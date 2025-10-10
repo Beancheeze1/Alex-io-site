@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { Check, Zap, ShieldCheck, Timer, PhoneCall, Mail, ArrowRight, BarChart3, Database, Workflow, Bot, Settings2, Building2, CalendarClock, Lock, Rocket } from "lucide-react";
 
-// Set to your real links
 const CALENDLY_URL = "https://calendly.com/25thhourdesign";
 const CONTACT_EMAIL = "chuckj@alex-io.com";
 const DOCS_URL = "#";
@@ -205,7 +204,7 @@ export default function Page() {
             <span className="text-sm text-slate-600">© {new Date().getFullYear()} Alex-IO. All rights reserved.</span>
           </div>
           <div className="flex items-center gap-4 text-sm text-slate-600">
-            <a className="hover:text-slate-800" href="#">Privacy</a>
+            <a className="hover:text-slate-800" href="/privacy">Privacy</a>
             <a className="hover:text-slate-800" href="#">Terms</a>
             <a className="hover:text-slate-800" href="mailto:support@alex-io.com">Support</a>
           </div>
