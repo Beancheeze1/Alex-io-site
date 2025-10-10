@@ -2,6 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-:root{color-scheme:light}
-html,body{height:100%}
-body{@apply bg-gradient-to-b from-slate-50 to-white text-slate-900}
+/* optional niceties */
+:root { color-scheme: light; }
+html, body { height: 100%; }
