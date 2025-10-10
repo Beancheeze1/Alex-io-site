@@ -1,4 +1,9 @@
-# Alex-IO (fallback both routers)
+# Alex-IO Landing Page (standard Next.js build, full + routes)
 
-Includes both `app/` and `pages/` routers. If app router misconfigures, Vercel will still serve `/` via `pages/index.js`.
-Build: `next build`.
+## Dev
+npm i
+npm run dev
+
+## Deploy (Vercel)
+Push to GitHub → Import in Vercel → Deploy (build command: next build)
+Routes: /, /thank-you, /privacy
