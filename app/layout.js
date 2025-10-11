@@ -1,5 +1,5 @@
 // app/layout.js
-import "../styles/globals.css"; // <-- ADD THIS LINE
+import "../styles/globals.css"; //
 
 export const metadata = {
   title: "Alex-IO — Reply to inbound emails in seconds",
