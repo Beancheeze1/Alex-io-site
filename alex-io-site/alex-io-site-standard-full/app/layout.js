@@ -1,7 +1,11 @@
+// app/layout.js
+import "../styles/globals.css";
+
 export const metadata = {
   title: "Alex-IO — Reply to inbound emails in seconds",
   description: "HubSpot-native email bot with quoting, pricing tiers, and turn times.",
 };
+
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
