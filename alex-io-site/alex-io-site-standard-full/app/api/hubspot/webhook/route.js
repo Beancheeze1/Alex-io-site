@@ -1,20 +1,25 @@
 // app/api/hubspot/webhook/route.js
 import { NextResponse } from "next/server";
+import { getConversationIdFromThread, postHubSpotMessage } from "../../../../lib/hubspot";
 
-// Quick GET so you can test in a browser
-export async function GET() {
-  return NextResponse.json(
-    { ok: true, path: "/api/hubspot/webhook", method: "GET" },
-    { status: 200 }
-  );
-}
+const AUTO_COMMENT = String(process.env.AUTO_COMMENT || "false").toLowerCase() === "true";
 
-// IMPORTANT: HubSpot sends POST. This MUST exist (405 = missing/blocked POST)
 export async function POST(req) {
-  // read the body (HubSpot sends an array of events)
   const raw = await req.text();
-  console.log("🔔 HubSpot webhook POST hit. First 500 chars:", raw?.slice(0, 500) || "<empty>");
+  let events = [];
+  try { events = JSON.parse(raw); } catch {}
+  for (const e of (Array.isArray(events) ? events : [])) {
+    if (e.subscriptionType !== "conversation.newMessage") continue;
+    const threadId = e.objectId;
+    if (!threadId) continue;
 
-  // Always return 200 fast so HubSpot doesn’t retry
-  return NextResponse.json({ ok: true, received: true }, { status: 200 });
+    // EITHER: resolve conversationId then post…
+    const conversationId = await getConversationIdFromThread(threadId).catch(() => null);
+
+    if (AUTO_COMMENT && conversationId) {
+      await postHubSpotMessage(conversationId, "Thanks for your message — we’ll be in touch soon!");
+      console.log("✅ Auto-comment posted");
+    }
+  }
+  return NextResponse.json({ ok: true }, { status: 200 });
 }
