@@ -10,6 +10,19 @@ const DEDUPE_TTL_SECONDS = 60 * 10; // de-dupe window (10 minutes)
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL!,
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+
+  const url = `https://api.hubapi.com/conversations/v3/conversations/${conversationId}/messages`;
+await fetch(url, {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    type: "MESSAGE",
+    text: "Thanks for your message — we’ll be in touch soon!"
+  })
+
 });
 
 // ---- Helpers ---------------------------------------------------------------
