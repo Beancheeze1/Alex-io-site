@@ -1,6 +1,6 @@
 // app/api/hubspot/debug/comment/route.js
 import { NextResponse } from "next/server";
-import { postMessageToThread } from "../../lib/hubspot";
+import { postMessageToThread } from "../lib/hubspot";
 
 export async function POST(req) {
   try {
