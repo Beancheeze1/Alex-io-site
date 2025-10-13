@@ -1,25 +1,36 @@
-// app/api/hubspot/webhook/route.js
+
 import { NextResponse } from "next/server";
-import { getConversationIdFromThread, postHubSpotMessage } from "../../../../lib/hubspot";
+import { postHubSpotMessage } from "../../../../../lib/hubspot";
 
 const AUTO_COMMENT = String(process.env.AUTO_COMMENT || "false").toLowerCase() === "true";
 
 export async function POST(req) {
-  const raw = await req.text();
-  let events = [];
-  try { events = JSON.parse(raw); } catch {}
-  for (const e of (Array.isArray(events) ? events : [])) {
-    if (e.subscriptionType !== "conversation.newMessage") continue;
-    const threadId = e.objectId;
-    if (!threadId) continue;
+  try {
+    const raw = await req.text();
+    let events = [];
+    try { events = JSON.parse(raw); } catch {}
+    for (const e of (Array.isArray(events) ? events : [])) {
+      if (e?.subscriptionType !== "conversation.newMessage") continue;
+      const threadId = e?.objectId;
+      if (!threadId) continue;
 
-    // EITHER: resolve conversationId then post…
-    const conversationId = await getConversationIdFromThread(threadId).catch(() => null);
-
-    if (AUTO_COMMENT && conversationId) {
-      await postHubSpotMessage(conversationId, "Thanks for your message — we’ll be in touch soon!");
-      console.log("✅ Auto-comment posted");
+      if (AUTO_COMMENT) {
+        try {
+          await postHubSpotMessage(threadId, "Thanks for your message — we’ll be in touch soon!", { kind: "thread" });
+          console.log("✅ Auto-comment posted (thread)", threadId);
+        } catch (err) {
+          console.error("❌ HubSpot post failed:", err.message);
+        }
+      }
     }
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (err) {
+    console.error("webhook error:", err?.message);
+    return NextResponse.json({ error: err?.message ?? "unknown" }, { status: 500 });
   }
-  return NextResponse.json({ ok: true }, { status: 200 });
+}
+
+// Keep a quick GET to verify path in browser if needed
+export async function GET() {
+  return NextResponse.json({ ok: true, path: "/api/hubspot/webhook" }, { status: 200 });
 }
