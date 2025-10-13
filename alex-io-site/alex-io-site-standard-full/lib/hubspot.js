@@ -1,8 +1,8 @@
 // lib/hubspot.js
 function requireToken() {
-  const t = process.env.HUBSPOT_ACCESS_TOKEN;
-  if (!t) throw new Error("Missing HUBSPOT_ACCESS_TOKEN");
-  return t;
+  const token = process.env.HUBSPOT_ACCESS_TOKEN;
+  if (!token) throw new Error("Missing HUBSPOT_ACCESS_TOKEN");
+  return token;
 }
 
 function jsonHeaders() {
@@ -12,26 +12,33 @@ function jsonHeaders() {
   };
 }
 
-async function read(r) {
-  const text = await r.text();
-  try { return { ok: r.ok, status: r.status, json: JSON.parse(text), text }; }
-  catch { return { ok: r.ok, status: r.status, json: null, text }; }
+async function parse(r) {
+  const txt = await r.text();
+  try {
+    return { ok: r.ok, status: r.status, data: JSON.parse(txt), raw: txt };
+  } catch {
+    return { ok: r.ok, status: r.status, data: null, raw: txt };
+  }
 }
 
-/** Most reliable across inbox types: post to the THREAD endpoint */
 export async function postMessageToThread(threadId, text) {
   if (!threadId) throw new Error("threadId required");
   if (!text) throw new Error("text required");
 
   const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${threadId}/messages`;
   const payload = {
-    type: "MESSAGE",                 // use "INTERNAL_NOTE" if you want an internal note
+    type: "MESSAGE", // change to "INTERNAL_NOTE" if you want private notes
     text,
-    sender: { type: "BOT", name: "ALEX-IO" }
+    sender: { type: "BOT", name: "ALEX-IO" },
   };
 
-  const r = await fetch(url, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(payload) });
-  const out = await read(r);
-  if (!out.ok) throw new Error(`HubSpot POST thread ${out.status}: ${out.text}`);
-  return out.json ?? { ok: true };
+  const r = await fetch(url, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+  });
+  const res = await parse(r);
+
+  if (!res.ok) throw new Error(`HubSpot POST failed ${res.status}: ${res.raw}`);
+  return res.data ?? { ok: true };
 }
