@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { postHubSpotMessage } from "../../../../../lib/hubspot";
 
 const AUTO_COMMENT = String(process.env.AUTO_COMMENT || "false").toLowerCase() === "true";
+console.log("threadId:", e?.objectId);
 
 export async function POST(req) {
   try {
