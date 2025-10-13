@@ -1,79 +1,54 @@
 // lib/hubspot.js
-// Shared helpers for HubSpot Conversations API
-
-// Minimal retry helper for transient 429/5xx
-async function withRetry(fn, { attempts = 3, baseMs = 250 } = {}) {
-  let lastErr;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      const status = err?.status || err?.code || "";
-      // only retry on 429/5xx-ish or explicit transient flags
-      const shouldRetry =
-        /(^429$)|(^5\d{2}$)/.test(String(status)) ||
-        /ECONNRESET|ETIMEDOUT/i.test(String(err?.message || ""));
-      if (!shouldRetry || i === attempts - 1) break;
-      const jitter = Math.floor(Math.random() * baseMs);
-      await new Promise(r => setTimeout(r, baseMs + jitter));
-    }
-  }
-  throw lastErr;
+function mustToken() {
+  const t = process.env.HUBSPOT_ACCESS_TOKEN;
+  if (!t) throw new Error("Missing HUBSPOT_ACCESS_TOKEN");
+  return t;
 }
-
-function authHeaders() {
-  const token = process.env.HUBSPOT_ACCESS_TOKEN;
-  if (!token) throw new Error("Missing HUBSPOT_ACCESS_TOKEN");
-  return { Authorization: `Bearer ${token}` };
+function headers(json = true) {
+  return json
+    ? { Authorization: `Bearer ${mustToken()}`, "Content-Type": "application/json" }
+    : { Authorization: `Bearer ${mustToken()}` };
+}
+async function jsonOrText(r) {
+  const txt = await r.text();
+  try { return { ok: r.ok, status: r.status, data: JSON.parse(txt), raw: txt }; }
+  catch { return { ok: r.ok, status: r.status, data: null, raw: txt }; }
 }
 
 export async function getConversationIdFromThread(threadId) {
-  if (!threadId) throw new Error("threadId is required");
-  const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${threadId}`;
-
-  const res = await withRetry(() =>
-    fetch(url, { headers: authHeaders() }).then(async r => {
-      if (!r.ok) {
-        const txt = await r.text();
-        const err = new Error(`Thread lookup failed ${r.status}: ${txt}`);
-        err.status = r.status;
-        throw err;
-      }
-      return r.json();
-    })
+  if (!threadId) throw new Error("threadId required");
+  const r = await fetch(
+    `https://api.hubapi.com/conversations/v3/conversations/threads/${threadId}`,
+    { headers: headers(false) }
   );
-
-  const conversationId = res?.conversation?.id;
-  if (!conversationId) throw new Error(`No conversationId on thread ${threadId}`);
-  return conversationId;
+  const { ok, status, data, raw } = await jsonOrText(r);
+  if (!ok) throw new Error(`Thread lookup ${status}: ${raw}`);
+  const id = data?.conversation?.id;
+  if (!id) throw new Error(`No conversationId on thread ${threadId}`);
+  return id;
 }
 
-export async function postHubSpotMessage(conversationId, text) {
-  if (!conversationId) throw new Error("conversationId is required");
-  if (!text) throw new Error("text is required");
+/**
+ * Post a message. Default is posting to the THREAD endpoint,
+ * which proves more reliable across inbox types.
+ * kind: "thread" | "conversation"
+ */
+export async function postHubSpotMessage(id, text, { kind = "thread" } = {}) {
+  if (!id) throw new Error("id required");
+  if (!text) throw new Error("text required");
+  const url = kind === "conversation"
+    ? `https://api.hubapi.com/conversations/v3/conversations/${id}/messages`
+    : `https://api.hubapi.com/conversations/v3/conversations/threads/${id}/messages`;
 
-  const url = `https://api.hubapi.com/conversations/v3/conversations/${conversationId}/messages`;
-  const payload = { type: "MESSAGE", text };
+  // `sender` helps some portals render the message properly
+  const payload = { type: "MESSAGE", text, sender: { type: "BOT", name: "ALEX-IO" } };
 
-  const data = await withRetry(() =>
-    fetch(url, {
-      method: "POST",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).then(async r => {
-      const body = await r.text(); // read once
-      if (!r.ok) {
-        const err = new Error(`HubSpot post failed ${r.status}: ${body}`);
-        err.status = r.status;
-        throw err;
-      }
-      try { return JSON.parse(body); } catch { return { ok: true, raw: body }; }
-    })
-  );
-
-  return data;
+  const r = await fetch(url, { method: "POST", headers: headers(true), body: JSON.stringify(payload) });
+  const { ok, status, data, raw } = await jsonOrText(r);
+  if (!ok) throw new Error(`Post ${kind} ${status}: ${raw}`);
+  return data ?? { ok: true, raw };
 }
+
 
 // Optional: simple guard if webhook payload includes your appId or bot sender flag
 export function isFromOurApp(eventAppId) {
