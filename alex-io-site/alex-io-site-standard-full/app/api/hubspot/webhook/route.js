@@ -1,37 +1,37 @@
-
-import { NextResponse } from "next/server";
-import { postHubSpotMessage } from "../../../../../lib/hubspot";
-
-const AUTO_COMMENT = String(process.env.AUTO_COMMENT || "false").toLowerCase() === "true";
-console.log("threadId:", e?.objectId);
-
-export async function POST(req) {
-  try {
-    const raw = await req.text();
-    let events = [];
-    try { events = JSON.parse(raw); } catch {}
-    for (const e of (Array.isArray(events) ? events : [])) {
-      if (e?.subscriptionType !== "conversation.newMessage") continue;
-      const threadId = e?.objectId;
-      if (!threadId) continue;
-
-      if (AUTO_COMMENT) {
-        try {
-          await postHubSpotMessage(threadId, "Thanks for your message — we’ll be in touch soon!", { kind: "thread" });
-          console.log("✅ Auto-comment posted (thread)", threadId);
-        } catch (err) {
-          console.error("❌ HubSpot post failed:", err.message);
-        }
-      }
-    }
-    return NextResponse.json({ ok: true }, { status: 200 });
-  } catch (err) {
-    console.error("webhook error:", err?.message);
-    return NextResponse.json({ error: err?.message ?? "unknown" }, { status: 500 });
-  }
+// lib/hubspot.js
+function requireToken() {
+  const t = process.env.HUBSPOT_ACCESS_TOKEN;
+  if (!t) throw new Error("Missing HUBSPOT_ACCESS_TOKEN");
+  return t;
 }
 
-// Keep a quick GET to verify path in browser if needed
-export async function GET() {
-  return NextResponse.json({ ok: true, path: "/api/hubspot/webhook" }, { status: 200 });
+function jsonHeaders() {
+  return {
+    Authorization: `Bearer ${requireToken()}`,
+    "Content-Type": "application/json",
+  };
+}
+
+async function read(r) {
+  const text = await r.text();
+  try { return { ok: r.ok, status: r.status, json: JSON.parse(text), text }; }
+  catch { return { ok: r.ok, status: r.status, json: null, text }; }
+}
+
+/** Most reliable across inbox types: post to the THREAD endpoint */
+export async function postMessageToThread(threadId, text) {
+  if (!threadId) throw new Error("threadId required");
+  if (!text) throw new Error("text required");
+
+  const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${threadId}/messages`;
+  const payload = {
+    type: "MESSAGE",                 // use "INTERNAL_NOTE" if you want an internal note
+    text,
+    sender: { type: "BOT", name: "ALEX-IO" }
+  };
+
+  const r = await fetch(url, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(payload) });
+  const out = await read(r);
+  if (!out.ok) throw new Error(`HubSpot POST thread ${out.status}: ${out.text}`);
+  return out.json ?? { ok: true };
 }
