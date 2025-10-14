@@ -43,26 +43,33 @@ export async function getConversationIdFromThread(threadId) {
 }
 
 /** Most reliable: post directly to the THREAD endpoint */
-export async function postMessageToThread(threadId, text) {
+export async function postMessageToThread(threadId, text, { type = "COMMENT" } = {}) {
   if (!threadId) throw new Error("threadId required");
   if (!text) throw new Error("text required");
 
   const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${threadId}/messages`;
-  const payload = {
-    type: "MESSAGE", // change to "INTERNAL_NOTE" for a private note
-    text,
-    sender: { type: "BOT", name: "ALEX-IO" },
-  };
+
+  // Minimal valid payload for an internal comment:
+  // { "type": "COMMENT", "text": "..." }
+  const payload =
+    type === "MESSAGE"
+      ? { type: "MESSAGE", text } // MESSAGE works, but usually also needs sender/recipients/channel – see docs
+      : { type: "COMMENT", text }; // default
 
   const r = await fetch(url, {
     method: "POST",
-    headers: jsonHeaders(),
+    headers: {
+      Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify(payload),
   });
-  const res = await parseResponse(r);
-  if (!res.ok) throw new Error(`Post thread ${res.status}: ${res.raw}`);
-  return res.data ?? { ok: true };
+
+  const body = await r.text();
+  if (!r.ok) throw new Error(`HubSpot ${r.status}: ${body}`);
+  try { return JSON.parse(body); } catch { return { ok: true, raw: body }; }
 }
+
 
 /** Back-compat wrapper: lets older code call postHubSpotMessage(kind) */
 export async function postHubSpotMessage(id, text, { kind = "conversation" } = {}) {
