@@ -1,30 +1,53 @@
 // lib/hubspot.js
+import { Client } from "@hubspot/api-client";
 
-function requireToken() {
-  const t = process.env.HUBSPOT_ACCESS_TOKEN;
-  if (!t) throw new Error("Missing HUBSPOT_ACCESS_TOKEN");
-  return t;
+const hubspotToken = process.env.HUBSPOT_ACCESS_TOKEN;
+if (!hubspotToken) {
+  console.warn("HUBSPOT_ACCESS_TOKEN missing");
+}
+export const hubspot = new Client({ accessToken: hubspotToken });
+
+export async function getMessageById(messageId) {
+  const r = await hubspot.apiRequest({
+    method: "GET",
+    path: `/conversations/v3/conversations/messages/${encodeURIComponent(messageId)}`
+  });
+  return r.json();
 }
 
-function jsonHeaders() {
-  return {
-    Authorization: `Bearer ${requireToken()}`,
-    "Content-Type": "application/json",
-  };
+export async function getThreadById(threadId) {
+  const r = await hubspot.apiRequest({
+    method: "GET",
+    path: `/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}`
+  });
+  return r.json();
 }
 
-function authHeaders() {
-  return { Authorization: `Bearer ${requireToken()}` };
+export async function sendEmailReply(threadId, bodyText) {
+  const r = await hubspot.apiRequest({
+    method: "POST",
+    path: `/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages`,
+    body: {
+      type: "MESSAGE",
+      text: bodyText
+      // add channelId if your portal requires it after you inspect thread JSON
+    }
+  });
+  return r.json();
 }
 
-async function parseResponse(r) {
-  const txt = await r.text();
-  try {
-    return { ok: r.ok, status: r.status, data: JSON.parse(txt), raw: txt };
-  } catch {
-    return { ok: r.ok, status: r.status, data: null, raw: txt };
-  }
+export async function sendChatReply(threadId, bodyText) {
+  const r = await hubspot.apiRequest({
+    method: "POST",
+    path: `/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages`,
+    body: {
+      type: "MESSAGE",
+      text: bodyText
+    }
+  });
+  return r.json();
 }
+
 
 /** -------- Helpers you asked for (back-compat) -------- **/
 
