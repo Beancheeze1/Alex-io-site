@@ -7,7 +7,6 @@ import { getThreadById, sendEmailReply, sendChatReply } from "../../../../lib/hu
 export async function POST(req) {
   try {
     const { threadId, text } = await req.json();
-
     if (!threadId || !text) {
       return NextResponse.json({ error: "threadId and text are required" }, { status: 400 });
     }
@@ -16,13 +15,12 @@ export async function POST(req) {
     const channelType = String(thread?.channelType ?? "").toUpperCase();
 
     if (!channelType) {
-      return NextResponse.json({ error: "No channelType found on thread", threadPreview: thread }, { status: 400 });
+      return NextResponse.json({ error: "No channelType on thread", threadPreview: thread }, { status: 400 });
     }
 
-    const result =
-      channelType === "EMAIL"
-        ? await sendEmailReply(threadId, text)
-        : await sendChatReply(threadId, text);
+    const result = channelType === "EMAIL"
+      ? await sendEmailReply(threadId, text)
+      : await sendChatReply(threadId, text);
 
     return NextResponse.json({ ok: true, channelType, result });
   } catch (e) {
