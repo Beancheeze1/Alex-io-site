@@ -1,11 +1,7 @@
 // tailwind.config.mjs
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    './app/**/*.{js,jsx,ts,tsx}',
-    './components/**/*.{js,jsx,ts,tsx}',
-    './styles/**/*.css'
-  ],
+  content: ['./app/**/*.{js,jsx,ts,tsx}', './styles/**/*.css'],
   theme: {
     extend: {},
   },
