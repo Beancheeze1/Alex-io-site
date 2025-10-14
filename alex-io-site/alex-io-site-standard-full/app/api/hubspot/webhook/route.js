@@ -56,11 +56,16 @@ export async function POST(req) {
       // only target new message events with a thread id
       if (type !== "conversation.newMessage" || !threadId) continue;
 
-      // never loop on our own posts
-      if (HUBSPOT_APP_ID && fromAppId === HUBSPOT_APP_ID) {
-        // quiet skip
-        continue;
-      }
+     // Loop guard — only skip if clearly our own outbound post
+const isSelf = HUBSPOT_APP_ID && fromAppId === HUBSPOT_APP_ID;
+const isInbound =
+  !direction || direction === "INBOUND" || direction === ""; // assume inbound if missing
+
+if (isSelf && !isInbound) {
+  if (LOG_EVENTS) console.log("↩︎ skip self outbound", fromAppId);
+  continue;
+}
+
 
       // FORCE mode: post and skip all other guards (best for bringing it back)
       if (AUTO_COMMENT && FORCE_REPLY) {
