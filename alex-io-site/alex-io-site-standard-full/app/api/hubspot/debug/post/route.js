@@ -44,12 +44,15 @@ export async function GET() {
 
 export async function POST(req) {
   try {
-    const { threadId, text = "ALEX-IO debug ✅", messageType = "INTERNAL_NOTE" } = await req.json();
+    const { threadId, text = "ALEX-IO debug ✅", messageType = "COMMENT" } = await req.json();
     if (!threadId) return NextResponse.json({ error: "threadId required" }, { status: 400 });
 
-    // 1) Try posting to the THREAD (preferred)
-    const a = await tryThread(threadId, text, messageType);
+    // 1) Try posting as COMMENT (minimal, inbox-only)
+    const a = await tryThread(threadId, text, messageType); // messageType now defaults to "COMMENT"
     if (a.ok) return NextResponse.json({ ok: true, via: "thread", a }, { status: 200 });
+
+    // ...leave the rest as-is
+
 
     // 2) Resolve conversation and try conversation endpoint
     const conv = await getConversationId(threadId);
