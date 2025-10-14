@@ -6,6 +6,7 @@ function token() {
   if (!t) throw new Error("Missing HUBSPOT_ACCESS_TOKEN");
   return t;
 }
+
 const HS = {
   headersJSON: () => ({
     Authorization: `Bearer ${token()}`,
@@ -37,16 +38,20 @@ async function tryConversation(conversationId, text, type) {
   return { ok: r.ok, status: r.status, body, url, payload };
 }
 
+export async function GET() {
+  return NextResponse.json({ ok: true, path: "/api/hubspot/debug/post" }, { status: 200 });
+}
+
 export async function POST(req) {
   try {
     const { threadId, text = "ALEX-IO debug ✅", messageType = "INTERNAL_NOTE" } = await req.json();
     if (!threadId) return NextResponse.json({ error: "threadId required" }, { status: 400 });
 
-    // 1) Try posting to the THREAD (most reliable)
+    // 1) Try posting to the THREAD (preferred)
     const a = await tryThread(threadId, text, messageType);
     if (a.ok) return NextResponse.json({ ok: true, via: "thread", a }, { status: 200 });
 
-    // 2) Resolve conversation and try the conversation endpoint
+    // 2) Resolve conversation and try conversation endpoint
     const conv = await getConversationId(threadId);
     if (!conv.ok || !conv.id) {
       return NextResponse.json({ ok: false, via: "thread", a, resolve: conv }, { status: 200 });
@@ -58,8 +63,3 @@ export async function POST(req) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }
 }
-
-export async function GET() {
-  return NextResponse.json({ ok: true, path: "/api/hubspot/debug/post" }, { status: 200 });
-}
-
