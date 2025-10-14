@@ -2,14 +2,12 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { getThreadById } from "../../../../../lib/hubspot.js";
+import { getThreadById } from "../../../../../lib/hubspot.js"; // 4 levels up to lib/
 
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const threadId = searchParams.get("threadId");
-  if (!threadId) {
-    return NextResponse.json({ error: "missing threadId" }, { status: 400 });
-  }
+  if (!threadId) return NextResponse.json({ error: "missing threadId" }, { status: 400 });
 
   try {
     const t = await getThreadById(threadId);
@@ -22,7 +20,7 @@ export async function GET(req) {
     });
   } catch (e) {
     return NextResponse.json(
-      { error: "HUBSPOT_FETCH_FAILED", details: String(e && e.message || e) },
+      { error: "HUBSPOT_FETCH_FAILED", details: String(e?.message || e) },
       { status: 502 }
     );
   }

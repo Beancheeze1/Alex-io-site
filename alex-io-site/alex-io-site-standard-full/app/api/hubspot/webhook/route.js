@@ -24,8 +24,9 @@ export async function POST(req) {
       const r = await processWebhookEvent(e);
       results.push(r);
     } catch (err) {
-      results.push({ error: String(err && err.message || err) });
+      results.push({ error: String(err?.message || err) });
     }
   }
+
   return NextResponse.json({ ok: true, results });
 }

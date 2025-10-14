@@ -1,75 +1,89 @@
 // lib/bot.js
+export const runtime = "nodejs"; // for safety if this ever gets used in a route
+
 import crypto from "crypto";
 import { getMessageById, getThreadById, sendChatReply, sendEmailReply } from "./hubspot.js";
-import { kv, seen, mark } from "./kv.js";
 
 const APP_ID = process.env.HUBSPOT_APP_ID || "0";
 
-function hash(input) {
-  return crypto.createHash("sha256").update(input).digest("hex").slice(0, 16);
+/* ---------- Inline KV (Redis optional, in-memory fallback) ---------- */
+const hasRedis = !!process.env.REDIS_URL && !!process.env.REDIS_TOKEN;
+let memory = new Map();
+function now() { return Math.floor(Date.now() / 1000); }
+
+let kv;
+if (hasRedis) {
+  // Lazy import to avoid bundler issues if not installed
+  const { Redis } = await import("@upstash/redis").catch(() => ({ Redis: null }));
+  kv = Redis
+    ? new Redis({ url: process.env.REDIS_URL, token: process.env.REDIS_TOKEN })
+    : {
+        async get(k){ const h=memory.get(k); if(!h) return null; if(h.expiresAt<=now()){memory.delete(k); return null;} return h.value; },
+        async set(k,v,o){ const ttl=(o && o.ex) ? o.ex : 3600; memory.set(k,{value:v,expiresAt:now()+ttl}); },
+        async del(k){ memory.delete(k); }
+      };
+} else {
+  kv = {
+    async get(k){ const h=memory.get(k); if(!h) return null; if(h.expiresAt<=now()){memory.delete(k); return null;} return h.value; },
+    async set(k,v,o){ const ttl=(o && o.ex) ? o.ex : 3600; memory.set(k,{value:v,expiresAt:now()+ttl}); },
+    async del(k){ memory.delete(k); }
+  };
 }
-function normalize(s) {
-  return String(s || "").replace(/\s+/g, " ").trim();
-}
+
+async function seen(key) { return (await kv.get(key)) !== null; }
+async function mark(key, ttl) { await kv.set(key, "1", { ex: ttl }); }
+/* ------------------------------------------------------------------- */
+
+function hash(s) { return crypto.createHash("sha256").update(String(s)).digest("hex").slice(0,16); }
+function normalize(s) { return String(s || "").replace(/\s+/g," ").trim(); }
 
 export async function processWebhookEvent(e) {
   const threadId = String(e.objectId);
   const eventKey = `evt:${e.eventId}`;
   const msgId = e.messageId ? String(e.messageId) : null;
 
-  // 1) event-level idempotency (48h)
+  // 1) Event-level idempotency (48h)
   if (await seen(eventKey)) return { skipped: "duplicate-event" };
-  await mark(eventKey, 48 * 3600);
+  await mark(eventKey, 48*3600);
 
-  // only act on NEW_MESSAGE of type MESSAGE
+  // Only NEW_MESSAGE of type MESSAGE
   if (e.changeFlag !== "NEW_MESSAGE" || e.messageType !== "MESSAGE") {
     return { skipped: "not-a-new-message" };
   }
 
-  // 2) message-level idempotency (14d)
+  // 2) Message-level idempotency (14d)
   if (msgId && await seen(`msg:${msgId}`)) return { skipped: "duplicate-message" };
 
-  // 3) fetch message to detect sender
+  // 3) Read message to detect sender (ignore ourselves/agents/bots/system)
   const msg = msgId ? await getMessageById(msgId) : null;
   if (msg) {
     const senderAppId = String(msg?.sender?.appId ?? "");
     const senderType = String(msg?.sender?.type ?? "");
-    if (senderAppId && senderAppId === String(APP_ID)) {
-      return { skipped: "from-our-app" };
-    }
-    if (["BOT", "AGENT", "SYSTEM"].includes(senderType.toUpperCase())) {
-      return { skipped: `from-${senderType}` };
-    }
+    if (senderAppId && senderAppId === String(APP_ID)) return { skipped: "from-our-app" };
+    if (["BOT","AGENT","SYSTEM"].includes(senderType.toUpperCase())) return { skipped: `from-${senderType}` };
   }
 
-  // 4) fetch thread to know channel
+  // 4) Read thread to know channel
   const thread = await getThreadById(threadId);
   const channelType = String(thread?.channelType ?? "").toUpperCase();
-  if (!channelType) {
-    return { error: "no-channel", threadPreview: thread };
-  }
+  if (!channelType) return { error: "no-channel", threadPreview: thread };
 
-  // 5) compose reply (replace with your real generator later)
+  // 5) Compose reply (replace with your real logic later)
   const replyBody = composeAutoReply(thread, msg);
 
-  // 6) per-thread payload hash guard (2h)
+  // 6) Per-thread payload hash guard (2h)
   const payloadHash = hash(`${threadId}:${normalize(replyBody)}`);
   const lastHash = await kv.get(`last:${threadId}`);
-  if (lastHash === payloadHash) {
-    return { skipped: "same-payload-recently-sent" };
-  }
+  if (lastHash === payloadHash) return { skipped: "same-payload-recently-sent" };
 
-  // 7) send
-  let sendResult;
-  if (channelType === "EMAIL") {
-    sendResult = await sendEmailReply(threadId, replyBody);
-  } else {
-    sendResult = await sendChatReply(threadId, replyBody);
-  }
+  // 7) Send exactly once based on channel
+  const sendResult = channelType === "EMAIL"
+    ? await sendEmailReply(threadId, replyBody)
+    : await sendChatReply(threadId, replyBody);
 
-  // 8) mark sent + remember payload
-  if (msgId) await mark(`msg:${msgId}`, 30 * 24 * 3600);
-  await kv.set(`last:${threadId}`, payloadHash, { ex: 2 * 3600 });
+  // 8) Mark sent for this message + remember payload
+  if (msgId) await mark(`msg:${msgId}`, 30*24*3600);
+  await kv.set(`last:${threadId}`, payloadHash, { ex: 2*3600 });
 
   return { ok: true, channelType, sendResult };
 }
