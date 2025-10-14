@@ -30,8 +30,10 @@ export async function POST(req) {
 
       // Loop guard: ignore our own posts
       if (HUBSPOT_APP_ID && fromAppId && fromAppId === String(HUBSPOT_APP_ID)) {
-        console.log("↩︎ skip (our own appId)", fromAppId);
-        continue;
+  // console.log("↩︎ skip (our own appId)", fromAppId);
+  continue;
+}
+
       }
 
       // Direction guard: only reply to inbound (human) messages
