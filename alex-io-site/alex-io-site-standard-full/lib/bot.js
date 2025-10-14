@@ -86,6 +86,42 @@ export async function processWebhookEvent(e) {
   await kv.set(`last:${threadId}`, payloadHash, { ex: 2*3600 });
 
   return { ok: true, channelType, sendResult };
+
+  // lib/bot.js
+import { getMessageById, getThreadById, sendReply } from "./hubspot.js";
+import { classifyIntent } from "./nlp.js";
+import { handleQuote } from "./skills/quote.js";
+import { handleMeeting } from "./skills/meeting.js";
+import { handleInfo } from "./skills/info.js";
+import { kvForTenant } from "./kv.js";
+
+export async function processWebhookEvent(e, ctx) {
+  const { tenantId, cfg } = ctx;
+  const kv = kvForTenant(tenantId); // namespaced keys
+
+  // ...dedupe as you already have...
+
+  const msg = e.messageId ? await getMessageById(e.messageId, cfg.hubspot.token) : null;
+  // ignore bots/agents/own-app, same as before…
+
+  const text = msg?.text || msg?.richText || "";
+  const intent = await classifyIntent(text, cfg); // lightweight model or rules
+
+  let reply;
+  if (intent === "quote" && cfg.features.quotes) {
+    reply = await handleQuote({ text, cfg, tenantId });
+  } else if (intent === "meeting" && cfg.features.meetings) {
+    reply = await handleMeeting({ text, cfg, tenantId });
+  } else if (intent === "info" && cfg.features.infoLookup) {
+    reply = await handleInfo({ text, cfg, tenantId });
+  } else {
+    reply = `Thanks for reaching out—we’ll get back shortly.\n${cfg.brand.signature}`;
+  }
+
+  await sendReply(String(e.objectId), reply, cfg.hubspot.token); // single endpoint
+  return { ok: true, tenantId, intent };
+}
+
 }
 
 function composeAutoReply(thread, msg) {
