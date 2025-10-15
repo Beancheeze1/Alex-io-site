@@ -1,10 +1,51 @@
 // app/api/hubspot/webhook/route.js
 import { NextResponse } from "next/server";
-import crypto from "crypto";
-import { kvGet, kvSet } from "@/lib/kv";
+import { getHubSpotCaps } from "../../../lib/hubspotCaps.js";
 
-export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// (Optional) Basic health check
+export async function GET() {
+  const caps = await getHubSpotCaps(); // warm the cache
+  return NextResponse.json({ ok: true, quotingMode: caps.quotingMode, can: caps.can });
+}
+
+export async function POST(req) {
+  // TODO: verify webhook signature if HUBSPOT_WEBHOOK_SECRET is set (not shown here)
+  const caps = await getHubSpotCaps(); // fast from cache after first call
+
+  // Parse webhook payload
+  let events = [];
+  try { events = await req.json(); } catch {}
+  if (!Array.isArray(events)) events = [events].filter(Boolean);
+
+  // Your minimal router:
+  for (const ev of events) {
+    // Example: react only to new inbound message events
+    // Adjust to your exact subscription types
+    const type = ev?.subscriptionType || ev?.eventType || "";
+    if (type.includes("conversation") || type.includes("newMessage")) {
+      // Decide quoting path
+      if (caps.quotingMode === "native") {
+        // 1) create native HubSpot Quote (requires quotes/products/line_items/deals write)
+        // await createNativeQuoteAndReply(ev);
+      } else if (caps.quotingMode === "pdf") {
+        // 2) render PDF quote -> upload via Files -> reply with link
+        // const priced = await priceQuoteFromEvent(ev);
+        // const pdfUrl = await renderAndUploadQuotePDF(priced);
+        // await replyWithLink(ev, pdfUrl);
+      } else {
+        // 3) text-only price breakdown
+        // const priced = await priceQuoteFromEvent(ev);
+        // await replyWithText(ev, formatTextQuote(priced));
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 
 // ----- utils -----
 function safeEq(a, b) {
