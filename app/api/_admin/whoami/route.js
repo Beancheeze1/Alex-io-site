@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Re-export the admin route so /api/_admin/whoami works too.
+export { GET } from "@/app/api/admin/whoami/route";
+
 
 function requireAdmin(headers) {
   const sent = headers.get("x-admin-key");
