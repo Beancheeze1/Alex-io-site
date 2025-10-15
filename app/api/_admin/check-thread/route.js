@@ -1,33 +1,71 @@
-// app/api/_admin/check-thread/route.js
+// app/api/admin/check-thread/route.js
 export const runtime = "nodejs";
 import { NextResponse } from "next/server";
-// NOTE: depth is 5 levels up from app/api/_admin/check-thread/route.js to project root.
-import { getThreadById } from "../../../../../lib/hubspot.js";
+import { getThreadById, getThreadMessages } from "../../../../lib/hubspot.js";
+
+const pick = (...vals) => {
+  for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
+  return null;
+};
 
 export async function GET(req) {
   const url = new URL(req.url);
   const threadId = url.searchParams.get("threadId");
-
-  console.log("[CHECK-THREAD] Incoming", { path: url.pathname, threadId });
-
-  if (!threadId) {
-    console.warn("[CHECK-THREAD] missing threadId");
-    return NextResponse.json({ error: "missing threadId" }, { status: 400 });
-  }
+  if (!threadId) return NextResponse.json({ error: "missing threadId" }, { status: 400 });
 
   try {
-    const t = await getThreadById(threadId);
-    const out = {
+    const thread = await getThreadById(threadId);
+    const msgsResp = await getThreadMessages(threadId, 50);
+
+    const msgs =
+      (Array.isArray(msgsResp?.results) && msgsResp.results) ||
+      (Array.isArray(msgsResp?.items) && msgsResp.items) ||
+      (Array.isArray(msgsResp?.messages) && msgsResp.messages) ||
+      [];
+
+    const last = msgs.length ? msgs[msgs.length - 1] : null;
+
+    // sender/type inference based on the keys your payload exposes
+    const lastSenderType = pick(
+      last?.senders?.[0]?.type,        // common
+      last?.sender?.type,              // alt shape
+      last?.createdBy?.type,           // sometimes present
+      last?.direction
+        ? (String(last.direction).toUpperCase() === "INBOUND" ? "HUMAN" : "AGENT/BOT")
+        : null
+    );
+
+    const lastSenderName = pick(
+      last?.senders?.[0]?.name,
+      last?.sender?.name,
+      last?.createdBy?.name,
+      last?.client?.name
+    );
+
+    const channelHint = pick(
+      last?.channelId,
+      last?.channelAccountId,
+      thread?.originalChannelId,
+      thread?.originalChannelAccountId
+    );
+
+    const conversationId = pick(thread?.conversationId, thread?.id);
+    const status = pick(thread?.status, thread?.properties?.status);
+    const inboxId = pick(thread?.inboxId, thread?.properties?.inboxId);
+
+    return NextResponse.json({
       threadId,
-      conversationId: t?.conversationId ?? null,
-      channelType: t?.channelType ?? null,
-      channelId: t?.channelId ?? null,
-      lastMessageSenderType: t?.lastMessage?.sender?.type ?? null
-    };
-    console.log("[CHECK-THREAD] OK", out);
-    return NextResponse.json(out);
+      conversationId,
+      status,
+      inboxId,
+      channelHint,
+      messagesCount: msgs.length,
+      lastMessageSenderType: lastSenderType,
+      lastMessageSenderName: lastSenderName,
+      observedThreadKeys: Object.keys(thread || []),
+      observedLastMessageKeys: last ? Object.keys(last) : []
+    });
   } catch (e) {
-    console.error("[CHECK-THREAD] ERROR", String(e?.message || e));
     return NextResponse.json(
       { error: "HUBSPOT_FETCH_FAILED", details: String(e?.message || e) },
       { status: 502 }
