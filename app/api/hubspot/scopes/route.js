@@ -1,4 +1,6 @@
+// app/api/admin/hubspot/scopes/route.js
 import { NextResponse } from "next/server";
+import { capabilitiesFromScopes } from "@/lib/capabilities"; // if you don't have @ alias, use "../../../../../lib/capabilities"
 
 function requireAdmin(headers) {
   const sent = headers.get("x-admin-key");
@@ -26,7 +28,7 @@ export async function GET(req) {
   const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN || "";
   if (!token) return NextResponse.json({ ok:false, error:"HUBSPOT_PRIVATE_APP_TOKEN missing" }, { status: 500 });
 
-  // 1) Try token info (works for OAuth; may not for Private Apps)
+  // Try (may fail for Private App tokens)
   let hubId = null;
   let scopes = null;
   try {
@@ -34,64 +36,55 @@ export async function GET(req) {
     if (infoRes.ok) {
       const info = await infoRes.json();
       hubId = info?.hub_id ?? null;
-      scopes = info?.scopes ?? null; // may be null for Private Apps
+      scopes = info?.scopes ?? null;
     }
   } catch {}
 
-  // 2) Capability probes (read-only; no mutations)
-  const results = await Promise.all([
-    hs("/crm/v3/owners?limit=1", token),                           // baseline auth
-    hs("/crm/v3/objects/products?limit=1", token),                 // products.read
-    hs("/crm/v3/objects/line_items?limit=1", token),               // line_items.read
-    hs("/crm/v3/objects/deals?limit=1", token),                    // deals.read
-    hs("/crm/v3/objects/contacts?limit=1", token),                 // contacts.read
-    hs("/crm/v3/objects/companies?limit=1", token),                // companies.read
-    hs("/conversations/v3/conversations/threads?limit=1", token),  // conversations.read (inbox)
-    hs("/files/v3/files?limit=1", token),                          // files.read
+  // Probe safe read endpoints
+  const [owners, products, lineItems, dealsR, contacts, companies, conv, filesR] = await Promise.all([
+    hs("/crm/v3/owners?limit=1", token),
+    hs("/crm/v3/objects/products?limit=1", token),
+    hs("/crm/v3/objects/line_items?limit=1", token),
+    hs("/crm/v3/objects/deals?limit=1", token),
+    hs("/crm/v3/objects/contacts?limit=1", token),
+    hs("/crm/v3/objects/companies?limit=1", token),
+    hs("/conversations/v3/conversations/threads?limit=1", token),
+    hs("/files/v3/files?limit=1", token),
   ]);
 
-  const [owners, products, lineItems, dealsR, contacts, companies, conv, filesR] = results;
+  // Start with capabilities from scopes (if we have them)…
+  let caps = scopes ? capabilitiesFromScopes(scopes) : capabilitiesFromScopes([]);
 
-  const can = {
-    conversationsRead: conv.ok,
-    filesRead: filesR.ok,
-    productsRead: products.ok,
-    lineItemsRead: lineItems.ok,
-    dealsRead: dealsR.ok,
-    contactsRead: contacts.ok,
-    companiesRead: companies.ok,
-    // write scopes can’t be safely probed without mutating; infer as false unless introspection provided scopes
-    conversationsWrite: scopes ? scopes.includes("conversations.write") : false,
-    filesWrite: scopes ? (scopes.includes("files.write") || scopes.includes("files.ui_hidden.write")) : false,
-    lineItemsWrite: scopes ? scopes.includes("crm.objects.line_items.write") : false,
-    dealsWrite: scopes ? scopes.includes("crm.objects.deals.write") : false,
-    quotesRead: scopes ? scopes.includes("crm.objects.quotes.read") : false,
-    quotesWrite: scopes ? scopes.includes("crm.objects.quotes.write") : false,
-    notesWrite: scopes ? scopes.includes("crm.objects.notes.write") : false,
-    tasksWrite: scopes ? scopes.includes("crm.objects.tasks.write") : false,
+  // …then overlay what we learned from probes (read capabilities)
+  const is200 = (x) => x.status >= 200 && x.status < 300;
+  caps = {
+    ...caps,
+    conversationsRead: is200(conv) || caps.conversationsRead,
+    filesRead: is200(filesR) || caps.filesRead,
+    productsRead: is200(products) || caps.productsRead,
+    lineItemsRead: is200(lineItems) || caps.lineItemsRead,
+    dealsRead: is200(dealsR) || caps.dealsRead,
+    contactsRead: is200(contacts) || caps.contactsRead,
+    companiesRead: is200(companies) || caps.companiesRead,
   };
 
-  // decide quoting mode
-  const quotingMode =
-    (can.quotesRead && can.quotesWrite && can.productsRead && can.lineItemsRead && can.lineItemsWrite && can.dealsWrite)
+  // Re-compute quoting mode with the merged view
+  caps.quotingMode =
+    (caps.quotesRead && caps.quotesWrite && caps.productsRead &&
+     caps.lineItemsRead && caps.lineItemsWrite && caps.dealsWrite)
       ? "native"
-      : (can.filesRead || can.filesWrite ? "pdf" : "text-only");
+      : (caps.filesWrite || caps.filesRead ? "pdf" : "text-only");
 
   return NextResponse.json({
     ok: true,
     hubId,
     probes: {
-      owners: owners.status,
-      products: products.status,
-      lineItems: lineItems.status,
-      deals: dealsR.status,
-      contacts: contacts.status,
-      companies: companies.status,
-      conversations: conv.status,
-      files: filesR.status,
+      owners: owners.status, products: products.status, lineItems: lineItems.status,
+      deals: dealsR.status, contacts: contacts.status, companies: companies.status,
+      conversations: conv.status, files: filesR.status,
     },
-    scopes: scopes || null,   // may be null for Private App
-    can,
-    quotingMode,
+    scopes: scopes || null,
+    can: caps,
+    quotingMode: caps.quotingMode,
   });
 }
