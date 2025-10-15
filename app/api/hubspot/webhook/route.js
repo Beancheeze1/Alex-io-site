@@ -1,62 +1,92 @@
-export const runtime = "nodejs";
+// app/api/hubspot/webhook/route.js
 import { NextResponse } from "next/server";
-<<<<<<< HEAD
 import crypto from "crypto";
-import { resolveTenantFromRequest } from "../../../../lib/tenancy.js";
-import { processWebhookEvent } from "../../../../lib/bot.js";
+import { kvGet, kvSet } from "@/lib/kv";
 
-// HubSpot V3 signature: baseString = method + path + body; HMAC SHA256 with app secret, hex
-function verifySignature(req, body, secret) {
-  const url = new URL(req.url);
-  const method = (req.method || "POST").toUpperCase();
-  const path = url.pathname + (url.search || "");
-  const base = method + path + body; // per HS docs
-  const expected = crypto.createHmac("sha256", String(secret)).update(base).digest("hex");
-  const got = req.headers.get("x-hubspot-signature-v3") || "";
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(got));
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+// ----- utils -----
+function safeEq(a, b) {
+  try {
+    const A = Buffer.from(a || "");
+    const B = Buffer.from(b || "");
+    return A.length === B.length && crypto.timingSafeEqual(A, B);
+  } catch {
+    return false;
+  }
 }
 
+// HubSpot v3 signature: sha256 HMAC of METHOD + PATH + RAW_BODY
+function verifySignature(req, rawBody, secret) {
+  if (!secret) return { ok: true, reason: "no-secret-configured" };
+  const path = new URL(req.url).pathname;
+  const base = req.method.toUpperCase() + path + rawBody;
+  const expected = crypto.createHmac("sha256", secret).update(base).digest("hex");
+  const got =
+    req.headers.get("x-hubspot-signature-v3") ||
+    req.headers.get("x-hubspot-signature"); // older header
+  if (!got) return { ok: false, reason: "missing-signature-header" };
+  if (!safeEq(expected, got)) return { ok: false, reason: "bad-signature" };
+  return { ok: true };
+}
+
+function cooldownSec() {
+  const n = Number(process.env.BOT_REPLY_COOLDOWN_SECONDS);
+  return Number.isFinite(n) && n >= 0 ? n : 120;
+}
+
+function idsFrom(events) {
+  const e = Array.isArray(events) ? events[0] : null;
+  return {
+    threadId: e?.objectId?.toString?.() || e?.threadId?.toString?.() || null,
+    conversationId: e?.conversationId?.toString?.() || null,
+    messageId: e?.messageId || null,
+  };
+}
+
+// ----- handlers -----
 export async function POST(req) {
   try {
-    const raw = await req.text();               // need raw for signature
-    const events = JSON.parse(raw);             // HS can POST batch array
-    const { tenantId, cfg } = resolveTenantFromRequest(req);
-
-    // optional but recommended
-    if (cfg.env.HUBSPOT_WEBHOOK_SECRET) {
-      const ok = verifySignature(req, raw, cfg.env.HUBSPOT_WEBHOOK_SECRET);
-      if (!ok) return NextResponse.json({ ok:false, error:"invalid_signature", tenantId }, { status: 401 });
+    const raw = await req.text();
+    let events;
+    try {
+      events = JSON.parse(raw);
+    } catch {
+      return NextResponse.json({ ok: false, error: "invalid-json" }, { status: 400 });
     }
 
-    const arr = Array.isArray(events) ? events : [events];
-    const results = [];
-    for (const e of arr) {
-      try {
-        results.push(await processWebhookEvent(e, { tenantId, cfg }));
-      } catch (err) {
-        // return 500 so HS retries transient errors
-        console.error("[WEBHOOK ERR]", tenantId, e?.eventId, err);
-        return NextResponse.json({ ok:false, tenantId, error:String(err?.message || err) }, { status: 500 });
-      }
+    const sig = verifySignature(req, raw, process.env.HUBSPOT_WEBHOOK_SECRET || "");
+    if (!sig.ok) {
+      return NextResponse.json({ ok: false, error: "signature-failed", reason: sig.reason }, { status: 401 });
     }
-    return NextResponse.json({ ok:true, tenantId, results });
-  } catch (e) {
-    return NextResponse.json({ ok:false, error:String(e?.message || e) }, { status: 400 });
-=======
-import { resolveTenant } from "../../../../lib/tenancy.js";
-import { processWebhookEvent } from "../../../../lib/bot.js";
 
-export async function POST(req) {
-  try {
-    const { tenantId, cfg } = resolveTenant(req);
-    const events = [].concat(await req.json());
-    const results = [];
-    for (const e of events) {
-      results.push(await processWebhookEvent(e, { tenantId, cfg }));
-    }
-    return NextResponse.json({ ok: true, tenantId, results });
-  } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 400 });
->>>>>>> f6dd5e74f75b95489f0ed99361ff7fc7c6357b48
+    const { threadId, conversationId, messageId } = idsFrom(events);
+    if (!threadId) return NextResponse.json({ ok: true, skipped: "no-thread-id" });
+
+    // cooldown/dedup
+    const cd = cooldownSec();
+    const key = `hubspot:reply-lock:${threadId}:${messageId || "no-msg"}`;
+    if (await kvGet(key)) return NextResponse.json({ ok: true, skipped: "cooldown" });
+    await kvSet(key, "1", cd);
+
+    // filter message events only
+    const relevant = events.filter((e) =>
+      (e.subscriptionType || "").toLowerCase().includes("newmessage") ||
+      (e.messageType || "").toLowerCase() === "message"
+    );
+    if (relevant.length === 0) return NextResponse.json({ ok: true, skipped: "no-message-event" });
+
+    // TODO: fetch latest thread → generate reply → post reply
+    console.log("🔔 Webhook", { count: events.length, threadId, conversationId, messageId });
+
+    return NextResponse.json({ ok: true, handled: true, threadId, conversationId, cooldownSeconds: cd });
+  } catch (err) {
+    console.error("Webhook error:", err);
+    return NextResponse.json({ ok: false, error: "server-error", detail: String(err?.message || err) }, { status: 500 });
   }
+}
+
+export async function GET() {
+  return NextResponse.json({ ok: true, route: "/api/hubspot/webhook" });
 }
