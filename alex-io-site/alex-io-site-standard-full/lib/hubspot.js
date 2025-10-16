@@ -63,3 +63,16 @@ export async function sendChatReply(threadId, bodyText) {
     { type: "MESSAGE", text: bodyText }
   );
 }
+export async function whoAmI() {
+  const token = process.env.HUBSPOT_ACCESS_TOKEN;
+  if (!token) throw new Error("HUBSPOT_ACCESS_TOKEN missing");
+  const res = await fetch(`https://api.hubapi.com/oauth/v1/access-tokens/${token}`);
+  const txt = await res.text();
+  const data = txt ? (()=>{ try { return JSON.parse(txt); } catch { return { raw: txt }; } })() : null;
+  if (!res.ok) {
+    const msg = data?.message || txt || res.statusText;
+    const err = new Error(`whoAmI ${res.status}: ${msg}`);
+    err.status = res.status; err.details = data || msg; throw err;
+  }
+  return data; // contains hubId (portal id), user info, scopes, expiresIn, etc.
+}

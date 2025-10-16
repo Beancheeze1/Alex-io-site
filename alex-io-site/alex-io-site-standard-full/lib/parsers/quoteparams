@@ -1,0 +1,47 @@
+// lib/parsers/quoteParams.js
+const INCH_PER_CM = 0.3937007874;
+
+function toInches(value, unit) {
+  if (!value) return 0;
+  if (!unit) return Number(value);
+  const u = unit.toLowerCase();
+  if (["in", "inch", "inches", '"'].includes(u)) return Number(value);
+  if (["cm", "centimeter", "centimeters"].includes(u)) return Number(value) * INCH_PER_CM;
+  return Number(value); // default assume inches
+}
+
+export function extractQuoteParams(text) {
+  const t = (text || "").replace(/\u00A0/g, " ").toLowerCase();
+
+  // qty
+  const qtyMatch = t.match(/\b(qty|quantity|order|units|pcs|pieces)\s*[:\-]?\s*(\d{1,6})\b/) ||
+                   t.match(/\b(\d{1,6})\s*(units|pcs|pieces|qty)\b/);
+  const quantity = qtyMatch ? Number(qtyMatch[2] || qtyMatch[1]) : (t.match(/\b\d{1,6}\b/) ? Number(t.match(/\b\d{1,6}\b/)[0]) : 1);
+
+  // dimensions: "10x8x3 in", "10 x 8 x 3", "25 cm x 18 cm x 6 cm"
+  const dimRegex = /(\d+(?:\.\d+)?)\s*(in|cm|")?\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(in|cm|")?\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(in|cm|")?/;
+  const dm = t.match(dimRegex);
+  const L = dm ? toInches(dm[1], dm[2]) : 0;
+  const W = dm ? toInches(dm[3], dm[4]) : 0;
+  const H = dm ? toInches(dm[5], dm[6]) : 0;
+
+  // material keywords (expand as needed)
+  let material = "foam_1_7lb";
+  if (t.includes("2.2") || t.includes("2lb") || t.includes("2.2lb")) material = "foam_2_2lb";
+  if (t.includes("plywood") || t.includes("crate")) material = "crate_plywood";
+
+  return {
+    quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+    lengthIn: L, widthIn: W, heightIn: H,
+    volumeCubicIn: L * W * H || 0,
+    material
+  };
+}
+
+export function validateQuoteParams(p) {
+  const errors = [];
+  if (!p.quantity || p.quantity <= 0) errors.push("Quantity must be > 0.");
+  if (!p.lengthIn || !p.widthIn || !p.heightIn) errors.push("Dimensions (LxWxH) are required.");
+  if (p.lengthIn > 200 || p.widthIn > 200 || p.heightIn > 200) errors.push("Single unit exceeds size limits.");
+  return errors;
+}
