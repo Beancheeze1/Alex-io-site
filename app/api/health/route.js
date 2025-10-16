@@ -1,7 +1,25 @@
-// app/api/health/route.js
+// app/api/health/route.ts
+import { NextResponse } from "next/server";
+
 export async function GET() {
-  return new Response(JSON.stringify({ ok: true, ts: Date.now() }), {
-    headers: { "Content-Type": "application/json" },
-    status: 200,
-  });
+  const env = process.env.NODE_ENV || "development";
+  const base = process.env.BASE_URL || "http://localhost:3000";
+  const required = [
+    "HUBSPOT_CLIENT_ID",
+    "HUBSPOT_CLIENT_SECRET",
+    "HUBSPOT_REDIRECT_URI",
+    "HUBSPOT_OAUTH_SCOPES",
+  ];
+  const missing = required.filter((k) => !process.env[k as keyof NodeJS.ProcessEnv]);
+
+  return NextResponse.json(
+    {
+      ok: missing.length === 0,
+      env,
+      baseUrl: base,
+      missingEnv: missing,
+      time: new Date().toISOString(),
+    },
+    { status: 200 }
+  );
 }

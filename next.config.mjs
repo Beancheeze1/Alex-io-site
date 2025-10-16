@@ -1,10 +1,11 @@
-// ✅ next.config.mjs
+// next.config.js
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // keep this minimal while debugging
-  // NO: output: 'export'
-  // NO: basePath (unless you truly use it; if you do, adjust URLs accordingly)
-  // NO: distDir/out from static export guides
+  webpack: (config) => {
+    // Use in-memory cache to dodge Windows rename/lock issues during setup
+    config.cache = { type: "memory" };
+    return config;
+  },
 };
 
-export default nextConfig;
+module.exports = nextConfig;
