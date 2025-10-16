@@ -1,41 +1,63 @@
+// /app/api/auth/hubspot/callback/route.js
 import { NextResponse } from "next/server";
-import { saveToken } from "@/lib/oauthStore";
+import { saveToken } from "@/lib/oauthStore.js";
+
 export const runtime = "nodejs";
 
 export async function GET(req) {
   try {
     const url = new URL(req.url);
     const code = url.searchParams.get("code");
-    if (!code) return NextResponse.json({ ok:false, error:"no code" }, { status: 400 });
+    const redirect_uri = process.env.HUBSPOT_REDIRECT_URI || "http://localhost:3000/api/auth/hubspot/callback";
+    const client_id = process.env.HUBSPOT_CLIENT_ID;
+    const client_secret = process.env.HUBSPOT_CLIENT_SECRET;
 
-    const cid = process.env.HUBSPOT_CLIENT_ID;
-    const secret = process.env.HUBSPOT_CLIENT_SECRET;
-    const redirect = process.env.HUBSPOT_REDIRECT_URI;
+    if (!code) {
+      return NextResponse.json({ ok: false, error: "Missing code" }, { status: 400 });
+    }
+    if (!client_id || !client_secret) {
+      return NextResponse.json({ ok: false, error: "Missing HUBSPOT_CLIENT_ID/SECRET env" }, { status: 500 });
+    }
 
-    const body = new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: cid,
-      client_secret: secret,
-      redirect_uri: redirect,
-      code,
-    });
-
-    const r = await fetch("https://api.hubapi.com/oauth/v1/token", {
+    // 1) exchange code -> access_token
+    const tokenRes = await fetch("https://api.hubapi.com/oauth/v1/token", {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded;charset=utf-8" },
-      body,
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id,
+        client_secret,
+        redirect_uri,
+        code,
+      }),
     });
-    const j = await r.json();
-    if (!r.ok) return NextResponse.json({ ok:false, step:"token", error:j }, { status: r.status });
 
-    // Get hub info to know which portal this token belongs to
-    const who = await fetch(`https://api.hubapi.com/oauth/v1/access-tokens/${j.access_token}`);
-    const wj = await who.json();
-    const hubId = wj.hub_id;
+    const tokenJson = await tokenRes.json();
+    if (!tokenRes.ok) {
+      return NextResponse.json({ ok: false, step: "token", error: tokenJson }, { status: 400 });
+    }
 
-    saveToken(hubId, j.access_token, j.expires_in);
-    return NextResponse.json({ ok:true, hubId, scopes: wj.scopes });
-  } catch (e) {
-    return NextResponse.json({ ok:false, error:String(e) }, { status: 500 });
+    const access_token = tokenJson.access_token;
+
+    // 2) figure out which portal (hubId) this token belongs to
+    const whoRes = await fetch(`https://api.hubapi.com/oauth/v1/access-tokens/${access_token}`);
+    const who = await whoRes.json();
+    if (!whoRes.ok) {
+      return NextResponse.json({ ok: false, step: "identify", error: who }, { status: 400 });
+    }
+
+    const hubId = who.hub_id || who.hubId || who.user?.hubId;
+    const scopes = who.scopes || tokenJson.scopes || [];
+
+    if (!hubId) {
+      return NextResponse.json({ ok: false, error: "Could not determine hubId" }, { status: 400 });
+    }
+
+    // 3) SAVE the token so /caps and the quote route can use it
+    saveToken(hubId, access_token);
+
+    return NextResponse.json({ ok: true, hubId, scopes });
+  } catch (err) {
+    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
   }
 }
