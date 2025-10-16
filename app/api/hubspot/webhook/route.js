@@ -1,133 +1,155 @@
 // app/api/hubspot/webhook/route.js
+import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { getHubSpotCaps } from "../../../lib/hubspotCaps.js";
+
+import { fetchCaps } from "@/lib/hubspotCaps.js";
+import { renderQuotePdf } from "@/lib/quote-pdf-lib.js";
+import { hsUploadBuffer } from "@/lib/hsFiles.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// (Optional) Basic health check
-export async function GET() {
-  const caps = await getHubSpotCaps(); // warm the cache
-  return NextResponse.json({ ok: true, quotingMode: caps.quotingMode, can: caps.can });
+/**
+ * Optional webhook signature verification (v3).
+ * Enable by setting HUBSPOT_WEBHOOK_SECRET to your app secret.
+ * Docs: https://developers.hubspot.com/docs/api/webhooks/validating-requests
+ */
+function verifyHubSpotSignature({ method, url, body, secret, signature }) {
+  if (!secret) return true; // verification disabled
+  if (!signature) return false;
+  const base = `${method}${url}${body}`;
+  const digest = crypto.createHmac("sha256", secret).update(base).digest("base64");
+  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
 }
 
-export async function POST(req) {
-  // TODO: verify webhook signature if HUBSPOT_WEBHOOK_SECRET is set (not shown here)
-  const caps = await getHubSpotCaps(); // fast from cache after first call
+/**
+ * Very simple event -> items extractor.
+ * Tailor this to your actual subscriptions. If no items found,
+ * we fall back to a demo quote so the pipeline still runs.
+ */
+function extractItemsFromEvents(events) {
+  const items = [];
 
-  // Parse webhook payload
-  let events = [];
-  try { events = await req.json(); } catch {}
-  if (!Array.isArray(events)) events = [events].filter(Boolean);
+  for (const ev of Array.isArray(events) ? events : []) {
+    // Example: you subscribed to product events or line item property changes
+    // Shape varies by subscription; adapt as needed.
 
-  // Your minimal router:
-  for (const ev of events) {
-    // Example: react only to new inbound message events
-    // Adjust to your exact subscription types
-    const type = ev?.subscriptionType || ev?.eventType || "";
-    if (type.includes("conversation") || type.includes("newMessage")) {
-      // Decide quoting path
-      if (caps.quotingMode === "native") {
-        // 1) create native HubSpot Quote (requires quotes/products/line_items/deals write)
-        // await createNativeQuoteAndReply(ev);
-      } else if (caps.quotingMode === "pdf") {
-        // 2) render PDF quote -> upload via Files -> reply with link
-        // const priced = await priceQuoteFromEvent(ev);
-        // const pdfUrl = await renderAndUploadQuotePDF(priced);
-        // await replyWithLink(ev, pdfUrl);
-      } else {
-        // 3) text-only price breakdown
-        // const priced = await priceQuoteFromEvent(ev);
-        // await replyWithText(ev, formatTextQuote(priced));
-      }
-    }
+    // If your event contains a line item SKU and qty
+    const sku = ev?.properties?.sku || ev?.sku;
+    const qty = Number(ev?.properties?.quantity ?? ev?.qty ?? 0);
+
+    if (sku && qty > 0) items.push({ sku, qty });
   }
 
-  return NextResponse.json({ ok: true });
-}
-
-
-// ----- utils -----
-function safeEq(a, b) {
-  try {
-    const A = Buffer.from(a || "");
-    const B = Buffer.from(b || "");
-    return A.length === B.length && crypto.timingSafeEqual(A, B);
-  } catch {
-    return false;
+  // Fallback demo so you can see end-to-end behavior even if events don’t match yet
+  if (items.length === 0) {
+    items.push({ sku: "FOAM-PE-1_7-2X2", qty: 100 });
+    items.push({ sku: "CRATE-48x40x36", qty: 10 });
   }
+
+  return items;
 }
 
-// HubSpot v3 signature: sha256 HMAC of METHOD + PATH + RAW_BODY
-function verifySignature(req, rawBody, secret) {
-  if (!secret) return { ok: true, reason: "no-secret-configured" };
-  const path = new URL(req.url).pathname;
-  const base = req.method.toUpperCase() + path + rawBody;
-  const expected = crypto.createHmac("sha256", secret).update(base).digest("hex");
-  const got =
-    req.headers.get("x-hubspot-signature-v3") ||
-    req.headers.get("x-hubspot-signature"); // older header
-  if (!got) return { ok: false, reason: "missing-signature-header" };
-  if (!safeEq(expected, got)) return { ok: false, reason: "bad-signature" };
-  return { ok: true };
-}
+/**
+ * Calls your internal pricing endpoint to compute a quote.
+ * Adjust the endpoint/body to match your actual pricing API.
+ */
+async function priceItems({ items, customerTierCode = "VIP", rush = true, shipState = "OH" }) {
+  const res = await fetch(`${process.env.NEXT_PUBLIC_URL ?? ""}/api/quote/price`, {
+    // For dev, relative fetch also works: new URL("/api/quote/price", req.url)
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ items, customerTierCode, rush, shipState }),
+  });
 
-function cooldownSec() {
-  const n = Number(process.env.BOT_REPLY_COOLDOWN_SECONDS);
-  return Number.isFinite(n) && n >= 0 ? n : 120;
-}
-
-function idsFrom(events) {
-  const e = Array.isArray(events) ? events[0] : null;
-  return {
-    threadId: e?.objectId?.toString?.() || e?.threadId?.toString?.() || null,
-    conversationId: e?.conversationId?.toString?.() || null,
-    messageId: e?.messageId || null,
-  };
-}
-
-// ----- handlers -----
-export async function POST(req) {
-  try {
-    const raw = await req.text();
-    let events;
-    try {
-      events = JSON.parse(raw);
-    } catch {
-      return NextResponse.json({ ok: false, error: "invalid-json" }, { status: 400 });
-    }
-
-    const sig = verifySignature(req, raw, process.env.HUBSPOT_WEBHOOK_SECRET || "");
-    if (!sig.ok) {
-      return NextResponse.json({ ok: false, error: "signature-failed", reason: sig.reason }, { status: 401 });
-    }
-
-    const { threadId, conversationId, messageId } = idsFrom(events);
-    if (!threadId) return NextResponse.json({ ok: true, skipped: "no-thread-id" });
-
-    // cooldown/dedup
-    const cd = cooldownSec();
-    const key = `hubspot:reply-lock:${threadId}:${messageId || "no-msg"}`;
-    if (await kvGet(key)) return NextResponse.json({ ok: true, skipped: "cooldown" });
-    await kvSet(key, "1", cd);
-
-    // filter message events only
-    const relevant = events.filter((e) =>
-      (e.subscriptionType || "").toLowerCase().includes("newmessage") ||
-      (e.messageType || "").toLowerCase() === "message"
-    );
-    if (relevant.length === 0) return NextResponse.json({ ok: true, skipped: "no-message-event" });
-
-    // TODO: fetch latest thread → generate reply → post reply
-    console.log("🔔 Webhook", { count: events.length, threadId, conversationId, messageId });
-
-    return NextResponse.json({ ok: true, handled: true, threadId, conversationId, cooldownSeconds: cd });
-  } catch (err) {
-    console.error("Webhook error:", err);
-    return NextResponse.json({ ok: false, error: "server-error", detail: String(err?.message || err) }, { status: 500 });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.quote) {
+    throw new Error(`pricing failed ${res.status}: ${JSON.stringify(data)}`);
   }
+  return data.quote; // expect { lines, subtotal, taxPct, taxAmt, total, orderSurcharge }
 }
 
 export async function GET() {
+  // Simple health check
   return NextResponse.json({ ok: true, route: "/api/hubspot/webhook" });
+}
+
+export async function POST(req) {
+  const url = new URL(req.url);
+
+  // 1) Optional signature verification (recommended in prod)
+  const secret = process.env.HUBSPOT_WEBHOOK_SECRET || process.env.HUBSPOT_CLIENT_SECRET || "";
+  const sig = req.headers.get("x-hubspot-signature-v3"); // v3
+  const method = "POST";
+  const bodyText = await req.text(); // must read raw body to verify
+  const fullUrl = url.toString();
+
+  if (!verifyHubSpotSignature({ method, url: fullUrl, body: bodyText, secret, signature: sig })) {
+    return NextResponse.json({ ok: false, step: "auth", error: "invalid signature" }, { status: 401 });
+  }
+
+  // 2) Parse events
+  let events;
+  try {
+    events = JSON.parse(bodyText);
+  } catch {
+    return NextResponse.json({ ok: false, step: "parse", error: "invalid JSON" }, { status: 400 });
+  }
+  if (!Array.isArray(events) || events.length === 0) {
+    return NextResponse.json({ ok: false, step: "events", error: "no events" }, { status: 400 });
+  }
+
+  // 3) Resolve hubId to pick the right OAuth token (or fall back to PAT)
+  //    For dev, pass ?hubId=... in your webhook URL inside HubSpot (Subscription settings)
+  const hubId = url.searchParams.get("hubId") || process.env.HUBSPOT_PORTAL_ID || null;
+  if (!hubId) {
+    return NextResponse.json({ ok: false, step: "auth", error: "hubId required (query or env)" }, { status: 400 });
+  }
+
+  // 4) Check capabilities → quotingMode (cached)
+  let quotingMode = "local_only";
+  try {
+    const caps = await fetchCaps(hubId);
+    quotingMode = caps.quotingMode;
+  } catch (e) {
+    // If caps fetch fails, continue in local_only so you still get a PDF in logs
+    quotingMode = "local_only";
+  }
+
+  try {
+    // 5) Build items from events → price → quote
+    const items = extractItemsFromEvents(events);
+    const quote = await priceItems({ items });
+
+    // 6) Render PDF (always)
+    const pdf = await renderQuotePdf({ quote, title: "Quote", company: "Alex Packaging" });
+
+    // 7) Upload only if mode allows
+    if (quotingMode === "local_only") {
+      return NextResponse.json({
+        ok: true,
+        step: "dry",
+        quotingMode,
+        pdfBytes: pdf.length,
+        totals: { subtotal: quote.subtotal, tax: quote.taxAmt, total: quote.total },
+      });
+    }
+
+    const urlOut = await hsUploadBuffer({
+      filename: `quote_${Date.now()}.pdf`,
+      buffer: pdf,
+      folderPath: "quotes",
+      hubId, // uses OAuth token for this portal; falls back to PAT if none
+    });
+
+    return NextResponse.json({
+      ok: true,
+      step: "upload",
+      quotingMode,
+      url: urlOut,
+      totals: { subtotal: quote.subtotal, tax: quote.taxAmt, total: quote.total },
+    });
+  } catch (e) {
+    return NextResponse.json({ ok: false, step: "unknown", error: String(e) }, { status: 500 });
+  }
 }

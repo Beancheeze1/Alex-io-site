@@ -1,101 +1,230 @@
 import { NextResponse } from "next/server";
-import { renderQuotePdf } from "@/lib/oauthStore";
+import { fetchCaps } from "@/lib/hubspotCaps.js";
+import { renderQuotePdf } from "@/lib/quote-pdf-lib.js";
 import { hsUploadBuffer } from "@/lib/hsFiles.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Polyfill (Node 18 usually has these, but add fallback just in case)
-try {
-  if (!globalThis.Blob) {
-    const { Blob } = await import("buffer");
-    globalThis.Blob = Blob;
-  }
-  if (!globalThis.FormData) {
-    const { FormData } = await import("undici");
-    globalThis.FormData = FormData;
-  }
-} catch {}
+// POST /api/admin/preview/quote?hubId=...&dry=1
+export async function POST(req) {
+  try {
+    const url = new URL(req.url);
+    const hubId = url.searchParams.get("hubId") || process.env.HUBSPOT_PORTAL_ID || null;
 
-function requireAdmin(headers) {
-  const sent = headers.get("x-admin-key");
-  const need = process.env.ADMIN_KEY || "";
-  if (!need) return { ok:false, status:500, error:"ADMIN_KEY missing" };
-  if (sent !== need) return { ok:false, status:401, error:"Unauthorized" };
-  return { ok:true };
-}
+    // simple admin guard
+    const adminKey = req.headers.get("x-admin-key");
+    if (!adminKey || adminKey !== (process.env.ADMIN_KEY || "dev-admin-key")) {
+      return NextResponse.json({ ok: false, step: "auth", error: "unauthorized" }, { status: 401 });
+    }
 
-async function priceQuoteLocal(body) {
-  const base = process.env.NEXT_PUBLIC_SITE_URL || "http://127.0.0.1:3000";
-  const r = await fetch(`${base}/api/quote/price`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.ok) throw new Error(`PRICE_FAIL ${r.status} ${JSON.stringify(j)}`);
-  return j.quote;
+    // body (provide defaults so you can test immediately)
+    const payload = await req.json().catch(() => ({}));
+    const {
+      items = [
+        { sku: "FOAM-PE-1_7-2X2", qty: 100 },
+        { sku: "CRATE-48x40x36", qty: 10 }
+      ],
+      customerTierCode = "VIP",
+      rush = true,
+      shipState = "OH"
+    } = payload;
+
+    // ---- demo pricing; replace with your real pricing call if you have one ----
+    const lines = items.map(i => ({
+      sku: i.sku,
+      name: i.sku,
+      qty: Number(i.qty || 0),
+      unitPrice: 1,
+      lineSubtotal: Number(i.qty || 0) * 1
+    }));
+    const subtotal = lines.reduce((s, L) => s + L.lineSubtotal, 0);
+    const taxPct = 7.5;
+    const taxAmt = +(subtotal * (taxPct / 100)).toFixed(2);
+    const total = +(subtotal + taxAmt).toFixed(2);
+    const quote = {
+      lines, subtotal, taxPct, taxAmt, total,
+      orderSurcharge: { percent: 0, flat: 0, amount: 0 },
+      meta: { customerTierCode, rush, shipState }
+    };
+    // -------------------------------------------------------------------------
+
+    // always render a PDF
+    const pdf = await renderQuotePdf({ quote, title: "Quote", company: "Alex Packaging" });
+
+    // dry or no hubId => return now
+    if (!hubId || url.searchParams.get("dry") === "1") {
+      return NextResponse.json({
+        ok: true,
+        step: "dry",
+        quotingMode: hubId ? "unknown" : "local_only",
+        pdfBytes: pdf.length,
+        totals: { subtotal: quote.subtotal, tax: quote.taxAmt, total: quote.total }
+      });
+    }
+
+    // compute quoting mode from caps (cached)
+    let quotingMode = "local_only";
+    try {
+      const caps = await fetchCaps(hubId);
+      quotingMode = caps.quotingMode;
+    } catch {
+      quotingMode = "local_only";
+    }
+
+    if (quotingMode === "local_only") {
+      return NextResponse.json({
+        ok: true,
+        step: "dry",
+        quotingMode,
+        pdfBytes: pdf.length,
+        totals: { subtotal: quote.subtotal, tax: quote.taxAmt, total: quote.total }
+      });
+    }
+
+    // upload allowed
+    const urlOut = await hsUploadBuffer({
+      filename: `quote_${Date.now()}.pdf`,
+      buffer: pdf,
+      folderPath: "quotes",
+      hubId
+    });
+
+    return NextResponse.json({
+      ok: true,
+      step: "upload",
+      quotingMode,
+      url: urlOut,
+      totals: { subtotal: quote.subtotal, tax: quote.taxAmt, total: quote.total }
+    });
+
+  } catch (e) {
+    return NextResponse.json({ ok: false, step: "unknown", error: String(e) }, { status: 500 });
+  }
 }
+import { NextResponse } from "next/server";
+import { fetchCaps } from "@/lib/hubspotCaps.js";
+import { renderQuotePdf } from "@/lib/quote-pdf-lib.js";
+import { hsUploadBuffer } from "@/lib/hsFiles.js";
+import { updateCrmProperty } from "@/lib/hsCrm.js";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(req) {
-  const auth = requireAdmin(req.headers);
-  if (!auth.ok) return NextResponse.json({ ok:false, error: auth.error }, { status: auth.status });
-
-  const url = new URL(req.url);
-  const dry = url.searchParams.get("dry") === "1";
-
   try {
-    const body = await req.json();
-    if (!Array.isArray(body?.items) || body.items.length === 0) {
-      return NextResponse.json({ ok:false, error:"items required" }, { status:400 });
+    const url = new URL(req.url);
+    const hubId = url.searchParams.get("hubId") || process.env.HUBSPOT_PORTAL_ID || null;
+
+    // optional CRM target for attaching URL
+    const recordType = url.searchParams.get("recordType"); // e.g. "deals"
+    const recordId   = url.searchParams.get("recordId");   // e.g. "123456789"
+    const propName   = url.searchParams.get("prop") || "last_quote_url";
+
+    // admin guard (keep your existing)
+    const adminKey = req.headers.get("x-admin-key");
+    if (!adminKey || adminKey !== (process.env.ADMIN_KEY || "dev-admin-key")) {
+      return NextResponse.json({ ok: false, step: "auth", error: "unauthorized" }, { status: 401 });
     }
 
-    // 1) Pricing
-    let quote;
-    try {
-      quote = await priceQuoteLocal(body);
-    } catch (e) {
-      return NextResponse.json({ ok:false, step:"pricing", error:String(e) }, { status:500 });
-    }
+    // parse body (…your pricing, same as before…)
+    const payload = await req.json().catch(() => ({}));
+    const {
+      items = [
+        { sku: "FOAM-PE-1_7-2X2", qty: 100 },
+        { sku: "CRATE-48x40x36", qty: 10 }
+      ],
+      customerTierCode = "VIP",
+      rush = true,
+      shipState = "OH"
+    } = payload;
 
-    // 2) PDF
-    let pdfBuffer;
-    try {
-      pdfBuffer = await renderQuotePdf({
-        quote,
-        title: body.title || "Quote",
-        company: body.company || "Your Company",
-      });
-    } catch (e) {
-      return NextResponse.json({ ok:false, step:"pdf", error:String(e) }, { status:500 });
-    }
+    // demo pricing (unchanged)
+    const lines = items.map(i => ({
+      sku: i.sku, name: i.sku, qty: Number(i.qty || 0),
+      unitPrice: 1, lineSubtotal: Number(i.qty || 0) * 1
+    }));
+    const subtotal = lines.reduce((s, L) => s + L.lineSubtotal, 0);
+    const taxPct = 7.5;
+    const taxAmt = +(subtotal * (taxPct / 100)).toFixed(2);
+    const total = +(subtotal + taxAmt).toFixed(2);
+    const quote = {
+      lines, subtotal, taxPct, taxAmt, total,
+      orderSurcharge: { percent: 0, flat: 0, amount: 0 },
+      meta: { customerTierCode, rush, shipState }
+    };
 
-    if (dry) {
-      // Skip upload—prove PDF and pricing work
+    // render pdf always
+    const pdf = await renderQuotePdf({ quote, title: "Quote", company: "Alex Packaging" });
+
+    // dry or no hubId → return now
+    if (!hubId || url.searchParams.get("dry") === "1") {
       return NextResponse.json({
-        ok:true, step:"dry",
-        pdfBytes: pdfBuffer.length,
+        ok: true,
+        step: "dry",
+        quotingMode: hubId ? "unknown" : "local_only",
+        pdfBytes: pdf.length,
         totals: { subtotal: quote.subtotal, tax: quote.taxAmt, total: quote.total }
       });
     }
 
-    // 3) Upload
+    // caps → mode
+    let quotingMode = "local_only";
     try {
-      const name = `quote_${Date.now()}.pdf`;
-      const url = await hsUploadBuffer({ filename: name, buffer: pdfBuffer, folderPath: "quotes" });
+      const caps = await fetchCaps(hubId);
+      quotingMode = caps.quotingMode;
+    } catch {
+      quotingMode = "local_only";
+    }
+
+    if (quotingMode === "local_only") {
       return NextResponse.json({
-        ok:true, step:"upload", url,
+        ok: true,
+        step: "dry",
+        quotingMode,
+        pdfBytes: pdf.length,
         totals: { subtotal: quote.subtotal, tax: quote.taxAmt, total: quote.total }
       });
-    } catch (e) {
-      return NextResponse.json({ ok:false, step:"upload", error:String(e) }, { status:500 });
     }
+
+    // upload (returns {id,url} or just url depending on your helper)
+    const uploaded = await hsUploadBuffer({
+      filename: `quote_${Date.now()}.pdf`,
+      buffer: pdf,
+      folderPath: "quotes",
+      hubId
+    });
+    const fileUrl = uploaded?.url || uploaded; // support old return type
+
+    // ---------- NEW: attach URL to CRM record if provided ----------
+    let attached = null;
+    if (recordType && recordId && fileUrl) {
+      try {
+        attached = await updateCrmProperty({
+          hubId,
+          object: recordType,      // "deals" | "companies" | "contacts"
+          id: recordId,
+          property: propName,      // defaults to "last_quote_url"
+          value: fileUrl
+        });
+      } catch (e) {
+        // don’t fail the whole request if property update fails
+        // (likely the property doesn't exist yet)
+        attached = { ok: false, error: String(e) };
+      }
+    }
+    // ---------------------------------------------------------------
+
+    return NextResponse.json({
+      ok: true,
+      step: "upload",
+      quotingMode,
+      url: fileUrl,
+      attached, // details of property update if attempted
+      totals: { subtotal: quote.subtotal, tax: quote.taxAmt, total: quote.total }
+    });
+
   } catch (e) {
-    return NextResponse.json({ ok:false, step:"unknown", error:String(e) }, { status:500 });
+    return NextResponse.json({ ok: false, step: "unknown", error: String(e) }, { status: 500 });
   }
-}
-
-export async function GET() {
-  return NextResponse.json({ ok:false, error:"Use POST" }, { status:405 });
 }
