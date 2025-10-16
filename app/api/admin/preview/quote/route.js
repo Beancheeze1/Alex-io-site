@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { renderQuotePdf } from "../../../../../lib/quotePdf.js";
-import { hsUploadBuffer } from "../../../../../lib/hsFiles.js";
+import { renderQuotePdf } from "@/lib/oauthStore";
+import { hsUploadBuffer } from "@/lib/hsFiles.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
