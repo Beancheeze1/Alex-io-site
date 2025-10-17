@@ -1,12 +1,7 @@
-// lib/hsClient.ts — Path A: no alias imports
+// lib/hsClient.ts
 import { tokenStore, TokenRecord } from "./tokenStore";
 import { refreshTokens } from "./hubspot";
 
-/**
- * Return a valid access token for a given portalId.
- * - Refreshes if expiring within 60s
- * - Persists the refreshed token in tokenStore
- */
 export async function getPortalAccessToken(portalId: string | number): Promise<string> {
   const rec = (await tokenStore.get(portalId)) as TokenRecord | null;
   if (!rec) throw new Error(`no token for portal ${portalId}`);
@@ -21,7 +16,7 @@ export async function getPortalAccessToken(portalId: string | number): Promise<s
 
   await tokenStore.set(portalId, {
     access_token: updated.access_token,
-    refresh_token: updated.refresh_token || rec.refresh_token, // HS may omit refresh_token on refresh
+    refresh_token: updated.refresh_token || rec.refresh_token,
     expires_at,
     hub_id: (rec as any).hub_id,
     user_id: (rec as any).user_id,
@@ -31,16 +26,11 @@ export async function getPortalAccessToken(portalId: string | number): Promise<s
   return updated.access_token;
 }
 
-/**
- * Convenience fetch that:
- *  - attaches Authorization: Bearer
- *  - JSON-serializes body when you pass an object
- *  - throws on non-2xx with response text
- */
 export async function hsFetch(
   portalId: string | number,
   url: string,
-  init: RequestInit = {}
+  // Accept any body; we'll JSON-stringify objects internally
+  init: (RequestInit & { body?: any }) = {}
 ): Promise<Response> {
   const token = await getPortalAccessToken(portalId);
 
@@ -48,8 +38,18 @@ export async function hsFetch(
   headers.set("Authorization", `Bearer ${token}`);
 
   let body = init.body as any;
-  if (body && typeof body === "object" && !(body instanceof ArrayBuffer) && !(body instanceof Uint8Array)) {
-    headers.set("Content-Type", headers.get("Content-Type") || "application/json");
+
+  // Auto-JSON for plain objects
+  const isPlainObject =
+    body &&
+    typeof body === "object" &&
+    !(body instanceof ArrayBuffer) &&
+    !(body instanceof Uint8Array) &&
+    !(typeof Blob !== "undefined" && body instanceof Blob) &&
+    !(typeof FormData !== "undefined" && body instanceof FormData);
+
+  if (isPlainObject) {
+    if (!headers.get("Content-Type")) headers.set("Content-Type", "application/json");
     body = JSON.stringify(body);
   }
 
