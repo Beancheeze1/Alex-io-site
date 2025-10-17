@@ -95,19 +95,27 @@ export async function POST(req: Request) {
     const results: any[] = [];
 
     for (const [portalId, evs] of byPortal.entries()) {
-      // 3a) Prove auth works for this portal with a safe, read-only endpoint
-      try {
-        const res = await hsFetch(
-          portalId,
-          "https://api.hubapi.com/oauth/v1/access-tokens/inspect",
-          { method: "POST" }
-        );
-        const info = await res.json().catch(() => ({}));
-        results.push({ portalId, auth: "ok", tokenInfo: info });
-      } catch (e: any) {
-        results.push({ portalId, auth: "fail", error: e?.message || String(e) });
-        continue; // skip actions if auth failed
-      }
+      // 3a) Prove auth works for this portal using tokenStore + GET inspect
+try {
+  const rec = await tokenStore.get(portalId);
+  if (!rec) throw new Error("no token for portal");
+
+  const inspectUrl = `https://api.hubapi.com/oauth/v1/access-tokens/${encodeURIComponent(
+    rec.access_token
+  )}`;
+
+  const res = await fetch(inspectUrl, { method: "GET", cache: "no-store" });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HubSpot ${res.status}: ${text || res.statusText}`);
+  }
+  const info = await res.json().catch(() => ({}));
+  results.push({ portalId, auth: "ok", tokenInfo: info });
+} catch (e: any) {
+  results.push({ portalId, auth: "fail", error: e?.message || String(e) });
+  continue; // skip actions if auth failed
+}
+
 
       // 3b) OPTIONAL: reply to new conversation messages (enable by setting AUTO_REPLY=true)
       if (AUTO_REPLY) {
