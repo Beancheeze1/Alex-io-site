@@ -1,0 +1,12 @@
+import { NextResponse } from "next/server";
+export async function GET() {
+  const env = process.env.NODE_ENV || "development";
+  const base = process.env.BASE_URL || "http://localhost:3000";
+  const required = ["HUBSPOT_CLIENT_ID","HUBSPOT_CLIENT_SECRET","HUBSPOT_REDIRECT_URI","HUBSPOT_OAUTH_SCOPES"];
+  const missing = required.filter(k => !process.env[k as keyof NodeJS.ProcessEnv]);
+  return NextResponse.json({
+    ok: missing.length === 0,
+    env, baseUrl: base, missingEnv: missing,
+    time: new Date().toISOString()
+  });
+}

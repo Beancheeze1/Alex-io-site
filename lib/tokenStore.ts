@@ -1,7 +1,6 @@
-// lib/tokenStore.ts
-import crypto from "crypto";
+﻿import crypto from "crypto";
 
-type TokenRecord = {
+export type TokenRecord = {
   access_token: string;
   refresh_token: string;
   expires_at: number; // epoch seconds
@@ -10,51 +9,63 @@ type TokenRecord = {
   scopes?: string[];
 };
 
-const provider = process.env.TOKEN_STORE_PROVIDER?.toLowerCase() || "memory";
-
+const provider = (process.env.TOKEN_STORE_PROVIDER ?? "memory").toLowerCase();
 const mem = new Map<string, TokenRecord>();
 
-// Optional Redis (Upstash REST)
+/** ---------- Optional Redis (Upstash REST) helpers ---------- */
+
 async function redisGet(key: string) {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) return null;
-  const res = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+
+  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
   if (!res.ok) return null;
+
   const json = await res.json();
   return json?.result ? JSON.parse(json.result) : null;
 }
 
 async function redisSet(key: string, value: unknown, ttlSeconds?: number) {
-  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) return;
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return;
+
   const body = JSON.stringify(value);
-  const base = `${process.env.UPSTASH_REDIS_REST_URL}/set/${encodeURIComponent(key)}`;
-  const url = ttlSeconds ? `${base}/${encodeURIComponent(body)}/EX/${ttlSeconds}` : `${base}/${encodeURIComponent(body)}`;
-  await fetch(url, {
-    headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
+  const base = `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(body)}`;
+  const finalUrl =
+    typeof ttlSeconds === "number" ? `${base}/EX/${ttlSeconds}` : base;
+
+  await fetch(finalUrl, {
+    headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
 }
 
-// Simple encryption so we’re not storing raw tokens in memory/redis
-const ENC_KEY = process.env.ENCRYPTION_KEY || ""; // base64 32 bytes
-function enc(data: string) {
-  if (!ENC_KEY) return data;
-  const key = Buffer.from(ENC_KEY, "base64");
+/** ---------- Optional encryption for stored tokens ---------- */
+
+const ENC_KEY_B64 = process.env.ENCRYPTION_KEY || ""; // base64-encoded 32 bytes
+
+function encrypt(plain: string): string {
+  if (!ENC_KEY_B64) return plain;
+  const key = Buffer.from(ENC_KEY_B64, "base64"); // 32 bytes
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const enc = Buffer.concat([cipher.update(data, "utf8"), cipher.final()]);
+  const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, enc]).toString("base64");
 }
-function dec(blob: string) {
-  if (!ENC_KEY) return blob;
+
+function decrypt(blob: string): string {
+  if (!ENC_KEY_B64) return blob;
   const raw = Buffer.from(blob, "base64");
   const iv = raw.subarray(0, 12);
   const tag = raw.subarray(12, 28);
   const enc = raw.subarray(28);
-  const key = Buffer.from(ENC_KEY, "base64");
+  const key = Buffer.from(ENC_KEY_B64, "base64");
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(tag);
   const out = Buffer.concat([decipher.update(enc), decipher.final()]);
@@ -64,19 +75,22 @@ function dec(blob: string) {
 function toStorable(rec: TokenRecord) {
   return {
     ...rec,
-    access_token: enc(rec.access_token),
-    refresh_token: enc(rec.refresh_token),
+    access_token: encrypt(rec.access_token),
+    refresh_token: encrypt(rec.refresh_token),
   };
 }
-function fromStorable(rec: any): TokenRecord {
+
+function fromStorable(obj: any): TokenRecord {
   return {
-    ...rec,
-    access_token: dec(rec.access_token),
-    refresh_token: dec(rec.refresh_token),
+    ...obj,
+    access_token: decrypt(obj.access_token),
+    refresh_token: decrypt(obj.refresh_token),
   };
 }
 
 const KEY = (portalId: string | number) => `hs:tokens:${portalId}`;
+
+/** ---------- Public API ---------- */
 
 export const tokenStore = {
   async get(portalId: string | number): Promise<TokenRecord | null> {
@@ -84,8 +98,7 @@ export const tokenStore = {
       const got = await redisGet(KEY(portalId));
       return got ? fromStorable(got) : null;
     }
-    const v = mem.get(String(portalId));
-    return v ?? null;
+    return mem.get(String(portalId)) ?? null;
   },
 
   async set(portalId: string | number, rec: TokenRecord) {
@@ -98,7 +111,9 @@ export const tokenStore = {
   },
 
   async clear(portalId: string | number) {
-    if (provider === "redis") await redisSet(KEY(portalId), "", 1);
+    if (provider === "redis") {
+      await redisSet(KEY(portalId), "", 1);
+    }
     mem.delete(String(portalId));
   },
 };
