@@ -1,0 +1,41 @@
+name: Bot Guard
+on:
+  pull_request: { branches: [ main ] }
+  push: { branches: [ main ] }
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify core files exist
+        run: |
+          required=(
+            "app/api/health/route.ts"
+            "app/api/admin/route.ts"
+            "app/api/admin/ping/route.ts"
+            "app/api/admin/whoami/route.ts"
+            "app/api/auth/hubspot/route.ts"
+            "app/api/auth/hubspot/callback/route.ts"
+            "app/api/hubspot/webhook/route.ts"
+            "lib/hubspot.js"
+            "lib/oauthStore.js"
+            "lib/kv.js"
+            "lib/quote-pdf-lib.js"
+            "lib/quotePdfPdfLib.js"
+          )
+          missing=0
+          for f in "${required[@]}"; do
+            if [ ! -f "$f" ]; then echo "Missing $f"; missing=1; fi
+          done
+          if [ $missing -ne 0 ]; then
+            echo "::error::Core bot files missing"; exit 1
+          fi
+      - name: Block invalid scopes
+        run: |
+          if grep -R "files.read" -n app/api/auth/hubspot/; then
+            echo "::error::Invalid scope 'files.read'"; exit 1
+          fi
+      - uses: actions/setup-node@v4
+        with: { node-version: '20.x' }
+      - run: npm ci --include=dev
+      - run: npm run build

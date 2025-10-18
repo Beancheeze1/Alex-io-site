@@ -1,60 +1,41 @@
 import { NextResponse } from "next/server";
-// relative paths from /app/api/auth/hubspot/callback to /lib
-import { exchangeCodeForTokens, introspect } from "../../../../../lib/hubspot";
-import { tokenStore } from "../../../../../lib/tokenStore";
+import { exchangeCodeForTokens } from "@/lib/hubspot.js";
+import { setToken } from "@/lib/oauthStore.js";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
-  try {
-    const url = new URL(req.url);
-    const code = url.searchParams.get("code");
-    const err = url.searchParams.get("error");
-    const errDesc = url.searchParams.get("error_description");
+type TokenExchangeOk = {
+  ok: true;
+  access_token: string;
+  refresh_token?: string | null;
+  expires_in?: number | null;
+  hub_id?: number | null; // HubSpot returns hub_id on some responses
+};
 
-    if (err) {
-      return NextResponse.json(
-        { ok: false, step: "callback", error: err, error_description: errDesc },
-        { status: 400 }
-      );
-    }
-    if (!code) {
-      return NextResponse.json(
-        { ok: false, step: "callback", error: "missing_code" },
-        { status: 400 }
-      );
-    }
+type TokenExchangeFail = { ok: false; error: string; status?: number; detail?: unknown };
+type TokenExchange = TokenExchangeOk | TokenExchangeFail;
 
-    const tokens = await exchangeCodeForTokens(code);
-    const expires_at = Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600);
-    const info = await introspect(tokens.access_token);
-    if (!info?.hub_id) {
-      return NextResponse.json(
-        { ok: false, step: "introspect", error: "no_hub_id", raw: info },
-        { status: 400 }
-      );
-    }
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const error = url.searchParams.get("error");
 
-    await tokenStore.set(info.hub_id, {
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      expires_at,
-      hub_id: info.hub_id,
-      user_id: info.user_id,
-      scopes: info.scopes
-    });
+  if (error) return NextResponse.json({ ok: false, error }, { status: 400 });
+  if (!code) return NextResponse.json({ ok: false, error: "missing_code" }, { status: 400 });
 
-    const res = NextResponse.json({
-      ok: true,
-      message: "OAuth complete",
-      hub_id: info.hub_id
-    });
-    res.cookies.set("hs_portal", String(info.hub_id), { httpOnly: true, path: "/" });
-    return res;
-  } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, step: "exception", error: e?.message || String(e) },
-      { status: 500 }
-    );
+  const r = (await exchangeCodeForTokens(code)) as TokenExchange;
+
+  if (!r.ok || !("access_token" in r) || !r.access_token) {
+    return NextResponse.json({ ok: false, error: "exchange_failed", detail: r }, { status: 400 });
   }
-}
 
+  await setToken({
+    accessToken: r.access_token,
+    refreshToken: r.refresh_token || null,
+    expires_in: r.expires_in ?? null,
+    portalId: r.hub_id ?? null
+  });
+
+  return NextResponse.json({ ok: true, stored: true }, { status: 200 });
+}
