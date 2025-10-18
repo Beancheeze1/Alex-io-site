@@ -28,5 +28,13 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2"
     
+  },
+  
+  "scripts": {
+    "build": "next build",
+    "start": "next start -p $PORT",
+    "dev": "next dev"
   }
 }
+
+
