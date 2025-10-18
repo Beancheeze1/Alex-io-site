@@ -12,17 +12,17 @@
     "dev": "next dev"
   },
   "dependencies": {
-    "@types/node": "^24.8.1",
     "autoprefixer": "^10.4.20",
     "next": "^15.5.6",
     "postcss": "^8.4.41",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "tailwindcss": "^3.4.13",
-    "typescript": "^5.9.3"
+    "tailwindcss": "^3.4.13"
   },
   "devDependencies": {
+    "@types/node": "^24.8.1",
     "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.2"
+    "@types/react-dom": "^19.2.2",
+    "typescript": "^5.9.3"
   }
 }
