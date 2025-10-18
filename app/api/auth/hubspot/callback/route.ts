@@ -1,41 +1,52 @@
 import { NextResponse } from "next/server";
-import { exchangeCodeForTokens } from "@/lib/hubspot.js";
-import { setToken } from "@/lib/oauthStore.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type TokenExchangeOk = {
-  ok: true;
-  access_token: string;
-  refresh_token?: string | null;
-  expires_in?: number | null;
-  hub_id?: number | null; // HubSpot returns hub_id on some responses
-};
+/** Force module mode for TS no matter what tries to import. */
+export {}; // <-- harmless, guarantees this file is a module
 
-type TokenExchangeFail = { ok: false; error: string; status?: number; detail?: unknown };
-type TokenExchange = TokenExchangeOk | TokenExchangeFail;
+type EnvCheck = { ok: boolean; error?: string; have?: { client_id: boolean; redirect_uri: boolean } };
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const code = url.searchParams.get("code");
-  const error = url.searchParams.get("error");
+function buildAuthorizeUrl(): { ok: true; url: string } | EnvCheck {
+  const client_id = process.env.HUBSPOT_CLIENT_ID ?? "";
+  const redirect_uri = process.env.HUBSPOT_REDIRECT_URI ?? "";
 
-  if (error) return NextResponse.json({ ok: false, error }, { status: 400 });
-  if (!code) return NextResponse.json({ ok: false, error: "missing_code" }, { status: 400 });
-
-  const r = (await exchangeCodeForTokens(code)) as TokenExchange;
-
-  if (!r.ok || !("access_token" in r) || !r.access_token) {
-    return NextResponse.json({ ok: false, error: "exchange_failed", detail: r }, { status: 400 });
+  if (!client_id || !redirect_uri) {
+    return {
+      ok: false,
+      error: "missing_env",
+      have: { client_id: !!client_id, redirect_uri: !!redirect_uri },
+    };
   }
 
-  await setToken({
-    accessToken: r.access_token,
-    refreshToAken: r.refresh_token || null,
-    expires_in: r.expires_in ?? null,
-    portalId: r.hub_id ?? null
-  });
+  // Canonical scopes (space-separated). No 'files.read'.
+  const scopes = [
+    "oauth",
+    "crm.objects.contacts.read",
+    "crm.objects.contacts.write",
+    "crm.objects.companies.read",
+    "crm.objects.companies.write",
+    "crm.objects.deals.read",
+    "crm.objects.deals.write",
+    "crm.objects.owners.read",
+    "conversations.read",
+    "conversations.write",
+    // "files",
+    // "files.ui_hidden.read",
+    // "forms-uploaded-files",
+  ].join(" ");
 
-  return NextResponse.json({ ok: true, stored: true }, { status: 200 });
+  const u = new URL("https://app.hubspot.com/oauth/authorize");
+  u.searchParams.set("client_id", client_id);
+  u.searchParams.set("redirect_uri", redirect_uri);
+  u.searchParams.set("scope", scopes);
+
+  return { ok: true, url: u.toString() };
+}
+
+export async function GET() {
+  const result = buildAuthorizeUrl();
+  if (!result.ok) return NextResponse.json(result, { status: 500 });
+  return NextResponse.json(result, { status: 200 });
 }
