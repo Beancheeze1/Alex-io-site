@@ -1,38 +1,77 @@
-// app/api/admin/route.ts
+// app/api/admin/whoami/route.ts
 import { NextResponse } from "next/server";
 
+// Path-A: use the shims you already added
+import { getAccessToken } from "@/lib/oauthStore.js";
+import { introspect, hsGetOwners } from "@/lib/hubspot.js";
+
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic"; // do not cache
+export const revalidate = 0;
 
-/**
- * Admin index: intentionally lightweight.
- * - Confirms /api/admin is wired (no more 404).
- * - Lists helpful internal checks (only links/notes; does not call external APIs here).
- * - Keeps Path-A: no changes to your existing auth/webhook files.
- */
 export async function GET() {
-  const now = new Date().toISOString();
+  try {
+    const accessToken = await getAccessToken();
 
-  // If you already have /api/admin/whoami or other endpoints, keep them.
-  // We just present commonly-used checks so you can click/cURL quickly.
-  const endpoints = [
-    { path: "/api/health", purpose: "Liveness check (200 OK)" },
-    { path: "/api/admin", purpose: "This index (route exists)" },
-    { path: "/api/admin/ping", purpose: "Optional no-op (add later if desired)" },
-    { path: "/api/admin/whoami", purpose: "HubSpot portal check (if present in your repo)" },
-    { path: "/api/hubspot/webhook", purpose: "Webhook receiver (POST from HubSpot)" },
-    { path: "/api/auth/hubspot", purpose: "Start OAuth (if already implemented)" },
-    { path: "/api/auth/hubspot/callback", purpose: "OAuth redirect URI (if already implemented)" },
-  ];
+    if (!accessToken) {
+      return NextResponse.json(
+        {
+          ok: false,
+          reason: "no_access_token",
+          hint:
+            "No access token available. Run the OAuth flow at /api/auth/hubspot and ensure HUBSPOT_* envs are set.",
+          env: {
+            has_client_id: !!process.env.HUBSPOT_CLIENT_ID || false,
+            has_client_secret: !!process.env.HUBSPOT_CLIENT_SECRET || false,
+            redirect_uri: process.env.HUBSPOT_REDIRECT_URI || null,
+            portal_env: process.env.HUBSPOT_PORTAL_ID || null,
+          },
+        },
+        { status: 200 }
+      );
+    }
 
-  return NextResponse.json(
-    {
-      ok: true,
-      service: "alex-io-site",
-      time: now,
-      notes:
-        "This is a minimal /api/admin index to prove the route is wired. It doesn’t modify your auth/webhook code.",
-      endpoints,
-    },
-    { status: 200 }
-  );
-}
+    // Ask HubSpot who this token belongs to
+    const tokenInfo = await introspect(accessToken);
+
+    // Non-fatal: try a lightweight owners call to prove CRM scope
+    let ownersPreview: Array<{ id: string; email?: string }> = [];
+    try {
+      const owners = await hsGetOwners();
+      ownersPreview = (owners || [])
+        .slice(0, 3)
+        .map((o: any) => ({ id: String(o.id ?? ""), email: o.email ?? undefined }));
+    } catch {
+      // ignore
+    }
+
+    return NextResponse.json(
+      {
+        ok: !!tokenInfo?.ok,
+        token_ok: !!tokenInfo?.ok,
+        // Useful bits from HubSpot’s introspection
+        portalId: (tokenInfo as any)?.hub_id ?? null,
+        user: {
+          user_id: (tokenInfo as any)?.user_id ?? null,
+          user: (tokenInfo as any)?.user ?? null,
+        },
+        scopes: (tokenInfo as any)?.scopes ?? null,
+        expires_at: (tokenInfo as any)?.expires_at ?? null,
+        // A tiny live permission check
+        owners_preview: ownersPreview,
+        // diagnostics
+        env: {
+          portal_env: process.env.HUBSPOT_PORTAL_ID || null,
+          redirect_uri: process.env.HUBSPOT_REDIRECT_URI || null,
+        },
+      },
+      { status: 200 }
+    );
+  } catch (err: any) {
+    return NextResponse.json(
+      {
+        ok: false,
+        reason: "whoami_error",
+        error: err?.message || String(err),
+      },
+      { status: 500
