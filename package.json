@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20 <21",
-    "npm": ">=10"
+    "node": "20.x"
   },
   "scripts": {
     "dev": "next dev -p 3000",
@@ -22,10 +21,9 @@
     "tailwindcss": "^3.4.13"
   },
   "devDependencies": {
-    "@types/react": "19.2.2"
-  
-  },
-  "engines": {
-    "node": "20.x"
+    "@types/node": "^24.8.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "typescript": "^5.9.3"
   }
 }
