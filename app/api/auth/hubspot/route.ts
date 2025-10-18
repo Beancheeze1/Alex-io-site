@@ -1,14 +1,24 @@
 import { NextResponse } from "next/server";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Builds a HubSpot authorize URL using the canonical scopes.
+ * Returns JSON { ok, url } so you can click through or redirect from the UI.
+ */
 export async function GET() {
-  const client_id = process.env.HUBSPOT_CLIENT_ID;
-  const redirect_uri = process.env.HUBSPOT_REDIRECT_URI;
+  const client_id = process.env.HUBSPOT_CLIENT_ID ?? "";
+  const redirect_uri = process.env.HUBSPOT_REDIRECT_URI ?? "";
+
   if (!client_id || !redirect_uri) {
-    return NextResponse.json({ ok: false, error: "missing_env" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: "missing_env", have: { client_id: !!client_id, redirect_uri: !!redirect_uri } },
+      { status: 500 }
+    );
   }
 
+  // Canonical scopes (space-separated). Do NOT use `files.read` (invalid).
   const scopes = [
     "oauth",
     "crm.objects.contacts.read",
@@ -20,8 +30,8 @@ export async function GET() {
     "crm.objects.owners.read",
     "conversations.read",
     "conversations.write"
-    // "files",
-    // "files.ui_hidden.read",
+    // "files",                 // enable if you truly need File Manager
+    // "files.ui_hidden.read", // enable if you need hidden/system files
     // "forms-uploaded-files"
   ].join(" ");
 
@@ -29,9 +39,6 @@ export async function GET() {
   u.searchParams.set("client_id", client_id);
   u.searchParams.set("redirect_uri", redirect_uri);
   u.searchParams.set("scope", scopes);
-
-  // You can redirect instead of JSON if you prefer:
-  // return NextResponse.redirect(u.toString());
 
   return NextResponse.json({ ok: true, url: u.toString() }, { status: 200 });
 }

@@ -1,44 +1,41 @@
 import { NextResponse } from "next/server";
+import { exchangeCodeForTokens } from "@/lib/hubspot.js";
+import { setToken } from "@/lib/oauthStore.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/**
- * Builds a HubSpot authorize URL using the canonical scopes.
- * Returns JSON { ok, url } so you can click through or redirect from the UI.
- */
-export async function GET() {
-  const client_id = process.env.HUBSPOT_CLIENT_ID ?? "";
-  const redirect_uri = process.env.HUBSPOT_REDIRECT_URI ?? "";
+type TokenExchangeOk = {
+  ok: true;
+  access_token: string;
+  refresh_token?: string | null;
+  expires_in?: number | null;
+  hub_id?: number | null; // HubSpot returns hub_id on some responses
+};
 
-  if (!client_id || !redirect_uri) {
-    return NextResponse.json(
-      { ok: false, error: "missing_env", have: { client_id: !!client_id, redirect_uri: !!redirect_uri } },
-      { status: 500 }
-    );
+type TokenExchangeFail = { ok: false; error: string; status?: number; detail?: unknown };
+type TokenExchange = TokenExchangeOk | TokenExchangeFail;
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const error = url.searchParams.get("error");
+
+  if (error) return NextResponse.json({ ok: false, error }, { status: 400 });
+  if (!code) return NextResponse.json({ ok: false, error: "missing_code" }, { status: 400 });
+
+  const r = (await exchangeCodeForTokens(code)) as TokenExchange;
+
+  if (!r.ok || !("access_token" in r) || !r.access_token) {
+    return NextResponse.json({ ok: false, error: "exchange_failed", detail: r }, { status: 400 });
   }
 
-  // Canonical scopes (space-separated). Do NOT use `files.read` (invalid).
-  const scopes = [
-    "oauth",
-    "crm.objects.contacts.read",
-    "crm.objects.contacts.write",
-    "crm.objects.companies.read",
-    "crm.objects.companies.write",
-    "crm.objects.deals.read",
-    "crm.objects.deals.write",
-    "crm.objects.owners.read",
-    "conversations.read",
-    "conversations.write"
-    // "files",                 // enable if you truly need File Manager
-    // "files.ui_hidden.read", // enable if you need hidden/system files
-    // "forms-uploaded-files"
-  ].join(" ");
+  await setToken({
+    accessToken: r.access_token,
+    refreshToAken: r.refresh_token || null,
+    expires_in: r.expires_in ?? null,
+    portalId: r.hub_id ?? null
+  });
 
-  const u = new URL("https://app.hubspot.com/oauth/authorize");
-  u.searchParams.set("client_id", client_id);
-  u.searchParams.set("redirect_uri", redirect_uri);
-  u.searchParams.set("scope", scopes);
-
-  return NextResponse.json({ ok: true, url: u.toString() }, { status: 200 });
+  return NextResponse.json({ ok: true, stored: true }, { status: 200 });
 }
