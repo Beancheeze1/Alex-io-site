@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+import { hsGetOwners } from '@/lib/hubspot';
+import { kvPing } from '@/lib/kv';
 export const revalidate = 0;
 export async function GET() {
   return NextResponse.json(

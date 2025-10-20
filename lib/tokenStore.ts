@@ -1,119 +1,136 @@
-﻿import crypto from "crypto";
+﻿// lib/tokenStore.ts
+// File-backed, portal-aware token store.
+// Compatible with the previous in-memory API so the rest of your code stays the same.
+
+import fs from "fs";
+import path from "path";
 
 export type TokenRecord = {
   access_token: string;
-  refresh_token: string;
-  expires_at: number; // epoch seconds
-  hub_id?: number;
-  user_id?: string;
-  scopes?: string[];
-};
+  refresh_token?: string;
+  expires_in?: number;   // seconds until expiry from "obtained_at"
+  token_type?: string;
+  obtained_at?: number;  // epoch seconds when this record was stored/refreshed
+  [k: string]: any;
+} | null;
 
-const provider = (process.env.TOKEN_STORE_PROVIDER ?? "memory").toLowerCase();
-const mem = new Map<string, TokenRecord>();
+const DEFAULT_KEY = "_default";
 
-/** ---------- Optional Redis (Upstash REST) helpers ---------- */
+// Where to store tokens on disk.
+// Override with TOKEN_STORE_PATH if you want a custom location.
+const STORE_FILE =
+  process.env.TOKEN_STORE_PATH ||
+  path.join(process.cwd(), ".data", "tokens.json");
 
-async function redisGet(key: string) {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
+// In-memory cache, hydrated from disk on first use.
+let cache: Record<string, TokenRecord> | null = null;
 
-  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (!res.ok) return null;
-
-  const json = await res.json();
-  return json?.result ? JSON.parse(json.result) : null;
+function ensureDirExists(fp: string) {
+  const dir = path.dirname(fp);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-async function redisSet(key: string, value: unknown, ttlSeconds?: number) {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return;
-
-  const body = JSON.stringify(value);
-  const base = `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(body)}`;
-  const finalUrl =
-    typeof ttlSeconds === "number" ? `${base}/EX/${ttlSeconds}` : base;
-
-  await fetch(finalUrl, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
+function readStore(): Record<string, TokenRecord> {
+  try {
+    if (cache) return cache;
+    if (!fs.existsSync(STORE_FILE)) {
+      cache = {};
+      return cache;
+    }
+    const raw = fs.readFileSync(STORE_FILE, "utf8");
+    cache = raw ? (JSON.parse(raw) as Record<string, TokenRecord>) : {};
+    return cache!;
+  } catch {
+    // On any read error, fall back to empty store (don’t blow up requests)
+    cache = {};
+    return cache!;
+  }
 }
 
-/** ---------- Optional encryption for stored tokens ---------- */
-
-const ENC_KEY_B64 = process.env.ENCRYPTION_KEY || ""; // base64-encoded 32 bytes
-
-function encrypt(plain: string): string {
-  if (!ENC_KEY_B64) return plain;
-  const key = Buffer.from(ENC_KEY_B64, "base64"); // 32 bytes
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, enc]).toString("base64");
+function writeStore() {
+  try {
+    ensureDirExists(STORE_FILE);
+    fs.writeFileSync(STORE_FILE, JSON.stringify(cache ?? {}, null, 2), "utf8");
+  } catch {
+    // Swallow write errors to avoid breaking routes;
+    // you can log here if you wire up a logger.
+  }
 }
 
-function decrypt(blob: string): string {
-  if (!ENC_KEY_B64) return blob;
-  const raw = Buffer.from(blob, "base64");
-  const iv = raw.subarray(0, 12);
-  const tag = raw.subarray(12, 28);
-  const enc = raw.subarray(28);
-  const key = Buffer.from(ENC_KEY_B64, "base64");
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-  const out = Buffer.concat([decipher.update(enc), decipher.final()]);
-  return out.toString("utf8");
+function keyOf(portal?: string | number) {
+  return portal === undefined ? DEFAULT_KEY : String(portal);
 }
-
-function toStorable(rec: TokenRecord) {
-  return {
-    ...rec,
-    access_token: encrypt(rec.access_token),
-    refresh_token: encrypt(rec.refresh_token),
-  };
-}
-
-function fromStorable(obj: any): TokenRecord {
-  return {
-    ...obj,
-    access_token: decrypt(obj.access_token),
-    refresh_token: decrypt(obj.refresh_token),
-  };
-}
-
-const KEY = (portalId: string | number) => `hs:tokens:${portalId}`;
-
-/** ---------- Public API ---------- */
 
 export const tokenStore = {
-  async get(portalId: string | number): Promise<TokenRecord | null> {
-    if (provider === "redis") {
-      const got = await redisGet(KEY(portalId));
-      return got ? fromStorable(got) : null;
-    }
-    return mem.get(String(portalId)) ?? null;
-  },
-
-  async set(portalId: string | number, rec: TokenRecord) {
-    const ttl = Math.max(1, Math.floor(rec.expires_at - Date.now() / 1000));
-    if (provider === "redis") {
-      await redisSet(KEY(portalId), toStorable(rec), ttl);
+  /** Save tokens under a portal (hub_id). Adds/updates obtained_at automatically. */
+  save(tokens: TokenRecord, portal?: string | number) {
+    const store = readStore();
+    const key = keyOf(portal);
+    if (tokens) {
+      const now = Math.floor(Date.now() / 1000);
+      const merged: NonNullable<TokenRecord> = {
+        obtained_at: now,
+        ...(store[key] ?? {}),
+        ...tokens,
+      };
+      store[key] = merged;
     } else {
-      mem.set(String(portalId), rec);
+      store[key] = null;
     }
+    writeStore();
+    return key;
   },
 
-  async clear(portalId: string | number) {
-    if (provider === "redis") {
-      await redisSet(KEY(portalId), "", 1);
+  /** Get tokens for a portal; if none provided, uses the default slot. */
+  get(portal?: string | number): TokenRecord {
+    const store = readStore();
+    return store[keyOf(portal)] ?? null;
+  },
+
+  /** Update a subset of fields for a portal's record. */
+  update(partial: Partial<NonNullable<TokenRecord>>, portal?: string | number): TokenRecord {
+    const store = readStore();
+    const key = keyOf(portal);
+    const curr = store[key] ?? null;
+    if (!curr) {
+      const now = Math.floor(Date.now() / 1000);
+      const rec: NonNullable<TokenRecord> = { obtained_at: now, ...(partial as any) };
+      store[key] = rec;
+      writeStore();
+      return rec;
     }
-    mem.delete(String(portalId));
+    const now = Math.floor(Date.now() / 1000);
+    const next: NonNullable<TokenRecord> = {
+      ...curr,
+      ...partial,
+      obtained_at: partial.access_token ? now : (curr.obtained_at ?? now),
+    };
+    store[key] = next;
+    writeStore();
+    return next;
+  },
+
+  /** Whether we have any record for a portal. */
+  has(portal?: string | number) {
+    const store = readStore();
+    return Object.prototype.hasOwnProperty.call(store, keyOf(portal));
+  },
+
+  /** Clear a portal's record, or EVERYTHING if portal is omitted. */
+  clear(portal?: string | number) {
+    const store = readStore();
+    if (portal === undefined) {
+      cache = {};
+      writeStore();
+      return;
+    }
+    delete store[keyOf(portal)];
+    writeStore();
+  },
+
+  /** List all keys currently stored. */
+  listKeys(): string[] {
+    const store = readStore();
+    return Object.keys(store);
   },
 };

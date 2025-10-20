@@ -1,8 +1,52 @@
 {
   "compilerOptions": {
     "baseUrl": ".",
-    "paths": { "@/*": ["./*"], "@lib/*": ["./lib/*"] }
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@lib/*": [
+        "./lib/*"
+      ]
+    },
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "jsx": "preserve",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "incremental": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "next-env.d.ts",
+    "scripts/*.ts",
+    ".next/types/**/*.ts"
+, "lib/kv.js", "app/api/auth/peek/route.ts.bak"  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    ".turbo",
+    "vcpkg",
+    "**/vcpkg/**",
+    "**/scripts/azure-pipelines/**"
+  ]
 }

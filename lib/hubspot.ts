@@ -1,63 +1,169 @@
-﻿// lib/hubspot.ts — clean, named-exports only
+// lib/hubspot.ts
+import { kv, ns } from "lib/kv";
 
-const TOKEN_URL = "https://api.hubapi.com/oauth/v1/token";
-const INTROSPECT_URL = "https://api.hubapi.com/oauth/v1/access-tokens";
-
-const CLIENT_ID = process.env.HUBSPOT_CLIENT_ID ?? "";
-const CLIENT_SECRET = process.env.HUBSPOT_CLIENT_SECRET ?? "";
-const REDIRECT_URI = process.env.HUBSPOT_REDIRECT_URI ?? "";
-
-export type OAuthTokenResp = {
+export type TokenBundle = {
   access_token: string;
   refresh_token: string;
-  expires_in: number;
+  expires_at: number; // epoch seconds
+  hubId: number;
+  scope?: string;
 };
 
-export async function exchangeCodeForTokens(code: string): Promise<OAuthTokenResp> {
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
-    redirect_uri: REDIRECT_URI,
-    code
-  });
+const HS_BASE = "https://api.hubapi.com";
 
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body
-  });
-
-  if (!res.ok) {
-    throw new Error(`exchange failed: ${res.status} ${await res.text()}`);
-  }
-  return (await res.json()) as OAuthTokenResp;
+function now(): number {
+  return Math.floor(Date.now() / 1000);
 }
 
-export async function refreshTokens(refresh_token: string): Promise<OAuthTokenResp> {
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
-    refresh_token
-  });
-
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body
-  });
-
-  if (!res.ok) {
-    throw new Error(`refresh failed: ${res.status} ${await res.text()}`);
-  }
-  return (await res.json()) as OAuthTokenResp;
+function env<T extends string = string>(name: T, required = true) {
+  const v = process.env[name];
+  if (!v && required) throw new Error(`Missing env ${name}`);
+  return v!;
 }
 
-export async function introspect(access_token: string) {
-  const res = await fetch(`${INTROSPECT_URL}/${access_token}`);
+export function redirectUri(origin?: string) {
+  // Prefer explicit env, otherwise infer from the request origin
+  return process.env.HUBSPOT_REDIRECT_URI || `${origin}/api/auth/hubspot/callback`;
+}
+
+export function buildAuthUrl(origin?: string) {
+  const clientId = env("HUBSPOT_CLIENT_ID");
+  const scopes =
+    process.env.HUBSPOT_SCOPES ||
+    "oauth files crm.objects.deals.read crm.objects.deals.write crm.objects.contacts.read crm.objects.contacts.write crm.objects.owners.read";
+  const ruri = encodeURIComponent(redirectUri(origin));
+  const state = crypto.randomUUID();
+  const url =
+    `https://app.hubspot.com/oauth/authorize` +
+    `?client_id=${encodeURIComponent(clientId)}` +
+    `&redirect_uri=${ruri}` +
+    `&scope=${encodeURIComponent(scopes)}`;
+  return { url, state };
+}
+
+export async function saveState(state: string) {
+  await kv.set(ns(`oauth:state:${state}`), 1, { ex: 600 });
+}
+export async function verifyState(state?: string) {
+  if (!state) return false;
+  const ok = await kv.get(ns(`oauth:state:${state}`));
+  if (ok) await kv.del(ns(`oauth:state:${state}`));
+  return !!ok;
+}
+
+export async function exchangeCode(code: string, origin?: string): Promise<{ token: TokenBundle }> {
+  const clientId = env("HUBSPOT_CLIENT_ID");
+  const clientSecret = env("HUBSPOT_CLIENT_SECRET");
+  const ruri = redirectUri(origin);
+
+  const res = await fetch(`${HS_BASE}/oauth/v1/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: ruri,
+      code,
+    }),
+  });
+
   if (!res.ok) {
-    throw new Error(`introspect failed: ${res.status} ${await res.text()}`);
+    const text = await res.text();
+    throw new Error(`Token exchange failed: ${res.status} ${text}`);
   }
-  return await res.json(); // { hub_id, user_id, scopes, expires_in, ... }
+  const data = await res.json();
+
+  // Get hub_id from token introspection
+  const who = await fetch(`${HS_BASE}/oauth/v1/access-tokens/${data.access_token}`);
+  if (!who.ok) {
+    const text = await who.text();
+    throw new Error(`Introspection failed: ${who.status} ${text}`);
+  }
+  const whoJson = await who.json(); // has hub_id
+  const hubId = Number(whoJson.hub_id);
+
+  const token: TokenBundle = {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expires_at: now() + (data.expires_in ?? 0) - 30, // small buffer
+    hubId,
+    scope: data.scope,
+  };
+  return { token };
+}
+
+export async function storeToken(token: TokenBundle) {
+  await kv.hset(ns(`hubspot:portal:${token.hubId}`), token);
+}
+
+export async function listPortals(): Promise<number[]> {
+  const keys = await kv.keys(ns("hubspot:portal:*"));
+  return keys
+    .map((k) => Number(k.split(":").pop()))
+    .filter((n) => !Number.isNaN(n));
+}
+
+export async function loadToken(hubId: number): Promise<TokenBundle | null> {
+  return (await kv.hget<TokenBundle>(ns(`hubspot:portal:${hubId}`), "access_token"))
+    ? (await kv.hget<TokenBundle>(ns(`hubspot:portal:${hubId}`), "" as any)) // fallback – some KV impls require field; we saved whole object with hset
+    : null;
+}
+
+export async function getAnyToken(): Promise<TokenBundle | null> {
+  const hubs = await listPortals();
+  for (const h of hubs) {
+    const b = await kv.hget<TokenBundle>(ns(`hubspot:portal:${h}`), "" as any);
+    if (b) return b;
+  }
+  return null;
+}
+
+export async function refreshIfNeeded(bundle: TokenBundle): Promise<TokenBundle> {
+  if (bundle.expires_at > now()) return bundle;
+
+  const clientId = env("HUBSPOT_CLIENT_ID");
+  const clientSecret = env("HUBSPOT_CLIENT_SECRET");
+
+  const res = await fetch(`${HS_BASE}/oauth/v1/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: bundle.refresh_token,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Refresh failed: ${res.status} ${text}`);
+  }
+
+  const data = await res.json();
+  const updated: TokenBundle = {
+    ...bundle,
+    access_token: data.access_token,
+    expires_at: now() + (data.expires_in ?? 0) - 30,
+    scope: data.scope ?? bundle.scope,
+  };
+  await storeToken(updated);
+  return updated;
+}
+
+export async function hsFetch(
+  bundle: TokenBundle,
+  path: string,
+  init?: RequestInit
+): Promise<Response> {
+  const tok = await refreshIfNeeded(bundle);
+  return fetch(`${HS_BASE}${path}`, {
+    ...init,
+    headers: {
+      ...(init?.headers || {}),
+      Authorization: `Bearer ${tok.access_token}`,
+      "Content-Type": "application/json",
+    },
+  });
 }

@@ -1,29 +1,39 @@
-import { NextResponse } from "next/server";
-import { tokenStore } from "../../../../lib/tokenStore"; // 4 ups
+// app/api/auth/peek/route.ts
+import { NextResponse } from 'next/server';
+import { tokenStore } from '@/lib/tokenStore';
 
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
+/**
+ * GET /api/auth/peek?portal=244053164
+ * - Returns whether we have tokens cached for the given portal (hub_id).
+ * - If no portal is provided, checks the default slot.
+ */
 export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const portal = searchParams.get("portal");
-    if (!portal) {
-      return NextResponse.json({ ok: false, error: "missing_portal_param" }, { status: 400 });
-    }
+  const { searchParams } = new URL(req.url);
+  const portalParam = searchParams.get('portal');
+  const portal = portalParam ? Number(portalParam) : undefined;
 
-    const rec = await tokenStore.get(portal);
-    if (!rec) {
-      return NextResponse.json({ ok: true, portal, exists: false });
-    }
+  const rec = tokenStore.get(portal);
+  if (!rec) {
     return NextResponse.json({
       ok: true,
-      portal,
-      exists: true,
-      expires_at: rec.expires_at,
-      seconds_left: Math.max(0, rec.expires_at - Math.floor(Date.now() / 1000)),
-      scopes: rec.scopes ?? []
+      portal: portal ?? '_default',
+      exists: false,
     });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
+
+  // Don’t leak tokens—just indicate presence and basic metadata
+  return NextResponse.json({
+    ok: true,
+    portal: portal ?? '_default',
+    exists: true,
+    meta: {
+      token_type: rec.token_type ?? null,
+      expires_in: rec.expires_in ?? null,
+      has_refresh: !!rec.refresh_token,
+      has_access: !!rec.access_token,
+    },
+  });
 }
