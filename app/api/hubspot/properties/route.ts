@@ -4,7 +4,6 @@ import { getAnyToken, hsFetch } from "@/lib/hubspot";
 
 export const runtime = "nodejs";
 
-// GET /api/hubspot/properties?object=deals|contacts|companies
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -18,11 +17,10 @@ export async function GET(req: Request) {
     }
     const res = await hsFetch(bundle, `/crm/v3/properties/${encodeURIComponent(object)}`);
     const json = await res.json();
-    if (!res.ok) {
-      return NextResponse.json({ ok: false, error: json }, { status: res.status });
-    }
+    if (!res.ok) return NextResponse.json({ ok: false, error: json }, { status: res.status });
     return NextResponse.json({ ok: true, object, properties: json?.results ?? [] });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message }, { status: 500 });
   }
 }
+export {};
