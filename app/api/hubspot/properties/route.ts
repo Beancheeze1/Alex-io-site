@@ -4,16 +4,18 @@ import { getAnyToken, hsFetch } from "@/lib/hubspot";
 
 export const runtime = "nodejs";
 
-// Example: GET /api/hubspot/properties?object=deals
+// GET /api/hubspot/properties?object=deals|contacts|companies
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const object = url.searchParams.get("object") || "deals"; // contacts | companies | deals
+    const object = url.searchParams.get("object") || "deals";
     const bundle = await getAnyToken();
     if (!bundle) {
-      return NextResponse.json({ ok: false, error: "No token stored. Please authorize." }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, error: "No token stored. Please authorize." },
+        { status: 401 }
+      );
     }
-
     const res = await hsFetch(bundle, `/crm/v3/properties/${encodeURIComponent(object)}`);
     const json = await res.json();
     if (!res.ok) {
