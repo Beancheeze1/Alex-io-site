@@ -2,9 +2,8 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
+      "ES2023",
+      "DOM"
     ],
     "module": "esnext",
     "moduleResolution": "bundler",
@@ -16,14 +15,10 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
-    "allowJs": false,
     "baseUrl": ".",
     "paths": {
       "@/*": [
         "./*"
-      ],
-      "@lib/*": [
-        "lib/*"
       ]
     },
     "plugins": [
@@ -31,18 +26,20 @@
         "name": "next"
       }
     ],
-    "incremental": true
+    "incremental": true,
+    "allowJs": true
   },
   "include": [
+    "app",
+    "lib",
     "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    ".next\\dev/types/**/*.ts",
-    ".next\\dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    ".next",
+    "Alex-IO-clean/**",
+    "**/Alex-IO-clean/**"
   ]
 }
