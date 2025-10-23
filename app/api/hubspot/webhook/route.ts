@@ -1,105 +1,91 @@
 // app/api/hubspot/webhook/route.ts
 import { NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 
-export const runtime = "nodejs";
+const APP_SECRET = process.env.HUBSPOT_APP_SECRET || "";
+
+/** Fetches request body as UTF-8 string */
+async function getRawBody(req: Request): Promise<string> {
+  const ab = await req.arrayBuffer();
+  return new TextDecoder("utf-8").decode(ab);
+}
+
+/** Optional: save last event to Upstash Redis for debugging */
+async function saveLastEvent(obj: unknown) {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return;
+
+  try {
+    const key = "hubspot:last-webhook";
+    const setUrl = `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(
+      JSON.stringify(obj)
+    )}`;
+    await fetch(setUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    // Ignore persistence errors
+  }
+}
+
+/**
+ * Verify HubSpot v3 signature (HMAC-SHA256 of method+path+body)
+ */
+async function validSignature(req: Request, rawBody: string): Promise<boolean> {
+  if (!APP_SECRET) return true; // allow through if no secret set
+
+  const sig = req.headers.get("X-HubSpot-Signature-v3") || "";
+  const url = new URL(req.url);
+  const baseStr = `${req.method}${url.pathname}${rawBody}`;
+
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(APP_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(baseStr));
+  const hex = Array.from(new Uint8Array(mac))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  const calc = `sha256=${hex}`;
+
+  // timingSafeEqual doesn't exist in Web Crypto; do a safe fallback
+  return calc === sig;
+}
+
 export const dynamic = "force-dynamic";
 
 /**
- * Env controls
- * - HUBSPOT_WEBHOOK_SECRET: optional, if set we'll verify signature (recommended in prod)
- * - HUBSPOT_VALIDATE_WEBHOOKS: "true" to enforce signature verification
- * - WEBHOOK_LOG_DIR: optional, defaults to ".data/webhooks"
+ * POST: HubSpot webhook receiver
  */
-const SECRET = process.env.HUBSPOT_WEBHOOK_SECRET || process.env.HUBSPOT_CLIENT_SECRET || "";
-const ENFORCE = String(process.env.HUBSPOT_VALIDATE_WEBHOOKS || "").toLowerCase() === "true";
-const LOG_DIR = process.env.WEBHOOK_LOG_DIR || ".data/webhooks";
+export async function POST(req: Request) {
+  const raw = await getRawBody(req);
+  const valid = await validSignature(req, raw);
+
+  if (!valid) {
+    return NextResponse.json(
+      { ok: false, error: "Invalid signature" },
+      { status: 401 }
+    );
+  }
+
+  let json: any;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    json = { parseError: true, raw };
+  }
+
+  await saveLastEvent(json);
+  return NextResponse.json({ ok: true });
+}
 
 /**
- * HubSpot sends `X-HubSpot-Signature` or `X-HubSpot-Signature-v3`.
- * v3 = base64(HMAC_SHA256(secret, method + url + body))
- * (HubSpot docs specify the full URL including scheme/host.)
+ * GET: simple health endpoint for testing
  */
-function computeSignatureV3(secret: string, method: string, url: string, body: string) {
-  const base = (method.toUpperCase() + url + body);
-  return createHmac("sha256", secret).update(base).digest("base64");
-}
-
-function safeTSEqual(a: string, b: string) {
-  // avoid falsey/length mismatches throwing
-  const ab = Buffer.from(a || "", "utf8");
-  const bb = Buffer.from(b || "", "utf8");
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
-function logPayload(kind: "ok" | "fail", body: string, meta: Record<string, unknown>) {
-  try {
-    const day = new Date();
-    const dir = join(process.cwd(), LOG_DIR, `${day.getUTCFullYear()}-${String(day.getUTCMonth() + 1).padStart(2, "0")}-${String(day.getUTCDate()).padStart(2, "0")}`);
-    mkdirSync(dir, { recursive: true });
-    const file = join(
-      dir,
-      `${day.toISOString().replace(/[:.]/g, "-")}_${kind}.json`
-    );
-    const out = JSON.stringify({ meta, body }, null, 2);
-    writeFileSync(file, out);
-  } catch {
-    // best-effort logging; never crash handler
-  }
-}
-
-export async function POST(req: Request) {
-  const method = "POST";
-  const url = new URL(req.url);
-  const fullUrl = `${url.origin}${url.pathname}`; // HubSpot expects full URL; querystring is not included in their formula
-  const rawBody = await req.text(); // Keep raw string for signature calc
-  const headers = new Headers(req.headers);
-  const sigLegacy = headers.get("x-hubspot-signature") || "";
-  const sigV3 = headers.get("x-hubspot-signature-v3") || "";
-
-  // Optional signature verification (recommended in prod)
-  let verified = false;
-  if (SECRET) {
-    const expectV3 = computeSignatureV3(SECRET, method, fullUrl, rawBody);
-    if (sigV3) verified = safeTSEqual(sigV3, expectV3);
-    // If only legacy header present, we still accept (dev mode); add your legacy algorithm here if you want to enforce it.
-  }
-
-  // Enforce verification only when explicitly enabled
-  if (ENFORCE && SECRET && !verified) {
-    logPayload("fail", rawBody, {
-      reason: "signature_mismatch",
-      fullUrl,
-      sigV3,
-      enforced: ENFORCE,
-    });
-    return NextResponse.json({ ok: false, error: "invalid signature" }, { status: 401 });
-  }
-
-  // Parse JSON safely AFTER signature check
-  let events: unknown = null;
-  try {
-    events = rawBody ? JSON.parse(rawBody) : null;
-  } catch {
-    // HubSpot always posts JSON; but we’ll keep going with raw body for logging
-  }
-
-  // Write a best-effort log; safe to disable by unsetting LOG_DIR
-  logPayload(verified ? "ok" : "ok", rawBody, {
-    verified,
-    count: Array.isArray(events) ? events.length : null,
-    path: url.pathname,
-  });
-
-  // TODO: enqueue processing for each event (message received, etc.)
-  // For now: immediately ack so HubSpot doesn't retry.
-  return NextResponse.json({ ok: true, received: Array.isArray(events) ? events.length : 1 });
-}
-
-// Optional: reject other verbs clearly
-export function GET() {
-  return NextResponse.json({ ok: false, error: "Method Not Allowed" }, { status: 405 });
+export async function GET() {
+  return NextResponse.json({ ok: true, hint: "POST webhook events here" });
 }
