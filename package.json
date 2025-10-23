@@ -1,0 +1,30 @@
+{
+  "name": "alex-io",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "npm run guard && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "guard": "node scripts/guard-checks.mjs"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.35.6",
+    "next": "16.0.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.0",
+    "globby": "^14.1.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
