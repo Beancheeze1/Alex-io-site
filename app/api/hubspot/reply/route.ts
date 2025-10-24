@@ -8,7 +8,7 @@ async function kvGet<T = any>(key: string): Promise<T | null> {
   const v = (await redis.get(key)) as any;
   if (v == null) return null;
   if (typeof v === "string") {
-    try { return JSON.parse(v) as T; } catch { /* fall through */ }
+    try { return JSON.parse(v) as T; } catch { /* ignore */ }
   }
   return v as T;
 }
@@ -162,23 +162,72 @@ async function getThreadChannelMeta(threadId: string, messageId?: string): Promi
   return null;
 }
 
+/* ============ Participants ============ */
+// We’ll discover valid sender/recipient actorIds in the thread.
+type Participant = { actorId?: string; role?: string; type?: string; [k: string]: any };
+
+async function listParticipants(threadId: string): Promise<Participant[]> {
+  const { resp } = await hsFetch(`/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/participants`);
+  if (!resp?.ok) return [];
+  const j = await resp.json().catch(() => null);
+  const arr: Participant[] = Array.isArray(j?.results) ? j.results : Array.isArray(j) ? j : [];
+  return arr;
+}
+
+function selectActors(participants: Participant[]) {
+  // Heuristics:
+  // - consumer/visitor: recipient
+  // - hubspot_user/agent: preferred sender
+  // - app/integration: optional sender fallback if present in participants
+  let recipient: string | undefined;
+  let sender: string | undefined;
+
+  for (const p of participants) {
+    const id = p.actorId || p.actor?.id || p.id;
+    const role = (p.role || p.participantRole || "").toString().toUpperCase();
+    const type = (p.type || p.participantType || "").toString().toUpperCase();
+
+    if (!recipient && (role.includes("CONSUMER") || role.includes("VISITOR") || type.includes("CONSUMER") || type.includes("VISITOR"))) {
+      recipient = String(id);
+    }
+    if (!sender && (role.includes("AGENT") || role.includes("HUBSPOT_USER") || type.includes("AGENT") || type.includes("HUBSPOT_USER"))) {
+      sender = String(id);
+    }
+  }
+
+  // If we still don't have a sender, try any other non-consumer participant
+  if (!sender) {
+    const alt = participants.find(p => {
+      const id = p.actorId || p.actor?.id || p.id;
+      const role = (p.role || p.participantRole || "").toString().toUpperCase();
+      return id && !role.includes("CONSUMER") && !role.includes("VISITOR");
+    });
+    if (alt?.actorId) sender = String(alt.actorId);
+  }
+
+  return { senderActorId: sender, recipientActorId: recipient };
+}
+
 /* ============ Post reply ============ */
 async function postReply(
   threadId: string,
   messageText: string,
-  senderActorId: string,
-  meta: Required<ThreadMeta>
+  meta: Required<ThreadMeta>,
+  senderActorId?: string,
+  recipientActorId?: string
 ) {
-  const body = {
+  // Build payload. HubSpot requires at least one recipient; include when we have it.
+  const body: any = {
     type: "MESSAGE",
     messageFormat: "TEXT",
     text: messageText,
     direction: "OUTGOING",
-    senderActorId,          // must be typed: APP-<id>
-    senderActorType: "APP",
     channelId: meta.channelId,
     channelAccountId: meta.channelAccountId,
   };
+
+  if (senderActorId) body.senderActorId = senderActorId;
+  if (recipientActorId) body.recipients = [{ actorId: recipientActorId }];
 
   const { resp } = await hsFetch(
     `/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages`,
@@ -191,20 +240,14 @@ async function postReply(
     return { ok: false, status: resp.status, error: t || `HTTP ${resp.status}` };
   }
   const j = await resp.json().catch(() => ({}));
-  return { ok: true, status: 200, data: j };
+  return { ok: true, status: 200, data: j, payload: body };
 }
 
 /* ============ Routes ============ */
 export const dynamic = "force-dynamic";
 
-/**
- * POST /api/hubspot/reply
- * Body (optional): { text: string }
- * Uses the most recent webhook to determine the target thread and replies.
- */
 export async function POST(req: Request) {
   try {
-    // read body safely; allow empty body and fall back to default
     const reqBody = (await req.json().catch(() => ({}))) as any;
     const messageText: string =
       (typeof reqBody?.text === "string" ? reqBody.text.trim() : "") ||
@@ -252,32 +295,33 @@ export async function POST(req: Request) {
       );
     }
 
-    // APP-typed actor id
-    const appId = process.env.HUBSPOT_APP_ID || (wh?.appId ? String(wh.appId) : "");
-    if (!appId) {
-      return NextResponse.json(
-        { ok: false, error: "Missing HUBSPOT_APP_ID and webhook had no appId" },
-        { status: 400 }
-      );
-    }
-    const senderActorId = `A-${appId}`;
+    // participants → choose sender & recipient
+    const parts = await listParticipants(threadId);
+    const { senderActorId, recipientActorId } = selectActors(parts);
 
-    // post
-    const posted = await postReply(threadId, messageText, senderActorId, meta);
+    // Post reply (sender optional, recipient strongly recommended)
+    const posted = await postReply(threadId, messageText, meta, senderActorId, recipientActorId);
     if (!posted.ok) {
       return NextResponse.json(
-        { ok: false, step: "postReply", status: posted.status, error: posted.error, threadId, meta },
+        { ok: false, step: "postReply", status: posted.status, error: posted.error, threadId, meta, participants: parts },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ ok: true, threadId, meta, reply: posted.data });
+    return NextResponse.json({
+      ok: true,
+      threadId,
+      meta,
+      senderActorId,
+      recipientActorId,
+      reply: posted.data,
+      payloadUsed: posted.payload,
+    });
   } catch (err: any) {
     return NextResponse.json({ ok: false, step: "catch", error: String(err?.message || err) }, { status: 500 });
   }
 }
 
-/** GET: debug helper */
 export async function GET() {
   const last = await kvGet("hubspot:last-webhook");
   return NextResponse.json({ ok: true, lastWebhook: last });
