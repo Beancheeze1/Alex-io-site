@@ -111,70 +111,6 @@ export async function GET(req: Request) {
   const dryRun = url.searchParams.get("dryRun");
   const mode   = url.searchParams.get("mode");
   const limit  = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") ?? 10)));
-
-  if (dryRun === "1") {
-    return corsJson({ ok: true, dryRun: true, note: "Webhook endpoint reachable", fp: "webhook-v3" });
-  }
-
-  if (mode === "recent") {
-    const items = await upstashLRange("hubspot:webhook:log", 0, limit - 1);
-    return corsJson({ ok: true, mode, count: items ? items.length : 0, items });
-  }
-
-  if (mode === "count") {
-    const n = await upstashLLen("hubspot:webhook:log");
-    return corsJson({ ok: true, mode, length: n ?? 0 });
-  }
-
-  return corsJson({ ok: true, note: "GET health/log modes: ?dryRun=1 | ?mode=recent&limit=10 | ?mode=count", fp: "webhook-v3" });
-}
-
-// ---------- POST: dryRun or log real events ----------
-export async function POST(req: Request) {
-  const url = new URL(req.url);
-  const dryRun = url.searchParams.get("dryRun");
-
-  if (dryRun === "1") {
-    return corsJson({ ok: true, dryRun: true, method: "POST", fp: "webhook-v3" });
-  }
-
-  // Parse JSON
-  let payload: unknown;
-  try {
-    payload = await req.json();
-  } catch {
-    return corsJson({ ok: false, error: "invalid-json" }, 400);
-  }
-
-  // Accept either an array of events or a single event object
-  const events: any[] = Array.isArray(payload) ? payload : (payload && typeof payload === "object" ? [payload] : []);
-
-  if (events.length === 0) {
-    return corsJson({ ok: false, error: "no-events" }, 400);
-  }
-
-  const entry = {
-    ts: new Date().toISOString(),
-    count: events.length,
-    sample: events[0],
-  };
-
-  const write = await upstashLPush("hubspot:webhook:log", JSON.stringify(entry));
-
-  return corsJson({
-    ok: true,
-    recorded: write.ok,
-    received: events.length,
-    note: "accepted",
-    fp: "webhook-v3",
-  });
-}
-
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const dryRun = url.searchParams.get("dryRun");
-  const mode   = url.searchParams.get("mode");
-  const limit  = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") ?? 10)));
   const id     = Number(url.searchParams.get("id") ?? 0);
 
   if (dryRun === "1") {
@@ -234,3 +170,46 @@ export async function GET(req: Request) {
 
   return corsJson({ ok: true, note: "GET modes: ?dryRun=1 | ?mode=recent&limit=10 | ?mode=count | ?mode=replay&id=0 | ?mode=clear", fp: "webhook-v3" });
 }
+
+
+// ---------- POST: dryRun or log real events ----------
+export async function POST(req: Request) {
+  const url = new URL(req.url);
+  const dryRun = url.searchParams.get("dryRun");
+
+  if (dryRun === "1") {
+    return corsJson({ ok: true, dryRun: true, method: "POST", fp: "webhook-v3" });
+  }
+
+  // Parse JSON
+  let payload: unknown;
+  try {
+    payload = await req.json();
+  } catch {
+    return corsJson({ ok: false, error: "invalid-json" }, 400);
+  }
+
+  // Accept either an array of events or a single event object
+  const events: any[] = Array.isArray(payload) ? payload : (payload && typeof payload === "object" ? [payload] : []);
+
+  if (events.length === 0) {
+    return corsJson({ ok: false, error: "no-events" }, 400);
+  }
+
+  const entry = {
+    ts: new Date().toISOString(),
+    count: events.length,
+    sample: events[0],
+  };
+
+  const write = await upstashLPush("hubspot:webhook:log", JSON.stringify(entry));
+
+  return corsJson({
+    ok: true,
+    recorded: write.ok,
+    received: events.length,
+    note: "accepted",
+    fp: "webhook-v3",
+  });
+}
+
