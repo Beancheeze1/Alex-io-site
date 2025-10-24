@@ -1,7 +1,8 @@
 // app/api/hubspot/reply/route.ts
 import { NextResponse } from "next/server";
 
-/** ===== Upstash helpers ===== */
+/* ================= Upstash helpers ================= */
+
 async function kvGet(key: string) {
   const url = process.env.UPSTASH_REDIS_REST_URL!;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN!;
@@ -11,19 +12,26 @@ async function kvGet(key: string) {
   });
   const j = await r.json().catch(() => null);
   if (!j?.result) return null;
-  try { return JSON.parse(j.result); } catch { return j.result; }
+  try {
+    return JSON.parse(j.result);
+  } catch {
+    return j.result;
+  }
 }
 
 async function kvSet(key: string, value: any) {
   const url = process.env.UPSTASH_REDIS_REST_URL!;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN!;
   await fetch(
-    `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(JSON.stringify(value))}`,
+    `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(
+      JSON.stringify(value)
+    )}`,
     { headers: { Authorization: `Bearer ${token}` } }
   ).catch(() => {});
 }
 
-/** ===== Token manager (access + refresh) ===== */
+/* ================= OAuth token management ================= */
+
 type TokenBundle = {
   access_token: string;
   refresh_token?: string;
@@ -31,8 +39,12 @@ type TokenBundle = {
   token_type?: string;
 };
 
-async function refreshIfNeeded(resp: Response, last: TokenBundle): Promise<TokenBundle | null> {
+async function refreshIfNeeded(
+  resp: Response,
+  last: TokenBundle
+): Promise<TokenBundle | null> {
   if (resp.status !== 401) return null;
+
   const clientId = process.env.HUBSPOT_CLIENT_ID!;
   const clientSecret = process.env.HUBSPOT_CLIENT_SECRET!;
   if (!clientId || !clientSecret || !last?.refresh_token) return null;
@@ -50,13 +62,18 @@ async function refreshIfNeeded(resp: Response, last: TokenBundle): Promise<Token
     cache: "no-store",
   });
   if (!r.ok) return null;
+
   const next = (await r.json()) as TokenBundle;
   const merged: TokenBundle = { ...last, ...next };
   await kvSet("hubspot:tokens", merged);
   return merged;
 }
 
-async function hsFetch(path: string, init: RequestInit = {}, tokens?: TokenBundle) {
+async function hsFetch(
+  path: string,
+  init: RequestInit = {},
+  tokens?: TokenBundle
+) {
   const withAuth = async (t: TokenBundle) =>
     fetch(`https://api.hubapi.com${path}`, {
       ...init,
@@ -70,8 +87,13 @@ async function hsFetch(path: string, init: RequestInit = {}, tokens?: TokenBundl
 
   const current: TokenBundle = tokens ?? (await kvGet("hubspot:tokens"));
   if (!current?.access_token) {
-    return { resp: null as Response | null, tokens: current, error: "No access token" as const };
+    return {
+      resp: null as Response | null,
+      tokens: current,
+      error: "No access token" as const,
+    };
   }
+
   let resp = await withAuth(current);
   if (resp.status === 401) {
     const fresh = await refreshIfNeeded(resp, current);
@@ -83,41 +105,132 @@ async function hsFetch(path: string, init: RequestInit = {}, tokens?: TokenBundl
   return { resp, tokens: current, error: null as any };
 }
 
-/** ===== Resolve thread/message ===== */
+/* ================= Thread/message resolution ================= */
+
 async function getThreadIdFromMessage(messageId: string): Promise<string | null> {
-  const { resp } = await hsFetch(`/conversations/v3/conversations/messages/${encodeURIComponent(messageId)}`);
+  const { resp } = await hsFetch(
+    `/conversations/v3/conversations/messages/${encodeURIComponent(messageId)}`
+  );
   if (!resp?.ok) return null;
   const j = await resp.json().catch(() => null);
-  const threadId = j?.threadId ?? j?.thread?.id ?? j?.threadID ?? j?.thread_id ?? null;
+  const threadId =
+    j?.threadId ?? j?.thread?.id ?? j?.threadID ?? j?.thread_id ?? null;
   return threadId ? String(threadId) : null;
 }
 
-async function getThreadIdFromObject(objectId: string | number): Promise<string | null> {
-  // Frequently objectId is already the threadId for conversation.newMessage
+async function getThreadIdFromObject(
+  objectId: string | number
+): Promise<string | null> {
   const id = String(objectId);
-  const { resp } = await hsFetch(`/conversations/v3/conversations/threads/${encodeURIComponent(id)}`);
+  const { resp } = await hsFetch(
+    `/conversations/v3/conversations/threads/${encodeURIComponent(id)}`
+  );
   if (resp?.ok) return id;
   return null;
 }
 
-/** ===== Load channel info from thread ===== */
+/* ================= Channel meta helpers ================= */
+
 type ThreadMeta = { channelId?: string; channelAccountId?: string };
 
-async function getThreadChannelMeta(threadId: string): Promise<ThreadMeta | null> {
-  const { resp } = await hsFetch(`/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}`);
-  if (!resp?.ok) return null;
-  const j = await resp.json().catch(() => null);
-  // The properties vary by account; try the common places:
+function pickChannelMeta(obj: any): ThreadMeta {
+  if (!obj || typeof obj !== "object") return {};
+
   const channelId =
-    j?.channelId ?? j?.channel?.id ?? j?.thread?.channelId ?? j?.properties?.channelId ?? null;
+    obj.channelId ??
+    obj.channel_id ??
+    obj.channel?.id ??
+    obj.thread?.channelId ??
+    obj.properties?.channelId ??
+    obj.properties?.channel_id ??
+    obj.message?.channelId ??
+    obj.message?.channel?.id ??
+    null;
+
   const channelAccountId =
-    j?.channelAccountId ?? j?.channel?.accountId ?? j?.thread?.channelAccountId ?? j?.properties?.channelAccountId ?? null;
-  return { channelId: channelId ? String(channelId) : undefined,
-           channelAccountId: channelAccountId ? String(channelAccountId) : undefined };
+    obj.channelAccountId ??
+    obj.channel_account_id ??
+    obj.channel?.accountId ??
+    obj.thread?.channelAccountId ??
+    obj.properties?.channelAccountId ??
+    obj.properties?.channel_account_id ??
+    obj.message?.channelAccountId ??
+    obj.message?.channel?.accountId ??
+    null;
+
+  return {
+    channelId: channelId ? String(channelId) : undefined,
+    channelAccountId: channelAccountId ? String(channelAccountId) : undefined,
+  };
 }
 
-/** ===== Post a reply into a thread ===== */
-async function postReply(threadId: string, text: string, senderActorId: string, channelId: string, channelAccountId: string) {
+/**
+ * Try multiple sources to discover channelId & channelAccountId:
+ * 1) message detail
+ * 2) thread messages list (scan newest)
+ * 3) thread object
+ */
+async function getThreadChannelMeta(
+  threadId: string,
+  messageId?: string
+): Promise<ThreadMeta | null> {
+  // 1) message detail (best)
+  if (messageId) {
+    const { resp } = await hsFetch(
+      `/conversations/v3/conversations/messages/${encodeURIComponent(messageId)}`
+    );
+    if (resp?.ok) {
+      const j = await resp.json().catch(() => null);
+      const meta = pickChannelMeta(j);
+      if (meta.channelId && meta.channelAccountId) return meta;
+    }
+  }
+
+  // 2) list messages in thread and scan
+  {
+    const { resp } = await hsFetch(
+      `/conversations/v3/conversations/threads/${encodeURIComponent(
+        threadId
+      )}/messages?limit=50`
+    );
+    if (resp?.ok) {
+      const j = await resp.json().catch(() => null);
+      const arr: any[] = Array.isArray(j?.results)
+        ? j.results
+        : Array.isArray(j)
+        ? j
+        : [];
+      for (const m of arr) {
+        const meta = pickChannelMeta(m);
+        if (meta.channelId && meta.channelAccountId) return meta;
+      }
+    }
+  }
+
+  // 3) thread object
+  {
+    const { resp } = await hsFetch(
+      `/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}`
+    );
+    if (resp?.ok) {
+      const j = await resp.json().catch(() => null);
+      const meta = pickChannelMeta(j);
+      if (meta.channelId && meta.channelAccountId) return meta;
+    }
+  }
+
+  return null;
+}
+
+/* ================= Posting the reply ================= */
+
+async function postReply(
+  threadId: string,
+  text: string,
+  senderActorId: string,
+  channelId: string,
+  channelAccountId: string
+) {
   const body = {
     type: "MESSAGE",
     messageFormat: "TEXT",
@@ -130,7 +243,9 @@ async function postReply(threadId: string, text: string, senderActorId: string, 
   };
 
   const { resp } = await hsFetch(
-    `/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages`,
+    `/conversations/v3/conversations/threads/${encodeURIComponent(
+      threadId
+    )}/messages`,
     { method: "POST", body: JSON.stringify(body) }
   );
 
@@ -143,10 +258,13 @@ async function postReply(threadId: string, text: string, senderActorId: string, 
   return { ok: true, status: 200, data: j };
 }
 
-/** ===== Read last webhook ===== */
+/* ================= Read last webhook ================= */
+
 async function getLastWebhook() {
   return (await kvGet("hubspot:last-webhook")) as any;
 }
+
+/* ================= Route handlers ================= */
 
 export const dynamic = "force-dynamic";
 
@@ -157,12 +275,18 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request) {
   const { text } = (await req.json().catch(() => ({}))) as { text?: string };
-  const messageText = text?.trim() || "Thanks for your message! This is an automated reply from alex-io 🤖";
+  const messageText =
+    text?.trim() ||
+    "Thanks for your message! This is an automated reply from alex-io 🤖";
 
   const tokens = (await kvGet("hubspot:tokens")) as TokenBundle | null;
   if (!tokens?.access_token) {
     return NextResponse.json(
-      { ok: false, error: "No HubSpot access token persisted. Re-run /api/auth/hubspot." },
+      {
+        ok: false,
+        error:
+          "No HubSpot access token persisted. Re-run /api/auth/hubspot first.",
+      },
       { status: 400 }
     );
   }
@@ -170,10 +294,15 @@ export async function POST(req: Request) {
   const last = await getLastWebhook();
   if (!Array.isArray(last) || last.length === 0) {
     return NextResponse.json(
-      { ok: false, error: "No lastWebhook found. Trigger an inbound message or send a test event first." },
+      {
+        ok: false,
+        error:
+          "No lastWebhook found. Trigger an inbound message or send a test event first.",
+      },
       { status: 400 }
     );
   }
+
   const evt = last[0];
 
   // Resolve threadId
@@ -184,39 +313,65 @@ export async function POST(req: Request) {
 
   let threadId: string | null = null;
   if (messageId) threadId = await getThreadIdFromMessage(messageId);
-  if (!threadId && objectId != null) threadId = await getThreadIdFromObject(objectId);
+  if (!threadId && objectId != null)
+    threadId = await getThreadIdFromObject(objectId);
+
   if (!threadId) {
     return NextResponse.json(
-      { ok: false, error: "Could not resolve threadId", hint: { messageId, objectId, subscriptionType: evt?.subscriptionType } },
+      {
+        ok: false,
+        error: "Could not resolve threadId",
+        hint: { messageId, objectId, subscriptionType: evt?.subscriptionType },
+      },
       { status: 422 }
     );
   }
 
-  // Load channel info
-  const meta = await getThreadChannelMeta(threadId);
+  // Load channel info (now tries message, list, thread)
+  const meta = await getThreadChannelMeta(threadId, messageId || undefined);
   if (!meta?.channelId || !meta?.channelAccountId) {
     return NextResponse.json(
-      { ok: false, step: "getThreadChannelMeta", error: "Missing channelId/channelAccountId", meta },
+      {
+        ok: false,
+        step: "getThreadChannelMeta",
+        error: "Missing channelId/channelAccountId",
+        meta: meta ?? {},
+      },
       { status: 400 }
     );
   }
 
-  // Determine senderActorId
+  // Determine senderActorId (env first, then webhook.appId)
   const senderActorId =
-    process.env.HUBSPOT_APP_ID ||
-    (evt?.appId ? String(evt.appId) : "");
-
+    process.env.HUBSPOT_APP_ID || (evt?.appId ? String(evt.appId) : "");
   if (!senderActorId) {
     return NextResponse.json(
-      { ok: false, error: "Missing HUBSPOT_APP_ID and webhook had no appId. Set HUBSPOT_APP_ID env to your HubSpot App ID." },
+      {
+        ok: false,
+        error:
+          "Missing HUBSPOT_APP_ID and webhook had no appId. Set HUBSPOT_APP_ID env to your HubSpot App ID.",
+      },
       { status: 400 }
     );
   }
 
-  const posted = await postReply(threadId, messageText, senderActorId, meta.channelId, meta.channelAccountId);
+  const posted = await postReply(
+    threadId,
+    messageText,
+    senderActorId,
+    meta.channelId,
+    meta.channelAccountId
+  );
   if (!posted.ok) {
     return NextResponse.json(
-      { ok: false, step: "postReply", status: posted.status, error: posted.error, threadId, meta },
+      {
+        ok: false,
+        step: "postReply",
+        status: posted.status,
+        error: posted.error,
+        threadId,
+        meta,
+      },
       { status: 500 }
     );
   }
