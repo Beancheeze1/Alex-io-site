@@ -36,6 +36,28 @@ function corsJson(data: any, status = 200) {
   });
 }
 
+// --- add these helpers near the top with the other Upstash helpers ---
+async function upstashLIndex(key: string, index: number) {
+  const { url, token } = upstashEnv();
+  if (!url || !token) return null;
+  const r = await fetch(`${url}/lindex/${encodeURIComponent(key)}/${index}`, {
+    headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  return j?.result ?? null;
+}
+
+async function upstashDel(key: string) {
+  const { url, token } = upstashEnv();
+  if (!url || !token) return { ok: false };
+  const r = await fetch(`${url}/del/${encodeURIComponent(key)}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
+  });
+  return { ok: r.ok, status: r.status };
+}
+
+
 function upstashEnv() {
   const url =
     process.env.UPSTASH_REDIS_REST_URL ?? process.env.REDIS_URL ?? "";
@@ -148,3 +170,67 @@ export async function POST(req: Request) {
   });
 }
 
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const dryRun = url.searchParams.get("dryRun");
+  const mode   = url.searchParams.get("mode");
+  const limit  = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") ?? 10)));
+  const id     = Number(url.searchParams.get("id") ?? 0);
+
+  if (dryRun === "1") {
+    return corsJson({ ok: true, dryRun: true, note: "Webhook endpoint reachable", fp: "webhook-v3" });
+  }
+
+  if (mode === "recent") {
+    const items = await upstashLRange("hubspot:webhook:log", 0, limit - 1);
+    return corsJson({ ok: true, mode, count: items ? items.length : 0, items });
+  }
+
+  if (mode === "count") {
+    const n = await upstashLLen("hubspot:webhook:log");
+    return corsJson({ ok: true, mode, length: n ?? 0 });
+  }
+
+  // NEW: clear all logs
+  if (mode === "clear") {
+    const cleared = await upstashDel("hubspot:webhook:log");
+    return corsJson({ ok: cleared.ok, mode, note: cleared.ok ? "log cleared" : "clear failed" });
+  }
+
+  // NEW: replay a single stored entry by index (0 = most recent)
+  if (mode === "replay") {
+    const raw = await upstashLIndex("hubspot:webhook:log", id);
+    if (!raw) return corsJson({ ok: false, mode, error: "no-such-id" }, 404);
+
+    let entry: any = null;
+    try { entry = JSON.parse(raw); } catch { /* keep null */ }
+    const sample = entry?.sample ?? null;
+
+    if (!sample || typeof sample !== "object") {
+      return corsJson({ ok: false, mode, error: "entry-missing-sample" }, 400);
+    }
+
+    // Repost the stored 'sample' back to THIS webhook (real, non-dry) as an array
+    const res = await fetch(url.origin + "/api/hubspot/webhook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([sample]),
+      cache: "no-store",
+    });
+
+    const text = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(text); } catch { data = text; }
+
+    return corsJson({
+      ok: res.ok,
+      mode,
+      id,
+      repostStatus: res.status,
+      repostBody: data,
+      replayedSample: sample,
+    }, res.ok ? 200 : 500);
+  }
+
+  return corsJson({ ok: true, note: "GET modes: ?dryRun=1 | ?mode=recent&limit=10 | ?mode=count | ?mode=replay&id=0 | ?mode=clear", fp: "webhook-v3" });
+}
