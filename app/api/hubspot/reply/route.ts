@@ -1,131 +1,211 @@
 // app/api/hubspot/reply/route.ts
 import { NextResponse } from "next/server";
-import { tokenStore } from "@/lib/tokenStore";
-import { hsFetch } from "@/lib/hubspot";
-import { requireEnv } from "@/lib/env";
 
-export const runtime = "nodejs";
+/** ===== Upstash helpers ===== */
+async function kvGet(key: string) {
+  const url = process.env.UPSTASH_REDIS_REST_URL!;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN!;
+  const r = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const j = await r.json().catch(() => null);
+  if (!j?.result) return null;
+  try { return JSON.parse(j.result); } catch { return j.result; }
+}
+
+async function kvSet(key: string, value: any) {
+  const url = process.env.UPSTASH_REDIS_REST_URL!;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN!;
+  await fetch(
+    `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(JSON.stringify(value))}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  ).catch(() => {});
+}
+
+/** ===== Token manager (access + refresh) ===== */
+type TokenBundle = {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  token_type?: string;
+  // HubSpot includes more fields; we keep what we need.
+};
+
+async function refreshIfNeeded(resp: Response, last: TokenBundle): Promise<TokenBundle | null> {
+  if (resp.status !== 401) return null;
+  const clientId = process.env.HUBSPOT_CLIENT_ID!;
+  const clientSecret = process.env.HUBSPOT_CLIENT_SECRET!;
+  if (!clientId || !clientSecret || !last?.refresh_token) return null;
+
+  const params = new URLSearchParams();
+  params.set("grant_type", "refresh_token");
+  params.set("client_id", clientId);
+  params.set("client_secret", clientSecret);
+  params.set("refresh_token", last.refresh_token);
+
+  const r = await fetch("https://api.hubapi.com/oauth/v1/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+    cache: "no-store",
+  });
+
+  if (!r.ok) return null;
+  const next = (await r.json()) as TokenBundle;
+  // persist the fresh bundle
+  const merged: TokenBundle = { ...last, ...next };
+  await kvSet("hubspot:tokens", merged);
+  return merged;
+}
+
+async function hsFetch(path: string, init: RequestInit = {}, tokens?: TokenBundle) {
+  const withAuth = async (t: TokenBundle) =>
+    fetch(`https://api.hubapi.com${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${t.access_token}`,
+        "Content-Type": "application/json",
+        ...(init.headers || {}),
+      },
+      cache: "no-store",
+    });
+
+  const current: TokenBundle = tokens ?? (await kvGet("hubspot:tokens"));
+  if (!current?.access_token) {
+    return { resp: null as Response | null, tokens: current, error: "No access token" as const };
+  }
+  let resp = await withAuth(current);
+  if (resp.status === 401) {
+    const fresh = await refreshIfNeeded(resp, current);
+    if (fresh) {
+      resp = await withAuth(fresh);
+      return { resp, tokens: fresh, error: null as any };
+    }
+  }
+  return { resp, tokens: current, error: null as any };
+}
+
+/** ===== Resolve thread/message =====
+ * We try via messageId first (from webhook),
+ * then fall back to objectId if available.
+ */
+async function getThreadIdFromMessage(messageId: string): Promise<string | null> {
+  // Try Conversations Messages detail by messageId
+  const { resp } = await hsFetch(`/conversations/v3/conversations/messages/${encodeURIComponent(messageId)}`);
+  if (!resp) return null;
+  if (resp.ok) {
+    const j = await resp.json().catch(() => null);
+    // Common shapes include threadId on the message (varies by account)
+    const threadId = j?.threadId ?? j?.thread?.id ?? j?.threadID ?? j?.thread_id ?? null;
+    if (threadId) return String(threadId);
+  }
+  return null;
+}
+
+async function getThreadIdFromObject(objectId: string | number): Promise<string | null> {
+  // Some webhooks send objectId as the thread id for conversations
+  // Try fetching thread directly to verify
+  const id = String(objectId);
+  const { resp } = await hsFetch(`/conversations/v3/conversations/threads/${encodeURIComponent(id)}`);
+  if (resp?.ok) return id;
+  return null;
+}
+
+/** ===== Post a reply into a thread ===== */
+async function postReply(threadId: string, text: string) {
+  // API commonly accepts this payload shape for an agent/bot message
+  const body = {
+    type: "MESSAGE",
+    text: text,
+    direction: "OUTGOING",
+    // You can include sender metadata if your portal requires it
+  };
+  const { resp } = await hsFetch(
+    `/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages`,
+    { method: "POST", body: JSON.stringify(body) }
+  );
+  if (!resp) return { ok: false, status: 0, error: "No response" as const };
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => "");
+    return { ok: false, status: resp.status, error: t || `HTTP ${resp.status}` };
+  }
+  const j = await resp.json().catch(() => ({}));
+  return { ok: true, status: 200, data: j };
+}
+
+/** ===== Read the webhook we stored earlier ===== */
+async function getLastWebhook() {
+  return (await kvGet("hubspot:last-webhook")) as any;
+}
+
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/hubspot/reply?portal=244053164
- * Headers:
- *   x-admin-key: <ADMIN_KEY>
- * Body (JSON):
- *   { "threadId": number|string, "text": string }
- *
- * Notes:
- * - Uses Conversations v3: POST /conversations/v3/conversations/threads/{threadId}/messages
- * - HubSpot may evolve this API; we pass through the response body for visibility.
+ * POST /api/hubspot/reply
+ * Body (optional): { text: string }
+ * Uses the most recent webhook to determine the target thread and replies.
  */
 export async function POST(req: Request) {
-  requireEnv();
+  const { text } = (await req.json().catch(() => ({}))) as { text?: string };
+  const messageText = text?.trim() || "Thanks for your message! This is an automated reply from alex-io 🤖";
 
-  // --- auth gate
-  const adminKey = process.env.ADMIN_KEY || "";
-  const hdr = new Headers(req.headers).get("x-admin-key") || "";
-  if (!adminKey || hdr !== adminKey) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  // Ensure we have tokens
+  const tokens = (await kvGet("hubspot:tokens")) as TokenBundle | null;
+  if (!tokens?.access_token) {
+    return NextResponse.json(
+      { ok: false, error: "No HubSpot access token persisted. Re-run /api/auth/hubspot." },
+      { status: 400 }
+    );
   }
 
-  // --- parse JSON body
-  let payload: any;
-  try {
-    // Some clients mislabel Content-Type or send unusual encodings.
-    // Read raw text first; then try JSON.parse; fall back to req.json().
-    const raw = await req.text();
-    payload = raw ? JSON.parse(raw) : {};
-  } catch {
-    try {
-      payload = await req.json(); // fallback if raw parse failed
-    } catch {
-      return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
-    }
-}
+  const last = await getLastWebhook();
+  if (!Array.isArray(last) || last.length === 0) {
+    return NextResponse.json(
+      { ok: false, error: "No lastWebhook found. Trigger an inbound message or send a test event first." },
+      { status: 400 }
+    );
+  }
+  const evt = last[0]; // use the most recent
+  const messageId: string | null =
+    evt?.messageId ?? evt?.properties?.messageId ?? null;
+  const objectId: string | number | null =
+    evt?.objectId ?? evt?.properties?.threadId ?? null;
 
-  const text = String(payload?.text || "").trim();
-  const threadIdRaw = payload?.threadId ?? payload?.thread_id ?? payload?.thread;
-  const threadId =
-    typeof threadIdRaw === "number"
-      ? threadIdRaw
-      : typeof threadIdRaw === "string" && /^\d+$/.test(threadIdRaw)
-      ? Number(threadIdRaw)
-      : undefined;
+  let threadId: string | null = null;
 
-  if (!text || !threadId) {
+  if (messageId) {
+    threadId = await getThreadIdFromMessage(messageId);
+  }
+  if (!threadId && objectId != null) {
+    threadId = await getThreadIdFromObject(objectId);
+  }
+
+  if (!threadId) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Missing required fields",
-        hint: "Body must include { text: string, threadId: number|string }",
+        error:
+          "Could not resolve threadId from webhook. Need messageId resolvable or a valid objectId.",
+        hint: { messageId, objectId, subscriptionType: evt?.subscriptionType },
       },
-      { status: 400 }
+      { status: 422 }
     );
   }
 
-  // --- select portal (optional)
-  const url = new URL(req.url);
-  const portalParam = url.searchParams.get("portal");
-  const portal =
-    portalParam && /^\d+$/.test(portalParam) ? Number(portalParam) : undefined;
-
-  const bundle = tokenStore.get(portal);
-  if (!bundle?.access_token) {
+  const posted = await postReply(threadId, messageText);
+  if (!posted.ok) {
     return NextResponse.json(
-      { ok: false, error: "No token available for requested portal/default" },
-      { status: 400 }
-    );
-  }
-
-  // --- build request to HubSpot Conversations API
-  const path = `/conversations/v3/conversations/threads/${encodeURIComponent(
-    String(threadId)
-  )}/messages`;
-
-  // minimal message body; HubSpot accepts "type": "MESSAGE" with "text"
-  const body = JSON.stringify({
-    type: "MESSAGE",
-    text,
-  });
-
-  try {
-    const r = await hsFetch(bundle, path, {
-      method: "POST",
-      body,
-    });
-
-    const data = await r
-      .json()
-      .catch(async () => ({ raw: await r.text().catch(() => "") }));
-
-    if (!r.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          status: r.status,
-          statusText: r.statusText,
-          error: data?.message || "HubSpot error",
-          data,
-        },
-        { status: r.status }
-      );
-    }
-
-    return NextResponse.json({
-      ok: true,
-      portal: portal ?? bundle.hubId ?? "default",
-      threadId,
-      data,
-    });
-  } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
+      { ok: false, step: "postReply", status: posted.status, error: posted.error, threadId },
       { status: 500 }
     );
   }
+
+  return NextResponse.json({ ok: true, threadId, reply: posted.data });
 }
 
-// Optional: reject GET clearly
-export function GET() {
-  return NextResponse.json({ ok: false, error: "Method Not Allowed" }, { status: 405 });
+/** GET helper: returns what we would reply to (dry run) */
+export async function GET() {
+  const last = await getLastWebhook();
+  return NextResponse.json({ ok: true, lastWebhook: last });
 }
