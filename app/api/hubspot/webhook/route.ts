@@ -112,35 +112,33 @@ export async function POST(req: Request) {
   const url = new URL(req.url);
   const dryRun = url.searchParams.get("dryRun");
 
-  // Dry run -> instant JSON (no body parse)
   if (dryRun === "1") {
     return corsJson({ ok: true, dryRun: true, method: "POST", fp: "webhook-v3" });
   }
 
-  // Real events
-  let events: unknown;
+  // Parse JSON
+  let payload: unknown;
   try {
-    events = await req.json();
+    payload = await req.json();
   } catch {
     return corsJson({ ok: false, error: "invalid-json" }, 400);
   }
 
-  if (!Array.isArray(events) || events.length === 0) {
+  // Accept either an array of events or a single event object
+  const events: any[] = Array.isArray(payload) ? payload : (payload && typeof payload === "object" ? [payload] : []);
+
+  if (events.length === 0) {
     return corsJson({ ok: false, error: "no-events" }, 400);
   }
 
-  // Build a compact log entry (one entry per POST)
   const entry = {
     ts: new Date().toISOString(),
     count: events.length,
-    // keep it compact: include 1st event as sample; full array can be large
     sample: events[0],
   };
 
-  // Write to Upstash (best-effort, keep request fast)
   const write = await upstashLPush("hubspot:webhook:log", JSON.stringify(entry));
 
-  // Acknowledge quickly (HubSpot expects a 200)
   return corsJson({
     ok: true,
     recorded: write.ok,
@@ -149,3 +147,4 @@ export async function POST(req: Request) {
     fp: "webhook-v3",
   });
 }
+
