@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { Redis } from "@upstash/redis";
 
-/* ============ Upstash ============ */
+/* =========================
+   Upstash (Redis) helpers
+   ========================= */
+
 const redis = Redis.fromEnv();
 
 async function kvGet<T = any>(key: string): Promise<T | null> {
@@ -16,7 +19,10 @@ async function kvSet(key: string, value: any) {
   await redis.set(key, JSON.stringify(value));
 }
 
-/* ============ Tokens (access + refresh) ============ */
+/* =========================
+   OAuth token handling
+   ========================= */
+
 type TokenBundle = {
   access_token: string;
   refresh_token?: string;
@@ -26,6 +32,7 @@ type TokenBundle = {
 
 async function refreshIfNeeded(resp: Response, last: TokenBundle): Promise<TokenBundle | null> {
   if (resp.status !== 401) return null;
+
   const clientId = process.env.HUBSPOT_CLIENT_ID!;
   const clientSecret = process.env.HUBSPOT_CLIENT_SECRET!;
   if (!clientId || !clientSecret || !last?.refresh_token) return null;
@@ -78,7 +85,10 @@ async function hsFetch(path: string, init: RequestInit = {}, tokens?: TokenBundl
   return { resp, tokens: current, error: null as any };
 }
 
-/* ============ Resolve thread/message ============ */
+/* =========================
+   Thread/message resolution
+   ========================= */
+
 async function getThreadIdFromMessage(messageId: string): Promise<string | null> {
   const { resp } = await hsFetch(`/conversations/v3/conversations/messages/${encodeURIComponent(messageId)}`);
   if (!resp?.ok) return null;
@@ -94,7 +104,10 @@ async function getThreadIdFromObject(objectId: string | number): Promise<string 
   return null;
 }
 
-/* ============ Channel meta helpers ============ */
+/* =========================
+   Channel metadata (id/accountId)
+   ========================= */
+
 type ThreadMeta = { channelId?: string; channelAccountId?: string };
 
 function pickChannelMeta(obj: any): ThreadMeta {
@@ -129,7 +142,7 @@ function pickChannelMeta(obj: any): ThreadMeta {
 
 /** Try: message → thread messages list → thread */
 async function getThreadChannelMeta(threadId: string, messageId?: string): Promise<Required<ThreadMeta> | null> {
-  // 1) message detail
+  // 1) message
   if (messageId) {
     const { resp } = await hsFetch(`/conversations/v3/conversations/messages/${encodeURIComponent(messageId)}`);
     if (resp?.ok) {
@@ -138,7 +151,7 @@ async function getThreadChannelMeta(threadId: string, messageId?: string): Promi
       if (meta.channelId && meta.channelAccountId) return meta as Required<ThreadMeta>;
     }
   }
-  // 2) list thread messages
+  // 2) thread messages list
   {
     const { resp } = await hsFetch(`/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages?limit=50`);
     if (resp?.ok) {
@@ -162,63 +175,99 @@ async function getThreadChannelMeta(threadId: string, messageId?: string): Promi
   return null;
 }
 
-/* ============ Discover actors from messages ============ */
+/* =========================
+   Actor discovery (from messages)
+   ========================= */
+
 type ActorPick = { senderActorId?: string; recipientActorId?: string };
 
-function typeChar(id?: string): string | undefined {
-  if (!id || typeof id !== "string") return undefined;
-  const idx = id.indexOf("-");
-  return idx > 0 ? id.slice(0, idx) : undefined; // e.g., "U", "C", "A"
+function extractActorIdsFromMsg(m: any): string[] {
+  const found = new Set<string>();
+  const tryAdd = (v: any) => {
+    if (!v) return;
+    const s = String(v);
+    if (/^[A-Z]-\d+/.test(s)) found.add(s); // e.g., U-123, C-456, A-789
+  };
+
+  // common locations
+  tryAdd(m?.senderActorId);
+  tryAdd(m?.message?.senderActorId);
+
+  // nested shapes observed across portals
+  tryAdd(m?.sender?.actorId);
+  tryAdd(m?.message?.sender?.actorId);
+  tryAdd(m?.from?.actorId);
+  tryAdd(m?.message?.from?.actorId);
+  tryAdd(m?.author?.actorId);
+  tryAdd(m?.message?.author?.actorId);
+
+  // recipients sometimes list consumer/user ids
+  const recs = m?.recipients || m?.message?.recipients || [];
+  for (const r of Array.isArray(recs) ? recs : []) {
+    tryAdd(r?.actorId || r?.id);
+  }
+
+  // extra fallbacks
+  tryAdd(m?.actorId);
+  tryAdd(m?.message?.actorId);
+
+  return [...found];
 }
 
-async function discoverActorsFromMessages(threadId: string, seedMessageId?: string): Promise<ActorPick & { seen: string[] }> {
+function idTypeChar(id?: string) {
+  if (!id) return undefined;
+  const i = id.indexOf("-");
+  return i > 0 ? id.slice(0, i) : undefined; // "U" | "C" | "A" | ...
+}
+
+async function discoverActorsFromMessages(
+  threadId: string,
+  seedMessageId?: string
+): Promise<ActorPick & { seen: string[] }> {
   const seen: string[] = [];
   let senderActorId: string | undefined;
   let recipientActorId: string | undefined;
 
-  // Check the seed message first
+  // Seed message first
   if (seedMessageId) {
     const { resp } = await hsFetch(`/conversations/v3/conversations/messages/${encodeURIComponent(seedMessageId)}`);
     if (resp?.ok) {
       const j = await resp.json().catch(() => null);
-      const sid = j?.senderActorId || j?.message?.senderActorId;
-      if (sid) seen.push(String(sid));
+      for (const a of extractActorIdsFromMsg(j)) seen.push(a);
     }
   }
 
-  // Walk recent messages in the thread
+  // Recent messages in thread
   const { resp } = await hsFetch(`/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages?limit=100`);
   if (resp?.ok) {
     const j = await resp.json().catch(() => null);
     const arr: any[] = Array.isArray(j?.results) ? j.results : Array.isArray(j) ? j : [];
     for (const m of arr) {
-      const sid = m?.senderActorId || m?.message?.senderActorId;
-      if (sid) {
-        const s = String(sid);
-        seen.push(s);
-        const t = typeChar(s);
-        // recipient: prefer consumer/visitor (usually "C")
-        if (!recipientActorId && (t === "C" || String(m?.direction).toUpperCase() === "INCOMING")) {
-          recipientActorId = s;
-        }
-        // sender: prefer user/agent (usually "U")
-        if (!senderActorId && (t === "U" || String(m?.direction).toUpperCase() === "OUTGOING")) {
-          senderActorId = s;
-        }
+      const ids = extractActorIdsFromMsg(m);
+      for (const a of ids) {
+        if (!seen.includes(a)) seen.push(a);
+        const t = idTypeChar(a);
+        if (!recipientActorId && t === "C") recipientActorId = a; // customer/visitor
+        if (!senderActorId && t === "U") senderActorId = a;       // agent/user
       }
     }
   }
 
-  // Fallback: if we still have no recipient but saw any actor that isn't "U", assume that one is the consumer.
+  // Fallback recipient: any non-U actor we saw
   if (!recipientActorId) {
-    const c = seen.find(a => typeChar(a) && typeChar(a) !== "U");
-    if (c) recipientActorId = c;
+    recipientActorId = seen.find(a => {
+      const t = idTypeChar(a);
+      return t && t !== "U";
+    });
   }
 
   return { senderActorId, recipientActorId, seen };
 }
 
-/* ============ Post reply ============ */
+/* =========================
+   Post reply
+   ========================= */
+
 async function postReply(
   threadId: string,
   messageText: string,
@@ -233,7 +282,7 @@ async function postReply(
     direction: "OUTGOING",
     channelId: meta.channelId,
     channelAccountId: meta.channelAccountId,
-    senderActorId, // HubSpot requires this now
+    senderActorId, // HubSpot requires explicit sender now
   };
   if (recipientActorId) body.recipients = [{ actorId: recipientActorId }];
 
@@ -251,12 +300,20 @@ async function postReply(
   return { ok: true, status: 200, data: j, payload: body };
 }
 
-/* ============ Routes ============ */
+/* =========================
+   Route handlers
+   ========================= */
+
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/hubspot/reply
- * Body: { text: string, sender?: string, recipient?: string }
+ * Body (optional):
+ *   {
+ *     "text": "message string",
+ *     "sender": "U-123456",      // override (optional)
+ *     "recipient": "C-987654"    // override (optional)
+ *   }
  */
 export async function POST(req: Request) {
   try {
@@ -267,7 +324,7 @@ export async function POST(req: Request) {
     const overrideSender = typeof reqBody?.sender === "string" ? reqBody.sender.trim() : undefined;
     const overrideRecipient = typeof reqBody?.recipient === "string" ? reqBody.recipient.trim() : undefined;
 
-    // tokens must exist
+    // Ensure we have tokens
     const tokens = await kvGet<TokenBundle>("hubspot:tokens");
     if (!tokens?.access_token) {
       return NextResponse.json(
@@ -276,7 +333,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // last webhook
+    // Most recent webhook stored by /api/hubspot/webhook
     const last = await kvGet<any>("hubspot:last-webhook");
     if (!Array.isArray(last) || !last[0]) {
       return NextResponse.json(
@@ -286,7 +343,7 @@ export async function POST(req: Request) {
     }
     const wh = last[0];
 
-    // resolve thread
+    // Resolve thread id
     const messageId: string | null = wh?.messageId ?? wh?.properties?.messageId ?? null;
     const objectId: string | number | null = wh?.objectId ?? wh?.properties?.threadId ?? null;
 
@@ -300,7 +357,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // channel meta
+    // Channel metadata
     const meta = await getThreadChannelMeta(threadId, messageId || undefined);
     if (!meta) {
       return NextResponse.json(
@@ -309,7 +366,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // discover actors from messages (unless overridden)
+    // Determine sender/recipient
     let senderActorId = overrideSender;
     let recipientActorId = overrideRecipient;
 
@@ -318,22 +375,29 @@ export async function POST(req: Request) {
       senderActorId = senderActorId || found.senderActorId;
       recipientActorId = recipientActorId || found.recipientActorId;
 
-      // If we STILL lack a sender, error with hints
       if (!senderActorId) {
-        return NextResponse.json(
-          {
-            ok: false,
-            step: "discoverActors",
-            error: "No senderActorId found. Provide one in the POST body as { sender: \"U-<id>\" }.",
-            seenActorIds: found.seen,
-            hint: "Look for an ID starting with U- from your own/agent messages, or pass a known actor id.",
-          },
-          { status: 400 }
-        );
+        // Last-ditch fallback from env (configure in Render)
+        const envFallback = process.env.HUBSPOT_FALLBACK_SENDER;
+        if (envFallback && /^[A-Z]-\d+/.test(envFallback)) {
+          senderActorId = envFallback;
+        } else {
+          return NextResponse.json(
+            {
+              ok: false,
+              step: "discoverActors",
+              error:
+                "No senderActorId found. Either set HUBSPOT_FALLBACK_SENDER=U-<id> in env, or pass it in the POST body as { sender: \"U-<id>\" }.",
+              seenActorIds: found.seen,
+              hint:
+                "Send one manual reply in HubSpot first; then retry. That will create a U-<id> we can reuse.",
+            },
+            { status: 400 }
+          );
+        }
       }
     }
 
-    // post
+    // Post reply
     const posted = await postReply(threadId, messageText, meta, senderActorId!, recipientActorId);
     if (!posted.ok) {
       return NextResponse.json(
@@ -363,6 +427,7 @@ export async function POST(req: Request) {
   }
 }
 
+/** GET: quick debug helper */
 export async function GET() {
   const last = await kvGet("hubspot:last-webhook");
   return NextResponse.json({ ok: true, lastWebhook: last });
