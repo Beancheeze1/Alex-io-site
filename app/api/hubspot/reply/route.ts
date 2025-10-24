@@ -162,50 +162,60 @@ async function getThreadChannelMeta(threadId: string, messageId?: string): Promi
   return null;
 }
 
-/* ============ Participants ============ */
-// We’ll discover valid sender/recipient actorIds in the thread.
-type Participant = { actorId?: string; role?: string; type?: string; [k: string]: any };
+/* ============ Discover actors from messages ============ */
+type ActorPick = { senderActorId?: string; recipientActorId?: string };
 
-async function listParticipants(threadId: string): Promise<Participant[]> {
-  const { resp } = await hsFetch(`/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/participants`);
-  if (!resp?.ok) return [];
-  const j = await resp.json().catch(() => null);
-  const arr: Participant[] = Array.isArray(j?.results) ? j.results : Array.isArray(j) ? j : [];
-  return arr;
+function typeChar(id?: string): string | undefined {
+  if (!id || typeof id !== "string") return undefined;
+  const idx = id.indexOf("-");
+  return idx > 0 ? id.slice(0, idx) : undefined; // e.g., "U", "C", "A"
 }
 
-function selectActors(participants: Participant[]) {
-  // Heuristics:
-  // - consumer/visitor: recipient
-  // - hubspot_user/agent: preferred sender
-  // - app/integration: optional sender fallback if present in participants
-  let recipient: string | undefined;
-  let sender: string | undefined;
+async function discoverActorsFromMessages(threadId: string, seedMessageId?: string): Promise<ActorPick & { seen: string[] }> {
+  const seen: string[] = [];
+  let senderActorId: string | undefined;
+  let recipientActorId: string | undefined;
 
-  for (const p of participants) {
-    const id = p.actorId || p.actor?.id || p.id;
-    const role = (p.role || p.participantRole || "").toString().toUpperCase();
-    const type = (p.type || p.participantType || "").toString().toUpperCase();
-
-    if (!recipient && (role.includes("CONSUMER") || role.includes("VISITOR") || type.includes("CONSUMER") || type.includes("VISITOR"))) {
-      recipient = String(id);
-    }
-    if (!sender && (role.includes("AGENT") || role.includes("HUBSPOT_USER") || type.includes("AGENT") || type.includes("HUBSPOT_USER"))) {
-      sender = String(id);
+  // Check the seed message first
+  if (seedMessageId) {
+    const { resp } = await hsFetch(`/conversations/v3/conversations/messages/${encodeURIComponent(seedMessageId)}`);
+    if (resp?.ok) {
+      const j = await resp.json().catch(() => null);
+      const sid = j?.senderActorId || j?.message?.senderActorId;
+      if (sid) seen.push(String(sid));
     }
   }
 
-  // If we still don't have a sender, try any other non-consumer participant
-  if (!sender) {
-    const alt = participants.find(p => {
-      const id = p.actorId || p.actor?.id || p.id;
-      const role = (p.role || p.participantRole || "").toString().toUpperCase();
-      return id && !role.includes("CONSUMER") && !role.includes("VISITOR");
-    });
-    if (alt?.actorId) sender = String(alt.actorId);
+  // Walk recent messages in the thread
+  const { resp } = await hsFetch(`/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages?limit=100`);
+  if (resp?.ok) {
+    const j = await resp.json().catch(() => null);
+    const arr: any[] = Array.isArray(j?.results) ? j.results : Array.isArray(j) ? j : [];
+    for (const m of arr) {
+      const sid = m?.senderActorId || m?.message?.senderActorId;
+      if (sid) {
+        const s = String(sid);
+        seen.push(s);
+        const t = typeChar(s);
+        // recipient: prefer consumer/visitor (usually "C")
+        if (!recipientActorId && (t === "C" || String(m?.direction).toUpperCase() === "INCOMING")) {
+          recipientActorId = s;
+        }
+        // sender: prefer user/agent (usually "U")
+        if (!senderActorId && (t === "U" || String(m?.direction).toUpperCase() === "OUTGOING")) {
+          senderActorId = s;
+        }
+      }
+    }
   }
 
-  return { senderActorId: sender, recipientActorId: recipient };
+  // Fallback: if we still have no recipient but saw any actor that isn't "U", assume that one is the consumer.
+  if (!recipientActorId) {
+    const c = seen.find(a => typeChar(a) && typeChar(a) !== "U");
+    if (c) recipientActorId = c;
+  }
+
+  return { senderActorId, recipientActorId, seen };
 }
 
 /* ============ Post reply ============ */
@@ -213,10 +223,9 @@ async function postReply(
   threadId: string,
   messageText: string,
   meta: Required<ThreadMeta>,
-  senderActorId?: string,
+  senderActorId: string,
   recipientActorId?: string
 ) {
-  // Build payload. HubSpot requires at least one recipient; include when we have it.
   const body: any = {
     type: "MESSAGE",
     messageFormat: "TEXT",
@@ -224,9 +233,8 @@ async function postReply(
     direction: "OUTGOING",
     channelId: meta.channelId,
     channelAccountId: meta.channelAccountId,
+    senderActorId, // HubSpot requires this now
   };
-
-  if (senderActorId) body.senderActorId = senderActorId;
   if (recipientActorId) body.recipients = [{ actorId: recipientActorId }];
 
   const { resp } = await hsFetch(
@@ -237,7 +245,7 @@ async function postReply(
   if (!resp) return { ok: false, status: 0, error: "No response" as const };
   if (!resp.ok) {
     const t = await resp.text().catch(() => "");
-    return { ok: false, status: resp.status, error: t || `HTTP ${resp.status}` };
+    return { ok: false, status: resp.status, error: t || `HTTP ${resp.status}`, payload: body };
   }
   const j = await resp.json().catch(() => ({}));
   return { ok: true, status: 200, data: j, payload: body };
@@ -246,12 +254,18 @@ async function postReply(
 /* ============ Routes ============ */
 export const dynamic = "force-dynamic";
 
+/**
+ * POST /api/hubspot/reply
+ * Body: { text: string, sender?: string, recipient?: string }
+ */
 export async function POST(req: Request) {
   try {
     const reqBody = (await req.json().catch(() => ({}))) as any;
     const messageText: string =
       (typeof reqBody?.text === "string" ? reqBody.text.trim() : "") ||
       "Thanks for your message! This is an automated reply from alex-io 🤖";
+    const overrideSender = typeof reqBody?.sender === "string" ? reqBody.sender.trim() : undefined;
+    const overrideRecipient = typeof reqBody?.recipient === "string" ? reqBody.recipient.trim() : undefined;
 
     // tokens must exist
     const tokens = await kvGet<TokenBundle>("hubspot:tokens");
@@ -262,7 +276,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // load last webhook we stored in the webhook route
+    // last webhook
     const last = await kvGet<any>("hubspot:last-webhook");
     if (!Array.isArray(last) || !last[0]) {
       return NextResponse.json(
@@ -295,15 +309,43 @@ export async function POST(req: Request) {
       );
     }
 
-    // participants → choose sender & recipient
-    const parts = await listParticipants(threadId);
-    const { senderActorId, recipientActorId } = selectActors(parts);
+    // discover actors from messages (unless overridden)
+    let senderActorId = overrideSender;
+    let recipientActorId = overrideRecipient;
 
-    // Post reply (sender optional, recipient strongly recommended)
-    const posted = await postReply(threadId, messageText, meta, senderActorId, recipientActorId);
+    if (!senderActorId || !recipientActorId) {
+      const found = await discoverActorsFromMessages(threadId, messageId || undefined);
+      senderActorId = senderActorId || found.senderActorId;
+      recipientActorId = recipientActorId || found.recipientActorId;
+
+      // If we STILL lack a sender, error with hints
+      if (!senderActorId) {
+        return NextResponse.json(
+          {
+            ok: false,
+            step: "discoverActors",
+            error: "No senderActorId found. Provide one in the POST body as { sender: \"U-<id>\" }.",
+            seenActorIds: found.seen,
+            hint: "Look for an ID starting with U- from your own/agent messages, or pass a known actor id.",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // post
+    const posted = await postReply(threadId, messageText, meta, senderActorId!, recipientActorId);
     if (!posted.ok) {
       return NextResponse.json(
-        { ok: false, step: "postReply", status: posted.status, error: posted.error, threadId, meta, participants: parts },
+        {
+          ok: false,
+          step: "postReply",
+          status: posted.status,
+          error: posted.error,
+          threadId,
+          meta,
+          payloadUsed: posted.payload,
+        },
         { status: 500 }
       );
     }
@@ -315,7 +357,6 @@ export async function POST(req: Request) {
       senderActorId,
       recipientActorId,
       reply: posted.data,
-      payloadUsed: posted.payload,
     });
   } catch (err: any) {
     return NextResponse.json({ ok: false, step: "catch", error: String(err?.message || err) }, { status: 500 });
