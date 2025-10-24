@@ -260,7 +260,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const senderActorId = `APP-${appId}`;
+    const senderActorId = `A-${appId}`;
 
     // post
     const posted = await postReply(threadId, messageText, senderActorId, meta);
