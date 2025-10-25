@@ -36,6 +36,27 @@ function corsJson(data: any, status = 200) {
   });
 }
 
+async function postToProcessor(sample: any) {
+  try {
+    const res = await fetch(`${process.env.APP_BASE_URL}/api/internal/hubspot/process`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([sample]),
+      cache: "no-store",
+    });
+    const text = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(text); } catch { data = text; }
+    return { ok: res.ok, status: res.status, data };
+  } catch (err: any) {
+    return { ok: false, status: 500, data: String(err) };
+  }
+}
+
+
+
+
+
 // --- add these helpers near the top with the other Upstash helpers ---
 async function upstashLIndex(key: string, index: number) {
   const { url, token } = upstashEnv();
@@ -137,6 +158,7 @@ export async function GET(req: Request) {
   if (mode === "replay") {
     const raw = await upstashLIndex("hubspot:webhook:log", id);
     if (!raw) return corsJson({ ok: false, mode, error: "no-such-id" }, 404);
+    
 
     let entry: any = null;
     try { entry = JSON.parse(raw); } catch { /* keep null */ }
@@ -146,26 +168,18 @@ export async function GET(req: Request) {
       return corsJson({ ok: false, mode, error: "entry-missing-sample" }, 400);
     }
 
-    // Repost the stored 'sample' back to THIS webhook (real, non-dry) as an array
-    const res = await fetch(url.origin + "/api/hubspot/webhook", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify([sample]),
-      cache: "no-store",
-    });
+    // Repost to internal processor instead of looping back to this route
+const replay = await postToProcessor(sample);
 
-    const text = await res.text();
-    let data: any = null;
-    try { data = JSON.parse(text); } catch { data = text; }
+return corsJson({
+  ok: replay.ok,
+  mode,
+  id,
+  status: replay.status,
+  response: replay.data,
+  replayedSample: sample,
+});
 
-    return corsJson({
-      ok: res.ok,
-      mode,
-      id,
-      repostStatus: res.status,
-      repostBody: data,
-      replayedSample: sample,
-    }, res.ok ? 200 : 500);
   }
 
   return corsJson({ ok: true, note: "GET modes: ?dryRun=1 | ?mode=recent&limit=10 | ?mode=count | ?mode=replay&id=0 | ?mode=clear", fp: "webhook-v3" });
