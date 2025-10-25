@@ -1,29 +1,8 @@
 // app/api/hubspot/webhook/route.ts
 import { NextResponse } from "next/server";
-
 export const dynamic = "force-dynamic";
 
-/**
- * HubSpot Webhook endpoint with Replay Logger
- *
- * POST:
- *   - ?dryRun=1     -> returns ok immediately, no parsing
- *   - (default)     -> expects JSON array of events; logs to Upstash list
- *
- * GET:
- *   - ?dryRun=1     -> health check JSON
- *   - ?mode=recent  -> returns last N logged entries (default N=10) from Upstash
- *   - ?mode=count   -> returns current log length
- *
- * Upstash keys:
- *   hubspot:webhook:log         (list; newest first)
- *
- * Required env:
- *   UPSTASH_REDIS_REST_URL   or REDIS_URL
- *   UPSTASH_REDIS_REST_TOKEN or REDIS_TOKEN
- */
-
-// ---------- small helpers ----------
+/** ---------- helpers ---------- */
 function corsJson(data: any, status = 200) {
   return NextResponse.json(data, {
     status,
@@ -36,9 +15,75 @@ function corsJson(data: any, status = 200) {
   });
 }
 
+function upstashEnv() {
+  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.REDIS_URL ?? "";
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.REDIS_TOKEN ?? "";
+  return { url, token };
+}
+
+async function upstashLPush(key: string, value: string) {
+  const { url, token } = upstashEnv();
+  if (!url || !token) return { ok: false, status: 500 };
+  const r = await fetch(`${url}/lpush/${encodeURIComponent(key)}/${encodeURIComponent(value)}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return { ok: r.ok, status: r.status };
+}
+
+async function upstashLRange(key: string, start = 0, stop = 9) {
+  const { url, token } = upstashEnv();
+  if (!url || !token) return null;
+  const r = await fetch(`${url}/lrange/${encodeURIComponent(key)}/${start}/${stop}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  return j?.result ?? null;
+}
+
+async function upstashLLen(key: string) {
+  const { url, token } = upstashEnv();
+  if (!url || !token) return null;
+  const r = await fetch(`${url}/llen/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  return typeof j?.result === "number" ? j.result : null;
+}
+
+async function upstashLIndex(key: string, index: number) {
+  const { url, token } = upstashEnv();
+  if (!url || !token) return null;
+  const r = await fetch(`${url}/lindex/${encodeURIComponent(key)}/${index}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  return j?.result ?? null;
+}
+
+async function upstashDel(key: string) {
+  const { url, token } = upstashEnv();
+  if (!url || !token) return { ok: false, status: 500 };
+  const r = await fetch(`${url}/del/${encodeURIComponent(key)}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return { ok: r.ok, status: r.status };
+}
+
+// Replay target (avoids self-POST loops)
 async function postToProcessor(sample: any) {
   try {
-    const res = await fetch(`${process.env.APP_BASE_URL}/api/internal/hubspot/process`, {
+    const base = process.env.APP_BASE_URL || "http://localhost:3000";
+    const res = await fetch(`${base}/api/internal/hubspot/process`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify([sample]),
@@ -53,86 +98,17 @@ async function postToProcessor(sample: any) {
   }
 }
 
-
-
-
-
-// --- add these helpers near the top with the other Upstash helpers ---
-async function upstashLIndex(key: string, index: number) {
-  const { url, token } = upstashEnv();
-  if (!url || !token) return null;
-  const r = await fetch(`${url}/lindex/${encodeURIComponent(key)}/${index}`, {
-    headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
-  });
-  if (!r.ok) return null;
-  const j = await r.json().catch(() => null);
-  return j?.result ?? null;
-}
-
-async function upstashDel(key: string) {
-  const { url, token } = upstashEnv();
-  if (!url || !token) return { ok: false };
-  const r = await fetch(`${url}/del/${encodeURIComponent(key)}`, {
-    method: "POST", headers: { Authorization: `Bearer ${token}` }, cache: "no-store"
-  });
-  return { ok: r.ok, status: r.status };
-}
-
-
-function upstashEnv() {
-  const url =
-    process.env.UPSTASH_REDIS_REST_URL ?? process.env.REDIS_URL ?? "";
-  const token =
-    process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.REDIS_TOKEN ?? "";
-  return { url, token };
-}
-
-async function upstashLPush(key: string, value: string) {
-  const { url, token } = upstashEnv();
-  if (!url || !token) return { ok: false, reason: "no-env" };
-  const r = await fetch(
-    `${url}/lpush/${encodeURIComponent(key)}/${encodeURIComponent(value)}`,
-    { method: "POST", headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
-  );
-  return { ok: r.ok, status: r.status };
-}
-
-async function upstashLRange(key: string, start = 0, stop = 9) {
-  const { url, token } = upstashEnv();
-  if (!url || !token) return null;
-  const r = await fetch(
-    `${url}/lrange/${encodeURIComponent(key)}/${start}/${stop}`,
-    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
-  );
-  if (!r.ok) return null;
-  const j = await r.json().catch(() => null);
-  return j?.result ?? null;
-}
-
-async function upstashLLen(key: string) {
-  const { url, token } = upstashEnv();
-  if (!url || !token) return null;
-  const r = await fetch(
-    `${url}/llen/${encodeURIComponent(key)}`,
-    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
-  );
-  if (!r.ok) return null;
-  const j = await r.json().catch(() => null);
-  return typeof j?.result === "number" ? j.result : null;
-}
-
-// ---------- CORS preflight ----------
+/** ---------- routes ---------- */
 export async function OPTIONS() {
   return corsJson({ ok: true, method: "OPTIONS" }, 204);
 }
 
-// ---------- GET: health + recent logs ----------
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const dryRun = url.searchParams.get("dryRun");
-  const mode   = url.searchParams.get("mode");
-  const limit  = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") ?? 10)));
-  const id     = Number(url.searchParams.get("id") ?? 0);
+  const mode = url.searchParams.get("mode");
+  const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") ?? 10)));
+  const id = Number(url.searchParams.get("id") ?? 0);
 
   if (dryRun === "1") {
     return corsJson({ ok: true, dryRun: true, note: "Webhook endpoint reachable", fp: "webhook-v3" });
@@ -148,67 +124,51 @@ export async function GET(req: Request) {
     return corsJson({ ok: true, mode, length: n ?? 0 });
   }
 
-  // NEW: clear all logs
   if (mode === "clear") {
     const cleared = await upstashDel("hubspot:webhook:log");
     return corsJson({ ok: cleared.ok, mode, note: cleared.ok ? "log cleared" : "clear failed" });
   }
 
-  // NEW: replay a single stored entry by index (0 = most recent)
   if (mode === "replay") {
     const raw = await upstashLIndex("hubspot:webhook:log", id);
     if (!raw) return corsJson({ ok: false, mode, error: "no-such-id" }, 404);
-    
 
     let entry: any = null;
-    try { entry = JSON.parse(raw); } catch { /* keep null */ }
+    try { entry = JSON.parse(raw); } catch { /* noop */ }
     const sample = entry?.sample ?? null;
-
     if (!sample || typeof sample !== "object") {
       return corsJson({ ok: false, mode, error: "entry-missing-sample" }, 400);
     }
 
-    // Repost to internal processor instead of looping back to this route
-const replay = await postToProcessor(sample);
-
-return corsJson({
-  ok: replay.ok,
-  mode,
-  id,
-  status: replay.status,
-  response: replay.data,
-  replayedSample: sample,
-});
-
+    const replay = await postToProcessor(sample);
+    return corsJson({
+      ok: replay.ok,
+      mode,
+      id,
+      status: replay.status,
+      response: replay.data,
+      replayedSample: sample,
+    }, replay.ok ? 200 : 500);
   }
 
   return corsJson({ ok: true, note: "GET modes: ?dryRun=1 | ?mode=recent&limit=10 | ?mode=count | ?mode=replay&id=0 | ?mode=clear", fp: "webhook-v3" });
 }
 
-
-// ---------- POST: dryRun or log real events ----------
 export async function POST(req: Request) {
   const url = new URL(req.url);
   const dryRun = url.searchParams.get("dryRun");
 
+  // Dry-run: fast JSON, no parsing
   if (dryRun === "1") {
     return corsJson({ ok: true, dryRun: true, method: "POST", fp: "webhook-v3" });
   }
 
-  // Parse JSON
+  // Accept array OR single object
   let payload: unknown;
-  try {
-    payload = await req.json();
-  } catch {
-    return corsJson({ ok: false, error: "invalid-json" }, 400);
-  }
-
-  // Accept either an array of events or a single event object
+  try { payload = await req.json(); } catch { return corsJson({ ok: false, error: "invalid-json" }, 400); }
   const events: any[] = Array.isArray(payload) ? payload : (payload && typeof payload === "object" ? [payload] : []);
 
-  if (events.length === 0) {
-    return corsJson({ ok: false, error: "no-events" }, 400);
-  }
+  if (events.length === 0) return corsJson({ ok: false, error: "no-events" }, 400);
 
   const entry = {
     ts: new Date().toISOString(),
@@ -226,4 +186,3 @@ export async function POST(req: Request) {
     fp: "webhook-v3",
   });
 }
-
