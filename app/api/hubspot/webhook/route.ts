@@ -79,6 +79,12 @@ async function upstashDel(key: string) {
   return { ok: r.ok, status: r.status };
 }
 
+// temporary debug hook
+if (process.env.LOG_WEBHOOK === "1") {
+  console.log(`[WEBHOOK] received ${new Date().toISOString()}`);
+}
+
+
 // Replay target (avoids self-POST loops)
 async function postToProcessor(sample: any) {
   try {
