@@ -1,0 +1,16 @@
+﻿[
+  {
+    "subscriptionType": "conversation.newMessage",
+    "objectId": 9639805666,
+    "eventId": 3001,
+    "portalId": 244053164,
+    "messageId": "batch-1"
+  },
+  {
+    "subscriptionType": "conversation.newMessage",
+    "objectId": 9639805666,
+    "eventId": 3002,
+    "portalId": 244053164,
+    "messageId": "batch-2"
+  }
+]

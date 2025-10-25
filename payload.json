@@ -1,1 +1,9 @@
-﻿{"eventId":"test-1","occurredAt":1234567890,"subscriptionType":"contact.propertyChange"}
+﻿[
+  {
+    "subscriptionType": "conversation.newMessage",
+    "objectId": 9639805666,
+    "eventId": 2222,
+    "portalId": 244053164,
+    "messageId": "test-msg-2"
+  }
+]
