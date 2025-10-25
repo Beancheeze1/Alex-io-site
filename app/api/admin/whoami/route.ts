@@ -1,32 +1,26 @@
+// app/api/admin/whoami/route.ts
 import { NextResponse } from "next/server";
-// Use the ONE that matches your kv export (see note below):
-// import getRedisClient from "@/lib/kv";                 // if default export
-// import { getRedisClient } from "@/lib/kv";            // if named function
-// import { kv as getRedisClient } from "@/lib/kv";      // if it exports `kv` instance
+import { kvPing } from "@/lib/kv";
+import { tokenStore } from "@/lib/tokenStore";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-async function getKV() {
-  // pick one line that matches your lib:
-  // return await getRedisClient();  // if it’s a function you call
-  // return getRedisClient;          // if it’s already an instance (named `kv`)
-  // If you’re not sure, open lib/kv.ts and check exports.
-  // TEMP fallback to avoid blocking:
-  // @ts-ignore
-  return typeof getRedisClient === "function" ? await getRedisClient() : getRedisClient;
-}
-
-export async function GET() {
+export async function GET(_req: Request) {
   try {
-    const kv = await getKV();
-    const hasAccess  = !!(await kv.get("hubspot:access_token"));
-    const hasRefresh = !!(await kv.get("hubspot:refresh_token"));
+    // 1) Token status from the canonical store (.data/tokens.json)
+    const tok = tokenStore.get(); // default portal bucket
+    const hasAccess = !!tok?.access_token;
+    const hasRefresh = !!tok?.refresh_token;
+
+    // 2) KV status (Upstash if configured, else memory)
+    const kv = await kvPing(); // { ok, provider, roundtripMs?, error? }
 
     return NextResponse.json({
       ok: true,
       authorized: hasAccess && hasRefresh,
       tokens: { access: hasAccess, refresh: hasRefresh },
-      source: "hubspot",
+      kv,
     });
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
