@@ -20,37 +20,65 @@ async function getAccessTokenFromKv(): Promise<string | null> {
   return js?.result ?? null;
 }
 
+async function getThread(token: string, threadId: string) {
+  const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error(`thread fetch ${r.status}: ${t || r.statusText}`);
+  }
+  return r.json();
+}
+
 async function postToHubSpotThread(threadId: string, text: string) {
   const token = await getAccessTokenFromKv();
-  if (!token) {
-    return { ok: false, status: 401, error: "No HubSpot access token in KV" };
-  }
+  if (!token) return { ok: false, status: 401, error: "No HubSpot access token in KV" };
 
-  // Conversations Messages API — reply into the thread
+  // 1) Fetch thread to get channel context
+  const thread = await getThread(token, threadId).catch((e) => ({ error: String(e) }));
+  if ((thread as any).error) return { ok: false, status: 400, error: (thread as any).error };
+
+  // Try multiple places HubSpot puts these fields
+  const channelId =
+    (thread as any).channelId ??
+    (Array.isArray((thread as any).threadMessages) && (thread as any).threadMessages[0]?.channelId) ??
+    undefined;
+
+  const channelAccountId =
+    (thread as any).channelAccountId ??
+    (Array.isArray((thread as any).threadMessages) && (thread as any).threadMessages[0]?.channelAccountId) ??
+    undefined;
+
+  // 2) Build payload with required fields
+  const payload: Record<string, any> = {
+    type: "MESSAGE",
+    text,
+    richText: false,
+    senderType: "AGENT",
+    messageDirection: "OUTGOING",
+  };
+
+  if (channelId) payload.channelId = channelId;
+  if (channelAccountId) payload.channelAccountId = channelAccountId;
+
   const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${encodeURIComponent(
     threadId
   )}/messages`;
 
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    // Minimal body: a plain text agent message
-    body: JSON.stringify({
-      type: "MESSAGE", // HubSpot accepts MESSAGE for agent text posts
-      text,
-    }),
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    return { ok: false as const, status: res.status, error: detail || res.statusText };
+    return { ok: false as const, status: res.status, error: detail || res.statusText, payload, thread };
   }
   const data = await res.json().catch(() => ({}));
-  return { ok: true as const, status: 200, data };
+  return { ok: true as const, status: 200, data, payload };
 }
+
 
 function fmtMoney(n: number, ccy = "USD") {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: ccy }).format(n);
