@@ -2,8 +2,8 @@
   {
     "subscriptionType": "conversation.newMessage",
     "objectId": 9639805666,
-    "eventId": 4444,
+    "eventId": 5555,
     "portalId": 244053164,
-    "messageId": "test-msg-4"
+    "messageId": "test-msg-5"
   }
 ]

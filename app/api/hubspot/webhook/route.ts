@@ -178,13 +178,19 @@ export async function GET(req: Request) {
     case "replay": {
       const id = Number(search.get("id") ?? 0); // 0 = newest
       const rows = await kv.lrange(KEY_EVENTS, 0, MAX_EVENTS - 1);
-      if (rows.length === 0 || id < 0 || id >= rows.length) {
-        return NextResponse.json({ ok: false, error: "no-event", fp: FP }, { status: 404 });
-      }
-      const evt = JSON.parse(rows[id]) as WebhookEvent;
-      log("replay", { id, evt });
-      const res = await attemptReply(evt);
-      return NextResponse.json({ ok: true, replayed: id, reply: res, fp: FP });
+if (rows.length === 0 || id < 0 || id >= rows.length) {
+  return NextResponse.json({ ok: false, error: "no-event", fp: FP }, { status: 404 });
+}
+
+// Rows are stored as { ts, ev }. Unwrap if needed.
+const parsed: any = JSON.parse(rows[id]);
+const event: WebhookEvent = (parsed && parsed.ev) ? parsed.ev : parsed;
+
+log("replay", { id, evt: event });
+const res = await attemptReply(event);
+return NextResponse.json({ ok: true, replayed: id, reply: res, fp: FP });
+
+      
     }
     case "clear": {
       await kv.del(KEY_EVENTS);
