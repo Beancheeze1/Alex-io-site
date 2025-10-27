@@ -2,72 +2,132 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  if (searchParams.get("dryRun") === "1") {
-    return NextResponse.json({ ok: true, route: "/api/ms/send", dryRun: true });
-  }
-  return NextResponse.json({ ok: false, error: "Use POST to send mail" });
+// Env we rely on (already set in your Render envs)
+const TENANT = process.env.MS_TENANT_ID!;
+const CLIENT_ID = process.env.MS_CLIENT_ID!;
+const CLIENT_SECRET = process.env.MS_CLIENT_SECRET!;
+const FROM = process.env.MS_MAILBOX_FROM!; // must be the PRIMARY SMTP of the mailbox
+
+function json(data: any, init?: number | ResponseInit) {
+  const opts: ResponseInit | undefined =
+    typeof init === "number" ? { status: init } : init;
+  return NextResponse.json(data, opts);
 }
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const { to, subject, text, html } = body;
-
-    if (!to || !subject || (!text && !html)) {
-      return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
-    }
-
-    const res = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${process.env.MS_MAILBOX_FROM}/sendMail`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${await getAccessToken()}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: {
-            subject,
-            body: {
-              contentType: html ? "HTML" : "Text",
-              content: html || text,
-            },
-            toRecipients: [{ emailAddress: { address: to } }],
-          },
-          saveToSentItems: true,
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error("Graph sendMail error:", errText);
-      return NextResponse.json({ ok: false, error: "Graph send failed", detail: errText }, { status: 500 });
-    }
-
-    return NextResponse.json({ ok: true, sent: { from: process.env.MS_MAILBOX_FROM, to, subject } });
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ ok: false, error: "Internal error", detail: String(e) }, { status: 500 });
-  }
-}
-
-// 🔐 Helper: Exchange client credentials for Graph token
-async function getAccessToken() {
-  const tokenRes = await fetch(`https://login.microsoftonline.com/${process.env.MS_TENANT_ID}/oauth2/v2.0/token`, {
+async function getAppToken() {
+  const url = `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
+    grant_type: "client_credentials",
+    scope: "https://graph.microsoft.com/.default",
+  });
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.MS_CLIENT_ID!,
-      client_secret: process.env.MS_CLIENT_SECRET!,
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials",
-    }),
+    body,
   });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    console.log(`[ms/send] token error ${res.status} ${t}`);
+    throw new Error(`token_error_${res.status}`);
+  }
+  return (await res.json()).access_token as string;
+}
 
-  const json = await tokenRes.json();
-  if (!tokenRes.ok) throw new Error(json.error_description || "Token request failed");
-  return json.access_token;
+type SendInput = {
+  to: string;
+  subject?: string;
+  text?: string;
+  html?: string;
+  replyTo?: string[];
+};
+
+export async function POST(req: Request) {
+  let body: SendInput;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ ok: false, error: "invalid_json" }, 400);
+  }
+
+  const to = (body.to || "").trim();
+  if (!to) return json({ ok: false, error: "missing_to" }, 400);
+  if (!body.text && !body.html)
+    return json({ ok: false, error: "missing_text_or_html" }, 400);
+
+  // Build Graph message
+  const message: any = {
+    subject: body.subject || "Re: your message",
+    toRecipients: [{ emailAddress: { address: to } }],
+    from: { emailAddress: { address: FROM } }, // explicit
+    replyTo: (body.replyTo || []).map((a) => ({ emailAddress: { address: a } })),
+    body: {
+      contentType: body.html ? "HTML" : "Text",
+      content: body.html || body.text,
+    },
+  };
+
+  try {
+    const token = await getAppToken();
+
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      FROM
+    )}/sendMail`;
+
+    const payload = {
+      message,
+      saveToSentItems: true, // <- force Sent Items copy
+    };
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    // Graph sendMail returns 202 Accepted with empty body on success
+    const text = await res.text().catch(() => "");
+    let parsed: any = {};
+    try {
+      parsed = text ? JSON.parse(text) : {};
+    } catch {
+      parsed = { raw: text };
+    }
+
+    // Emit a compact line so you SEE it in Render logs
+    console.log(
+      `[ms/send] to=${to} status=${res.status} sentItems=true subject="${message.subject}"`
+    );
+
+    if (res.status === 202 || res.ok) {
+      return json({
+        ok: true,
+        sent: {
+          from: FROM,
+          to,
+          subject: message.subject,
+          status: res.status,
+          graph: parsed, // usually empty on 202
+        },
+      });
+    }
+
+    // Non-2xx — return Graph error
+    return json(
+      {
+        ok: false,
+        error: "graph_send_failed",
+        status: res.status,
+        graph: parsed,
+      },
+      res.status
+    );
+  } catch (err: any) {
+    console.log(`[ms/send] fatal ${err?.message || err}`);
+    return json({ ok: false, error: "fatal", detail: `${err}` }, 500);
+  }
 }
