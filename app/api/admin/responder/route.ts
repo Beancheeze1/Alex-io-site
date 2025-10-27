@@ -1,155 +1,144 @@
 // app/api/admin/responder/route.ts
 import { NextResponse } from "next/server";
-import crypto from "crypto";
+import { getHubSpotAccessToken, hubspotGet, pickLastInboundEmailMessage } from "@/app/lib/hubspot";
+import { sendRawMimeViaGraph } from "@/app/lib/email/graph";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const HS_BASE = "https://api.hubapi.com";
-
-function tryJson(x: string) { try { return JSON.parse(x); } catch { return x; } }
-
-// Resolve token: env first, then KV key "hs:oauth:access_token"
-async function getToken(): Promise<string | null> {
-  if (process.env.HS_TOKEN) return process.env.HS_TOKEN;
-  try {
-    const mod: any = await import("@/lib/kv");
-    const kv = mod?.kv ?? mod?.default ?? mod?.redis ?? mod?.client ?? null;
-    if (kv?.get) {
-      const token = await kv.get("hs:oauth:access_token");
-      if (typeof token === "string" && token.length > 0) return token;
-    }
-  } catch {}
-  return null;
+function requireEnv(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing ENV: ${name}`);
+  return v;
 }
 
-// GET helper with Bearer header
-async function hsGet(url: string, token: string) {
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  const t = await r.text();
-  return { ok: r.ok, status: r.status, body: tryJson(t) };
+function buildReplyMime(params: {
+  from: string;
+  to: string;
+  subject: string;
+  inReplyTo: string;
+  references?: string;
+  textBody: string;
+}): string {
+  const { from, to, subject, inReplyTo, references, textBody } = params;
+
+  // Minimal RFC822 MIME (UTF-8, text/plain)
+  const lines = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    `In-Reply-To: ${inReplyTo}`,
+    `References: ${references ?? inReplyTo}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/plain; charset=UTF-8`,
+    ``,
+    textBody,
+  ];
+  return lines.join("\r\n");
+}
+
+async function fetchThreadMessages(threadId: string, token: string) {
+  // HubSpot API: GET /conversations/v3/conversations/threads/{threadId}/messages
+  const path = `/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages`;
+  return hubspotGet<any>(path, token);
+}
+
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const threadId = url.searchParams.get("threadId") || "";
+    const dry = url.searchParams.get("dryRun") || url.searchParams.get("dryrun");
+
+    if (!threadId) {
+      return NextResponse.json({ ok: false, error: "Missing query param: threadId" }, { status: 400 });
+    }
+
+    // Dry-run mode: only read HubSpot and echo what we WOULD send
+    const token = await getHubSpotAccessToken();
+    const messages = await fetchThreadMessages(threadId, token);
+    const picked = pickLastInboundEmailMessage(messages);
+
+    if (!picked.customerEmail || !picked.subject || !picked.messageId) {
+      return NextResponse.json(
+        { ok: false, threadId, picked, error: "Could not resolve customerEmail/subject/messageId." },
+        { status: 422 }
+      );
+    }
+
+    if (dry) {
+      return NextResponse.json({
+        ok: true,
+        mode: "dry-run",
+        threadId,
+        to: picked.customerEmail,
+        subject: `Re: ${picked.subject}`,
+        inReplyTo: picked.messageId,
+        references: picked.messageId,
+        exampleBody: "Thanks for reaching out — this is a dry-run placeholder.",
+      });
+    }
+
+    // Live send via Graph
+    const tenantId = requireEnv("MS_TENANT_ID");
+    const clientId = requireEnv("MS_CLIENT_ID");
+    const clientSecret = requireEnv("MS_CLIENT_SECRET");
+    const from = requireEnv("MS_MAILBOX_FROM");
+
+    const raw = buildReplyMime({
+      from,
+      to: picked.customerEmail!,
+      subject: picked.subject!.startsWith("Re:") ? picked.subject! : `Re: ${picked.subject}`,
+      inReplyTo: picked.messageId!,
+      references: picked.messageId!,
+      textBody:
+        "Thanks for reaching out — this is an automated reply from Alex-IO.\r\n\r\n" +
+        "If you need a quote, reply with your dimensions, weight, fragility (if known), and ship-to ZIP.\r\n" +
+        "— Alex-IO Bot",
+    });
+
+    const result = await sendRawMimeViaGraph({
+      tenantId,
+      clientId,
+      clientSecret,
+      from,
+      rawMime: raw,
+    });
+
+    return NextResponse.json({
+      ok: result.ok,
+      status: result.status,
+      provider: "graph",
+      threadId,
+      to: picked.customerEmail,
+      subject: picked.subject,
+      inReplyTo: picked.messageId,
+      error: result.error ?? null,
+    }, { status: result.ok ? 200 : 500 });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: String(err?.message ?? err) }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {
-  // tolerant body parsing
-  const raw = await req.text();
-  let data: any = {};
-  try { data = JSON.parse(raw); } catch {}
-  const inputId = data.threadId ?? data.threadID ?? data.thread_id ?? data?.ev?.objectId;
-  const text = data.text;
+  // Support POST { threadId, dryRun?, body? }
+  try {
+    const body = await req.json().catch(() => ({}));
+    const threadId = body.threadId || "";
+    const dry = body.dryRun;
 
-  if (!inputId) {
-    return NextResponse.json(
-      { ok: false, error: "missing-threadId", raw: raw?.slice?.(0, 200) ?? "<no-body>" },
-      { status: 400 }
-    );
-  }
-
-  const token = await getToken();
-  if (!token) {
-    return NextResponse.json({ ok: false, error: "missing-HS_TOKEN" }, { status: 400 });
-  }
-
-  const senderActorId = process.env.SENDER_ACTOR_ID; // e.g., "A-123456"
-  if (!senderActorId) {
-    return NextResponse.json({ ok: false, error: "missing-SENDER_ACTOR_ID" }, { status: 400 });
-  }
-
-  // -------- Resolve: threadId vs conversationId --------
-  let resolvedThreadId = String(inputId);
-
-  // If treating as thread returns 404, try listing by conversationId
-  {
-    const test = await hsGet(`${HS_BASE}/conversations/v3/conversations/threads/${encodeURIComponent(resolvedThreadId)}`, token);
-    if (!test.ok && test.status === 404) {
-      const list = await hsGet(`${HS_BASE}/conversations/v3/conversations/threads?conversationId=${encodeURIComponent(String(inputId))}`, token);
-      if (list.ok && Array.isArray((list.body as any)?.results) && (list.body as any).results.length > 0) {
-        const first = (list.body as any).results[0];
-        resolvedThreadId = String(first.id ?? first.threadId);
-      } else {
-        return NextResponse.json(
-          { ok: false, step: "resolve-thread", status: list.status, body: list.body },
-          { status: 404 }
-        );
-      }
-    } else if (!test.ok && test.status !== 404) {
-      return NextResponse.json(
-        { ok: false, step: "check-thread", status: test.status, body: test.body },
-        { status: 502 }
-      );
+    if (!threadId) {
+      return NextResponse.json({ ok: false, error: "Missing body.threadId" }, { status: 400 });
     }
+
+    // Reuse GET logic by crafting a GET URL with params
+    const origin = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const u = new URL(`${origin}/api/admin/responder`);
+    u.searchParams.set("threadId", threadId);
+    if (dry) u.searchParams.set("dryRun", "1");
+
+    const res = await fetch(u, { cache: "no-store" });
+    const json = await res.json();
+    return NextResponse.json(json, { status: res.status });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: String(err?.message ?? err) }, { status: 500 });
   }
-
-  // -------- Get last message (preferred) or thread details --------
-  let channelId: any;
-  let channelAccountId: any;
-  let recipients: any[] = [];
-
-  const msgs = await hsGet(`${HS_BASE}/conversations/v3/conversations/threads/${encodeURIComponent(resolvedThreadId)}/messages`, token);
-
-  if (msgs.ok) {
-    const results = Array.isArray((msgs.body as any)?.results) ? (msgs.body as any).results : (msgs.body as any)?.results ?? [];
-    const last = results[results.length - 1] ?? results[0];
-    if (last) {
-      channelId = last.channelId ?? last?.client?.channelId ?? last?.originalChannelId;
-      channelAccountId = last.channelAccountId ?? last?.client?.channelAccountId ?? last?.originalChannelAccountId;
-      recipients = Array.isArray(last.recipients) ? last.recipients : [];
-    }
-  } else {
-    const t = await hsGet(`${HS_BASE}/conversations/v3/conversations/threads/${encodeURIComponent(resolvedThreadId)}`, token);
-    if (!t.ok) {
-      return NextResponse.json(
-        { ok: false, step: "fetch-thread", status: t.status, body: t.body },
-        { status: 502 }
-      );
-    }
-    const tb = t.body as any;
-    channelId = tb?.channelId ?? tb?.channel?.id ?? tb?.client?.channelId;
-    channelAccountId = tb?.channelAccountId ?? tb?.channel?.accountId ?? tb?.client?.channelAccountId;
-    recipients = Array.isArray(tb?.recipients) ? tb.recipients : [];
-  }
-
-  if (!channelId || !channelAccountId) {
-    return NextResponse.json(
-      { ok: false, error: "missing-channel-info", channelId, channelAccountId, threadId: resolvedThreadId },
-      { status: 400 }
-    );
-  }
-
-  // -------- Send reply --------
-  const endpoint = `${HS_BASE}/conversations/v3/conversations/threads/${encodeURIComponent(resolvedThreadId)}/messages`;
-  const payload = {
-    type: "MESSAGE",
-    text: text ?? `Alex-IO test responder ✅ ${new Date().toISOString()}`,
-    senderActorId,
-    channelId,
-    channelAccountId,
-    recipients,
-    attachments: [],
-  };
-
-  const r = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": crypto.randomUUID(),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const bodyText = await r.text();
-  return NextResponse.json({
-    ok: r.ok,
-    status: r.status,
-    body: tryJson(bodyText),
-    sent: { ...payload, threadId: resolvedThreadId }
-  });
-}
-
-export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    note: "POST { threadId, text? } with HS_TOKEN (or KV) + SENDER_ACTOR_ID. Accepts threadId or conversationId; resolves automatically."
-  });
 }
