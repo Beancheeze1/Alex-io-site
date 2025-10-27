@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-
 export const dynamic = "force-dynamic";
 
 export async function GET() {
@@ -11,7 +10,6 @@ export async function GET() {
   };
 
   try {
-    // Try to get a token using your envs (but don't return the token)
     const r = await fetch(
       `https://login.microsoftonline.com/${process.env.MS_TENANT_ID}/oauth2/v2.0/token`,
       {
