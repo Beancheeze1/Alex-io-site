@@ -1,9 +1,3 @@
 ﻿[
-  {
-    "subscriptionType": "conversation.newMessage",
-    "objectId": 9639805666,
-    "eventId": 5555,
-    "portalId": 244053164,
-    "messageId": "test-msg-5"
-  }
+  { "subscriptionType":"conversation.newMessage","objectId":9754900183,"eventId":9001,"portalId":244053164,"messageId":"test-msg" }
 ]

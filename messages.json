@@ -1,0 +1,90 @@
+﻿{
+    "results":  [
+                    {
+                        "id":  "a00ffdad-2020-43d0-bcb4-51aa86e276f7",
+                        "conversationsThreadId":  "9602216670",
+                        "createdAt":  "2025-10-07T22:03:12.315Z",
+                        "createdBy":  "A-160339713",
+                        "client":  {
+                                       "clientType":  "SYSTEM"
+                                   },
+                        "senders":  [
+                                        {
+                                            "actorId":  "S-hubspot"
+                                        }
+                                    ],
+                        "recipients":  [
+
+                                       ],
+                        "archived":  false,
+                        "newStatus":  "CLOSED",
+                        "type":  "THREAD_STATUS_CHANGE"
+                    },
+                    {
+                        "id":  "cdd9d330-ae79-4c34-afcd-e775f1c77f0a",
+                        "conversationsThreadId":  "9602216670",
+                        "createdAt":  "2025-10-07T20:41:53.319Z",
+                        "createdBy":  "S-hubspot",
+                        "client":  {
+                                       "clientType":  "SYSTEM"
+                                   },
+                        "senders":  [
+                                        {
+                                            "actorId":  "S-hubspot"
+                                        }
+                                    ],
+                        "recipients":  [
+
+                                       ],
+                        "archived":  false,
+                        "newStatus":  "OPEN",
+                        "type":  "THREAD_STATUS_CHANGE"
+                    },
+                    {
+                        "id":  "5b9f16d3-ddc8-4cb8-a496-c430a0c34d50",
+                        "conversationsThreadId":  "9602216670",
+                        "createdAt":  "2025-10-07T20:41:49Z",
+                        "updatedAt":  "2025-10-07T20:41:52.395Z",
+                        "createdBy":  "V-275836139194",
+                        "client":  {
+                                       "clientType":  "HUBSPOT"
+                                   },
+                        "senders":  [
+                                        {
+                                            "actorId":  "V-275836139194",
+                                            "name":  "Maria Johnson (Sample Contact)",
+                                            "senderField":  "FROM",
+                                            "deliveryIdentifier":  {
+                                                                       "type":  "HS_EMAIL_ADDRESS",
+                                                                       "value":  "emailmaria@hubspot.com"
+                                                                   }
+                                        }
+                                    ],
+                        "recipients":  [
+                                           {
+                                               "name":  "Chuck Johnson",
+                                               "recipientField":  "TO",
+                                               "deliveryIdentifier":  {
+                                                                          "type":  "HS_EMAIL_ADDRESS",
+                                                                          "value":  "sales@alex-io.com"
+                                                                      }
+                                           }
+                                       ],
+                        "archived":  false,
+                        "text":  "You connected sales@alex-io.com\nAny new emails sent to this address will also appear here. Choose what youΓÇÖd like to do next:\n\nTry it out\nSend yourself an email at \u003ca href = \u0027mailto:sales@alex-io.com\u0027\u003esales@alex-io.com\u003c/a\u003e\n\nManage email channel settings\nPersonalize your emails with a team signature. \u003ca href = \u0027https://app-na2.hubspot.com/live-messages-settings/244053164/inboxes/1987289610/edit/email/1874426213?utm_campaign=manage_channel_settings\u0027 target=\u0027_blank\u0027 rel=\u0027noopener\u0027\u003eGo to email channel settings\u003c/a\u003e\n\nsales@alex-io.com",
+                        "richText":  "\u003cb\u003eYou connected sales@alex-io.com\u003c/b\u003e 🎉 \n\u003cbr\u003eAny new emails sent to this address will also appear here. Choose what youΓÇÖd like to do next: \n\u003cbr\u003e \n\u003cbr\u003e \n\u003cb\u003eTry it out\u003c/b\u003e \n\u003cbr\u003eSend yourself an email at \n\u003ca href=\"mailto:sales@alex-io.com\"\u003esales@alex-io.com\u003c/a\u003e \n\u003cbr\u003e \n\u003cbr\u003e \n\u003cb\u003eManage email channel settings\u003c/b\u003e \n\u003cbr\u003ePersonalize your emails with a team signature. \n\u003ca href=\"https://app-na2.hubspot.com/live-messages-settings/244053164/inboxes/1987289610/edit/email/1874426213?utm_campaign=manage_channel_settings\u0026amp;_hsenc=p2ANqtz-_0kb5iRBgJLHPAnDzb9Pai9Rgko5bXfr8Aa-2BhfJGMqajplQMk5vzCo4IsRShP4HDjEJHt0GIMAgLxSE5qYfOHBRLTA\u0026amp;_hsmi=0\" target=\"_blank\" rel=\"noopener\"\u003eGo to email channel settings\u003c/a\u003e \n\u003cbr\u003e \n\u003cbr\u003e",
+                        "attachments":  [
+
+                                        ],
+                        "subject":  "New email channel connected to HubSpot",
+                        "truncationStatus":  "NOT_TRUNCATED",
+                        "status":  {
+                                       "statusType":  "RECEIVED"
+                                   },
+                        "direction":  "INCOMING",
+                        "channelId":  "1002",
+                        "channelAccountId":  "2127259799",
+                        "type":  "MESSAGE"
+                    }
+                ]
+}
