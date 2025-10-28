@@ -3,9 +3,42 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+function requireEnv(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
+
+async function getAppToken() {
+  const tenant = requireEnv("MS_TENANT_ID");
+  const clientId = requireEnv("MS_CLIENT_ID");
+  const clientSecret = requireEnv("MS_CLIENT_SECRET");
+
+  const tokenUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    grant_type: "client_credentials",
+    scope: "https://graph.microsoft.com/.default",
+  });
+
+  const res = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Token error ${res.status}: ${text}`);
+  }
+
+  const json = await res.json();
+  return json.access_token as string;
+}
+
 /**
- * Graph Send test route
- * Verifies env vars and connectivity before sending real emails
+ * GET — health check
  */
 export async function GET() {
   try {
@@ -26,6 +59,88 @@ export async function GET() {
       tenant,
       client,
       mailbox,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { ok: false, error: (err as Error).message },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST — send a test email via Graph (app-only)
+ * Body JSON:
+ * {
+ *   "to": "you@domain.com"        // optional, defaults to MS_MAILBOX_FROM
+ *   "subject": "Test",
+ *   "html": "<p>Hello</p>",
+ *   "dryRun": true                 // optional; if true, does not send
+ * }
+ */
+export async function POST(req: Request) {
+  try {
+    const mailbox = requireEnv("MS_MAILBOX_FROM");
+    const { to, subject, html, dryRun } = await req.json().catch(() => ({}));
+
+    const toAddress = (to as string) || mailbox;
+    const emailSubject =
+      (subject as string) ||
+      "Alex-IO Graph Warm-Up — loop-tagged (X-AlexIO-Sent: 1)";
+    const emailHtml =
+      (html as string) ||
+      `<p>Warm-up ping from Alex-IO.</p><p>Timestamp: ${new Date().toISOString()}</p>`;
+
+    // Build the message we would send
+    const messagePayload = {
+      message: {
+        subject: emailSubject,
+        body: { contentType: "HTML", content: emailHtml },
+        toRecipients: [{ emailAddress: { address: toAddress } }],
+        // 🔒 Loop protection tag (your webhook should ignore messages with this)
+        internetMessageHeaders: [{ name: "X-AlexIO-Sent", value: "1" }],
+      },
+      saveToSentItems: true,
+    };
+
+    if (dryRun) {
+      return NextResponse.json({
+        ok: true,
+        dryRun: true,
+        preview: { to: toAddress, subject: emailSubject },
+      });
+    }
+
+    const token = await getAppToken();
+
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+        mailbox
+      )}/sendMail`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(messagePayload),
+      }
+    );
+
+    if (!res.ok) {
+      const text = await res.text();
+      return NextResponse.json(
+        { ok: false, status: res.status, error: text },
+        { status: 502 }
+      );
+    }
+
+    // Graph returns 202 for sendMail (no JSON body)
+    const requestId = res.headers.get("request-id") || undefined;
+    return NextResponse.json({
+      ok: true,
+      sent: { to: toAddress, subject: emailSubject },
+      graph: { status: res.status, requestId },
     });
   } catch (err) {
     return NextResponse.json(
