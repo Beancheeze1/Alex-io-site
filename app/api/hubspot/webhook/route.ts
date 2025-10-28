@@ -87,12 +87,14 @@ function json(data: any, init?: number | ResponseInit) {
 /* ----------------- Core logic ----------------- */
 
 function isInboundNewMessage(e: HubSpotEvent): boolean {
-  // Permit minimal looseness but still target what we want
   const isConv = asU(e.subscriptionType)?.toLowerCase() === "conversation.newmessage";
-  const isNew = asU(e.changeFlag)?.toUpperCase() === "NEW_MESSAGE";
-  const isMsg = asU(e.messageType)?.toUpperCase() === "MESSAGE";
+  const isNew  = asU(e.changeFlag)?.toUpperCase() === "NEW_MESSAGE";
+  const isMsg  = asU(e.messageType)?.toUpperCase() === "MESSAGE";
+  const dir    = asU(e.envelope?.dir)?.toUpperCase();
+  if (dir === "OUTGOING") return false; // extra loop protection
   return !!(isConv && isNew && isMsg);
 }
+
 
 function extractSenderEmail(e: HubSpotEvent): string | undefined {
   // Try multiple places; HS often sets some to null
