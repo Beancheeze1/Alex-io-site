@@ -1,0 +1,6 @@
+﻿{
+  "message": {
+    "headers": [ { "name": "X-AlexIO-Sent", "value": "1" } ],
+    "html": "<p>Test</p><!-- alexio:sent=1 -->"
+  }
+}
