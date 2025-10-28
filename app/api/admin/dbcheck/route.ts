@@ -1,4 +1,3 @@
-// app/api/_admin/dbcheck/route.ts
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
 
@@ -22,11 +21,18 @@ function getPool() {
 export async function GET() {
   try {
     const pool = getPool();
-    const r1 = await pool.query("SELECT 1 AS ok");
-    const r2 = await pool.query("SELECT to_regclass('public.v_product_pricing') AS view_exists");
-    return NextResponse.json({ ok: r1.rows[0].ok, view: r2.rows[0].view_exists }, { status: 200 });
+    const ping = await pool.query("SELECT 1 AS ok, current_user, version()");
+    const view = await pool.query("SELECT to_regclass('public.v_product_pricing') AS v");
+    return NextResponse.json(
+      {
+        ok: ping.rows[0]?.ok ?? 0,
+        user: ping.rows[0]?.current_user,
+        view: view.rows[0]?.v, // should be "v_product_pricing"
+      },
+      { status: 200 }
+    );
   } catch (err: any) {
-    console.error("/api/_admin/dbcheck:", err);
+    console.error("/api/admin/dbcheck:", err);
     return NextResponse.json({ error: (err?.message || "").toString() }, { status: 500 });
   }
 }
