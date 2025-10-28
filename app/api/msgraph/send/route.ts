@@ -83,25 +83,37 @@ export async function POST(req: Request) {
     const mailbox = requireEnv("MS_MAILBOX_FROM");
     const { to, subject, html, dryRun } = await req.json().catch(() => ({}));
 
-    const toAddress = (to as string) || mailbox;
-    const emailSubject =
-      (subject as string) ||
-      "Alex-IO Graph Warm-Up — loop-tagged (X-AlexIO-Sent: 1)";
-    const emailHtml =
-      (html as string) ||
-      `<p>Warm-up ping from Alex-IO.</p><p>Timestamp: ${new Date().toISOString()}</p>`;
+const toAddress = (to as string) || mailbox;
+const emailSubject =
+  (subject as string) ||
+  "Alex-IO Graph Warm-Up — loop-tagged (X-AlexIO-Sent: 1)";
 
-    // Build the message we would send
-    const messagePayload = {
-      message: {
-        subject: emailSubject,
-        body: { contentType: "HTML", content: emailHtml },
-        toRecipients: [{ emailAddress: { address: toAddress } }],
-        // 🔒 Loop protection tag (your webhook should ignore messages with this)
-        internetMessageHeaders: [{ name: "X-AlexIO-Sent", value: "1" }],
-      },
-      saveToSentItems: true,
-    };
+// 🔒 Hidden body marker for loop protection (works even if headers get lost)
+const loopMarker = "<!-- alexio:sent=1 -->";
+
+// Start with caller-provided HTML or our default
+const baseHtml =
+  (html as string) ||
+  `<p>Warm-up ping from Alex-IO.</p><p>Timestamp: ${new Date().toISOString()}</p>`;
+
+// Ensure the marker is present exactly once
+const htmlWithMarker = baseHtml.includes("alexio:sent=1")
+  ? baseHtml
+  : `${baseHtml}${loopMarker}`;
+
+// Build the message we would send
+const messagePayload = {
+  message: {
+    subject: emailSubject,
+    body: { contentType: "HTML", content: htmlWithMarker }, // ⬅️ use marked HTML
+    toRecipients: [{ emailAddress: { address: toAddress } }],
+    // 🔒 Header-based loop protection as well
+    internetMessageHeaders: [{ name: "X-AlexIO-Sent", value: "1" }],
+  },
+  saveToSentItems: true,
+};
+
+
 
     if (dryRun) {
       return NextResponse.json({
