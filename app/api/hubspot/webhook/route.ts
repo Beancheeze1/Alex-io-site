@@ -1,210 +1,229 @@
-// app/api/hubspot/webhook/route.ts
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-type DeliveryIdentifier =
-  | { type?: string; value?: string }
-  | null
-  | undefined;
+/**
+ * Minimal HubSpot webhook:
+ *  - Accepts POSTs with an array of events
+ *  - Filters to conversation.newMessage / NEW_MESSAGE
+ *  - Extracts sender email (customer) and composes a simple reply
+ *  - Calls our internal /api/ms/send
+ *  - Supports ?dryRun=1 to avoid actually sending
+ */
 
-type SenderEntry = {
-  senderField?: string; // "FROM" / "TO"
-  deliveryIdentifier?: DeliveryIdentifier; // { type:"HS_EMAIL_ADDRESS", value:"someone@example.com" }
-};
-
-type HubSpotMessage = {
-  id?: string;
-  direction?: string; // sometimes "INBOUND"
-  messageDirection?: string; // sometimes "INBOUND"
-  from?: { email?: string };
-  sender?: { email?: string; address?: string };
-  recipient?: { email?: string };
-  channel?: { from?: { email?: string } };
-  senders?: SenderEntry[];
-};
+/* ----------------- Types ----------------- */
 
 type HubSpotEvent = {
-  subscriptionType?: string; // "conversation.newMessage"
-  changeFlag?: string; // "NEW_MESSAGE"
-  messageType?: string; // "MESSAGE"
-  objectId?: number | string; // threadId
-  // sometimes HubSpot includes these on the event:
-  customerEmail?: string;
-  fromEmail?: string;
-  email?: string;
-  sender?: string;
-  deliveryIdentifier?: { type?: string; value?: string }[]; // rarely on the event
-  subject?: string;
-  text?: string;
+  // core IDs
+  eventId?: number | null;
+  portalId?: number | null;
+  subscriptionId?: number | null;
+
+  // kinds
+  subscriptionType?: string | null; // "conversation.newMessage"
+  occurredAt?: number | null;
+  objectId?: number | null; // threadId (from earlier pipeline)
+  messageId?: string | null;
+  messageType?: "MESSAGE" | string | null; // MESSAGE
+  changeFlag?: "NEW_MESSAGE" | string | null;
+
+  // emails HubSpot sometimes sets to null
+  customerEmail?: string | null;
+  fromEmail?: string | null;
+  email?: string | null;
+  sender?: string | null;
+
+  // misc slot we used earlier
+  html?: string | null;
+  subject?: string | null;
+  text?: string | null;
+
+  // lenient envelope we might derive when we fetch thread (not used here)
+  envelope?: {
+    dir?: "INCOMING" | "OUTGOING" | null;
+    from?: string | null;
+    recip?: string | null;
+  } | null;
 };
 
-function j(data: any, init?: number | ResponseInit) {
-  const opts = typeof init === "number" ? { status: init } : init;
+/* ----------------- Helpers ----------------- */
+
+// Normalize HubSpot nulls to undefined so they match string | undefined
+const asU = <T>(v: T | null | undefined): T | undefined => v ?? undefined;
+
+// String guard
+const hasText = (s: string | null | undefined): s is string =>
+  typeof s === "string" && s.trim().length > 0;
+
+// Very small in-memory dedupe for this process (prevents resend on HS retries)
+const seen = new Set<string>();
+const dedupeKey = (e: HubSpotEvent) =>
+  [
+    asU(e.eventId)?.toString(),
+    asU(e.messageId),
+    asU(e.objectId)?.toString(),
+  ]
+    .filter(Boolean)
+    .join(":");
+
+/* ----------------- Config ----------------- */
+
+const BASE_URL =
+  process.env.NEXT_PUBLIC_BASE_URL ||
+  process.env.VERCEL_URL?.startsWith("http")
+    ? (process.env.VERCEL_URL as string)
+    : `https://${process.env.VERCEL_URL}`;
+
+const FROM_ADDR = (process.env.MS_MAILBOX_FROM || "sales@alex-io.com").toLowerCase();
+
+/* ----------------- Util JSON wrapper ----------------- */
+
+function json(data: any, init?: number | ResponseInit) {
+  const opts: ResponseInit | undefined =
+    typeof init === "number" ? { status: init } : init;
   return NextResponse.json(data, opts);
 }
 
-const SELF_FROM = (process.env.MS_MAILBOX_FROM || "sales@alex-io.com").toLowerCase();
+/* ----------------- Core logic ----------------- */
 
-function isInboundEvent(ev: HubSpotEvent) {
-  return (
-    (ev.subscriptionType || "").toLowerCase() === "conversation.newmessage" &&
-    (ev.changeFlag || "").toUpperCase() === "NEW_MESSAGE" &&
-    (ev.messageType || "MESSAGE").toUpperCase() === "MESSAGE"
-  );
+function isInboundNewMessage(e: HubSpotEvent): boolean {
+  // Permit minimal looseness but still target what we want
+  const isConv = asU(e.subscriptionType)?.toLowerCase() === "conversation.newmessage";
+  const isNew = asU(e.changeFlag)?.toUpperCase() === "NEW_MESSAGE";
+  const isMsg = asU(e.messageType)?.toUpperCase() === "MESSAGE";
+  return !!(isConv && isNew && isMsg);
 }
 
-function directEmailFromEvent(ev: HubSpotEvent): string | null {
-  // check all the legacy event fields first
-  const candidates: (string | undefined)[] = [
-    ev.customerEmail,
-    ev.fromEmail,
-    ev.email,
-    ev.sender,
-    ev.deliveryIdentifier?.find((d) => d?.value)?.value, // if present on event (rare)
-  ];
-  const first = candidates.find((s) => !!s)?.trim()?.toLowerCase() || null;
+function extractSenderEmail(e: HubSpotEvent): string | undefined {
+  // Try multiple places; HS often sets some to null
+  const candidates = [
+    asU(e.customerEmail),
+    asU(e.email),
+    asU(e.fromEmail),
+    asU(e.sender),
+    asU(e.envelope?.from),
+  ].filter(hasText);
+
+  const first = candidates[0]?.trim().toLowerCase();
+  if (!first) return undefined;
+
+  // Loop-protection: do not reply to ourselves
+  if (first === FROM_ADDR) return undefined;
+
   return first;
 }
 
-async function getHubspotAccessToken(): Promise<string> {
-  const base = process.env.NEXT_PUBLIC_BASE_URL!;
-  const r = await fetch(`${base}/api/hubspot/refresh`, { cache: "no-store" });
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    console.log(`[webhook] hubspot refresh error ${r.status} ${t}`);
-    throw new Error("hs_token_" + r.status);
-  }
-  const data = await r.json().catch(() => ({}));
-  const tok = data?.access_token || data?.accessToken || data?.token;
-  if (!tok) throw new Error("hs_token_missing");
-  return tok;
+function buildSubject(e: HubSpotEvent): string {
+  const raw = asU(e.subject) || "Re: your message";
+  // Ensure 'Re:' prefix only once
+  return /^re:/i.test(raw) ? raw : `Re: ${raw}`;
 }
 
-function fromSendersArray(senders?: SenderEntry[]): string | null {
-  if (!senders || !Array.isArray(senders)) return null;
-  // Prefer the "FROM" senderField
-  const fromEntry =
-    senders.find((s) => (s.senderField || "").toUpperCase() === "FROM") || senders[0];
-
-  const val = fromEntry?.deliveryIdentifier && (fromEntry.deliveryIdentifier as any).value;
-  if (typeof val === "string" && val.includes("@")) return val.trim().toLowerCase();
-  return null;
+function buildText(e: HubSpotEvent): string {
+  if (hasText(e.text)) return e.text!.trim();
+  return "Thanks for your message — we'll get back to you shortly.";
 }
 
-function firstInbound(messages: any): HubSpotMessage | null {
-  const list: HubSpotMessage[] = messages?.results || messages?.messages || [];
-  if (!Array.isArray(list) || !list.length) return null;
-  const inbound =
-    list.find((m) => {
-      const d = (m.direction || m.messageDirection || "").toUpperCase();
-      return d === "INBOUND";
-    }) || list[0];
-  return inbound || null;
+/* ----------------- Route handlers ----------------- */
+
+/**
+ * Optional GET ping: /api/hubspot/webhook?dryRun=1
+ * (kept for parity with your earlier testing style)
+ */
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const dryRun = searchParams.get("dryRun") === "1";
+  return json({ ok: true, route: "/api/hubspot/webhook", dryRun }, 200);
 }
 
-async function emailFromThread(threadId: string | number): Promise<string | null> {
-  const token = await getHubspotAccessToken();
-
-  // newest-first
-  const res = await fetch(
-    `https://api.hubapi.com/conversations/v3/conversations/threads/${threadId}/messages?limit=10&sort=createdAt&order=DESC`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    console.log(`[webhook] thread ${threadId} fetch error ${res.status} ${t}`);
-    return null;
-  }
-
-  const data = await res.json().catch(() => ({}));
-  const msg = firstInbound(data);
-  if (!msg) return null;
-
-  // 1) NEW SHAPE: senders[].deliveryIdentifier.value
-  const viaSenders = fromSendersArray(msg.senders);
-  if (viaSenders) return viaSenders;
-
-  // 2) Legacy shapes as fallback
-  const candidates: (string | undefined)[] = [
-    msg?.from?.email,
-    msg?.sender?.email,
-    msg?.sender?.address,
-    msg?.channel?.from?.email,
-    msg?.recipient?.email,
-  ];
-  const found = candidates.find((s) => !!s)?.trim()?.toLowerCase() || null;
-  return found;
-}
-
+/**
+ * HubSpot POST webhook handler
+ */
 export async function POST(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const dryRun = searchParams.get("dryRun") === "1";
+
+  let events: HubSpotEvent[] = [];
   try {
-    const { searchParams } = new URL(req.url);
-    const dryRun = searchParams.get("dryRun") === "1";
+    const body = await req.json();
+    // HS posts an array; guard if a single object arrives
+    events = Array.isArray(body) ? (body as HubSpotEvent[]) : [body as HubSpotEvent];
+  } catch (err) {
+    return json({ ok: false, error: "invalid_json" }, 400);
+  }
 
-    let events: HubSpotEvent[] = [];
-    try {
-      const body = await req.json();
-      events = Array.isArray(body) ? body : body ? [body] : [];
-    } catch {
-      return j({ ok: false, error: "invalid_json" }, 400);
+  // Slim log hint (not PII heavy)
+  console.log("[webhook] received events=%d", events.length);
+
+  // Filter relevant events
+  const targets = events.filter(isInboundNewMessage);
+
+  if (targets.length === 0) {
+    return json({ ok: true, skipped: true, reason: "no_events" }, 200);
+  }
+
+  // Process each event; stop at first successful send
+  for (const e of targets) {
+    const key = dedupeKey(e);
+    if (key && seen.has(key)) {
+      console.log("[webhook] duplicate_skipped %s", key);
+      continue;
     }
 
-    console.log(`[webhook] received events=${events.length}`);
-    if (!events.length) return j({ ok: true, skipped: true, reason: "no_events" });
-
-    // Find the first inbound event and resolve an email
-    let toEmail: string | null = null;
-    let selected: HubSpotEvent | null = null;
-
-    for (const ev of events) {
-      if (!isInboundEvent(ev)) continue;
-
-      // Try direct fields first
-      let email = directEmailFromEvent(ev);
-
-      // If not present, resolve via thread (new HubSpot shapes place it there)
-      if (!email && ev.objectId != null) {
-        email = await emailFromThread(String(ev.objectId));
-      }
-
-      if (email && !email.includes(SELF_FROM)) {
-        toEmail = email;
-        selected = ev;
-        break;
-      }
+    const to = extractSenderEmail(e);
+    if (!to) {
+      console.log(
+        "[webhook] no_valid_inbound (missing/loop email) for objectId=%s messageId=%s",
+        asU(e.objectId),
+        asU(e.messageId)
+      );
+      continue;
     }
 
-    if (!toEmail) {
-      console.log("[webhook] no_valid_inbound (missing/loop email)");
-      return j({ ok: true, skipped: true, reason: "no_valid_inbound" });
-    }
-
-    // Build a simple reply
-    const subject = selected?.subject ? `Re: ${selected.subject}` : "Re: your message";
-    const text =
-      selected?.text ||
-      "Thanks for your message — this is an automated reply from Alex-IO while we connect you with a human.";
+    const subject = buildSubject(e);
+    const text = buildText(e);
 
     if (dryRun) {
-      console.log("[webhook] dryRun → to=", toEmail);
-      return j({ ok: true, dryRun: true, to: toEmail, subject, text }, 200);
+      console.log("[webhook] DRYRUN to=%s subject=%j", to, subject);
+      seen.add(key);
+      // Keep iterating to catch other events, but report first preview
+      // Returning immediately would also be acceptable
+      continue;
     }
 
-    // Forward to your MS Graph sender
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/ms/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to: toEmail, subject, text }),
-    });
+    // Call our internal Graph sender
+    const sendUrl = `${BASE_URL}/api/ms/send`;
+    try {
+      const res = await fetch(sendUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, subject, text }),
+      });
 
-    const ok = res.status === 202 || res.ok;
-    const data = await res.json().catch(() => ({}));
-    console.log(`[webhook] send to=${toEmail} status=${res.status}`);
-    return j({ ok, status: res.status, data }, ok ? 200 : res.status);
-  } catch (err: any) {
-    console.error("[webhook] error", err);
-    return j({ ok: false, error: String(err?.message || err) }, 500);
+      // Accept 200/202
+      if (res.ok || res.status === 202) {
+        console.log(
+          "[webhook] send to=%s status=%d",
+          to,
+          res.status
+        );
+        seen.add(key);
+        // We can continue to send for other events in the same batch
+        // (or return immediately if one is enough)
+        continue;
+      } else {
+        const t = await res.text().catch(() => "");
+        console.warn(
+          "[webhook] send_failed to=%s status=%d body=%s",
+          to,
+          res.status,
+          t?.slice(0, 300)
+        );
+      }
+    } catch (err) {
+      console.warn("[webhook] send_exception to=%s err=%o", to, err);
+    }
   }
+
+  return json({ ok: true, processed: targets.length }, 200);
 }
