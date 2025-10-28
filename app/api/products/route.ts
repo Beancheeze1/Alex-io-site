@@ -2,15 +2,20 @@
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// --- Singleton PG pool (no extra deps, Path-A minimal)
+// --- Singleton PG pool
 let _pool: Pool | null = null;
 function getPool() {
   if (!_pool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("Missing env: DATABASE_URL");
-    _pool = new Pool({ connectionString: url, max: 5, ssl: { rejectUnauthorized: false } });
+    _pool = new Pool({
+      connectionString: url,
+      max: 5,
+      ssl: { rejectUnauthorized: false },
+    });
   }
   return _pool;
 }
@@ -25,7 +30,9 @@ export async function GET() {
     );
     return NextResponse.json(rows, { status: 200 });
   } catch (err: any) {
+    // TEMP: surface message so we can see the root cause via curl
+    const message = (err?.message || "Unknown error").toString();
     console.error("GET /api/products error:", err);
-    return NextResponse.json({ error: "Failed to load products" }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
