@@ -1,0 +1,8 @@
+﻿{
+  "sku": "FOAM-BLOCK-B",
+  "name": "Block B (rev B)",
+  "material_id": 1,
+  "base_length_in": 20,
+  "base_width_in": 16,
+  "base_height_in": 2.5
+}
