@@ -1,0 +1,7 @@
+﻿{
+  "name": "PE 2.2 lb",
+  "density_lb_ft3": 2.2,
+  "price_per_bf": 7.5,
+  "kerf_waste_pct": 10,
+  "min_charge_usd": 20
+}

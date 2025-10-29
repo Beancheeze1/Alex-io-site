@@ -14,9 +14,21 @@ function getPool() {
   return _pool;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const pool = getPool();
   try {
+    const url = new URL(req.url);
+    const sku = (url.searchParams.get("sku") || "").trim();
+
+    if (sku) {
+      // return a single product row (from pricing view) by SKU
+      const { rows } = await pool.query(
+        `SELECT * FROM public.v_product_pricing WHERE sku = $1 LIMIT 1;`,
+        [sku]
+      );
+      return NextResponse.json(rows, { status: 200, headers: { "Cache-Control": "no-store" } });
+    }
+
     const { rows } = await pool.query(
       `SELECT * FROM public.v_product_pricing ORDER BY sku;`
     );
@@ -26,6 +38,7 @@ export async function GET() {
     return NextResponse.json({ error: (err?.message || "").toString() }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }
+
 
 export async function POST(req: Request) {
   const pool = getPool();

@@ -1,0 +1,5 @@
+﻿{
+  "items": [
+    { "label": "tool slot", "count": 2, "cav_length_in": 5, "cav_width_in": 1.5, "cav_depth_in": 1 }
+  ]
+}
