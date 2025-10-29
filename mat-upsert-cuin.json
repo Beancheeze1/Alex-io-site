@@ -1,0 +1,7 @@
+﻿{
+  "name": "PE 1.7 lb",
+  "density_lb_ft3": 1.7,
+  "price_per_cuin": 0.003762,
+  "kerf_waste_pct": 10,
+  "min_charge_usd": 15
+}
