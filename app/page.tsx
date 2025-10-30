@@ -1,8 +1,14 @@
-export default function Home() {
+import BrandCard from '@/components/BrandCard';   // <-- import
+import Container from '@/components/Container';    // optional wrapper
+
+
+
+
+
+export default function Page() {
   return (
-    <main className="min-h-screen p-8">
-      <h1 className="text-2xl font-bold">Alex-IO (Clean)</h1>
-      <p className="mt-2">Go to <code>/api/auth/hubspot</code> to connect HubSpot.</p>
-    </main>
+    <Container>
+      <BrandCard />                                {/* <-- render it */}
+    </Container>
   );
 }

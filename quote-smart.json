@@ -1,0 +1,10 @@
+﻿{
+  "length_in": 20, "width_in": 16,
+  "material_id": 1,
+  "qty": 1,
+  "cavities": [],
+  "weight_lbf": 12,
+  "area_in2": 48,
+  "fragility_g": 50,
+  "drop_in": 24
+}

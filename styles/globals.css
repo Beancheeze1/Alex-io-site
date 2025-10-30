@@ -1,0 +1,17 @@
+/* styles/globals.css */
+
+
+/* Tailwind layers */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+/* === Brand tokens === */
+@import './theme.css';
+
+
+/* Optional base tweaks */
+html, body {
+height: 100%;
+}
