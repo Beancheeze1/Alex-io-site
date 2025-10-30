@@ -5,66 +5,25 @@ import {
   CartesianGrid, ResponsiveContainer, Legend, ReferenceLine,
 } from "recharts";
 
+/* ===== Brand Palette (stable per material_id) ===== */
+const PALETTE = ["#111827","#2563EB","#10B981","#F59E0B","#EF4444","#8B5CF6","#14B8A6","#E11D48","#0EA5E9","#84CC16"];
+const colorForMaterial = (id: number) => PALETTE[Math.abs(id) % PALETTE.length];
+
+/* ===== Tiny Spinner ===== */
 function Spinner({ className = "" }) {
   return (
-    <svg
-      className={`animate-spin h-4 w-4 ${className}`}
-      viewBox="0 0 24 24"
-      fill="none"
-    >
+    <svg className={`animate-spin h-4 w-4 ${className}`} viewBox="0 0 24 24" fill="none">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
     </svg>
   );
 }
 
-
-/* ================= Brand Palette (stable) =================
-   Edit to taste. These are high-contrast, print-friendly. */
-const PALETTE = [
-  "#111827", // black-ish
-  "#2563EB", // blue
-  "#10B981", // emerald
-  "#F59E0B", // amber
-  "#EF4444", // red
-  "#8B5CF6", // violet
-  "#14B8A6", // teal
-  "#E11D48", // rose
-  "#0EA5E9", // sky
-  "#84CC16", // lime
-];
-function colorForMaterial(id: number) {
-  return PALETTE[Math.abs(id) % PALETTE.length];
-}
-
-/* ---------------- CSV Parser (no deps) ---------------- */
-function parseCSV(csv: string): Record<string, string>[] {
-  const lines = csv.replace(/\r\n?/g, "\n").split("\n").filter(l => l.trim().length);
-  if (!lines.length) return [];
-  const split = (line: string) => {
-    const out: string[] = []; let cur = "", inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ; }
-      else if (ch === "," && !inQ) { out.push(cur.trim()); cur = ""; }
-      else { cur += ch; }
-    }
-    out.push(cur.trim());
-    return out;
-  };
-  const header = split(lines[0]).map(h => h.trim().toLowerCase());
-  return lines.slice(1).map(line => {
-    const cols = split(line); const row: Record<string, string> = {};
-    header.forEach((h, idx) => { row[h] = (cols[idx] ?? "").trim(); });
-    return row;
-  });
-}
-
-/* ---------------- Types ---------------- */
+/* ===== Types ===== */
 type Material = { id: number; name: string };
 type Curve = { material_id: number; static_psi: number; deflect_pct: number; g_level: number; source?: string };
 
-/* ---------------- Helpers ---------------- */
+/* ===== Helpers ===== */
 function interpG(pts: Array<{deflect_pct:number; g_level:number}>, defl: number): number | null {
   if (!pts.length) return null;
   if (defl <= pts[0].deflect_pct) return pts[0].g_level;
@@ -80,19 +39,24 @@ function interpG(pts: Array<{deflect_pct:number; g_level:number}>, defl: number)
   return null;
 }
 
-/* ====================================================================== */
+/* ===== Page ===== */
 export default function CushionCurvesAdmin() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [curves, setCurves] = useState<Curve[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [staticPsi, setStaticPsi]     = useState<string>("0.50");
-  const [uploading, setUploading]     = useState(false);
-  const [msg, setMsg]                 = useState<string>("");
+  const [staticPsi, setStaticPsi] = useState<string>("0.50");
+  const [uploading, setUploading] = useState(false);
+  const [msg, setMsg] = useState<string>("");
 
-  // Test Cushion widget
+  // Test Cushion
   const [tc, setTC] = useState({ weight_lbf: "12", area_in2: "48", thickness_in: "2", fragility_g: "50", drop_in: "24" });
   const [tcResults, setTCResults] = useState<any>(null);
   const fragilityLine = useMemo(()=> Number(tc.fragility_g || "0") || undefined, [tc.fragility_g]);
+
+  // Parse Tester
+  const [parseText, setParseText] = useState<string>("");
+  const [parseOut, setParseOut] = useState<any>(null);
+  const [parseBusy, setParseBusy] = useState<boolean>(false);
 
   async function refreshMaterials() {
     const res = await fetch("/api/materials", { cache: "no-store" });
@@ -113,7 +77,6 @@ export default function CushionCurvesAdmin() {
       source: r.source ?? undefined,
     })));
   }
-
   useEffect(() => { refreshMaterials(); refreshCurves(); }, []);
 
   const curvesByMat = useMemo(() => {
@@ -168,29 +131,20 @@ export default function CushionCurvesAdmin() {
 
   async function handleCSV(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
-    const text = await file.text(); const rows = parseCSV(text);
-    const mapped: Curve[] = rows.map(r => ({
-      material_id: Number(r["material_id"]) || Number(r["material"]),
-      static_psi: Number(r["static_psi"]),
-      deflect_pct: Number(r["deflect_pct"]) || Number(r["deflection_pct"]) || Number(r["deflect%"]),
-      g_level: Number(r["g_level"]) || Number(r["g"]),
-      source: r["source"],
-    })).filter(x => x.material_id && x.static_psi >= 0 && x.deflect_pct >= 0 && x.g_level > 0);
-    if (!mapped.length) { setMsg("Couldn’t find valid rows. Expected headers like material_id, static_psi, deflect_pct, g_level"); return; }
+    const text = await file.text();
+    const header = text.trim().split(/\r?\n/)[0].toLowerCase();
+    const looksOk = ["material_id","static_psi","deflect_pct","g_level"].every(h => header.includes(h));
+    if (!looksOk) { setMsg("Expected headers: material_id, static_psi, deflect_pct, g_level[, source]"); return; }
 
     setUploading(true); setMsg("");
-    const chunkSize = 500; let upserted = 0; let failed = 0;
-    for (let i = 0; i < mapped.length; i += chunkSize) {
-      const chunk = mapped.slice(i, i + chunkSize);
-      try {
-        const res = await fetch("/api/cushion/curves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: chunk }) });
-        const j = await res.json().catch(() => ({}));
-        if (res.ok) upserted += (j?.upserted ?? chunk.length); else failed += chunk.length;
-      } catch { failed += chunk.length; }
+    try {
+      const res = await fetch("/api/cushion/curves", { method: "POST", headers: { "Content-Type": "text/csv" }, body: text });
+      const j = await res.json().catch(()=>({}));
+      setMsg(res.ok ? `Uploaded ${j?.upserted ?? ""} points.` : (j?.error || "Upload failed"));
+      await refreshCurves();
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
-    setMsg(`Uploaded ${upserted} points${failed ? ", failed " + failed : ""}.`);
-    await refreshCurves();
   }
 
   async function runTestCushion(e: React.FormEvent) {
@@ -211,78 +165,99 @@ export default function CushionCurvesAdmin() {
     if (j?.input?.static_psi != null) setStaticPsi(String(j.input.static_psi));
   }
 
+  async function runParseEmail() {
+    setParseBusy(true); setParseOut(null);
+    try {
+      const res = await fetch("/api/parse/email-quote?t="+Math.random(), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: parseText })
+      });
+      const j = await res.json();
+      setParseOut(j);
+    } finally {
+      setParseBusy(false);
+    }
+  }
+  async function sendParsedToQuote() {
+    if (!parseOut?.foam_quote_body) return;
+    const res = await fetch("/api/quote/foam?t="+Math.random(), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(parseOut.foam_quote_body),
+    });
+    const j = await res.json();
+    setParseOut((prev:any) => ({ ...(prev||{}), quote_result: j }));
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8">
       <h1 className="text-2xl font-semibold">Cushion Curves</h1>
 
-<div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-white p-4 rounded-2xl shadow">
-  {/* Material multi-select */}
-  <div className="md:col-span-4">
-    <label className="text-sm text-gray-600">Materials (overlay)</label>
-    <div className="border rounded-lg p-2 h-36 overflow-auto space-y-1">
-      {materials.map(m => {
-        const checked = selectedIds.includes(m.id);
-        return (
-          <label key={m.id} className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(e) => {
-                setSelectedIds(prev => e.target.checked
-                  ? [...prev, m.id] : prev.filter(x=>x!==m.id));
-              }}
-            />
-            <span>{m.name}</span>
-          </label>
-        );
-      })}
-      {!materials.length && <div className="text-xs text-gray-500">No materials yet.</div>}
-    </div>
-    <div className="text-xs text-gray-500 mt-1">If none selected, the chart shows up to 8 materials.</div>
-  </div>
+      {/* Controls row */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-white p-4 rounded-2xl shadow">
+        {/* Material multi-select */}
+        <div className="md:col-span-4">
+          <label className="text-sm text-gray-600">Materials (overlay)</label>
+          <div className="border rounded-lg p-2 h-36 overflow-auto space-y-1">
+            {materials.map(m => {
+              const checked = selectedIds.includes(m.id);
+              return (
+                <label key={m.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => {
+                      setSelectedIds(prev => e.target.checked ? [...prev, m.id] : prev.filter(x=>x!==m.id));
+                    }}
+                  />
+                  <span>{m.name}</span>
+                </label>
+              );
+            })}
+            {!materials.length && <div className="text-xs text-gray-500">No materials yet.</div>}
+          </div>
+          <div className="text-xs text-gray-500 mt-1">If none selected, the chart shows up to 8 materials.</div>
+        </div>
 
-  {/* Target psi */}
-  <div className="md:col-span-2">
-    <label className="text-sm text-gray-600">Target static load (psi)</label>
-    <input className="border rounded-lg p-2 w-full" value={staticPsi} onChange={(e)=>setStaticPsi(e.target.value)} />
-  </div>
+        {/* Target psi */}
+        <div className="md:col-span-2">
+          <label className="text-sm text-gray-600">Target static load (psi)</label>
+          <input className="border rounded-lg p-2 w-full" value={staticPsi} onChange={(e)=>setStaticPsi(e.target.value)} />
+        </div>
 
-  {/* CSV upload */}
-  <div className="md:col-span-4">
-    <label className="text-sm text-gray-600">Upload CSV (material_id, static_psi, deflect_pct, g_level[, source])</label>
-    <input type="file" accept=".csv,text/csv" className="block w-full" onChange={handleCSV} />
-    {msg && <div className="text-xs text-green-700 mt-1">{msg}</div>}
-  </div>
+        {/* CSV upload */}
+        <div className="md:col-span-4">
+          <label className="text-sm text-gray-600">Upload CSV (material_id, static_psi, deflect_pct, g_level[, source])</label>
+          <input type="file" accept=".csv,text/csv" className="block w-full" onChange={handleCSV} />
+          {msg && <div className="text-xs text-green-700 mt-1">{msg}</div>}
+        </div>
 
-  {/* Refresh + Export CSV (spinner/disable while uploading) */}
-  <div className="md:col-span-2 flex items-end gap-2">
-    <button
-      disabled={uploading}
-      onClick={() => refreshCurves()}
-      className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40 w-full"
-    >
-      Refresh
-    </button>
+        {/* Refresh + Export CSV */}
+        <div className="md:col-span-2 flex items-end gap-2">
+          <button
+            disabled={uploading}
+            onClick={() => refreshCurves()}
+            className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40 w-full"
+          >
+            Refresh
+          </button>
 
-    <a
-      href={
-        selectedIds.length === 1
-          ? `/api/cushion/curves/export?material_id=${selectedIds[0]}`
-          : `/api/cushion/curves/export`
-      }
-      role="button"
-      aria-disabled={uploading}
-      onClick={(e) => { if (uploading) e.preventDefault(); }}
-      className={`bg-white border border-gray-300 rounded-lg px-4 py-2 text-center w-full flex items-center justify-center gap-2 ${uploading ? "opacity-50 pointer-events-none" : ""}`}
-      title="Download a CSV of the currently selected material (or all if multiple/none selected)."
-    >
-      {uploading && <Spinner />}
-      Export CSV
-    </a>
-  </div>
-</div>
+          <a
+            href={selectedIds.length === 1
+              ? `/api/cushion/curves/export?material_id=${selectedIds[0]}`
+              : `/api/cushion/curves/export`}
+            role="button"
+            aria-disabled={uploading}
+            onClick={(e) => { if (uploading) e.preventDefault(); }}
+            className={`bg-white border border-gray-300 rounded-lg px-4 py-2 text-center w-full flex items-center justify-center gap-2 ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+            title="Download a CSV of the currently selected material (or all if multiple/none selected)."
+          >
+            {uploading && <Spinner />}
+            Export CSV
+          </a>
+        </div>
+      </div>
 
-
+      {/* Overlay Chart */}
       <div className="bg-white rounded-2xl shadow p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-medium">G vs. Deflection% (overlay at nearest curves to {staticPsi} psi)</h2>
@@ -298,22 +273,14 @@ export default function CushionCurvesAdmin() {
               <Legend />
               {fragilityLine ? <ReferenceLine y={fragilityLine} strokeDasharray="4 4" label={`Fragility G (${fragilityLine})`} /> : null}
               {seriesMeta.map(s => (
-                <Line
-                  key={s.key}
-                  type="monotone"
-                  dataKey={s.key}
-                  name={s.name}
-                  dot={false}
-                  stroke={s.stroke}     // <<< colored line
-                  strokeWidth={2}
-                  activeDot={{ r: 3 }}
-                />
+                <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} dot={false} stroke={s.stroke} strokeWidth={2} activeDot={{ r: 3 }} />
               ))}
             </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
 
+      {/* Test Cushion */}
       <div className="bg-white rounded-2xl shadow p-4">
         <h2 className="text-lg font-medium mb-2">Test Cushion</h2>
         <form onSubmit={runTestCushion} className="grid grid-cols-1 md:grid-cols-10 gap-3">
@@ -349,15 +316,59 @@ export default function CushionCurvesAdmin() {
                 ))}
               </tbody>
             </table>
-            <div className="text-xs text-gray-500 mt-2">
-              We also drew a horizontal <b>Fragility G</b> line on the chart. Adjust inputs and re-run to compare.
-            </div>
           </div>
         ) : tcResults?.error ? (
           <div className="text-sm text-red-600 mt-3">{String(tcResults.error)}</div>
         ) : null}
       </div>
 
+      {/* Parse Tester */}
+      <div className="bg-white rounded-2xl shadow p-4">
+        <h2 className="text-lg font-medium mb-2">Parse Tester (email → quote)</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm text-gray-600">Paste an email or plain text with dimensions/cavities</label>
+            <textarea
+              value={parseText}
+              onChange={(e)=>setParseText(e.target.value)}
+              rows={8}
+              className="w-full border rounded-lg p-2 font-mono"
+              placeholder={`e.g.\nNeed 2# PE block 20 x 16 x 2 with two 2" square x 1" deep cavities. Qty 3.`}
+            />
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={runParseEmail}
+                disabled={parseBusy || !parseText.trim()}
+                className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40"
+              >
+                {parseBusy ? "Parsing..." : "Parse"}
+              </button>
+              <button
+                onClick={sendParsedToQuote}
+                disabled={!parseOut?.foam_quote_body}
+                className="bg-white border border-gray-300 rounded-lg px-4 py-2 disabled:opacity-40"
+                title="Send parsed body to /api/quote/foam and show result below"
+              >
+                Send to Foam Quote
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-auto">
+            <div className="text-sm text-gray-600 mb-1">Parsed output</div>
+            <pre className="text-xs bg-gray-50 border rounded-lg p-2 overflow-auto">
+{JSON.stringify(parseOut, null, 2)}
+            </pre>
+            {!parseOut?.foam_quote_body && (
+              <div className="text-xs text-gray-500 mt-2">
+                Tip: after parsing, click <b>Send to Foam Quote</b> to see pricing here.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Raw table of uploaded points (row accent color) */}
       <div className="overflow-x-auto rounded-2xl shadow">
         <table className="w-full text-sm">
           <thead className="bg-gray-50">
@@ -371,20 +382,19 @@ export default function CushionCurvesAdmin() {
           </thead>
           <tbody>
             {curves.length ? curves.map((c, i) => {
-  const stroke = colorForMaterial(c.material_id);
-  return (
-    <tr key={i} className="border-t" style={{ borderLeft: `4px solid ${stroke}` }}>
-      <td className="p-2">{materials.find(m => m.id === c.material_id)?.name || c.material_id}</td>
-      <td className="p-2">{c.static_psi}</td>
-      <td className="p-2">{c.deflect_pct}</td>
-      <td className="p-2">{c.g_level}</td>
-      <td className="p-2">{c.source || ""}</td>
-    </tr>
-  );
-}) : (
-  <tr><td colSpan={5} className="p-3">No curve points yet. Upload a CSV to begin.</td></tr>
-)}
-
+              const stroke = colorForMaterial(c.material_id);
+              return (
+                <tr key={i} className="border-t" style={{ borderLeft: `4px solid ${stroke}` }}>
+                  <td className="p-2">{materials.find(m => m.id === c.material_id)?.name || c.material_id}</td>
+                  <td className="p-2">{c.static_psi}</td>
+                  <td className="p-2">{c.deflect_pct}</td>
+                  <td className="p-2">{c.g_level}</td>
+                  <td className="p-2">{c.source || ""}</td>
+                </tr>
+              );
+            }) : (
+              <tr><td colSpan={5} className="p-3">No curve points yet. Upload a CSV to begin.</td></tr>
+            )}
           </tbody>
         </table>
       </div>

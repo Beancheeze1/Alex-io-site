@@ -1,0 +1,6 @@
+﻿{
+  "length_in": 20, "width_in": 16, "height_in": 2, "qty": 3, "material_id": 1,
+  "cavities": [
+    { "label": "slot", "count": 2, "w": 2, "l": 2, "d": 1 }
+  ]
+}

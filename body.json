@@ -1,11 +1,1 @@
-﻿{
-  "length_in": 24,
-  "width_in": 18,
-  "height_in": 2,
-  "material_id": 1,
-  "qty": 10,
-  "cavities": [
-    { "label": "slot",   "count": 2, "l": 6, "w": 2, "d": 1 },
-    { "label": "square", "count": 1, "l": 3, "w": 3, "d": 1.5 }
-  ]
-}
+﻿{ "text": "Need 2# EPE block 24x18x2, 3 slots 1 x 6 x 2 deep, qty 5" }
