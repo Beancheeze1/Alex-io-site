@@ -17,9 +17,9 @@ function pool() {
 
 function N(x: any) { const n = Number(x); return isFinite(n) ? n : 0; }
 function toPricePerCuIn(body: any) {
-  const p_cuin  = N(body.price_per_cuin);
-  const p_cuft  = N(body.price_per_cuft);
-  const p_bf    = N(body.price_per_bf);
+  const p_cuin = N(body.price_per_cuin);
+  const p_cuft = N(body.price_per_cuft);
+  const p_bf   = N(body.price_per_bf);
   return p_cuin || (p_cuft ? p_cuft / 1728 : 0) || (p_bf ? p_bf / 144 : 0);
 }
 
@@ -42,7 +42,7 @@ export async function GET() {
   }
 }
 
-// POST /api/materials  (create)
+// POST /api/materials  — UPSERT by name
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -57,10 +57,16 @@ export async function POST(req: Request) {
     const sql = `
       INSERT INTO public.materials (name, price_per_cuin, kerf_waste_pct, min_charge_usd, density_lb_ft3)
       VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (name) DO UPDATE
+        SET price_per_cuin = EXCLUDED.price_per_cuin,
+            kerf_waste_pct = EXCLUDED.kerf_waste_pct,
+            min_charge_usd = EXCLUDED.min_charge_usd,
+            density_lb_ft3 = EXCLUDED.density_lb_ft3
       RETURNING id, name, price_per_cuin, kerf_waste_pct, min_charge_usd, density_lb_ft3
     `;
     const { rows } = await pool().query(sql, [name, price_per_cuin, kerf_waste_pct, min_charge_usd, density_lb_ft3]);
-    return NextResponse.json(rows[0], { status: 201 });
+    const status = rows.length && rows[0] ? 201 : 200; // 201 for insert, 200 for update (either way fine)
+    return NextResponse.json(rows[0], { status });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
   }
