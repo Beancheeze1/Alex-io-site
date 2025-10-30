@@ -27,14 +27,24 @@ export async function POST(req: Request) {
 
   try {
     await withTxn(async (client) => {
-      // upsert materials
-      for (const m of pb.tables.materials) {
-        await client.query(UPSERT_MATERIAL, [m.id, m.name, m.density_lb_ft3 ?? null, m.supplier_code ?? null]);
-      }
-      // upsert rules
-      for (const r of pb.tables.price_rules) {
-        await client.query(UPSERT_RULE, [r.id, r.applies_to, r.metric, r.formula ?? null]);
-      }
+      // materials
+for (const m of pb.tables.materials) {
+  await client.query(UPSERT_MATERIAL, [
+    m.id,                               // material_uid
+    m.name,
+    m.density_lb_ft3 ?? null,
+    m.supplier_code ?? null,
+  ]);
+}
+      // price_rules
+for (const r of pb.tables.price_rules) {
+  await client.query(UPSERT_RULE, [
+    r.id,                               // rule_uid
+    r.applies_to ?? null,
+    r.metric ?? null,
+    r.formula ?? null,
+  ]);
+}
       // upsert cavities
       for (const c of pb.tables.cavities) {
         await client.query(UPSERT_CAVITY, [c.id, c.shape, JSON.stringify(c.dims ?? {}), c.volume_ci, c.notes ?? null]);
