@@ -236,9 +236,26 @@ export default function CushionCurvesAdmin() {
           {msg && <div className="text-xs text-green-700 mt-1">{msg}</div>}
         </div>
 
-        <div className="md:col-span-2 flex items-end">
-          <button disabled={uploading} onClick={()=>refreshCurves()} className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40 w-full">Refresh</button>
-        </div>
+        <div className="md:col-span-2 flex items-end gap-2">
+  <button
+    disabled={uploading}
+    onClick={()=>refreshCurves()}
+    className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40 w-full"
+  >
+    Refresh
+  </button>
+
+  <a
+    href={selectedIds.length === 1
+      ? `/api/cushion/curves/export?material_id=${selectedIds[0]}`
+      : `/api/cushion/curves/export`}
+    className="bg-white border border-gray-300 rounded-lg px-4 py-2 text-center"
+    title="Download a CSV of the currently selected material (or all if multiple/none selected)."
+  >
+    Export CSV
+  </a>
+</div>
+
       </div>
 
       <div className="bg-white rounded-2xl shadow p-4">
@@ -328,17 +345,21 @@ export default function CushionCurvesAdmin() {
             </tr>
           </thead>
           <tbody>
-            {curves.length ? curves.map((c, i) => (
-              <tr key={i} className="border-t">
-                <td className="p-2">{materials.find(m => m.id === c.material_id)?.name || c.material_id}</td>
-                <td className="p-2">{c.static_psi}</td>
-                <td className="p-2">{c.deflect_pct}</td>
-                <td className="p-2">{c.g_level}</td>
-                <td className="p-2">{c.source || ""}</td>
-              </tr>
-            )) : (
-              <tr><td colSpan={5} className="p-3">No curve points yet. Upload a CSV to begin.</td></tr>
-            )}
+            {curves.length ? curves.map((c, i) => {
+  const stroke = colorForMaterial(c.material_id);
+  return (
+    <tr key={i} className="border-t" style={{ borderLeft: `4px solid ${stroke}` }}>
+      <td className="p-2">{materials.find(m => m.id === c.material_id)?.name || c.material_id}</td>
+      <td className="p-2">{c.static_psi}</td>
+      <td className="p-2">{c.deflect_pct}</td>
+      <td className="p-2">{c.g_level}</td>
+      <td className="p-2">{c.source || ""}</td>
+    </tr>
+  );
+}) : (
+  <tr><td colSpan={5} className="p-3">No curve points yet. Upload a CSV to begin.</td></tr>
+)}
+
           </tbody>
         </table>
       </div>
