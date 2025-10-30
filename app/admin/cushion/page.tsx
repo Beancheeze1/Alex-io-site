@@ -5,6 +5,20 @@ import {
   CartesianGrid, ResponsiveContainer, Legend, ReferenceLine,
 } from "recharts";
 
+function Spinner({ className = "" }) {
+  return (
+    <svg
+      className={`animate-spin h-4 w-4 ${className}`}
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+    </svg>
+  );
+}
+
+
 /* ================= Brand Palette (stable) =================
    Edit to taste. These are high-contrast, print-friendly. */
 const PALETTE = [
@@ -201,62 +215,73 @@ export default function CushionCurvesAdmin() {
     <div className="p-6 max-w-7xl mx-auto space-y-8">
       <h1 className="text-2xl font-semibold">Cushion Curves</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-white p-4 rounded-2xl shadow">
-        <div className="md:col-span-4">
-          <label className="text-sm text-gray-600">Materials (overlay)</label>
-          <div className="border rounded-lg p-2 h-36 overflow-auto space-y-1">
-            {materials.map(m => {
-              const checked = selectedIds.includes(m.id);
-              return (
-                <label key={m.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(e) => {
-                      setSelectedIds(prev => e.target.checked ? [...prev, m.id] : prev.filter(x=>x!==m.id));
-                    }}
-                  />
-                  <span>{m.name}</span>
-                </label>
-              );
-            })}
-            {!materials.length && <div className="text-xs text-gray-500">No materials yet.</div>}
-          </div>
-          <div className="text-xs text-gray-500 mt-1">If none selected, the chart shows up to 8 materials.</div>
-        </div>
+<div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-white p-4 rounded-2xl shadow">
+  {/* Material multi-select */}
+  <div className="md:col-span-4">
+    <label className="text-sm text-gray-600">Materials (overlay)</label>
+    <div className="border rounded-lg p-2 h-36 overflow-auto space-y-1">
+      {materials.map(m => {
+        const checked = selectedIds.includes(m.id);
+        return (
+          <label key={m.id} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => {
+                setSelectedIds(prev => e.target.checked
+                  ? [...prev, m.id] : prev.filter(x=>x!==m.id));
+              }}
+            />
+            <span>{m.name}</span>
+          </label>
+        );
+      })}
+      {!materials.length && <div className="text-xs text-gray-500">No materials yet.</div>}
+    </div>
+    <div className="text-xs text-gray-500 mt-1">If none selected, the chart shows up to 8 materials.</div>
+  </div>
 
-        <div className="md:col-span-2">
-          <label className="text-sm text-gray-600">Target static load (psi)</label>
-          <input className="border rounded-lg p-2 w-full" value={staticPsi} onChange={(e)=>setStaticPsi(e.target.value)} />
-        </div>
+  {/* Target psi */}
+  <div className="md:col-span-2">
+    <label className="text-sm text-gray-600">Target static load (psi)</label>
+    <input className="border rounded-lg p-2 w-full" value={staticPsi} onChange={(e)=>setStaticPsi(e.target.value)} />
+  </div>
 
-        <div className="md:col-span-4">
-          <label className="text-sm text-gray-600">Upload CSV (material_id, static_psi, deflect_pct, g_level[, source])</label>
-          <input type="file" accept=".csv,text/csv" className="block w-full" onChange={handleCSV} />
-          {msg && <div className="text-xs text-green-700 mt-1">{msg}</div>}
-        </div>
+  {/* CSV upload */}
+  <div className="md:col-span-4">
+    <label className="text-sm text-gray-600">Upload CSV (material_id, static_psi, deflect_pct, g_level[, source])</label>
+    <input type="file" accept=".csv,text/csv" className="block w-full" onChange={handleCSV} />
+    {msg && <div className="text-xs text-green-700 mt-1">{msg}</div>}
+  </div>
 
-        <div className="md:col-span-2 flex items-end gap-2">
-  <button
-    disabled={uploading}
-    onClick={()=>refreshCurves()}
-    className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40 w-full"
-  >
-    Refresh
-  </button>
+  {/* Refresh + Export CSV (spinner/disable while uploading) */}
+  <div className="md:col-span-2 flex items-end gap-2">
+    <button
+      disabled={uploading}
+      onClick={() => refreshCurves()}
+      className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40 w-full"
+    >
+      Refresh
+    </button>
 
-  <a
-    href={selectedIds.length === 1
-      ? `/api/cushion/curves/export?material_id=${selectedIds[0]}`
-      : `/api/cushion/curves/export`}
-    className="bg-white border border-gray-300 rounded-lg px-4 py-2 text-center"
-    title="Download a CSV of the currently selected material (or all if multiple/none selected)."
-  >
-    Export CSV
-  </a>
+    <a
+      href={
+        selectedIds.length === 1
+          ? `/api/cushion/curves/export?material_id=${selectedIds[0]}`
+          : `/api/cushion/curves/export`
+      }
+      role="button"
+      aria-disabled={uploading}
+      onClick={(e) => { if (uploading) e.preventDefault(); }}
+      className={`bg-white border border-gray-300 rounded-lg px-4 py-2 text-center w-full flex items-center justify-center gap-2 ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+      title="Download a CSV of the currently selected material (or all if multiple/none selected)."
+    >
+      {uploading && <Spinner />}
+      Export CSV
+    </a>
+  </div>
 </div>
 
-      </div>
 
       <div className="bg-white rounded-2xl shadow p-4">
         <div className="flex items-center justify-between mb-3">
