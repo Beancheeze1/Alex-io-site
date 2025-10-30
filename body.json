@@ -1,7 +1,7 @@
 ﻿{
-  "length_in": 24, "width_in": 18, "height_in": 2, "qty": 2, "material_id": 1,
-  "cavities": [
-    { "label": "slot",   "count": 2, "w": 1,   "l": 6, "d": 2 },
-    { "label": "circle", "count": 1, "dia": 3, "d": 1 }
-  ]
+  "weight_lbf": 12,
+  "area_in2": 48,
+  "thickness_in": 2,
+  "fragility_g": 50,
+  "drop_in": 24
 }

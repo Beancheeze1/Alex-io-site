@@ -1,16 +1,11 @@
 // app/api/cushion/recommend/route.ts
 import { NextResponse } from "next/server";
+import { readFile } from "fs/promises";
+import { join } from "path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/**
- * ⚠️ Starter sample curves (for prototyping only)
- * - Units: 24" drop, thickness reference = 2.0 in
- * - Series are per-foam, per-deflection (fraction, e.g. 0.25 = 25%)
- * - Each series: [{ psi, g }, ...] where psi = static stress (lb/in^2), g = transmitted G
- * - Shapes are approximate/illustrative — swap with vendor data when ready.
- */
 type Point = { psi: number; g: number };
 type Series = { defl: number; points: Point[] };
 type FoamCurve = { key: string; name: string; density_lb_ft3: number; series: Series[] };
@@ -18,8 +13,8 @@ type FoamCurve = { key: string; name: string; density_lb_ft3: number; series: Se
 const THICKNESS_REF_IN = 2.0;
 const DROP_REF_IN = 24.0;
 
-/** A few common families with gentle U-shaped curves around an optimum static stress. */
-const CURVES: FoamCurve[] = [
+/** Embedded fallback curves (used if data/cushion_curves.json is missing) */
+const FALLBACK_CURVES: FoamCurve[] = [
   {
     key: "pe17",
     name: "PE 1.7 lb",
@@ -54,9 +49,19 @@ const CURVES: FoamCurve[] = [
   },
 ];
 
-/** Linear interpolation over piecewise segments. Extrapolates flat at ends. */
+/** Load curves from data/cushion_curves.json if present; fall back to embedded sample. */
+async function loadCurves(): Promise<FoamCurve[]> {
+  try {
+    const p = join(process.cwd(), "data", "cushion_curves.json");
+    const txt = await readFile(p, "utf8");
+    const arr = JSON.parse(txt);
+    if (Array.isArray(arr)) return arr as FoamCurve[];
+  } catch {}
+  return FALLBACK_CURVES;
+}
+
 function interp(points: Point[], psi: number): number {
-  if (points.length === 0) return Number.POSITIVE_INFINITY;
+  if (!points.length) return Number.POSITIVE_INFINITY;
   if (psi <= points[0].psi) return points[0].g;
   if (psi >= points[points.length - 1].psi) return points[points.length - 1].g;
   for (let i = 0; i < points.length - 1; i++) {
@@ -69,17 +74,22 @@ function interp(points: Point[], psi: number): number {
   return points[points.length - 1].g;
 }
 
-/**
- * Scale G for thickness and drop heuristics.
- * Very rough but useful for early quoting:
- *  - Thickness: G ~ (t_ref / t)^0.5  (thicker foam → lower G)
- *  - Drop height: G ~ sqrt(drop / drop_ref)
- */
-function applyScaling(gAtRef: number, thickness_in: number, drop_in: number): number {
+/** Thickness + drop scaling: g_scaled = g_ref * sqrt(drop/drop_ref) * sqrt(t_ref / t) */
+function gScaled(gRef: number, thickness_in: number, drop_in: number) {
   const t = Math.max(0.25, thickness_in || THICKNESS_REF_IN);
-  const thicknessFactor = Math.sqrt(THICKNESS_REF_IN / t);
   const dropFactor = Math.sqrt((drop_in || DROP_REF_IN) / DROP_REF_IN);
-  return gAtRef * thicknessFactor * dropFactor;
+  const tFactor = Math.sqrt(THICKNESS_REF_IN / t);
+  return gRef * dropFactor * tFactor;
+}
+
+/** Solve minimum thickness to meet a fragility limit at given gRef & drop. */
+function minThicknessFor(gRef: number, fragG: number, drop_in: number) {
+  const dropFactor = Math.sqrt((drop_in || DROP_REF_IN) / DROP_REF_IN);
+  const need = (gRef * dropFactor) / Math.max(1e-6, fragG);
+  // fragG >= gRef * dropFactor * sqrt(t_ref/t)  =>  t >= t_ref * (gRef*dropFactor/fragG)^2
+  const tReq = THICKNESS_REF_IN * (need * need);
+  const snapped = Math.max(0.25, Math.round(tReq * 8) / 8); // snap to 1/8"
+  return { t_required_in: snapped, exact_in: tReq };
 }
 
 type Input = {
@@ -88,6 +98,7 @@ type Input = {
   thickness_in?: number;
   fragility_g?: number;
   drop_in?: number;
+  overlay_count?: number;
 };
 
 export async function POST(req: Request) {
@@ -99,65 +110,61 @@ export async function POST(req: Request) {
     const t_in   = Math.max(0.25, Number(body.thickness_in) || THICKNESS_REF_IN);
     const fragG  = Math.max(10, Number(body.fragility_g) || 50);
     const drop   = Math.max(6, Number(body.drop_in) || DROP_REF_IN);
+    const overlayCount = Math.min(4, Math.max(1, Math.floor(Number(body.overlay_count) || 3)));
 
-    const psi = weight / area; // static stress
+    const psi = weight / area;
+    const curves = await loadCurves();
 
-    // Evaluate every foam/deflection; pick best that meets fragility.
-    type Cand = {
-      foam: FoamCurve;
-      defl: number;
-      g_pred: number;
-      g_raw: number;
-      psi: number;
-    };
-
+    type Cand = { foam: FoamCurve; defl: number; g_ref: number; g_pred: number };
     const cands: Cand[] = [];
-    for (const foam of CURVES) {
+
+    for (const foam of curves) {
       for (const s of foam.series) {
-        const g24 = interp(s.points, psi);     // predicted G at 24" & 2"
-        const gScaled = applyScaling(g24, t_in, drop);
-        cands.push({ foam, defl: s.defl, g_pred: gScaled, g_raw: g24, psi });
+        const gRef = interp(s.points, psi);
+        const gPred = gScaled(gRef, t_in, drop);
+        cands.push({ foam, defl: s.defl, g_ref: gRef, g_pred: gPred });
       }
     }
 
-    // Sort by predicted G ascending (we want the lowest that meets requirement).
     cands.sort((a, b) => a.g_pred - b.g_pred);
-
-    // Pick first that meets fragility; if none, pick lowest G (warn).
     const winner = cands.find(c => c.g_pred <= fragG) ?? cands[0];
 
-    // Build a chart series for the chosen foam at its best deflection.
-    const seriesForChart = (() => {
-      const s = winner.foam.series.find(x => x.defl === winner.defl)!;
-      const pts = s.points.map(p => ({ psi: p.psi, g: applyScaling(p.g, t_in, drop) }));
-      return {
-        deflection_pct: Math.round(winner.defl * 100),
-        points: pts,
-      };
-    })();
+    // Overlay nearest deflections for the winner foam
+    const winnerFoam = winner.foam;
+    const deflsSorted = [...winnerFoam.series]
+      .sort((a, b) => Math.abs(a.defl - winner.defl) - Math.abs(b.defl - winner.defl))
+      .slice(0, overlayCount);
 
-    // Return top-3 plus chart data
-    const top3 = cands.slice(0, 3).map(c => ({
-      foam_key: c.foam.key,
-      foam_name: c.foam.name,
-      density_lb_ft3: c.foam.density_lb_ft3,
-      deflection_pct: Math.round(c.defl * 100),
-      psi: c.psi,
-      g_pred: Number(c.g_pred.toFixed(1)),
-      g_raw_ref: Number(c.g_raw.toFixed(1)),
-      meets_fragility: c.g_pred <= fragG,
+    const overlaySeries = deflsSorted.map(s => ({
+      deflection_pct: Math.round(s.defl * 100),
+      points: s.points.map(p => ({ psi: p.psi, g: gScaled(p.g, t_in, drop) })),
     }));
+
+    // Per-foam minimum thickness
+    const perFoam = curves.map(foam => {
+      let best = { t_required_in: Infinity, deflection_pct: 0, g_ref_at_psi: Infinity };
+      for (const s of foam.series) {
+        const gRef = interp(s.points, psi);
+        const m = minThicknessFor(gRef, fragG, drop);
+        if (m.t_required_in < best.t_required_in) {
+          best = { t_required_in: m.t_required_in, deflection_pct: Math.round(s.defl * 100), g_ref_at_psi: gRef };
+        }
+      }
+      return {
+        foam_key: foam.key,
+        foam_name: foam.name,
+        density_lb_ft3: foam.density_lb_ft3,
+        deflection_pct: best.deflection_pct,
+        min_thickness_in: Number(best.t_required_in.toFixed(3)),
+        g_ref_at_psi: Number(best.g_ref_at_psi.toFixed(1)),
+      };
+    }).sort((a, b) => a.min_thickness_in - b.min_thickness_in);
+
+    const overall = perFoam[0];
 
     return NextResponse.json({
       ok: true,
-      input: {
-        weight_lbf: weight,
-        area_in2: area,
-        thickness_in: t_in,
-        psi,
-        fragility_g: fragG,
-        drop_in: drop,
-      },
+      input: { weight_lbf: weight, area_in2: area, thickness_in: t_in, psi, fragility_g: fragG, drop_in: drop },
       winner: {
         foam_key: winner.foam.key,
         foam_name: winner.foam.name,
@@ -166,12 +173,17 @@ export async function POST(req: Request) {
         g_pred: Number(winner.g_pred.toFixed(1)),
         meets_fragility: winner.g_pred <= fragG,
       },
-      top3,
-      chart: {
-        series: seriesForChart,
-        fragility_g: fragG,
-      },
-      note: "Prototype math using heuristic scaling; replace with vendor curves for production.",
+      top3: cands.slice(0, 3).map(c => ({
+        foam_key: c.foam.key,
+        foam_name: c.foam.name,
+        density_lb_ft3: c.foam.density_lb_ft3,
+        deflection_pct: Math.round(c.defl * 100),
+        g_pred: Number(c.g_pred.toFixed(1)),
+        meets_fragility: c.g_pred <= fragG,
+      })),
+      chart: { overlays: overlaySeries, fragility_g: fragG },
+      thickness_recommendation: { overall_min: overall, per_foam: perFoam },
+      note: "Prototype scaling; swap data in data/cushion_curves.json for production curves.",
     }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
