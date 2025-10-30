@@ -1,5 +1,5 @@
 // app/layout.tsx
-import './globals.css';
+import '../styles/globals.css';
 import BrandHeader from '@/components/BrandHeader';
 import LeftNav from '@/components/LeftNav';
 
