@@ -1,123 +1,179 @@
 // app/api/cushion/recommend/route.ts
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-let _pool: Pool | null = null;
-function pool() {
-  if (!_pool) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error("Missing env: DATABASE_URL");
-    _pool = new Pool({ connectionString: url, max: 5, ssl: { rejectUnauthorized: false } });
-  }
-  return _pool!;
-}
+/**
+ * ⚠️ Starter sample curves (for prototyping only)
+ * - Units: 24" drop, thickness reference = 2.0 in
+ * - Series are per-foam, per-deflection (fraction, e.g. 0.25 = 25%)
+ * - Each series: [{ psi, g }, ...] where psi = static stress (lb/in^2), g = transmitted G
+ * - Shapes are approximate/illustrative — swap with vendor data when ready.
+ */
+type Point = { psi: number; g: number };
+type Series = { defl: number; points: Point[] };
+type FoamCurve = { key: string; name: string; density_lb_ft3: number; series: Series[] };
 
-type CurvePt = { deflect_pct:number, g_level:number };
+const THICKNESS_REF_IN = 2.0;
+const DROP_REF_IN = 24.0;
 
-function interp(points: CurvePt[], defl: number): number | null {
-  // points must be sorted by deflect_pct
-  if (!points.length) return null;
-  if (defl <= points[0].deflect_pct) return points[0].g_level;
-  if (defl >= points[points.length-1].deflect_pct) return points[points.length-1].g_level;
-  for (let i=0;i<points.length-1;i++){
-    const a = points[i], b = points[i+1];
-    if (defl >= a.deflect_pct && defl <= b.deflect_pct) {
-      const t = (defl - a.deflect_pct)/(b.deflect_pct - a.deflect_pct);
-      return a.g_level + t*(b.g_level - a.g_level);
+/** A few common families with gentle U-shaped curves around an optimum static stress. */
+const CURVES: FoamCurve[] = [
+  {
+    key: "pe17",
+    name: "PE 1.7 lb",
+    density_lb_ft3: 1.7,
+    series: [
+      { defl: 0.20, points: [ {psi:0.20,g:150},{psi:0.40,g:105},{psi:0.70,g:85},{psi:1.00,g:95},{psi:1.30,g:120} ] },
+      { defl: 0.25, points: [ {psi:0.25,g:140},{psi:0.50,g:95 },{psi:0.80,g:70},{psi:1.10,g:78},{psi:1.40,g:105} ] },
+      { defl: 0.30, points: [ {psi:0.30,g:145},{psi:0.55,g:100},{psi:0.85,g:73},{psi:1.20,g:80},{psi:1.55,g:110} ] },
+      { defl: 0.35, points: [ {psi:0.35,g:155},{psi:0.60,g:110},{psi:0.90,g:80},{psi:1.30,g:88},{psi:1.70,g:120} ] },
+    ],
+  },
+  {
+    key: "pe22",
+    name: "PE 2.2 lb",
+    density_lb_ft3: 2.2,
+    series: [
+      { defl: 0.20, points: [ {psi:0.35,g:150},{psi:0.60,g:105},{psi:0.95,g:85},{psi:1.30,g:95},{psi:1.70,g:125} ] },
+      { defl: 0.25, points: [ {psi:0.40,g:140},{psi:0.70,g:95 },{psi:1.05,g:70},{psi:1.45,g:78},{psi:1.90,g:108} ] },
+      { defl: 0.30, points: [ {psi:0.45,g:145},{psi:0.80,g:100},{psi:1.20,g:72},{psi:1.65,g:80},{psi:2.10,g:112} ] },
+      { defl: 0.35, points: [ {psi:0.50,g:155},{psi:0.90,g:110},{psi:1.35,g:80},{psi:1.85,g:88},{psi:2.45,g:122} ] },
+    ],
+  },
+  {
+    key: "pu13",
+    name: "PU 1.3 lb (ester)",
+    density_lb_ft3: 1.3,
+    series: [
+      { defl: 0.20, points: [ {psi:0.12,g:150},{psi:0.25,g:110},{psi:0.40,g:88},{psi:0.60,g:102} ] },
+      { defl: 0.25, points: [ {psi:0.15,g:140},{psi:0.28,g:100},{psi:0.45,g:80},{psi:0.65,g:96} ] },
+      { defl: 0.30, points: [ {psi:0.18,g:142},{psi:0.32,g:102},{psi:0.52,g:83},{psi:0.75,g:98} ] },
+    ],
+  },
+];
+
+/** Linear interpolation over piecewise segments. Extrapolates flat at ends. */
+function interp(points: Point[], psi: number): number {
+  if (points.length === 0) return Number.POSITIVE_INFINITY;
+  if (psi <= points[0].psi) return points[0].g;
+  if (psi >= points[points.length - 1].psi) return points[points.length - 1].g;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    if (psi >= a.psi && psi <= b.psi) {
+      const t = (psi - a.psi) / (b.psi - a.psi || 1e-9);
+      return a.g + t * (b.g - a.g);
     }
   }
-  return null;
+  return points[points.length - 1].g;
 }
+
+/**
+ * Scale G for thickness and drop heuristics.
+ * Very rough but useful for early quoting:
+ *  - Thickness: G ~ (t_ref / t)^0.5  (thicker foam → lower G)
+ *  - Drop height: G ~ sqrt(drop / drop_ref)
+ */
+function applyScaling(gAtRef: number, thickness_in: number, drop_in: number): number {
+  const t = Math.max(0.25, thickness_in || THICKNESS_REF_IN);
+  const thicknessFactor = Math.sqrt(THICKNESS_REF_IN / t);
+  const dropFactor = Math.sqrt((drop_in || DROP_REF_IN) / DROP_REF_IN);
+  return gAtRef * thicknessFactor * dropFactor;
+}
+
+type Input = {
+  weight_lbf?: number;
+  area_in2?: number;
+  thickness_in?: number;
+  fragility_g?: number;
+  drop_in?: number;
+};
 
 export async function POST(req: Request) {
   try {
-    const b = await req.json();
-    const weight = Number(b.weight_lbf);
-    const area   = Number(b.area_in2);
-    const thick  = Number(b.thickness_in);
-    const fragG  = Number(b.fragility_g ?? 50);
-    const dropIn = Number(b.drop_in ?? 24);
+    const body = (await req.json()) as Input;
 
-    if (!(weight>0 && area>0 && thick>0)) {
-      return NextResponse.json({ error: "weight_lbf, area_in2, thickness_in must be > 0" }, { status: 400 });
-    }
-    const staticPsi = weight/area;
+    const weight = Math.max(0.01, Number(body.weight_lbf) || 0);
+    const area   = Math.max(0.01, Number(body.area_in2)   || 0);
+    const t_in   = Math.max(0.25, Number(body.thickness_in) || THICKNESS_REF_IN);
+    const fragG  = Math.max(10, Number(body.fragility_g) || 50);
+    const drop   = Math.max(6, Number(body.drop_in) || DROP_REF_IN);
 
-    // Pull materials + price
-    const mats = await pool().query(`
-      SELECT id, name, kerf_waste_pct, price_per_bf,
-             (price_per_bf/1728.0)::numeric(12,6) AS price_per_cuin
-      FROM public.materials
-      WHERE active IS DISTINCT FROM false
-      ORDER BY id
-    `);
+    const psi = weight / area; // static stress
 
-    // Pull curve points near this static load
-    const window = 0.25; // psi search window
-    const { rows: pts } = await pool().query(`
-      SELECT material_id, static_psi, deflect_pct, g_level
-      FROM public.cushion_curves
-      WHERE static_psi BETWEEN $1 AND $2
-      ORDER BY material_id, deflect_pct
-    `, [staticPsi - window, staticPsi + window]);
-
-    // Assemble by material
-    const byMat = new Map<number, CurvePt[]>();
-    for (const r of pts) {
-      const arr = byMat.get(r.material_id) || [];
-      arr.push({ deflect_pct: Number(r.deflect_pct), g_level: Number(r.g_level) });
-      byMat.set(r.material_id, arr);
-    }
-
+    // Evaluate every foam/deflection; pick best that meets fragility.
     type Cand = {
-      material_id:number; material_name:string;
-      static_psi:number; deflect_pct:number; g:number;
-      est_piece_usd:number;
+      foam: FoamCurve;
+      defl: number;
+      g_pred: number;
+      g_raw: number;
+      psi: number;
     };
+
     const cands: Cand[] = [];
-
-    for (const m of mats.rows) {
-      const mid = Number(m.id);
-      const curve = byMat.get(mid);
-      if (!curve || curve.length<2) continue;
-
-      // try a sweep over allowable deflections (10%..70%)
-      let best: {defl:number; g:number} | null = null;
-      for (let d = 10; d<=70; d+=1){
-        const g = interp(curve, d);
-        if (g==null) continue;
-        if (g <= fragG) {
-          if (!best || g < best.g) best = {defl:d, g};
-        }
+    for (const foam of CURVES) {
+      for (const s of foam.series) {
+        const g24 = interp(s.points, psi);     // predicted G at 24" & 2"
+        const gScaled = applyScaling(g24, t_in, drop);
+        cands.push({ foam, defl: s.defl, g_pred: gScaled, g_raw: g24, psi });
       }
-      if (!best) continue;
-
-      // rough cost: area*thickness * $/cuin (doesn't include kerf rounding)
-      const netCuIn = area * thick;
-      const pricePerCuIn = Number(m.price_per_cuin);
-      const estPieceUsd = Math.max(netCuIn * pricePerCuIn, Number(m.min_charge_usd ?? 0) || 0);
-
-      cands.push({
-        material_id: mid,
-        material_name: String(m.name),
-        static_psi: staticPsi,
-        deflect_pct: best.defl,
-        g: Number(best.g.toFixed(0)),
-        est_piece_usd: Number(estPieceUsd.toFixed(2))
-      });
     }
 
-    cands.sort((a,b)=> (a.g-b.g) || (a.est_piece_usd - b.est_piece_usd));
+    // Sort by predicted G ascending (we want the lowest that meets requirement).
+    cands.sort((a, b) => a.g_pred - b.g_pred);
+
+    // Pick first that meets fragility; if none, pick lowest G (warn).
+    const winner = cands.find(c => c.g_pred <= fragG) ?? cands[0];
+
+    // Build a chart series for the chosen foam at its best deflection.
+    const seriesForChart = (() => {
+      const s = winner.foam.series.find(x => x.defl === winner.defl)!;
+      const pts = s.points.map(p => ({ psi: p.psi, g: applyScaling(p.g, t_in, drop) }));
+      return {
+        deflection_pct: Math.round(winner.defl * 100),
+        points: pts,
+      };
+    })();
+
+    // Return top-3 plus chart data
+    const top3 = cands.slice(0, 3).map(c => ({
+      foam_key: c.foam.key,
+      foam_name: c.foam.name,
+      density_lb_ft3: c.foam.density_lb_ft3,
+      deflection_pct: Math.round(c.defl * 100),
+      psi: c.psi,
+      g_pred: Number(c.g_pred.toFixed(1)),
+      g_raw_ref: Number(c.g_raw.toFixed(1)),
+      meets_fragility: c.g_pred <= fragG,
+    }));
 
     return NextResponse.json({
-      input: { weight_lbf: weight, area_in2: area, thickness_in: thick, fragility_g: fragG, drop_in: dropIn, static_psi: Number(staticPsi.toFixed(3)) },
-      recommendations: cands.slice(0, 8) // top 8
-    }, { status: 200, headers: { "Cache-Control": "no-store" } });
-
-  } catch (e:any) {
+      ok: true,
+      input: {
+        weight_lbf: weight,
+        area_in2: area,
+        thickness_in: t_in,
+        psi,
+        fragility_g: fragG,
+        drop_in: drop,
+      },
+      winner: {
+        foam_key: winner.foam.key,
+        foam_name: winner.foam.name,
+        density_lb_ft3: winner.foam.density_lb_ft3,
+        deflection_pct: Math.round(winner.defl * 100),
+        g_pred: Number(winner.g_pred.toFixed(1)),
+        meets_fragility: winner.g_pred <= fragG,
+      },
+      top3,
+      chart: {
+        series: seriesForChart,
+        fragility_g: fragG,
+      },
+      note: "Prototype math using heuristic scaling; replace with vendor curves for production.",
+    }, { status: 200 });
+  } catch (e: any) {
     return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
   }
 }

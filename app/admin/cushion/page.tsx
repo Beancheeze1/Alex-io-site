@@ -1,403 +1,148 @@
+// app/admin/cushion/page.tsx
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip,
-  CartesianGrid, ResponsiveContainer, Legend, ReferenceLine,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
 } from "recharts";
 
-/* ===== Brand Palette (stable per material_id) ===== */
-const PALETTE = ["#111827","#2563EB","#10B981","#F59E0B","#EF4444","#8B5CF6","#14B8A6","#E11D48","#0EA5E9","#84CC16"];
-const colorForMaterial = (id: number) => PALETTE[Math.abs(id) % PALETTE.length];
+type RecInput = {
+  weight_lbf: number; area_in2: number; thickness_in: number; fragility_g: number; drop_in: number;
+};
+type ChartPoint = { psi: number; g: number };
 
-/* ===== Tiny Spinner ===== */
-function Spinner({ className = "" }) {
-  return (
-    <svg className={`animate-spin h-4 w-4 ${className}`} viewBox="0 0 24 24" fill="none">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-    </svg>
-  );
-}
-
-/* ===== Types ===== */
-type Material = { id: number; name: string };
-type Curve = { material_id: number; static_psi: number; deflect_pct: number; g_level: number; source?: string };
-
-/* ===== Helpers ===== */
-function interpG(pts: Array<{deflect_pct:number; g_level:number}>, defl: number): number | null {
-  if (!pts.length) return null;
-  if (defl <= pts[0].deflect_pct) return pts[0].g_level;
-  const last = pts[pts.length-1];
-  if (defl >= last.deflect_pct) return last.g_level;
-  for (let i=0;i<pts.length-1;i++){
-    const a = pts[i], b = pts[i+1];
-    if (defl >= a.deflect_pct && defl <= b.deflect_pct) {
-      const t = (defl - a.deflect_pct) / (b.deflect_pct - a.deflect_pct);
-      return a.g_level + t*(b.g_level - a.g_level);
-    }
-  }
-  return null;
-}
-
-/* ===== Page ===== */
-export default function CushionCurvesAdmin() {
-  const [materials, setMaterials] = useState<Material[]>([]);
-  const [curves, setCurves] = useState<Curve[]>([]);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [staticPsi, setStaticPsi] = useState<string>("0.50");
-  const [uploading, setUploading] = useState(false);
+export default function CushionAdminPage() {
+  const [form, setForm] = useState<RecInput>({
+    weight_lbf: 12, area_in2: 48, thickness_in: 2, fragility_g: 50, drop_in: 24,
+  });
+  const [data, setData] = useState<null | {
+    ok: boolean;
+    input: any;
+    winner: any;
+    top3: any[];
+    chart: { series: { deflection_pct: number; points: ChartPoint[] }; fragility_g: number };
+    note: string;
+  }>(null);
+  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string>("");
 
-  // Test Cushion
-  const [tc, setTC] = useState({ weight_lbf: "12", area_in2: "48", thickness_in: "2", fragility_g: "50", drop_in: "24" });
-  const [tcResults, setTCResults] = useState<any>(null);
-  const fragilityLine = useMemo(()=> Number(tc.fragility_g || "0") || undefined, [tc.fragility_g]);
-
-  // Parse Tester
-  const [parseText, setParseText] = useState<string>("");
-  const [parseOut, setParseOut] = useState<any>(null);
-  const [parseBusy, setParseBusy] = useState<boolean>(false);
-
-  async function refreshMaterials() {
-    const res = await fetch("/api/materials", { cache: "no-store" });
-    const data = await res.json();
-    const rows = Array.isArray(data) ? data : [];
-    setMaterials(rows.map((r: any) => ({ id: r.id, name: r.name })));
-  }
-  async function refreshCurves(material_id?: number) {
-    const url = material_id ? `/api/cushion/curves?material_id=${material_id}` : "/api/cushion/curves";
-    const res = await fetch(url, { cache: "no-store" });
-    const data = await res.json();
-    const rows: any[] = Array.isArray(data) ? data : (Array.isArray(data?.rows) ? data.rows : []);
-    setCurves(rows.map(r => ({
-      material_id: Number(r.material_id),
-      static_psi: Number(r.static_psi),
-      deflect_pct: Number(r.deflect_pct),
-      g_level: Number(r.g_level),
-      source: r.source ?? undefined,
-    })));
-  }
-  useEffect(() => { refreshMaterials(); refreshCurves(); }, []);
-
-  const curvesByMat = useMemo(() => {
-    const map = new Map<number, Map<number, {deflect_pct:number; g_level:number}[]>>();
-    for (const c of curves) {
-      const m = map.get(c.material_id) || new Map<number, any[]>();
-      const key = Number(c.static_psi.toFixed(3));
-      const arr = m.get(key) || [];
-      arr.push({ deflect_pct: c.deflect_pct, g_level: c.g_level });
-      m.set(key, arr); map.set(c.material_id, m);
-    }
-    map.forEach(m => m.forEach(arr => arr.sort((a,b)=>a.deflect_pct-b.deflect_pct)));
-    return map;
-  }, [curves]);
-
-  const overlayData = useMemo(() => {
-    const ids = (selectedIds.length ? selectedIds : Array.from(curvesByMat.keys())).slice(0, 8);
-    if (!ids.length) return [] as any[];
-    const target = Number(staticPsi) || 0;
-    const nearestFor: Record<number, {deflect_pct:number; g_level:number}[] | null> = {};
-    ids.forEach(id => {
-      const groups = curvesByMat.get(id);
-      if (!groups) { nearestFor[id] = null; return; }
-      const keys = Array.from(groups.keys());
-      if (!keys.length) { nearestFor[id] = null; return; }
-      const nearestKey = keys.sort((a,b)=>Math.abs(a-target)-Math.abs(b-target))[0];
-      nearestFor[id] = groups.get(nearestKey) || null;
-    });
-    const rows: any[] = [];
-    for (let defl = 10; defl <= 70; defl += 1) {
-      const row: any = { deflect_pct: defl };
-      ids.forEach(id => {
-        const pts = nearestFor[id];
-        if (pts && pts.length >= 2) {
-          const g = interpG(pts, defl);
-          if (g != null) row[`g_m${id}`] = Number(g.toFixed(0));
-        }
-      });
-      rows.push(row);
-    }
-    return rows;
-  }, [curvesByMat, selectedIds, staticPsi]);
-
-  const seriesMeta = useMemo(() => {
-    const ids = (selectedIds.length ? selectedIds : Array.from(curvesByMat.keys())).slice(0, 8);
-    return ids.map(id => ({
-      key: `g_m${id}`,
-      name: materials.find(m=>m.id===id)?.name || `Mat ${id}`,
-      stroke: colorForMaterial(id),
-    }));
-  }, [materials, curvesByMat, selectedIds]);
-
-  async function handleCSV(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]; if (!file) return;
-    const text = await file.text();
-    const header = text.trim().split(/\r?\n/)[0].toLowerCase();
-    const looksOk = ["material_id","static_psi","deflect_pct","g_level"].every(h => header.includes(h));
-    if (!looksOk) { setMsg("Expected headers: material_id, static_psi, deflect_pct, g_level[, source]"); return; }
-
-    setUploading(true); setMsg("");
+  async function onCalc(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setMsg("");
     try {
-      const res = await fetch("/api/cushion/curves", { method: "POST", headers: { "Content-Type": "text/csv" }, body: text });
-      const j = await res.json().catch(()=>({}));
-      setMsg(res.ok ? `Uploaded ${j?.upserted ?? ""} points.` : (j?.error || "Upload failed"));
-      await refreshCurves();
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function runTestCushion(e: React.FormEvent) {
-    e.preventDefault(); setTCResults(null);
-    const payload = {
-      weight_lbf: Number(tc.weight_lbf),
-      area_in2: Number(tc.area_in2),
-      thickness_in: Number(tc.thickness_in),
-      fragility_g: Number(tc.fragility_g),
-      drop_in: Number(tc.drop_in),
-    };
-    const res = await fetch("/api/cushion/recommend?t="+Math.random(), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const j = await res.json().catch(()=>({}));
-    setTCResults(j);
-    if (j?.input?.static_psi != null) setStaticPsi(String(j.input.static_psi));
-  }
-
-  async function runParseEmail() {
-    setParseBusy(true); setParseOut(null);
-    try {
-      const res = await fetch("/api/parse/email-quote?t="+Math.random(), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: parseText })
+      const res = await fetch("/api/cushion/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
       });
       const j = await res.json();
-      setParseOut(j);
+      if (!res.ok) throw new Error(j?.error || "Calc failed");
+      setData(j);
+    } catch (err: any) {
+      setMsg(err.message || String(err));
     } finally {
-      setParseBusy(false);
+      setBusy(false);
     }
-  }
-  async function sendParsedToQuote() {
-    if (!parseOut?.foam_quote_body) return;
-    const res = await fetch("/api/quote/foam?t="+Math.random(), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(parseOut.foam_quote_body),
-    });
-    const j = await res.json();
-    setParseOut((prev:any) => ({ ...(prev||{}), quote_result: j }));
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-8">
-      <h1 className="text-2xl font-semibold">Cushion Curves</h1>
+    <div className="p-6 max-w-6xl mx-auto space-y-8">
+      <h1 className="text-2xl font-semibold">Cushion Curve — Auto-Recommend</h1>
 
-      {/* Controls row */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-white p-4 rounded-2xl shadow">
-        {/* Material multi-select */}
-        <div className="md:col-span-4">
-          <label className="text-sm text-gray-600">Materials (overlay)</label>
-          <div className="border rounded-lg p-2 h-36 overflow-auto space-y-1">
-            {materials.map(m => {
-              const checked = selectedIds.includes(m.id);
-              return (
-                <label key={m.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(e) => {
-                      setSelectedIds(prev => e.target.checked ? [...prev, m.id] : prev.filter(x=>x!==m.id));
-                    }}
-                  />
-                  <span>{m.name}</span>
-                </label>
-              );
-            })}
-            {!materials.length && <div className="text-xs text-gray-500">No materials yet.</div>}
-          </div>
-          <div className="text-xs text-gray-500 mt-1">If none selected, the chart shows up to 8 materials.</div>
-        </div>
+      <form onSubmit={onCalc} className="bg-white rounded-2xl shadow p-4 grid grid-cols-1 md:grid-cols-12 gap-3">
+        <label className="md:col-span-2 text-sm">Weight (lbf)
+          <input className="border rounded-lg p-2 w-full"
+                 type="number" step="0.1" value={form.weight_lbf}
+                 onChange={e=>setForm({...form, weight_lbf: Number(e.target.value)})}/>
+        </label>
+        <label className="md:col-span-2 text-sm">Contact area (in²)
+          <input className="border rounded-lg p-2 w-full"
+                 type="number" step="0.1" value={form.area_in2}
+                 onChange={e=>setForm({...form, area_in2: Number(e.target.value)})}/>
+        </label>
+        <label className="md:col-span-2 text-sm">Foam thickness (in)
+          <input className="border rounded-lg p-2 w-full"
+                 type="number" step="0.1" value={form.thickness_in}
+                 onChange={e=>setForm({...form, thickness_in: Number(e.target.value)})}/>
+        </label>
+        <label className="md:col-span-2 text-sm">Fragility G (max)
+          <input className="border rounded-lg p-2 w-full"
+                 type="number" step="1" value={form.fragility_g}
+                 onChange={e=>setForm({...form, fragility_g: Number(e.target.value)})}/>
+        </label>
+        <label className="md:col-span-2 text-sm">Drop height (in)
+          <input className="border rounded-lg p-2 w-full"
+                 type="number" step="1" value={form.drop_in}
+                 onChange={e=>setForm({...form, drop_in: Number(e.target.value)})}/>
+        </label>
 
-        {/* Target psi */}
-        <div className="md:col-span-2">
-          <label className="text-sm text-gray-600">Target static load (psi)</label>
-          <input className="border rounded-lg p-2 w-full" value={staticPsi} onChange={(e)=>setStaticPsi(e.target.value)} />
-        </div>
+        <button className="bg-black text-white rounded-lg px-4 py-2 md:col-span-2 disabled:opacity-40" disabled={busy}>
+          {busy ? "Calculating…" : "Recommend"}
+        </button>
 
-        {/* CSV upload */}
-        <div className="md:col-span-4">
-          <label className="text-sm text-gray-600">Upload CSV (material_id, static_psi, deflect_pct, g_level[, source])</label>
-          <input type="file" accept=".csv,text/csv" className="block w-full" onChange={handleCSV} />
-          {msg && <div className="text-xs text-green-700 mt-1">{msg}</div>}
-        </div>
+        {msg && <div className="md:col-span-12 text-sm text-red-700">{msg}</div>}
+      </form>
 
-        {/* Refresh + Export CSV */}
-        <div className="md:col-span-2 flex items-end gap-2">
-          <button
-            disabled={uploading}
-            onClick={() => refreshCurves()}
-            className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40 w-full"
-          >
-            Refresh
-          </button>
-
-          <a
-            href={selectedIds.length === 1
-              ? `/api/cushion/curves/export?material_id=${selectedIds[0]}`
-              : `/api/cushion/curves/export`}
-            role="button"
-            aria-disabled={uploading}
-            onClick={(e) => { if (uploading) e.preventDefault(); }}
-            className={`bg-white border border-gray-300 rounded-lg px-4 py-2 text-center w-full flex items-center justify-center gap-2 ${uploading ? "opacity-50 pointer-events-none" : ""}`}
-            title="Download a CSV of the currently selected material (or all if multiple/none selected)."
-          >
-            {uploading && <Spinner />}
-            Export CSV
-          </a>
-        </div>
-      </div>
-
-      {/* Overlay Chart */}
-      <div className="bg-white rounded-2xl shadow p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-medium">G vs. Deflection% (overlay at nearest curves to {staticPsi} psi)</h2>
-          <span className="text-xs text-gray-500">Toggle materials on the left to compare.</span>
-        </div>
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={overlayData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="deflect_pct" label={{ value: "Deflection %", position: "insideBottomRight", offset: -5 }} />
-              <YAxis label={{ value: "G-level", angle: -90, position: "insideLeft" }} />
-              <Tooltip />
-              <Legend />
-              {fragilityLine ? <ReferenceLine y={fragilityLine} strokeDasharray="4 4" label={`Fragility G (${fragilityLine})`} /> : null}
-              {seriesMeta.map(s => (
-                <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} dot={false} stroke={s.stroke} strokeWidth={2} activeDot={{ r: 3 }} />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Test Cushion */}
-      <div className="bg-white rounded-2xl shadow p-4">
-        <h2 className="text-lg font-medium mb-2">Test Cushion</h2>
-        <form onSubmit={runTestCushion} className="grid grid-cols-1 md:grid-cols-10 gap-3">
-          <input className="border rounded-lg p-2" placeholder="Weight (lbf)"      value={tc.weight_lbf}   onChange={(e)=>setTC({...tc, weight_lbf:e.target.value})}/>
-          <input className="border rounded-lg p-2" placeholder="Contact area (in²)" value={tc.area_in2}     onChange={(e)=>setTC({...tc, area_in2:e.target.value})}/>
-          <input className="border rounded-lg p-2" placeholder="Thickness (in)"     value={tc.thickness_in} onChange={(e)=>setTC({...tc, thickness_in:e.target.value})}/>
-          <input className="border rounded-lg p-2" placeholder="Fragility G"        value={tc.fragility_g}  onChange={(e)=>setTC({...tc, fragility_g:e.target.value})}/>
-          <input className="border rounded-lg p-2" placeholder="Drop height (in)"   value={tc.drop_in}      onChange={(e)=>setTC({...tc, drop_in:e.target.value})}/>
-          <button className="bg-black text-white rounded-lg px-4 py-2 md:col-span-2">Recommend</button>
-        </form>
-
-        {tcResults?.recommendations?.length ? (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="p-2 text-left">Material</th>
-                  <th className="p-2 text-left">Static psi</th>
-                  <th className="p-2 text-left">Deflection %</th>
-                  <th className="p-2 text-left">G</th>
-                  <th className="p-2 text-left">Est $ / piece</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tcResults.recommendations.map((r: any, i: number) => (
-                  <tr key={i} className="border-t">
-                    <td className="p-2">{r.material_name}</td>
-                    <td className="p-2">{r.static_psi}</td>
-                    <td className="p-2">{r.deflect_pct}</td>
-                    <td className="p-2">{r.g}</td>
-                    <td className="p-2">{r.est_piece_usd}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : tcResults?.error ? (
-          <div className="text-sm text-red-600 mt-3">{String(tcResults.error)}</div>
-        ) : null}
-      </div>
-
-      {/* Parse Tester */}
-      <div className="bg-white rounded-2xl shadow p-4">
-        <h2 className="text-lg font-medium mb-2">Parse Tester (email → quote)</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm text-gray-600">Paste an email or plain text with dimensions/cavities</label>
-            <textarea
-              value={parseText}
-              onChange={(e)=>setParseText(e.target.value)}
-              rows={8}
-              className="w-full border rounded-lg p-2 font-mono"
-              placeholder={`e.g.\nNeed 2# PE block 20 x 16 x 2 with two 2" square x 1" deep cavities. Qty 3.`}
-            />
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={runParseEmail}
-                disabled={parseBusy || !parseText.trim()}
-                className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40"
-              >
-                {parseBusy ? "Parsing..." : "Parse"}
-              </button>
-              <button
-                onClick={sendParsedToQuote}
-                disabled={!parseOut?.foam_quote_body}
-                className="bg-white border border-gray-300 rounded-lg px-4 py-2 disabled:opacity-40"
-                title="Send parsed body to /api/quote/foam and show result below"
-              >
-                Send to Foam Quote
-              </button>
+      {data && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl shadow p-4">
+            <div className="flex flex-wrap items-center gap-4 text-sm">
+              <span className="px-2 py-1 rounded bg-black text-white">
+                {data.winner.foam_name} — {data.winner.density_lb_ft3} lb/ft³ @ {data.winner.deflection_pct}% defl
+              </span>
+              <span>Predicted G: <b>{data.winner.g_pred}</b> (limit {data.input.fragility_g})</span>
+              <span>Static stress: <b>{data.input.psi.toFixed(3)} psi</b></span>
+              <span>Thickness: <b>{data.input.thickness_in}"</b>, Drop: <b>{data.input.drop_in}"</b></span>
             </div>
           </div>
 
-          <div className="overflow-auto">
-            <div className="text-sm text-gray-600 mb-1">Parsed output</div>
-            <pre className="text-xs bg-gray-50 border rounded-lg p-2 overflow-auto">
-{JSON.stringify(parseOut, null, 2)}
-            </pre>
-            {!parseOut?.foam_quote_body && (
-              <div className="text-xs text-gray-500 mt-2">
-                Tip: after parsing, click <b>Send to Foam Quote</b> to see pricing here.
-              </div>
-            )}
+          <div className="bg-white rounded-2xl shadow p-4">
+            <h3 className="font-medium mb-2">Curve (scaled for thickness & drop)</h3>
+            <div style={{ width: "100%", height: 360 }}>
+              <ResponsiveContainer>
+                <LineChart data={data.chart.series.points}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="psi" label={{ value: "Static stress (psi)", position: "insideBottom", offset: -5 }} />
+                  <YAxis label={{ value: "Transmitted G", angle: -90, position: "insideLeft" }} />
+                  <Tooltip />
+                  <Legend />
+                  <ReferenceLine y={data.chart.fragility_g} stroke="red" strokeDasharray="5 5" label="Fragility limit" />
+                  <Line type="monotone" dataKey="g" name={`Best defl ${data.chart.series.deflection_pct}%`} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">{data.note}</p>
           </div>
-        </div>
-      </div>
 
-      {/* Raw table of uploaded points (row accent color) */}
-      <div className="overflow-x-auto rounded-2xl shadow">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="p-2 text-left">Material</th>
-              <th className="p-2 text-left">Static psi</th>
-              <th className="p-2 text-left">Deflect %</th>
-              <th className="p-2 text-left">G</th>
-              <th className="p-2 text-left">Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {curves.length ? curves.map((c, i) => {
-              const stroke = colorForMaterial(c.material_id);
-              return (
-                <tr key={i} className="border-t" style={{ borderLeft: `4px solid ${stroke}` }}>
-                  <td className="p-2">{materials.find(m => m.id === c.material_id)?.name || c.material_id}</td>
-                  <td className="p-2">{c.static_psi}</td>
-                  <td className="p-2">{c.deflect_pct}</td>
-                  <td className="p-2">{c.g_level}</td>
-                  <td className="p-2">{c.source || ""}</td>
-                </tr>
-              );
-            }) : (
-              <tr><td colSpan={5} className="p-3">No curve points yet. Upload a CSV to begin.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          <div className="bg-white rounded-2xl shadow p-4">
+            <h3 className="font-medium mb-2">Top options</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-2 text-left">Foam</th>
+                    <th className="p-2 text-left">Density</th>
+                    <th className="p-2 text-left">Defl %</th>
+                    <th className="p-2 text-left">Pred G</th>
+                    <th className="p-2 text-left">Meets</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.top3.map((r, i) => (
+                    <tr key={i} className="border-t">
+                      <td className="p-2">{r.foam_name}</td>
+                      <td className="p-2">{r.density_lb_ft3}</td>
+                      <td className="p-2">{r.deflection_pct}</td>
+                      <td className="p-2">{r.g_pred}</td>
+                      <td className="p-2">{r.meets_fragility ? "✅" : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }
