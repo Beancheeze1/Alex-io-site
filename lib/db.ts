@@ -1,23 +1,32 @@
 // lib/db.ts
-import "server-only";
-import pg from "pg"; // works well in ESM/Next
-const { Pool } = pg;
+import { Pool, PoolClient } from "pg";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: Number(process.env.DB_POOL_MAX ?? 5),
-  ssl: process.env.DATABASE_URL?.includes("sslmode=require") ? undefined : { rejectUnauthorized: false },
-});
+let _pool: Pool | null = null;
 
-// keep a tiny ping to verify connectivity
-export async function dbPing() {
-  const r = await pool.query("select 1 as ok");
-  return r.rows?.[0]?.ok === 1;
+export function getPool(): Pool {
+  if (_pool) return _pool;
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("Missing env: DATABASE_URL");
+  _pool = new Pool({ connectionString: url, max: 5 });
+  return _pool;
 }
 
-export async function getProductsBySkus(skus: string[]) {
-  const r = await pool.query("select * from products where sku = any($1)", [skus]);
-  return r.rows;
+/**
+ * Run a function inside a BEGIN/COMMIT transaction.
+ * If it throws, we ROLLBACK and rethrow.
+ */
+export async function withTxn<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch {}
+    throw err;
+  } finally {
+    client.release();
+  }
 }
-
-export { pool };
