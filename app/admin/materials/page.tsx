@@ -16,6 +16,8 @@ function N(x: any) { const n = Number(x); return isFinite(n) ? n : 0; }
 export default function MaterialsAdminPage() {
   const [rows, setRows] = useState<Material[]>([]);
   const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; tone: "ok" | "err" } | null>(null);
+
   const [form, setForm] = useState({
     name: "",
     price_per_cuin: "",
@@ -25,14 +27,13 @@ export default function MaterialsAdminPage() {
     min_charge_usd: "15",
     density_lb_ft3: "",
   });
-  const [msg, setMsg] = useState<string>("");
 
   async function load() {
     const res = await fetch("/api/materials", { cache: "no-store" });
     const j = await res.json();
     setRows(Array.isArray(j) ? j : []);
   }
-  useEffect(()=>{ load(); }, []);
+  useEffect(() => { load(); }, []);
 
   function cuinFromForm(): number {
     const p_cuin = N(form.price_per_cuin);
@@ -41,9 +42,14 @@ export default function MaterialsAdminPage() {
     return p_cuin || (p_cuft ? p_cuft / 1728 : 0) || (p_bf ? p_bf / 144 : 0);
   }
 
+  function toast(text: string, tone: "ok" | "err" = "ok") {
+    setMsg({ text, tone });
+    setTimeout(() => setMsg(null), 3500);
+  }
+
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setMsg("");
+    setBusy(true); setMsg(null);
     try {
       const payload: any = {
         name: form.name.trim(),
@@ -51,37 +57,46 @@ export default function MaterialsAdminPage() {
         min_charge_usd: N(form.min_charge_usd),
         density_lb_ft3: N(form.density_lb_ft3),
       };
-      // send whichever price user entered
       if (form.price_per_cuin) payload.price_per_cuin = N(form.price_per_cuin);
       if (form.price_per_bf)   payload.price_per_bf   = N(form.price_per_bf);
       if (form.price_per_cuft) payload.price_per_cuft = N(form.price_per_cuft);
 
       const res = await fetch("/api/materials", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const j = await res.json();
+
       if (!res.ok) throw new Error(j?.error || "Create failed");
-      setMsg(`Created material #${j.id}`);
-      setForm({
-        name: "",
-        price_per_cuin: "",
-        price_per_bf: "",
-        price_per_cuft: "",
-        kerf_waste_pct: "10",
-        min_charge_usd: "15",
-        density_lb_ft3: "",
-      });
+
+      // Uses upsert_action returned by API: "created" | "updated"
+      const action: string = j?.upsert_action || (res.status === 201 ? "created" : "updated");
+      toast(`${action === "created" ? "Created" : "Updated"} “${j.name}” (#${j.id})`, "ok");
+
+      // Reset only if it was a create
+      if (action === "created") {
+        setForm({
+          name: "",
+          price_per_cuin: "",
+          price_per_bf: "",
+          price_per_cuft: "",
+          kerf_waste_pct: "10",
+          min_charge_usd: "15",
+          density_lb_ft3: "",
+        });
+      }
+
       await load();
     } catch (err: any) {
-      setMsg(err.message || String(err));
+      toast(err.message || String(err), "err");
     } finally {
       setBusy(false);
     }
   }
 
   async function onPatch(id: number, patch: Partial<Material> & { price_per_bf?: number; price_per_cuft?: number }) {
-    setBusy(true); setMsg("");
+    setBusy(true); setMsg(null);
     try {
       const res = await fetch(`/api/materials/${id}`, {
         method: "PATCH",
@@ -90,10 +105,10 @@ export default function MaterialsAdminPage() {
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j?.error || "Update failed");
-      setMsg(`Updated #${id}`);
+      toast(`Saved #${id}`, "ok");
       await load();
     } catch (e: any) {
-      setMsg(e.message || String(e));
+      toast(e.message || String(e), "err");
     } finally {
       setBusy(false);
     }
@@ -101,15 +116,15 @@ export default function MaterialsAdminPage() {
 
   async function onDelete(id: number) {
     if (!confirm(`Delete material #${id}?`)) return;
-    setBusy(true); setMsg("");
+    setBusy(true); setMsg(null);
     try {
       const res = await fetch(`/api/materials/${id}`, { method: "DELETE" });
       const j = await res.json();
       if (!res.ok) throw new Error(j?.error || "Delete failed");
-      setMsg(`Deleted #${id}`);
+      toast(`Deleted #${id}`, "ok");
       await load();
     } catch (e: any) {
-      setMsg(e.message || String(e));
+      toast(e.message || String(e), "err");
     } finally {
       setBusy(false);
     }
@@ -141,8 +156,15 @@ export default function MaterialsAdminPage() {
           Computed price/cu-in from inputs: <b>${cuinFromForm().toFixed(6)}</b> (cu-ft ÷ 1728, BF ÷ 144).
         </div>
 
-        <button className="bg-black text-white rounded-lg px-4 py-2 md:col-span-2" disabled={busy}>Add material</button>
-        {msg && <div className="md:col-span-10 text-sm text-green-700 self-center">{msg}</div>}
+        <button className="bg-black text-white rounded-lg px-4 py-2 md:col-span-2 disabled:opacity-40" disabled={busy}>
+          {busy ? "Saving…" : "Add / Upsert"}
+        </button>
+
+        {msg && (
+          <div className={`md:col-span-10 text-sm self-center ${msg.tone === "ok" ? "text-green-700" : "text-red-700"}`}>
+            {msg.text}
+          </div>
+        )}
       </form>
 
       <div className="bg-white rounded-2xl shadow overflow-x-auto">

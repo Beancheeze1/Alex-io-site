@@ -42,7 +42,7 @@ export async function GET() {
   }
 }
 
-// POST /api/materials  — UPSERT by name
+// POST /api/materials  — UPSERT by name with created/updated flag
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -54,6 +54,7 @@ export async function POST(req: Request) {
     const min_charge_usd = N(body.min_charge_usd);
     const density_lb_ft3 = N(body.density_lb_ft3);
 
+    // Postgres trick: (xmax = 0) is true for freshly inserted rows, false for updated rows
     const sql = `
       INSERT INTO public.materials (name, price_per_cuin, kerf_waste_pct, min_charge_usd, density_lb_ft3)
       VALUES ($1, $2, $3, $4, $5)
@@ -62,11 +63,20 @@ export async function POST(req: Request) {
             kerf_waste_pct = EXCLUDED.kerf_waste_pct,
             min_charge_usd = EXCLUDED.min_charge_usd,
             density_lb_ft3 = EXCLUDED.density_lb_ft3
-      RETURNING id, name, price_per_cuin, kerf_waste_pct, min_charge_usd, density_lb_ft3
+      RETURNING
+        id, name, price_per_cuin, kerf_waste_pct, min_charge_usd, density_lb_ft3,
+        (xmax = 0) AS inserted
     `;
+
     const { rows } = await pool().query(sql, [name, price_per_cuin, kerf_waste_pct, min_charge_usd, density_lb_ft3]);
-    const status = rows.length && rows[0] ? 201 : 200; // 201 for insert, 200 for update (either way fine)
-    return NextResponse.json(rows[0], { status });
+    const r = rows[0];
+    const upsert_action = r?.inserted ? "created" : "updated";
+    const status = r?.inserted ? 201 : 200;
+
+    return NextResponse.json(
+      { ...r, upsert_action },
+      { status }
+    );
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
   }
