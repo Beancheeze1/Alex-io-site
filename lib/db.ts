@@ -5,16 +5,26 @@ let _pool: Pool | null = null;
 
 export function getPool(): Pool {
   if (_pool) return _pool;
+
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("Missing env: DATABASE_URL");
-  _pool = new Pool({ connectionString: url, max: 5 });
+
+  // Auto-detect if SSL is required
+  const needsSSL =
+    process.env.PGSSLMODE?.toLowerCase() === "require" ||
+    url.includes("sslmode=require") ||
+    url.includes("ssl=true");
+
+  _pool = new Pool({
+    connectionString: url,
+    max: 5,
+    ssl: needsSSL ? { rejectUnauthorized: false } : undefined, // dev-safe; swap to CA pinning later if you want
+  });
+
   return _pool;
 }
 
-/**
- * Run a function inside a BEGIN/COMMIT transaction.
- * If it throws, we ROLLBACK and rethrow.
- */
+/** Transaction helper */
 export async function withTxn<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const pool = getPool();
   const client = await pool.connect();
