@@ -57,33 +57,39 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "length_in, width_in, height_in must be > 0" }, { status: 400 });
     }
 
-    // material pricing from DB
-    const q = `
-      SELECT id, name,
-             COALESCE(price_per_cuin, 0)  AS price_per_cuin,
-             COALESCE(kerf_waste_pct, 0)  AS kerf_waste_pct,
-             COALESCE(min_charge_usd, 0)  AS min_charge_usd
-      FROM public.materials
-      WHERE id = $1
-    `;
-    const { rows } = await pool().query(q, [material_id]);
+    // Pull the whole row as JSON so we can tolerate different column names.
+    const { rows } = await pool().query(
+      `SELECT to_jsonb(m.*) AS mat FROM public.materials m WHERE m.id = $1`,
+      [material_id]
+    );
     if (!rows.length) return NextResponse.json({ error: "bad material_id" }, { status: 400 });
 
-    const mat = rows[0] as {
-      id: number; name: string; price_per_cuin: number; kerf_waste_pct: number; min_charge_usd: number;
-    };
+    const matObj = rows[0].mat as Record<string, any>;
 
+    // Flexible pricing detection:
+    // price_per_cuin OR price_per_cu_in OR price_per_cuft/1728 OR price_per_bf/144
+    const price_per_cuin =
+      N(matObj.price_per_cuin) ||
+      N(matObj.price_per_cu_in) ||
+      (N(matObj.price_per_cuft) / 1728) ||
+      (N(matObj.price_per_bf) / 144) ||
+      0;
+
+    const kerf_waste_pct = N(matObj.kerf_waste_pct);
+    const min_charge_usd = N(matObj.min_charge_usd);
+    const material_name  = String(matObj.name ?? `Material ${material_id}`);
+
+    // Volumes
     const ext_cuin = length_in * width_in * height_in;
     const cav_cuin = computeCavitiesCuIn(cavities);
     const net_cuin = Math.max(0, ext_cuin - cav_cuin);
 
-    const kerf_pct = Math.max(0, Number(mat.kerf_waste_pct) || 0);
-    const kerf_factor = 1 + kerf_pct / 100;
+    // Kerf / waste multiplier
+    const kerf_factor = 1 + (kerf_waste_pct / 100);
     const bill_cuin = net_cuin * kerf_factor;
 
-    const unit_price_usd = Number(mat.price_per_cuin) || 0;
-    const min_charge_usd = Number(mat.min_charge_usd) || 0;
-
+    // Pricing
+    const unit_price_usd = price_per_cuin;
     const piece_price_usd = Math.max(min_charge_usd, unit_price_usd * bill_cuin);
     const total_price_usd = piece_price_usd * qty;
 
@@ -91,10 +97,17 @@ export async function POST(req: Request) {
       ok: true,
       input: { length_in, width_in, height_in, qty, material_id, cavities },
       material: {
-        id: mat.id, name: mat.name,
-        price_per_cuin: unit_price_usd,
-        kerf_waste_pct: kerf_pct,
-        min_charge_usd,
+        id: material_id,
+        name: material_name,
+        price_per_cuin: Number(unit_price_usd.toFixed(6)),
+        kerf_waste_pct: Number(kerf_waste_pct.toFixed(3)),
+        min_charge_usd: Number(min_charge_usd.toFixed(2)),
+        detected_from: {
+          price_per_cuin: "price_per_cuin" in matObj,
+          price_per_cu_in: "price_per_cu_in" in matObj,
+          price_per_cuft: "price_per_cuft" in matObj,
+          price_per_bf: "price_per_bf" in matObj
+        }
       },
       math: {
         ext_cuin: Number(ext_cuin.toFixed(3)),
@@ -106,7 +119,6 @@ export async function POST(req: Request) {
       pricing: {
         piece_price_usd: Number(piece_price_usd.toFixed(2)),
         total_price_usd: Number(total_price_usd.toFixed(2)),
-        unit_price_usd: Number(unit_price_usd.toFixed(6))
       }
     }, { status: 200, headers: { "Cache-Control": "no-store" } });
 

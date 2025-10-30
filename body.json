@@ -1,1 +1,15 @@
-﻿{ "text": "Need 2# EPE block 24x18x2, 3 slots 1 x 6 x 2 deep, qty 5" }
+﻿{
+    "material_id":  1,
+    "width_in":  16,
+    "qty":  1,
+    "cavities":  [
+                     {
+                         "label":  "circle",
+                         "d":  1,
+                         "dia":  2,
+                         "count":  2
+                     }
+                 ],
+    "height_in":  2,
+    "length_in":  20
+}
