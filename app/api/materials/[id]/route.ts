@@ -1,3 +1,4 @@
+// app/api/materials/[id]/route.ts
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
 
@@ -5,60 +6,63 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 let _pool: Pool | null = null;
-function getPool() {
+function pool() {
   if (!_pool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("Missing env: DATABASE_URL");
     _pool = new Pool({ connectionString: url, max: 5, ssl: { rejectUnauthorized: false } });
   }
-  return _pool;
+  return _pool!;
 }
 
-export async function PUT(req: Request, { params }: { params: { id: string } }) {
+function N(x: any) { const n = Number(x); return isFinite(n) ? n : 0; }
+function toPricePerCuIn(body: any) {
+  const p_cuin  = N(body.price_per_cuin);
+  const p_cuft  = N(body.price_per_cuft);
+  const p_bf    = N(body.price_per_bf);
+  return p_cuin || (p_cuft ? p_cuft / 1728 : 0) || (p_bf ? p_bf / 144 : 0);
+}
+
+export async function PATCH(_req: Request, ctx: { params: { id: string } }) {
   try {
-    const id = Number(params.id);
-    if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ error: "bad id" }, { status: 400 });
+    const id = Number(ctx.params.id);
+    const body = await _req.json();
 
-    const b = await req.json();
-    const fields = ["name","density_lb_ft3","price_per_bf","kerf_waste_pct","min_charge_usd","active"] as const;
+    const fields: string[] = [];
+    const vals: any[] = [];
+    let i = 1;
 
-    const updates: string[] = [];
-    const values: any[] = [];
-
-    // accept price_per_cuin → convert to price_per_bf
-    if (b.price_per_cuin != null && b.price_per_bf == null) {
-      updates.push(`price_per_bf = $${values.length + 1}`);
-      values.push(Number(b.price_per_cuin) * 1728);
+    if (typeof body.name === "string") { fields.push(`name = $${i++}`); vals.push(String(body.name).trim()); }
+    if (body.price_per_cuin != null || body.price_per_cuft != null || body.price_per_bf != null) {
+      fields.push(`price_per_cuin = $${i++}`); vals.push(toPricePerCuIn(body));
     }
+    if (body.kerf_waste_pct != null) { fields.push(`kerf_waste_pct = $${i++}`); vals.push(N(body.kerf_waste_pct)); }
+    if (body.min_charge_usd != null) { fields.push(`min_charge_usd = $${i++}`); vals.push(N(body.min_charge_usd)); }
+    if (body.density_lb_ft3 != null) { fields.push(`density_lb_ft3 = $${i++}`); vals.push(N(body.density_lb_ft3)); }
 
-    for (const f of fields) {
-      if (b[f] !== undefined) {
-        updates.push(`${f} = $${values.length + 1}`);
-        values.push(b[f]);
-      }
-    }
-    if (!updates.length) return NextResponse.json({ error: "no updates" }, { status: 400 });
+    if (!fields.length) return NextResponse.json({ error: "no fields" }, { status: 400 });
 
-    values.push(id);
-    const { rows } = await getPool().query(
-      `UPDATE public.materials SET ${updates.join(", ")}, updated_at = now()
-       WHERE id = $${values.length}
-       RETURNING id, name, density_lb_ft3, price_per_bf,
-                 (price_per_bf/1728.0)::numeric(12,6) AS price_per_cuin,
-                 kerf_waste_pct, min_charge_usd, active;`, values
-    );
-    return rows[0] ? NextResponse.json(rows[0]) : NextResponse.json({ error: "not found" }, { status: 404 });
+    const sql = `
+      UPDATE public.materials
+      SET ${fields.join(", ")}
+      WHERE id = $${i}
+      RETURNING id, name, price_per_cuin, kerf_waste_pct, min_charge_usd, density_lb_ft3
+    `;
+    vals.push(id);
+    const { rows } = await pool().query(sql, vals);
+    if (!rows.length) return NextResponse.json({ error: "not found" }, { status: 404 });
+    return NextResponse.json(rows[0], { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
   }
 }
 
-export async function DELETE(_: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, ctx: { params: { id: string } }) {
   try {
-    const id = Number(params.id);
-    if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ error: "bad id" }, { status: 400 });
-    const { rowCount } = await getPool().query(`DELETE FROM public.materials WHERE id = $1;`, [id]);
-    return rowCount ? NextResponse.json({ ok: true }) : NextResponse.json({ error: "not found" }, { status: 404 });
+    const id = Number(ctx.params.id);
+    const { rowCount } = await pool().query(`DELETE FROM public.materials WHERE id = $1`, [id]);
+    if (!rowCount) return NextResponse.json({ error: "not found" }, { status: 404 });
+    return NextResponse.json({ ok: true, id }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
   }
