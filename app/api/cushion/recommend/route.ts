@@ -49,16 +49,30 @@ const FALLBACK_CURVES: FoamCurve[] = [
   },
 ];
 
-/** Load curves from data/cushion_curves.json if present; fall back to embedded sample. */
+// replace the existing loadCurves() with this:
 async function loadCurves(): Promise<FoamCurve[]> {
+  const { readFile } = await import("fs/promises");
+  const { join } = await import("path");
   try {
-    const p = join(process.cwd(), "data", "cushion_curves.json");
-    const txt = await readFile(p, "utf8");
+    // 1) prefer /tmp upload
+    const tmp = join("/tmp", "cushion_curves.json");
+    const txtTmp = await readFile(tmp, "utf8").catch(() => null as any);
+    if (txtTmp) {
+      const arr = JSON.parse(txtTmp);
+      if (Array.isArray(arr)) return arr as FoamCurve[];
+    }
+  } catch {}
+  try {
+    // 2) then /data in repo
+    const data = join(process.cwd(), "data", "cushion_curves.json");
+    const txt = await (await import("fs/promises")).readFile(data, "utf8");
     const arr = JSON.parse(txt);
     if (Array.isArray(arr)) return arr as FoamCurve[];
   } catch {}
+  // 3) fallback to embedded
   return FALLBACK_CURVES;
 }
+
 
 function interp(points: Point[], psi: number): number {
   if (!points.length) return Number.POSITIVE_INFINITY;
