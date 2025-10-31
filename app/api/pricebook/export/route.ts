@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { PriceBook } from "@/lib/pricebook/schema";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -26,11 +27,30 @@ function cleanDims(input: any) {
   if (z !== undefined) out.z = z;
   return out;
 }
-// Turn an integer into a format-valid UUID string (passes z.string().uuid())
-function intToUUID(id: any): string {
-  const n = Number(id);
-  const hex = Number.isFinite(n) ? n.toString(16).padStart(12, "0").slice(-12) : "000000000000";
-  return `00000000-0000-0000-0000-${hex}`;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isUUID(s: any): boolean {
+  return typeof s === "string" && UUID_RE.test(s);
+}
+
+/**
+ * Deterministic RFC-4122 UUID v5 from an arbitrary seed (Buffer or string).
+ * This guarantees the same output for the same input every export.
+ */
+function uuidFromSeed(seed: any): string {
+  const buf = crypto.createHash("sha1").update(Buffer.isBuffer(seed) ? seed : String(seed)).digest().subarray(0, 16);
+  // version 5: set high nibble of byte 6 to 0101
+  buf[6] = (buf[6] & 0x0f) | 0x50;
+  // variant RFC 4122: set the two most significant bits of byte 8 to 10
+  buf[8] = (buf[8] & 0x3f) | 0x80;
+
+  const hex = buf.toString("hex");
+  return (
+    hex.slice(0, 8) + "-" +
+    hex.slice(8, 12) + "-" +
+    hex.slice(12, 16) + "-" +
+    hex.slice(16, 20) + "-" +
+    hex.slice(20)
+  );
 }
 
 const APPLIES_ALLOWED = new Set(["material", "product", "cavity"]);
@@ -90,9 +110,13 @@ export async function GET() {
     });
 
     const products = productsQ.rows.map((r: any) => {
+      // DB has legacy integer ids; manifest requires UUID → derive deterministic v5 UUID from stable seed
+      const rawId = r.id;
+      const seed  = `prod:${r.sku ?? ""}:${rawId ?? ""}`;
+      const uuid  = isUUID(rawId) ? String(rawId) : uuidFromSeed(seed);
+
       const out: any = {
-        // DB has integer ids; manifest requires UUID → coerce to UUID-shaped string
-        id: /^[0-9a-f-]{36}$/i.test(String(r.id)) ? toStr(r.id) : intToUUID(r.id),
+        id: uuid,
         sku: toStr(r.sku),
         description: r.description == null ? undefined : toStr(r.description),
         dims: cleanDims(r.dims),

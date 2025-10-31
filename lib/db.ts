@@ -1,42 +1,55 @@
 // lib/db.ts
-import { Pool, PoolClient } from "pg";
+import { Pool, type QueryResultRow } from "pg";
 
-let _pool: Pool | null = null;
-
-export function getPool(): Pool {
-  if (_pool) return _pool;
-
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("Missing env: DATABASE_URL");
-
-  // Auto-detect if SSL is required
-  const needsSSL =
-    process.env.PGSSLMODE?.toLowerCase() === "require" ||
-    url.includes("sslmode=require") ||
-    url.includes("ssl=true");
-
-  _pool = new Pool({
-    connectionString: url,
-    max: 5,
-    ssl: needsSSL ? { rejectUnauthorized: false } : undefined, // dev-safe; swap to CA pinning later if you want
-  });
-
-  return _pool;
+declare global {
+  // Reuse a single pool in dev/hot-reload
+  // eslint-disable-next-line no-var
+  var __pgPool__: Pool | undefined;
 }
 
-/** Transaction helper */
-export async function withTxn<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const pool = getPool();
-  const client = await pool.connect();
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
+
+export function db(): Pool {
+  if (!globalThis.__pgPool__) {
+    globalThis.__pgPool__ = new Pool({
+      connectionString: requireEnv("DATABASE_URL"),
+      max: 3,
+      idleTimeoutMillis: 10_000,
+    });
+  }
+  return globalThis.__pgPool__!;
+}
+
+/** Back-compat alias (some routes import getPool/pool) */
+export const getPool = db;
+export const pool: Pool = db();
+
+/**
+ * Run a query and get typed rows back.
+ * Usage: const rows = await q<{ id:number; name:string }>("SELECT id,name FROM t");
+ */
+export async function q<T extends QueryResultRow = QueryResultRow>(
+  sql: string,
+  params: any[] = []
+): Promise<T[]> {
+  const client = await db().connect();
   try {
-    await client.query("BEGIN");
-    const result = await fn(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (err) {
-    try { await client.query("ROLLBACK"); } catch {}
-    throw err;
+    const res = await client.query<T>(sql, params);
+    return res.rows as T[];
   } finally {
     client.release();
   }
+}
+
+/** Run a query and get a single row (or null). */
+export async function one<T extends QueryResultRow = QueryResultRow>(
+  sql: string,
+  params: any[] = []
+): Promise<T | null> {
+  const rows = await q<T>(sql, params);
+  return (rows[0] ?? null) as T | null;
 }
