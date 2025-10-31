@@ -1,86 +1,84 @@
 // app/api/quotes/[id]/items/route.ts
 import { NextResponse } from "next/server";
-import { q, one } from "@/lib/db";
+import { z } from "zod";
+import { QuoteIdParam, QuoteItemBody } from "@/lib/validators";
+import { getPool } from "@/lib/db"; // keep your existing db helper
 
 export const dynamic = "force-dynamic";
 
-/** GET /api/quotes/:id/items */
-export async function GET(_: Request, { params }: { params: { id: string } }) {
-  const id = parseInt(params.id, 10);
-  if (!Number.isFinite(id)) return NextResponse.json({ ok: false, error: "Bad id" }, { status: 400 });
+export async function POST(
+  req: Request,
+  ctx: { params: { id: string } }
+) {
+  try {
+    // Validate params & body
+    const { id } = QuoteIdParam.parse(ctx.params);
+    const body = QuoteItemBody.parse(await req.json());
 
-  const rows = await q(`
-    SELECT qi.*, p.sku, p.name AS product_name
-    FROM public.quote_items qi
-    LEFT JOIN public.products p ON p.id = qi.product_id
-    WHERE qi.quote_id = $1
-    ORDER BY qi.id ASC
-  `, [id]);
+    const pool = await getPool();
 
-  return NextResponse.json({ ok: true, items: rows });
-}
+    // Use calc_foam_quote to compute pricing snapshot
+    const calc = await pool.query(
+      `SELECT public.calc_foam_quote($1,$2,$3,$4,$5,$6,$7) AS snapshot`,
+      [
+        body.length_in,
+        body.width_in,
+        body.height_in,
+        body.material_id,
+        body.qty,
+        JSON.stringify(body.cavities ?? []),
+        body.round_to_bf ?? 0.1,
+      ],
+    );
 
-/**
- * POST /api/quotes/:id/items
- * Body:
- * {
- *   "sku": "FOAM-BLK-VALVE",        // or null, you can pass dimensions instead
- *   "length_in": 10, "width_in": 6, "height_in": 3,
- *   "material_id": 1,
- *   "qty": 2,
- *   "cavities": [{"count":1,"l":3,"w":3,"d":2}],
- *   "round_to_bf": 0.10
- * }
- */
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const quoteId = parseInt(params.id, 10);
-  if (!Number.isFinite(quoteId)) return NextResponse.json({ ok: false, error: "Bad id" }, { status: 400 });
+    const snapshot = calc.rows[0]?.snapshot ?? null;
 
-  const body = await req.json().catch(() => ({}));
-  let { sku, length_in, width_in, height_in, material_id, qty = 1, cavities = [], round_to_bf = 0.10 } = body || {};
+    // Insert quote_items row
+    const insItem = await pool.query(
+      `INSERT INTO quote_items
+         (quote_id, product_id, length_in, width_in, height_in,
+          material_id, qty, price_unit_usd, price_total_usd, calc_snapshot)
+       VALUES
+         ($1, NULL, $2, $3, $4, $5, $6,
+          ($7 ->> 'price_unit_usd')::numeric,
+          ($7 ->> 'price_total_usd')::numeric,
+          $7::jsonb)
+       RETURNING id`,
+      [
+        id,
+        body.length_in, body.width_in, body.height_in,
+        body.material_id, body.qty,
+        snapshot,
+      ],
+    );
 
-  // If SKU provided, hydrate dims/material from product
-  if (sku) {
-    const prod = await one(`
-      SELECT id, base_length_in AS l, base_width_in AS w, base_height_in AS h, material_id
-      FROM public.products WHERE sku = $1
-    `, [sku]);
-    if (!prod) return NextResponse.json({ ok: false, error: "SKU not found" }, { status: 404 });
-    length_in ??= prod.l; width_in ??= prod.w; height_in ??= prod.h; material_id ??= prod.material_id;
+    const itemId = insItem.rows[0].id;
+
+    // Insert cavities (if any)
+    if ((body.cavities ?? []).length > 0) {
+      const valuesSql: string[] = [];
+      const values: any[] = [];
+      let p = 1;
+      for (const cav of body.cavities!) {
+        valuesSql.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+        values.push(itemId, cav.count ?? 1, cav.l, cav.w, cav.d, `Cavity`);
+      }
+      await pool.query(
+        `INSERT INTO quote_item_cavities
+           (quote_item_id, count, cav_length_in, cav_width_in, cav_depth_in, label)
+         VALUES ${valuesSql.join(",")}`,
+        values,
+      );
+    }
+
+    return NextResponse.json({ ok: true, item_id: itemId, snapshot }, { status: 200 });
+  } catch (err: any) {
+    // Zod or DB errors
+    const msg =
+      err?.issues?.[0]?.message ||
+      err?.message ||
+      "Unknown error";
+    const code = typeof err?.code === "string" ? err.code : undefined;
+    return NextResponse.json({ ok: false, error: msg, code }, { status: 400 });
   }
-
-  if (!(length_in && width_in && height_in && material_id)) {
-    return NextResponse.json({ ok: false, error: "length_in, width_in, height_in, material_id are required" }, { status: 400 });
-  }
-
-  // Use server-side SQL function calc_foam_quote
-  const calc = await one<{ j: any }>(
-    `SELECT public.calc_foam_quote($1,$2,$3,$4,$5,$6::jsonb,$7) AS j`,
-    [length_in, width_in, height_in, material_id, qty, JSON.stringify(cavities ?? []), round_to_bf]
-  );
-  if (!calc) return NextResponse.json({ ok: false, error: "calc failed" }, { status: 500 });
-
-  // Optional: link product if SKU exists
-  const product = sku
-    ? await one<{ id: number }>(`SELECT id FROM public.products WHERE sku=$1`, [sku])
-    : null;
-
-  const inserted = await one(`
-    INSERT INTO public.quote_items
-      (quote_id, product_id, length_in, width_in, height_in, material_id, qty,
-       notes, price_unit_usd, price_total_usd, calc_snapshot)
-    VALUES
-      ($1, $2, $3, $4, $5, $6, $7,
-       $8, ($9->>'price_unit_usd')::numeric, ($9->>'price_total_usd')::numeric, $9)
-    RETURNING *
-  `, [
-    quoteId,
-    product?.id ?? null,
-    length_in, width_in, height_in,
-    material_id, qty,
-    sku ? `Auto from SKU ${sku}` : null,
-    calc.j, // price_unit_usd & price_total_usd extracted in SQL
-  ]);
-
-  return NextResponse.json({ ok: true, item: inserted }, { status: 201 });
 }
