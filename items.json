@@ -1,0 +1,9 @@
+﻿{
+  "length_in": 12,
+  "width_in": 8,
+  "height_in": 2,
+  "material_id": 59,
+  "qty": 2,
+  "cavities": [ { "count": 1, "l": 3, "w": 3, "d": 2 } ],
+  "round_to_bf": 0.10
+}
