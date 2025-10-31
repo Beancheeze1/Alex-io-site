@@ -1,60 +1,67 @@
 // app/api/quotes/[id]/reprice/route.ts
 import { NextResponse } from "next/server";
-import { QuoteItemInputSchema } from "@/lib/validators";
-import { pool } from "@/lib/db";
+import { getPool } from "@/lib/db";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const quoteId = Number(params.id);
-  if (!Number.isFinite(quoteId) || quoteId <= 0) {
-    return NextResponse.json({ ok: false, error: "Bad id" }, { status: 400 });
-  }
+function json(status: number, body: unknown) {
+  return NextResponse.json(body, { status });
+}
 
-  let body: unknown;
+export async function POST(
+  req: Request,
+  ctx: { params: { id?: string } }
+) {
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
-  }
+    const raw = ctx.params?.id ?? "";
+    const id = Number(raw);
+    if (!Number.isInteger(id) || id <= 0) {
+      return json(400, { ok: false, error: "Bad id" });
+    }
 
-  const parsed = QuoteItemInputSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { ok: false, error: "Invalid input", issues: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-  const input = parsed.data;
+    const pool = getPool();
 
-  // Call your calc function (from schema you shared earlier)
-  // calc_foam_quote(length, width, height, material_id, qty, cavities_json, round_to_bf)
-  const client = await pool.connect();
-  try {
-    const calc = await client.query(
-      `
-      SELECT public.calc_foam_quote($1,$2,$3,$4,$5,$6,$7) as quote_json
-      `,
-      [
-        input.length_in,
-        input.width_in,
-        input.height_in,
-        input.material_id,
-        input.qty,
-        JSON.stringify(input.cavities),
-        input.round_to_bf ?? 0.10,
-      ]
+    // Ensure quote exists
+    const q = await pool.query(`select id from quotes where id = $1`, [id]);
+    if (q.rowCount === 0) {
+      return json(404, { ok: false, error: "Quote not found" });
+    }
+
+    // Reprice each item using your calc_foam_quote() function
+    const items = await pool.query(
+      `select id, length_in, width_in, height_in, material_id, qty
+         from quote_items
+        where quote_id = $1`,
+      [id]
     );
 
-    const result = calc.rows[0]?.quote_json ?? null;
-    return NextResponse.json({ ok: true, preview: result });
+    let updated = [] as any[];
+
+    for (const r of items.rows) {
+      const calc = await pool.query(
+        `select calc_foam_quote($1,$2,$3,$4,$5,'[]'::jsonb,0.10) as j`,
+        [r.length_in, r.width_in, r.height_in, r.material_id, r.qty]
+      );
+      const j = calc.rows[0]?.j ?? {};
+      const price_unit = Number(j?.price_unit_usd ?? 0);
+      const price_total = Number(j?.price_total_usd ?? 0);
+
+      await pool.query(
+        `update quote_items
+            set price_unit_usd = $1,
+                price_total_usd = $2,
+                calc_snapshot = $3,
+                updated_at = now()
+          where id = $4`,
+        [price_unit, price_total, j, r.id]
+      );
+
+      updated.push({ id: r.id, price_unit_usd: price_unit, price_total_usd: price_total });
+    }
+
+    return json(200, { ok: true, updated });
   } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: "Calc error", detail: err?.message ?? String(err) },
-      { status: 500 }
-    );
-  } finally {
-    client.release();
+    console.error("reprice POST error:", err);
+    return json(500, { ok: false, error: "Server error" });
   }
 }
