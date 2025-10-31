@@ -2,7 +2,7 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
 declare global {
-  // Reuse a single pool across hot reloads
+  // Reuse a single pool across hot reloads in dev
   // eslint-disable-next-line no-var
   var __pgPool__: Pool | undefined;
 }
@@ -28,7 +28,7 @@ export function db(): Pool {
 export const getPool = db;
 export const pool: Pool = db();
 
-/** Basic query helpers */
+/** Run a query and get typed rows back */
 export async function q<T extends QueryResultRow = QueryResultRow>(
   sql: string,
   params: any[] = []
@@ -42,6 +42,7 @@ export async function q<T extends QueryResultRow = QueryResultRow>(
   }
 }
 
+/** Run a query and get a single row (or null) */
 export async function one<T extends QueryResultRow = QueryResultRow>(
   sql: string,
   params: any[] = []
@@ -51,15 +52,13 @@ export async function one<T extends QueryResultRow = QueryResultRow>(
 }
 
 /**
- * withTxn — Back-compat transaction helper.
+ * withTxn — Back-compat transaction helper used by older routes.
  * Usage:
  *   await withTxn(async (tx) => {
- *     const rows = await tx.query("SELECT 1");
+ *     await tx.query("UPDATE ...");
  *   });
  */
-export async function withTxn<R>(
-  fn: (tx: PoolClient) => Promise<R>
-): Promise<R> {
+export async function withTxn<R>(fn: (tx: PoolClient) => Promise<R>): Promise<R> {
   const client = await db().connect();
   try {
     await client.query("BEGIN");
@@ -74,6 +73,17 @@ export async function withTxn<R>(
   }
 }
 
-/** Optional: more compat names some codebases use */
+/**
+ * dbPing — Back-compat health probe some routes import.
+ * Returns an object with db time & version.
+ */
+export async function dbPing() {
+  const rows = await q<{ now: string; ver: string }>(
+    "SELECT now()::text AS now, version() AS ver"
+  );
+  return rows[0];
+}
+
+/** Extra compat names some codebases expect */
 export const query = q;
 export const queryOne = one;
