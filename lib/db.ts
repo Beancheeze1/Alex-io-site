@@ -1,8 +1,8 @@
 // lib/db.ts
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
 declare global {
-  // Reuse a single pool in dev/hot-reload
+  // Reuse a single pool across hot reloads
   // eslint-disable-next-line no-var
   var __pgPool__: Pool | undefined;
 }
@@ -24,14 +24,11 @@ export function db(): Pool {
   return globalThis.__pgPool__!;
 }
 
-/** Back-compat alias (some routes import getPool/pool) */
+/** Back-compat aliases some routes expect */
 export const getPool = db;
 export const pool: Pool = db();
 
-/**
- * Run a query and get typed rows back.
- * Usage: const rows = await q<{ id:number; name:string }>("SELECT id,name FROM t");
- */
+/** Basic query helpers */
 export async function q<T extends QueryResultRow = QueryResultRow>(
   sql: string,
   params: any[] = []
@@ -45,7 +42,6 @@ export async function q<T extends QueryResultRow = QueryResultRow>(
   }
 }
 
-/** Run a query and get a single row (or null). */
 export async function one<T extends QueryResultRow = QueryResultRow>(
   sql: string,
   params: any[] = []
@@ -53,3 +49,31 @@ export async function one<T extends QueryResultRow = QueryResultRow>(
   const rows = await q<T>(sql, params);
   return (rows[0] ?? null) as T | null;
 }
+
+/**
+ * withTxn — Back-compat transaction helper.
+ * Usage:
+ *   await withTxn(async (tx) => {
+ *     const rows = await tx.query("SELECT 1");
+ *   });
+ */
+export async function withTxn<R>(
+  fn: (tx: PoolClient) => Promise<R>
+): Promise<R> {
+  const client = await db().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Optional: more compat names some codebases use */
+export const query = q;
+export const queryOne = one;
