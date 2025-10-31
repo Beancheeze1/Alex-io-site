@@ -2,7 +2,6 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
 declare global {
-  // Reuse a single pool across hot reloads in dev
   // eslint-disable-next-line no-var
   var __pgPool__: Pool | undefined;
 }
@@ -15,20 +14,27 @@ function requireEnv(name: string): string {
 
 export function db(): Pool {
   if (!globalThis.__pgPool__) {
+    const connectionString = requireEnv("DATABASE_URL");
+
+    // Many managed Postgres providers (incl. Render) require SSL.
+    // If the URL doesn’t include ssl params, add a safe default.
+    const needsLooseSSL =
+      !/(\?|&)sslmode=/i.test(connectionString) && !/(\?|&)ssl=/i.test(connectionString);
+
     globalThis.__pgPool__ = new Pool({
-      connectionString: requireEnv("DATABASE_URL"),
+      connectionString,
       max: 3,
       idleTimeoutMillis: 10_000,
+      ssl: needsLooseSSL ? { rejectUnauthorized: false } : undefined,
     });
   }
   return globalThis.__pgPool__!;
 }
 
-/** Back-compat aliases some routes expect */
+/** Back-compat aliases used by older routes */
 export const getPool = db;
 export const pool: Pool = db();
 
-/** Run a query and get typed rows back */
 export async function q<T extends QueryResultRow = QueryResultRow>(
   sql: string,
   params: any[] = []
@@ -42,7 +48,6 @@ export async function q<T extends QueryResultRow = QueryResultRow>(
   }
 }
 
-/** Run a query and get a single row (or null) */
 export async function one<T extends QueryResultRow = QueryResultRow>(
   sql: string,
   params: any[] = []
@@ -51,13 +56,6 @@ export async function one<T extends QueryResultRow = QueryResultRow>(
   return (rows[0] ?? null) as T | null;
 }
 
-/**
- * withTxn — Back-compat transaction helper used by older routes.
- * Usage:
- *   await withTxn(async (tx) => {
- *     await tx.query("UPDATE ...");
- *   });
- */
 export async function withTxn<R>(fn: (tx: PoolClient) => Promise<R>): Promise<R> {
   const client = await db().connect();
   try {
@@ -73,10 +71,7 @@ export async function withTxn<R>(fn: (tx: PoolClient) => Promise<R>): Promise<R>
   }
 }
 
-/**
- * dbPing — Back-compat health probe some routes import.
- * Returns an object with db time & version.
- */
+/** Health helper some routes import */
 export async function dbPing() {
   const rows = await q<{ now: string; ver: string }>(
     "SELECT now()::text AS now, version() AS ver"
@@ -84,6 +79,5 @@ export async function dbPing() {
   return rows[0];
 }
 
-/** Extra compat names some codebases expect */
 export const query = q;
 export const queryOne = one;
