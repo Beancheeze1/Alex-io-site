@@ -1,7 +1,9 @@
-﻿{
-  "weight_lbf": 12,
-  "area_in2": 48,
-  "thickness_in": 2,
-  "fragility_g": 50,
-  "drop_in": 24
-}
+[
+  {
+    "subscriptionType": "conversation.newMessage",
+    "objectId": 9602216670,
+    "portalId": 244053164,
+    "eventId": "loc-test",
+    "occurredAt": 1730342400000
+  }
+]
