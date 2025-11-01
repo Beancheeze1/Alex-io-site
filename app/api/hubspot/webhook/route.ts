@@ -1,188 +1,153 @@
 // app/api/hubspot/webhook/route.ts
-import { NextResponse } from "next/server";
-
+import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
-/** tiny helpers */
-const ok = (extra: Record<string, unknown> = {}) =>
-  NextResponse.json({ ok: true, ...extra });
+/**
+ * Path-A minimal webhook handler:
+ * - Accepts a wide range of "new inbound" signals:
+ *   subscriptionType: "conversation.newMessage" OR
+ *   changeFlag: "NEW_MESSAGE" OR
+ *   messageType: "MESSAGE" OR
+ *   eventType contains "newMessage"
+ * - Loop-protection: skip if original had X-AlexIO-Responder: 1
+ * - Extracts customer email + Message-Id defensively
+ * - Calls local /api/msgraph/send for delivery
+ *
+ * ENV:
+ *   REPLY_ENABLED = "true" to allow live sends
+ */
 
-const bad = (status: number, reason: string, extra?: Record<string, unknown>) =>
-  NextResponse.json({ ok: false, reason, ...extra }, { status });
+function toBool(v: unknown) {
+  return String(v ?? "").toLowerCase() === "true";
+}
 
-/** Parse both `?dryRun=1` and `?dryRun=true` as true */
-const isTrue = (v: string | null) => v !== null && /^1|true|yes$/i.test(v);
+function validEmail(s: unknown): s is string {
+  return typeof s === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+}
 
-/** Optional KV (Upstash) – loaded lazily and safely */
-async function getKV() {
-  try {
-    // Works whether you export default or named `kv`
-    const mod: any = await import("@/lib/kv");
-    const kv = mod?.kv ?? mod?.default ?? mod;
-    if (kv && typeof kv.get === "function" && typeof kv.set === "function") {
-      return kv as { get: (k: string) => Promise<any>; set: (k: string, v: any, opts?: any) => Promise<any> };
-    }
-  } catch {
-    // no kv available – fine, we silently skip dedupe
-  }
+function get(obj: any, path: string[]): any {
+  return path.reduce((a, k) => (a && typeof a === "object" ? a[k] : undefined), obj);
+}
+
+function extractEmail(evt: any): string | null {
+  const candidates = [
+    get(evt, ["recipient", "email"]),
+    get(evt, ["message", "from", "email"]),
+    get(evt, ["object", "message", "from", "email"]),
+    get(evt, ["object", "from", "email"]),
+  ];
+  for (const c of candidates) if (validEmail(c)) return c;
   return null;
 }
 
-/** Minimal shape we care about from HubSpot envelope */
-type Envelope = {
-  subType?: string;          // e.g., "conversation.newMessage"
-  objId?: string | number;   // conversation/thread/message identifier
-  channel?: string;
-  direction?: string;        // sometimes "", sometimes "INCOMING"/"OUTGOING"
-};
-
-/** Normalize request JSON into our Envelope */
-function asEnvelope(body: unknown): Envelope {
-  // Some HubSpot deliveries are arrays of events; you’ve been seeing single-object envelopes.
-  if (Array.isArray(body) && body.length > 0) {
-    const first = body[0] as any;
-    return {
-      subType: first?.subType ?? first?.subscriptionType ?? undefined,
-      objId: String(first?.objId ?? first?.objectId ?? ""),
-      channel: first?.channel ?? "",
-      direction: first?.direction ?? first?.messageDirection ?? "",
-    };
-  }
-  const b = body as any;
-  return {
-    subType: b?.subType ?? b?.subscriptionType ?? undefined,
-    objId: String(b?.objId ?? b?.objectId ?? ""),
-    channel: b?.channel ?? "",
-    direction: b?.direction ?? b?.messageDirection ?? "",
-  };
+function extractMessageId(evt: any): string | null {
+  const headers =
+    get(evt, ["message", "headers"]) ||
+    get(evt, ["object", "message", "headers"]) ||
+    {};
+  const mid =
+    headers["Message-Id"] || headers["message-id"] || headers["MESSAGE-ID"] ||
+    evt?.messageId || evt?.object?.messageId || null;
+  return typeof mid === "string" && mid.length > 6 ? mid : null;
 }
 
-/** GET: quick health check */
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const dryRun = isTrue(url.searchParams.get("dryRun"));
-  console.log(`[webhook] GET hit { dryRun: ${dryRun}, qs: '${url.search}' }`);
-  return ok({ dryRun });
+function hasLoopHeader(evt: any): boolean {
+  const headers =
+    get(evt, ["message", "headers"]) ||
+    get(evt, ["object", "message", "headers"]) ||
+    {};
+  const v =
+    headers["X-AlexIO-Responder"] ||
+    headers["x-alexio-responder"] ||
+    headers["X-ALEXIO-RESPONDER"] ||
+    "";
+  return String(v).trim() === "1";
 }
 
-/** POST: HubSpot webhook handler with guardrails */
-export async function POST(req: Request) {
-  const url = new URL(req.url);
-  const dryRun = isTrue(url.searchParams.get("dryRun"));
-  const hubspotSig =
-    req.headers.get("x-hubspot-signature-v3") ||
-    req.headers.get("x-hubspot-signature") ||
-    "missing";
-
-  // Loop-protection header we add on our outbound sends
-  const alexSent = req.headers.get("x-alexio-sent");
-
-  let body: unknown;
-  try {
-    // If you dry-run with an empty body, make a tiny envelope so logs still show shape.
-    body = (await req.json().catch(() => (dryRun ? {} : undefined))) ?? {};
-  } catch {
-    return bad(400, "invalid_json");
-  }
-
-  const env: Envelope = asEnvelope(body);
-
-  console.log(
-    `[webhook] POST hit { dryRun:${dryRun}, len:${JSON.stringify(body).length}, json:true, ua:'${req.headers.get(
-      "user-agent"
-    )}', hubspotSig:'${hubspotSig}' }`
+function isNewInbound(evt: any) {
+  const subscriptionType = String(evt?.subscriptionType ?? "");
+  const eventType = String(evt?.eventType ?? "");
+  const changeFlag = String(evt?.changeFlag ?? "");
+  const messageType = String(evt?.messageType ?? "");
+  // Broad OR across all known shapes
+  return (
+    subscriptionType.includes("conversation.newMessage") ||
+    eventType.includes("newMessage") ||
+    changeFlag === "NEW_MESSAGE" ||
+    messageType === "MESSAGE"
   );
-  console.log(`[webhook] envelope`, {
-    subType: env.subType ?? "",
-    objId: env.objId ?? "",
-    channel: env.channel ?? "",
-    direction: env.direction ?? "",
+}
+
+async function postJson(url: string, body: unknown) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
+  return res;
+}
 
-  // 1) Global kill switch
-  const REPLY_ENABLED = String(process.env.REPLY_ENABLED ?? "").toLowerCase() === "true";
-  const MAILBOX_FROM = String(process.env.MS_MAILBOX_FROM ?? "sales@alex-io.com").toLowerCase();
-
-  console.log(
-    `[webhook] env { REPLY_ENABLED:'${REPLY_ENABLED}', MS_TENANT_ID:'${!!process.env.MS_TENANT_ID}', MS_CLIENT_ID:'${!!process.env.MS_CLIENT_ID}', MS_CLIENT_SECRET:'${!!process.env.MS_CLIENT_SECRET}', MS_MAILBOX_FROM:'${MAILBOX_FROM}' }`
-  );
-
-  if (!REPLY_ENABLED) {
-    console.log(`[webhook] Responder output { sent:false, action:'no-responder', note:'reply disabled' }`);
-    return ok({ dryRun, ignored: true, reason: "reply_disabled" });
-  }
-
-  // 2) Subtype guard
-  if ((env.subType || "").toLowerCase() !== "conversation.newmessage") {
-    console.log(`[webhook] Responder output { sent:false, action:'no-responder', note:'wrong subtype' }`);
-    return ok({ dryRun, ignored: true, reason: "wrong_subtype", subType: env.subType ?? "" });
-  }
-
-  // 3) Loop guard (ignore anything we sent)
-  // We tag every Graph send with header: X-AlexIO-Sent: 1
-  if (alexSent === "1") {
-    console.log(`[webhook] Responder output { sent:false, action:'no-responder', note:'loop header' }`);
-    return ok({ dryRun, ignored: true, reason: "loop_header" });
-  }
-
-  // 4) De-dupe on objId (best effort; only if KV is available)
+export async function POST(req: NextRequest) {
   try {
-    const kv = await getKV();
-    if (kv && env.objId) {
-      const key = `hs:evt:${env.objId}`;
-      const seen = await kv.get(key);
-      if (seen) {
-        console.log(`[webhook] Responder output { sent:false, action:'no-responder', note:'duplicate objId' }`);
-        return ok({ dryRun, ignored: true, reason: "duplicate" });
-      }
-      // TTL 10 minutes is plenty for HS retries
-      await kv.set(key, "1", { ex: 600 });
+    const url = new URL(req.url);
+    const dryRun = url.searchParams.get("dryRun") === "1";
+    const replyEnabled = toBool(process.env.REPLY_ENABLED);
+
+    const events = (await req.json()) as any[];
+    if (!Array.isArray(events) || events.length === 0) {
+      return NextResponse.json({ ok: true, ignored: true, reason: "no_events" });
     }
-  } catch (e: any) {
-    console.log(`[webhook] dedupe skipped: ${e?.message ?? String(e)}`);
-  }
 
-  // 5) Dry-run quick exit
-  if (dryRun) {
-    console.log(`[webhook] Responder output { sent:false, action:'noop', note:'dry-run' }`);
-    return ok({ dryRun, processable: false, reason: "dry-run" });
-  }
+    // Handle first event only (Path-A)
+    const evt = events[0];
 
-  // At this point: allowed to proceed. We forward to the responder
-  // so it can decide whether to send (templates, parsing, etc).
-  try {
-    // We forward to your responder URL so the "brains" live in one place.
-    // NOTE: keep this path consistent with your project’s existing responder route.
-    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
-    const responder = `${base}/api/admin/responder`;
+    const debug = {
+      subscriptionType: evt?.subscriptionType ?? null,
+      eventType: evt?.eventType ?? null,
+      changeFlag: evt?.changeFlag ?? null,
+      messageType: evt?.messageType ?? null,
+    };
 
-    const forward = await fetch(responder, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // Preserve our loop-protection marker through the pipeline.
-        "X-AlexIO-Envelope": "webhook",
-      },
-      body: JSON.stringify({
-        objId: env.objId ?? "",
-        envelope: env,
-      }),
+    if (!isNewInbound(evt)) {
+      return NextResponse.json({ ok: true, dryRun, ignored: true, reason: "wrong_subtype", subType: "", debug });
+    }
+
+    if (hasLoopHeader(evt)) {
+      return NextResponse.json({ ok: true, dryRun, ignored: true, reason: "loop_header_present", debug });
+    }
+
+    const toEmail = extractEmail(evt);
+    const inReplyTo = extractMessageId(evt);
+    if (!toEmail) {
+      return NextResponse.json({ ok: true, dryRun, ignored: true, reason: "no_email", debug });
+    }
+
+    if (dryRun || !replyEnabled) {
+      return NextResponse.json({ ok: true, dryRun, wouldSend: true, toEmail, inReplyTo, debug });
+    }
+
+    const html =
+      `<p>Thanks for reaching out! We received your message and will follow up shortly.</p>` +
+      `<p>— Alex-IO</p>`;
+
+    const base = `${url.protocol}//${url.host}`;
+    const res = await postJson(`${base}/api/msgraph/send`, {
+      to: toEmail,
+      html,
+      inReplyTo,
+      references: inReplyTo ? [inReplyTo] : undefined,
     });
 
-    const text = await forward.text();
-    console.log(
-      `[webhook] Responder forward result { status: ${forward.status}, text: ${text ? text.slice(0, 400) : ""} }`
-    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return NextResponse.json(
+        { ok: false, error: "sendMail failed", details: text.slice(0, 2000), toEmail, inReplyTo, debug },
+        { status: 502 }
+      );
+    }
 
-    const sent = forward.ok;
-    console.log(
-      `[webhook] Responder output { sent:${sent}, action:'${sent ? "graph-send" : "no-responder"}', note:'${
-        forward.ok ? "accepted" : "failed:" + forward.status
-      }' }`
-    );
-    return NextResponse.json({ ok: true, forwarded: true, status: forward.status, body: text ?? "" });
+    return NextResponse.json({ ok: true, sent: true, toEmail, inReplyTo, debug });
   } catch (err: any) {
-    console.log(`[webhook] ERROR forwarding to responder: ${err?.message ?? String(err)}`);
-    return bad(500, "forward_error");
+    return NextResponse.json({ ok: false, error: err?.message ?? "unknown" }, { status: 500 });
   }
 }
