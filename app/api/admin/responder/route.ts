@@ -1,185 +1,227 @@
 // app/api/admin/responder/route.ts
 import { NextResponse } from "next/server";
-
-// If you moved the helper into /lib/msgraph.ts use this:
 import { sendGraphMail } from "@/lib/msgraph";
-// If you kept it at repo root use:  import { sendGraphMail } from "@/msgraph";
 
-export const dynamic = "force-dynamic";
+/**
+ * Small helpers
+ */
+const bool = (v: string | undefined | null, def = false) =>
+  v == null ? def : /^(1|true|yes|on)$/i.test(v);
 
-function b(v: string | undefined, def = false) {
-  return v ? /^(1|true|yes|on)$/i.test(v) : def;
-}
-function requireEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
+const safeStr = (v: any, d = "") =>
+  typeof v === "string" && v.trim().length ? v.trim() : d;
 
-type Envelope = {
-  subType?: string;
-  objId?: string | number;
-  channel?: string;
-  direction?: string;
-};
+const json = (o: any, init?: number) =>
+  NextResponse.json(o, { status: init ?? 200 });
 
-async function getHubSpotToken(): Promise<string> {
-  // Uses your existing refresh endpoint that returns a JSON
-  // with { ok:true, access_token:"..." }.
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
-  const r = await fetch(`${base}/api/hubspot/refresh`, { cache: "no-store" });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j?.access_token) {
-    throw new Error(`HubSpot refresh failed (${r.status})`);
+function baseUrlFromReq(req: Request) {
+  try {
+    const url = new URL(req.url);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
   }
-  return j.access_token as string;
 }
 
 /**
- * Fetch the latest inbound message on the HubSpot conversation thread
- * and return { fromEmail, subject }. Falls back to undefined on errors.
- *
- * NOTE: HubSpot conversations APIs vary by account.
- * This uses a conservative "threads/{id}/messages" path that is commonly available.
+ * Fetch a fresh HubSpot access token by calling your internal refresh endpoint.
+ * (You already have /api/hubspot/refresh wired up.)
  */
-async function getLatestInboundFromHubSpot(objId: string): Promise<{ fromEmail?: string; subject?: string } | null> {
+async function getHubSpotAccessToken(req: Request): Promise<string | null> {
   try {
-    const token = await getHubSpotToken();
-
-    // Try messages list for the thread
-    const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${encodeURIComponent(
-      objId
-    )}/messages?limit=20`;
-    const r = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    const base = baseUrlFromReq(req);
+    const r = await fetch(`${base}/api/hubspot/refresh`, {
       cache: "no-store",
     });
-
-    if (!r.ok) {
-      const t = await r.text().catch(() => "");
-      console.log("[responder] hubspot thread fetch error", { status: r.status, body: t?.slice(0, 400) });
-      return null;
-    }
-
-    const data = await r.json().catch(() => ({}));
-    const items: any[] = Array.isArray(data?.results) ? data.results : Array.isArray(data) ? data : [];
-
-    // Heuristic: pick the most recent INBOUND email not sent by our mailbox
-    const self = (process.env.MS_MAILBOX_FROM || "sales@alex-io.com").toLowerCase();
-    let bestFrom: string | undefined;
-    let bestSubject: string | undefined;
-
-    for (const m of items) {
-      const direction = String(m?.direction || m?.messageDirection || "").toUpperCase();
-      const ch = String(m?.channel || "").toUpperCase();
-      const from = String(
-        m?.from?.email ||
-          m?.sender?.email ||
-          m?.senderEmail ||
-          m?.recipient?.email ||
-          m?.metadata?.from?.email ||
-          ""
-      ).toLowerCase();
-
-      const subj = String(
-        m?.subject ||
-          m?.properties?.subject ||
-          m?.metadata?.subject ||
-          ""
-      );
-
-      if (direction === "INCOMING" || direction === "INBOUND" || (direction === "" && ch === "EMAIL")) {
-        if (from && from !== self) {
-          bestFrom = from;
-          bestSubject = subj || bestSubject;
-          break;
-        }
-      }
-    }
-
-    if (!bestFrom) {
-      console.log("[responder] hubspot lookup: no inbound sender found");
-      return null;
-    }
-    return { fromEmail: bestFrom, subject: bestSubject };
-  } catch (e: any) {
-    console.log("[responder] hubspot lookup exception", String(e?.message || e));
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.accessToken ?? null;
+  } catch {
     return null;
   }
 }
 
-function defaultTemplate(nameOrEmail: string) {
-  return `
-  <p>Hi ${nameOrEmail},</p>
-  <p>Thanks for reaching out — we received your request. I’m preparing a quick quote and will follow up shortly.</p>
-  <p>— Alex-IO Bot</p>
-  <hr />
-  <p style="font-size:12px;color:#666">This message was sent automatically by Alex-IO.</p>
-  `;
-}
-
-export async function POST(req: Request) {
-  const replyEnabled = b(process.env.REPLY_ENABLED, false);
-  const from = requireEnv("MS_MAILBOX_FROM");
-
-  // Body can be: { to?, subject?, html?, text?, envelope?, objId? }
-  let body: any = {};
-  try { body = await req.json(); } catch {}
-
-  const explicitTo = body?.to; // allow manual override
-  const explicitSubject = body?.subject;
-  const objId = String(body?.objId ?? body?.envelope?.objId ?? "");
-
-  // Safety: if replies disabled, noop but 200 (so HubSpot won’t retry)
-  if (!replyEnabled) {
-    console.log("[responder] reply disabled — noop");
-    return NextResponse.json({ ok: true, sent: false, reason: "reply_disabled" });
-  }
-
-  // If caller provided "to", we trust it (used in manual tests)
-  if (explicitTo) {
-    const toList = Array.isArray(explicitTo) ? explicitTo : [explicitTo];
-    const html = body?.html || defaultTemplate(String(toList[0]));
-    const subject = explicitSubject || "[Alex-IO] Thanks — we’re on it";
-    const r = await sendGraphMail({ to: toList[0], subject, html }); // helper saves to Sent Items
-    return NextResponse.json({ ok: r.ok, sent: r.ok, graphStatus: r.status, requestId: r.requestId ?? null });
-  }
-
-  // Otherwise, resolve the customer from HubSpot using objId
-  if (!objId) {
-    console.log("[responder] missing objId and no explicit 'to' — noop");
-    return NextResponse.json({ ok: true, sent: false, reason: "missing_objId" });
-  }
-
-  const resolved = await getLatestInboundFromHubSpot(objId);
-  if (!resolved?.fromEmail) {
-    console.log("[responder] could not resolve customer email — noop");
-    return NextResponse.json({ ok: true, sent: false, reason: "no_customer_email" });
-  }
-
-  const subject = explicitSubject || resolved.subject || "[Alex-IO] Thanks — we’re on it";
-  const html = defaultTemplate(resolved.fromEmail);
-
-  // Send the real reply
+/**
+ * Fallback: resolve an inbound customer's email by scanning the thread's messages.
+ * We walk newest → oldest and pick the first inbound EMAIL sender.
+ */
+async function resolveInboundEmailFromThread(
+  objId: string,
+  hubspotAccessToken: string
+): Promise<string | null> {
   try {
-    const r = await sendGraphMail({ to: resolved.fromEmail, subject, html }); // Sent Items copy saved
-    console.log("[responder] graph result", { status: r.status, requestId: r.requestId });
-    return NextResponse.json({ ok: r.ok, sent: r.ok, graphStatus: r.status, requestId: r.requestId ?? null });
-  } catch (e: any) {
-    console.log("[responder] graph exception", String(e?.message || e));
-    return NextResponse.json({ ok: false, sent: false, error: String(e?.message || e) }, { status: 200 });
+    const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${objId}/messages?limit=50`;
+    const r = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${hubspotAccessToken}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    });
+    if (!r.ok) {
+      console.log("[responder] thread fetch failed:", r.status);
+      return null;
+    }
+    const data = await r.json();
+    const msgs: any[] = data?.results ?? data?.messages ?? [];
+    if (!Array.isArray(msgs)) return null;
+
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      const dir = String(m?.direction ?? m?.directionality ?? "").toLowerCase();
+      const ch = String(m?.channel ?? m?.originChannel ?? "").toLowerCase();
+      const fromEmail =
+        m?.from?.email ?? m?.sender?.email ?? m?.senderEmail ?? null;
+
+      const isIncoming = dir.includes("in"); // inbound / incoming
+      const isEmail = ch === "email";
+
+      if (isIncoming && isEmail && fromEmail) {
+        return String(fromEmail).trim();
+      }
+    }
+    return null;
+  } catch (err) {
+    console.log("[responder] fallback error:", (err as Error)?.message);
+    return null;
   }
 }
 
-// Optional GET smoke test so you can do quick header/parse passes
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const to = url.searchParams.get("to");
-  if (!to) return NextResponse.json({ ok: false, error: "add ?to=email" }, { status: 400 });
-  const r = await sendGraphMail({
-    to,
-    subject: "[Alex-IO] Responder GET smoke",
-    html: `<p>Responder GET smoke — ${new Date().toISOString()}</p>`,
+/**
+ * POST: sends email via Graph.
+ * Accepts JSON body:
+ *  {
+ *    "to"?: string,                 // explicit recipient (optional)
+ *    "subject"?: string,
+ *    "html"?: string,
+ *    "objId"?: string               // HubSpot conversation thread id (optional)
+ *  }
+ * If "to" is missing and "objId" is present, we try to resolve the inbound sender
+ * from the thread messages as a fallback.
+ */
+export async function POST(req: Request) {
+  // --- env checks and flags
+  const REPLY_ENABLED = bool(process.env.REPLY_ENABLED ?? "false", false);
+  const FROM = safeStr(process.env.MS_MAILBOX_FROM);
+  const hasTenant = !!process.env.MS_TENANT_ID;
+  const hasClientId = !!process.env.MS_CLIENT_ID;
+  const hasClientSecret = !!process.env.MS_CLIENT_SECRET;
+
+  // parse request
+  let body: any = {};
+  try {
+    body = await req.json();
+  } catch {
+    // ignore; body stays {}
+  }
+
+  let to = safeStr(body?.to);
+  const objId = safeStr(body?.objId);
+  const subject = safeStr(
+    body?.subject,
+    "[Alex-IO] Default Test — responder"
+  );
+  const html = safeStr(body?.html, "<p>Hello from Alex-IO responder.</p>");
+
+  // log a compact summary for Render logs
+  console.log("[webhook] envelope { subType:'', objId:'%s', channel:'', direction:'' }", objId);
+  console.log("[webhook] env { REPLY_ENABLED:'%s', MS_TENANT_ID:'%s', MS_CLIENT_ID:'%s', MS_CLIENT_SECRET:'%s', MS_MAILBOX_FROM: '%s' }",
+    String(REPLY_ENABLED), String(hasTenant), String(hasClientId), String(hasClientSecret), FROM || "(missing)"
+  );
+
+  // basic gate checks
+  if (!REPLY_ENABLED) {
+    return json({
+      ok: true,
+      sent: false,
+      reason: "reply_disabled",
+    });
+  }
+  if (!FROM || !hasTenant || !hasClientId || !hasClientSecret) {
+    return json({
+      ok: false,
+      sent: false,
+      reason: "graph_env_missing",
+    }, 500);
+  }
+
+  // If "to" is not supplied, try to resolve from HubSpot thread (fallback)
+  if (!to && objId) {
+    const hubspotAccessToken = await getHubSpotAccessToken(req);
+    if (hubspotAccessToken) {
+      const fallback = await resolveInboundEmailFromThread(
+        objId,
+        hubspotAccessToken
+      );
+      if (fallback) {
+        to = fallback;
+        console.log(
+          "[responder] fallback resolved customerEmail from thread: %s",
+          to
+        );
+      } else {
+        console.log("[responder] fallback lookup still empty");
+      }
+    } else {
+      console.log("[responder] hubspot access token unavailable");
+    }
+  }
+
+  // If we STILL don't have a recipient, noop with a clean reason
+  if (!to) {
+    const reason = objId ? "no_customer_email" : "missing_objId";
+    console.log(
+      "[responder] missing objId and no explicit 'to' – noop (reason=%s)",
+      reason
+    );
+    return json({
+      ok: true,
+      sent: false,
+      reason,
+    });
+  }
+
+  // At this point we have a "to" and can try Graph
+  try {
+    const result = await sendGraphMail({
+      to,
+      subject,
+      html,
+      // You can extend with cc/bcc if desired later
+    });
+
+    // We assume your sendGraphMail returns something like { status, requestId }
+    return json({
+      ok: true,
+      sent: true,
+      action: "graph-send",
+      note: "accepted",
+      graph: {
+        status: result?.status ?? 202,
+        requestId: result?.requestId ?? null,
+      },
+    });
+  } catch (err: any) {
+    console.log("[responder] graph error:", err?.message || String(err));
+    return json(
+      {
+        ok: false,
+        sent: false,
+        action: "error",
+        error: err?.message || String(err),
+      },
+      500
+    );
+  }
+}
+
+/**
+ * Optional GET: quick curl -i smoke test
+ *   curl.exe -i https://api.alex-io.com/api/admin/responder?t=123
+ */
+export async function GET() {
+  return json({
+    ok: true,
+    route: "/api/admin/responder",
   });
-  return NextResponse.json({ ok: r.ok, graphStatus: r.status, requestId: r.requestId ?? null });
 }

@@ -1,9 +1,1 @@
-[
-  {
-    "subscriptionType": "conversation.newMessage",
-    "objectId": 9602216670,
-    "portalId": 244053164,
-    "eventId": "loc-test",
-    "occurredAt": 1730342400000
-  }
-]
+﻿{"subject":"[Alex-IO] Direct send test","to":"25thhourdesign@gmail.com","html":"\u003cp\u003eDirect test ✔\u003c/p\u003e","objId":"9819707114"}
