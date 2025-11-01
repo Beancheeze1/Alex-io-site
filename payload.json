@@ -1,3 +1,1 @@
-﻿[
-  { "subscriptionType":"conversation.newMessage","objectId":9754900183,"eventId":9001,"portalId":244053164,"messageId":"test-msg" }
-]
+{ "to": "25thhourdesign@gmail.com", "subject": "Alex-IO Warm-Up", "html": "<p>Warmup test</p>" }
