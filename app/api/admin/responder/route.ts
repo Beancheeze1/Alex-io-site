@@ -1,111 +1,77 @@
 // app/api/admin/responder/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-async function getAccessToken(): Promise<string> {
-  // 1) If set in env (dev), use it
-  if (process.env.HUBSPOT_ACCESS_TOKEN) return process.env.HUBSPOT_ACCESS_TOKEN;
-
-  // 2) Otherwise call your refresh endpoint
-  const base = process.env.NEXT_PUBLIC_BASE_URL;
-  if (!base) throw new Error("NEXT_PUBLIC_BASE_URL not set");
-
-  const res = await fetch(`${base.replace(/\/$/, "")}/api/hubspot/refresh`, { cache: "no-store" });
-  const json = await res.json().catch(() => ({} as any));
-  if (!res.ok || !json?.access_token) {
-    throw new Error(`refresh_failed: ${res.status} ${JSON.stringify(json)}`);
-  }
-  return json.access_token as string;
+function j(o: any) {
+  try { return JSON.stringify(o); } catch { return String(o); }
 }
 
-export async function GET(req: Request) {
+export async function POST(req: NextRequest) {
+  const url = new URL(req.url);
+  const t0 = Date.now();
+
+  let body: any = null;
   try {
-    const url = new URL(req.url);
-    const threadId = url.searchParams.get("threadId");
-    const dryRun = url.searchParams.get("dryRun") === "1";
-
-    if (!threadId) {
-      return NextResponse.json({ ok: false, error: "missing threadId" }, { status: 400 });
-    }
-
-    // Allow an override token via header/query (optional helper for testing)
-    const bearerFromQuery = url.searchParams.get("token");
-    const bearerFromHeader = (() => {
-      try {
-        const h = (req as any).headers?.get?.("authorization") || "";
-        return h.toLowerCase().startsWith("bearer ") ? h.slice(7) : "";
-      } catch { return ""; }
-    })();
-
-    const token =
-      bearerFromQuery?.trim() ||
-      bearerFromHeader?.trim() ||
-      (await getAccessToken());
-
-    // Pull messages for the thread
-    const msgRes = await fetch(
-      `https://api.hubapi.com/conversations/v3/conversations/threads/${encodeURIComponent(threadId)}/messages`,
-      { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
-    );
-    if (!msgRes.ok) {
-      const t = await msgRes.text().catch(() => "");
-      return NextResponse.json(
-        { ok: false, error: `hubspot_messages_failed ${msgRes.status}`, detail: t.slice(0, 300) },
-        { status: 502 }
-      );
-    }
-    const data = await msgRes.json();
-
-    // Find the latest incoming email-style message
-    const results: any[] = data?.results ?? [];
-    const inbound = [...results].reverse().find(
-      (m: any) => (m?.direction === "INCOMING" || m?.direction === "inbound") && (m?.type === "MESSAGE" || m?.type === "message")
-    );
-
-    if (!inbound) {
-      return NextResponse.json({ ok: false, threadId, error: "no inbound message found" }, { status: 422 });
-    }
-
-    // Extract email, subject, and a reply anchor (Message-Id header if present)
-    const customerEmail =
-      inbound?.senders?.[0]?.deliveryIdentifier?.value ??
-      inbound?.from?.email ??
-      null;
-
-    const subject = inbound?.subject ?? "(no subject)";
-
-    const messageId =
-      (Array.isArray(inbound?.headers)
-        ? inbound.headers.find((h: any) => String(h?.name).toLowerCase() === "message-id")?.value
-        : inbound?.headers?.["Message-Id"] || inbound?.headers?.["message-id"]) ||
-      inbound?.id ||
-      threadId;
-
-    if (!customerEmail) {
-      return NextResponse.json(
-        { ok: false, threadId, picked: { subject, messageId }, error: "missing customer email" },
-        { status: 422 }
-      );
-    }
-
-    if (dryRun) {
-      return NextResponse.json({
-        ok: true,
-        dryRun: true,
-        threadId,
-        picked: { customerEmail, subject, messageId },
-        note: "Ready to send via Graph/Gmail with In-Reply-To/References.",
-      });
-    }
-
-    // TODO: Call your real Graph/Gmail sender here (we'll wire it right after dry-run succeeds)
-    return NextResponse.json({
-      ok: true,
-      provider: "placeholder",
-      sent: { to: customerEmail, subject, inReplyTo: messageId },
-    });
-  } catch (err: any) {
-    return NextResponse.json({ ok: false, error: String(err?.message ?? err) }, { status: 500 });
+    body = await req.json();
+  } catch {
+    console.log("[responder] invalid json body");
+    return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
   }
+
+  const objId = body?.objId ?? "";
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const from = process.env.MS_MAILBOX_FROM || "";
+  const testTo = from; // smoke test: send back to our mailbox so we can verify quickly
+
+  console.log("[responder] start", { objId, base, from, hasTenant: !!process.env.MS_TENANT_ID });
+
+  // Safety: if Graph envs aren’t present, bail early with 200 so HubSpot stops retrying,
+  // but tell us clearly in logs.
+  if (!process.env.MS_TENANT_ID || !process.env.MS_CLIENT_ID || !process.env.MS_CLIENT_SECRET || !from) {
+    console.log("[responder] missing Graph envs; returning 200 to stop HubSpot retries");
+    return NextResponse.json({ ok: true, skipped: "missing_graph_envs" });
+  }
+
+  // Call the existing Graph sender route you already proved working
+  try {
+    const r = await fetch(`${base}/api/msgraph/send?t=${Date.now()}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // loop tag you were using in tests
+        "X-AlexIO-Sent": "1",
+      },
+      body: JSON.stringify({
+        to: testTo,
+        subject: `[Alex-IO] Webhook smoke test (objId: ${objId})`,
+        html: `<p>Webhook reached responder ✅</p>
+               <p>objId: <code>${objId || "(none)"}</code></p>
+               <p>ts: ${new Date().toISOString()}</p>`,
+      }),
+    });
+
+    const text = await r.text();
+    console.log("[responder] graph result", { status: r.status, body: text?.slice(0, 400) });
+
+    // Return 200 so HubSpot treats it as delivered; include downstream status for our logs
+    return NextResponse.json({
+      ok: r.ok,
+      graphStatus: r.status,
+      tookMs: Date.now() - t0,
+    }, { status: 200 });
+  } catch (err: any) {
+    console.log("[responder] graph exception", j(String(err)));
+    // Still return 200 to stop retry storms, but flag failure
+    return NextResponse.json({
+      ok: false,
+      error: String(err),
+      tookMs: Date.now() - t0,
+    }, { status: 200 });
+  }
+}
+
+// Optional: provide GET to avoid 405 if someone pings it by hand
+export async function GET() {
+  return NextResponse.json({ ok: true, route: "admin/responder" });
 }
