@@ -130,13 +130,15 @@ export async function POST(req: NextRequest) {
       `<p>Thanks for reaching out! We received your message and will follow up shortly.</p>` +
       `<p>— Alex-IO</p>`;
 
-    const base = `${url.protocol}//${url.host}`;
-    const res = await postJson(`${base}/api/msgraph/send`, {
-      to: toEmail,
-      html,
-      inReplyTo,
-      references: inReplyTo ? [inReplyTo] : undefined,
-    });
+    const override = process.env.INTERNAL_SEND_URL; // e.g., https://alex-io-bot.onrender.com/api/msgraph/send
+const sendUrl = override || new URL("/api/msgraph/send", url).toString();
+
+const res = await postJson(sendUrl, {
+  to: toEmail,
+  html,
+  inReplyTo,
+  references: inReplyTo ? [inReplyTo] : undefined,
+});
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");

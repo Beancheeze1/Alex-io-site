@@ -1,1 +1,9 @@
-{ "to": "25thhourdesign@gmail.com", "subject": "Alex-IO Warm-Up", "html": "<p>Warmup test</p>" }
+﻿[
+  {
+    "subscriptionType": "conversation.newMessage",
+    "message": {
+      "from": { "email": "25thhourdesign@gmail.com" },
+      "headers": { "Message-Id": "<fake.message.id@alex-io.com>" }
+    }
+  }
+]
