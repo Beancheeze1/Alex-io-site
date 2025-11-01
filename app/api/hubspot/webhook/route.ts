@@ -1,186 +1,186 @@
 // app/api/hubspot/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-// Tiny helper: robust truthy parser for envs
-function truthy(v: any): boolean {
-  if (v == null) return false;
-  const s = String(v).trim().toLowerCase();
-  return s === "1" || s === "true" || s === "yes" || s === "on";
-}
+export const dynamic = "force-dynamic";
 
-type HubspotEnvelope = {
-  objectId?: number | string;
-  eventType?: string;           // e.g. "conversation.creation" or "conversation.newMessage"
-  messageDirection?: string;    // optional, some payloads include direction
-  channel?: string;             // optional (e.g., "EMAIL", "CHAT")
-  // Your existing shape may be different; we only read the top-level we need.
+type ClassicEvent = {
+  objectId?: string | number;
+  objId?: string | number;
+  subType?: string;                 // e.g. "conversation.newMessage"
+  channel?: string;                 // e.g. "EMAIL"
+  direction?: string;               // e.g. "INCOMING"
 };
 
-// Safe JSON parse
-async function tryJson<T>(req: NextRequest): Promise<{ ok: true; data: T } | { ok: false; err: string }> {
-  try {
-    const data = await req.json();
-    return { ok: true, data };
-  } catch (e: any) {
-    return { ok: false, err: e?.message || String(e) };
+type ExpandedObjectEvent = {
+  // Expanded/object model examples seen from HubSpot:
+  // {
+  //   "objectType":"conversation",
+  //   "objectId":"9819308774",
+  //   "eventType":"NEW_MESSAGE",      // sometimes uppercase
+  //   "subscriptionType"?: "conversation.newMessage",
+  //   ...
+  // }
+  objectType?: string;
+  objectId?: string | number;
+  eventType?: string;               // e.g. "NEW_MESSAGE"
+  subscriptionType?: string;        // e.g. "conversation.newMessage"
+};
+
+type Envelope = {
+  subType: string;
+  objId: string;
+  channel: string;
+  direction: string;
+};
+
+function log(msg: string, obj?: any) {
+  if (obj !== undefined) {
+    console.log(`[webhook] ${msg}`, obj);
+  } else {
+    console.log(`[webhook] ${msg}`);
   }
 }
 
-// Central diagnostic log
-function log(section: string, data: Record<string, any>) {
-  // Render shows console.log lines; keep compact and explicit
-  console.log(`[webhook] ${section}`, JSON.stringify(data));
+function asString(v: any): string {
+  return v == null ? "" : String(v);
 }
 
-export const dynamic = "force-dynamic";
+/**
+ * Normalize either payload style into a single envelope our responder understands.
+ * Returns null if we can't positively identify a "new inbound message".
+ */
+function extractEnvelope(body: any): Envelope | null {
+  // 1) Classic conversations webhook (what we originally built for)
+  const maybeClassic = (evt: any): Envelope | null => {
+    const c: ClassicEvent = evt ?? {};
+    const subType = asString(c.subType);
+    if (subType) {
+      return {
+        subType,
+        objId: asString(c.objId ?? c.objectId),
+        channel: asString(c.channel),
+        direction: asString(c.direction),
+      };
+    }
+    return null;
+  };
+
+  // 2) Expanded object style → map into our envelope
+  const maybeExpanded = (evt: any): Envelope | null => {
+    const e: ExpandedObjectEvent = evt ?? {};
+    // Positive signals we treat as "new message":
+    const looksLikeNew =
+      e.subscriptionType === "conversation.newMessage" ||
+      (e.objectType === "conversation" &&
+        (e.eventType?.toUpperCase?.() === "NEW_MESSAGE" ||
+         e.eventType?.toLowerCase?.() === "conversation.newmessage"));
+
+    if (!looksLikeNew) return null;
+
+    return {
+      subType: "conversation.newMessage",
+      objId: asString(e.objectId),
+      channel: "",    // unknown in object model
+      direction: "",  // unknown in object model
+    };
+  };
+
+  const arr = Array.isArray(body) ? body : [body];
+
+  for (const item of arr) {
+    // Try the classic shape first
+    const c = maybeClassic(item);
+    if (c) return c;
+
+    // Then try the expanded/object shape
+    const x = maybeExpanded(item);
+    if (x) return x;
+  }
+
+  return null;
+}
+
+function summarizeEnvelope(env: Envelope | null) {
+  if (!env) return { subType: "", objId: "", channel: "", direction: "" };
+  const { subType, objId, channel, direction } = env;
+  return { subType, objId, channel, direction };
+}
 
 export async function POST(req: NextRequest) {
   const url = new URL(req.url);
-  const dryRun = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
+  const dryRun = url.searchParams.get("dryRun") === "1";
+  const hubspotSig =
+    req.headers.get("X-HubSpot-Signature") ||
+    req.headers.get("x-hubspot-signature");
 
-  // Presence of HubSpot signature indicates real webhook
-  const hubspotSig = req.headers.get("X-HubSpot-Signature") ? "present" : "missing";
-  const ua = req.headers.get("user-agent") || "";
-  const len = Number(req.headers.get("content-length") || "0");
-  log("POST hit", { dryRun, len, json: true, ua, hubspotSig });
+  const isJson =
+    (req.headers.get("content-type") || "").includes("application/json");
 
-  // Parse body
-  const parsed = await tryJson<HubspotEnvelope | HubspotEnvelope[]>(req);
-  if (!parsed.ok) {
-    log("JSON parse error", { error: parsed.err });
-    return NextResponse.json({ ok: false, error: `bad_json: ${parsed.err}` }, { status: 400 });
+  let body: any = null;
+  try {
+    body = isJson ? await req.json() : await req.text();
+  } catch {
+    // ignore parse error; we'll respond below
   }
-  const body = parsed.data;
 
-  // Normalize to a single envelope for logging / decision
-  const first: HubspotEnvelope =
-    Array.isArray(body) ? (body[0] || {}) : (body as HubspotEnvelope);
+  log(`POST hit { dryRun:${dryRun}, len:${body ? JSON.stringify(body).length : 0}, json:${isJson}, ua:'${req.headers.get("user-agent")}', hubspotSig:'${hubspotSig ? "present" : "missing"}' }`);
 
-  const subType = first?.eventType ?? (first as any)?.subType ?? ""; // support either field name
-  const objId = String(first?.objectId ?? (first as any)?.obj ?? "");
-  const channel = (first as any)?.channel || "";           // may be empty
-  const direction = (first as any)?.messageDirection || ""; // may be empty
+  if (dryRun) {
+    return NextResponse.json({
+      ok: true,
+      dryRun: true,
+      ignored: false,
+      reason: "processable: dry-run",
+    });
+  }
 
-  // Pull env flags and show exactly what code is seeing
-  const env = {
+  if (!isJson || !body) {
+    log("Responder output { sent:false, action:'no-responder', note:'invalid_json' }");
+    return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
+  }
+
+  const env = extractEnvelope(body);
+  log("envelope", summarizeEnvelope(env));
+
+  // Surface important env vars (helpful for debugging)
+  log("env", {
     REPLY_ENABLED: process.env.REPLY_ENABLED,
     MS_TENANT_ID: !!process.env.MS_TENANT_ID,
     MS_CLIENT_ID: !!process.env.MS_CLIENT_ID,
     MS_CLIENT_SECRET: !!process.env.MS_CLIENT_SECRET,
     MS_MAILBOX_FROM: process.env.MS_MAILBOX_FROM,
-  };
-  const replyEnabled = truthy(env.REPLY_ENABLED);
+  });
 
-  log("envelope", { subType, objId, channel, direction });
-  log("env", env);
-  log("flags", { replyEnabled });
-
-  // === Decision guards (these are the typical bailout points) ===
-
-  // 1) Global gate
-  if (!replyEnabled) {
-    const note = "reply_disabled";
-    log("Responder output", { sent: false, action: "no-responder", note });
-    return NextResponse.json({ ok: true, sent: false, action: "no-responder", note });
+  if (!env || env.subType !== "conversation.newMessage") {
+    log("Responder output { sent:false, action:'no-responder', note:'ignore_event:unknown' }");
+    return NextResponse.json({ ok: true, ignored: true, note: "unknown_event" });
   }
 
-  // 2) Must be a message event we handle (allow both creation + newMessage)
-  const allowed = subType === "conversation.newMessage" || subType === "conversation.creation";
-  if (!allowed) {
-    const note = `ignore_event:${subType || "unknown"}`;
-    log("Responder output", { sent: false, action: "no-responder", note });
-    return NextResponse.json({ ok: true, sent: false, action: "no-responder", note });
-  }
-
-  // 3) Optional: restrict to email channel if your responder only supports email
-  // If your payload doesn’t include channel, this will be empty and pass through.
-  // Change this to `channel?.toUpperCase() !== "EMAIL"` if you need that.
-  const emailOnly = false; // flip to true if you want to require EMAIL
-  if (emailOnly && channel && channel.toUpperCase() !== "EMAIL") {
-    const note = `ignore_channel:${channel}`;
-    log("Responder output", { sent: false, action: "no-responder", note });
-    return NextResponse.json({ ok: true, sent: false, action: "no-responder", note });
-  }
-
-  // 4) We need a valid conversation id to fetch text
-  if (!objId) {
-    const note = "missing_objId";
-    log("Responder output", { sent: false, action: "no-responder", note });
-    return NextResponse.json({ ok: true, sent: false, action: "no-responder", note });
-  }
-
-  // === Fetch the thread/message text (your existing helper) ===
-  // If your project already has /api/hubspot/peek-like logic in a util, call it here.
-  // For diagnostics, call the existing peek API so we log the outcome.
-  // NOTE: replace this with your internal fetch if you have one.
-
-  let messagePreview = "";
+  // ---------- At this point we know it's a new message ----------
+  // Call the responder route to actually send email via Graph.
   try {
-    const peekUrl = new URL(`${url.origin}/api/hubspot/peek`);
-    peekUrl.searchParams.set("threadId", objId);
-    // pass a cache buster
-    peekUrl.searchParams.set("t", String(Date.now()));
-    const r = await fetch(peekUrl, { method: "GET", headers: { "accept": "application/json" } });
-    const text = await r.text();
-    log("peek_result", { status: r.status, bodyLen: text.length, bodySample: text.slice(0, 240) });
-    try {
-      const j = JSON.parse(text);
-      messagePreview = (j?.lastText || j?.text || "").slice(0, 256);
-    } catch {
-      // keep raw sample only
-    }
-  } catch (e: any) {
-    log("peek_error", { error: e?.message || String(e) });
-  }
-
-  if (!messagePreview) {
-    const note = "no_message_text";
-    log("Responder output", { sent: false, action: "no-responder", note });
-    return NextResponse.json({ ok: true, sent: false, action: "no-responder", note });
-  }
-
-  // === At this point we would compose and send via Graph ===
-  // For safety, keep a dry-run unless you really want to send.
-  // Flip `doSend` to true to attempt a real send immediately.
-  const doSend = true;
-
-  if (!doSend) {
-    const note = "dry_gate";
-    log("Responder output", { sent: false, action: "would-send", note, preview: messagePreview });
-    return NextResponse.json({ ok: true, sent: false, action: "would-send", note });
-  }
-
-  // Minimal Graph call using your existing /api/msgraph/send endpoint
-  try {
-    const sendUrl = new URL(`${url.origin}/api/msgraph/send`);
-    sendUrl.searchParams.set("t", String(Date.now()));
-    const payload = {
-      to: process.env.MS_MAILBOX_FROM, // send to yourself for now
-      subject: "Alex-IO Auto Reply (diag)",
-      html: `<p>Auto-detected message on thread ${objId}.</p><pre>${escapeHtml(messagePreview)}</pre>`
-    };
-    const r = await fetch(sendUrl, {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ""}/api/admin/responder`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload)
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        objId: env.objId,
+        from: process.env.MS_MAILBOX_FROM,
+      }),
     });
-    const t = await r.text();
-    log("msgraph_send", { status: r.status, body: t.slice(0, 240) });
-    if (r.ok) {
-      log("Responder output", { sent: true, action: "sent", note: undefined });
-      return NextResponse.json({ ok: true, sent: true, action: "sent" });
-    } else {
-      log("Responder output", { sent: false, action: "send-failed", note: t.slice(0, 200) });
-      return NextResponse.json({ ok: true, sent: false, action: "send-failed", note: t.slice(0, 200) });
-    }
-  } catch (e: any) {
-    const note = e?.message || String(e);
-    log("msgraph_error", { error: note });
-    log("Responder output", { sent: false, action: "send-exception", note });
-    return NextResponse.json({ ok: true, sent: false, action: "send-exception", note });
-  }
-}
 
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+    const text = await res.text();
+    log("Responder forward result", { status: res.status, text: text?.slice(0, 500) });
+
+    const ok = res.ok;
+    log(`Responder output { sent:${ok}, action:'graph-send', note:'${ok ? "accepted" : "failed"}:${res.status}' }`);
+
+    return NextResponse.json({
+      ok,
+      forwardedStatus: res.status,
+      body: text?.slice(0, 500),
+    }, { status: ok ? 200 : 500 });
+  } catch (err: any) {
+    log("Responder output { sent:false, action:'graph-send', note:'exception' }");
+    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
+  }
 }
