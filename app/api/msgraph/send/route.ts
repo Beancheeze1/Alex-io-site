@@ -21,7 +21,11 @@ async function getAppToken() {
     grant_type: "client_credentials",
   });
 
-  const r = await fetch(tokenUrl, { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+  const r = await fetch(tokenUrl, {
+    method: "POST",
+    body,
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
   const j = await r.json();
   if (!r.ok) throw new Error(`token error ${r.status}: ${JSON.stringify(j).slice(0, 300)}`);
   return j.access_token as string;
@@ -29,47 +33,50 @@ async function getAppToken() {
 
 export async function POST(req: Request) {
   try {
-    const { to, subject, text, html, inReplyTo, references } = await req.json();
+    const { to, subject, text, html } = await req.json();
 
     if (!to) return NextResponse.json({ ok: false, error: "missing to" }, { status: 400 });
 
-    const fromMailbox = requireEnv("MS_MAILBOX_FROM"); // e.g., "sales@alex-io.com"
+    const fromMailbox = requireEnv("MS_MAILBOX_FROM");
     const token = await getAppToken();
 
     const isHtml = !!html;
-    const content = isHtml ? html : (text ?? ""); // prefer html when provided
+    const content = isHtml ? html : (text ?? "");
 
-    // Add loop header
-    const internetMessageHeaders = [
-      { name: "X-AlexIO-Responder", value: "1" },
-    ];
-    if (inReplyTo) internetMessageHeaders.push({ name: "In-Reply-To", value: inReplyTo });
-    if (Array.isArray(references) && references.length)
-      internetMessageHeaders.push({ name: "References", value: references.join(" ") });
+    // ONLY custom header; DO NOT set In-Reply-To/References via Graph
+    const internetMessageHeaders = [{ name: "X-AlexIO-Responder", value: "1" }];
 
     const msg = {
       message: {
         subject: subject ?? "Thanks for your message",
         toRecipients: [{ emailAddress: { address: to } }],
         from: { emailAddress: { address: fromMailbox } },
-        internetMessageHeaders,
+        internetMessageHeaders, // safe custom header
         body: { contentType: isHtml ? "HTML" : "Text", content },
       },
       saveToSentItems: true,
     };
 
-    const r = await fetch("https://graph.microsoft.com/v1.0/users/" + encodeURIComponent(fromMailbox) + "/sendMail", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(msg),
-    });
+    const r = await fetch(
+      "https://graph.microsoft.com/v1.0/users/" +
+        encodeURIComponent(fromMailbox) +
+        "/sendMail",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(msg),
+      }
+    );
 
     if (!r.ok) {
       const t = await r.text().catch(() => "");
-      return NextResponse.json({ ok: false, error: "graph send failed", status: r.status, details: t.slice(0, 1000) }, { status: 502 });
+      return NextResponse.json(
+        { ok: false, error: "graph send failed", status: r.status, details: t.slice(0, 1000) },
+        { status: 502 }
+      );
     }
 
-    const reqId = r.headers.get("request-id") || r.headers.get("x-ms-ags-diagnostic") || "";
+    const reqId = r.headers.get("request-id") || "";
     return NextResponse.json({ ok: true, status: 202, requestId: reqId });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "unknown" }, { status: 500 });
