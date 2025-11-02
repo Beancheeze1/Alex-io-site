@@ -1,109 +1,58 @@
 // app/api/admin/templates/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { pickTemplate } from "@/app/lib/templates";
+import { NextResponse } from "next/server";
+import { Pool } from "pg";
 
 export const dynamic = "force-dynamic";
 
-/** ---- Shared types ---- */
-type TemplateRow = { subject?: string; html?: string };
-type TemplateTable = Record<string, TemplateRow>;
-type Ctx = { inboxEmail?: string; inboxId?: string | number; channelId?: string | number };
-
-function parseJsonEnv(name: string): TemplateTable | null {
-  const raw = process.env[name];
-  if (!raw) return null;
-  try {
-    const obj = JSON.parse(raw);
-    return (obj && typeof obj === "object") ? (obj as TemplateTable) : null;
-  } catch {
-    return null;
-  }
+declare global {
+  // eslint-disable-next-line no-var
+  var __TEMPLATE_DB_POOL__: Pool | undefined;
 }
 
-/** GET /api/admin/templates */
-export async function GET(req: NextRequest) {
-  try {
-    const u = new URL(req.url);
-    const inboxEmail = u.searchParams.get("inboxEmail") ?? undefined;
-    const inboxId = u.searchParams.get("inboxId") ?? undefined;
-    const channelId = u.searchParams.get("channelId") ?? undefined;
-    const show = u.searchParams.get("show");
-
-    const chosen = pickTemplate({ inboxEmail, inboxId, channelId });
-
-    const resp: any = {
-      ok: true,
-      context: { inboxEmail, inboxId, channelId },
-      chosen: {
-        subject: chosen.subject ?? "(none)",
-        htmlPreview: (chosen.html ?? "").slice(0, 240),
-      },
-    };
-
-    if (show === "raw") {
-      resp.table = parseJsonEnv("REPLY_TEMPLATES_JSON") ?? "(not set)";
-    }
-
-    return NextResponse.json(resp);
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "unknown" }, { status: 500 });
+function getPool() {
+  if (!global.__TEMPLATE_DB_POOL__) {
+    const conn = process.env.DATABASE_URL;
+    if (!conn) throw new Error("Missing env: DATABASE_URL");
+    global.__TEMPLATE_DB_POOL__ = new Pool({ connectionString: conn, max: 5 });
   }
+  return global.__TEMPLATE_DB_POOL__;
 }
 
-/** POST /api/admin/templates
- * Body: { table: TemplateTable, context?: Ctx }
- * Validates a proposed REPLY_TEMPLATES_JSON and shows which row would match.
- */
-export async function POST(req: NextRequest) {
-  try {
-    const { table, context } = (await req.json()) as {
-      table: unknown;
-      context?: Ctx;
-    };
+export async function GET() {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `select id, tkey, name, subject, body_html, body_text, vars, is_active, created_at, updated_at
+     from templates
+     order by updated_at desc nulls last, created_at desc`
+  );
+  return NextResponse.json({ ok: true, items: rows });
+}
 
-    // Strongly validate table shape
-    if (!table || typeof table !== "object") {
-      return NextResponse.json({ ok: false, error: "table must be a JSON object" }, { status: 400 });
-    }
-    const typedTable = table as TemplateTable;
+export async function POST(req: Request) {
+  const body = await req.json().catch(() => ({}));
+  const {
+    tkey,
+    name,
+    subject = "",
+    body_html = "",
+    body_text = "",
+    vars = {},
+    is_active = false,
+  } = body || {};
 
-    for (const [k, v] of Object.entries(typedTable)) {
-      if (!v || typeof v !== "object") {
-        return NextResponse.json({ ok: false, error: `key "${k}" must map to an object` }, { status: 400 });
-      }
-      if (v.subject != null && typeof v.subject !== "string") {
-        return NextResponse.json({ ok: false, error: `key "${k}".subject must be a string` }, { status: 400 });
-      }
-      if (v.html != null && typeof v.html !== "string") {
-        return NextResponse.json({ ok: false, error: `key "${k}".html must be a string` }, { status: 400 });
-      }
-    }
-
-    const ctx: Ctx = context ?? {};
-    const tryKeys: string[] = [];
-    if (ctx.inboxEmail) tryKeys.push(`inbox:${String(ctx.inboxEmail).toLowerCase()}`);
-    if (ctx.inboxId != null) tryKeys.push(`inboxId:${String(ctx.inboxId)}`);
-    if (ctx.channelId != null) tryKeys.push(`channelId:${String(ctx.channelId)}`);
-    tryKeys.push("default");
-
-    let chosenKey: string | null = null;
-    let chosenRow: TemplateRow | null = null;
-
-    for (const k of tryKeys) {
-      const row = typedTable[k];
-      if (row) { chosenKey = k; chosenRow = row; break; }
-    }
-
-    return NextResponse.json({
-      ok: true,
-      context: ctx,
-      chosen: {
-        matchedKey: chosenKey ?? "(none)",
-        subject: (chosenRow?.subject ?? "(none)"),
-        htmlPreview: (chosenRow?.html ?? "").slice(0, 240),
-      },
-    });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "unknown" }, { status: 500 });
+  if (!tkey || !name) {
+    return NextResponse.json(
+      { ok: false, error: "Missing required: tkey, name" },
+      { status: 400 }
+    );
   }
+
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `insert into templates (tkey, name, subject, body_html, body_text, vars, is_active)
+     values ($1,$2,$3,$4,$5,$6,$7)
+     returning id, tkey, name, subject, body_html, body_text, vars, is_active, created_at, updated_at`,
+    [tkey, name, subject, body_html, body_text, vars, is_active]
+  );
+  return NextResponse.json({ ok: true, item: rows[0] }, { status: 201 });
 }
