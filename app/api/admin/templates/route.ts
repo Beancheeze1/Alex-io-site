@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pickTemplateWithKey } from "@/app/lib/templates";
 import { makeKv } from "@/app/lib/kv";
-import { renderTemplate } from "@/app/lib/tpl";
+import { renderTemplate, htmlToText } from "@/app/lib/tpl";
 import { shouldWrap, wrapHtml } from "@/app/lib/layout";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +63,9 @@ export async function GET(req: NextRequest) {
     const wrapOn = wrapParam === "1" || (wrapParam === "" && shouldWrap());
     const html = wrapOn ? wrapHtml(innerHtml) : innerHtml;
 
+    // NEW: preview text fallback (from innerHtml, not wrapped)
+    const textPreview = htmlToText(innerHtml).slice(0, 280);
+
     const show = u.searchParams.get("show");
     const table = show === "raw" ? (parseJsonEnv("REPLY_TEMPLATES_JSON") ?? "(not set)") : undefined;
 
@@ -73,6 +76,7 @@ export async function GET(req: NextRequest) {
       subject,
       wrapped: wrapOn,
       htmlPreview: String(html).slice(0, 280),
+      textPreview, // NEW
       table,
     };
 
@@ -83,6 +87,7 @@ export async function GET(req: NextRequest) {
       subject,
       wrapped: wrapOn,
       htmlPreview: String(html).slice(0, 140),
+      textPreview: textPreview.slice(0, 140),
     });
 
     return NextResponse.json(payload);
@@ -116,13 +121,12 @@ export async function POST(req: NextRequest) {
 
     let matchedKey = "(fallback)";
     let row = table["default"] || null;
-    for (const k of tryKeys) {
-      if (table[k]) { matchedKey = k; row = table[k]; break; }
-    }
+    for (const k of tryKeys) { if (table[k]) { matchedKey = k; row = table[k]; break; } }
 
     const subj = renderTemplate(row?.subject, vars) || row?.subject || "(none)";
     const inner = renderTemplate(row?.html, vars) || row?.html || "";
     const outHtml = wrap ? wrapHtml(inner) : inner;
+    const outText = htmlToText(inner).slice(0, 280); // NEW
 
     return NextResponse.json({
       ok: true,
@@ -130,6 +134,7 @@ export async function POST(req: NextRequest) {
       subject: subj,
       wrapped: wrap,
       htmlPreview: outHtml.slice(0, 280),
+      textPreview: outText, // NEW
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "unknown" }, { status: 500 });

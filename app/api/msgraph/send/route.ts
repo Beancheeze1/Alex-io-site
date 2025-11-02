@@ -7,6 +7,7 @@ function requireEnv(name: string) {
   if (!v) throw new Error(`Missing env: ${name}`);
   return v;
 }
+const b = (v: unknown) => String(v ?? "").toLowerCase() === "true";
 
 async function getAppToken() {
   const tenant = requireEnv("MS_TENANT_ID");
@@ -21,11 +22,7 @@ async function getAppToken() {
     grant_type: "client_credentials",
   });
 
-  const r = await fetch(tokenUrl, {
-    method: "POST",
-    body,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  });
+  const r = await fetch(tokenUrl, { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } });
   const j = await r.json();
   if (!r.ok) throw new Error(`token error ${r.status}: ${JSON.stringify(j).slice(0, 300)}`);
   return j.access_token as string;
@@ -40,44 +37,42 @@ export async function POST(req: Request) {
     const fromMailbox = requireEnv("MS_MAILBOX_FROM");
     const token = await getAppToken();
 
-    const isHtml = !!html;
-    const content = isHtml ? html : (text ?? "");
+    // Mode: HTML by default, but allow forcing text
+    const forceText = b(process.env.REPLY_FORCE_TEXT);
+    const hasHtml = typeof html === "string" && html.trim().length > 0;
+    const hasText = typeof text === "string" && text.trim().length > 0;
 
-    // ONLY custom header; DO NOT set In-Reply-To/References via Graph
-    const internetMessageHeaders = [{ name: "X-AlexIO-Responder", value: "1" }];
+    const bodyContentType = (!forceText && hasHtml) ? "HTML" as const : "Text" as const;
+    const bodyContent = (bodyContentType === "HTML") ? html : (hasText ? text : "");
+
+    const internetMessageHeaders = [
+      { name: "X-AlexIO-Responder", value: "1" }, // loop guard
+    ];
 
     const msg = {
       message: {
         subject: subject ?? "Thanks for your message",
         toRecipients: [{ emailAddress: { address: to } }],
         from: { emailAddress: { address: fromMailbox } },
-        internetMessageHeaders, // safe custom header
-        body: { contentType: isHtml ? "HTML" : "Text", content },
+        internetMessageHeaders,
+        body: { contentType: bodyContentType, content: bodyContent },
       },
       saveToSentItems: true,
     };
 
-    const r = await fetch(
-      "https://graph.microsoft.com/v1.0/users/" +
-        encodeURIComponent(fromMailbox) +
-        "/sendMail",
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(msg),
-      }
-    );
+    const r = await fetch("https://graph.microsoft.com/v1.0/users/" + encodeURIComponent(fromMailbox) + "/sendMail", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(msg),
+    });
 
     if (!r.ok) {
       const t = await r.text().catch(() => "");
-      return NextResponse.json(
-        { ok: false, error: "graph send failed", status: r.status, details: t.slice(0, 1000) },
-        { status: 502 }
-      );
+      return NextResponse.json({ ok: false, error: "graph send failed", status: r.status, details: t.slice(0, 1000) }, { status: 502 });
     }
 
     const reqId = r.headers.get("request-id") || "";
-    return NextResponse.json({ ok: true, status: 202, requestId: reqId });
+    return NextResponse.json({ ok: true, status: 202, requestId: reqId, bodyMode: bodyContentType });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "unknown" }, { status: 500 });
   }

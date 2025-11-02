@@ -1,1 +1,1 @@
-﻿[{"subscriptionType":"conversation.newMessage","9825209030":"59bed06a-574c-4951-b67e-36a6e29acc57","messageId":"<REAL_MESSAGE_ID>"}]
+﻿[{"subscriptionType":"conversation.newMessage","objectId":"<REAL_THREAD_ID>","messageId":"<REAL_MESSAGE_ID>"}]
