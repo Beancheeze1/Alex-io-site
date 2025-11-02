@@ -18,7 +18,6 @@ function parseEmailFromHeader(v: unknown): string | null {
 }
 
 async function getAccessToken(selfBase: string) {
-  // use Render origin to avoid edge issues
   const refreshUrl = `${selfBase}/api/hubspot/refresh`;
   const res = await fetch(refreshUrl, { cache: "no-store" });
   if (!res.ok) throw new Error(`refresh failed: ${res.status}`);
@@ -36,11 +35,12 @@ export async function POST(req: NextRequest) {
 
     const token = await getAccessToken(selfBase);
 
+    // Messages for the thread (v3)
     const hsUrl = `https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/messages`;
     const res = await fetch(hsUrl, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
       const t = await res.text().catch(() => "");
-      return NextResponse.json({ ok: false, error: "hubspot messages fetch failed", status: res.status, details: t.slice(0, 1000) }, { status: 502 });
+      return NextResponse.json({ ok: false, error: "hubspot messages fetch failed", status: res.status, details: t.slice(0, 1000), context: { id: [String(objectId)] }, category: "OBJECT_NOT_FOUND", subCategory: "ConversationsResourceNotFoundError.THREAD_NOT_FOUND" }, { status: 404 });
     }
 
     const data = await res.json().catch(() => null);
@@ -54,6 +54,16 @@ export async function POST(req: NextRequest) {
       chosen = items.find(m => String(m?.direction || "").toLowerCase() === "inbound") || items[items.length - 1];
     }
 
+    // Try to grab inbox/channel hints from any message in the thread (chosen or first)
+    const hintSrc = chosen || items[0] || {};
+    const inboxId = hintSrc?.inboxId ?? hintSrc?.inbox?.id ?? null;
+    const channelId = hintSrc?.channelId ?? hintSrc?.channel?.id ?? null;
+    const inboxEmail =
+      hintSrc?.to?.[0]?.email ||
+      hintSrc?.inbox?.email ||
+      hintSrc?.channel?.email ||
+      null;
+
     const candidates: (string | undefined)[] = [
       chosen?.from?.email,
       chosen?.sender?.email,
@@ -61,15 +71,16 @@ export async function POST(req: NextRequest) {
       parseEmailFromHeader(chosen?.headers?.["Reply-To"]),
       parseEmailFromHeader(chosen?.headers?.["From"]),
     ];
-
     for (const c of candidates) {
-      if (c && isEmail(c) && looksExternal(c)) return NextResponse.json({ ok: true, email: c, via: "direct" });
+      if (c && isEmail(c) && looksExternal(c)) {
+        return NextResponse.json({ ok: true, email: c, via: "direct", inboxId, channelId, inboxEmail });
+      }
     }
 
     const blob = JSON.stringify(chosen ?? {});
     const deep = [...blob.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)].map(m => m[0].toLowerCase());
     const pick = deep.find(looksExternal);
-    if (pick) return NextResponse.json({ ok: true, email: pick, via: "deep" });
+    if (pick) return NextResponse.json({ ok: true, email: pick, via: "deep", inboxId, channelId, inboxEmail });
 
     return NextResponse.json({ ok: false, error: "no_email_found", sample: { keys: Object.keys(chosen || {}) } }, { status: 404 });
   } catch (err: any) {

@@ -1,23 +1,14 @@
 // app/api/hubspot/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { makeKv } from "@/app/lib/kv";
+import { pickTemplate } from "@/app/lib/templates";
 export const dynamic = "force-dynamic";
 
 /**
- * Path-A: production-safe webhook
- *  - Resolves sender via internal lookup when HubSpot payload is minimal
- *  - Idempotency per Message-Id
- *  - Cooldown per thread to avoid multiple auto-replies
- *  - Env-driven reply template
- *
- * ENVs:
- *   REPLY_ENABLED=true
- *   INTERNAL_SELF_URL=https://alex-io-bot.onrender.com
- *   INTERNAL_SEND_URL=https://alex-io-bot.onrender.com/api/msgraph/send
- *   REPLY_COOLDOWN_MIN=120            // minutes; default 120
- *   IDEMP_TTL_MIN=1440                // minutes; default 1440
- *   REPLY_SUBJECT_PREFIX=[Alex-IO]    // optional
- *   REPLY_TEMPLATE_HTML               // optional HTML body
+ * Webhook with:
+ *  - lookup fallback
+ *  - idempotency + cooldown
+ *  - per-inbox/pipeline template selection
  */
 
 function asBool(v: unknown) { return String(v ?? "").toLowerCase() === "true"; }
@@ -45,19 +36,6 @@ function isNewInbound(evt: any): boolean {
     changeFlag === "NEW_MESSAGE" ||
     messageType === "MESSAGE"
   );
-}
-
-function buildHtml(): string {
-  const tpl = process.env.REPLY_TEMPLATE_HTML?.trim();
-  if (tpl) return tpl;
-  return (
-    `<p>Thanks for reaching out to Alex-IO. We received your message and will follow up shortly.</p>` +
-    `<p>— Alex-IO</p>`
-  );
-}
-function buildSubject(): string | undefined {
-  const p = process.env.REPLY_SUBJECT_PREFIX?.trim();
-  return p ? `${p} Thanks for your message` : undefined;
 }
 
 async function postJson(url: string, body: unknown) {
@@ -104,27 +82,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, dryRun, ignored: true, reason: "loop_header_present", subtype });
     }
 
-    // ---- Idempotency (per message) ----
+    // Idempotency per message
     if (rawMessageId) {
       const idemKey = `alexio:idempotency:${rawMessageId}`;
-      const was = await kv.get(idemKey);
-      if (was) {
-        console.log("[webhook] IGNORE idempotent (already replied) messageId=%s", rawMessageId);
+      if (await kv.get(idemKey)) {
+        console.log("[webhook] IGNORE idempotent messageId=%s", rawMessageId);
         return NextResponse.json({ ok: true, ignored: true, reason: "idempotent" });
       }
     }
-
-    // ---- Cooldown (per thread) ----
+    // Cooldown per thread
     if (objectId) {
       const cdKey = `alexio:cooldown:thread:${objectId}`;
-      const hit = await kv.get(cdKey);
-      if (hit) {
+      if (await kv.get(cdKey)) {
         console.log("[webhook] IGNORE cooldown threadId=%s", objectId);
         return NextResponse.json({ ok: true, ignored: true, reason: "cooldown" });
       }
     }
 
-    // Try trivial places first (rare on live webhooks)
+    // Try trivial places first
     let toEmail: string | null = null;
     const direct = [
       get(evt, ["recipient", "email"]),
@@ -133,13 +108,17 @@ export async function POST(req: NextRequest) {
     ];
     for (const c of direct) { if (isEmail(c)) { toEmail = c; break; } }
 
+    // Resolve via internal lookup when needed
     let via = "direct";
+    let inboxId: string | number | null = null;
+    let channelId: string | number | null = null;
+    let inboxEmail: string | null = null;
+
     if (!toEmail) {
       if (!objectId) {
         console.log("[webhook] IGNORE no_email (no objectId)");
         return NextResponse.json({ ok: true, dryRun, ignored: true, reason: "no_email_no_objectId", subtype });
       }
-      // resolve via internal lookup (Render origin)
       const lookupUrl = `${SELF}/api/hubspot/lookup`;
       let lookupRes: Response;
       try {
@@ -152,19 +131,33 @@ export async function POST(req: NextRequest) {
       if (lookupRes.ok && lookup?.email) {
         toEmail = lookup.email;
         via = `lookup:${lookup?.via || "unknown"}`;
+        inboxId = lookup?.inboxId ?? null;
+        channelId = lookup?.channelId ?? null;
+        inboxEmail = lookup?.inboxEmail ?? null;
       } else {
         console.log("[webhook] IGNORE no_email (lookup failed) status=%s body=%j", lookupRes.status, lookup);
         return NextResponse.json({ ok: true, dryRun, ignored: true, reason: "no_email_lookup_failed", subtype, lookup });
       }
     }
 
+    // ---- Template selection (per inbox / channel) ----
+    const chosen = pickTemplate({
+      inboxEmail: inboxEmail ?? undefined,
+      inboxId: inboxId ?? undefined,
+      channelId: channelId ?? undefined,
+    });
+    const subject = chosen.subject;
+    const html = (chosen.html || "").trim() ||
+      `<p>Thanks for reaching out to Alex-IO. We received your message and will follow up shortly.</p><p>— Alex-IO</p>`;
+
     const inReplyTo = extractMessageId(evt);
-    const html = buildHtml();
-    const subject = buildSubject();
 
     if (dryRun || !replyEnabled) {
-      console.log("[webhook] DRYRUN to=%s via=%s inReplyTo=%s", toEmail, via, inReplyTo ?? "-");
-      return NextResponse.json({ ok: true, dryRun: true, wouldSend: true, toEmail, via, inReplyTo, subtype });
+      return NextResponse.json({
+        ok: true, dryRun: true, wouldSend: true,
+        toEmail, via, inReplyTo, subtype,
+        template: { subject: subject ?? "(none)", htmlPreview: html.slice(0, 140) }
+      });
     }
 
     // ---- Send via internal sender ----
@@ -191,16 +184,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ---- Mark idempotency + cooldown after successful send ----
-    if (rawMessageId) {
-      await kv.set(`alexio:idempotency:${rawMessageId}`, "1", Math.max(60, idemTtlMin * 60));
-    }
-    if (objectId) {
-      await kv.set(`alexio:cooldown:thread:${objectId}`, "1", Math.max(60, cooldownMin * 60));
-    }
+    // Mark idempotency + cooldown
+    if (rawMessageId) await kv.set(`alexio:idempotency:${rawMessageId}`, "1", Math.max(60, idemTtlMin * 60));
+    if (objectId) await kv.set(`alexio:cooldown:thread:${objectId}`, "1", Math.max(60, cooldownMin * 60));
 
     console.log("[webhook] SENT to=%s via=%s inReplyTo=%s ms=%d", toEmail, via, inReplyTo ?? "-", Date.now() - startedAt);
-    return NextResponse.json({ ok: true, sent: true, toEmail, via, inReplyTo, subtype });
+    return NextResponse.json({ ok: true, sent: true, toEmail, via, inReplyTo, templateUsed: { subject: subject ?? "(none)" } });
   } catch (err: any) {
     console.log("[webhook] ERROR %s", err?.message ?? "unknown");
     return NextResponse.json({ ok: false, error: err?.message ?? "unknown" }, { status: 500 });

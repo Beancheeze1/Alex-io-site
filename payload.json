@@ -1,9 +1,5 @@
-﻿[
-  {
-    "subscriptionType": "conversation.newMessage",
-    "message": {
-      "from": { "email": "25thhourdesign@gmail.com" },
-      "headers": { "Message-Id": "<live.thread.test@alex-io.com>" }
-    }
-  }
-]
+﻿[{
+  "subscriptionType":"conversation.newMessage",
+  "objectId":"9825039089",
+  "messageId":"b0993d3d-ab07-45ab-b7c3-11e5f1fddb21"
+}]
