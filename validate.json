@@ -1,0 +1,8 @@
+﻿{
+  "table": {
+    "default": { "subject": "[Alex-IO] Thanks {{firstName}}", "html": "<p>Hi {{firstName}}</p>" },
+    "inbox:sales@alex-io.com": { "subject": "[Sales] Hello {{firstName}}", "html": "<p>Sales path</p>" }
+  },
+  "context": { "inboxEmail": "sales@alex-io.com" },
+  "vars": { "firstName": "Chuck" }
+}

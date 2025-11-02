@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pickTemplateWithKey } from "@/app/lib/templates";
 import { makeKv } from "@/app/lib/kv";
 import { renderTemplate } from "@/app/lib/tpl";
+import { shouldWrap, wrapHtml } from "@/app/lib/layout";
 
 export const dynamic = "force-dynamic";
 
@@ -23,18 +24,15 @@ async function appendLog(entry: any) {
     let list: any[] = [];
     try { list = JSON.parse(raw); } catch { list = []; }
     list.unshift(entry);
-    if (list.length > 50) list = list.slice(0, 50); // cap
-    await kv.set(key, JSON.stringify(list), 7 * 24 * 60 * 60); // 7 days TTL
-  } catch {
-    // best-effort; ignore logging errors
-  }
+    if (list.length > 50) list = list.slice(0, 50);
+    await kv.set(key, JSON.stringify(list), 7 * 24 * 60 * 60);
+  } catch {}
 }
 
 export async function GET(req: NextRequest) {
   try {
     const u = new URL(req.url);
-    const action = u.searchParams.get("action") || ""; // "logs" or ""
-
+    const action = u.searchParams.get("action") || "";
     if (action === "logs") {
       const kv = makeKv();
       const raw = (await kv.get("alexio:tpl:recent")) || "[]";
@@ -43,12 +41,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: true, logs: list });
     }
 
-    // Preview / render
     const inboxEmail = u.searchParams.get("inboxEmail") || undefined;
     const inboxId = u.searchParams.get("inboxId") || undefined;
     const channelId = u.searchParams.get("channelId") || undefined;
 
-    // Optional customer vars to render
     const vars: Vars = {
       firstName: u.searchParams.get("firstName") || "",
       lastName: u.searchParams.get("lastName") || "",
@@ -59,12 +55,14 @@ export async function GET(req: NextRequest) {
       quoteId: u.searchParams.get("quoteId") || "",
     };
 
-    // Choose + render
     const picked = pickTemplateWithKey({ inboxEmail, inboxId, channelId });
     const subject = renderTemplate(picked.template.subject, vars) || picked.template.subject || "(none)";
-    const html = renderTemplate(picked.template.html, vars) || picked.template.html || "";
+    const innerHtml = renderTemplate(picked.template.html, vars) || picked.template.html || "";
 
-    // Optional: ?show=raw
+    const wrapParam = (u.searchParams.get("wrap") || "").toLowerCase();
+    const wrapOn = wrapParam === "1" || (wrapParam === "" && shouldWrap());
+    const html = wrapOn ? wrapHtml(innerHtml) : innerHtml;
+
     const show = u.searchParams.get("show");
     const table = show === "raw" ? (parseJsonEnv("REPLY_TEMPLATES_JSON") ?? "(not set)") : undefined;
 
@@ -73,17 +71,18 @@ export async function GET(req: NextRequest) {
       context: { inboxEmail, inboxId, channelId },
       matchedKey: picked.key,
       subject,
-      htmlPreview: html.slice(0, 280),
+      wrapped: wrapOn,
+      htmlPreview: String(html).slice(0, 280),
       table,
     };
 
-    // Append to rolling log
     await appendLog({
       ts: new Date().toISOString(),
       context: { inboxEmail, inboxId, channelId },
       matchedKey: picked.key,
       subject,
-      htmlPreview: html.slice(0, 140),
+      wrapped: wrapOn,
+      htmlPreview: String(html).slice(0, 140),
     });
 
     return NextResponse.json(payload);
@@ -93,12 +92,12 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  // Validates a proposed table and renders with optional vars (no env mutation).
   try {
     const body = await req.json();
     const table = body?.table as TemplateTable;
     const context = (body?.context || {}) as { inboxEmail?: string; inboxId?: string | number; channelId?: string | number };
     const vars = (body?.vars || {}) as Vars;
+    const wrap = !!body?.wrap;
 
     if (!table || typeof table !== "object") {
       return NextResponse.json({ ok: false, error: "table must be an object" }, { status: 400 });
@@ -109,7 +108,6 @@ export async function POST(req: NextRequest) {
       if (v.html != null && typeof v.html !== "string") return NextResponse.json({ ok: false, error: `key "${k}".html must be string` }, { status: 400 });
     }
 
-    // Re-implement match here using the provided table
     const tryKeys: string[] = [];
     if (context.inboxEmail) tryKeys.push(`inbox:${String(context.inboxEmail).toLowerCase()}`);
     if (context.inboxId != null) tryKeys.push(`inboxId:${String(context.inboxId)}`);
@@ -121,14 +119,17 @@ export async function POST(req: NextRequest) {
     for (const k of tryKeys) {
       if (table[k]) { matchedKey = k; row = table[k]; break; }
     }
+
     const subj = renderTemplate(row?.subject, vars) || row?.subject || "(none)";
-    const html = renderTemplate(row?.html, vars) || row?.html || "";
+    const inner = renderTemplate(row?.html, vars) || row?.html || "";
+    const outHtml = wrap ? wrapHtml(inner) : inner;
 
     return NextResponse.json({
       ok: true,
       matchedKey,
       subject: subj,
-      htmlPreview: html.slice(0, 280),
+      wrapped: wrap,
+      htmlPreview: outHtml.slice(0, 280),
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? "unknown" }, { status: 500 });
