@@ -1,22 +1,5 @@
 // app/lib/templates.ts
-/**
- * Flexible template picker for Alex-IO auto-replies.
- *
- * Source of truth is REPLY_TEMPLATES_JSON env (JSON object). Keys you can use:
- *   - "default"                                 -> global default
- *   - "inbox:<email-address>"                   -> e.g., "inbox:sales@alex-io.com"
- *   - "inboxId:<id>"                            -> numeric/string ID from HubSpot
- *   - "channelId:<id>"                          -> HubSpot channelId if present
- *
- * Value shape:
- *   { "subject": "...", "html": "<p>...</p>" }
- *
- * Fallback order (first match wins):
- *   inbox:<email>  -> inboxId:<id> -> channelId:<id> -> default
- *
- * NOTE: If REPLY_TEMPLATES_JSON is missing or invalid, we gracefully fall back
- *       to REPLY_TEMPLATE_HTML and REPLY_SUBJECT_PREFIX.
- */
+// Minimal, typed template resolver used by the webhook and admin preview.
 
 export type ReplyTemplate = { subject?: string; html?: string };
 export type TemplateContext = {
@@ -25,14 +8,36 @@ export type TemplateContext = {
   channelId?: string | number | null;
 };
 
-function parseJsonEnv(name: string): any | null {
+type TemplateRow = { subject?: string; html?: string };
+type TemplateTable = Record<string, TemplateRow>;
+
+function parseJsonEnv(name: string): TemplateTable | null {
   const raw = process.env[name];
   if (!raw) return null;
-  try { return JSON.parse(raw); } catch { return null; }
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" ? (obj as TemplateTable) : null;
+  } catch {
+    return null;
+  }
 }
 
+function fallbackTemplate(): ReplyTemplate {
+  const prefix = (process.env.REPLY_SUBJECT_PREFIX || "").trim();
+  const subject = prefix ? `${prefix} Thanks for your message` : undefined;
+  const html =
+    (process.env.REPLY_TEMPLATE_HTML || "").trim() ||
+    `<p>Thanks for reaching out to Alex-IO. We received your message and will follow up shortly.</p><p>— Alex-IO</p>`;
+  return { subject, html };
+}
+
+/**
+ * Pick a template by context.
+ * Priority: inbox:<email> → inboxId:<id> → channelId:<id> → default → legacy fallbacks
+ */
 export function pickTemplate(ctx: TemplateContext): ReplyTemplate {
-  const table = parseJsonEnv("REPLY_TEMPLATES_JSON") || {};
+  const table = parseJsonEnv("REPLY_TEMPLATES_JSON");
+  if (!table) return fallbackTemplate();
 
   const tryKeys: string[] = [];
   if (ctx?.inboxEmail) tryKeys.push(`inbox:${String(ctx.inboxEmail).toLowerCase()}`);
@@ -41,17 +46,10 @@ export function pickTemplate(ctx: TemplateContext): ReplyTemplate {
   tryKeys.push("default");
 
   for (const k of tryKeys) {
-    const v = table[k];
-    if (v && typeof v === "object") {
-      return { subject: v.subject, html: v.html };
+    const row = table[k];
+    if (row && typeof row === "object") {
+      return { subject: row.subject, html: row.html ?? fallbackTemplate().html };
     }
   }
-
-  // Legacy fallbacks
-  const subjectPrefix = (process.env.REPLY_SUBJECT_PREFIX || "").trim();
-  const subject = subjectPrefix ? `${subjectPrefix} Thanks for your message` : undefined;
-  const html = (process.env.REPLY_TEMPLATE_HTML || "").trim() ||
-    `<p>Thanks for reaching out to Alex-IO. We received your message and will follow up shortly.</p><p>— Alex-IO</p>`;
-
-  return { subject, html };
+  return fallbackTemplate();
 }
