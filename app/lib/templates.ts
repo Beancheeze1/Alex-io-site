@@ -31,25 +31,28 @@ function fallbackTemplate(): ReplyTemplate {
   return { subject, html };
 }
 
-/**
- * Pick a template by context.
- * Priority: inbox:<email> → inboxId:<id> → channelId:<id> → default → legacy fallbacks
- */
+/** Original simple picker (kept for compatibility) */
 export function pickTemplate(ctx: TemplateContext): ReplyTemplate {
-  const table = parseJsonEnv("REPLY_TEMPLATES_JSON");
-  if (!table) return fallbackTemplate();
+  const { template } = pickTemplateWithKey(ctx);
+  return template;
+}
 
+/** New: return both the matched key and the template */
+export function pickTemplateWithKey(ctx: TemplateContext): { key: string; template: ReplyTemplate } {
+  const table = parseJsonEnv("REPLY_TEMPLATES_JSON");
   const tryKeys: string[] = [];
   if (ctx?.inboxEmail) tryKeys.push(`inbox:${String(ctx.inboxEmail).toLowerCase()}`);
   if (ctx?.inboxId != null) tryKeys.push(`inboxId:${String(ctx.inboxId)}`);
   if (ctx?.channelId != null) tryKeys.push(`channelId:${String(ctx.channelId)}`);
   tryKeys.push("default");
 
+  if (!table) return { key: "(fallback)", template: fallbackTemplate() };
+
   for (const k of tryKeys) {
     const row = table[k];
     if (row && typeof row === "object") {
-      return { subject: row.subject, html: row.html ?? fallbackTemplate().html };
+      return { key: k, template: { subject: row.subject, html: row.html ?? fallbackTemplate().html } };
     }
   }
-  return fallbackTemplate();
+  return { key: "(fallback)", template: fallbackTemplate() };
 }
