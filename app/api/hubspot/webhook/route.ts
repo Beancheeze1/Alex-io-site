@@ -1,6 +1,24 @@
 // app/api/hubspot/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { makeKv } from "@/app/lib/kv";
 export const dynamic = "force-dynamic";
+
+/**
+ * Path-A: production-safe webhook
+ *  - Resolves sender via internal lookup when HubSpot payload is minimal
+ *  - Idempotency per Message-Id
+ *  - Cooldown per thread to avoid multiple auto-replies
+ *  - Env-driven reply template
+ *
+ * ENVs:
+ *   REPLY_ENABLED=true
+ *   INTERNAL_SELF_URL=https://alex-io-bot.onrender.com
+ *   INTERNAL_SEND_URL=https://alex-io-bot.onrender.com/api/msgraph/send
+ *   REPLY_COOLDOWN_MIN=120            // minutes; default 120
+ *   IDEMP_TTL_MIN=1440                // minutes; default 1440
+ *   REPLY_SUBJECT_PREFIX=[Alex-IO]    // optional
+ *   REPLY_TEMPLATE_HTML               // optional HTML body
+ */
 
 function asBool(v: unknown) { return String(v ?? "").toLowerCase() === "true"; }
 function get(o: any, path: string[]) { return path.reduce((a, k) => (a && typeof a === "object" ? a[k] : undefined), o); }
@@ -9,7 +27,7 @@ function isEmail(s: unknown): s is string { return typeof s === "string" && /^[^
 function extractMessageId(evt: any): string | null {
   const headers = get(evt, ["message", "headers"]) || get(evt, ["object", "message", "headers"]) || {};
   const mid = headers["Message-Id"] || headers["message-id"] || headers["MESSAGE-ID"] || evt?.messageId || evt?.object?.messageId || null;
-  return typeof mid === "string" && mid.length > 6 ? mid : null;
+  return typeof mid === "string" && mid.length > 6 ? String(mid) : null;
 }
 function hasLoopHeader(evt: any): boolean {
   const headers = get(evt, ["message", "headers"]) || get(evt, ["object", "message", "headers"]) || {};
@@ -29,6 +47,19 @@ function isNewInbound(evt: any): boolean {
   );
 }
 
+function buildHtml(): string {
+  const tpl = process.env.REPLY_TEMPLATE_HTML?.trim();
+  if (tpl) return tpl;
+  return (
+    `<p>Thanks for reaching out to Alex-IO. We received your message and will follow up shortly.</p>` +
+    `<p>— Alex-IO</p>`
+  );
+}
+function buildSubject(): string | undefined {
+  const p = process.env.REPLY_SUBJECT_PREFIX?.trim();
+  return p ? `${p} Thanks for your message` : undefined;
+}
+
 async function postJson(url: string, body: unknown) {
   return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
@@ -39,6 +70,12 @@ export async function POST(req: NextRequest) {
     const url = new URL(req.url);
     const dryRun = url.searchParams.get("dryRun") === "1";
     const replyEnabled = asBool(process.env.REPLY_ENABLED);
+    const SELF = process.env.INTERNAL_SELF_URL || `${url.protocol}//${url.host}`;
+    const SEND = process.env.INTERNAL_SEND_URL || new URL("/api/msgraph/send", url).toString();
+
+    const kv = makeKv();
+    const cooldownMin = Number(process.env.REPLY_COOLDOWN_MIN ?? 120);
+    const idemTtlMin = Number(process.env.IDEMP_TTL_MIN ?? 1440);
 
     const events = (await req.json()) as any[];
     if (!Array.isArray(events) || events.length === 0) {
@@ -53,6 +90,9 @@ export async function POST(req: NextRequest) {
       changeFlag: evt?.changeFlag ?? null,
       messageType: evt?.messageType ?? null,
     };
+    const objectId = evt?.objectId ?? evt?.threadId ?? null;
+    const rawMessageId = extractMessageId(evt) || evt?.messageId || null;
+
     console.log("[webhook] ARRIVE subtype=%j", subtype);
 
     if (!isNewInbound(evt)) {
@@ -64,17 +104,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, dryRun, ignored: true, reason: "loop_header_present", subtype });
     }
 
-    const objectId = evt?.objectId ?? evt?.threadId ?? null;
-    const messageId = evt?.messageId ?? null;
+    // ---- Idempotency (per message) ----
+    if (rawMessageId) {
+      const idemKey = `alexio:idempotency:${rawMessageId}`;
+      const was = await kv.get(idemKey);
+      if (was) {
+        console.log("[webhook] IGNORE idempotent (already replied) messageId=%s", rawMessageId);
+        return NextResponse.json({ ok: true, ignored: true, reason: "idempotent" });
+      }
+    }
 
-    // trivial candidates rarely present; skip to lookup if missing
+    // ---- Cooldown (per thread) ----
+    if (objectId) {
+      const cdKey = `alexio:cooldown:thread:${objectId}`;
+      const hit = await kv.get(cdKey);
+      if (hit) {
+        console.log("[webhook] IGNORE cooldown threadId=%s", objectId);
+        return NextResponse.json({ ok: true, ignored: true, reason: "cooldown" });
+      }
+    }
+
+    // Try trivial places first (rare on live webhooks)
     let toEmail: string | null = null;
-    const direct = [ get(evt, ["recipient", "email"]), get(evt, ["message", "from", "email"]), get(evt, ["object", "message", "from", "email"]) ];
+    const direct = [
+      get(evt, ["recipient", "email"]),
+      get(evt, ["message", "from", "email"]),
+      get(evt, ["object", "message", "from", "email"]),
+    ];
     for (const c of direct) { if (isEmail(c)) { toEmail = c; break; } }
-
-    // Use Render-origin for internal calls to avoid Cloudflare edge issues
-    const SELF = process.env.INTERNAL_SELF_URL || `${url.protocol}//${url.host}`;
-    const SEND = process.env.INTERNAL_SEND_URL || new URL("/api/msgraph/send", url).toString();
 
     let via = "direct";
     if (!toEmail) {
@@ -82,11 +139,11 @@ export async function POST(req: NextRequest) {
         console.log("[webhook] IGNORE no_email (no objectId)");
         return NextResponse.json({ ok: true, dryRun, ignored: true, reason: "no_email_no_objectId", subtype });
       }
-      // call internal lookup via Render origin
+      // resolve via internal lookup (Render origin)
       const lookupUrl = `${SELF}/api/hubspot/lookup`;
       let lookupRes: Response;
       try {
-        lookupRes = await postJson(lookupUrl, { objectId, messageId });
+        lookupRes = await postJson(lookupUrl, { objectId, messageId: evt?.messageId ?? null });
       } catch (e: any) {
         console.log("[webhook] ERROR fetch failed (lookup) %s", e?.message ?? "unknown");
         return NextResponse.json({ ok: false, error: "internal_lookup_fetch_failed" }, { status: 500 });
@@ -102,17 +159,24 @@ export async function POST(req: NextRequest) {
     }
 
     const inReplyTo = extractMessageId(evt);
+    const html = buildHtml();
+    const subject = buildSubject();
 
     if (dryRun || !replyEnabled) {
       console.log("[webhook] DRYRUN to=%s via=%s inReplyTo=%s", toEmail, via, inReplyTo ?? "-");
       return NextResponse.json({ ok: true, dryRun: true, wouldSend: true, toEmail, via, inReplyTo, subtype });
     }
 
-    const html = `<p>Thanks for reaching out! We received your message and will follow up shortly.</p><p>— Alex-IO</p>`;
-
+    // ---- Send via internal sender ----
     let sendRes: Response;
     try {
-      sendRes = await postJson(SEND, { to: toEmail, html, inReplyTo, references: inReplyTo ? [inReplyTo] : undefined });
+      sendRes = await postJson(SEND, {
+        to: toEmail,
+        html,
+        subject,
+        inReplyTo,
+        references: inReplyTo ? [inReplyTo] : undefined,
+      });
     } catch (e: any) {
       console.log("[webhook] ERROR fetch failed (send) %s", e?.message ?? "unknown");
       return NextResponse.json({ ok: false, error: "send_fetch_failed" }, { status: 500 });
@@ -122,9 +186,17 @@ export async function POST(req: NextRequest) {
       const text = await sendRes.text().catch(() => "");
       console.log("[webhook] SEND FAIL to=%s status=%s ms=%d", toEmail, sendRes.status, Date.now() - startedAt);
       return NextResponse.json(
-        { ok: false, error: "sendMail fetch failed", status: sendRes.status, details: text.slice(0, 1000) },
+        { ok: false, error: "graph send failed", status: sendRes.status, details: text.slice(0, 1000) },
         { status: 502 }
       );
+    }
+
+    // ---- Mark idempotency + cooldown after successful send ----
+    if (rawMessageId) {
+      await kv.set(`alexio:idempotency:${rawMessageId}`, "1", Math.max(60, idemTtlMin * 60));
+    }
+    if (objectId) {
+      await kv.set(`alexio:cooldown:thread:${objectId}`, "1", Math.max(60, cooldownMin * 60));
     }
 
     console.log("[webhook] SENT to=%s via=%s inReplyTo=%s ms=%d", toEmail, via, inReplyTo ?? "-", Date.now() - startedAt);
