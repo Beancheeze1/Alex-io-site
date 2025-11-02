@@ -1,12 +1,11 @@
 // app/api/msgraph/send/route.ts
 import { NextResponse } from "next/server";
-
 export const dynamic = "force-dynamic";
 
 function requireEnv(name: string) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing env: ${name}`);
-  return value;
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
 }
 
 async function getAppToken() {
@@ -14,63 +13,65 @@ async function getAppToken() {
   const clientId = requireEnv("MS_CLIENT_ID");
   const clientSecret = requireEnv("MS_CLIENT_SECRET");
 
-  const url = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
-  const params = new URLSearchParams({
-    grant_type: "client_credentials",
+  const tokenUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
     client_id: clientId,
     client_secret: clientSecret,
     scope: "https://graph.microsoft.com/.default",
+    grant_type: "client_credentials",
   });
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params,
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error_description || "Failed to fetch Graph token");
-  return data.access_token as string;
+  const r = await fetch(tokenUrl, { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+  const j = await r.json();
+  if (!r.ok) throw new Error(`token error ${r.status}: ${JSON.stringify(j).slice(0, 300)}`);
+  return j.access_token as string;
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const accessToken = await getAppToken();
+    const { to, subject, text, html, inReplyTo, references } = await req.json();
 
-    // Prefer the passed customer email, fallback to self only for internal tests
-    const to = body.to || body.customerEmail || "sales@alex-io.com";
-    const subject = body.subject || "[Alex-IO] Default Test";
-    const html = body.html || `<p>Graph send test message — ${new Date().toISOString()}</p>`;
+    if (!to) return NextResponse.json({ ok: false, error: "missing to" }, { status: 400 });
 
-    const fromMailbox = requireEnv("MS_MAILBOX_FROM");
-    const endpoint = `https://graph.microsoft.com/v1.0/users/${fromMailbox}/sendMail`;
+    const fromMailbox = requireEnv("MS_MAILBOX_FROM"); // e.g., "sales@alex-io.com"
+    const token = await getAppToken();
 
-    const message = {
+    const isHtml = !!html;
+    const content = isHtml ? html : (text ?? ""); // prefer html when provided
+
+    // Add loop header
+    const internetMessageHeaders = [
+      { name: "X-AlexIO-Responder", value: "1" },
+    ];
+    if (inReplyTo) internetMessageHeaders.push({ name: "In-Reply-To", value: inReplyTo });
+    if (Array.isArray(references) && references.length)
+      internetMessageHeaders.push({ name: "References", value: references.join(" ") });
+
+    const msg = {
       message: {
-        subject,
-        body: { contentType: "HTML", content: html },
+        subject: subject ?? "Thanks for your message",
         toRecipients: [{ emailAddress: { address: to } }],
+        from: { emailAddress: { address: fromMailbox } },
+        internetMessageHeaders,
+        body: { contentType: isHtml ? "HTML" : "Text", content },
       },
       saveToSentItems: true,
     };
 
-    const sendRes = await fetch(endpoint, {
+    const r = await fetch("https://graph.microsoft.com/v1.0/users/" + encodeURIComponent(fromMailbox) + "/sendMail", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(message),
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(msg),
     });
 
-    return NextResponse.json({
-      ok: true,
-      sent: { to, subject },
-      graph: { status: sendRes.status, requestId: sendRes.headers.get("request-id") },
-    });
-  } catch (err: any) {
-    console.error("[Graph Send Error]", err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    if (!r.ok) {
+      const t = await r.text().catch(() => "");
+      return NextResponse.json({ ok: false, error: "graph send failed", status: r.status, details: t.slice(0, 1000) }, { status: 502 });
+    }
+
+    const reqId = r.headers.get("request-id") || r.headers.get("x-ms-ags-diagnostic") || "";
+    return NextResponse.json({ ok: true, status: 202, requestId: reqId });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message ?? "unknown" }, { status: 500 });
   }
 }
