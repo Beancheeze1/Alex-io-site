@@ -3,14 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 /**
- * Alex-IO Webhook (Path-A, verbose debug)
- * - Accepts multiple "new inbound" shapes
- * - Logs on EVERY path so Render logs always show a line per event
- * - Uses INTERNAL_SEND_URL override to call Graph sender if set
- *
- * ENVs:
- *   REPLY_ENABLED=true
- *   INTERNAL_SEND_URL=https://alex-io-bot.onrender.com/api/msgraph/send   (recommended)
+ * Alex-IO Webhook (Path-A with sender/originator fix)
+ * Logs every inbound event and now detects sender.email and originator.email.
  */
 
 function asBool(v: unknown) { return String(v ?? "").toLowerCase() === "true"; }
@@ -25,7 +19,11 @@ function extractEmail(evt: any): string | null {
   const cands = [
     get(evt, ["recipient", "email"]),
     get(evt, ["message", "from", "email"]),
+    get(evt, ["message", "sender", "email"]),
+    get(evt, ["message", "originator", "email"]),
     get(evt, ["object", "message", "from", "email"]),
+    get(evt, ["object", "message", "sender", "email"]),
+    get(evt, ["object", "message", "originator", "email"]),
     get(evt, ["object", "from", "email"]),
   ];
   for (const c of cands) if (validEmail(c)) return c;
@@ -94,9 +92,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, ignored: true, reason: "no_events" });
     }
 
-    // Path-A: handle first event only
     const evt = events[0];
-
     const subtype = {
       subscriptionType: evt?.subscriptionType ?? null,
       eventType: evt?.eventType ?? null,
@@ -104,7 +100,6 @@ export async function POST(req: NextRequest) {
       messageType: evt?.messageType ?? null,
     };
 
-    // Always log arrival with subtype snapshot
     console.log("[webhook] ARRIVE subtype=%j", subtype);
 
     if (!isNewInbound(evt)) {
@@ -122,7 +117,15 @@ export async function POST(req: NextRequest) {
 
     if (!toEmail) {
       console.log("[webhook] IGNORE no_email subtype=%j", subtype);
-      return NextResponse.json({ ok: true, dryRun, ignored: true, reason: "no_email", subtype });
+      return NextResponse.json({
+        ok: true,
+        dryRun,
+        ignored: true,
+        reason: "no_email",
+        subtype,
+        sampleKeys: Object.keys(evt || {}),
+        messageKeys: Object.keys(evt?.message || evt?.object?.message || {}),
+      });
     }
 
     if (dryRun || !replyEnabled) {
@@ -130,11 +133,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, dryRun: true, wouldSend: true, toEmail, inReplyTo, subtype });
     }
 
-    const html =
-      `<p>Thanks for reaching out! We received your message and will follow up shortly.</p>` +
-      `<p>— Alex-IO</p>`;
-
-    const override = process.env.INTERNAL_SEND_URL; // e.g., Render origin
+    const html = `<p>Thanks for reaching out! We received your message and will follow up shortly.</p><p>— Alex-IO</p>`;
+    const override = process.env.INTERNAL_SEND_URL;
     const sendUrl = override || new URL("/api/msgraph/send", url).toString();
 
     const res = await postJson(sendUrl, {
@@ -146,9 +146,9 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.log("[webhook] SEND FAIL to=%s status=%s ms=%d", toEmail, res.status, Date.now() - startedAt);
+      console.log("[webhook] SEND FAIL to=%s status=%s", toEmail, res.status);
       return NextResponse.json(
-        { ok: false, error: "sendMail fetch failed", status: res.status, details: text.slice(0, 2000), toEmail, inReplyTo, subtype },
+        { ok: false, error: "sendMail fetch failed", status: res.status, details: text.slice(0, 1000), toEmail, inReplyTo, subtype },
         { status: 502 }
       );
     }
