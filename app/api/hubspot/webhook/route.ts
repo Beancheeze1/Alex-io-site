@@ -65,11 +65,18 @@ export async function POST(req: NextRequest) {
     const dryRun = url.searchParams.get("dryRun") === "1";
     const replyEnabled = b(process.env.REPLY_ENABLED);
 
-    // Internal URLs
     const SELF = process.env.INTERNAL_SELF_URL || `${url.protocol}//${url.host}`;
     const SEND =
       process.env.INTERNAL_SEND_URL ||
       new URL("/api/msgraph/send", url).toString();
+
+    // NEW: base and TTL for quote links
+    const QUOTE_LINK_BASE =
+      process.env.QUOTE_LINK_BASE || `${url.protocol}//${url.host}/q`;
+    const QUOTE_TTL_DAYS = Math.max(
+      1,
+      Number(process.env.QUOTE_TTL_DAYS ?? 30)
+    );
 
     // Throttles / TTLs
     const kv = makeKv();
@@ -78,9 +85,8 @@ export async function POST(req: NextRequest) {
     const microThrottleSec = Math.max(
       1,
       Number(process.env.REPLY_MICRO_THROTTLE_SEC ?? 5)
-    ); // NEW
+    );
 
-    // Payload
     const events = (await req.json()) as any[];
     if (!Array.isArray(events) || events.length === 0) {
       return NextResponse.json({ ok: true, ignored: true, reason: "no_events" });
@@ -89,52 +95,34 @@ export async function POST(req: NextRequest) {
     const objectId = evt?.objectId ?? evt?.threadId ?? null;
     const rawMessageId = extractMessageId(evt);
 
-    // Basic checks
     if (!isNewInbound(evt)) {
       return NextResponse.json({ ok: true, ignored: true, reason: "wrong_subtype" });
     }
     if (hasLoopHeader(evt)) {
-      return NextResponse.json({
-        ok: true,
-        ignored: true,
-        reason: "loop_header_present",
-      });
+      return NextResponse.json({ ok: true, ignored: true, reason: "loop_header_present" });
     }
 
-    // ---- MICRO-THROTTLE (NEW) ----
+    // Micro-throttle (seconds)
     const microKey = `alexio:micro:${objectId ?? "x"}:${rawMessageId ?? "x"}`;
     if (await kv.get(microKey)) {
-      return NextResponse.json({
-        ok: true,
-        ignored: true,
-        reason: "micro_throttle",
-      });
+      return NextResponse.json({ ok: true, ignored: true, reason: "micro_throttle" });
     }
-    await kv.set(microKey, "1", microThrottleSec); // seconds
+    await kv.set(microKey, "1", microThrottleSec);
 
-    // Idempotency / cooldown (existing logic)
     if (rawMessageId) {
       const k = `alexio:idempotency:${rawMessageId}`;
       if (await kv.get(k)) {
-        return NextResponse.json({
-          ok: true,
-          ignored: true,
-          reason: "idempotent",
-        });
+        return NextResponse.json({ ok: true, ignored: true, reason: "idempotent" });
       }
     }
     if (objectId) {
       const k = `alexio:cooldown:thread:${objectId}`;
       if (await kv.get(k)) {
-        return NextResponse.json({
-          ok: true,
-          ignored: true,
-          reason: "cooldown",
-        });
+        return NextResponse.json({ ok: true, ignored: true, reason: "cooldown" });
       }
     }
 
-    // Try to extract sender email directly
+    // Email resolution
     let toEmail: string | null =
       g(evt, ["message", "from", "email"]) ||
       g(evt, ["object", "message", "from", "email"]) ||
@@ -145,9 +133,8 @@ export async function POST(req: NextRequest) {
     let inboxId: string | number | null = null;
     let channelId: string | number | null = null;
     let inboxEmail: string | null = null;
-    let vars: Record<string, string> = {}; // for {{firstName}} etc
+    let vars: Record<string, string> = {};
 
-    // If not found, call our lookup to resolve email + contact vars
     if (!toEmail) {
       if (!objectId) {
         return NextResponse.json({
@@ -183,7 +170,24 @@ export async function POST(req: NextRequest) {
       vars.displayName = (c.displayName || "").trim();
     }
 
-    // Pick template and render with vars
+    // --------- NEW: create quote token + link ---------
+    const quoteId =
+      (globalThis as any).crypto?.randomUUID?.() ??
+      Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const quoteKey = `alexio:quote:${quoteId}`;
+    const quoteValue = JSON.stringify({
+      objectId,
+      messageId: rawMessageId,
+      toEmail,
+      inboxEmail,
+      createdAt: Date.now(),
+    });
+    await kv.set(quoteKey, quoteValue, QUOTE_TTL_DAYS * 24 * 60 * 60); // seconds
+    const quoteLink = `${QUOTE_LINK_BASE}?t=${encodeURIComponent(quoteId)}`;
+    vars.quoteLink = quoteLink;
+    vars.quoteId = quoteId;
+
+    // Template + render
     const tpl = pickTemplate({
       inboxEmail: inboxEmail ?? undefined,
       inboxId: inboxId ?? undefined,
@@ -201,7 +205,6 @@ export async function POST(req: NextRequest) {
       "Thanks for your message";
     const html = renderTemplate(htmlRaw, vars) || htmlRaw;
 
-    // Dry run / disabled replies
     if (dryRun || !replyEnabled) {
       return NextResponse.json({
         ok: true,
@@ -209,11 +212,13 @@ export async function POST(req: NextRequest) {
         wouldSend: true,
         toEmail,
         via,
-        template: { subject, htmlPreview: html.slice(0, 140) },
+        quoteId,
+        quoteLink,
+        template: { subject, htmlPreview: html.slice(0, 180) },
       });
     }
 
-    // Send via internal msgraph route (msgraph adds loop header; no In-Reply-To/References)
+    // Send via graph
     const sendRes = await postJson(SEND, { to: toEmail, subject, html });
     if (!sendRes.ok) {
       const t = await sendRes.text().catch(() => "");
@@ -228,7 +233,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Mark idempotent & cooldown
+    // Success → idempotency/cooldown
     if (rawMessageId)
       await kv.set(
         `alexio:idempotency:${rawMessageId}`,
@@ -253,6 +258,8 @@ export async function POST(req: NextRequest) {
       sent: true,
       toEmail,
       via,
+      quoteId,
+      quoteLink,
       templateUsed: { subject },
     });
   } catch (err: any) {
