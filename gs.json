@@ -1,5 +1,1 @@
-﻿{
-  "to": "25thhourdesign@gmail.com",
-  "subject": "Graph Live Send — Template path check",
-  "html": "<p>Hello from Alex-IO Graph live send via msgraph.</p>"
-}
+﻿{"to":"25thhourdesign@gmail.com","subject":"Graph Live Send — Header Fix","html":"<p>HTML OK after header fix.</p>"}
