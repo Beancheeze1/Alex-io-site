@@ -1,385 +1,301 @@
 // app/api/hubspot/webhook/route.ts
-// Alex-IO HubSpot Webhook → Graph Reply Handler
-// - Micro-throttle to absorb quick HubSpot retries
-// - Idempotency + per-thread cooldown
-// - Contact-aware templating (name/company)
-// - Quote token + {{quoteLink}} / {{quoteId}}
-// - Per-inbox signatures (auto-appended when {{signatureHtml}} not present)
-// - Optional brand wrapper (REPLY_BRAND_WRAPPER=true)
-// - Text fallback (B3) passed to Graph along with HTML
-// - Internal self/send URLs honor INTERNAL_* envs to avoid host drift
+// Multi-turn responder for HubSpot Conversations: B1 → B2 → B3
+// - Ignored if: Auto-Submitted, from our own mailbox, missing sender, or cooldown
+// - Idempotent per messageId
+// - Stage state stored per conversation (objectId) in KV
+// - Sends via internal /api/msgraph/send
+// - Uses your existing template system + per-inbox signatures
+//
+// Stage logic
+//   stage 0 (first touch)  -> B1  (base template key)
+//   stage 1 (second touch) -> B2  (try "<matchedKey>.b2" then "default.b2" then base)
+//   stage 2+ (further)     -> B3  (try "<matchedKey>.b3" then "default.b3" then base)
+//
+// You can define B2/B3 variants in REPLY_TEMPLATES_JSON, e.g.:
+//  "default.b2": { "subject": "Re: {{subjectPrefix}} (B2)", "html": "<p>Following up…</p>" },
+//  "inbox:sales@alex-io.com.b3": { "subject": "Re: {{subjectPrefix}} (B3)", "html": "<p>Final note…</p>" }
 
 import { NextRequest, NextResponse } from "next/server";
 import { makeKv } from "@/app/lib/kv";
-import { pickTemplate } from "@/app/lib/templates";
+import { pickTemplateWithKey } from "@/app/lib/templates";
 import { renderTemplate, htmlToText } from "@/app/lib/tpl";
 import { shouldWrap, wrapHtml } from "@/app/lib/layout";
 import { pickSignature } from "@/app/lib/signature";
 
 export const dynamic = "force-dynamic";
 
-/* -------------------------------------------------------------------------- */
-/* small utilities                                                             */
-/* -------------------------------------------------------------------------- */
+// ---------- small utils
 
-const b = (v: unknown) => String(v ?? "").toLowerCase() === "true";
+function nowSec() { return Math.floor(Date.now() / 1000); }
+function minutes(n: number) { return n * 60; }
 
-const g = (o: any, p: string[]) =>
-  p.reduce((a, k) => (a && typeof a === "object" ? a[k] : undefined), o);
-
-const isEmail = (s: unknown): s is string =>
-  typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-
-/** Extract a usable Message-Id from HS event if present (else null). */
-function extractMessageId(evt: any): string | null {
-  const headers =
-    g(evt, ["message", "headers"]) ||
-    g(evt, ["object", "message", "headers"]) ||
-    {};
-  const mid =
-    headers["Message-Id"] ||
-    headers["message-id"] ||
-    headers["MESSAGE-ID"] ||
-    evt?.messageId ||
-    evt?.object?.messageId ||
-    null;
-  return typeof mid === "string" && mid.length > 6 ? String(mid) : null;
+function toBool(v: any, fallback = false) {
+  if (v === undefined || v === null) return fallback;
+  const s = String(v).trim().toLowerCase();
+  return ["1", "true", "yes", "y", "on"].includes(s);
 }
 
-/** True if our loop header is present (ignore such events). */
-function hasLoopHeader(evt: any): boolean {
-  const headers =
-    g(evt, ["message", "headers"]) ||
-    g(evt, ["object", "message", "headers"]) ||
-    {};
-  return (
-    String(
-      headers["X-AlexIO-Responder"] ?? headers["x-alexio-responder"] ?? ""
-    ).trim() === "1"
-  );
+function toInt(v: any, fallback: number) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-/** Treat HS “new inbound” message types as replyable. */
-function isNewInbound(evt: any): boolean {
-  const subscriptionType = String(evt?.subscriptionType ?? "");
-  const changeFlag = String(evt?.changeFlag ?? "");
-  const messageType = String(evt?.messageType ?? "");
-  return (
-    subscriptionType.includes("conversation.newMessage") ||
-    changeFlag === "NEW_MESSAGE" ||
-    messageType === "MESSAGE"
-  );
+function parseJson<T>(raw?: string | null): T | null {
+  if (!raw) return null;
+  try { return JSON.parse(raw) as T; } catch { return null; }
 }
 
-/** Minimal JSON POST helper (no-store). */
-async function postJson(url: string, body: unknown) {
-  return fetch(url, {
+// Internal call helper to our own API routes (Render / Cloudflare safe)
+async function postJson<T>(path: string, body: any): Promise<{ ok: boolean; json?: T; status: number; }> {
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "";
+  const url = `${base}${path}`;
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    cache: "no-store",
   });
+  let json: any = null;
+  try { json = await res.json(); } catch { /* ignore */ }
+  return { ok: res.ok, json, status: res.status };
 }
 
-/* -------------------------------------------------------------------------- */
-/* route                                                                       */
-/* -------------------------------------------------------------------------- */
+// ---------- env & constants
+
+const MAILBOX_FROM = (process.env.MS_MAILBOX_FROM || "").toLowerCase();   // e.g. sales@alex-io.com
+const REPLY_ENABLED = toBool(process.env.REPLY_ENABLED ?? "true", true);
+const COOLDOWN_MIN = toInt(process.env.REPLY_COOLDOWN_MIN ?? "10", 10);
+const STATE_TTL_SEC = 30 * 24 * 60 * 60;     // 30 days per thread
+const MSG_TTL_SEC   = 14 * 24 * 60 * 60;     // 14 days per message idempotency
+
+// ---------- template helpers (stage-aware)
+
+type TemplateRow = { subject?: string; html?: string };
+type TemplateTable = Record<string, TemplateRow>;
+
+function getTemplates(): TemplateTable {
+  return parseJson<TemplateTable>(process.env.REPLY_TEMPLATES_JSON) || {};
+}
+
+/**
+ * Return a row for a given stage:
+ *   stage 0: matchedKey, fallback "default", finally base
+ *   stage 1: "<matchedKey>.b2" → "default.b2" → base
+ *   stage 2+: "<matchedKey>.b3" → "default.b3" → base
+ */
+function pickStageRow(matchedKey: string, baseRow: TemplateRow, stage: number): { row: TemplateRow, key: string } {
+  const table = getTemplates();
+
+  const wantKey =
+    stage <= 0 ? matchedKey
+    : stage === 1 ? `${matchedKey}.b2`
+    : `${matchedKey}.b3`;
+
+  if (table[wantKey]) return { row: table[wantKey], key: wantKey };
+
+  const defaultKey =
+    stage <= 0 ? "default"
+    : stage === 1 ? "default.b2"
+    : "default.b3";
+
+  if (table[defaultKey]) return { row: table[defaultKey], key: defaultKey };
+
+  return { row: baseRow, key: matchedKey }; // fallback to base
+}
+
+// ---------- state in KV
+
+type ThreadState = { stage: number; lastSentAt: number };
+const stateKey = (conversationId: string | number) => `alexio:thread:${conversationId}`;
+const msgKey   = (messageId: string) => `alexio:webhook:msg:${messageId}`;
+
+async function readState(kv: ReturnType<typeof makeKv>, conversationId: string | number): Promise<ThreadState> {
+  const raw = await kv.get(stateKey(conversationId));
+  const obj = parseJson<ThreadState>(raw);
+  if (obj && typeof obj.stage === "number" && typeof obj.lastSentAt === "number") return obj;
+  return { stage: 0, lastSentAt: 0 };
+}
+
+async function writeState(kv: ReturnType<typeof makeKv>, conversationId: string | number, s: ThreadState) {
+  await kv.set(stateKey(conversationId), JSON.stringify(s), STATE_TTL_SEC);
+}
+
+async function isProcessed(kv: ReturnType<typeof makeKv>, id: string) {
+  return Boolean(await kv.get(msgKey(id)));
+}
+
+async function markProcessed(kv: ReturnType<typeof makeKv>, id: string) {
+  await kv.set(msgKey(id), "1", MSG_TTL_SEC);
+}
+
+// ---------- core handler
 
 export async function POST(req: NextRequest) {
+  let debug: any = {};
   try {
-    const startedAt = Date.now();
-    const url = new URL(req.url);
-
-    // Query controls
-    const dryRun = url.searchParams.get("dryRun") === "1";
-    const replyEnabled = b(process.env.REPLY_ENABLED);
-
-    // Internal URLs (lock to API origin if provided)
-    const SELF =
-      process.env.INTERNAL_SELF_URL || `${url.protocol}//${url.host}`;
-    const SEND =
-      process.env.INTERNAL_SEND_URL ||
-      new URL("/api/msgraph/send", url).toString();
-
-    // Quote link base + token TTL
-    const QUOTE_LINK_BASE =
-      process.env.QUOTE_LINK_BASE || `${url.protocol}//${url.host}/q`;
-    const QUOTE_TTL_DAYS = Math.max(
-      1,
-      Number(process.env.QUOTE_TTL_DAYS ?? 30)
-    );
-
-    // Throttles / TTLs
     const kv = makeKv();
-    const cooldownMin = Number(process.env.REPLY_COOLDOWN_MIN ?? 120); // after a send per thread
-    const idemTtlMin = Number(process.env.IDEMP_TTL_MIN ?? 1440); // Message-Id idempotency minutes
-    const microThrottleSec = Math.max(
-      1,
-      Number(process.env.REPLY_MICRO_THROTTLE_SEC ?? 5)
-    ); // absorb quick HS retries
+    const url = new URL(req.url);
+    const isDry = url.searchParams.get("dryRun") === "1";
 
-    // Payload → pick first event (HS batches)
-    const events = (await req.json()) as any[];
-    if (!Array.isArray(events) || events.length === 0) {
-      return NextResponse.json({
-        ok: true,
-        ignored: true,
-        reason: "no_events",
-      });
-    }
-    const evt = events[0];
+    const body = await req.json();
+    const events = Array.isArray(body) ? body : [body];
 
-    const objectId = evt?.objectId ?? evt?.threadId ?? null;
-    const rawMessageId = extractMessageId(evt);
+    // HubSpot event schema we care about
+    const e = events[0] || {};
+    const subscriptionType = e.subscriptionType || "";
+    const conversationId: string | number = e.objectId ?? e.conversationId ?? "unknown";
+    const messageId = e.messageId || `${conversationId}:no-msgid:${nowSec()}`;
+    const msg = e.message || {};
+    const headers = (msg.headers || {}) as Record<string, string>;
+    const fromEmail = (msg.from?.email || "").toLowerCase();
 
-    // Type/loop guards
-    if (!isNewInbound(evt)) {
-      return NextResponse.json({
-        ok: true,
-        ignored: true,
-        reason: "wrong_subtype",
-      });
-    }
-    if (hasLoopHeader(evt)) {
-      return NextResponse.json({
-        ok: true,
-        ignored: true,
-        reason: "loop_header_present",
-      });
-    }
-
-    // Micro-throttle (few seconds per thread+message)
-    const microKey = `alexio:micro:${objectId ?? "x"}:${rawMessageId ?? "x"}`;
-    if (await kv.get(microKey)) {
-      return NextResponse.json({
-        ok: true,
-        ignored: true,
-        reason: "micro_throttle",
-      });
-    }
-    await kv.set(microKey, "1", microThrottleSec);
-
-    // Idempotency by Message-Id
-    if (rawMessageId) {
-      const idemKey = `alexio:idempotency:${rawMessageId}`;
-      if (await kv.get(idemKey)) {
-        return NextResponse.json({
-          ok: true,
-          ignored: true,
-          reason: "idempotent",
-        });
-      }
-    }
-
-    // Per-thread cooldown after we send a reply
-    if (objectId) {
-      const cdKey = `alexio:cooldown:thread:${objectId}`;
-      if (await kv.get(cdKey)) {
-        return NextResponse.json({
-          ok: true,
-          ignored: true,
-          reason: "cooldown",
-        });
-      }
-    }
-
-    /* ------------------------ email resolution & vars ----------------------- */
-
-    // Try sender email directly from event
-    let toEmail: string | null =
-      g(evt, ["message", "from", "email"]) ||
-      g(evt, ["object", "message", "from", "email"]) ||
-      null;
-    if (toEmail && !isEmail(toEmail)) toEmail = null;
-
-    let via = "direct";
-    let inboxId: string | number | null = null;
-    let channelId: string | number | null = null;
-    let inboxEmail: string | null = null;
-
-    // Vars exposed to templates
-    const vars: Record<string, string> = {
-      firstName: "",
-      lastName: "",
-      name: "",
-      company: "",
-      displayName: "",
-      quoteLink: "",
-      quoteId: "",
-      signatureHtml: "",
+    debug = {
+      subscriptionType,
+      conversationId,
+      messageId,
+      fromEmail,
+      hasHeaders: !!msg.headers,
     };
 
-    // If we don’t have email, use our lookup endpoint (pulls contact details too)
-    if (!toEmail) {
-      if (!objectId) {
-        return NextResponse.json({
-          ok: true,
-          ignored: true,
-          reason: "no_email_no_objectId",
-        });
-      }
-      const lookupRes = await postJson(`${SELF}/api/hubspot/lookup`, {
-        objectId,
-        messageId: evt?.messageId ?? null,
-      });
-      const lookup = await lookupRes.json().catch(() => ({}));
-
-      if (!lookupRes.ok || !lookup?.email) {
-        return NextResponse.json({
-          ok: true,
-          ignored: true,
-          reason: "no_email_lookup_failed",
-          lookup,
-        });
-      }
-      toEmail = lookup.email;
-      via = `lookup:${lookup?.via || "unknown"}`;
-      inboxId = lookup?.inboxId ?? null;
-      channelId = lookup?.channelId ?? null;
-      inboxEmail = lookup?.inboxEmail ?? null;
-
-      const c = (lookup?.contact as any) || {};
-      vars.firstName = String(c.firstName || "").trim();
-      vars.lastName = String(c.lastName || "").trim();
-      vars.name = [vars.firstName, vars.lastName].filter(Boolean).join(" ");
-      vars.company = String(c.company || "").trim();
-      vars.displayName = String(c.displayName || "").trim();
+    // 0) Basic guards
+    if (subscriptionType !== "conversation.newMessage") {
+      return NextResponse.json({ ok: true, ignored: true, reason: "wrong_subtype", debug });
+    }
+    if (!fromEmail) {
+      return NextResponse.json({ ok: true, ignored: true, reason: "no_sender", debug });
+    }
+    if (MAILBOX_FROM && fromEmail === MAILBOX_FROM) {
+      return NextResponse.json({ ok: true, ignored: true, reason: "from_our_mailbox", debug });
+    }
+    if (headers["Auto-Submitted"] || headers["auto-submitted"]) {
+      return NextResponse.json({ ok: true, ignored: true, reason: "auto_reply", debug });
+    }
+    if (!REPLY_ENABLED && !isDry) {
+      return NextResponse.json({ ok: true, ignored: true, reason: "reply_disabled", debug });
     }
 
-    /* --------------------------- quote token/link --------------------------- */
-
-    const quoteId =
-      (globalThis as any).crypto?.randomUUID?.() ??
-      Math.random().toString(36).slice(2) + Date.now().toString(36);
-    const quoteKey = `alexio:quote:${quoteId}`;
-    const quoteValue = JSON.stringify({
-      objectId,
-      messageId: rawMessageId,
-      toEmail,
-      inboxEmail,
-      createdAt: Date.now(),
-    });
-    await kv.set(quoteKey, quoteValue, QUOTE_TTL_DAYS * 24 * 60 * 60);
-    const quoteLink = `${QUOTE_LINK_BASE}?t=${encodeURIComponent(quoteId)}`;
-    vars.quoteId = quoteId;
-    vars.quoteLink = quoteLink;
-
-    /* ----------------------- template + signature render -------------------- */
-
-    // Choose template by inbox/channel/default
-    const tpl = pickTemplate({
-      inboxEmail: inboxEmail ?? undefined,
-      inboxId: inboxId ?? undefined,
-      channelId: channelId ?? undefined,
-    });
-
-    const subjectRaw = tpl.subject;
-    const innerHtmlRaw =
-      tpl.html ||
-      `<p>Thanks for reaching out to Alex-IO. We received your message and will follow up shortly.</p><p>— Alex-IO</p>`;
-
-    // Per-inbox signature (env SIGNATURES_JSON) and provide {{signatureHtml}}
-    const sig = pickSignature({ inboxEmail, inboxId, channelId });
-    vars.signatureHtml = sig.html;
-
-    // Render subject + inner HTML with vars
-    const subject =
-      renderTemplate(subjectRaw, vars) ||
-      subjectRaw ||
-      "Thanks for your message";
-    let innerHtml = renderTemplate(innerHtmlRaw, vars) || innerHtmlRaw;
-
-    // If the template didn’t explicitly include {{signatureHtml}}, auto-append
-    if (!/\{\{\s*signatureHtml\s*\}\}/.test(innerHtml)) {
-      innerHtml = `${innerHtml}
-        <div style="margin-top:16px; border-top:1px solid #e5e7eb; padding-top:12px;">
-          ${sig.html}
-        </div>`;
+    // 1) Idempotency per messageId
+    if (await isProcessed(kv, messageId)) {
+      return NextResponse.json({ ok: true, ignored: true, reason: "idempotent", debug });
     }
 
-    // Optional brand wrapper; plain-text fallback from inner content
-    const html = shouldWrap() ? wrapHtml(innerHtml) : innerHtml;
+    // 2) Thread state + cooldown
+    const state = await readState(kv, conversationId);
+    const now = nowSec();
+    const cooldownSec = minutes(COOLDOWN_MIN);
+
+    if (state.lastSentAt && now - state.lastSentAt < cooldownSec && !isDry) {
+      return NextResponse.json({ ok: true, ignored: true, reason: "cooldown", cooldownMin: COOLDOWN_MIN, stage: state.stage, debug });
+    }
+
+    // 3) Lookup deep info (to get inReplyTo, and confirm recipient email)
+    //    We call your internal /api/hubspot/lookup route with the event.
+    const lookupRes = await postJson<{ ok: boolean; email?: string; inReplyTo?: string; via?: string; }>(
+      "/api/hubspot/lookup",
+      { subscriptionType, objectId: conversationId, messageId, message: msg }
+    );
+    const recipientEmail = String(lookupRes.json?.email || fromEmail);
+    const inReplyTo = String(lookupRes.json?.inReplyTo || "");
+
+    // 4) Pick template (match by inboxEmail/inboxId/channelId/default)
+    //    We assume this webhook is for your primary sales inbox.
+    const inboxEmail = MAILBOX_FROM || "sales@alex-io.com";
+    const picked = pickTemplateWithKey({ inboxEmail });
+
+    // stage-aware row selection
+    const stageRow = pickStageRow(picked.key, picked.template, state.stage);
+
+    // 5) Signature + render
+    const sig = pickSignature({ inboxEmail });
+    const vars = {
+      firstName: msg.from?.firstName || "",
+      lastName: msg.from?.lastName || "",
+      name: msg.from?.name || "",
+      company: msg.from?.company || "",
+      displayName: msg.from?.displayName || "",
+      subjectPrefix: msg.subject || "",
+      quoteLink: "",
+      quoteId: "",
+      signatureHtml: sig.html,
+    };
+
+    // subject
+    const subject = renderTemplate(stageRow.row.subject || picked.template.subject || "", vars) || "(no subject)";
+
+    // inner HTML and auto-append signature if templ did not include it
+    const baseInner = renderTemplate(stageRow.row.html || picked.template.html || "", vars) || "";
+    const needsAppend = !/\{\{\s*signatureHtml\s*\}\}/.test(baseInner);
+    const innerHtml = needsAppend
+      ? `${baseInner}
+         <div style="margin-top:16px;border-top:1px solid #e5e7eb;padding-top:12px;">${sig.html}</div>`
+      : baseInner;
+
+    const wrapped = shouldWrap();
+    const html = wrapped ? wrapHtml(innerHtml) : innerHtml;
     const text = htmlToText(innerHtml);
 
-    /* -------------------------- dry-run or live send ------------------------ */
-
-    if (dryRun || !replyEnabled) {
-      return NextResponse.json({
-        ok: true,
-        dryRun: true,
-        wouldSend: true,
-        toEmail,
-        via,
-        quoteId,
-        quoteLink,
-        wrapped: shouldWrap(),
-        template: {
-          subject,
-          htmlPreview: html.slice(0, 180),
-          textPreview: text.slice(0, 180),
-        },
-      });
-    }
-
-    // Send through internal Graph route (adds loop header; no refs)
-    const sendRes = await postJson(SEND, {
-      to: toEmail,
+    const sendPayload = {
+      to: recipientEmail,
       subject,
       html,
       text,
-    });
-    if (!sendRes.ok) {
-      const t = await sendRes.text().catch(() => "");
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "graph send failed",
-          status: sendRes.status,
-          details: t.slice(0, 1000),
-        },
-        { status: 502 }
-      );
+      inReplyTo: inReplyTo || undefined,
+    };
+
+    // 6) DryRun support
+    if (isDry) {
+      return NextResponse.json({
+        ok: true,
+        dryRun: true,
+        stage: state.stage,
+        matchedKey: picked.key,
+        usedKey: stageRow.key,
+        toEmail: recipientEmail,
+        via: lookupRes.json?.via || "base",
+        subject,
+        htmlPreview: html.slice(0, 280),
+        textPreview: text.slice(0, 280),
+      });
     }
 
-    // Mark idempotency & per-thread cooldown after successful send
-    if (rawMessageId) {
-      await kv.set(
-        `alexio:idempotency:${rawMessageId}`,
-        "1",
-        Math.max(60, idemTtlMin * 60)
-      );
-    }
-    if (objectId) {
-      await kv.set(
-        `alexio:cooldown:thread:${objectId}`,
-        "1",
-        Math.max(60, cooldownMin * 60)
-      );
-    }
-
-    console.log(
-      "[webhook] SENT to=%s via=%s wrapped=%s ms=%d",
-      toEmail,
-      via,
-      shouldWrap(),
-      Date.now() - startedAt
+    // 7) Send via internal Graph route
+    const sent = await postJson<{ ok: boolean; graph?: { status?: number; requestId?: string; }; }>(
+      "/api/msgraph/send",
+      sendPayload
     );
 
-    return NextResponse.json({
-      ok: true,
-      sent: true,
-      toEmail,
-      via,
-      quoteId,
-      quoteLink,
-      wrapped: shouldWrap(),
-      templateUsed: { subject },
-    });
-  } catch (err: any) {
-    console.log("[webhook] ERROR %s", err?.message ?? "unknown");
+    // mark idempotent and advance stage on success
+    if (sent.ok && sent.json?.ok) {
+      await markProcessed(kv, messageId);
+      const nextStage = Math.min(state.stage + 1, 2); // 0->1->2 (2 is B3 cap)
+      await writeState(kv, conversationId, { stage: nextStage, lastSentAt: now });
+
+      return NextResponse.json({
+        ok: true,
+        stageBefore: state.stage,
+        stageAfter: nextStage,
+        to: recipientEmail,
+        matchedKey: picked.key,
+        usedKey: stageRow.key,
+        graph: sent.json?.graph || { status: 202 },
+      });
+    }
+
+    // failed send
     return NextResponse.json(
-      { ok: false, error: err?.message ?? "unknown" },
-      { status: 500 }
+      {
+        ok: false,
+        error: "graph send failed",
+        status: sent.status,
+        details: JSON.stringify(sent.json || {}),
+      },
+      { status: 502 }
     );
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message ?? "unknown", debug }, { status: 500 });
   }
+}
+
+// Optional: allow HubSpot "Test URL" (GET) to return OK
+export async function GET() {
+  return NextResponse.json({ ok: true, route: "hubspot/webhook", mode: "multi-turn" });
 }
