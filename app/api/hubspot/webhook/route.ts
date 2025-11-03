@@ -4,220 +4,210 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/**
- * HubSpot Webhook (conversation.newMessage)
- * - Accepts array or object payloads (HubSpot fires both styles)
- * - Extracts { toEmail, text, subject, messageId } when present
- * - If missing -> deep lookup via /api/hubspot/lookup
- * - ?dryRun=1 returns a stub 200 (keeps HubSpot green)
- * - Otherwise forwards to /api/ai/orchestrate for an AI reply
- */
-
-// ---- small helpers ---------------------------------------------------------
-
-function safeJson<T = any>(x: unknown): T | null {
-  try {
-    return x as T;
-  } catch {
-    return null;
-  }
-}
-
-function pickFirst<T>(...vals: Array<T | undefined | null>): T | undefined {
-  for (const v of vals) if (v !== undefined && v !== null) return v as T;
-  return undefined;
-}
-
-type HSArrive = {
+type HSMsg = {
   subscriptionType?: string;
   messageType?: string | null;
   changeFlag?: string | null;
   message?: {
-    messageId?: string;
-    text?: string;
-    subject?: string;
     from?: { email?: string };
+    id?: string; // HubSpot messageId
   };
-  from?: { email?: string };
-  text?: string;
-  subject?: string;
-  // HubSpot sometimes sticks arbitrary fields on the root:
-  [k: string]: any;
+  objectId?: number | string; // sometimes present
 };
 
-// Best-effort normalizer: supports single-object or array payloads.
-function normalizePayload(body: any): { arrive: HSArrive; raw: any } {
-  if (Array.isArray(body) && body.length > 0) {
-    // HubSpot batches are arrays of events; we only need the first newMessage
-    const first = body[0] ?? {};
-    return { arrive: first as HSArrive, raw: body };
-  }
-  return { arrive: body as HSArrive, raw: body };
+type Extracted = {
+  toEmail?: string;
+  text?: string;
+  subject?: string;
+  messageId?: string;
+};
+
+function log(...args: any[]) {
+  // small guard to keep logs tidy on Render
+  console.log("[webhook]", ...args);
 }
 
-// ---- main handler ----------------------------------------------------------
+function shallowExtract(anyBody: any): Extracted {
+  // Accept both array-of-events and object payloads
+  const body = Array.isArray(anyBody) ? anyBody[0] : anyBody;
+  const out: Extracted = {};
+
+  try {
+    const m: HSMsg | undefined = body?.message ? body : undefined;
+
+    // Known HubSpot webhook shape (when present)
+    const fromEmail =
+      body?.message?.from?.email ??
+      body?.from?.email ??
+      body?.sender?.email ??
+      undefined;
+
+    // Some “test” payloads use a ‘text’ field directly
+    const text =
+      body?.text ??
+      body?.message?.text ??
+      body?.message?.body ??
+      body?.message?.content ??
+      undefined;
+
+    const subject =
+      body?.subject ??
+      body?.message?.subject ??
+      undefined;
+
+    const messageId =
+      body?.messageId ??
+      body?.message?.id ??
+      body?.id ??
+      undefined;
+
+    if (fromEmail) out.toEmail = String(fromEmail).trim();
+    if (text) out.text = String(text).trim();
+    if (subject) out.subject = String(subject).trim();
+    if (messageId) out.messageId = String(messageId).trim();
+  } catch {
+    // no-op; we log outside
+  }
+  return out;
+}
+
+async function safeJson(res: Response): Promise<any | null> {
+  // Never throw on non-JSON/empty body — log and return null
+  let text = "";
+  try {
+    text = await res.text();
+  } catch {
+    return null;
+  }
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (e: any) {
+    const preview = text.length > 160 ? text.slice(0, 160) + "…" : text;
+    log("lookup_error:", "status", res.status, "| body-preview:", preview);
+    return null;
+  }
+}
+
+async function deepLookup(baseUrl: string, messageId: string): Promise<Extracted> {
+  const url = `${baseUrl}/api/hubspot/lookup?messageId=${encodeURIComponent(messageId)}&mode=deep`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { "accept": "application/json" },
+    // Avoid caching in edge/CDN
+    cache: "no-store",
+  });
+
+  // Try to parse JSON but never throw
+  const data = await safeJson(res);
+  const out: Extracted = {};
+  if (data?.toEmail) out.toEmail = String(data.toEmail).trim();
+  if (data?.text) out.text = String(data.text).trim();
+  if (data?.subject) out.subject = String(data.subject).trim();
+  return out;
+}
+
+async function sendViaOrchestrate(baseUrl: string, payload: {
+  toEmail: string;
+  text: string;
+  subject?: string;
+  dryRun?: boolean;
+}) {
+  const url = `${baseUrl}/api/ai/orchestrate`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({
+      mode: "live",
+      toEmail: payload.toEmail,
+      subject: payload.subject ?? "(no subject)",
+      text: payload.text,
+    }),
+  });
+  const json = await safeJson(res);
+  return { status: res.status, json };
+}
+
+function pickBaseUrl(req: NextRequest) {
+  // Honor NEXT_PUBLIC_BASE_URL if set; otherwise reconstruct from request
+  const envUrl = process.env.NEXT_PUBLIC_BASE_URL?.trim();
+  if (envUrl) return envUrl.replace(/\/+$/, "");
+  const origin = req.nextUrl.origin.replace(/\/+$/, "");
+  return origin;
+}
 
 export async function POST(req: NextRequest) {
-  const isDry = req.nextUrl.searchParams.get("dryRun") === "1";
-
-  // HubSpot sometimes sends no content-type JSON hints; Next handles it.
-  let body: any;
+  let body: any = null;
   try {
     body = await req.json();
   } catch {
-    // Not JSON, but HubSpot still expects a 200 or it retries
-    console.log("[webhook] non-JSON body; returning 200 to avoid retries");
-    return NextResponse.json({ ok: true, detail: "non-json" });
+    body = null; // ok, some tests may send empty
   }
 
-  const { arrive, raw } = normalizePayload(body);
+  const dryRun = req.nextUrl.searchParams.get("dryRun") === "1";
+  const subtype =
+    Array.isArray(body) ? body[0]?.subscriptionType : body?.subscriptionType;
 
-  // Useful trace for us
-  const subtype = {
-    subscriptionType: arrive?.subscriptionType,
-    messageType: arrive?.messageType ?? null,
-    changeFlag: arrive?.changeFlag ?? null,
-  };
-  console.log("[webhook] ARRIVE {");
-  console.log("  subtype:", JSON.stringify(subtype), ",");
-  console.log("}");
+  log("ARRIVE {");
+  log("  subtype:", JSON.stringify({
+    subscriptionType: subtype ?? "undefined",
+    messageType: (Array.isArray(body) ? body[0]?.messageType : body?.messageType) ?? null,
+    changeFlag: (Array.isArray(body) ? body[0]?.changeFlag : body?.changeFlag) ?? "undefined",
+  }));
+  log("}");
 
-  // Step 1: shallow extract
-  let messageId =
-    pickFirst(
-      arrive?.message?.messageId,
-      arrive?.messageId,
-      raw?.objectId /* sometimes present */
-    ) || undefined;
+  // 1) Shallow attempt
+  const shallow = shallowExtract(body);
+  log("shallow extract ->", JSON.stringify({
+    hasEmail: !!shallow.toEmail,
+    hasText: !!shallow.text,
+    messageId: shallow.messageId ?? undefined,
+  }));
 
-  let toEmail =
-    pickFirst(arrive?.message?.from?.email, arrive?.from?.email) || undefined;
-
-  let text =
-    pickFirst(arrive?.message?.text, arrive?.text) || undefined;
-
-  let subject =
-    pickFirst(arrive?.message?.subject, arrive?.subject) || undefined;
-
-  // Flags for logging
-  let hasEmail = !!toEmail;
-  let hasText = !!text;
-
-  console.log(
-    "[webhook] shallow extract ->",
-    JSON.stringify({ hasEmail, hasText, messageId })
-  );
-
-  // Step 2: deep lookup if missing any critical part
-  if (!toEmail || !text) {
-    if (!messageId) {
-      // Without messageId we cannot lookup — bail early (keep HubSpot green)
-      console.log(
-        "[webhook] IGNORE missing (no messageId) { toEmail:",
-        !!toEmail,
-        ", text:",
-        !!text,
-        "}"
-      );
-      return NextResponse.json({
-        ok: true,
-        reason: "missing messageId for lookup",
-      });
-    }
-
+  // 2) If missing essentials, try deep lookup by messageId
+  let final: Extracted = { ...shallow };
+  if ((!final.toEmail || !final.text) && final.messageId) {
     try {
-      const base = process.env.NEXT_PUBLIC_BASE_URL || "";
-      const url = `${base}/api/hubspot/lookup?messageId=${encodeURIComponent(
-        String(messageId)
-      )}&mode=deep`;
-
-      const r = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
-      const j = safeJson<any>(await r.json()) || {};
-
-      // Your lookup route should return { ok, email, text, subject? }
-      if (j?.ok) {
-        toEmail = toEmail || j.email;
-        text = text || j.text;
-        subject = subject || j.subject;
-      }
-
-      hasEmail = !!toEmail;
-      hasText = !!text;
-
-      console.log(
-        "[webhook] deep lookup ->",
-        JSON.stringify({ status: r.status, hasEmail, hasText })
-      );
+      const base = pickBaseUrl(req);
+      const deep = await deepLookup(base, final.messageId);
+      final = { ...final, ...deep };
     } catch (e: any) {
-      console.log("[webhook] lookup error:", e?.message || String(e));
+      log("lookup_error:", e?.message ?? String(e));
     }
   }
 
-  // Dry-run stub (for your PowerShell tests & HubSpot “Ping”)
-  if (isDry) {
-    console.log("[webhook] DRYRUN echo");
+  // 3) If still missing, keep HS green but don’t send
+  if (!final.toEmail || !final.text) {
+    log("IGNORE missing { toEmail:", !!final.toEmail, ", text:", !!final.text, "}");
+    return NextResponse.json({ ok: true, ignored: true });
+  }
+
+  // 4) Dry-run echo (helps CLI testing)
+  if (dryRun) {
+    log("dryRun -> would orchestrate to", final.toEmail);
     return NextResponse.json({
       ok: true,
       dryRun: true,
-      toEmail: toEmail ?? null,
-      subject: subject ?? "(none)",
-      text: text ?? "(none)",
+      toEmail: final.toEmail,
+      subject: final.subject ?? "(no subject)",
+      text: final.text.slice(0, 140),
     });
   }
 
-  // Final gate — if still missing, don’t spam retries; return OK + reason
-  if (!toEmail || !text) {
-    console.log(
-      "[webhook] IGNORE missing { toEmail:",
-      !!toEmail,
-      ", text:",
-      !!text,
-      "}"
-    );
-    return NextResponse.json({
-      ok: true,
-      reason: "missing toEmail or text",
-    });
-  }
+  // 5) Real send via orchestrator
+  const base = pickBaseUrl(req);
+  const { status, json } = await sendViaOrchestrate(base, {
+    toEmail: final.toEmail!,
+    subject: final.subject,
+    text: final.text!,
+  });
 
-  // Step 3: forward to AI orchestrator (same contract we used earlier)
-  try {
-    const base = process.env.NEXT_PUBLIC_BASE_URL || "";
-    const url = `${base}/api/ai/orchestrate`;
-
-    const payload = {
-      mode: "estimate", // or “auto” if you prefer
-      toEmail,
-      subject: subject ?? "",
-      text,
-      messageId: messageId ?? "",
-    };
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    console.log("[webhook] FORWARD -> /api/ai/orchestrate", res.status);
-
-    // Keep HubSpot green no matter what
-    return NextResponse.json({
-      ok: true,
-      forwarded: true,
-      status: res.status,
-    });
-  } catch (e: any) {
-    console.log("[webhook] forward error:", e?.message || String(e));
-    // Still 200 to avoid repeated webhook retries
-    return NextResponse.json({
-      ok: false,
-      error: "forward_failed",
-    });
-  }
+  log("orchestrate ->", status, json ?? null);
+  return NextResponse.json({ ok: status >= 200 && status < 300 });
 }
 
-// HubSpot also occasionally probes with GET
 export async function GET() {
+  // Simple health for your 405/200 checks
   return NextResponse.json({ ok: true, method: "GET" });
 }
