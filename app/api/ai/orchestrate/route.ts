@@ -1,189 +1,225 @@
 // app/api/ai/orchestrate/route.ts
 import { NextRequest, NextResponse } from "next/server";
-
-import { pickTemplateWithKey } from "@/app/lib/templates";
-import { pickSignature } from "@/app/lib/signature";
 import { makeKv } from "@/app/lib/kv";
-import { renderTemplate, htmlToText } from "@/app/lib/tpl";
-import { shouldWrap, wrapHtml } from "@/app/lib/layout";
+import { wrapHtml } from "@/app/lib/layout";
+import { pickSignature } from "@/app/lib/signature";
 
 export const dynamic = "force-dynamic";
 
-function mustStr(v: string | undefined, fb = ""): string {
-  return v ?? fb;
-}
-
-async function postJson<T = any>(path: string, body: unknown): Promise<T> {
-  const url = new URL(
-    path,
-    process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com"
-  ).toString();
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-    next: { revalidate: 0 },
-  });
-  const text = await res.text();
-  let json: any;
-  try {
-    json = text ? JSON.parse(text) : {};
-  } catch {
-    json = { raw: text };
-  }
-  if (!res.ok) {
-    const err: any = new Error("postJson failed");
-    err.status = res.status;
-    err.payload = json;
-    throw err;
-  }
-  return json as T;
-}
-
-async function appendLog(entry: any) {
-  try {
-    const kv = makeKv?.();
-    if (!kv) return;
-    const key = "alexio:ai:orchestrate:recent";
-    const raw = ((await kv.get(key)) as string) || "[]";
-    let list: any[] = [];
-    try {
-      list = JSON.parse(raw);
-    } catch {}
-    list.unshift({ at: Date.now(), ...entry });
-    list = list.slice(0, 50);
-    // numeric TTL (seconds)
-    await (kv as any).set(key, JSON.stringify(list), 60 * 60);
-  } catch {}
-}
-
-type OrchestrateInput = {
-  conversationId?: string;
-  fromEmail?: string;
-  text?: string;
-  dryRun?: boolean;
+type OrchestrateIn = {
+  text?: string;          // customer's message (plain text)
+  toEmail?: string;       // direct destination if known
+  inReplyTo?: string;     // thread/message id for deep lookup & threading
+  subject?: string;       // optional subject override
 };
 
-function pickTemplateSafe(inboxEmail: string) {
+type SendOut = {
+  ok: boolean;
+  sent?: any;
+  graph?: any;
+  reason?: string;
+  debug?: any;
+};
+
+function json(data: any, init?: ResponseInit) {
+  return NextResponse.json(data, init);
+}
+
+function badRequest(msg: string) {
+  return json({ ok: false, error: msg }, { status: 400 });
+}
+
+function originFrom(req: NextRequest) {
   try {
-    // @ts-expect-error object overload allowed
-    return pickTemplateWithKey({ inboxEmail }) ?? pickTemplateWithKey(inboxEmail);
+    const u = new URL(req.url);
+    return `${u.protocol}//${u.host}`;
   } catch {
-    try {
-      // @ts-expect-error string overload allowed
-      return pickTemplateWithKey(inboxEmail);
-    } catch {
-      return { subject: "[Alex-IO]", html: "{{body}}" };
-    }
+    return process.env.NEXT_PUBLIC_BASE_URL || process.env.BASE_URL || "";
   }
 }
 
-function pickSignatureSafe(inboxEmail: string) {
-  try {
-    // @ts-expect-error object overload allowed
-    return pickSignature({ inboxEmail }) ?? pickSignature(inboxEmail);
-  } catch {
-    try {
-      // @ts-expect-error string overload allowed
-      return pickSignature(inboxEmail);
-    } catch {
-      return { key: "(fallback)", html: "" };
-    }
+function normalizeEmail(v?: string | null) {
+  if (!v) return "";
+  return String(v).trim().toLowerCase();
+}
+
+function short(s: any, max = 600) {
+  const v = typeof s === "string" ? s : JSON.stringify(s);
+  return v.length > max ? v.slice(0, max) + "…" : v;
+}
+
+/** very light planner for B2 */
+function planReply(userText: string) {
+  const t = userText.toLowerCase();
+
+  const wantsQuote =
+    /quote|price|pricing|estimate|how much|cost/.test(t) ||
+    /\b\d+\s*(pcs|pieces|qty|quantity)\b/.test(t);
+
+  const mentionsDims =
+    /\b\d+(\.\d+)?\s*[x×]\s*\d+(\.\d+)?\s*[x×]\s*\d+(\.\d+)?\b/.test(t) ||
+    /\b(l|length)\s*\d+/.test(t);
+
+  if (!wantsQuote || !mentionsDims) {
+    return {
+      subject: "Got it — quick specs check",
+      lead:
+        "I can put a quote together quickly. Could you confirm a few details so we size this correctly?",
+      bullets: [
+        "Inner cavity **Length × Width × Height** (inches)?",
+        "How many **cavities** per insert?",
+        "Target **quantity**?",
+        "Preferred **foam** (e.g., PE 1.7 pcf) or “recommend best”?",
+      ],
+      outro:
+        "If you have a drawing or sketch, you can attach it to your reply. I’ll run the numbers and send a price.",
+    };
   }
+
+  return {
+    subject: "Thanks — running numbers now",
+    lead:
+      "Thanks for the specs. I’ll run a quick waste-adjusted price. If anything below is missing, reply with the details:",
+    bullets: [
+      "Confirm **Length × Width × Height** (inches)",
+      "Number of **cavities**",
+      "Production **quantity**",
+      "Foam type (e.g., PE 1.7 pcf) — or ask for a recommendation",
+    ],
+    outro:
+      "I’ll send a draft quote next. If you need alternate quantities or materials, just say so.",
+  };
+}
+
+function buildHtml(subject: string, intro: string, bullets: string[], outro: string) {
+  const list = bullets.map(b => `<li style="margin:6px 0;">${b}</li>`).join("");
+  const sig = pickSignature({}); // <-- pass empty ctx to satisfy required arg
+
+  const inner = `
+    <p>${intro}</p>
+    <ul style="padding-left:18px; margin:12px 0;">${list}</ul>
+    <p>${outro}</p>
+    <hr style="border:none;border-top:1px solid #eef1f6;margin:16px 0;" />
+    ${sig?.html ?? ""}
+  `;
+
+  // call the union-friendly object overload (subject + html)
+  return wrapHtml({ subject, html: inner });
+}
+
+async function tryDeepLookup(origin: string, inReplyTo?: string) {
+  if (!inReplyTo) return null;
+  try {
+    const res = await fetch(`${origin}/api/hubspot/lookup?t=${Date.now()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: inReplyTo }),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data && data.ok && data.email) {
+      return { email: data.email as string, via: (data.via as string) || "lookup" };
+    }
+  } catch { /* ignore */ }
+  return null;
 }
 
 export async function POST(req: NextRequest) {
+  const kv = makeKv();
   const started = Date.now();
+  const origin = originFrom(req);
 
-  let body: OrchestrateInput = {};
+  let body: OrchestrateIn | null = null;
   try {
-    body = (await req.json()) as OrchestrateInput;
+    body = (await req.json()) as OrchestrateIn;
   } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+    return badRequest("Invalid JSON body.");
   }
 
-  const conversationId = mustStr(body.conversationId, "");
-  const fromEmail = mustStr(body.fromEmail, "").toLowerCase();
-  const messageText = mustStr(body.text, "");
-  const dryRun = Boolean(body.dryRun);
+  const userText = (body?.text || "").trim();
+  const inReplyTo = body?.inReplyTo?.trim();
+  let toEmail = normalizeEmail(body?.toEmail);
+  const subjectOverride = body?.subject;
 
-  if (!fromEmail) {
-    return NextResponse.json({ ok: false, error: "fromEmail is required" }, { status: 400 });
+  if (!userText && !subjectOverride) {
+    return badRequest("Missing 'text' (customer message).");
   }
 
-  const inboxEmail = String(process.env.MS_MAILBOX_FROM || "sales@alex-io.com").toLowerCase();
-
-  const templ = pickTemplateSafe(inboxEmail);
-  const signature = pickSignatureSafe(inboxEmail);
-
-  const subject = mustStr((templ as any)?.subject, "[Alex-IO]");
-  const templateHtml = mustStr((templ as any)?.html, "{{body}}");
-
-  const vars: Record<string, string> = {
-    body: messageText,
-    customerEmail: fromEmail,
-    conversationId,
-  };
-
-  const renderedBody = renderTemplate(templateHtml, vars);
-  const composedHtml = renderedBody + mustStr(signature?.html, "");
-
-  // ✅ wrapHtml expects an object (Partial<WrapOpts>)
-  const html = shouldWrap() ? wrapHtml({ subject, html: composedHtml }) : composedHtml;
-
-  const text = htmlToText(html);
-
-  const sendPayload = {
-    to: fromEmail,
-    subject: mustStr(subject, "[Alex-IO]"),
-    html: mustStr(html, ""),
-    text: mustStr(text, ""),
-  };
-
-  if (dryRun) {
-    await appendLog({ kind: "dryRun", to: fromEmail, subject, ms: Date.now() - started });
-    return NextResponse.json({
-      ok: true,
-      sent: false,
-      dryRun: true,
-      preview: { to: fromEmail, subject, html, text },
-    });
+  let lookupInfo: { email?: string; via?: string } | null = null;
+  if (!toEmail && inReplyTo) {
+    lookupInfo = await tryDeepLookup(origin, inReplyTo);
+    if (lookupInfo?.email) toEmail = normalizeEmail(lookupInfo.email);
   }
 
+  if (!toEmail) {
+    await (kv as any).lpush(
+      "alexio:orchestrate:recent",
+      JSON.stringify({
+        at: new Date().toISOString(),
+        reason: "no_toEmail",
+        inReplyTo: short(inReplyTo),
+        text: short(userText, 240),
+      })
+    );
+    return json(
+      {
+        ok: false,
+        reason:
+          "No 'toEmail' available (and lookup did not resolve one). Provide 'toEmail' or 'inReplyTo' linked to a known thread.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const plan = planReply(userText);
+  const subject = subjectOverride || plan.subject;
+  const html = buildHtml(subject, plan.lead, plan.bullets, plan.outro);
+
+  let sendResp: SendOut;
   try {
-    const graph = await postJson<{ status: number; requestId?: string }>(
-      "/api/msgraph/send",
-      sendPayload
-    );
-    await appendLog({ kind: "send", to: fromEmail, subject, graph, ms: Date.now() - started });
-    return NextResponse.json({ ok: true, sent: true, to: fromEmail, subject, graph });
-  } catch (err: any) {
-    await appendLog({
-      kind: "error",
-      to: fromEmail,
-      subject,
-      error: true,
-      status: err?.status ?? 500,
-      details: err?.payload ?? String(err),
-      ms: Date.now() - started,
+    const r = await fetch(`${origin}/api/msgraph/send?t=${Date.now()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        to: toEmail,
+        subject,
+        html,
+        inReplyTo,
+      }),
     });
-    return NextResponse.json(
-      { ok: false, error: "graph send failed", status: err?.status ?? 500, details: err?.payload ?? String(err) },
-      { status: 502 }
-    );
+    const j = await r.json();
+    sendResp = j as SendOut;
+  } catch (err: any) {
+    sendResp = { ok: false, reason: "send_failed", debug: String(err) };
   }
-}
 
-export async function GET() {
-  const inboxEmail = String(process.env.MS_MAILBOX_FROM || "sales@alex-io.com").toLowerCase();
-  const templ = pickTemplateSafe(inboxEmail);
-  const signature = pickSignatureSafe(inboxEmail);
+  await (kv as any).lpush(
+    "alexio:orchestrate:recent",
+    JSON.stringify({
+      at: new Date().toISOString(),
+      ms: Date.now() - started,
+      toEmail,
+      inReplyTo: short(inReplyTo),
+      ok: !!sendResp?.ok,
+      graph: sendResp?.graph?.status ?? null,
+      subject: short(subject, 120),
+      preview: short(userText, 240),
+    })
+  );
+  await (kv as any).ltrim("alexio:orchestrate:recent", 0, 50);
 
-  return NextResponse.json({
-    ok: true,
-    inboxEmail,
-    templateSubject: mustStr((templ as any)?.subject, "[Alex-IO]"),
-    hasSignature: Boolean(signature?.html),
+  return json({
+    ok: !!sendResp?.ok,
+    toEmail,
+    subject,
+    ms: Date.now() - started,
+    method: "msgraph/send",
+    graph: sendResp?.graph ?? null,
+    debug: {
+      via: lookupInfo?.via || (body?.toEmail ? "direct" : "unknown"),
+      usedLookup: !!lookupInfo?.email,
+    },
   });
 }

@@ -1,10 +1,5 @@
-﻿[{
-  "subscriptionType":"conversation.newMessage",
-  "objectId":"test-thread-1001",
-  "messageId":"m-74766607-b3",
-  "message":{
-    "from":{"email":"25thhourdesign@gmail.com","firstName":"Chuck"},
-    "subject":"Stage engine test — B3",
-    "headers":{}
-  }
-}]
+{
+  "to": "25thhourdesign@gmail.com",
+  "subject": "Send Test OK",
+  "text": "Hello from Alex-IO Graph app send (text body)."
+}
