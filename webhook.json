@@ -4,8 +4,8 @@
   "changeFlag": "NEW_MESSAGE",
   "message": {
     "from": { "email": "25thhourdesign@gmail.com" },
-    "subject": "Test subject",
-    "text": "Test text from webhook"
+    "subject": "Test via webhook",
+    "text": "Hello Alex-IO, this is a live-style inbound message."
   },
-  "headers": { "Message-Id": "<fake.message.id@alex-io.com>" }
+  "headers": { "Message-Id": "fake.message.id@alex-io.com" }
 }

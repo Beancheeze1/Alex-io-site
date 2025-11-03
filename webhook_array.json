@@ -1,0 +1,12 @@
+﻿[
+  {
+    "subscriptionType": "conversation.newMessage",
+    "messageType": "MESSAGE",
+    "changeFlag": "NEW_MESSAGE",
+    "message": {
+      "from": { "email": "25thhourdesign@gmail.com" },
+      "subject": "Array form",
+      "text": "UI test payload variant"
+    }
+  }
+]

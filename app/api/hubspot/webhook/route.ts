@@ -1,5 +1,9 @@
 // app/api/hubspot/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { callMsGraphSend } from "@/app/lib/msgraph";
+import { parseHubspotPayload } from "@/app/lib/hubspot";
+import { makeKv } from "@/app/lib/kv";
+
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -174,17 +178,11 @@ export async function POST(req: NextRequest) {
   let orchStatus = 0;
   let orchJson: any = null;
   try {
-    const res = await fetch(`${u.origin}/api/ai/orchestrate?t=${Date.now()}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "reply",
-        toEmail,
-        subject,
-        text,
-        messageId,
-      }),
-    });
+    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/ai/orchestrate`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ toEmail, text, subject, messageId }),
+});
     orchStatus = res.status;
     try { orchJson = await res.json(); } catch { orchJson = { note: "non-json response" }; }
   } catch (e: any) {
