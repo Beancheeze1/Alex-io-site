@@ -1,1 +1,10 @@
-﻿[{"subscriptionType":"conversation.newMessage","objectId":"<REAL_THREAD_ID>","messageId":"<REAL_MESSAGE_ID>"}]
+﻿[{
+  "subscriptionType":"conversation.newMessage",
+  "objectId":"test-thread-1001",
+  "messageId":"m-74766607-b3",
+  "message":{
+    "from":{"email":"25thhourdesign@gmail.com","firstName":"Chuck"},
+    "subject":"Stage engine test — B3",
+    "headers":{}
+  }
+}]
