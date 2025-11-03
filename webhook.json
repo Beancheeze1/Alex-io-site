@@ -1,5 +1,9 @@
-﻿{
-  "subscriptionType": "conversation.newMessage",
-  "message": { "from": { "email": "25thhourdesign@gmail.com" }, "text": "Webhook dry-run check" },
-  "headers": { "Message-Id": "manual-check-001@alex-io.com" }
-}
+﻿[
+  {
+    "subscriptionType": "conversation.newMessage",
+    "messageType": "MESSAGE",
+    "changeFlag": "NEW_MESSAGE",
+    "objectId": "REPLACE_WITH_THREAD_ID",
+    "message": { "text": "Quick test — can you quote 12x8x3, 1.7 PE, qty 50?" }
+  }
+]
