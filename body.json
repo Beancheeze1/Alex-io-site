@@ -1,1 +1,5 @@
-﻿{"subject":"[Alex-IO] Direct send test","to":"25thhourdesign@gmail.com","html":"\u003cp\u003eDirect test ✔\u003c/p\u003e","objId":"9819707114"}
+﻿{
+  "to": "25thhourdesign@gmail.com",
+  "subject": "Graph Live Send — OK",
+  "text": "Hello from Alex-IO Graph (live)."
+}

@@ -1,5 +1,8 @@
-{
-  "to": "25thhourdesign@gmail.com",
-  "subject": "Send Test OK",
-  "text": "Hello from Alex-IO Graph app send (text body)."
-}
+﻿[{
+  "subscriptionType": "conversation.newMessage",
+  "message": {
+    "from": { "email": "25thhourdesign@gmail.com" },
+    "messageId": "fake.message.id@alex-io.com"
+  },
+  "headers": { "Message-Id": "fake.message.id@alex-io.com" }
+}]

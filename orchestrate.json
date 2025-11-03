@@ -1,6 +1,1 @@
-﻿{
-  "toEmail": "25thhourdesign@gmail.com",
-  "text": "Looking for a foam insert, 12x8x3 in EPE 1.7 lb/ft3, qty 50.",
-  "subject": "Run live test — AI Orchestrator (canary)",
-  "dryRun": true
-}
+{  "toEmail": "25thhourdesign@gmail.com",  "subject": "Looking for foam insert pricing",  "text": "Hi, I need pricing on a foam insert, 12x8x3, 1.7 lb PE, qty 50. Turn time and shipping?",  "messageId": "manual-test-806376192",  "dryRun": false}

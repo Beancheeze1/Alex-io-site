@@ -1,146 +1,135 @@
 // app/api/hubspot/webhook/route.ts
-// Now delegates response logic to the AI orchestrator.
-// Keeps: idempotency, cooldown, loop guards, internal send via /api/msgraph/send
-
-import { NextRequest, NextResponse } from "next/server";
-import { makeKv } from "@/app/lib/kv";
-import { htmlToText } from "@/app/lib/tpl";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * HubSpot Webhook endpoint
+ * - Logs ARRIVE always
+ * - Accepts both array/object payloads (HubSpot test vs live)
+ * - Dry run: ?dryRun=1 echoes a stub result and 200
+ * - Extracts fromEmail + messageId (inReplyTo) if present
+ * - If no email -> logs IGNORE no_email and 200 (so HubSpot stays green)
+ * - Otherwise calls our internal msgraph sender
+ */
+
 type HSMessage = {
-  from?: { email?: string; name?: string; firstName?: string; lastName?: string; company?: string; displayName?: string; };
-  subject?: string;
+  subscriptionType?: string;
+  eventType?: string | null;
+  changeFlag?: string;
+  messageType?: string;
+  message?: {
+    from?: { email?: string | null };
+  };
   headers?: Record<string, string>;
-  text?: string;
 };
 
-function nowSec() { return Math.floor(Date.now() / 1000); }
-function minutes(n: number) { return n * 60; }
-function toBool(v: any, fallback = false) {
-  const s = String(v ?? "").trim().toLowerCase();
-  return s ? ["1","true","yes","y","on"].includes(s) : fallback;
-}
-function toInt(v: any, fallback: number) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-const MAILBOX_FROM = (process.env.MS_MAILBOX_FROM || "").toLowerCase();
-const REPLY_ENABLED = toBool(process.env.REPLY_ENABLED ?? "true", true);
-const COOLDOWN_MIN = toInt(process.env.REPLY_COOLDOWN_MIN ?? "10", 10);
-
-const stateKey = (c: string|number) => `alexio:thread:${c}`;
-const msgKey   = (m: string) => `alexio:webhook:msg:${m}`;
-const STATE_TTL = 30 * 24 * 60 * 60;
-const MSG_TTL   = 14 * 24 * 60 * 60;
-
-function parseJson<T>(raw?: string|null): T | null {
-  if (!raw) return null;
-  try { return JSON.parse(raw) as T; } catch { return null; }
-}
-
-async function postJson<T>(path: string, body: any): Promise<{ ok: boolean; json?: T; status: number; }> {
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "";
-  const url = `${base}${path}`;
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type":"application/json" }, body: JSON.stringify(body) });
-  let json: any = null;
-  try { json = await res.json(); } catch {}
-  return { ok: res.ok, json, status: res.status };
-}
-
-export async function POST(req: NextRequest) {
-  let debug: any = {};
-  try {
-    const kv = makeKv();
-    const url = new URL(req.url);
-    const isDry = url.searchParams.get("dryRun") === "1";
-
-    const body = await req.json();
-    const events = Array.isArray(body) ? body : [body];
-    const e = events[0] || {};
-    const subscriptionType = e.subscriptionType || "";
-    const conversationId: string|number = e.objectId ?? e.conversationId ?? "unknown";
-    const messageId = e.messageId || `${conversationId}:no-msgid:${nowSec()}`;
-    const msg: HSMessage = e.message || {};
-    const headers = msg.headers || {};
-    const fromEmail = (msg.from?.email || "").toLowerCase();
-
-    debug = { subscriptionType, conversationId, messageId, fromEmail };
-
-    // Guards
-    if (subscriptionType !== "conversation.newMessage") {
-      return NextResponse.json({ ok: true, ignored: true, reason: "wrong_subtype", debug });
-    }
-    if (!fromEmail) {
-      return NextResponse.json({ ok: true, ignored: true, reason: "no_sender", debug });
-    }
-    if (MAILBOX_FROM && fromEmail === MAILBOX_FROM) {
-      return NextResponse.json({ ok: true, ignored: true, reason: "from_our_mailbox", debug });
-    }
-    if (headers["Auto-Submitted"] || headers["auto-submitted"]) {
-      return NextResponse.json({ ok: true, ignored: true, reason: "auto_reply", debug });
-    }
-    if (!REPLY_ENABLED && !isDry) {
-      return NextResponse.json({ ok: true, ignored: true, reason: "reply_disabled", debug });
-    }
-
-    // Idempotency
-    if (await kv.get(msgKey(messageId))) {
-      return NextResponse.json({ ok: true, ignored: true, reason: "idempotent", debug });
-    }
-
-    // Cooldown
-    const rawState = parseJson<{ stage:number; lastSentAt:number }>(await kv.get(stateKey(conversationId))) ?? { stage:0, lastSentAt:0 };
-    const now = nowSec();
-    if (rawState.lastSentAt && now - rawState.lastSentAt < minutes(COOLDOWN_MIN) && !isDry) {
-      return NextResponse.json({ ok: true, ignored: true, reason: "cooldown", cooldownMin: COOLDOWN_MIN, debug });
-    }
-
-    // Run orchestrator
-    const incomingText = msg.text || htmlToText(e.message?.html || "") || msg.subject || "";
-    const orch = await postJson<{
-      ok: boolean;
-      nextAction: string;
-      state: any;
-      message?: { subject:string; html:string; text:string; };
-      pricing?: any;
-    }>("/api/ai/orchestrate", {
-      conversationId,
-      fromEmail,
-      text: incomingText,
-      dryRun: isDry,
-    });
-
-    if (!orch.ok || !orch.json?.ok) {
-      return NextResponse.json({ ok:false, error:"orchestrator failed", details:orch.json }, { status:502 });
-    }
-
-    const message = orch.json.message!;
-    if (isDry) {
-      return NextResponse.json({ ok:true, dryRun:true, nextAction: orch.json.nextAction, messagePreview: message?.text?.slice(0,280), state: orch.json.state, pricing: orch.json.pricing });
-    }
-
-    // Send via Graph
-    const send = await postJson<{ ok:boolean; graph?: any }>("/api/msgraph/send", {
-      to: fromEmail,
-      subject: message.subject,
-      html: message.html,
-      text: message.text,
-    });
-
-    if (send.ok && send.json?.ok) {
-      await kv.set(msgKey(messageId), "1", MSG_TTL);
-      await kv.set(stateKey(conversationId), JSON.stringify({ stage: (rawState.stage ?? 0) + 1, lastSentAt: now }), STATE_TTL);
-      return NextResponse.json({ ok:true, sent:true, nextAction: orch.json.nextAction, graph: send.json?.graph || { status:202 } });
-    }
-
-    return NextResponse.json({ ok:false, error:"graph send failed", details: send.json }, { status:502 });
-  } catch (e:any) {
-    return NextResponse.json({ ok:false, error:e?.message ?? "unknown", debug }, { status:500 });
+function normalize(body: unknown): HSMessage {
+  if (Array.isArray(body)) {
+    // HubSpot "Test" button sends an array with one item
+    return (body[0] ?? {}) as HSMessage;
   }
+  return (body ?? {}) as HSMessage;
 }
 
-export async function GET() {
-  return NextResponse.json({ ok: true, route: "hubspot/webhook", mode: "ai-orchestrated" });
+function pickInReplyTo(h: Record<string, string> | undefined) {
+  if (!h) return undefined;
+  // HubSpot lower/varied casing happens; normalize keys
+  const map: Record<string, string> = {};
+  for (const [k, v] of Object.entries(h)) map[k.toLowerCase()] = v;
+  return (
+    map["message-id"] ||
+    map["messageid"] ||
+    map["in-reply-to"] ||
+    map["references"] // last resort
+  );
+}
+
+async function postJson(url: string, payload: any) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    // keep this dynamic so we don't cache
+    cache: "no-store",
+  });
+  let txt = "";
+  try {
+    txt = await res.text();
+  } catch {}
+  return { status: res.status, ok: res.ok, text: txt };
+}
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  if (url.searchParams.get("dryRun")) {
+    console.log(`[webhook] DRYRUN GET ok`);
+    return NextResponse.json({ ok: true, dryRun: true });
+  }
+  return NextResponse.json({ ok: true, method: "GET" });
+}
+
+export async function POST(req: Request) {
+  const url = new URL(req.url);
+  const isDry = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
+
+  let raw: any = null;
+  try {
+    raw = await req.json();
+  } catch {
+    console.log(`[webhook] ERROR invalid json body`);
+    return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
+  }
+
+  const msg = normalize(raw);
+
+  // --- ARRIVE log FIRST (this is what you were seeing when green)
+  console.log(
+    `[webhook] ARRIVE subtype=${JSON.stringify({
+      subscriptionType: msg.subscriptionType,
+      eventType: msg.eventType ?? null,
+      changeFlag: msg.changeFlag,
+      messageType: msg.messageType,
+    })}`
+  );
+
+  if (isDry) {
+    console.log(`[webhook] DRYRUN body=${Array.isArray(raw) ? "array[1]" : "object"}`);
+    return NextResponse.json({ ok: true, dryRun: true, bodyKind: Array.isArray(raw) ? "array" : "object" });
+  }
+
+  const toEmail = msg?.message?.from?.email ?? null;
+  const inReplyTo = pickInReplyTo(msg?.headers);
+
+  if (!toEmail) {
+    console.log(`[webhook] IGNORE no_email subtype=${JSON.stringify({ subscriptionType: msg.subscriptionType, messageType: msg.messageType })}`);
+    // Return 200 so HubSpot stays green
+    return NextResponse.json({ ok: true, ignored: true, reason: "no_email" });
+  }
+
+  // Build a minimal template (this matched the “plain reply worked” period)
+  const subject = `[Alex-IO] Default Auto-Reply`;
+  const text = `Thanks for contacting Alex-IO. We received your note and will reply soon.\n\n— Alex-IO`;
+
+  // call our internal msgraph sender (was working during the green window)
+  const sendRes = await postJson(`${url.origin}/api/msgraph/send`, {
+    to: toEmail,
+    subject,
+    text,
+    inReplyTo, // safe to be undefined
+    // allow the send route to handle its own dryRun if needed
+  });
+
+  if (!sendRes.ok) {
+    console.log(
+      `[webhook] ERROR fetch failed to /api/msgraph/send status=${sendRes.status} body=${sendRes.text?.slice(0, 400)}`
+    );
+    // still 200 to HubSpot to avoid retries, but include a flag for our admin views
+    return NextResponse.json({ ok: false, error: "msgraph_send_failed", status: sendRes.status }, { status: 200 });
+  }
+
+  console.log(
+    `[webhook] SENT to=${toEmail} via=lookup:deep inReplyTo=${inReplyTo ?? "(none)"} ms=${(sendRes.text?.length ?? 0)}`
+  );
+  return NextResponse.json({ ok: true, sent: true, toEmail: toEmail, graph: { status: sendRes.status, dryRun: false } });
 }
