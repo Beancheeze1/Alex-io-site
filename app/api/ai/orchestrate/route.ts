@@ -7,10 +7,10 @@ import { pickSignature } from "@/app/lib/signature";
 export const dynamic = "force-dynamic";
 
 type OrchestrateIn = {
-  text?: string;          // customer's message (plain text)
-  toEmail?: string;       // direct destination if known
-  inReplyTo?: string;     // thread/message id for deep lookup & threading
-  subject?: string;       // optional subject override
+  text?: string;
+  toEmail?: string;
+  inReplyTo?: string;
+  subject?: string;
 };
 
 type SendOut = {
@@ -48,7 +48,6 @@ function short(s: any, max = 600) {
   return v.length > max ? v.slice(0, max) + "…" : v;
 }
 
-/** very light planner for B2 */
 function planReply(userText: string) {
   const t = userText.toLowerCase();
 
@@ -91,10 +90,9 @@ function planReply(userText: string) {
   };
 }
 
-function buildHtml(subject: string, intro: string, bullets: string[], outro: string) {
+function buildHtmlTwoArg(subject: string, intro: string, bullets: string[], outro: string) {
   const list = bullets.map(b => `<li style="margin:6px 0;">${b}</li>`).join("");
-  const sig = pickSignature({}); // <-- pass empty ctx to satisfy required arg
-
+  const sig = pickSignature({}); // pass empty ctx to satisfy arg
   const inner = `
     <p>${intro}</p>
     <ul style="padding-left:18px; margin:12px 0;">${list}</ul>
@@ -102,9 +100,8 @@ function buildHtml(subject: string, intro: string, bullets: string[], outro: str
     <hr style="border:none;border-top:1px solid #eef1f6;margin:16px 0;" />
     ${sig?.html ?? ""}
   `;
-
-  // call the union-friendly object overload (subject + html)
-  return wrapHtml({ subject, html: inner });
+  // IMPORTANT: use the 2-arg variant implemented in your repo
+  return wrapHtml(subject, inner);
 }
 
 async function tryDeepLookup(origin: string, inReplyTo?: string) {
@@ -174,7 +171,16 @@ export async function POST(req: NextRequest) {
 
   const plan = planReply(userText);
   const subject = subjectOverride || plan.subject;
-  const html = buildHtml(subject, plan.lead, plan.bullets, plan.outro);
+
+  let html: string;
+  try {
+    html = buildHtmlTwoArg(subject, plan.lead, plan.bullets, plan.outro);
+  } catch (e: any) {
+    return json(
+      { ok: false, error: "template_build_failed", detail: String(e) },
+      { status: 500 }
+    );
+  }
 
   let sendResp: SendOut;
   try {
@@ -182,12 +188,7 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({
-        to: toEmail,
-        subject,
-        html,
-        inReplyTo,
-      }),
+      body: JSON.stringify({ to: toEmail, subject, html, inReplyTo }),
     });
     const j = await r.json();
     sendResp = j as SendOut;
