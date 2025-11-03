@@ -1,0 +1,6 @@
+﻿{
+  "toEmail": "25thhourdesign@gmail.com",
+  "subject": "Orchestrator DryRun — OK",
+  "text": "Dry run path through orchestrator to Graph.",
+  "dryRun": true
+}
