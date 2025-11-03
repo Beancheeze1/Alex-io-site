@@ -4,12 +4,19 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Temporary shim: report a safe, static list so the page builds */
+/**
+ * Lightweight sanity route — returns a static list for now.
+ * Replace later with the real HubSpot OAuth scopes if needed.
+ */
 export async function GET() {
-  const scopes = [
-    "crm.objects.contacts.read",
-    "crm.objects.contacts.write",
-    "crm.objects.owners.read",
-  ];
-  return NextResponse.json({ ok: true, scopes, note: "shim" }, { status: 200 });
+  return NextResponse.json({
+    ok: true,
+    route: "/api/hubspot/scopes",
+    scopes: [
+      "crm.objects.contacts.read",
+      "crm.objects.contacts.write",
+      "crm.objects.deals.read",
+      "crm.objects.deals.write",
+    ],
+  });
 }

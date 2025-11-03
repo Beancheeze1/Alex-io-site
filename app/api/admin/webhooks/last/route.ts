@@ -4,10 +4,15 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Temporary shim to unblock build; returns empty log list */
+/**
+ * Placeholder for "last webhook" admin view.
+ * Keeps build clean; you can wire this to KV/DB later.
+ */
 export async function GET() {
-  return NextResponse.json(
-    { ok: true, route: "/api/admin/webhooks/last", items: [], note: "shim" },
-    { status: 200 }
-  );
+  return NextResponse.json({
+    ok: true,
+    route: "/api/admin/webhooks/last",
+    last: null, // replace with real fetch later
+    note: "Stubbed endpoint; no storage dependency.",
+  });
 }
