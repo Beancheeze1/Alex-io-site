@@ -1,199 +1,223 @@
 // app/api/hubspot/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { callMsGraphSend } from "@/app/lib/msgraph";
-import { parseHubspotPayload } from "@/app/lib/hubspot";
-import { makeKv } from "@/app/lib/kv";
-
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
  * HubSpot Webhook (conversation.newMessage)
- * - Accepts object or array payloads (HubSpot UI test vs live)
- * - Extracts { toEmail, text, subject, messageId }
- * - ?dryRun=1 -> returns stub result and 200 (no external send)
- * - Otherwise forwards to /api/ai/orchestrate to generate/send a reply
- * - Always returns 200 to keep HubSpot dashboard green
+ * - Accepts array or object payloads (HubSpot fires both styles)
+ * - Extracts { toEmail, text, subject, messageId } when present
+ * - If missing -> deep lookup via /api/hubspot/lookup
+ * - ?dryRun=1 returns a stub 200 (keeps HubSpot green)
+ * - Otherwise forwards to /api/ai/orchestrate for an AI reply
  */
 
-type HSArr = any[];
-type HSObj = Record<string, any>;
-type MaybeHS = HSArr | HSObj | undefined | null;
+// ---- small helpers ---------------------------------------------------------
 
-function pick<T>(v: T | undefined | null, def: T): T {
-  return v === undefined || v === null ? def : v;
+function safeJson<T = any>(x: unknown): T | null {
+  try {
+    return x as T;
+  } catch {
+    return null;
+  }
 }
 
-function coerceJson(x: unknown): MaybeHS {
-  if (typeof x === "string") {
-    try { return JSON.parse(x); } catch { return undefined; }
-  }
-  if (x && typeof x === "object") return x as any;
+function pickFirst<T>(...vals: Array<T | undefined | null>): T | undefined {
+  for (const v of vals) if (v !== undefined && v !== null) return v as T;
   return undefined;
 }
 
-/**
- * Attempt to pull an email address from common HubSpot shapes.
- */
-function extractFromEmail(anyMsg: any): string | undefined {
-  // Common live shape: message.from.email
-  const viaFrom = anyMsg?.message?.from?.email;
-  if (typeof viaFrom === "string" && viaFrom.includes("@")) return viaFrom.trim();
+type HSArrive = {
+  subscriptionType?: string;
+  messageType?: string | null;
+  changeFlag?: string | null;
+  message?: {
+    messageId?: string;
+    text?: string;
+    subject?: string;
+    from?: { email?: string };
+  };
+  from?: { email?: string };
+  text?: string;
+  subject?: string;
+  // HubSpot sometimes sticks arbitrary fields on the root:
+  [k: string]: any;
+};
 
-  // Some UI tests: message?.origin?.email OR properties?
-  const viaOrigin = anyMsg?.message?.origin?.email;
-  if (typeof viaOrigin === "string" && viaOrigin.includes("@")) return viaOrigin.trim();
-
-  const viaProps = anyMsg?.message?.fromEmail ?? anyMsg?.fromEmail ?? anyMsg?.email;
-  if (typeof viaProps === "string" && viaProps.includes("@")) return viaProps.trim();
-
-  // Sometimes in headers
-  const hdrs = anyMsg?.headers ?? anyMsg?.message?.headers;
-  const hdrEmail = hdrs?.["From"] ?? hdrs?.["from"] ?? hdrs?.["sender"];
-  if (typeof hdrEmail === "string" && hdrEmail.includes("@")) return hdrEmail.trim();
-
-  return undefined;
-}
-
-/**
- * Pull plain text content (fallbacks included).
- */
-function extractText(anyMsg: any): string | undefined {
-  // Live payloads often carry message.text
-  if (typeof anyMsg?.message?.text === "string" && anyMsg.message.text.trim()) {
-    return anyMsg.message.text.trim();
+// Best-effort normalizer: supports single-object or array payloads.
+function normalizePayload(body: any): { arrive: HSArrive; raw: any } {
+  if (Array.isArray(body) && body.length > 0) {
+    // HubSpot batches are arrays of events; we only need the first newMessage
+    const first = body[0] ?? {};
+    return { arrive: first as HSArrive, raw: body };
   }
-  // Some carry body or html stripped
-  if (typeof anyMsg?.message?.body === "string" && anyMsg.message.body.trim()) {
-    return anyMsg.message.body.trim();
-  }
-  if (typeof anyMsg?.text === "string" && anyMsg.text.trim()) {
-    return anyMsg.text.trim();
-  }
-  if (typeof anyMsg?.body === "string" && anyMsg.body.trim()) {
-    return anyMsg.body.trim();
-  }
-  return undefined;
+  return { arrive: body as HSArrive, raw: body };
 }
 
-/**
- * Subject + messageId best-effort.
- */
-function extractSubject(anyMsg: any): string | undefined {
-  return (
-    anyMsg?.message?.subject ??
-    anyMsg?.subject ??
-    anyMsg?.headers?.subject ??
-    anyMsg?.headers?.Subject
-  );
-}
-function extractMsgId(anyMsg: any): string | undefined {
-  return (
-    anyMsg?.messageId ??
-    anyMsg?.message?.messageId ??
-    anyMsg?.headers?.["Message-Id"] ??
-    anyMsg?.headers?.["message-id"] ??
-    anyMsg?.headers?.["MessageId"]
-  );
-}
-
-/**
- * Normalize HubSpot payload (object or array). Return the "latest" message-like item.
- */
-function normalizeFirstItem(payload: MaybeHS): any | undefined {
-  if (!payload) return undefined;
-  if (Array.isArray(payload)) {
-    // HubSpot UI test sends an array; pick last/newest non-null object
-    for (let i = payload.length - 1; i >= 0; i--) {
-      const x = payload[i];
-      if (x && typeof x === "object") return x;
-    }
-    return undefined;
-  }
-  // Single object case
-  return payload;
-}
-
-export async function GET() {
-  // For sanity: GET should yield 405, so callers know to POST
-  return NextResponse.json({ ok: true, method: "GET" });
-}
+// ---- main handler ----------------------------------------------------------
 
 export async function POST(req: NextRequest) {
-  const u = new URL(req.url);
-  const dryRun = u.searchParams.get("dryRun") === "1";
+  const isDry = req.nextUrl.searchParams.get("dryRun") === "1";
 
-  let raw: unknown;
+  // HubSpot sometimes sends no content-type JSON hints; Next handles it.
+  let body: any;
   try {
-    raw = await req.json();
+    body = await req.json();
   } catch {
-    raw = undefined;
+    // Not JSON, but HubSpot still expects a 200 or it retries
+    console.log("[webhook] non-JSON body; returning 200 to avoid retries");
+    return NextResponse.json({ ok: true, detail: "non-json" });
   }
 
-  const payload = coerceJson(raw);
-  const item = normalizeFirstItem(payload);
+  const { arrive, raw } = normalizePayload(body);
 
-  // Shallow subtype info for log
+  // Useful trace for us
   const subtype = {
-    subscriptionType: item?.subscriptionType ?? item?.eventType ?? undefined,
-    messageType: item?.messageType ?? null,
-    changeFlag: item?.changeFlag ?? undefined,
+    subscriptionType: arrive?.subscriptionType,
+    messageType: arrive?.messageType ?? null,
+    changeFlag: arrive?.changeFlag ?? null,
   };
-
-  // Extract essentials
-  const toEmail = extractFromEmail(item);
-  const text = extractText(item);
-  const subject = pick(extractSubject(item), "(no subject)");
-  const messageId = extractMsgId(item);
-
-  const hasEmail = Boolean(toEmail);
-  const hasText = Boolean(text);
-
-  // Console logs show up in Render logs
   console.log("[webhook] ARRIVE {");
-  console.log("  subtype:", JSON.stringify(subtype));
-  console.log("  hasEmail:", hasEmail, ", hasText:", hasText);
+  console.log("  subtype:", JSON.stringify(subtype), ",");
   console.log("}");
 
-  if (!hasEmail || !hasText) {
-    console.log("[webhook] IGNORE missing { toEmail:", hasEmail, ", text:", hasText, "}");
-    return NextResponse.json({ ok: true, ignored: true, reason: "missing_toEmail_or_text" });
+  // Step 1: shallow extract
+  let messageId =
+    pickFirst(
+      arrive?.message?.messageId,
+      arrive?.messageId,
+      raw?.objectId /* sometimes present */
+    ) || undefined;
+
+  let toEmail =
+    pickFirst(arrive?.message?.from?.email, arrive?.from?.email) || undefined;
+
+  let text =
+    pickFirst(arrive?.message?.text, arrive?.text) || undefined;
+
+  let subject =
+    pickFirst(arrive?.message?.subject, arrive?.subject) || undefined;
+
+  // Flags for logging
+  let hasEmail = !!toEmail;
+  let hasText = !!text;
+
+  console.log(
+    "[webhook] shallow extract ->",
+    JSON.stringify({ hasEmail, hasText, messageId })
+  );
+
+  // Step 2: deep lookup if missing any critical part
+  if (!toEmail || !text) {
+    if (!messageId) {
+      // Without messageId we cannot lookup — bail early (keep HubSpot green)
+      console.log(
+        "[webhook] IGNORE missing (no messageId) { toEmail:",
+        !!toEmail,
+        ", text:",
+        !!text,
+        "}"
+      );
+      return NextResponse.json({
+        ok: true,
+        reason: "missing messageId for lookup",
+      });
+    }
+
+    try {
+      const base = process.env.NEXT_PUBLIC_BASE_URL || "";
+      const url = `${base}/api/hubspot/lookup?messageId=${encodeURIComponent(
+        String(messageId)
+      )}&mode=deep`;
+
+      const r = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+      const j = safeJson<any>(await r.json()) || {};
+
+      // Your lookup route should return { ok, email, text, subject? }
+      if (j?.ok) {
+        toEmail = toEmail || j.email;
+        text = text || j.text;
+        subject = subject || j.subject;
+      }
+
+      hasEmail = !!toEmail;
+      hasText = !!text;
+
+      console.log(
+        "[webhook] deep lookup ->",
+        JSON.stringify({ status: r.status, hasEmail, hasText })
+      );
+    } catch (e: any) {
+      console.log("[webhook] lookup error:", e?.message || String(e));
+    }
   }
 
-  if (dryRun) {
-    // Don’t send — just echo what we would use.
+  // Dry-run stub (for your PowerShell tests & HubSpot “Ping”)
+  if (isDry) {
+    console.log("[webhook] DRYRUN echo");
     return NextResponse.json({
       ok: true,
       dryRun: true,
-      toEmail,
-      subject,
-      text,
-      messageId,
-      note: "Would forward to /api/ai/orchestrate",
+      toEmail: toEmail ?? null,
+      subject: subject ?? "(none)",
+      text: text ?? "(none)",
     });
   }
 
-  // Forward to your AI orchestrator (internal call)
-  let orchStatus = 0;
-  let orchJson: any = null;
-  try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/ai/orchestrate`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ toEmail, text, subject, messageId }),
-});
-    orchStatus = res.status;
-    try { orchJson = await res.json(); } catch { orchJson = { note: "non-json response" }; }
-  } catch (e: any) {
-    console.error("[webhook] orchestrate call failed:", e?.message ?? e);
-    orchStatus = 500;
-    orchJson = { ok: false, error: "orchestrate_fetch_failed" };
+  // Final gate — if still missing, don’t spam retries; return OK + reason
+  if (!toEmail || !text) {
+    console.log(
+      "[webhook] IGNORE missing { toEmail:",
+      !!toEmail,
+      ", text:",
+      !!text,
+      "}"
+    );
+    return NextResponse.json({
+      ok: true,
+      reason: "missing toEmail or text",
+    });
   }
 
-  return NextResponse.json({
-    ok: true,
-    forwarded: true,
-    orchestrate: { status: orchStatus, body: orchJson },
-  });
+  // Step 3: forward to AI orchestrator (same contract we used earlier)
+  try {
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "";
+    const url = `${base}/api/ai/orchestrate`;
+
+    const payload = {
+      mode: "estimate", // or “auto” if you prefer
+      toEmail,
+      subject: subject ?? "",
+      text,
+      messageId: messageId ?? "",
+    };
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    console.log("[webhook] FORWARD -> /api/ai/orchestrate", res.status);
+
+    // Keep HubSpot green no matter what
+    return NextResponse.json({
+      ok: true,
+      forwarded: true,
+      status: res.status,
+    });
+  } catch (e: any) {
+    console.log("[webhook] forward error:", e?.message || String(e));
+    // Still 200 to avoid repeated webhook retries
+    return NextResponse.json({
+      ok: false,
+      error: "forward_failed",
+    });
+  }
+}
+
+// HubSpot also occasionally probes with GET
+export async function GET() {
+  return NextResponse.json({ ok: true, method: "GET" });
 }
