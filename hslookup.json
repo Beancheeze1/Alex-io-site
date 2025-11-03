@@ -1,1 +1,4 @@
-﻿{"objectId":"9825039089","messageId":"b0993d3d-ab07-45ab-b7c3-11e5f1fddb21"}
+﻿{
+  "subscriptionType": "conversation.newMessage",
+  "objectId": "9831291615"
+}

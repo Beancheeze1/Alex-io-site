@@ -1,0 +1,12 @@
+﻿{
+  "mode": "ai",
+  "toEmail": "25thhourdesign@gmail.com",
+  "inReplyTo": "bff0c792-3ea5-418f-87b4-7671cea37321",
+  "subject": "Re: your message to Alex-IO",
+  "text": "Following up on your specs — can you confirm density and thickness under the part?",
+  "dryRun": false,
+  "ai": {
+    "task": "Reply like a helpful estimator and move toward quoting.",
+    "hints": ["<=120 words", "Ask 2 crisp questions", "Foam insert: density + thickness under part"]
+  }
+}
