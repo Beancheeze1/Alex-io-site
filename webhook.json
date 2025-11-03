@@ -1,5 +1,11 @@
-﻿[{
-  "subscriptionType":"conversation.newMessage",
-  "message": { "from": { "email": "25thhourdesign@gmail.com" } },
+﻿{
+  "subscriptionType": "conversation.newMessage",
+  "messageType": "MESSAGE",
+  "changeFlag": "NEW_MESSAGE",
+  "message": {
+    "from": { "email": "25thhourdesign@gmail.com" },
+    "subject": "Test subject",
+    "text": "Test text from webhook"
+  },
   "headers": { "Message-Id": "<fake.message.id@alex-io.com>" }
-}]
+}

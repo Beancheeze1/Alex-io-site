@@ -1,7 +1,4 @@
 // app/lib/msgraph.ts
-//
-// Thin internal client for our own /api/msgraph/send route.
-
 export type SendArgs = {
   to: string;
   subject: string;
@@ -13,12 +10,12 @@ export type SendArgs = {
 export async function callMsGraphSend(args: SendArgs) {
   const { to, subject, text, inReplyTo, dryRun } = args;
 
-  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ""}/api/msgraph/send`, {
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "";
+  const res = await fetch(`${base}/api/msgraph/send`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ to, subject, text, inReplyTo, dryRun }),
-    // Avoid Next.js caching for server-to-server call
     cache: "no-store",
+    body: JSON.stringify({ to, subject, text, inReplyTo, dryRun }),
   });
 
   const details = await res.json().catch(() => ({}));
