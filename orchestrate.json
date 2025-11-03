@@ -1,4 +1,7 @@
-{
-  "toEmail": "25thhourdesign@gmail.com",
-  "text": "Need a quote for a foam insert: 8x10x3, qty 50. PE 1.7 is fine."
+﻿{
+  "fromEmail": "25thhourdesign@gmail.com",
+  "toEmail":   "sales@alex-io.com",
+  "subject":   "Looking for foam insert pricing",
+  "text":      "Hi, I need pricing on a foam insert, 12x8x3, 1.7 lb PE, qty 50. Turn time and shipping?",
+  "messageId": "manual-test-$(Get-Random)"
 }
