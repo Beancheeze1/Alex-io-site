@@ -1,169 +1,218 @@
 // app/api/hubspot/webhook/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
  * HubSpot Webhook (conversation.newMessage)
- * Path A: extract {toEmail, text, subject?, messageId} and forward to /api/ai/orchestrate
- * - Accepts array or object payloads
- * - Returns 200 to keep HubSpot green
+ * - Accepts array or object payloads (HubSpot test vs live)
+ * - Extracts { toEmail, text, subject, messageId }
+ * - If anything required is missing -> log and 200 (HubSpot stays green)
+ * - ?dryRun=1 echoes a stub result
+ * - Otherwise forwards to /api/ai/orchestrate to send a real reply
  */
 
-type HSMsg = {
+type HSSubtype = {
   subscriptionType?: string;
-  messageType?: string;
+  messageType?: string | null;
   changeFlag?: string;
-  message?: {
-    from?: { email?: string };
-    text?: string;            // common
-    textHtml?: string;        // sometimes present
-    content?: string;         // alt
-    body?: string;            // alt
-    subject?: string;         // alt
-  };
-  headers?: Record<string, string>;
-  // allow unknown props
-  [k: string]: any;
 };
 
-function pickFirst(body: any): HSMsg | null {
-  if (!body) return null;
-  return Array.isArray(body) ? (body[0] as HSMsg) ?? null : (body as HSMsg);
+function toArray<T = unknown>(x: T | T[] | undefined | null): T[] {
+  return Array.isArray(x) ? x : x ? [x] : [];
 }
 
-function header(h: Record<string, string> | undefined, key: string) {
-  if (!h) return undefined;
-  const k = Object.keys(h).find((x) => x.toLowerCase() === key.toLowerCase());
-  return k ? h[k] : undefined;
+function safeStr(x: unknown): string | undefined {
+  if (typeof x === "string") return x;
+  if (x == null) return undefined;
+  try {
+    return String(x);
+  } catch {
+    return undefined;
+  }
 }
 
-function extractEmail(ev: HSMsg | null): string | undefined {
-  return ev?.message?.from?.email ?? (ev as any)?.fromEmail ?? undefined;
+function findHeader(obj: any, name: string): string | undefined {
+  if (!obj) return undefined;
+  // common places headers may live
+  const fromTop = obj?.headers?.[name];
+  if (fromTop) return safeStr(fromTop);
+
+  const msg = obj?.message;
+  const fromMsg = msg?.headers?.[name];
+  if (fromMsg) return safeStr(fromMsg);
+
+  // some payloads flatten these
+  const flat = obj?.[name] ?? msg?.[name];
+  return safeStr(flat);
 }
 
-function stripHtml(s: string) {
-  return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
+function parseHubspotPayload(raw: any) {
+  // HubSpot can send an array of events; we handle both forms.
+  const payload = Array.isArray(raw) ? raw[0] ?? {} : raw ?? {};
 
-function extractText(ev: HSMsg | null): string | undefined {
-  if (!ev) return undefined;
-  const m = ev.message ?? (ev as any);
-  const raw =
-    m?.text ??
-    m?.content ??
-    m?.body ??
-    (typeof m?.textHtml === "string" ? stripHtml(m.textHtml) : undefined) ??
-    (typeof (ev as any)?.text === "string" ? (ev as any).text : undefined) ??
+  const subtype: HSSubtype = {
+    subscriptionType: payload?.subscriptionType,
+    messageType: payload?.messageType ?? payload?.message?.type ?? null,
+    changeFlag: payload?.changeFlag,
+  };
+
+  const msg = payload?.message ?? {};
+
+  // Try to get the sender email from multiple likely spots:
+  const fromEmail =
+    safeStr(msg?.from?.email) ??
+    safeStr(msg?.fromEmail) ??
+    safeStr(msg?.sender?.email) ??
+    safeStr(payload?.from?.email);
+
+  // Subject & text are likewise in different places depending on source.
+  const subject =
+    safeStr(msg?.subject) ??
+    safeStr(payload?.subject) ??
     undefined;
-  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : undefined;
+
+  const text =
+    safeStr(msg?.text) ??
+    safeStr(msg?.text?.plain) ??
+    safeStr(payload?.text) ??
+    undefined;
+
+  // Message-Id is important for threading / loop-protection.
+  const messageId =
+    findHeader(payload, "Message-Id") ??
+    safeStr(payload?.messageId) ??
+    safeStr(msg?.messageId) ??
+    undefined;
+
+  const hasEmail = !!fromEmail;
+  const hasText = !!text || !!subject;
+
+  return {
+    subtype,
+    fromEmail,
+    subject,
+    text,
+    messageId,
+    hasEmail,
+    hasText,
+    debug: { subtype, peek: { subject, text, messageId } },
+  };
 }
 
-function extractSubject(ev: HSMsg | null): string | undefined {
-  const m = ev?.message ?? (ev as any);
-  const s = m?.subject ?? (ev as any)?.subject;
-  return typeof s === "string" && s.trim() ? s.trim() : undefined;
-}
-
-function extractMessageId(ev: HSMsg | null): string | undefined {
-  const h = ev?.headers;
+function getBaseUrl() {
+  // Prefer explicit base if set; otherwise fall back to production domain.
   return (
-    header(h, "Message-Id") ||
-    header(h, "Message-ID") ||
-    header(h, "message-id") ||
-    (ev as any)?.messageId ||
-    undefined
+    process.env.NEXT_PUBLIC_BASE_URL ??
+    "https://api.alex-io.com"
   );
-}
-
-async function postJson(url: string, payload: any) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    cache: "no-store",
-  });
-  const text = await res.text().catch(() => "");
-  // try to parse, but keep raw text for logging
-  let json: any = null;
-  try { json = JSON.parse(text); } catch {}
-  return { status: res.status, ok: res.ok, json, text };
 }
 
 export async function GET() {
-  // We intentionally allow GET=405 in prior versions, but returning 200 here keeps CF/health probes happy.
-  return NextResponse.json({ ok: true, method: "GET" }, { status: 200 });
+  // We do not serve GET here (keeps your test chain honest)
+  return new NextResponse("Method Not Allowed", { status: 405 });
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   const url = new URL(req.url);
-  const dryRun = url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
+  const dryRun = url.searchParams.get("dryRun") === "1";
 
-  let body: any = null;
+  let body: any = {};
   try {
     body = await req.json();
   } catch {
-    console.log("[webhook] ERROR invalid_json");
-    return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 200 });
+    // keep body as {}
   }
 
-  const ev = pickFirst(body);
-  const toEmail = extractEmail(ev);
-  const text = extractText(ev);
-  const subject = extractSubject(ev);
-  const messageId = extractMessageId(ev);
+  const parsed = parseHubspotPayload(body);
 
+  // Always log an ARRIVE line so you can see if HubSpot is hitting you.
   console.log("[webhook] ARRIVE", {
-    subtype: {
-      subscriptionType: ev?.subscriptionType ?? "",
-      messageType: ev?.messageType ?? "",
-      changeFlag: ev?.changeFlag ?? "",
-    },
-    hasEmail: !!toEmail,
-    hasText: !!text,
+    subtype: parsed.subtype,
+    hasEmail: parsed.hasEmail,
+    hasText: parsed.hasText,
   });
 
-  // keep HubSpot green but explain why ignored
-  if (!toEmail || !text) {
-    console.log("[webhook] IGNORE missing", { toEmail: !!toEmail, text: !!text });
-    return NextResponse.json(
-      { ok: true, ignored: true, reason: !toEmail ? "no_email" : "no_text" },
-      { status: 200 }
-    );
+  if (!parsed.hasEmail || !parsed.hasText) {
+    console.log("[webhook] IGNORE missing", {
+      toEmail: parsed.hasEmail,
+      text: parsed.hasText,
+    });
+    return NextResponse.json({
+      ok: true,
+      ignored: true,
+      reason: "missing toEmail or text",
+      subtype: parsed.subtype,
+    });
   }
 
-  // Call the AI orchestrator (this is what gives you the “AI-like” responses)
-  const base =
-    process.env.NEXT_PUBLIC_BASE_URL ||
-    process.env.BASE_URL ||
-    "https://api.alex-io.com";
+  if (dryRun) {
+    // Echo a stubbed result for your PowerShell `?dryRun=1` sanity checks.
+    return NextResponse.json({
+      ok: true,
+      dryRun: true,
+      toEmail: parsed.fromEmail,
+      subject: parsed.subject ?? "(no subject)",
+      textPreview: (parsed.text ?? "").slice(0, 120),
+      graph: { status: 200, dryRun: true },
+    });
+  }
 
-  const orchUrl = `${base}/api/ai/orchestrate${dryRun ? "?dryRun=1" : ""}`;
+  // Forward to the AI orchestrator to craft the real “AI-like” reply and send.
+  const orchestrateUrl = `${getBaseUrl()}/api/ai/orchestrate`;
 
   const payload = {
-    toEmail,
-    text,
-    subject,
-    messageId,
-    // let orchestrate decide: estimate vs clarify vs reply
-    mode: "reply",
+    mode: "reply", // lets orchestrator know this is an inbound reply flow
+    toEmail: parsed.fromEmail,
+    subject: parsed.subject ?? "",
+    text: parsed.text ?? "",
+    inReplyTo: parsed.messageId ?? null,
+    // keep a trimmed debug block for Render logs
+    debug: parsed.debug,
   };
 
-  const r = await postJson(orchUrl, payload);
+  let status = 0;
+  let sent = false;
+  let detail: string | undefined;
 
-  if (!r.ok) {
-    console.log("[webhook] ERROR orchestrate_failed", { status: r.status, body: r.text?.slice(0, 400) });
-    // still 200 so HS won’t retry; we’ll see it in our logs
-    return NextResponse.json(
-      { ok: false, error: "orchestrate_failed", status: r.status },
-      { status: 200 }
-    );
+  try {
+    const res = await fetch(orchestrateUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      // no-cache to avoid Next.js caching any internal calls
+      cache: "no-store",
+    });
+    status = res.status;
+    sent = res.ok;
+    if (!res.ok) {
+      detail = await res.text().catch(() => undefined);
+    }
+  } catch (err: any) {
+    detail = err?.message ?? "fetch failed";
   }
 
-  console.log("[webhook] FORWARDED to orchestrate", { status: r.status });
-  return NextResponse.json(
-    { ok: true, forwarded: true, orchestrate: { status: r.status, dryRun } },
-    { status: 200 }
-  );
+  if (!sent) {
+    console.log("[webhook] ERROR orchestrator", { status, detail });
+    // Still 200 to HubSpot so it won’t retry-spam you,
+    // but include the failure details for your logs.
+    return NextResponse.json({
+      ok: false,
+      error: "orchestrator_failed",
+      status,
+      detail,
+    });
+  }
+
+  console.log("[webhook] SENT via orchestrator", {
+    to: payload.toEmail,
+    status,
+  });
+
+  return NextResponse.json({
+    ok: true,
+    toEmail: payload.toEmail,
+    status,
+  });
 }
