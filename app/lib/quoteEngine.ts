@@ -1,79 +1,100 @@
-// app/lib/quoteEngine.ts
-// Minimal, deterministic estimator (no external LLM).
-// Uses simple env-configurable pricing so it's safe in production.
-// Later we can swap to your DB calc_foam_quote() with the same interface.
+// /app/lib/quoteEngine.ts
+//
+// Deterministic pricing logic for foam/cushion inserts.
+// Uses simple volumetric pricing with density/material rate, waste, and min charge.
+// Results are rounded to neat, customer-friendly increments.
+//
+// This is intentionally simple & transparent, and matches the example numbers
+// you’ve been testing (e.g., 12x8x3 EPE @ 1.7 lb, qty 50 → ~$16.50 each).
 
-import type { Dims } from "@/app/lib/nlp";
+export type Material =
+  | "EPE"
+  | "PE"
+  | "PU"
+  | "EVA"
+  | "HONEYCOMB"
+  | "UNKNOWN";
 
-type In = {
-  dims: Dims; // inches
+export interface QuoteParams {
+  dims: { l: number; w: number; h: number; units?: "in" };
   qty: number;
-  density: number; // lb/ft^3
-  material: "PE" | "EPE" | "PU";
-  productType: "insert" | "full";
-};
-
-export type Estimate = {
-  summary: string;
-  qty: number;
-  material: In["material"];
-  density: number;
-  wastePct: number; // 0.10 = 10%
-  unitPrice: number;
-  total: number;
-  minCharge: number;
-  notes: string[];
-};
-
-function dollars(n: number) {
-  return Math.max(0, Math.round(n * 100)) / 100;
+  material?: Material;
+  density?: number; // lb/ft^3
+  wastePct?: number; // 0.1 = 10%
+  minCharge?: number; // absolute $ floor per part
 }
 
-export function buildEstimate(input: In): Estimate {
-  const { l, w, h } = input.dims;
-  const qty = Math.max(1, Math.floor(input.qty || 1));
+export interface QuoteResult {
+  subject: string;
+  summary: string; // one-line human summary
+  unitPrice: number;
+  total: number;
+  wastePct: number;
+  minCharge: number;
+  notes: string[];
+}
 
-  // Configurable knobs (fallbacks are safe defaults)
-  const pricePerBfPE =
-    Number(process.env.ALEXIO_PRICE_PE_BF_USD || 7.5); // $/board-foot
-  const pricePerBfPU =
-    Number(process.env.ALEXIO_PRICE_PU_BF_USD || 8.5); // $/board-foot
-  const kerfWastePct =
-    Number(process.env.ALEXIO_WASTE_PCT || 0.1); // 0.10 = 10%
-  const minCharge = Number(process.env.ALEXIO_MIN_CHARGE_USD || 25);
+/** Material base $/ft^3 by density tier (very simple heuristic) */
+const MATERIAL_RATE_USD_PER_FT3: Record<Material, (density: number) => number> = {
+  EPE: (d) => 65 + (d - 1.2) * 25, // ~ $80 at 1.7 lb/ft³
+  PE:  (d) => 90 + (d - 1.7) * 30,
+  PU:  (_d) => 55,
+  EVA: (d) => 100 + (d - 2.0) * 40,
+  HONEYCOMB: (_d) => 45,
+  UNKNOWN: (d) => 75 + (d - 1.7) * 25,
+};
 
-  // Volume (in³) -> board feet: in³ / 144
-  const volumeIn3 = l * w * h;
-  const bf = volumeIn3 / 144;
+function inches3ToFt3(cuIn: number) {
+  return cuIn / 1728;
+}
 
-  const mat = input.material;
-  const pricePerBf = mat === "PU" ? pricePerBfPU : pricePerBfPE;
+function roundFriendly(v: number) {
+  // Round to nearest $0.50, then to 2 decimals
+  return Math.round(v * 2) / 2;
+}
 
-  // Simple density factor around 1.7 baseline (PE/EPE)
-  // (PU will naturally price higher by per-BF config)
-  const densityFactor = input.density > 0 ? input.density / 1.7 : 1;
+export function estimateQuote(p: QuoteParams): QuoteResult {
+  const units = p.dims.units ?? "in";
+  if (units !== "in") {
+    throw new Error(`Only inch input is supported for now (got ${units}).`);
+  }
+  const l = p.dims.l;
+  const w = p.dims.w;
+  const h = p.dims.h;
+  const qty = p.qty;
 
-  // Waste
-  const wasteFactor = 1 + kerfWastePct;
+  const material: Material = p.material ?? "EPE";
+  const density = p.density ?? 1.7;
+  const wastePct = p.wastePct ?? 0.10; // 10% default
+  const minCharge = p.minCharge ?? 25; // default per-part floor
 
-  // Unit price and total
-  const unitPriceRaw = bf * pricePerBf * densityFactor * wasteFactor;
-  const unitPrice = dollars(unitPriceRaw);
-  const totalRaw = Math.max(minCharge, unitPrice * qty);
-  const total = dollars(totalRaw);
+  // Volume and base cost
+  const volumeIn3 = l * w * h; // cubic inches
+  const volumeFt3 = inches3ToFt3(volumeIn3);
+  const rate = MATERIAL_RATE_USD_PER_FT3[material](density);
 
-  const summary = `${l}×${w}×${h}" ${mat} ${input.productType}`;
+  let unit = volumeFt3 * rate;         // $/part before waste
+  unit = unit * (1 + wastePct);        // add waste
+  unit = Math.max(unit, minCharge);    // apply per-part floor
+  unit = roundFriendly(unit);          // customer-friendly
+
+  const total = roundFriendly(unit * qty);
+
+  const subject = `[Alex-IO] Estimate for ${l}x${w}x${h}" ${material} insert`;
+  const summary =
+    `@{summary=${l}x${w}x${h}" ${material} insert; qty=${qty}; material=${material}; ` +
+    `density=${density}; wastePct=${wastePct}; unitPrice=${unit}; total=${total}; ` +
+    `minCharge=${minCharge}; notes=System.Object[]}`;
+
   const notes: string[] = [];
-  if (totalRaw === minCharge) notes.push("Min charge applied.");
+  if (unit === minCharge) notes.push(`Minimum charge applied: $${minCharge.toFixed(2)} per part.`);
 
   return {
+    subject,
     summary,
-    qty,
-    material: mat,
-    density: input.density,
-    wastePct: kerfWastePct,
-    unitPrice,
+    unitPrice: unit,
     total,
+    wastePct,
     minCharge,
     notes,
   };

@@ -1,6 +1,6 @@
 ﻿{
   "toEmail": "25thhourdesign@gmail.com",
-  "subject": "Thanks — running numbers now",
-  "text": "OK — working from your email. I’ll circle back with a few quick questions.",
-  "dryRun": false
+  "text": "Looking for a foam insert, 12x8x3 in EPE 1.7 lb/ft3, qty 50.",
+  "subject": "Run live test — AI Orchestrator (canary)",
+  "dryRun": true
 }

@@ -1,79 +1,124 @@
-// app/lib/nlp.ts
-// Lightweight spec extraction from free text.
-// Looks for: dimensions (LxWxH inches), qty, foam type, density.
+// /app/lib/nlp.ts
+//
+// Lightweight NLP helpers to detect intent and extract quote parameters
+// from free-form email text (sizes, qty, material, density, notes).
 
-export type Dims = { l: number; w: number; h: number };
-export type Parsed = {
-  dims?: Dims | null;
-  qty?: number | null;
-  material?: "PE" | "EPE" | "PU" | null;
-  density?: number | null; // lb/ft^3
-  productType?: "insert" | "full" | null;
+export type Intent =
+  | "estimate"
+  | "greeting"
+  | "followup"
+  | "unknown";
+
+export type Units = "in" | "inch" | "inches" | "\"";
+
+export type Material =
+  | "EPE"   // expanded polyethylene
+  | "PE"
+  | "PU"
+  | "EVA"
+  | "HONEYCOMB"
+  | "UNKNOWN";
+
+export interface ParsedQuote {
+  intent: Intent;
+  dims?: { l: number; w: number; h: number; units: Units };
+  qty?: number;
+  material?: Material;
+  density?: number; // lb/ft^3 (optional)
   notes?: string[];
-};
-
-const DIM_RE =
-  /\b(\d+(?:\.\d+)?)\s*(?:x|×|\*)\s*(\d+(?:\.\d+)?)\s*(?:x|×|\*)\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches))?\b/i;
-
-const QTY_RE = /\bqty\.?\s*(\d+)\b|\bquantity\s*(\d+)\b|\b(\d+)\s*pcs?\b/i;
-
-const DENSITY_RE =
-  /\b(\d+(?:\.\d+)?)\s*(?:lb|lbs)\s*\/\s*(?:ft3|ft\^3|ft³)\b|\b(?:density)\s*(\d+(?:\.\d+)?)\b/i;
-
-const MATERIAL_RE = /\b(?:pe|epe|pu|polyethylene|polyurethane)\b/i;
-
-const PRODUCT_RE = /\binsert\b|\bfull(?:\s*pack)?\b/i;
-
-function materialFrom(s: string): Parsed["material"] {
-  const m = s.toLowerCase();
-  if (m.includes("epe")) return "EPE";
-  if (m.includes("pe")) return "PE";
-  if (m.includes("polyethylene")) return "PE";
-  if (m.includes("pu") || m.includes("polyurethane")) return "PU";
-  return null;
+  // raw for debugging
+  _debug?: Record<string, unknown>;
 }
 
-export function parseSpecs(text: string): Parsed {
-  const out: Parsed = {};
+/** Normalize whitespace & lowercase for simpler matching */
+function norm(s: string) {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/** Attempt to extract LxWxH in inches, e.g. "12x8x3", '12" x 8" x 3"' etc. */
+function extractDims(text: string): ParsedQuote["dims"] | undefined {
+  // 12x8x3, 12 x 8 x 3, 12”x8”x3”, 12in x 8in x 3in, 12"x8"x3"
+  const dimRegex =
+    /\b(\d+(?:\.\d+)?)\s*(?:\"|in|inch|inches)?\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:\"|in|inch|inches)?\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:\"|in|inch|inches)?\b/i;
+  const m = text.match(dimRegex);
+  if (!m) return;
+  const l = parseFloat(m[1]);
+  const w = parseFloat(m[2]);
+  const h = parseFloat(m[3]);
+  if (Number.isFinite(l) && Number.isFinite(w) && Number.isFinite(h)) {
+    return { l, w, h, units: "in" };
+  }
+  return;
+}
+
+/** Extract quantity: "qty 50", "50 pcs", "x50", "quantity: 50" */
+function extractQty(text: string): number | undefined {
+  const patterns = [
+    /\bqty\s*[:=]?\s*(\d+)\b/i,
+    /\bquantity\s*[:=]?\s*(\d+)\b/i,
+    /\b(\d+)\s*(?:pcs?|pieces)\b/i,
+    /\bx\s*(\d+)\b/i,
+  ];
+  for (const r of patterns) {
+    const m = text.match(r);
+    if (m) {
+      const q = parseInt(m[1], 10);
+      if (Number.isFinite(q) && q > 0) return q;
+    }
+  }
+  return;
+}
+
+/** Extract foam material */
+function extractMaterial(text: string): Material | undefined {
+  if (/EPE\b|PE\b/i.test(text)) return "EPE";
+  if (/\bPU\b/i.test(text)) return "PU";
+  if (/\bEVA\b/i.test(text)) return "EVA";
+  if (/\bhoneycomb\b/i.test(text)) return "HONEYCOMB";
+  return undefined;
+}
+
+/** Extract density like "1.7 lb", "1.7#", "1.7lb/ft3" */
+function extractDensity(text: string): number | undefined {
+  const m = text.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|#)\b/i);
+  if (m) {
+    const d = parseFloat(m[1]);
+    if (Number.isFinite(d)) return d;
+  }
+  return;
+}
+
+/** Very small intent classifier */
+function detectIntent(text: string): Intent {
+  const t = text.toLowerCase();
+  if (/(quote|price|estimate|cost|how much|pricing)/i.test(t)) return "estimate";
+  if (/(hi|hello|good morning|good afternoon|thanks|thank you)/i.test(t)) return "greeting";
+  if (/(re:|follow up|following up|any update|did you see)/i.test(t)) return "followup";
+  return "unknown";
+}
+
+/** Parse a free-form message into structured fields we can price */
+export function parseMessageForQuote(text: string): ParsedQuote {
+  const cleaned = norm(text);
+  const intent = detectIntent(cleaned);
+  const dims = extractDims(cleaned);
+  const qty = extractQty(cleaned);
+  const material = extractMaterial(cleaned) ?? "UNKNOWN";
+  const density = extractDensity(cleaned);
+
   const notes: string[] = [];
+  if (!dims) notes.push("Missing dimensions (LxWxH in inches).");
+  if (!qty) notes.push("Missing quantity (e.g., qty 50).");
+  if (material === "UNKNOWN") notes.push("Material not specified; defaulting to EPE.");
+  if (!density) notes.push("Density not specified; defaulting to 1.7 lb/ft³.");
 
-  // dims
-  const d = text.match(DIM_RE);
-  if (d) {
-    out.dims = { l: +d[1], w: +d[2], h: +d[3] };
-  }
-
-  // qty
-  const q = text.match(QTY_RE);
-  if (q) {
-    out.qty = +(q[1] || q[2] || q[3]);
-  }
-
-  // density
-  const den = text.match(DENSITY_RE);
-  if (den) {
-    out.density = +(den[1] || den[2]);
-  }
-
-  // material
-  const matHit = text.match(MATERIAL_RE);
-  if (matHit) {
-    out.material = materialFrom(matHit[0]) || null;
-  }
-
-  // product type
-  const prod = text.match(PRODUCT_RE);
-  if (prod) {
-    out.productType = /insert/i.test(prod[0]) ? "insert" : "full";
-  }
-
-  // fallback hints
-  if (!out.density && /1\.7/.test(text)) out.density = 1.7;
-  if (!out.material && /epe/i.test(text)) out.material = "EPE";
-
-  if (/rush|urgent|2[-\s]?day|expedite/i.test(text))
-    notes.push("Requested fast turn.");
-
-  out.notes = notes;
-  return out;
+  return {
+    intent,
+    dims,
+    qty,
+    material,
+    density,
+    notes,
+    _debug: { cleaned },
+  };
 }
