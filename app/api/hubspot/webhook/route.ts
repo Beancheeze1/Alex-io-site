@@ -1,124 +1,201 @@
 // app/api/hubspot/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { parseHubspotPayload } from "../../../lib/hubspot";
-import { callMsGraphSend } from "../../../lib/msgraph";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
  * HubSpot Webhook (conversation.newMessage)
- * - Accepts array or object payloads (HubSpot test vs live)
+ * - Accepts object or array payloads (HubSpot UI test vs live)
  * - Extracts { toEmail, text, subject, messageId }
- * - ?dryRun=1 echoes a stub result and 200
- * - Otherwise forwards to /api/ai/orchestrate; falls back to /api/msgraph/send
- * - Always return 200 so HubSpot stays green
+ * - ?dryRun=1 -> returns stub result and 200 (no external send)
+ * - Otherwise forwards to /api/ai/orchestrate to generate/send a reply
+ * - Always returns 200 to keep HubSpot dashboard green
  */
 
-function ok(body: any) {
-  return NextResponse.json({ ok: true, ...body }, { status: 200 });
+type HSArr = any[];
+type HSObj = Record<string, any>;
+type MaybeHS = HSArr | HSObj | undefined | null;
+
+function pick<T>(v: T | undefined | null, def: T): T {
+  return v === undefined || v === null ? def : v;
 }
-function err(body: any) {
-  return NextResponse.json({ ok: false, ...body }, { status: 200 });
+
+function coerceJson(x: unknown): MaybeHS {
+  if (typeof x === "string") {
+    try { return JSON.parse(x); } catch { return undefined; }
+  }
+  if (x && typeof x === "object") return x as any;
+  return undefined;
 }
 
-async function callOrchestrate(args: {
-  toEmail: string;
-  text: string;
-  subject?: string;
-  inReplyTo?: string;
-  dryRun?: boolean;
-}) {
-  const { toEmail, text, subject, inReplyTo, dryRun } = args;
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "";
+/**
+ * Attempt to pull an email address from common HubSpot shapes.
+ */
+function extractFromEmail(anyMsg: any): string | undefined {
+  // Common live shape: message.from.email
+  const viaFrom = anyMsg?.message?.from?.email;
+  if (typeof viaFrom === "string" && viaFrom.includes("@")) return viaFrom.trim();
 
-  const res = await fetch(`${base}/api/ai/orchestrate`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    cache: "no-store",
-    body: JSON.stringify({
-      mode: "email",
-      toEmail,
-      text,
-      subject,
-      inReplyTo,
-      dryRun,
-    }),
-  });
+  // Some UI tests: message?.origin?.email OR properties?
+  const viaOrigin = anyMsg?.message?.origin?.email;
+  if (typeof viaOrigin === "string" && viaOrigin.includes("@")) return viaOrigin.trim();
 
-  const details = await res.json().catch(() => ({}));
-  return { status: res.status, details };
+  const viaProps = anyMsg?.message?.fromEmail ?? anyMsg?.fromEmail ?? anyMsg?.email;
+  if (typeof viaProps === "string" && viaProps.includes("@")) return viaProps.trim();
+
+  // Sometimes in headers
+  const hdrs = anyMsg?.headers ?? anyMsg?.message?.headers;
+  const hdrEmail = hdrs?.["From"] ?? hdrs?.["from"] ?? hdrs?.["sender"];
+  if (typeof hdrEmail === "string" && hdrEmail.includes("@")) return hdrEmail.trim();
+
+  return undefined;
+}
+
+/**
+ * Pull plain text content (fallbacks included).
+ */
+function extractText(anyMsg: any): string | undefined {
+  // Live payloads often carry message.text
+  if (typeof anyMsg?.message?.text === "string" && anyMsg.message.text.trim()) {
+    return anyMsg.message.text.trim();
+  }
+  // Some carry body or html stripped
+  if (typeof anyMsg?.message?.body === "string" && anyMsg.message.body.trim()) {
+    return anyMsg.message.body.trim();
+  }
+  if (typeof anyMsg?.text === "string" && anyMsg.text.trim()) {
+    return anyMsg.text.trim();
+  }
+  if (typeof anyMsg?.body === "string" && anyMsg.body.trim()) {
+    return anyMsg.body.trim();
+  }
+  return undefined;
+}
+
+/**
+ * Subject + messageId best-effort.
+ */
+function extractSubject(anyMsg: any): string | undefined {
+  return (
+    anyMsg?.message?.subject ??
+    anyMsg?.subject ??
+    anyMsg?.headers?.subject ??
+    anyMsg?.headers?.Subject
+  );
+}
+function extractMsgId(anyMsg: any): string | undefined {
+  return (
+    anyMsg?.messageId ??
+    anyMsg?.message?.messageId ??
+    anyMsg?.headers?.["Message-Id"] ??
+    anyMsg?.headers?.["message-id"] ??
+    anyMsg?.headers?.["MessageId"]
+  );
+}
+
+/**
+ * Normalize HubSpot payload (object or array). Return the "latest" message-like item.
+ */
+function normalizeFirstItem(payload: MaybeHS): any | undefined {
+  if (!payload) return undefined;
+  if (Array.isArray(payload)) {
+    // HubSpot UI test sends an array; pick last/newest non-null object
+    for (let i = payload.length - 1; i >= 0; i--) {
+      const x = payload[i];
+      if (x && typeof x === "object") return x;
+    }
+    return undefined;
+  }
+  // Single object case
+  return payload;
 }
 
 export async function GET() {
-  return NextResponse.json({ ok: true, method: "GET" }, { status: 200 });
+  // For sanity: GET should yield 405, so callers know to POST
+  return NextResponse.json({ ok: true, method: "GET" });
 }
 
 export async function POST(req: NextRequest) {
-  const url = new URL(req.url);
-  const dryRun = url.searchParams.has("dryRun");
+  const u = new URL(req.url);
+  const dryRun = u.searchParams.get("dryRun") === "1";
 
   let raw: unknown;
   try {
     raw = await req.json();
   } catch {
-    return err({ error: "no_body" });
+    raw = undefined;
   }
 
-  const { toEmail, text, subject, messageId } = parseHubspotPayload(raw);
-  const hasEmail = !!toEmail && typeof toEmail === "string";
-  const hasText = !!text && typeof text === "string" && text.trim().length > 0;
+  const payload = coerceJson(raw);
+  const item = normalizeFirstItem(payload);
 
-  console.log("[webhook] ARRIVE {",
-    "\n  subscriptionType:", (raw as any)?.subscriptionType,
-    "\n  messageType:", (raw as any)?.messageType ?? null,
-    "\n  changeFlag:", (raw as any)?.changeFlag,
-    "\n}", `\n  hasEmail: ${hasEmail},`, `\n  hasText: ${hasText}`);
+  // Shallow subtype info for log
+  const subtype = {
+    subscriptionType: item?.subscriptionType ?? item?.eventType ?? undefined,
+    messageType: item?.messageType ?? null,
+    changeFlag: item?.changeFlag ?? undefined,
+  };
 
-  if (dryRun) {
-    return ok({
-      dryRun: true,
-      toEmail,
-      subject: subject ?? "(none)",
-      text: (text ?? "").slice(0, 120),
-      inReplyTo: messageId,
-    });
-  }
+  // Extract essentials
+  const toEmail = extractFromEmail(item);
+  const text = extractText(item);
+  const subject = pick(extractSubject(item), "(no subject)");
+  const messageId = extractMsgId(item);
+
+  const hasEmail = Boolean(toEmail);
+  const hasText = Boolean(text);
+
+  // Console logs show up in Render logs
+  console.log("[webhook] ARRIVE {");
+  console.log("  subtype:", JSON.stringify(subtype));
+  console.log("  hasEmail:", hasEmail, ", hasText:", hasText);
+  console.log("}");
 
   if (!hasEmail || !hasText) {
-    console.log("[webhook] IGNORE missing", { toEmail: !!toEmail, text: !!text });
-    return ok({ ignored: true, reason: "missing_email_or_text" });
+    console.log("[webhook] IGNORE missing { toEmail:", hasEmail, ", text:", hasText, "}");
+    return NextResponse.json({ ok: true, ignored: true, reason: "missing_toEmail_or_text" });
   }
 
-  // Primary: AI orchestrator
-  try {
-    const orch = await callOrchestrate({
-      toEmail: toEmail!,
-      text: text!,
+  if (dryRun) {
+    // Don’t send — just echo what we would use.
+    return NextResponse.json({
+      ok: true,
+      dryRun: true,
+      toEmail,
       subject,
-      inReplyTo: messageId,
-      dryRun: false,
+      text,
+      messageId,
+      note: "Would forward to /api/ai/orchestrate",
     });
-    if (orch.status >= 200 && orch.status < 300) {
-      return ok({ route: "/api/ai/orchestrate", status: orch.status });
-    }
-    console.warn("[webhook] Orchestrate failed, falling back", orch);
-  } catch (e) {
-    console.warn("[webhook] Orchestrate threw, falling back", e);
   }
 
-  // Fallback: direct msgraph send
+  // Forward to your AI orchestrator (internal call)
+  let orchStatus = 0;
+  let orchJson: any = null;
   try {
-    const ms = await callMsGraphSend({
-      to: toEmail!,
-      subject: subject ?? "[Alex-IO] We received your message",
-      text: text!,
-      inReplyTo: messageId,
-      dryRun: false,
+    const res = await fetch(`${u.origin}/api/ai/orchestrate?t=${Date.now()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "reply",
+        toEmail,
+        subject,
+        text,
+        messageId,
+      }),
     });
-    return ok({ route: "/api/msgraph/send", status: ms.status, graph: ms.details });
-  } catch (e) {
-    console.error("[webhook] graph fallback failed", e);
-    return err({ error: "graph_send_failed" });
+    orchStatus = res.status;
+    try { orchJson = await res.json(); } catch { orchJson = { note: "non-json response" }; }
+  } catch (e: any) {
+    console.error("[webhook] orchestrate call failed:", e?.message ?? e);
+    orchStatus = 500;
+    orchJson = { ok: false, error: "orchestrate_fetch_failed" };
   }
+
+  return NextResponse.json({
+    ok: true,
+    forwarded: true,
+    orchestrate: { status: orchStatus, body: orchJson },
+  });
 }
