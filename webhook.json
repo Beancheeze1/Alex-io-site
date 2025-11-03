@@ -1,15 +1,4 @@
 ﻿[{
   "subscriptionType": "conversation.newMessage",
-  "messageType": "MESSAGE",
-  "changeFlag": "NEW_MESSAGE",
-
-  "message": {
-    "from": { "email": "25thhourdesign@gmail.com" }
-  },
-
-  "headers": {
-    "Message-Id": "<fake.message.id@alex-io.com>"
-  },
-
-  "messageId": "fake.message.id@alex-io.com"
+  "message": { "from": { "email": "25thhourdesign@gmail.com" } }
 }]
