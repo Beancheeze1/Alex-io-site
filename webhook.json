@@ -1,1 +1,19 @@
-﻿@
+﻿{
+  "subscriptionType": "conversation.newMessage",
+
+  // used for idempotency / logging
+  "messageId": "manual-test-789",
+
+  // root-level aliases (some versions of our extractor look here first)
+  "fromEmail": "25thhourdesign@gmail.com",
+  "text": "Quick inline test — root fields",
+
+  // canonical nested shape
+  "message": {
+    "from": { "email": "25thhourdesign@gmail.com" },
+    "text": "Quick inline test — nested fields"
+  },
+
+  // optional: mirrors messageId in headers for some older branches
+  "headers": { "Message-Id": "manual-test-789@alex-io.com" }
+}
