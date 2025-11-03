@@ -1,14 +1,5 @@
 ﻿{
   "subscriptionType": "conversation.newMessage",
-
-  "messageId": "manual-test-789",
-  "fromEmail": "25thhourdesign@gmail.com",
-  "text": "Quick inline test — root fields",
-
-  "message": {
-    "from": { "email": "25thhourdesign@gmail.com" },
-    "text": "Quick inline test — nested fields"
-  },
-
-  "headers": { "Message-Id": "manual-test-789@alex-io.com" }
+  "message": { "from": { "email": "25thhourdesign@gmail.com" }, "text": "Webhook dry-run check" },
+  "headers": { "Message-Id": "manual-check-001@alex-io.com" }
 }
