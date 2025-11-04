@@ -35,11 +35,15 @@ type SendInput = {
   to: string;
   subject: string;
   html: string;
-  /** Optional: Internet Message-Id of the inbound email we’re replying to */
+  /** Optional: Internet Message-Id we’re replying to (with or without < >) */
   inReplyTo?: string;
-  /** Optional: explicit references header to carry thread */
+  /** Optional fallback References header */
   references?: string;
 };
+
+function normalizeSubject(s: string) {
+  return s.replace(/^\s*(re:|fwd:)\s*/i, "").trim().toLowerCase();
+}
 
 export async function POST(req: Request) {
   try {
@@ -52,13 +56,13 @@ export async function POST(req: Request) {
 
     const token = await getAppToken();
 
-    // Helper for Graph calls
-    async function g(path: string, init: RequestInit) {
+    async function g(path: string, init: RequestInit, extraHeaders?: Record<string, string>) {
       const r = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}${path}`, {
         ...init,
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          ...(extraHeaders || {}),
           ...(init.headers || {}),
         },
       });
@@ -68,44 +72,70 @@ export async function POST(req: Request) {
       return { ok: r.ok, status: r.status, json };
     }
 
-    // If we were given an Internet Message-Id, try replying to that exact message
+    // ---------- Strategy A: exact reply by Internet Message-Id ----------
     if (inReplyTo) {
-      // Graph stores this in internetMessageId with <angle-brackets>
       const bracketed = inReplyTo.startsWith("<") ? inReplyTo : `<${inReplyTo}>`;
-      const search = await g(`/messages?$filter=internetMessageId eq '${bracketed.replace(/'/g, "''")}'&$top=1`, {
-        method: "GET",
-      });
+      const esc = bracketed.replace(/'/g, "''"); // OData escaping
+      const search = await g(`/messages?$filter=internetMessageId eq '${esc}'&$top=1`, { method: "GET" });
 
       if (search.ok && Array.isArray(search.json.value) && search.json.value.length > 0) {
         const msgId = search.json.value[0].id as string;
 
-        // Create a reply, set HTML body, then send
-        const create = await g(`/messages/${msgId}/createReply`, {
-          method: "POST",
-          body: JSON.stringify({ message: {}}),
-        });
+        // Create a reply, patch body + To, then send
+        const create = await g(`/messages/${msgId}/createReply`, { method: "POST", body: JSON.stringify({ message: {} }) });
         if (create.ok) {
           const draftId = create.json?.id ?? create.json?.message?.id;
           if (draftId) {
-            // Update draft body and To (we control recipients)
             await g(`/messages/${draftId}`, {
               method: "PATCH",
               body: JSON.stringify({
-                subject, // keep subject aligned
+                subject,
                 toRecipients: [{ emailAddress: { address: to } }],
                 body: { contentType: "HTML", content: html },
               }),
             });
             const send = await g(`/messages/${draftId}/send`, { method: "POST", body: "{}" });
-            if (send.ok) return NextResponse.json({ ok: true, mode: "reply", status: 200 });
+            if (send.ok) return NextResponse.json({ ok: true, mode: "reply_by_messageId" }, { status: 200 });
             return NextResponse.json({ ok: false, error: "send_reply_failed", detail: send.json }, { status: 200 });
           }
         }
-        // If createReply fails, fall through to sendMail with headers
+        // fall through to Strategy B if createReply fails
       }
     }
 
-    // Fallback: sendMail with In-Reply-To / References headers to keep threading
+    // ---------- Strategy B: heuristic reply (same sender + subject) ----------
+    // Find the most recent message FROM this sender whose normalized subject matches our normalized subject
+    const base = normalizeSubject(subject);
+    // Filter is efficient; we’ll fetch a few recent items and match the subject locally.
+    const list = await g(
+      `/messages?$filter=from/emailAddress/address eq '${to.replace(/'/g, "''")}'&$orderby=receivedDateTime desc&$top=10`,
+      { method: "GET" }
+    );
+
+    if (list.ok && Array.isArray(list.json.value)) {
+      const match = (list.json.value as any[]).find((m) => normalizeSubject(String(m.subject || "")) === base);
+      if (match?.id) {
+        const create = await g(`/messages/${match.id}/createReply`, { method: "POST", body: JSON.stringify({ message: {} }) });
+        if (create.ok) {
+          const draftId = create.json?.id ?? create.json?.message?.id;
+          if (draftId) {
+            await g(`/messages/${draftId}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                subject,
+                toRecipients: [{ emailAddress: { address: to } }],
+                body: { contentType: "HTML", content: html },
+              }),
+            });
+            const send = await g(`/messages/${draftId}/send`, { method: "POST", body: "{}" });
+            if (send.ok) return NextResponse.json({ ok: true, mode: "reply_by_sender_subject" }, { status: 200 });
+            return NextResponse.json({ ok: false, error: "send_reply_failed", detail: send.json }, { status: 200 });
+          }
+        }
+      }
+    }
+
+    // ---------- Strategy C: sendMail with threading headers (last resort) ----------
     const headers: Array<{ name: string; value: string }> = [];
     if (inReplyTo) headers.push({ name: "In-Reply-To", value: inReplyTo });
     if (references) headers.push({ name: "References", value: references });
@@ -122,9 +152,10 @@ export async function POST(req: Request) {
     };
 
     const sendMail = await g(`/sendMail`, { method: "POST", body: JSON.stringify(mail) });
-    if (!sendMail.ok) return NextResponse.json({ ok: false, error: "sendMail_failed", detail: sendMail.json }, { status: 200 });
-
-    return NextResponse.json({ ok: true, mode: "sendMail", status: 200 }, { status: 200 });
+    if (!sendMail.ok) {
+      return NextResponse.json({ ok: false, error: "sendMail_failed", detail: sendMail.json }, { status: 200 });
+    }
+    return NextResponse.json({ ok: true, mode: "sendMail_fallback" }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "send_exception" }, { status: 500 });
   }
