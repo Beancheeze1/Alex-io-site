@@ -1,3 +1,4 @@
+// app/api/hubspot/lookup/route.ts
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -24,34 +25,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "missing HubSpot token" });
     }
 
-    // ✅ Fallback mode (tokenless)
+    // Tokenless fallback for dev/testing
     if (skipLookup) {
-      console.log("[lookup:fallback] Running in tokenless mode");
+      console.log("[lookup:fallback] tokenless mode");
       return NextResponse.json({
         ok: true,
         email: "25thhourdesign@gmail.com",
         subject: "test",
-        text: "test",
+        text: "12 x 8 x 2 in, qty 50",
         threadId: Number(objectId),
+        internetMessageId: undefined, // unknown in fallback
         src: "@(email=deep/chooser; subject=direct/deep; text=messages)",
         fallback: true,
       });
     }
 
-    // ✅ Real HubSpot fetch if token provided
+    // Real HubSpot fetch
     const res = await fetch(
       `https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}?includePropertyVersions=false`,
       {
         headers: {
-          Authorization: `Bearer ${hubspotToken}`,
+          Authorization: `Bearer ${hubspotToken!}`,
           "Content-Type": "application/json",
         },
       }
     );
-
     const data = await res.json();
+
     if (!res.ok) {
-      console.warn("[lookup] HubSpot thread fetch failed", res.status, data);
+      console.warn("[lookup] hubspot_thread_fetch_failed", res.status, data);
       return NextResponse.json({
         ok: false,
         status: res.status,
@@ -60,7 +62,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // deep scan helper
+    // Deep getter
     const dig = (obj: any, path: string[]): any => {
       if (!obj || !path.length) return obj;
       const [head, ...rest] = path;
@@ -70,6 +72,7 @@ export async function POST(req: Request) {
       return dig(obj[head], rest);
     };
 
+    // Sources for email/subject/text
     const sources = {
       email: [["messages", "participants", "email"], ["participants", "email"]],
       subject: [["messages", "subject"], ["subject"]],
@@ -87,16 +90,49 @@ export async function POST(req: Request) {
       }
     }
 
+    // Try to locate an RFC 5322 internetMessageId
+    // Common places (varies by source): messages[].internetMessageId, messages[].headers[].{name,value}
+    let internetMessageId: string | undefined;
+    const candidates =
+      dig(data, ["messages"]) ||
+      dig(data, ["items"]) ||
+      [];
+
+    if (Array.isArray(candidates)) {
+      for (const m of candidates) {
+        if (typeof m?.internetMessageId === "string") {
+          internetMessageId = m.internetMessageId;
+          break;
+        }
+        const headers = Array.isArray(m?.headers) ? m.headers : [];
+        const h = headers.find(
+          (x: any) =>
+            (x?.name || "").toLowerCase() === "message-id" && typeof x?.value === "string" && x.value.includes("@")
+        );
+        if (h?.value) {
+          internetMessageId = h.value;
+          break;
+        }
+      }
+    }
+
     const result = {
       ok: true,
       email: picked.email || "",
       subject: picked.subject || "",
       text: picked.text || "",
       threadId: Number(objectId),
+      internetMessageId,
       src: sources,
     };
 
-    console.log("[lookup] result", result);
+    console.log("[lookup] result", {
+      email: !!result.email,
+      subject: !!result.subject,
+      text: !!result.text,
+      hasInternetMessageId: !!internetMessageId,
+    });
+
     return NextResponse.json(result);
   } catch (err: any) {
     console.error("[lookup] error", err);

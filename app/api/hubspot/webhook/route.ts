@@ -30,16 +30,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, ignored: true, reason: "empty_payload" });
     }
 
-    // Prefer NEW_MESSAGE
     const evt = arr.find((x) => String(x?.changeFlag || "").toUpperCase() === "NEW_MESSAGE") || arr[0];
     const objectId = evt?.objectId ?? evt?.threadId ?? evt?.objectID ?? null;
-    if (!objectId) {
-      return NextResponse.json({ ok: true, ignored: true, reason: "no_objectId" });
-    }
+    if (!objectId) return NextResponse.json({ ok: true, ignored: true, reason: "no_objectId" });
 
     const SELF = env("NEXT_PUBLIC_BASE_URL") || baseFromReq(req);
 
-    // 1) Lookup (works in tokenless mode with your HUBSPOT_SKIP_LOOKUP=1)
+    // 1) Lookup (tokenless works with HUBSPOT_SKIP_LOOKUP=1)
     const lookupRes = await fetch(`${SELF}/api/hubspot/lookup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -47,12 +44,9 @@ export async function POST(req: Request) {
       body: JSON.stringify({ objectId }),
     });
     const lookup = await lookupRes.json().catch(() => ({} as any));
-    if (!lookup?.ok) {
-      console.warn("[webhook] lookup_failed", lookup);
-      return NextResponse.json({ ok: true, ignored: true, reason: "lookup_failed", lookup });
-    }
+    if (!lookup?.ok) return NextResponse.json({ ok: true, ignored: true, reason: "lookup_failed", lookup });
 
-    // 2) AI respond (product-specific quote; clean reply)
+    // 2) AI
     const respondRes = await fetch(`${SELF}/api/ai/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -61,17 +55,14 @@ export async function POST(req: Request) {
         toEmail: lookup.email,
         subject: lookup.subject,
         text: lookup.text,
-        threadId: lookup.threadId, // pass through for in-thread reply
+        threadId: lookup.threadId,
         dryRun: dryRunParam || !replyEnabled,
       }),
     });
     const responseAi = await respondRes.json().catch(() => ({} as any));
-    if (!responseAi?.ok) {
-      console.warn("[webhook] ai_failed", responseAi);
-      return NextResponse.json({ ok: true, ignored: true, reason: "ai_failed", responseAi });
-    }
+    if (!responseAi?.ok) return NextResponse.json({ ok: true, ignored: true, reason: "ai_failed", responseAi });
 
-    // 3) Send via Graph (clean in-thread reply if threadId exists)
+    // 3) Send via Graph (pass internetMessageId when present for threading)
     const sendRes = await fetch(`${SELF}/api/msgraph/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -80,7 +71,10 @@ export async function POST(req: Request) {
         to: responseAi.to,
         subject: responseAi.subject,
         html: responseAi.html,
-        threadId: responseAi.threadId, // if present -> reply; else -> sendMail
+        // Prefer internetMessageId to resolve a Graph message id
+        internetMessageId: lookup.internetMessageId,
+        // If caller passed a real Graph id earlier we still honor it
+        threadId: responseAi.threadId,
       }),
     });
     const sendJson = await sendRes.json().catch(() => ({} as any));
@@ -89,6 +83,7 @@ export async function POST(req: Request) {
       dryRun: dryRunParam || !replyEnabled,
       ms: Date.now() - t0,
       mode: sendJson?.mode,
+      hasInternetMessageId: !!lookup.internetMessageId,
     });
 
     return NextResponse.json({

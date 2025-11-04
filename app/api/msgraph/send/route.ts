@@ -29,16 +29,57 @@ async function getAppToken() {
   return data.access_token as string;
 }
 
+/**
+ * If we receive an RFC5322 internetMessageId like "<xxxx@domain>",
+ * try to resolve it to a Graph message id in the mailbox so we can /reply.
+ */
+async function resolveGraphMessageId(
+  token: string,
+  mailbox: string,
+  internetMessageId?: string | null
+): Promise<string | null> {
+  if (!internetMessageId) return null;
+  try {
+    // Eq filter requires single quotes and exact match.
+    const encoded = encodeURIComponent(internetMessageId);
+    const url = `https://graph.microsoft.com/v1.0/users/${mailbox}/messages?$filter=internetMessageId eq '${encoded}'&$select=id,subject,conversationId,receivedDateTime,from`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await r.json().catch(() => ({} as any));
+    const id = j?.value?.[0]?.id as string | undefined;
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    const { to, subject, html, threadId } = await req.json();
-    const mailbox = env("MS_MAILBOX_FROM", true);
+    const { to, subject, html, threadId, internetMessageId } = await req.json();
 
+    const mailbox = env("MS_MAILBOX_FROM", true);
     const token = await getAppToken();
 
-    // Reply in-thread (if threadId provided) — clean reply body, no quoting.
-    if (threadId) {
-      const endpoint = `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${encodeURIComponent(String(threadId))}/reply`;
+    // We support three threading hints (highest → lowest):
+    //   1) graphMessageId (a real Graph message id, if caller ever supplies)
+    //   2) internetMessageId (we resolve it)
+    //   3) otherwise -> fallback to sendMail
+    let graphMessageId: string | null = null;
+
+    // Some callers might pass a Graph message id as "threadId" already.
+    // Heuristic: Graph ids are usually long base64/opaque strings (contain '=' or very long).
+    if (threadId && String(threadId).length > 20) {
+      graphMessageId = String(threadId);
+    }
+
+    if (!graphMessageId && internetMessageId) {
+      graphMessageId = await resolveGraphMessageId(token, mailbox, String(internetMessageId));
+    }
+
+    if (graphMessageId) {
+      // Clean, in-thread reply; no quoted body.
+      const endpoint = `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${encodeURIComponent(
+        graphMessageId
+      )}/reply`;
       const body = {
         comment: "",
         message: {
@@ -54,17 +95,25 @@ export async function POST(req: Request) {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+
       if (!r.ok) {
         const t = await r.text().catch(() => "");
-        console.error("[msgraph] reply error", r.status, t);
-        return NextResponse.json({ ok: false, status: r.status, detail: t, mode: "reply_error" }, { status: 200 });
+        console.log("[graph-thread-check] reply_failed -> fallback", r.status, t.slice(0, 300));
+      } else {
+        console.log("[graph-thread-check] replied_in_thread", { to, graphMessageId });
+        return NextResponse.json({ ok: true, mode: "reply_thread", to, graphMessageId });
       }
-      return NextResponse.json({ ok: true, mode: "reply_thread", to, threadId });
+      // If reply failed (invalid/missing), fall through to sendMail below.
+    } else {
+      console.log("[graph-thread-check] no_thread_id -> fallback_sendMail", {
+        hasThreadId: !!threadId,
+        hasInternetMessageId: !!internetMessageId,
+      });
     }
 
-    // Fallback: sendMail (new thread)
+    // Fallback: sendMail (new thread) — always succeeds if token is valid
     const sendEndpoint = `https://graph.microsoft.com/v1.0/users/${mailbox}/sendMail`;
-    const body = {
+    const sendBody = {
       message: {
         subject: subject || "Re: your message",
         internetMessageHeaders: [{ name: "X-AlexIO-Responder", value: "1" }],
@@ -74,15 +123,16 @@ export async function POST(req: Request) {
       saveToSentItems: true,
     };
 
-    const r = await fetch(sendEndpoint, {
+    const r2 = await fetch(sendEndpoint, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(sendBody),
     });
-    if (!r.ok) {
-      const t = await r.text().catch(() => "");
-      console.error("[msgraph] sendMail error", r.status, t);
-      return NextResponse.json({ ok: false, status: r.status, detail: t, mode: "sendMail_error" }, { status: 200 });
+
+    if (!r2.ok) {
+      const t = await r2.text().catch(() => "");
+      console.error("[msgraph] sendMail error", r2.status, t.slice(0, 300));
+      return NextResponse.json({ ok: false, status: r2.status, detail: t, mode: "sendMail_error" }, { status: 200 });
     }
     return NextResponse.json({ ok: true, mode: "sendMail_fallback", to });
   } catch (e: any) {

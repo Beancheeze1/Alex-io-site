@@ -1,14 +1,1 @@
-﻿[
-  {
-    "subscriptionType": "conversation.newMessage",
-    "messageType": "MESSAGE",
-    "changeFlag": "NEW_MESSAGE",
-    "objectId": 9834788558,
-    "message": {
-      "from": { "email": "25thhourdesign@gmail.com" },
-      "subject": "Test inbound",
-      "text": "Can you quote foam inserts?",
-      "headers": { "Message-Id": "<test-123@alex-io>" }
-    }
-  }
-]
+﻿[{"subscriptionType":"conversation.newMessage","messageType":"MESSAGE","changeFlag":"NEW_MESSAGE","objectId":9642315481,"message":{"from":{"email":"25thhourdesign@gmail.com"},"subject":"test","text":"make it 50"}}]
