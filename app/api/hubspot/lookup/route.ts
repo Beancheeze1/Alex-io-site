@@ -1,13 +1,6 @@
-// app/api/hubspot/lookup/route.ts
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-
-type LookupRequest = {
-  objectId?: string | number;
-  messageId?: string | number;
-  threadId?: string | number;
-};
 
 function requireEnv(name: string) {
   const v = process.env[name];
@@ -15,112 +8,83 @@ function requireEnv(name: string) {
   return v;
 }
 
-/**
- * Automatically get or refresh a HubSpot access token.
- * Falls back to /api/hubspot/refresh if HUBSPOT_ACCESS_TOKEN is missing or expired.
- */
-async function getHubspotAccessToken(): Promise<string> {
-  const direct = process.env.HUBSPOT_ACCESS_TOKEN;
-  if (direct && !direct.toLowerCase().includes("missing")) {
-    return direct;
-  }
-
-  const base = requireEnv("NEXT_PUBLIC_BASE_URL");
-  const refreshUrl = `${base}/api/hubspot/refresh?t=${Date.now()}`;
-  try {
-    const res = await fetch(refreshUrl, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Token refresh failed: ${res.status}`);
-    const data = await res.json();
-    if (!data.access_token) throw new Error("No access_token in refresh response");
-    console.log("[lookup] refreshed HubSpot token");
-    return data.access_token;
-  } catch (err) {
-    console.error("[lookup] token refresh error", err);
-    throw new Error("HubSpot token unavailable");
-  }
-}
-
-/**
- * Fetch thread info from HubSpot Conversations API.
- */
-async function fetchThread(objectId: string | number, token: string) {
-  const url = `https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`hubspot_thread_fetch_failed ${res.status} ${body}`);
-  }
-  return res.json();
-}
-
-/**
- * Safely extract sender, subject, and message text from a thread payload.
- */
-function extractThreadInfo(threadData: any) {
-  if (!threadData || !threadData.threadId) return null;
-
-  const messages = threadData.messages || [];
-  const participants = threadData.participants || [];
-  const lastMsg = messages[messages.length - 1] || {};
-  const senderEmail = lastMsg.from?.email ?? participants.find((p: any) => p.email)?.email ?? "";
-  const subject =
-    threadData.subject ??
-    lastMsg.subject ??
-    threadData.metadata?.subject ??
-    "";
-  const text =
-    lastMsg.text ||
-    lastMsg.message ||
-    (lastMsg.richText && lastMsg.richText.replace(/<[^>]*>/g, "")) ||
-    "";
-
-  return { senderEmail, subject, text };
-}
-
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as LookupRequest;
-    const objectId = body.objectId || body.threadId || body.messageId;
+    const body = await req.json();
+    const objectId = body.objectId?.toString() || body.threadId?.toString();
     if (!objectId) {
-      return NextResponse.json({ ok: false, error: "missing objectId or threadId" });
+      return NextResponse.json({ ok: false, error: "missing objectId or threadId" }, { status: 400 });
     }
 
-    // Acquire a valid token (auto-refresh if needed)
-    const token = await getHubspotAccessToken();
-
-    // Fetch the thread payload
-    const data = await fetchThread(objectId, token);
-
-    // Extract sender, subject, text
-    const info = extractThreadInfo(data);
-    if (!info) {
-      return NextResponse.json({
-        ok: true,
-        email: "",
-        subject: "",
-        text: "",
-        threadId: objectId,
-        src: "@{pickedKeys=System.Object[]}",
-      });
+    // Optional HubSpot token (skips if not provided)
+    const hubspotToken = process.env.HUBSPOT_ACCESS_TOKEN;
+    if (!hubspotToken && process.env.HUBSPOT_SKIP_LOOKUP !== "1") {
+      console.warn("[lookup] HUBSPOT_ACCESS_TOKEN missing");
+      return NextResponse.json({ ok: false, error: "missing HubSpot token" });
     }
 
-    return NextResponse.json({
-      ok: true,
-      email: info.senderEmail,
-      subject: info.subject,
-      text: info.text,
-      threadId: objectId,
-      src: "@{email=deep/chooser; subject=direct/deep; text=messages}",
+    const res = await fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}?includePropertyVersions=false`, {
+      headers: hubspotToken
+        ? { Authorization: `Bearer ${hubspotToken}`, "Content-Type": "application/json" }
+        : { "Content-Type": "application/json" },
     });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      return NextResponse.json({ ok: false, status: res.status, error: "hubspot_thread_fetch_failed", body: data });
+    }
+
+    // deep scan helper
+    const dig = (obj: any, path: string[]): any => {
+      if (!obj || !path.length) return obj;
+      const [head, ...rest] = path;
+      if (Array.isArray(obj)) return obj.map((o) => dig(o, path)).flat().filter(Boolean);
+      if (typeof obj !== "object") return [];
+      if (rest.length === 0) return obj[head];
+      return dig(obj[head], rest);
+    };
+
+    const sources = {
+      email: [
+        ["messages", "participants", "email"],
+        ["participants", "email"],
+      ],
+      subject: [
+        ["messages", "subject"],
+        ["subject"],
+      ],
+      text: [
+        ["messages", "text"],
+        ["messages", "body"],
+        ["body"],
+      ],
+    };
+
+    const picked: Record<string, any> = {};
+    for (const [key, paths] of Object.entries(sources)) {
+      for (const p of paths) {
+        const found = dig(data, p);
+        if (found && found.length) {
+          picked[key] = found.find((v: any) => typeof v === "string" && v.trim());
+          break;
+        }
+      }
+    }
+
+    const result = {
+      ok: true,
+      email: picked.email || "",
+      subject: picked.subject || "",
+      text: picked.text || "",
+      threadId: Number(objectId),
+      src: sources,
+    };
+
+    console.log("[lookup] result", result);
+    return NextResponse.json(result);
   } catch (err: any) {
     console.error("[lookup] error", err);
-    return NextResponse.json({
-      ok: false,
-      error: err.message ?? "unexpected error",
-    });
+    return NextResponse.json({ ok: false, error: err.message || String(err) }, { status: 500 });
   }
 }
