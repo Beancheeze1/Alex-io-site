@@ -11,6 +11,23 @@ function isEmail(s: unknown): s is string {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
+function pickEmailFromParticipants(arr: any[]): string | null {
+  for (const p of Array.isArray(arr) ? arr : []) {
+    const e =
+      p?.email ??
+      p?.emailAddress ??
+      p?.inboxEmail ??
+      p?.participantEmail ??
+      p?.channelAccountId ??
+      p?.channelUserEmail ??
+      null;
+    if (typeof e === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return e;
+  }
+  return null;
+}
+
+
+
 async function getAccessToken(): Promise<TokenResult> {
   const direct = process.env.HUBSPOT_ACCESS_TOKEN?.trim();
   if (direct) return { ok: true, token: direct };
@@ -105,6 +122,11 @@ function pickFromThread(threadJson: any) {
   return { email, text };
 }
 
+
+
+
+
+
 function chooseLatestInbound(messages: any[]): { email: string | null; text: string } {
   // Prefer human inbound (direction INBOUND / external actor)
   const pick = [...messages].reverse().find(m => {
@@ -164,6 +186,24 @@ export async function POST(req: Request) {
         } catch { /* ignore parse; keep best-effort */ }
       }
     }
+
+
+// 3) If still no email, ask participants API
+if (!email) {
+  const pUrl = `https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/participants`;
+  const pRes = await fetch(pUrl, { headers: { Authorization: `Bearer ${tok.token}` }, cache: "no-store" });
+  const pRaw = await pRes.text();
+  if (pRes.ok) {
+    try {
+      const pj = JSON.parse(pRaw);
+      const arr = Array.isArray(pj?.results) ? pj.results : (Array.isArray(pj) ? pj : []);
+      const hit = pickEmailFromParticipants(arr);
+      if (hit) email = hit;
+    } catch { /* ignore parse */ }
+  }
+}
+
+
 
     return NextResponse.json({ ok: true, email: email ?? "", subject, text, threadId: objectId }, { status: 200 });
   } catch (err: any) {
