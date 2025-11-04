@@ -11,22 +11,45 @@ function isEmail(s: unknown): s is string {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
-function pickEmailFromParticipants(arr: any[]): string | null {
-  for (const p of Array.isArray(arr) ? arr : []) {
-    const e =
-      p?.email ??
-      p?.emailAddress ??
-      p?.inboxEmail ??
-      p?.participantEmail ??
-      p?.channelAccountId ??
-      p?.channelUserEmail ??
-      null;
-    if (typeof e === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return e;
+/** Walk any object tree and return the first value that matches `pick` */
+function deepFind<T = any>(
+  obj: any,
+  pick: (k: string, v: any, path: string[]) => T | undefined,
+  path: string[] = []
+): T | undefined {
+  if (!obj || typeof obj !== "object") return undefined;
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      const got = deepFind(obj[i], pick, path.concat(String(i)));
+      if (got !== undefined) return got;
+    }
+    return undefined;
   }
-  return null;
+  for (const [k, v] of Object.entries(obj)) {
+    const gotHere = pick(k, v, path.concat(k));
+    if (gotHere !== undefined) return gotHere;
+    if (v && typeof v === "object") {
+      const got = deepFind(v, pick, path.concat(k));
+      if (got !== undefined) return got;
+    }
+  }
+  return undefined;
 }
 
+function findAnyEmail(obj: any): { value: string; from: string } | null {
+  const hit = deepFind(obj, (k, v, p) => (isEmail(v) ? { value: v as string, from: p.join(".") } : undefined));
+  return hit ?? null;
+}
 
+function findAnySubject(obj: any): { value: string; from: string } | null {
+  const hit = deepFind(obj, (k, v, p) => {
+    if (typeof v === "string" && v.trim() && k.toLowerCase().includes("subject")) {
+      return { value: v.trim(), from: p.join(".") };
+    }
+    return undefined;
+  });
+  return hit ?? null;
+}
 
 async function getAccessToken(): Promise<TokenResult> {
   const direct = process.env.HUBSPOT_ACCESS_TOKEN?.trim();
@@ -63,77 +86,13 @@ async function getAccessToken(): Promise<TokenResult> {
   }
 }
 
-// --- Flexible pickers for many HS shapes ---
-function deepFindEmail(obj: any): string | null {
-  if (!obj || typeof obj !== "object") return null;
-  for (const [k, v] of Object.entries(obj)) {
-    if (isEmail(v)) return v;
-    if (v && typeof v === "object") {
-      const hit = deepFindEmail(v);
-      if (hit) return hit;
-    }
-  }
-  return null;
-}
-
-function pickSubject(threadJson: any): string {
-  return (
-    threadJson?.subject ??
-    threadJson?.threadSubject ??
-    threadJson?.title ??
-    threadJson?.summary ??
-    ""
-  ).toString();
-}
-
-function pickFromThread(threadJson: any) {
-  // Try participants, lastMessage, messages, etc.
-  let email: string | null = null;
-  let text = "";
-  // participants
-  const parts = Array.isArray(threadJson?.participants) ? threadJson.participants : [];
-  for (const p of parts) {
-    const e = p?.email ?? p?.emailAddress ?? null;
-    if (isEmail(e)) { email = e; break; }
-  }
-  // lastMessage
-  const lm = threadJson?.lastMessage ?? threadJson?.last_message ?? null;
-  if (!text && lm) {
-    text = String(lm.text ?? lm.body ?? lm.content ?? "");
-    if (!email) {
-      const e = lm?.from?.email ?? lm?.from?.emailAddress ?? null;
-      if (isEmail(e)) email = e;
-    }
-  }
-  // direct messages array (some shapes embed a few)
-  const msgs = Array.isArray(threadJson?.messages) ? threadJson.messages : [];
-  if (!text && msgs.length) {
-    const last = [...msgs].reverse().find(m => (m?.direction ?? m?.type ?? "").toString().toUpperCase() !== "SYSTEM");
-    if (last) {
-      text = String(last.text ?? last.body ?? last.content ?? "");
-      if (!email) {
-        const e = last?.from?.email ?? last?.from?.emailAddress ?? null;
-        if (isEmail(e)) email = e;
-      }
-    }
-  }
-  // as a last resort, deep scan the object for *any* email-like field
-  if (!email) email = deepFindEmail(threadJson);
-  return { email, text };
-}
-
-
-
-
-
-
 function chooseLatestInbound(messages: any[]): { email: string | null; text: string } {
-  // Prefer human inbound (direction INBOUND / external actor)
-  const pick = [...messages].reverse().find(m => {
-    const dir = String(m?.direction ?? "").toUpperCase(); // INBOUND / OUTBOUND
-    const type = String(m?.type ?? m?.messageType ?? "").toUpperCase();
-    return dir !== "OUTBOUND" && type !== "SYSTEM" && type !== "NOTE";
-  }) ?? messages[messages.length - 1];
+  const pick =
+    [...messages].reverse().find((m) => {
+      const dir = String(m?.direction ?? "").toUpperCase(); // INBOUND / OUTBOUND
+      const type = String(m?.type ?? m?.messageType ?? "").toUpperCase();
+      return dir !== "OUTBOUND" && type !== "SYSTEM" && type !== "NOTE";
+    }) ?? messages[messages.length - 1];
 
   const body = String(pick?.text ?? pick?.body ?? pick?.content ?? "");
   const e = pick?.from?.email ?? pick?.from?.emailAddress ?? null;
@@ -153,59 +112,103 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: tok.error, status: tok.status, detail: tok.detail }, { status: 200 });
     }
 
-    // 1) Fetch thread
-    const tUrl = `https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}`;
-    const tRes = await fetch(tUrl, { headers: { Authorization: `Bearer ${tok.token}` }, cache: "no-store" });
-    const tRaw = await tRes.text();
+    // Fetch 3 sources: thread, messages, participants
+    const headers = { Authorization: `Bearer ${tok.token}` };
+
+    const [tRes, mRes, pRes] = await Promise.all([
+      fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}`, { headers, cache: "no-store" }),
+      fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/messages?limit=50`, {
+        headers,
+        cache: "no-store",
+      }),
+      fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/participants`, {
+        headers,
+        cache: "no-store",
+      }),
+    ]);
+
+    const [tRaw, mRaw, pRaw] = await Promise.all([tRes.text(), mRes.text(), pRes.text()]);
+
     if (!tRes.ok) {
-      return NextResponse.json({ ok: false, status: tRes.status, error: "hubspot_thread_fetch_failed", body: tRaw.slice(0, 1200) }, { status: 200 });
+      return NextResponse.json(
+        { ok: false, status: tRes.status, error: "hubspot_thread_fetch_failed", body: tRaw.slice(0, 1200) },
+        { status: 200 }
+      );
     }
 
     let thread: any = {};
-    try { thread = JSON.parse(tRaw); } catch {
-      return NextResponse.json({ ok: false, error: "hubspot_json_parse_error", body: tRaw.slice(0, 1200) }, { status: 200 });
+    let messages: any[] = [];
+    let participants: any[] = [];
+
+    try {
+      thread = JSON.parse(tRaw);
+    } catch { /* ignore */ }
+    try {
+      const mj = JSON.parse(mRaw);
+      messages = Array.isArray(mj?.results) ? mj.results : Array.isArray(mj) ? mj : [];
+    } catch { /* ignore */ }
+    try {
+      const pj = JSON.parse(pRaw);
+      participants = Array.isArray(pj?.results) ? pj.results : Array.isArray(pj) ? pj : [];
+    } catch { /* ignore */ }
+
+    // Subject: first try obvious fields, then deep scan everywhere
+    let subject =
+      (thread?.subject ??
+        thread?.threadSubject ??
+        thread?.title ??
+        thread?.summary ??
+        "")?.toString() ?? "";
+    if (!subject) {
+      const sHit = findAnySubject({ thread, messages, participants });
+      subject = sHit?.value ?? "";
     }
 
-    let subject = pickSubject(thread);
-    let { email, text } = pickFromThread(thread);
+    // Text + email from messages if present
+    let text = "";
+    let email: string | null = null;
+    if (messages.length) {
+      const pick = chooseLatestInbound(messages);
+      text = pick.text || text;
+      email = pick.email || email;
+    }
 
-    // 2) If still missing, fetch messages page and extract latest inbound
-    if (!email || !text) {
-      const mUrl = `https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/messages?limit=50`;
-      const mRes = await fetch(mUrl, { headers: { Authorization: `Bearer ${tok.token}` }, cache: "no-store" });
-      const mRaw = await mRes.text();
-      if (mRes.ok) {
-        try {
-          const j = JSON.parse(mRaw);
-          const items: any[] = Array.isArray(j?.results) ? j.results : (Array.isArray(j) ? j : []);
-          if (items.length) {
-            const pick = chooseLatestInbound(items);
-            if (!email && pick.email) email = pick.email;
-            if (!text && pick.text) text = pick.text;
-          }
-        } catch { /* ignore parse; keep best-effort */ }
+    // If still missing email, try thread -> participants -> deep scan
+    if (!email) {
+      // thread-level hints
+      const th = thread?.lastMessage ?? thread?.last_message ?? {};
+      const e1 = th?.from?.email ?? th?.from?.emailAddress ?? null;
+      if (isEmail(e1)) email = e1;
+
+      // participants
+      if (!email && participants.length) {
+        const ph = findAnyEmail(participants);
+        if (ph?.value) email = ph.value;
+      }
+
+      // deep scan across all JSON for an email-like string
+      if (!email) {
+        const dh = findAnyEmail({ thread, messages, participants });
+        if (dh?.value) email = dh.value;
       }
     }
 
-
-// 3) If still no email, ask participants API
-if (!email) {
-  const pUrl = `https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/participants`;
-  const pRes = await fetch(pUrl, { headers: { Authorization: `Bearer ${tok.token}` }, cache: "no-store" });
-  const pRaw = await pRes.text();
-  if (pRes.ok) {
-    try {
-      const pj = JSON.parse(pRaw);
-      const arr = Array.isArray(pj?.results) ? pj.results : (Array.isArray(pj) ? pj : []);
-      const hit = pickEmailFromParticipants(arr);
-      if (hit) email = hit;
-    } catch { /* ignore parse */ }
-  }
-}
-
-
-
-    return NextResponse.json({ ok: true, email: email ?? "", subject, text, threadId: objectId }, { status: 200 });
+    return NextResponse.json(
+      {
+        ok: true,
+        email: email ?? "",
+        subject,
+        text,
+        threadId: objectId,
+        // helpful breadcrumbs (short)
+        src: {
+          sub: subject ? "subject:direct/deep" : "none",
+          email: email ? "messages/participants/deep" : "none",
+          text: text ? "messages" : "none",
+        },
+      },
+      { status: 200 }
+    );
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err?.message ?? "lookup_route_exception" }, { status: 200 });
   }
