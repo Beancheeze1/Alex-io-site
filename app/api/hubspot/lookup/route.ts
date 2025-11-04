@@ -11,6 +11,35 @@ function isEmail(s: unknown): s is string {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
+
+
+function chooseCustomerEmail(cands: string[], mailboxFrom?: string): string | null {
+  const mbox = (mailboxFrom || process.env.MS_MAILBOX_FROM || "").toLowerCase();
+  const mboxDomain = mbox.split("@")[1] || "";
+  const cleaned = Array.from(new Set(cands.map((e) => e.toLowerCase())));
+
+  // Rank: not-equal mailbox, not same domain, not no-reply, looks normal
+  const score = (e: string) => {
+    let s = 0;
+    if (mbox && e !== mbox) s += 3;
+    if (mboxDomain && !e.endsWith("@" + mboxDomain)) s += 2;
+    if (!e.includes("no-reply") && !e.includes("noreply")) s += 1;
+    return s;
+  };
+
+  const best = cleaned
+    .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
+    .sort((a, b) => score(b) - score(a))[0];
+
+  return best || null;
+}
+
+
+
+
+
+
+
 /** Walk any object tree and return the first value that matches `pick` */
 function deepFind<T = any>(
   obj: any,
@@ -192,6 +221,32 @@ export async function POST(req: Request) {
         if (dh?.value) email = dh.value;
       }
     }
+
+
+// build a candidate set from everything we saw
+const candEmails = new Set<string>();
+// from messages
+for (const m of messages) {
+  const e = m?.from?.email ?? m?.from?.emailAddress ?? null;
+  if (e && typeof e === "string") candEmails.add(e);
+}
+// from participants deep scan + thread deep scan
+const dh1 = findAnyEmail({ thread });
+if (dh1?.value) candEmails.add(dh1.value);
+const dh2 = findAnyEmail({ participants });
+if (dh2?.value) candEmails.add(dh2.value);
+
+if (email) candEmails.add(email);
+
+// choose best that isn't your mailbox/self
+const picked = chooseCustomerEmail(Array.from(candEmails));
+if (picked) email = picked;
+
+
+
+
+
+
 
     return NextResponse.json(
       {
