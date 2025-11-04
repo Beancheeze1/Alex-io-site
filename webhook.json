@@ -1,7 +1,14 @@
-﻿[{
-  "subscriptionType": "conversation.newMessage",
-  "messageType": "MESSAGE",
-  "changeFlag": "NEW_MESSAGE",
-  "objectId": 9836577508,
-  "messageId": "93dfc0cb-1254-4118-a395-086d43adbc49"
-}]
+﻿[
+  {
+    "subscriptionType": "conversation.newMessage",
+    "messageType": "MESSAGE",
+    "changeFlag": "NEW_MESSAGE",
+    "objectId": 9834788558,
+    "message": {
+      "from": { "email": "25thhourdesign@gmail.com" },
+      "subject": "Test inbound",
+      "text": "Can you quote foam inserts?",
+      "headers": { "Message-Id": "<test-123@alex-io>" }
+    }
+  }
+]
