@@ -1,7 +1,10 @@
 // app/api/hubspot/lookup/route.ts
 import { NextResponse } from "next/server";
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+/* ------------------------------------ utils ------------------------------------ */
 
 type TokenResult =
   | { ok: true; token: string }
@@ -11,36 +14,7 @@ function isEmail(s: unknown): s is string {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
-
-
-function chooseCustomerEmail(cands: string[], mailboxFrom?: string): string | null {
-  const mbox = (mailboxFrom || process.env.MS_MAILBOX_FROM || "").toLowerCase();
-  const mboxDomain = mbox.split("@")[1] || "";
-  const cleaned = Array.from(new Set(cands.map((e) => e.toLowerCase())));
-
-  // Rank: not-equal mailbox, not same domain, not no-reply, looks normal
-  const score = (e: string) => {
-    let s = 0;
-    if (mbox && e !== mbox) s += 3;
-    if (mboxDomain && !e.endsWith("@" + mboxDomain)) s += 2;
-    if (!e.includes("no-reply") && !e.includes("noreply")) s += 1;
-    return s;
-  };
-
-  const best = cleaned
-    .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
-    .sort((a, b) => score(b) - score(a))[0];
-
-  return best || null;
-}
-
-
-
-
-
-
-
-/** Walk any object tree and return the first value that matches `pick` */
+/** Deep walk any object and return the first match from `pick` */
 function deepFind<T = any>(
   obj: any,
   pick: (k: string, v: any, path: string[]) => T | undefined,
@@ -66,7 +40,7 @@ function deepFind<T = any>(
 }
 
 function findAnyEmail(obj: any): { value: string; from: string } | null {
-  const hit = deepFind(obj, (k, v, p) => (isEmail(v) ? { value: v as string, from: p.join(".") } : undefined));
+  const hit = deepFind(obj, (k, v, p) => (isEmail(v) ? { value: String(v), from: p.join(".") } : undefined));
   return hit ?? null;
 }
 
@@ -80,10 +54,50 @@ function findAnySubject(obj: any): { value: string; from: string } | null {
   return hit ?? null;
 }
 
+function uniqLower(emails: string[]) {
+  return Array.from(new Set(emails.map((e) => e.toLowerCase())));
+}
+
+/**
+ * Prefer the *customer* email:
+ * - not exactly your mailbox (MS_MAILBOX_FROM)
+ * - not the same domain as your mailbox (e.g., alex-io.com)
+ * - avoid noreply/no-reply and obvious system senders
+ * - reward public/email-like domains (gmail/outlook/yahoo) a bit
+ */
+function chooseCustomerEmail(candsIn: string[], mailboxFromEnv?: string): string | null {
+  const cleaned = uniqLower(candsIn).filter(isEmail);
+  if (!cleaned.length) return null;
+
+  const mailbox = (mailboxFromEnv || process.env.MS_MAILBOX_FROM || "").toLowerCase();
+  const mailboxDomain = mailbox.split("@")[1] || "";
+  const isSystemish = (e: string) =>
+    e.includes("no-reply") ||
+    e.includes("noreply") ||
+    e.includes("hubspot") ||
+    e.endsWith("@noreply.com");
+
+  const publicBumps = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"];
+
+  const score = (e: string) => {
+    let s = 0;
+    if (mailbox && e !== mailbox) s += 4;                     // not exactly mailbox
+    if (mailboxDomain && !e.endsWith("@" + mailboxDomain)) s += 3; // not same domain
+    if (!isSystemish(e)) s += 2;                               // not noreply/hubspot
+    if (publicBumps.some((d) => e.endsWith("@" + d))) s += 1;  // slightly prefer consumer emails
+    return s;
+  };
+
+  const best = cleaned.sort((a, b) => score(b) - score(a))[0];
+  return best || null;
+}
+
 async function getAccessToken(): Promise<TokenResult> {
+  // Direct bearer first
   const direct = process.env.HUBSPOT_ACCESS_TOKEN?.trim();
   if (direct) return { ok: true, token: direct };
 
+  // Refresh flow
   const refresh = process.env.HUBSPOT_REFRESH_TOKEN?.trim();
   const cid = process.env.HUBSPOT_CLIENT_ID?.trim();
   const secret = process.env.HUBSPOT_CLIENT_SECRET?.trim();
@@ -102,8 +116,11 @@ async function getAccessToken(): Promise<TokenResult> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: form.toString(),
   });
+
   const text = await r.text();
-  if (!r.ok) return { ok: false, error: `refresh_failed`, status: r.status, detail: text.slice(0, 800) };
+  if (!r.ok) {
+    return { ok: false, error: "refresh_failed", status: r.status, detail: text.slice(0, 800) };
+  }
 
   try {
     const j = JSON.parse(text);
@@ -118,7 +135,7 @@ async function getAccessToken(): Promise<TokenResult> {
 function chooseLatestInbound(messages: any[]): { email: string | null; text: string } {
   const pick =
     [...messages].reverse().find((m) => {
-      const dir = String(m?.direction ?? "").toUpperCase(); // INBOUND / OUTBOUND
+      const dir = String(m?.direction ?? "").toUpperCase(); // INBOUND/OUTBOUND
       const type = String(m?.type ?? m?.messageType ?? "").toUpperCase();
       return dir !== "OUTBOUND" && type !== "SYSTEM" && type !== "NOTE";
     }) ?? messages[messages.length - 1];
@@ -127,6 +144,8 @@ function chooseLatestInbound(messages: any[]): { email: string | null; text: str
   const e = pick?.from?.email ?? pick?.from?.emailAddress ?? null;
   return { email: isEmail(e) ? e : null, text: body };
 }
+
+/* ------------------------------------ route ------------------------------------ */
 
 export async function POST(req: Request) {
   try {
@@ -138,12 +157,15 @@ export async function POST(req: Request) {
 
     const tok = await getAccessToken();
     if (!tok.ok) {
-      return NextResponse.json({ ok: false, error: tok.error, status: tok.status, detail: tok.detail }, { status: 200 });
+      return NextResponse.json(
+        { ok: false, error: tok.error, status: tok.status, detail: tok.detail },
+        { status: 200 }
+      );
     }
 
-    // Fetch 3 sources: thread, messages, participants
     const headers = { Authorization: `Bearer ${tok.token}` };
 
+    // Fetch thread, messages, participants in parallel
     const [tRes, mRes, pRes] = await Promise.all([
       fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}`, { headers, cache: "no-store" }),
       fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/messages?limit=50`, {
@@ -169,19 +191,17 @@ export async function POST(req: Request) {
     let messages: any[] = [];
     let participants: any[] = [];
 
-    try {
-      thread = JSON.parse(tRaw);
-    } catch { /* ignore */ }
+    try { thread = JSON.parse(tRaw); } catch {}
     try {
       const mj = JSON.parse(mRaw);
       messages = Array.isArray(mj?.results) ? mj.results : Array.isArray(mj) ? mj : [];
-    } catch { /* ignore */ }
+    } catch {}
     try {
       const pj = JSON.parse(pRaw);
       participants = Array.isArray(pj?.results) ? pj.results : Array.isArray(pj) ? pj : [];
-    } catch { /* ignore */ }
+    } catch {}
 
-    // Subject: first try obvious fields, then deep scan everywhere
+    // Subject
     let subject =
       (thread?.subject ??
         thread?.threadSubject ??
@@ -193,7 +213,7 @@ export async function POST(req: Request) {
       subject = sHit?.value ?? "";
     }
 
-    // Text + email from messages if present
+    // Text + initial email from messages
     let text = "";
     let email: string | null = null;
     if (messages.length) {
@@ -202,51 +222,39 @@ export async function POST(req: Request) {
       email = pick.email || email;
     }
 
-    // If still missing email, try thread -> participants -> deep scan
-    if (!email) {
-      // thread-level hints
-      const th = thread?.lastMessage ?? thread?.last_message ?? {};
-      const e1 = th?.from?.email ?? th?.from?.emailAddress ?? null;
-      if (isEmail(e1)) email = e1;
+    // Build candidate email list from many sources
+    const candEmails: string[] = [];
 
-      // participants
-      if (!email && participants.length) {
-        const ph = findAnyEmail(participants);
-        if (ph?.value) email = ph.value;
-      }
+    // From messages (from / replyTo / recipients)
+    for (const m of messages) {
+      const from = m?.from?.email ?? m?.from?.emailAddress ?? null;
+      if (isEmail(from)) candEmails.push(from);
 
-      // deep scan across all JSON for an email-like string
-      if (!email) {
-        const dh = findAnyEmail({ thread, messages, participants });
-        if (dh?.value) email = dh.value;
-      }
+      const rt = m?.replyTo?.email ?? m?.replyTo?.emailAddress ?? null;
+      if (isEmail(rt)) candEmails.push(rt);
+
+      // recipients arrays (if present)
+      const recips: any[] = Array.isArray(m?.to) ? m.to : [];
+      recips.forEach((r) => {
+        const e = r?.email ?? r?.emailAddress ?? null;
+        if (isEmail(e)) candEmails.push(e);
+      });
     }
 
+    // From participants
+    const pHit = findAnyEmail(participants);
+    if (pHit?.value) candEmails.push(pHit.value);
 
-// build a candidate set from everything we saw
-const candEmails = new Set<string>();
-// from messages
-for (const m of messages) {
-  const e = m?.from?.email ?? m?.from?.emailAddress ?? null;
-  if (e && typeof e === "string") candEmails.add(e);
-}
-// from participants deep scan + thread deep scan
-const dh1 = findAnyEmail({ thread });
-if (dh1?.value) candEmails.add(dh1.value);
-const dh2 = findAnyEmail({ participants });
-if (dh2?.value) candEmails.add(dh2.value);
+    // From thread (any deep email)
+    const tHit = findAnyEmail(thread);
+    if (tHit?.value) candEmails.push(tHit.value);
 
-if (email) candEmails.add(email);
+    // Include whatever we already found
+    if (email) candEmails.push(email);
 
-// choose best that isn't your mailbox/self
-const picked = chooseCustomerEmail(Array.from(candEmails));
-if (picked) email = picked;
-
-
-
-
-
-
+    // Choose customer email (not our mailbox, not same domain, not noreply)
+    const picked = chooseCustomerEmail(candEmails);
+    if (picked) email = picked;
 
     return NextResponse.json(
       {
@@ -255,10 +263,9 @@ if (picked) email = picked;
         subject,
         text,
         threadId: objectId,
-        // helpful breadcrumbs (short)
         src: {
-          sub: subject ? "subject:direct/deep" : "none",
-          email: email ? "messages/participants/deep" : "none",
+          subject: subject ? "direct/deep" : "none",
+          email: email ? "chooser(messages/participants/thread)" : "none",
           text: text ? "messages" : "none",
         },
       },
