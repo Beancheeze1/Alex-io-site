@@ -6,10 +6,10 @@ export const runtime = "nodejs";
 
 /**
  * AI Orchestrator with live quoting:
- * - Parses the inbound email for dims/qty/cavities/material hints via /api/parse/email-quote
- * - If sufficient, prices via /api/quote/foam-smart
- * - Crafts a concise reply (with a quote table if priced)
- * - dryRun=false -> POST /api/msgraph/send { to, subject, html }
+ * - Parses inbound email text via /api/parse/email-quote
+ * - Calls /api/quote/foam-smart to compute pricing
+ * - Crafts a natural reply (with quote table if priced)
+ * - dryRun=false -> sends via /api/msgraph/send
  */
 
 type OrchestrateInput = {
@@ -61,7 +61,6 @@ function htmlQuoteTable(args: {
 export async function POST(req: NextRequest) {
   try {
     const input = (await req.json()) as OrchestrateInput;
-    const mode = s(input.mode || "ai"); // reserved for future routing
     const toEmail = input.toEmail;
     const subject = s(input.subject || "Re: your message");
     const bodyText = s(input.text || "");
@@ -71,10 +70,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "invalid toEmail" }, { status: 400 });
     }
 
-    // 1) Parse the email for dims/qty/etc.
-    let parsed: any = null;
+    // === 1) Parse inbound text for dimensions, qty, material ===
     let foamBody: any = null;
-    let parseWarnings: string[] = [];
     try {
       const pRes = await fetch(`${BASE}/api/parse/email-quote`, {
         method: "POST",
@@ -83,36 +80,27 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({ text: bodyText }),
       });
       const pj = await pRes.json();
-      if (pRes.ok && pj?.ok) {
-        parsed = pj.parsed;
-        parseWarnings = pj.warnings || [];
-        // unified body the pricing endpoints understand
-        foamBody = pj.foam_quote_body; // { length_in, width_in, height_in?, qty, cavities:[...], meta:{...} }
-      }
+      if (pRes.ok && pj?.ok) foamBody = pj.foam_quote_body;
     } catch {
-      /* parsing is best-effort; proceed even if it fails */
+      /* continue */
     }
 
-    // Decide if we can price now
     const canPrice =
       foamBody &&
       Number.isFinite(foamBody.length_in) &&
       Number.isFinite(foamBody.width_in) &&
-      // allow auto-thickness path if height is missing but weight/area provided
       (Number.isFinite(foamBody.height_in) || (foamBody.weight_lbf && foamBody.area_in2)) &&
       Number.isFinite(foamBody.qty);
 
-    // 2) If enough info, get a price from foam-smart
-    let priced:
-      | null
-      | {
-          unitPrice: number;
-          total: number;
-          kerfPct?: number;
-          minCharge?: number;
-          materialName?: string;
-          used_auto_thickness?: boolean;
-        } = null;
+    // === 2) Call /api/quote/foam-smart ===
+    let priced: null | {
+      unitPrice: number;
+      total: number;
+      kerfPct?: number;
+      minCharge?: number;
+      materialName?: string;
+      used_auto_thickness?: boolean;
+    } = null;
 
     if (canPrice) {
       try {
@@ -123,11 +111,10 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             length_in: foamBody.length_in,
             width_in: foamBody.width_in,
-            height_in: foamBody.height_in, // may be undefined; foam-smart can auto-fill via cushion
+            height_in: foamBody.height_in,
             qty: foamBody.qty,
             material_id: foamBody.material_id ?? 1,
             cavities: foamBody.cavities ?? [],
-            // Optional cushion inputs if user mentioned weight/area
             weight_lbf: foamBody.weight_lbf,
             area_in2: foamBody.area_in2,
             fragility_g: foamBody.fragility_g,
@@ -137,18 +124,26 @@ export async function POST(req: NextRequest) {
 
         const raw = await qRes.text();
         let qj: any = {};
-        try { qj = JSON.parse(raw); } catch { qj = { ok: false, parseError: raw?.slice?.(0, 400) }; }
+        try {
+          qj = JSON.parse(raw);
+        } catch {
+          qj = { ok: false, parseError: raw?.slice?.(0, 400) };
+        }
 
-        // 🔎 DEBUG LOG ADDED (shows status + body returned by foam-smart)
         console.log("[foam-smart result]", qRes.status, qj);
 
         if (qRes.ok && qj?.ok) {
-          // Accept both flat {unitPrice,total,...} or nested {quote:{...}}
           const q = qj.quote || qj;
-          const u = Number(q.unitPrice);
-          const t = Number(q.total);
+          // Handle both naming styles
+          const u =
+            Number(q.unitPrice) ||
+            Number(q.piece_price_usd) ||
+            Number(q.pricing?.piece_price_usd);
+          const t =
+            Number(q.total) ||
+            Number(q.total_price_usd) ||
+            Number(q.pricing?.total_price_usd);
 
-          // Guard against NaN — only accept if both numeric
           if (Number.isFinite(u) && Number.isFinite(t)) {
             priced = {
               unitPrice: u,
@@ -159,7 +154,6 @@ export async function POST(req: NextRequest) {
               used_auto_thickness: !!q.used_auto_thickness,
             };
           } else {
-            // If response ok but numbers missing, fall back to ask-for-more-info flow
             console.warn("[foam-smart warn] ok:true but unitPrice/total not numeric", q);
           }
         }
@@ -168,26 +162,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3) Compose the reply
+    // === 3) Compose the reply ===
     const need: string[] = [];
     if (!foamBody?.length_in || !foamBody?.width_in) need.push("final outside dimensions (L × W × H)");
     if (!foamBody?.height_in) need.push("foam thickness (under or overall)");
     if (!foamBody?.qty) need.push("quantity");
-    // Optional detail prompts:
     need.push("material (PE/EPE/PU/EVA) and density (e.g., 1.7 lb/ft³)");
     need.push("number of cavities and their sizes");
 
-    const opening =
-      "Thanks for reaching out — I can help quote your foam packaging quickly.";
-    const ask =
-      priced
-        ? "Here’s a quick price based on what you shared:"
-        : `To lock in pricing, could you confirm:\n${bullets(need, 5)}`;
+    const opening = "Thanks for reaching out — I can help quote your foam packaging quickly.";
+    const ask = priced
+      ? "Here’s a quick price based on what you shared:"
+      : `To lock in pricing, could you confirm:\n${bullets(need, 5)}`;
 
     const money = (n: number) =>
       n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
-
-    const txtLines: string[] = [opening, "", ask];
 
     let html = `
     <div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;line-height:1.4;color:#111">
@@ -204,17 +193,6 @@ export async function POST(req: NextRequest) {
         kerfPct: priced.kerfPct,
         minCharge: priced.minCharge,
       });
-
-      txtLines.push(
-        `Unit price: ${money(priced.unitPrice)}`,
-        `Qty: ${foamBody?.qty ?? 1}`,
-        `Total: ${money(priced.total)}`
-      );
-
-      if (priced.used_auto_thickness) {
-        html += `<p style="color:#555;margin:8px 0 0 0">We estimated thickness using your weight/area (cushion model). If you already know the thickness, tell me and I’ll reprice.</p>`;
-        txtLines.push("Note: thickness was estimated using cushion model.");
-      }
     } else {
       html += `<ul style="margin:0 0 12px 18px;padding:0">${need
         .slice(0, 5)
@@ -225,33 +203,16 @@ export async function POST(req: NextRequest) {
     html += `<p>If you have a sketch or photo, attach it—helps confirm cavity sizes and clearances.</p>`;
     html += `<p>— Alex-IO Estimator</p></div>`;
 
-    const finalText = txtLines.join("\n");
-
-    // 4) dryRun vs live send
     if (dryRun) {
-      return NextResponse.json(
-        {
-          ok: true,
-          dryRun: true,
-          to: toEmail,
-          subject,
-          text: finalText,
-          htmlPreview: html,
-          priced: !!priced,
-        },
-        { status: 200 }
-      );
+      return NextResponse.json({ ok: true, dryRun: true, priced: !!priced, preview: html }, { status: 200 });
     }
 
+    // === 4) Send email ===
     const sendRes = await fetch(`${BASE}/api/msgraph/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({
-        to: toEmail,
-        subject,
-        html,
-      }),
+      body: JSON.stringify({ to: toEmail, subject, html }),
     });
 
     const sendJson = await sendRes.json().catch(() => ({}));
