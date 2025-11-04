@@ -192,36 +192,52 @@ export async function POST(req: NextRequest) {
         g(evt, ["object", "message", "subject"]) ||
         "").toString();
 
-    // If we’re missing email or text/subject, hydrate via lookup
-    if (!toEmail || !text || !subject) {
-      if (!objectId) {
-        logExit("no_objectId_for_lookup");
-        return NextResponse.json({
-          ok: true,
-          ignored: true,
-          reason: "no_objectId_for_lookup",
-        });
-      }
-      const lookupRes = await postJson(`${SELF}/api/hubspot/lookup`, {
-        objectId,
-        messageId: rawMessageId ?? null,
+// If we’re missing email or text/subject, hydrate via lookup (guarded)
+if (!toEmail || !text || !subject) {
+  const SKIP_LOOKUP = (process.env.HUBSPOT_SKIP_LOOKUP ?? "0") === "1";
+  const HAS_TOKEN = !!process.env.HUBSPOT_ACCESS_TOKEN;
+
+  if (SKIP_LOOKUP || !HAS_TOKEN) {
+    // Don’t attempt lookup; log why and bail if we still don’t have an email
+    logExit("lookup_skipped", { SKIP_LOOKUP, HAS_TOKEN });
+    if (!toEmail) {
+      return NextResponse.json({
+        ok: true,
+        ignored: true,
+        reason: "no_email_lookup_skipped",
       });
-      const lookup = await lookupRes.json().catch(() => ({}));
-
-      if (!toEmail) toEmail = lookup?.email ?? null;
-      if (!subject) subject = (lookup?.subject ?? "").toString();
-      if (!text) text = (lookup?.text ?? "").toString();
-
-      if (!toEmail) {
-        logExit("no_email_lookup_failed", { objectId, lookupStatus: lookupRes.status });
-        return NextResponse.json({
-          ok: true,
-          ignored: true,
-          reason: "no_email_lookup_failed",
-          lookup,
-        });
-      }
     }
+  } else {
+    if (!objectId) {
+      logExit("no_objectId_for_lookup");
+      return NextResponse.json({
+        ok: true,
+        ignored: true,
+        reason: "no_objectId_for_lookup",
+      });
+    }
+    const lookupRes = await postJson(`${SELF}/api/hubspot/lookup`, {
+      objectId,
+      messageId: rawMessageId ?? null,
+    });
+    const lookup = await lookupRes.json().catch(() => ({}));
+
+    if (!toEmail) toEmail = lookup?.email ?? null;
+    if (!subject) subject = (lookup?.subject ?? "").toString();
+    if (!text) text = (lookup?.text ?? "").toString();
+
+    if (!toEmail) {
+      logExit("no_email_lookup_failed", { objectId, lookupStatus: lookupRes.status });
+      return NextResponse.json({
+        ok: true,
+        ignored: true,
+        reason: "no_email_lookup_failed",
+        lookup,
+      });
+    }
+  }
+}
+
 
     if (!subject) subject = "Re: your message to Alex-IO";
     if (!text) text = ""; // AI can follow-up if needed
