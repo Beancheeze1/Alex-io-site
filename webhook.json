@@ -1,12 +1,7 @@
-﻿[
-  {
-    "subscriptionType": "conversation.newMessage",
-    "messageType": "MESSAGE",
-    "changeFlag": "NEW_MESSAGE",
-    "objectId": "THREAD_TEST_1",
-    "message": {
-      "from": { "email": "25thhourdesign@gmail.com" },
-      "text": "ping"
-    }
-  }
-]
+﻿[{
+  "subscriptionType": "conversation.newMessage",
+  "messageType": "MESSAGE",
+  "changeFlag": "NEW_MESSAGE",
+  "objectId": 9836577508,
+  "messageId": "93dfc0cb-1254-4118-a395-086d43adbc49"
+}]

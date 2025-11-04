@@ -42,9 +42,8 @@ function isNewInbound(evt: any): boolean {
   const changeFlag = String(evt?.changeFlag ?? "");
   const messageType = String(evt?.messageType ?? "");
   return (
-    subscriptionType.includes("conversation.newMessage") ||
-    changeFlag === "NEW_MESSAGE" ||
-    messageType === "MESSAGE"
+    subscriptionType === "conversation.newMessage" &&
+    (changeFlag === "NEW_MESSAGE" || messageType === "MESSAGE")
   );
 }
 async function postJson(url: string, body: unknown) {
@@ -54,6 +53,21 @@ async function postJson(url: string, body: unknown) {
     body: JSON.stringify(body),
     cache: "no-store",
   });
+}
+
+/* -------------------- new: logging helpers (minimal + safe) -------------------- */
+function redactedHeaders(h: Headers) {
+  const out: Record<string, string> = {};
+  h.forEach((v, k) => {
+    const key = k.toLowerCase();
+    out[k] =
+      key.includes("authorization") ||
+      key.includes("secret") ||
+      key.includes("signature")
+        ? "[redacted]"
+        : v;
+  });
+  return out;
 }
 
 /* -------------------- GET: keep probes JSON so you never see HTML -------------------- */
@@ -66,6 +80,19 @@ export async function POST(req: NextRequest) {
   try {
     const startedAt = Date.now();
     const url = new URL(req.url);
+
+    // unconditional entry log (headers redacted; body preview not required)
+    console.log("[webhook] -> entry", {
+      method: req.method,
+      path: url.pathname + url.search,
+      headers: redactedHeaders(req.headers),
+    });
+    const logExit = (reason: string, extra?: any) =>
+      console.log("[webhook] exit", {
+        reason,
+        ...(extra ? { extra } : {}),
+        ms: Date.now() - startedAt,
+      });
 
     // dryRun=1 -> orchestrate will be called with dryRun:true (no Graph send)
     const dryRunParam = url.searchParams.get("dryRun") === "1";
@@ -90,15 +117,18 @@ export async function POST(req: NextRequest) {
     // Payload (HubSpot sends an array)
     const events = (await req.json()) as any[];
     if (!Array.isArray(events) || events.length === 0) {
+      logExit("no_events");
       return NextResponse.json({ ok: true, ignored: true, reason: "no_events" });
     }
     const evt = events[0];
 
     // Fast reject paths
     if (!isNewInbound(evt)) {
+      logExit("wrong_subtype", { subscriptionType: evt?.subscriptionType, changeFlag: evt?.changeFlag });
       return NextResponse.json({ ok: true, ignored: true, reason: "wrong_subtype" });
     }
     if (hasLoopHeader(evt)) {
+      logExit("loop_header_present");
       return NextResponse.json({
         ok: true,
         ignored: true,
@@ -112,6 +142,7 @@ export async function POST(req: NextRequest) {
     // Micro-throttle per (thread,messageId)
     const microKey = `alexio:micro:${objectId ?? "x"}:${rawMessageId ?? "x"}`;
     if (await kv.get(microKey)) {
+      logExit("micro_throttle");
       return NextResponse.json({
         ok: true,
         ignored: true,
@@ -124,6 +155,7 @@ export async function POST(req: NextRequest) {
     if (rawMessageId) {
       const k = `alexio:idempotency:${rawMessageId}`;
       if (await kv.get(k)) {
+        logExit("idempotent");
         return NextResponse.json({
           ok: true,
           ignored: true,
@@ -132,8 +164,9 @@ export async function POST(req: NextRequest) {
       }
     }
     if (objectId) {
-      const k = `alexio:cooldown:thread:${objectId}`;
-      if (await kv.get(k)) {
+      const ck = `alexio:cooldown:thread:${objectId}`;
+      if (await kv.get(ck)) {
+        logExit("cooldown", { objectId });
         return NextResponse.json({
           ok: true,
           ignored: true,
@@ -162,6 +195,7 @@ export async function POST(req: NextRequest) {
     // If we’re missing email or text/subject, hydrate via lookup
     if (!toEmail || !text || !subject) {
       if (!objectId) {
+        logExit("no_objectId_for_lookup");
         return NextResponse.json({
           ok: true,
           ignored: true,
@@ -179,6 +213,7 @@ export async function POST(req: NextRequest) {
       if (!text) text = (lookup?.text ?? "").toString();
 
       if (!toEmail) {
+        logExit("no_email_lookup_failed", { objectId, lookupStatus: lookupRes.status });
         return NextResponse.json({
           ok: true,
           ignored: true,
@@ -216,7 +251,7 @@ export async function POST(req: NextRequest) {
         task: aiTask,
         hints: aiHints,
       },
-      hubspot: objectId ? { objectId } : undefined, // pass through for any downstream logging
+      hubspot: objectId ? { objectId } : undefined,
     };
 
     // Call AI orchestrator (it will call /api/msgraph/send when dryRun=false)
@@ -224,11 +259,15 @@ export async function POST(req: NextRequest) {
     const orch = await orchRes.json().catch(() => ({}));
 
     if (!orchRes.ok) {
+      console.log("[webhook] orchestrate_failed %s", orchRes.status);
       return NextResponse.json(
         {
           ok: false,
-          error: "orchestrator_failed",
-          detail: orch?.error ?? (await orchRes.text().catch(() => "")),
+          ai: false,
+          toEmail,
+          dryRun: orchestrateBody.dryRun,
+          orchestrate_status: orchRes.status,
+          orchestrate_body: orch,
         },
         { status: 502 }
       );
