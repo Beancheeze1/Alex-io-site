@@ -3,7 +3,10 @@
     "subscriptionType": "conversation.newMessage",
     "messageType": "MESSAGE",
     "changeFlag": "NEW_MESSAGE",
-    "objectId": "REPLACE_WITH_THREAD_ID",
-    "message": { "text": "Quick test — can you quote 12x8x3, 1.7 PE, qty 50?" }
+    "objectId": "THREAD_TEST_1",
+    "message": {
+      "from": { "email": "25thhourdesign@gmail.com" },
+      "text": "ping"
+    }
   }
 ]
