@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-function requireEnv(name: string) {
+function requireEnv(name: string, optional = false) {
   const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
+  if (!v && !optional) throw new Error(`Missing env: ${name}`);
   return v;
 }
 
@@ -16,23 +16,48 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "missing objectId or threadId" }, { status: 400 });
     }
 
-    // Optional HubSpot token (skips if not provided)
+    const skipLookup = process.env.HUBSPOT_SKIP_LOOKUP === "1";
     const hubspotToken = process.env.HUBSPOT_ACCESS_TOKEN;
-    if (!hubspotToken && process.env.HUBSPOT_SKIP_LOOKUP !== "1") {
+
+    if (!hubspotToken && !skipLookup) {
       console.warn("[lookup] HUBSPOT_ACCESS_TOKEN missing");
       return NextResponse.json({ ok: false, error: "missing HubSpot token" });
     }
 
-    const res = await fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}?includePropertyVersions=false`, {
-      headers: hubspotToken
-        ? { Authorization: `Bearer ${hubspotToken}`, "Content-Type": "application/json" }
-        : { "Content-Type": "application/json" },
-    });
+    // ✅ Fallback mode (tokenless)
+    if (skipLookup) {
+      console.log("[lookup:fallback] Running in tokenless mode");
+      return NextResponse.json({
+        ok: true,
+        email: "25thhourdesign@gmail.com",
+        subject: "test",
+        text: "test",
+        threadId: Number(objectId),
+        src: "@(email=deep/chooser; subject=direct/deep; text=messages)",
+        fallback: true,
+      });
+    }
+
+    // ✅ Real HubSpot fetch if token provided
+    const res = await fetch(
+      `https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}?includePropertyVersions=false`,
+      {
+        headers: {
+          Authorization: `Bearer ${hubspotToken}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
     const data = await res.json();
-
     if (!res.ok) {
-      return NextResponse.json({ ok: false, status: res.status, error: "hubspot_thread_fetch_failed", body: data });
+      console.warn("[lookup] HubSpot thread fetch failed", res.status, data);
+      return NextResponse.json({
+        ok: false,
+        status: res.status,
+        error: "hubspot_thread_fetch_failed",
+        body: data,
+      });
     }
 
     // deep scan helper
@@ -46,19 +71,9 @@ export async function POST(req: Request) {
     };
 
     const sources = {
-      email: [
-        ["messages", "participants", "email"],
-        ["participants", "email"],
-      ],
-      subject: [
-        ["messages", "subject"],
-        ["subject"],
-      ],
-      text: [
-        ["messages", "text"],
-        ["messages", "body"],
-        ["body"],
-      ],
+      email: [["messages", "participants", "email"], ["participants", "email"]],
+      subject: [["messages", "subject"], ["subject"]],
+      text: [["messages", "text"], ["messages", "body"], ["body"]],
     };
 
     const picked: Record<string, any> = {};
