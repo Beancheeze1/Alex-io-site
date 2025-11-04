@@ -4,100 +4,100 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/* ------------------------------------ utils ------------------------------------ */
+/* ------------------------------- helpers ------------------------------- */
 
 type TokenResult =
   | { ok: true; token: string }
   | { ok: false; error: string; status?: number; detail?: string };
 
+const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+
 function isEmail(s: unknown): s is string {
   return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
-/** Deep walk any object and return the first match from `pick` */
-function deepFind<T = any>(
-  obj: any,
-  pick: (k: string, v: any, path: string[]) => T | undefined,
-  path: string[] = []
-): T | undefined {
-  if (!obj || typeof obj !== "object") return undefined;
-  if (Array.isArray(obj)) {
-    for (let i = 0; i < obj.length; i++) {
-      const got = deepFind(obj[i], pick, path.concat(String(i)));
-      if (got !== undefined) return got;
-    }
-    return undefined;
+/** Collect *all* email-looking strings from any JSON shape. */
+function collectEmailsDeep(value: any, out: Set<string>) {
+  if (value == null) return;
+  const t = typeof value;
+
+  if (t === "string") {
+    // Pull raw emails from e.g. "Name <user@host>"
+    const hits = value.match(EMAIL_RE);
+    if (hits) for (const h of hits) out.add(h.toLowerCase());
+    return;
   }
-  for (const [k, v] of Object.entries(obj)) {
-    const gotHere = pick(k, v, path.concat(k));
-    if (gotHere !== undefined) return gotHere;
-    if (v && typeof v === "object") {
-      const got = deepFind(v, pick, path.concat(k));
-      if (got !== undefined) return got;
+
+  if (Array.isArray(value)) {
+    for (const v of value) collectEmailsDeep(v, out);
+    return;
+  }
+
+  if (t === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      // Keys that typically contain addresses – handle strings/arrays/objects under them.
+      if (
+        /(^|\.)(from|replyTo|sender|actor|initiatingActor|owner|participant|participants|to|cc|bcc|recipients|headers|email|emailAddress|channel.*Email|originating.*|metadata)$/i.test(
+          k
+        )
+      ) {
+        collectEmailsDeep(v, out);
+      } else if (typeof v === "object") {
+        collectEmailsDeep(v, out);
+      } else if (typeof v === "string") {
+        const hits = v.match(EMAIL_RE);
+        if (hits) for (const h of hits) out.add(h.toLowerCase());
+      }
     }
   }
-  return undefined;
 }
 
-function findAnyEmail(obj: any): { value: string; from: string } | null {
-  const hit = deepFind(obj, (k, v, p) => (isEmail(v) ? { value: String(v), from: p.join(".") } : undefined));
-  return hit ?? null;
-}
-
-function findAnySubject(obj: any): { value: string; from: string } | null {
-  const hit = deepFind(obj, (k, v, p) => {
-    if (typeof v === "string" && v.trim() && k.toLowerCase().includes("subject")) {
-      return { value: v.trim(), from: p.join(".") };
+/** Find any subject-like string anywhere in the JSON. */
+function findSubjectDeep(obj: any): string {
+  if (!obj || typeof obj !== "object") return "";
+  const stack: any[] = [obj];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (!cur || typeof cur !== "object") continue;
+    for (const [k, v] of Object.entries(cur)) {
+      if (typeof v === "string" && v.trim() && /subject/i.test(k)) return v.trim();
+      if (v && typeof v === "object") stack.push(v);
     }
-    return undefined;
-  });
-  return hit ?? null;
+  }
+  return "";
 }
 
-function uniqLower(emails: string[]) {
-  return Array.from(new Set(emails.map((e) => e.toLowerCase())));
-}
+/** Prefer the *customer* address (not your mailbox/domain; avoid noreply/hubspot). */
+function chooseCustomerEmail(candsIn: Iterable<string>, mailboxFromEnv?: string): string | null {
+  const unique = Array.from(new Set([...candsIn]))
+    .map((e) => e.toLowerCase())
+    .filter(isEmail);
 
-/**
- * Prefer the *customer* email:
- * - not exactly your mailbox (MS_MAILBOX_FROM)
- * - not the same domain as your mailbox (e.g., alex-io.com)
- * - avoid noreply/no-reply and obvious system senders
- * - reward public/email-like domains (gmail/outlook/yahoo) a bit
- */
-function chooseCustomerEmail(candsIn: string[], mailboxFromEnv?: string): string | null {
-  const cleaned = uniqLower(candsIn).filter(isEmail);
-  if (!cleaned.length) return null;
+  if (!unique.length) return null;
 
   const mailbox = (mailboxFromEnv || process.env.MS_MAILBOX_FROM || "").toLowerCase();
   const mailboxDomain = mailbox.split("@")[1] || "";
-  const isSystemish = (e: string) =>
-    e.includes("no-reply") ||
-    e.includes("noreply") ||
-    e.includes("hubspot") ||
-    e.endsWith("@noreply.com");
+  const systemish = (e: string) =>
+    e.includes("no-reply") || e.includes("noreply") || e.includes("hubspot") || e.endsWith("@noreply.com");
 
   const publicBumps = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"];
 
   const score = (e: string) => {
     let s = 0;
-    if (mailbox && e !== mailbox) s += 4;                     // not exactly mailbox
+    if (mailbox && e !== mailbox) s += 4; // not your exact mailbox
     if (mailboxDomain && !e.endsWith("@" + mailboxDomain)) s += 3; // not same domain
-    if (!isSystemish(e)) s += 2;                               // not noreply/hubspot
-    if (publicBumps.some((d) => e.endsWith("@" + d))) s += 1;  // slightly prefer consumer emails
+    if (!systemish(e)) s += 2; // not noreply/system
+    if (publicBumps.some((d) => e.endsWith("@" + d))) s += 1;
     return s;
   };
 
-  const best = cleaned.sort((a, b) => score(b) - score(a))[0];
-  return best || null;
+  return unique.sort((a, b) => score(b) - score(a))[0] ?? null;
 }
 
 async function getAccessToken(): Promise<TokenResult> {
-  // Direct bearer first
   const direct = process.env.HUBSPOT_ACCESS_TOKEN?.trim();
   if (direct) return { ok: true, token: direct };
 
-  // Refresh flow
   const refresh = process.env.HUBSPOT_REFRESH_TOKEN?.trim();
   const cid = process.env.HUBSPOT_CLIENT_ID?.trim();
   const secret = process.env.HUBSPOT_CLIENT_SECRET?.trim();
@@ -118,9 +118,7 @@ async function getAccessToken(): Promise<TokenResult> {
   });
 
   const text = await r.text();
-  if (!r.ok) {
-    return { ok: false, error: "refresh_failed", status: r.status, detail: text.slice(0, 800) };
-  }
+  if (!r.ok) return { ok: false, error: "refresh_failed", status: r.status, detail: text.slice(0, 800) };
 
   try {
     const j = JSON.parse(text);
@@ -132,17 +130,17 @@ async function getAccessToken(): Promise<TokenResult> {
   }
 }
 
-function chooseLatestInbound(messages: any[]): { email: string | null; text: string } {
+/** Choose most recent inbound message for text fallback. */
+function chooseLatestInbound(messages: any[]): string {
+  if (!Array.isArray(messages) || !messages.length) return "";
   const pick =
     [...messages].reverse().find((m) => {
-      const dir = String(m?.direction ?? "").toUpperCase(); // INBOUND/OUTBOUND
+      const dir = String(m?.direction ?? "").toUpperCase(); // INBOUND / OUTBOUND
       const type = String(m?.type ?? m?.messageType ?? "").toUpperCase();
       return dir !== "OUTBOUND" && type !== "SYSTEM" && type !== "NOTE";
     }) ?? messages[messages.length - 1];
 
-  const body = String(pick?.text ?? pick?.body ?? pick?.content ?? "");
-  const e = pick?.from?.email ?? pick?.from?.emailAddress ?? null;
-  return { email: isEmail(e) ? e : null, text: body };
+  return String(pick?.text ?? pick?.body ?? pick?.content ?? "");
 }
 
 /* ------------------------------------ route ------------------------------------ */
@@ -165,7 +163,7 @@ export async function POST(req: Request) {
 
     const headers = { Authorization: `Bearer ${tok.token}` };
 
-    // Fetch thread, messages, participants in parallel
+    // Fetch thread + messages + participants
     const [tRes, mRes, pRes] = await Promise.all([
       fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}`, { headers, cache: "no-store" }),
       fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/messages?limit=50`, {
@@ -179,7 +177,6 @@ export async function POST(req: Request) {
     ]);
 
     const [tRaw, mRaw, pRaw] = await Promise.all([tRes.text(), mRes.text(), pRes.text()]);
-
     if (!tRes.ok) {
       return NextResponse.json(
         { ok: false, status: tRes.status, error: "hubspot_thread_fetch_failed", body: tRaw.slice(0, 1200) },
@@ -201,71 +198,38 @@ export async function POST(req: Request) {
       participants = Array.isArray(pj?.results) ? pj.results : Array.isArray(pj) ? pj : [];
     } catch {}
 
-    // Subject
+    // Subject: direct fields or deep scan
     let subject =
       (thread?.subject ??
         thread?.threadSubject ??
         thread?.title ??
         thread?.summary ??
         "")?.toString() ?? "";
-    if (!subject) {
-      const sHit = findAnySubject({ thread, messages, participants });
-      subject = sHit?.value ?? "";
-    }
+    if (!subject) subject = findSubjectDeep({ thread, messages, participants });
 
-    // Text + initial email from messages
-    let text = "";
-    let email: string | null = null;
-    if (messages.length) {
-      const pick = chooseLatestInbound(messages);
-      text = pick.text || text;
-      email = pick.email || email;
-    }
+    // Text
+    let text = chooseLatestInbound(messages);
 
-    // Build candidate email list from many sources
-    const candEmails: string[] = [];
+    // Email candidates from anything that smells like an email
+    const emailSet = new Set<string>();
+    collectEmailsDeep(messages, emailSet);
+    collectEmailsDeep(participants, emailSet);
+    collectEmailsDeep(thread, emailSet);
 
-    // From messages (from / replyTo / recipients)
-    for (const m of messages) {
-      const from = m?.from?.email ?? m?.from?.emailAddress ?? null;
-      if (isEmail(from)) candEmails.push(from);
-
-      const rt = m?.replyTo?.email ?? m?.replyTo?.emailAddress ?? null;
-      if (isEmail(rt)) candEmails.push(rt);
-
-      // recipients arrays (if present)
-      const recips: any[] = Array.isArray(m?.to) ? m.to : [];
-      recips.forEach((r) => {
-        const e = r?.email ?? r?.emailAddress ?? null;
-        if (isEmail(e)) candEmails.push(e);
-      });
-    }
-
-    // From participants
-    const pHit = findAnyEmail(participants);
-    if (pHit?.value) candEmails.push(pHit.value);
-
-    // From thread (any deep email)
-    const tHit = findAnyEmail(thread);
-    if (tHit?.value) candEmails.push(tHit.value);
-
-    // Include whatever we already found
-    if (email) candEmails.push(email);
-
-    // Choose customer email (not our mailbox, not same domain, not noreply)
-    const picked = chooseCustomerEmail(candEmails);
-    if (picked) email = picked;
+    // Prefer customer (not our mailbox/domain and not noreply/system)
+    const picked = chooseCustomerEmail(emailSet);
+    const email = picked ?? "";
 
     return NextResponse.json(
       {
         ok: true,
-        email: email ?? "",
+        email,
         subject,
         text,
         threadId: objectId,
         src: {
+          email: email ? "deep/chooser" : "none",
           subject: subject ? "direct/deep" : "none",
-          email: email ? "chooser(messages/participants/thread)" : "none",
           text: text ? "messages" : "none",
         },
       },
