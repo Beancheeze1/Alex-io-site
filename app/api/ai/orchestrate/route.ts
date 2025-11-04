@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 
 /**
  * AI Orchestrator with live quoting:
- * - Parses the email body for dims/qty/material hints via /api/parse/email-quote
+ * - Parses the inbound email for dims/qty/cavities/material hints via /api/parse/email-quote
  * - If sufficient, prices via /api/quote/foam-smart
  * - Crafts a concise reply (with a quote table if priced)
  * - dryRun=false -> POST /api/msgraph/send { to, subject, html }
@@ -61,7 +61,7 @@ function htmlQuoteTable(args: {
 export async function POST(req: NextRequest) {
   try {
     const input = (await req.json()) as OrchestrateInput;
-    const mode = s(input.mode || "ai");
+    const mode = s(input.mode || "ai"); // reserved for future routing
     const toEmail = input.toEmail;
     const subject = s(input.subject || "Re: your message");
     const bodyText = s(input.text || "");
@@ -86,10 +86,11 @@ export async function POST(req: NextRequest) {
       if (pRes.ok && pj?.ok) {
         parsed = pj.parsed;
         parseWarnings = pj.warnings || [];
+        // unified body the pricing endpoints understand
         foamBody = pj.foam_quote_body; // { length_in, width_in, height_in?, qty, cavities:[...], meta:{...} }
       }
     } catch {
-      /* parsing is best-effort; keep going even if it fails */
+      /* parsing is best-effort; proceed even if it fails */
     }
 
     // Decide if we can price now
@@ -97,18 +98,21 @@ export async function POST(req: NextRequest) {
       foamBody &&
       Number.isFinite(foamBody.length_in) &&
       Number.isFinite(foamBody.width_in) &&
+      // allow auto-thickness path if height is missing but weight/area provided
       (Number.isFinite(foamBody.height_in) || (foamBody.weight_lbf && foamBody.area_in2)) &&
       Number.isFinite(foamBody.qty);
 
     // 2) If enough info, get a price from foam-smart
-    let priced: null | {
-      unitPrice: number;
-      total: number;
-      kerfPct?: number;
-      minCharge?: number;
-      materialName?: string;
-      used_auto_thickness?: boolean;
-    } = null;
+    let priced:
+      | null
+      | {
+          unitPrice: number;
+          total: number;
+          kerfPct?: number;
+          minCharge?: number;
+          materialName?: string;
+          used_auto_thickness?: boolean;
+        } = null;
 
     if (canPrice) {
       try {
@@ -130,19 +134,37 @@ export async function POST(req: NextRequest) {
             drop_in: foamBody.drop_in,
           }),
         });
-        const qj = await qRes.json();
+
+        const raw = await qRes.text();
+        let qj: any = {};
+        try { qj = JSON.parse(raw); } catch { qj = { ok: false, parseError: raw?.slice?.(0, 400) }; }
+
+        // 🔎 DEBUG LOG ADDED (shows status + body returned by foam-smart)
+        console.log("[foam-smart result]", qRes.status, qj);
+
         if (qRes.ok && qj?.ok) {
-          priced = {
-            unitPrice: Number(qj.unitPrice),
-            total: Number(qj.total),
-            kerfPct: qj.kerfPct,
-            minCharge: qj.minCharge,
-            materialName: qj.materialName,
-            used_auto_thickness: qj.used_auto_thickness,
-          };
+          // Accept both flat {unitPrice,total,...} or nested {quote:{...}}
+          const q = qj.quote || qj;
+          const u = Number(q.unitPrice);
+          const t = Number(q.total);
+
+          // Guard against NaN — only accept if both numeric
+          if (Number.isFinite(u) && Number.isFinite(t)) {
+            priced = {
+              unitPrice: u,
+              total: t,
+              kerfPct: Number.isFinite(Number(q.kerfPct)) ? Number(q.kerfPct) : undefined,
+              minCharge: Number.isFinite(Number(q.minCharge)) ? Number(q.minCharge) : undefined,
+              materialName: typeof q.materialName === "string" ? q.materialName : undefined,
+              used_auto_thickness: !!q.used_auto_thickness,
+            };
+          } else {
+            // If response ok but numbers missing, fall back to ask-for-more-info flow
+            console.warn("[foam-smart warn] ok:true but unitPrice/total not numeric", q);
+          }
         }
-      } catch {
-        /* non-fatal */
+      } catch (err) {
+        console.error("[foam-smart exception]", (err as any)?.message || String(err));
       }
     }
 
