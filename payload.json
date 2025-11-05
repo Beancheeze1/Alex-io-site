@@ -1,1 +1,8 @@
-﻿{"to":"25thhourdesign@gmail.com","subject":"Re: test","html":"<p>thread test</p>"}
+﻿{
+  "mode": "ai",
+  "toEmail": "25thhourdesign@gmail.com",
+  "subject": "Re: foam quote",
+  "text": "12x9x3, quantity 25, 0.5 under pad",
+  "inReplyTo": "",
+  "dryRun": true
+}

@@ -21,16 +21,26 @@ function isEmail(v: unknown): v is string {
   return typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
+// ---- UPDATED: broader, punctuation-tolerant quantity matcher
 function parseSlots(raw: string) {
   const LWH =
     /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i.exec(raw) ||
-    /\bL\s*=?\s*(\d+(?:\.\d+)?)\b.*\bW\s*=?\s*(\d+(?:\.\d+)?)\b.*\bH\s*=?\s*(\d+(?:\.\d+)?)/i.exec(raw);
-  const qty = /\b(\d{1,6})\s*(?:pcs?|pieces?|qty)\b/i.exec(raw);
+    /\bL\s*[:=]?\s*(\d+(?:\.\d+)?)\b.*\bW\s*[:=]?\s*(\d+(?:\.\d+)?)\b.*\bH\s*[:=]?\s*(\d+(?:\.\d+)?)/i.exec(raw);
+
+  // Accept: quantity 25, qty 25, q:25, pcs 25, pieces 25, units 25, with optional colon/equals/comma
+  const qty =
+    /\b(?:quantity|qty|q|pcs|pieces?|units?)\b\s*[:=]?\s*,?\s*(\d{1,6})\b/i.exec(raw);
+
+  // Density and “under pad” thickness unchanged
   const dens = /\b(\d(?:\.\d+)?)\s*(?:lb\/?ft3|lb\/?ft\^?3|density)\b/i.exec(raw);
   const under = /\b(?:under|bottom|pad)\s*(\d(?:\.\d+)?)\s*(?:in|inch|")\b/i.exec(raw);
 
   const slots: any = {};
-  if (LWH) { slots.internal_length_in = Number(LWH[1]); slots.internal_width_in = Number(LWH[2]); slots.internal_height_in = Number(LWH[3]); }
+  if (LWH) {
+    slots.internal_length_in = Number(LWH[1]);
+    slots.internal_width_in  = Number(LWH[2]);
+    slots.internal_height_in = Number(LWH[3]);
+  }
   if (qty) { slots.qty = Number(qty[1]); }
   if (dens) { slots.density_lbft3 = Number(dens[1]); }
   if (under) { slots.thickness_under_in = Number(under[1]); }
@@ -75,7 +85,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => ({}))) as OrchestrateInput;
 
-    // internal base URL for same-host calls
     const url = new URL(req.url);
     const SELF = process.env.INTERNAL_SELF_URL || `${url.protocol}//${url.host}`;
 
@@ -85,19 +94,20 @@ export async function POST(req: NextRequest) {
     const subject = s(body.subject) || "Re: your message to Alex-IO";
     const raw = s(body.text);
 
-    // Parse slots & figure out missing pieces
     const slots = parseSlots(raw);
+
+    // defaults
     if (slots.thickness_under_in == null) slots.thickness_under_in = Number(process.env.DEFAULT_UNDER_IN ?? "0.5");
     if (slots.cavities == null) slots.cavities = 1;
 
+    // ---- UPDATED: treat qty <= 0 as missing
     const missing: string[] = [];
     if (slots.internal_length_in == null || slots.internal_width_in == null || slots.internal_height_in == null) {
       missing.push("final outside dimensions (L × W × H)");
     }
-    if (slots.qty == null) missing.push("quantity");
+    if (!Number.isFinite(slots.qty) || slots.qty <= 0) missing.push("quantity");
     if (slots.thickness_under_in == null) missing.push("thickness under the part");
 
-    // If we have the essentials, run pricing
     let priced: { unitPrice: number; total: number } | undefined;
     if (missing.length === 0) {
       const priceRes = await fetch(`${SELF}/api/ai/price`, {
@@ -111,18 +121,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Threading memory: prefer HubSpot-provided inReplyTo; else fallback to KV by email
     const kv = makeKv();
     const kvKey = `alexio:mid:${toEmail.toLowerCase()}`;
     let inReplyTo = s(body.inReplyTo);
     if (!inReplyTo) {
       const fallbackMid = await kv.get(kvKey).catch(() => null);
-      if (fallbackMid) inReplyTo = fallbackMid;
+      if (fallbackMid) inReplyTo = String(fallbackMid);
     }
 
     const html = buildReplyHtml(missing, priced);
 
-    // Dry run? return preview only
     if (body.dryRun) {
       return NextResponse.json({
         ok: true,
@@ -135,7 +143,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Live send through Graph
     const res = await fetch(`${SELF}/api/msgraph/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
