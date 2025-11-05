@@ -1,8 +1,4 @@
-﻿{
-  "mode": "ai",
-  "toEmail": "25thhourdesign@gmail.com",
-  "subject": "Re: foam quote",
-  "text": "12x9x3, quantity 25, 0.5 under pad",
-  "inReplyTo": "",
-  "dryRun": true
-}
+﻿{ "mode":"ai", "toEmail":"25thhourdesign@gmail.com",
+  "subject":"Re: foam",
+  "text":"need 25 pcs; size L=12 W=9 H=3; bottom pad .5 in; EVA 1.9",
+  "dryRun": true }
