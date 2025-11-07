@@ -1,111 +1,76 @@
-// app/api/uploads/sketch/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { mkdir, writeFile, readFile, readdir } from "fs/promises";
-import { statSync, createReadStream, existsSync } from "fs";
-import { join, extname } from "path";
-import crypto from "crypto";
+import { randomBytes } from "crypto";
+import { writeFile } from "fs/promises";
+import { join } from "path";
+import { tmpdir } from "os";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const ROOT = join(process.cwd(), "data", "uploads");
-const META = (id: string) => join(ROOT, `${id}.json`);
-const FILE = (id: string, ext: string) => join(ROOT, `${id}${ext}`);
-
-type Meta = {
-  id: string;
-  name: string;
-  ext: string;
-  size: number;
-  mime: string;
-  createdAt: string;
-  threadId?: string | number;
-  internetMessageId?: string;
-  from?: string;
-  subject?: string;
-  notes?: string;
-};
-
-async function ensureRoot() {
-  await mkdir(ROOT, { recursive: true });
-}
-
-function sanitizeName(n?: string | null) {
-  const base = (n || "upload").replace(/[^\w.\-()+]/g, "_");
-  return base.slice(0, 120);
-}
-
-// POST multipart/form-data: file + optional fields
+// Accepts: multipart/form-data with field "file"
+// Returns: { ok: true, id, size, mime, filename, sketchRef }
 export async function POST(req: NextRequest) {
   try {
-    await ensureRoot();
+    const ct = req.headers.get("content-type") || "";
+    if (!ct.toLowerCase().includes("multipart/form-data")) {
+      return NextResponse.json(
+        { ok: false, error: "Content-Type must be multipart/form-data" },
+        { status: 400 }
+      );
+    }
 
     const form = await req.formData();
-    const file = form.get("file");
-    if (!(file instanceof Blob)) {
-      return NextResponse.json({ ok: false, error: "file required" }, { status: 400 });
+    const f = form.get("file");
+
+    if (!f || !(f instanceof File)) {
+      return NextResponse.json(
+        { ok: false, error: "Missing file field 'file'." },
+        { status: 400 }
+      );
     }
 
-    const threadId = form.get("threadId")?.toString() || undefined;
-    const internetMessageId = form.get("internetMessageId")?.toString() || undefined;
-    const from = form.get("from")?.toString() || undefined;
-    const subject = form.get("subject")?.toString() || undefined;
-    const notes = form.get("notes")?.toString() || undefined;
-
-    const arrayBuffer = await file.arrayBuffer();
-    const buf = Buffer.from(arrayBuffer);
-
-    const orig = sanitizeName((file as any).name || "sketch");
-    const ext = extname(orig) || ".bin";
-    const id = crypto.randomBytes(8).toString("hex");
-
-    const meta: Meta = {
-      id,
-      name: orig,
-      ext,
-      size: buf.length,
-      mime: (file as any).type || "application/octet-stream",
-      createdAt: new Date().toISOString(),
-      threadId,
-      internetMessageId,
-      from,
-      subject,
-      notes,
-    };
-
-    await writeFile(FILE(id, ext), buf);
-    await writeFile(META(id), JSON.stringify(meta, null, 2), "utf8");
-
-    return NextResponse.json({ ok: true, id, meta, download: `/api/uploads/sketch/${id}` });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "upload failed" }, { status: 500 });
-  }
-}
-
-// GET ?threadId=... | ?internetMessageId=...
-// Returns metadata list (no binary)
-export async function GET(req: NextRequest) {
-  try {
-    await ensureRoot();
-    const { searchParams } = new URL(req.url);
-    const threadId = searchParams.get("threadId");
-    const internetMessageId = searchParams.get("internetMessageId");
-
-    const files = (await readdir(ROOT)).filter((f) => f.endsWith(".json"));
-    const all: Meta[] = [];
-    for (const f of files) {
-      const meta: Meta = JSON.parse(await readFile(join(ROOT, f), "utf8"));
-      all.push(meta);
+    const mime = f.type || "application/octet-stream";
+    const allowed = ["image/png", "image/jpeg", "application/pdf"];
+    if (!allowed.includes(mime)) {
+      return NextResponse.json(
+        { ok: false, error: "Only PNG, JPG, or PDF allowed." },
+        { status: 415 }
+      );
     }
 
-    const filtered = all.filter((m) => {
-      if (threadId && String(m.threadId || "") !== String(threadId)) return false;
-      if (internetMessageId && (m.internetMessageId || "") !== internetMessageId) return false;
-      return true;
-    });
+    const arr = new Uint8Array(await f.arrayBuffer());
+    const id = randomBytes(8).toString("hex");
+    const ext =
+      mime === "image/png"
+        ? "png"
+        : mime === "image/jpeg"
+        ? "jpg"
+        : "pdf";
 
-    return NextResponse.json({ ok: true, count: filtered.length, items: filtered });
+    // Write to ephemeral disk; on Render this is fine for short-term
+    const fileName = `sketch_${id}.${ext}`;
+    const fullPath = join(tmpdir(), fileName);
+    await writeFile(fullPath, arr);
+
+    // Sketch reference that your orchestrator can store/echo
+    // In a future step you can back this with S3/Cloudflare R2 etc.
+    const sketchRef = `file://${fullPath}`;
+
+    return NextResponse.json(
+      {
+        ok: true,
+        id,
+        size: arr.byteLength,
+        mime,
+        filename: fileName,
+        sketchRef,
+      },
+      { status: 200 }
+    );
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "list failed" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || "upload error" },
+      { status: 500 }
+    );
   }
 }

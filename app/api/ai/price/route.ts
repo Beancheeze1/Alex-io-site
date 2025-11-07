@@ -1,114 +1,148 @@
-// app/api/ai/price/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import pg from "pg";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type PriceInput = {
-  dims: { L: number; W: number; H: number; units?: "in" | "mm" };
-  qty: number;
-  materialId: number;
-  cavities?: number;
-  round_to_bf?: boolean;
-};
+/**
+ * Input:
+ * {
+ *   dims: { L: number|string, W: number|string, H: number|string },
+ *   qty: number|string,
+ *   materialId?: number|string,
+ *   round_to_bf?: boolean|string,
+ *   units?: "in" | "mm"
+ * }
+ *
+ * Output:
+ * {
+ *   ok: boolean,
+ *   status: number,
+ *   pricingUsedDb: boolean,
+ *   pricing?: {
+ *     materialName?: string,
+ *     rateBasis: "BF" | "CI",
+ *     ratePerCI?: number,
+ *     ratePerBF?: number,
+ *     kerf_pct?: number,
+ *     min_charge?: number,
+ *     qty: number,
+ *     dims_in: { L: number, W: number, H: number },
+ *     piece_ci: number,
+ *     each: number,
+ *     extended: number
+ *   },
+ *   error?: string
+ * }
+ */
 
-function toNum(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+function num(v: any): number | undefined {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === "number" && isFinite(v)) return v;
+  const s = String(v).trim().toLowerCase();
+  if (!s) return undefined;
+  const n = Number(s);
+  return isFinite(n) ? n : undefined;
 }
 
-function normalizeToInches(dims: PriceInput["dims"]) {
-  const L = toNum(dims?.L);
-  const W = toNum(dims?.W);
-  const H = toNum(dims?.H);
-  if (!L || !W || !H) return null;
-  return (dims?.units || "in") === "mm"
-    ? { L: L / 25.4, W: W / 25.4, H: H / 25.4 }
-    : { L, W, H };
+function asBool(v: any): boolean {
+  if (typeof v === "boolean") return v;
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "true" || s === "1" || s === "yes";
+}
+
+function mmToIn(v: number) {
+  return v / 25.4;
 }
 
 export async function POST(req: NextRequest) {
-  const diag: Record<string, any> = {};
   try {
-    const body = (await req.json()) as Partial<PriceInput>;
-    const qty = toNum(body?.qty);
-    const materialId = toNum(body?.materialId);
-    const cavities = toNum(body?.cavities ?? 0) ?? 0;
-    const roundToBF = !!body?.round_to_bf;
-    const dimsInches = normalizeToInches(body?.dims ?? ({} as any));
+    const body = await req.json();
 
-    if (!dimsInches || !qty || !materialId) {
+    const units = (String(body?.units || "in").toLowerCase() === "mm" ? "mm" : "in") as
+      | "in"
+      | "mm";
+
+    let L = num(body?.dims?.L);
+    let W = num(body?.dims?.W);
+    let H = num(body?.dims?.H);
+    const qty = num(body?.qty) ?? 1;
+
+    if (units === "mm") {
+      if (typeof L === "number") L = mmToIn(L);
+      if (typeof W === "number") W = mmToIn(W);
+      if (typeof H === "number") H = mmToIn(H);
+    }
+
+    if (typeof L !== "number" || typeof W !== "number" || typeof H !== "number") {
       return NextResponse.json(
-        { ok: false, error: "missing/invalid dims, qty, or materialId" },
+        { ok: false, status: 400, error: "Missing or invalid dimensions." },
         { status: 400 }
       );
     }
 
-    const cn = process.env.DATABASE_URL;
-    if (!cn) {
-      return NextResponse.json(
-        { ok: false, error: "Missing env DATABASE_URL" },
-        { status: 500 }
-      );
+    // Normalize flags (PowerShell often sends "false" as a string)
+    const round_to_bf = asBool(body?.round_to_bf);
+
+    // Optional: database material lookup can happen here.
+    // For Path A minimal change, we compute from generic per-CI or per-BF if present
+    // and otherwise return a safe CI-based fallback.
+
+    const ratePerCI = num(body?.ratePerCI); // optional override
+    const ratePerBF = num(body?.ratePerBF); // optional override
+    const kerf_pct = num(body?.kerf_pct) ?? 0;
+    const min_charge = num(body?.min_charge) ?? 0;
+
+    // Piece volume (in^3)
+    const piece_ci_raw = L * W * H;
+    const piece_ci = piece_ci_raw * (1 + kerf_pct / 100);
+
+    let each = 0;
+    let rateBasis: "BF" | "CI" = "CI";
+
+    if (round_to_bf) {
+      // 1 board foot = 144 in^3
+      rateBasis = "BF";
+      const piece_bf = piece_ci / 144;
+      const rbf = ratePerBF ?? 34; // fallback example; DB can override
+      each = Math.max(min_charge, piece_bf * rbf);
+    } else {
+      rateBasis = "CI";
+      const rci = ratePerCI ?? 0.06; // fallback example; DB can override
+      each = Math.max(min_charge, piece_ci * rci);
     }
 
-    const pool = new pg.Pool({ connectionString: cn, ssl: { rejectUnauthorized: false } });
+    const extended = each * qty;
 
-    // ✅ FIX: remove column definition list; just select from the function
-    const sql = `
-      select * 
-      from calc_foam_quote($1,$2,$3,$4,$5,$6,$7)
-      limit 1
-    `;
-    const args = [
-      dimsInches.L,
-      dimsInches.W,
-      dimsInches.H,
-      materialId,
+    const pricing = {
+      materialName: body?.materialName ?? undefined,
+      rateBasis,
+      ratePerCI: rateBasis === "CI" ? (ratePerCI ?? 0.06) : undefined,
+      ratePerBF: rateBasis === "BF" ? (ratePerBF ?? 34) : undefined,
+      kerf_pct,
+      min_charge,
       qty,
-      cavities,
-      roundToBF,
-    ];
-
-    const { rows } = await pool.query(sql, args);
-    await pool.end();
-
-    if (!rows?.length) {
-      return NextResponse.json(
-        { ok: false, error: "calc_foam_quote returned no rows", diag },
-        { status: 500 }
-      );
-    }
-
-    // Try a few common field names
-    const r = rows[0] as any;
-    const each =
-      toNum(r.each) ??
-      toNum(r.unit_price) ??
-      toNum(r.price_each) ??
-      toNum(r.unit);
-    const extended =
-      toNum(r.extended) ??
-      toNum(r.total) ??
-      (each != null ? each * qty : null);
+      dims_in: { L, W, H },
+      piece_ci,
+      each,
+      extended,
+    };
 
     return NextResponse.json(
       {
-        ok: each != null && extended != null,
-        each: Number(each ?? 0),
-        extended: Number(extended ?? 0),
-        min_charge:
-          r.min_charge != null ? Number(r.min_charge) : undefined,
-        kerf_pct: r.kerf_pct != null ? Number(r.kerf_pct) : undefined,
-        notes: r.notes ?? undefined,
-        diag,
+        ok: true,
+        status: 200,
+        pricingUsedDb: false, // set true if/when you wire to DB
+        pricing,
       },
       { status: 200 }
     );
   } catch (e: any) {
     return NextResponse.json(
-      { ok: false, error: e?.message || "price error" },
+      {
+        ok: false,
+        status: 500,
+        error: e?.message || "price calculation error",
+      },
       { status: 500 }
     );
   }
