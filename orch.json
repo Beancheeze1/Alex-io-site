@@ -1,7 +1,7 @@
 ﻿{
-  "mode": "ai",
-  "toEmail": "25thhourdesign@gmail.com",
-  "subject": "Re: Foam insert quote",
-  "text": "Hi — looking for 12x8x3 insert, qty 50, 1.7 PE if possible.",
-  "dryRun": true
+    "subject":  "Re: foam",
+    "toEmail":  "25thhourdesign@gmail.com",
+    "dryRun":  true,
+    "mode":  "ai",
+    "text":  "Need qty 24, 12 x 9 x 2 in, PE 1.7 pcf, black, 1/2 in under, die cut."
 }
