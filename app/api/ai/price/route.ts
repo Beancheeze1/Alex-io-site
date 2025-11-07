@@ -1,200 +1,162 @@
 // app/api/ai/price/route.ts
-// DB-backed AI pricing: dynamic column detection + delegate to /api/quote/foam
-
 import { NextRequest, NextResponse } from "next/server";
-import { q, one } from "@/lib/db";
+import type { Pool } from "pg";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type Slots = {
-  internal_length_in?: number;
-  internal_width_in?: number;
-  internal_height_in?: number;
-  thickness_under_in?: number;
-  cavities?: number;
-  qty?: number;
-  density_lbft3?: number;     // optional if foam_material_id provided
-  foam_material_id?: number;  // optional if density provided
+function s(v: unknown) { return String(v ?? "").trim(); }
+function n(v: unknown) {
+  if (v === null || v === undefined || v === "") return null;
+  const x = Number(v);
+  return Number.isFinite(x) ? x : null;
+}
+function requireEnv(name: string, ...alts: string[]) {
+  const keys = [name, ...alts];
+  for (const k of keys) {
+    const v = process.env[k];
+    if (v && String(v).trim()) return v!;
+  }
+  throw new Error(`Missing env: one of ${keys.join(", ")}`);
+}
+
+// Lazy pg pool
+let _pool: Pool | null = null;
+function pool() {
+  if (_pool) return _pool;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { Pool } = require("pg") as typeof import("pg");
+  const connectionString = requireEnv("DATABASE_URL","POSTGRES_URL","POSTGRES_PRISMA_URL","PG_CONNECTION_STRING");
+  _pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false }, max: 3 });
+  return _pool!;
+}
+
+type PriceInput = {
+  slots: {
+    internal_length_in: number;
+    internal_width_in: number;
+    internal_height_in: number;
+    thickness_under_in?: number | null;
+    qty: number;
+    density_lbft3?: number | null;
+    cavities?: Array<{ length_in: number; width_in: number; height_in: number; count?: number }>;
+  };
 };
 
-function N(x: any) { const n = Number(x); return Number.isFinite(n) ? n : NaN; }
-function requiredNumber(name: string, v: any) {
-  const n = N(v);
-  if (!Number.isFinite(n)) throw new Error(`missing or invalid ${name}`);
-  return n;
-}
-function getBase() {
-  return (process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") || "http://localhost:3000");
-}
-
-type ColMap = {
-  density: string | null;
-  per_ci: string | null;
-  per_bf: string | null;
-  per_cuft: string | null;
-  kerf_pct: string | null;
-  min_charge: string | null;
-};
-
-async function detectMaterialColumns(): Promise<ColMap> {
-  // Read available columns from public.materials
-  const cols: Array<{ column_name: string }> = await q(
-    `select column_name
-       from information_schema.columns
-      where table_schema = 'public'
-        and table_name   = 'materials'`
-  );
-
-  const have = new Set(cols.map(c => c.column_name.toLowerCase()));
-
-  // Helper to pick the first that exists
-  const pick = (candidates: string[]) => {
-    for (const c of candidates) if (have.has(c.toLowerCase())) return c;
-    return null;
-  };
-
-  return {
-    density:  pick(["density_lbft3","density_lb_ft3","density","pcf","density_lbf_ft3"]),
-    per_ci:   pick(["price_per_cuin","price_per_ci","price_per_cu_in","price_per_cubic_in","price_ci"]),
-    per_bf:   pick(["price_per_bf","price_bf","price_per_board_foot"]),
-    per_cuft: pick(["price_per_cuft","price_per_cu_ft","price_cuft","price_per_cubic_foot"]),
-    kerf_pct: pick(["kerf_waste_pct","kerf_pct","waste_pct","kerf_percent"]),
-    min_charge: pick(["min_charge_usd","min_charge","minimum_charge","min_order_charge_usd"]),
-  };
-}
-
-function sqlExprOrNull(col: string | null, cast: "numeric" | "text" = "numeric") {
-  if (!col) return `NULL::${cast}`;
-  return cast === "numeric" ? `(${col})::numeric` : `${col}`;
-}
+function ci(L:number,W:number,H:number){ return Math.max(0,L)*Math.max(0,W)*Math.max(0,H); }
+function round2(v:number){ return Math.round(v*100)/100; }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const slots: Slots = (body?.slots || {}) as Slots;
+    const body = (await req.json()) as Partial<PriceInput>;
+    const slots = (body?.slots ?? {}) as PriceInput["slots"];
 
-    // --- Validate core dims for pricing ---
-    const L = requiredNumber("internal_length_in", slots.internal_length_in);
-    const W = requiredNumber("internal_width_in",  slots.internal_width_in);
-    const H = requiredNumber("internal_height_in", slots.internal_height_in);
-    const U = requiredNumber("thickness_under_in", slots.thickness_under_in);
-    const QTY = Number.isFinite(N(slots.qty)) ? Math.max(1, N(slots.qty)!) : 1;
-    const C = Number.isFinite(N(slots.cavities)) ? Math.max(1, N(slots.cavities)!) : 1;
+    const L = n(slots.internal_length_in) ?? 0;
+    const W = n(slots.internal_width_in) ?? 0;
+    const H = n(slots.internal_height_in) ?? 0;
+    const T = n(slots.thickness_under_in) ?? 0;
+    const Q = n(slots.qty) ?? 1;
+    const dens = n(slots.density_lbft3);
 
-    // --- Discover schema & resolve material ---
-    const cmap = await detectMaterialColumns();
+    if (L<=0 || W<=0 || H<=0 || Q<=0) {
+      return NextResponse.json({ ok:false, error:"missing or invalid dimensions/qty" }, { status:400 });
+    }
 
-    let materialId = Number.isFinite(N(slots.foam_material_id)) ? Number(slots.foam_material_id) : NaN;
-    let resolvedMaterial: any = null;
+    // volume
+    let pieceCI = ci(L,W,H);
+    const cavities = Array.isArray(slots.cavities) ? slots.cavities : [];
+    let cavCI = 0;
+    for (const c of cavities) {
+      const len = n(c.length_in) ?? 0, wid = n(c.width_in) ?? 0, hei = n(c.height_in) ?? 0, cnt = n(c.count) ?? 1;
+      cavCI += ci(len,wid,hei) * Math.max(1,cnt);
+    }
+    pieceCI = Math.max(0, pieceCI - cavCI);
+    if (T>0) pieceCI += ci(L,W,T);
 
-    if (!Number.isFinite(materialId)) {
-      const densityReq = N(slots.density_lbft3);
-      if (!Number.isFinite(densityReq)) {
-        throw new Error("provide foam_material_id or density_lbft3");
+    const orderCI = pieceCI * Q;
+
+    // material lookup (nearest density; else cheapest/default)
+    const client = await pool().connect();
+    try {
+      let row: any | null = null;
+
+      if (dens !== null) {
+        const res = await client.query(
+          `SELECT id,name,
+                  COALESCE(density_lbft3,0)::float AS density_lbft3,
+                  COALESCE(kerf_pct,0)::float      AS kerf_pct,
+                  COALESCE(price_per_ci,0)::float  AS price_per_ci,
+                  COALESCE(price_per_bf,0)::float  AS price_per_bf,
+                  COALESCE(min_charge,0)::float    AS min_charge
+           FROM materials
+           WHERE density_lbft3 IS NOT NULL
+           ORDER BY ABS(density_lbft3 - $1) ASC
+           LIMIT 1`, [dens]);
+        row = res.rows?.[0] ?? null;
       }
 
-      // Build a query that only references columns that actually exist
-      const densityExpr = sqlExprOrNull(cmap.density, "numeric");
-      const perCiExpr   = sqlExprOrNull(cmap.per_ci, "numeric");
-      const perBfExpr   = sqlExprOrNull(cmap.per_bf, "numeric");
-      const perCuftExpr = sqlExprOrNull(cmap.per_cuft, "numeric");
-      const kerfExpr    = sqlExprOrNull(cmap.kerf_pct, "numeric");
-      const minExpr     = sqlExprOrNull(cmap.min_charge, "numeric");
+      if (!row) {
+        const res = await client.query(
+          `SELECT id,name,
+                  COALESCE(density_lbft3,0)::float AS density_lbft3,
+                  COALESCE(kerf_pct,0)::float      AS kerf_pct,
+                  COALESCE(price_per_ci,0)::float  AS price_per_ci,
+                  COALESCE(price_per_bf,0)::float  AS price_per_bf,
+                  COALESCE(min_charge,0)::float    AS min_charge
+           FROM materials
+           ORDER BY price_per_ci NULLS LAST, price_per_bf NULLS LAST, id
+           LIMIT 1`);
+        row = res.rows?.[0] ?? null;
+      }
 
-      // Choose closest density; prefer rows with *any* price column populated
-      const rows = await q<any>(`
-        with materials_any as (
-          select
-            m.id,
-            coalesce(m.name, 'Material ' || m.id::text) as name,
-            ${densityExpr} as density,
-            ${perCiExpr}   as per_cu_in,
-            ${perBfExpr}   as per_bf,
-            ${perCuftExpr} as per_cu_ft,
-            ${kerfExpr}    as kerf_waste_pct,
-            ${minExpr}     as min_charge_usd
-          from public.materials m
-        ),
-        ranked as (
-          select *,
-                 abs((density) - $1::numeric) as abs_diff,
-                 case when per_cu_in is not null or per_bf is not null or per_cu_ft is not null then 1 else 0 end as has_price
-          from materials_any
-        )
-        select *
-        from ranked
-        order by has_price desc, abs_diff asc, id asc
-        limit 1
-      `, [densityReq]);
+      if (!row) {
+        return NextResponse.json({ ok:false, error:"no materials found" }, { status:500 });
+      }
 
-      if (!rows.length) throw new Error("no material candidates");
-      resolvedMaterial = rows[0];
-      materialId = Number(resolvedMaterial.id);
-    } else {
-      // Fetch basic info for echoing back (avoid missing columns)
-      const densityExpr = sqlExprOrNull(cmap.density, "numeric");
-      const kerfExpr    = sqlExprOrNull(cmap.kerf_pct, "numeric");
-      const minExpr     = sqlExprOrNull(cmap.min_charge, "numeric");
-      resolvedMaterial = await one<any>(
-        `select
-            m.id,
-            coalesce(m.name, 'Material ' || m.id::text) as name,
-            ${densityExpr} as density,
-            ${kerfExpr}    as kerf_waste_pct,
-            ${minExpr}     as min_charge_usd
-         from public.materials m
-         where m.id = $1`, [materialId]
-      );
+      const kerf = Math.max(0, row.kerf_pct ?? 0);
+      const pricePerCI = n(row.price_per_ci);
+      const pricePerBF = n(row.price_per_bf);
+      const minCharge  = Math.max(0, row.min_charge ?? 0);
+
+      const orderCIWithWaste = orderCI * (1+kerf);
+
+      let raw = 0;
+      if (pricePerCI && pricePerCI>0) raw = orderCIWithWaste * pricePerCI;
+      else if (pricePerBF && pricePerBF>0) raw = (orderCIWithWaste/1728) * pricePerBF;
+
+      const total = Math.max(minCharge, raw);
+
+      return NextResponse.json({
+        ok:true,
+        material:{
+          id:row.id, name:row.name,
+          density_lbft3: round2(row.density_lbft3 ?? 0),
+          kerf_pct: round2(kerf),
+          price_per_ci: pricePerCI,
+          price_per_bf: pricePerBF,
+          min_charge: round2(minCharge),
+        },
+        inputs:{
+          length_in:L, width_in:W, height_in:H, thickness_under_in:T,
+          qty:Q, density_lbft3:dens,
+          cavities: cavities.map(c=>({ length_in:n(c.length_in)??0, width_in:n(c.width_in)??0, height_in:n(c.height_in)??0, count:n(c.count)??1 })),
+        },
+        ci:{
+          piece_ci: round2(pieceCI),
+          order_ci: round2(orderCI),
+          order_ci_with_waste: round2(orderCIWithWaste),
+        },
+        pricing:{
+          currency:"USD",
+          raw: round2(raw),
+          total: round2(total),
+          used_min_charge: total < minCharge ? true : false,
+        },
+      }, { status:200 });
+    } finally {
+      client.release();
     }
-
-    if (!Number.isFinite(materialId)) throw new Error("material resolution failed");
-
-    // --- Delegate pricing to your existing DB-backed route ---
-    const foamPayload = {
-      length_in: L,
-      width_in:  W,
-      height_in: H,
-      qty: QTY,
-      material_id: materialId,
-      cavities: [
-        { label: "rect", l: L, w: W, d: U, count: C }
-      ]
-    };
-
-    const base = getBase();
-    const res = await fetch(`${base}/api/quote/foam`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(foamPayload),
-    });
-
-    const text = await res.text();
-    let data: any = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { ok: false, error: "quote_route_failed", status: res.status, detail: data ?? text ?? null },
-        { status: 200 }
-      );
-    }
-
-    return NextResponse.json({
-      ok: true,
-      material: {
-        id: Number(materialId),
-        name: resolvedMaterial?.name ?? `Material ${materialId}`,
-        density_lbft3: resolvedMaterial?.density ?? null,
-        kerf_waste_pct: resolvedMaterial?.kerf_waste_pct ?? null,
-        min_charge_usd: resolvedMaterial?.min_charge_usd ?? null,
-      },
-      math: data?.math ?? null,
-      pricing: data?.pricing ?? null,
-      source: "/api/quote/foam"
-    }, { status: 200 });
-
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 200 });
+  } catch (e:any) {
+    return NextResponse.json({ ok:false, error: e?.message || "ai/price error" }, { status:500 });
   }
 }

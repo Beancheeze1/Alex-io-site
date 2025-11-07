@@ -1,7 +1,7 @@
 ﻿{
-  "mode": "ai",
-  "toEmail": "25thhourdesign@gmail.com",
-  "subject": "Re: foam quote",
-  "text": "12x9x3, quantity 25, 0.5 under pad",
-  "dryRun": true
+    "subject":  "Re: foam quote",
+    "toEmail":  "25thhourdesign@gmail.com",
+    "dryRun":  true,
+    "mode":  "ai",
+    "text":  "qty 10; 1.7 pcf PE; 12 x 8 x 2 in; 1/2 in under"
 }
