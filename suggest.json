@@ -1,22 +1,15 @@
 ﻿{
     "filter":  {
-                   "family":  "pe",
-                   "color":  "black",
-                   "densityMin":  1.5,
-                   "densityMax":  1.9
+                   "densityMin":  1.4,
+                   "densityMax":  2,
+                   "family":  "PE",
+                   "color":  "black"
                },
     "searchWords":  [
-                        "pe",
+                        "PE",
                         "black",
-                        "1.7pcf",
-                        "need",
-                        "qty",
                         "1.7",
-                        "pcf",
-                        "1/2",
-                        "under",
-                        "black.",
-                        "die",
-                        "cut."
+                        "foam",
+                        "12x9x2"
                     ]
 }

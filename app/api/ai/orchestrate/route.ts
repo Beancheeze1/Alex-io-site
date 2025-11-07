@@ -20,6 +20,22 @@ const s = (v: unknown) => String(v ?? "").trim();
 const isEmail = (v: unknown): v is string =>
   typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v));
 
+function toNum(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Matches the shape we put in suggested.itemsPretty
+type PrettyItem = {
+  id: string | number | null;
+  name: string | null;
+  density_pcf: number | null;
+  color: string | null;
+  price_per_bf: number | null;
+  price_per_ci: number | null;
+  min_charge: number | null;
+};
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as Partial<OrchestrateInput>;
@@ -30,7 +46,9 @@ export async function POST(req: NextRequest) {
       text: s(body.text),
       inReplyTo: body.inReplyTo ?? null,
       dryRun: !!body.dryRun,
-      sketchRefs: Array.isArray(body.sketchRefs) ? body.sketchRefs.filter(x => s(x).length > 0) : [],
+      sketchRefs: Array.isArray(body.sketchRefs)
+        ? body.sketchRefs.filter((x) => s(x).length > 0)
+        : [],
     };
     if (!isEmail(input.toEmail)) {
       return NextResponse.json({ ok: false, error: "invalid toEmail" }, { status: 400 });
@@ -52,18 +70,22 @@ export async function POST(req: NextRequest) {
         extracted = j?.extracted ?? null;
         missing = j?.missing ?? null;
       }
-    } catch (_) {
-      // keep going; we'll still form a quote with fallback
+    } catch {
+      /* noop */
     }
 
     // ---- 2) suggest materials ----
-    let suggested: { count: number; items: any[]; top: any | null } = {
-      count: 0,
-      items: [],
-      top: null,
-    };
+    let suggested: {
+      count: number;
+      items: any[];
+      itemsPretty?: PrettyItem[];
+      summary?: string;
+      top: any | null;
+    } = { count: 0, items: [], top: null };
+
     try {
-      if (extracted?.dbFilter || extracted?.searchWords) {
+      const hasHints = extracted?.dbFilter || extracted?.searchWords;
+      if (hasHints) {
         const sugUrl = absoluteUrl(req, "/api/ai/suggest-materials");
         const payload = {
           filter: extracted?.dbFilter ?? {},
@@ -81,10 +103,38 @@ export async function POST(req: NextRequest) {
           suggested.items = items;
           suggested.count = Number(j?.count ?? items.length);
           suggested.top = pickTopMaterial(items, extracted ?? null);
+
+          // Pretty, minimal objects for display / logging
+          const pretty: PrettyItem[] = items.slice(0, 8).map((it: any): PrettyItem => ({
+            id: it?.id ?? null,
+            name: it?.name ?? null,
+            density_pcf: toNum(it?.density_pcf),
+            color: it?.color ?? null,
+            price_per_bf: toNum(it?.price_per_bf),
+            price_per_ci: toNum(it?.price_per_ci),
+            min_charge: toNum(it?.min_charge),
+          }));
+          suggested.itemsPretty = pretty;
+
+          // One-line summary per item (used in dryRun HTML below)
+          suggested.summary =
+            pretty.length > 0
+              ? pretty
+                  .map((it: PrettyItem) => {
+                    const parts: string[] = [];
+                    parts.push(it.name ?? "Material");
+                    if (it.density_pcf != null) parts.push(`${it.density_pcf.toFixed(1)} pcf`);
+                    if (it.color) parts.push(it.color);
+                    if (it.price_per_bf != null) parts.push(`$${it.price_per_bf}/BF`);
+                    else if (it.price_per_ci != null) parts.push(`$${it.price_per_ci}/CI`);
+                    return "• " + parts.join(" — ");
+                  })
+                  .join("\n")
+              : "None";
         }
       }
-    } catch (_) {
-      // ignore; suggestions are optional
+    } catch {
+      /* suggestions are optional */
     }
 
     // ---- 3) quote html (with safe fallback) ----
@@ -103,7 +153,9 @@ export async function POST(req: NextRequest) {
         quotePayload = j ?? null;
         html = j?.html ?? null;
       }
-    } catch (_) {}
+    } catch {
+      /* noop */
+    }
 
     if (!html) {
       html = `
@@ -122,6 +174,32 @@ export async function POST(req: NextRequest) {
       `.trim();
     }
 
+    // ---- Dry-run enhancements: append suggestions under the preview ----
+    if (input.dryRun && suggested.itemsPretty && suggested.itemsPretty.length) {
+      const list = (suggested.itemsPretty as PrettyItem[])
+        .slice(0, 3)
+        .map((it: PrettyItem) => {
+          const bits: string[] = [];
+          bits.push(it.name ?? "Material");
+          if (it.density_pcf != null) bits.push(`${it.density_pcf.toFixed(1)} pcf`);
+          if (it.color) bits.push(it.color);
+          if (it.price_per_bf != null) bits.push(`$${it.price_per_bf}/BF`);
+          else if (it.price_per_ci != null) bits.push(`$${it.price_per_ci}/CI`);
+          return `<li>${bits.join(" — ")}</li>`;
+        })
+        .join("");
+
+      html += `
+        <div style="margin-top:16px">
+          <p style="margin:0 0 6px 0"><strong>Suggested materials (top ${Math.min(
+            3,
+            suggested.itemsPretty.length
+          )}):</strong></p>
+          <ul style="margin:0 0 12px 18px">${list}</ul>
+        </div>
+      `;
+    }
+
     // ---- dryRun: preview only ----
     if (input.dryRun) {
       return NextResponse.json(
@@ -134,7 +212,7 @@ export async function POST(req: NextRequest) {
           quote: quotePayload?.quote ?? null,
           extracted,
           missing,
-          suggested, // <— surfaced for logs/UI
+          suggested, // { count, items, itemsPretty, summary, top }
         },
         { status: 200 }
       );
