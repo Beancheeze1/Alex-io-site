@@ -2,8 +2,8 @@
     "slots":  {
                   "qty":  10,
                   "internal_width_in":  8,
-                  "foam_material_id":  1,
                   "internal_height_in":  2,
+                  "density_lbft3":  1.7,
                   "thickness_under_in":  0.5,
                   "internal_length_in":  12
               }
