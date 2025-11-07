@@ -46,8 +46,8 @@ async function getColMap(client: any): Promise<ColMap> {
     id:         pick("id","material_id"),
     name:       pick("name","material_name","title"),
     color:      pick("color","colour"),
-    vendor:     pick("vendor","supplier","mfr","manufacturer"),
-    notes:      pick("notes","description","desc","details","comments"),
+    vendor:     pick("vendor","supplier","mfr"),
+    notes:      pick("notes","description","desc","details"),
     density:    pick("density_lbft3","density_pcf","density","pcf"),
     price_ci:   pick("price_per_ci","price_ci","price_per_cu_in"),
     price_bf:   pick("price_per_bf","price_bf"),
@@ -58,7 +58,7 @@ async function getColMap(client: any): Promise<ColMap> {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(()=>({}));
     const filter = body?.filter ?? {};
     const searchWords: string[] = Array.isArray(body?.searchWords) ? body.searchWords : [];
 
@@ -66,74 +66,78 @@ export async function POST(req: NextRequest) {
     try {
       const map = await getColMap(client);
 
-      // Build SELECT list (alias to stable names for the response)
-      const sel: string[] = [];
-      sel.push(map.id         ? `${map.id} AS id` : `NULL::text AS id`);
-      sel.push(map.name       ? `${map.name} AS name` : `NULL::text AS name`);
-      sel.push(map.color      ? `${map.color} AS color` : `NULL::text AS color`);
-      sel.push(map.vendor     ? `${map.vendor} AS vendor` : `NULL::text AS vendor`);
-      sel.push(map.notes      ? `${map.notes} AS notes` : `NULL::text AS notes`);
-      sel.push(map.density    ? `COALESCE(${map.density},0)::float AS density_pcf` : `0::float AS density_pcf`);
-      sel.push(map.kerf       ? `COALESCE(${map.kerf},0)::float AS kerf_pct` : `0::float AS kerf_pct`);
-      sel.push(map.price_ci   ? `COALESCE(${map.price_ci},0)::float AS price_per_ci` : `0::float AS price_per_ci`);
-      sel.push(map.price_bf   ? `COALESCE(${map.price_bf},0)::float AS price_per_bf` : `0::float AS price_per_bf`);
-      sel.push(map.min_charge ? `COALESCE(${map.min_charge},0)::float AS min_charge` : `0::float AS min_charge`);
+      // SELECT list with safe aliases
+      const sel = [
+        map.id         ? `${map.id} AS id` : `NULL::text AS id`,
+        map.name       ? `${map.name} AS name` : `NULL::text AS name`,
+        map.color      ? `${map.color} AS color` : `NULL::text AS color`,
+        map.vendor     ? `${map.vendor} AS vendor` : `NULL::text AS vendor`,
+        map.notes      ? `${map.notes} AS notes` : `NULL::text AS notes`,
+        map.density    ? `COALESCE(${map.density},0)::float AS density_pcf` : `0::float AS density_pcf`,
+        map.kerf       ? `COALESCE(${map.kerf},0)::float AS kerf_pct` : `0::float AS kerf_pct`,
+        map.price_ci   ? `COALESCE(${map.price_ci},0)::float AS price_per_ci` : `0::float AS price_per_ci`,
+        map.price_bf   ? `COALESCE(${map.price_bf},0)::float AS price_per_bf` : `0::float AS price_per_bf`,
+        map.min_charge ? `COALESCE(${map.min_charge},0)::float AS min_charge` : `0::float AS min_charge`,
+      ].join(", ");
 
-      const base = `SELECT ${sel.join(", ")} FROM materials`;
-
-      // WHERE builder
+      const searchable = [map.name, map.vendor, map.notes].filter(Boolean) as string[];
       const wh: string[] = [];
       const params: any[] = [];
       let p = 1;
 
-      // color/family name filters (best-effort string contains)
-      if (filter?.color && map.color) {
-        wh.push(`LOWER(${map.color}) LIKE $${p++}`);
-        params.push(`%${String(filter.color).toLowerCase()}%`);
+      // Density range (loose)
+      if (map.density && (filter?.densityMin != null || filter?.densityMax != null)) {
+        if (filter?.densityMin != null) { wh.push(`${map.density} >= $${p++}`); params.push(Number(filter.densityMin)); }
+        if (filter?.densityMax != null) { wh.push(`${map.density} <= $${p++}`); params.push(Number(filter.densityMax)); }
       }
-      if (filter?.family && map.name) {
-        // family likely appears in name (PE/EPE/PU/EVA etc.)
+
+      // Family hint as substring in name
+      if (map.name && filter?.family) {
         wh.push(`LOWER(${map.name}) LIKE $${p++}`);
         params.push(`%${String(filter.family).toLowerCase()}%`);
       }
 
-      // density min/max only if a density column exists
-      if (map.density && filter?.densityMin != null) {
-        wh.push(`${map.density} >= $${p++}`);
-        params.push(Number(filter.densityMin));
-      }
-      if (map.density && filter?.densityMax != null) {
-        wh.push(`${map.density} <= $${p++}`);
-        params.push(Number(filter.densityMax));
+      // Color exact/loose
+      if (map.color && filter?.color) {
+        wh.push(`LOWER(${map.color}) = $${p++}`);
+        params.push(String(filter.color).toLowerCase());
       }
 
-      // simple free-text search across name/vendor/notes if available
-      const searchableCols = [map.name, map.vendor, map.notes].filter(Boolean) as string[];
-      if (searchableCols.length && searchWords?.length) {
+      // Free-text keywords across searchable fields
+      if (searchable.length && searchWords?.length) {
         for (const w of searchWords.slice(0, 6)) {
-          const like = `(${searchableCols.map(c=>`LOWER(${c}) LIKE $${p}`).join(" OR ")})`;
+          const like = `(${searchable.map(c=>`LOWER(${c}) LIKE $${p}`).join(" OR ")})`;
           wh.push(like);
           params.push(`%${String(w).toLowerCase()}%`);
           p++;
         }
       }
 
+      // Build query
+      const base = `SELECT ${sel} FROM materials`;
       const where = wh.length ? `WHERE ${wh.join(" AND ")}` : "";
-      // Order: prefer rows with explicit price_per_ci, then price_per_bf, then by name
       const orderBy = `
         ORDER BY
           (CASE WHEN ${map.price_ci ? `${map.price_ci} IS NULL` : "true"} THEN 1 ELSE 0 END),
           (CASE WHEN ${map.price_bf ? `${map.price_bf} IS NULL` : "true"} THEN 1 ELSE 0 END),
           ${map.name ?? "1"} NULLS LAST
       `;
-      const sql = `${base} ${where} ${orderBy} LIMIT 8`;
+      const limit = `LIMIT 8`;
 
-      const r = await client.query(sql, params);
+      // First attempt with filters
+      let sql = `${base} ${where} ${orderBy} ${limit}`;
+      let r = await client.query(sql, params);
+
+      // If too tight (no rows), fall back to a broad list
+      if (!r.rowCount) {
+        r = await client.query(`${base} ${orderBy} ${limit}`);
+      }
+
       return NextResponse.json({ ok: true, count: r.rowCount, items: r.rows }, { status: 200 });
     } finally {
       client.release();
     }
-  } catch (e:any) {
+  } catch (e: any) {
     return NextResponse.json({ ok:false, error: e?.message || "suggest-materials error" }, { status:500 });
   }
 }

@@ -1,4 +1,22 @@
 ﻿{
-    "filter":  null,
-    "searchWords":  null
+    "filter":  {
+                   "family":  "pe",
+                   "color":  "black",
+                   "densityMin":  1.5,
+                   "densityMax":  1.9
+               },
+    "searchWords":  [
+                        "pe",
+                        "black",
+                        "1.7pcf",
+                        "need",
+                        "qty",
+                        "1.7",
+                        "pcf",
+                        "1/2",
+                        "under",
+                        "black.",
+                        "die",
+                        "cut."
+                    ]
 }
