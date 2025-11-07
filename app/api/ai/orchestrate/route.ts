@@ -24,7 +24,7 @@ function toNum(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// ---- origin + URL helpers (FIX for localhost:10000) ----
+// ---- origin helpers (CF/Render safe) ----
 function getOrigin(req: NextRequest) {
   const xfProto = req.headers.get("x-forwarded-proto") || undefined;
   const xfHost =
@@ -33,7 +33,6 @@ function getOrigin(req: NextRequest) {
     undefined;
   const proto = xfProto || "https";
   if (!xfHost) {
-    // last resort: parse from req.url but do NOT trust its host in Render
     try {
       const u = new URL(req.url);
       return `${proto}://${u.hostname}`;
@@ -43,13 +42,12 @@ function getOrigin(req: NextRequest) {
   }
   return `${proto}://${xfHost}`;
 }
-
 function local(req: NextRequest, path: string) {
   const base = getOrigin(req);
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-// Minimal pretty-shape for suggestions
+// Minimal pretty item for display
 type PrettyItem = {
   id: string | number | null;
   name: string | null;
@@ -58,7 +56,78 @@ type PrettyItem = {
   price_per_bf: number | null;
   price_per_ci: number | null;
   min_charge: number | null;
+  kerf_pct?: number | null;
+  vendor?: string | null;
 };
+
+// ---- simple preliminary pricing (per piece, then extended) ----
+type PricingOut = {
+  materialName: string;
+  rateBasis: "CI" | "BF->CI";
+  ratePerCI: number;       // USD per cubic inch
+  kerf_pct: number;        // 0..100
+  min_charge: number;      // USD per piece
+  qty: number;
+  dims_ci: number;         // L*W*H (in^3)
+  piece_ci_with_waste: number;
+  each: number;            // max(min_charge, ratePerCI * piece_ci_with_waste)
+  extended: number;        // each * qty
+  notes?: string;
+};
+
+function ciFromBF(bf: number) {
+  // 1 board foot = 144 in^3
+  return bf / 144;
+}
+function money(n: number) {
+  return `$${n.toFixed(2)}`;
+}
+
+function computePrelimPricing(extracted: any, top: any): PricingOut | null {
+  if (!extracted?.dims || typeof extracted.qty === "undefined") return null;
+  const L = toNum(extracted.dims.L_in);
+  const W = toNum(extracted.dims.W_in);
+  const H = toNum(extracted.dims.H_in);
+  const qty = toNum(extracted.qty);
+  if (!L || !W || !H || !qty) return null;
+
+  const pricePerCI = toNum(top?.price_per_ci);
+  const pricePerBF = toNum(top?.price_per_bf);
+  let ratePerCI: number | null = null;
+  let basis: "CI" | "BF->CI" = "CI";
+
+  if (pricePerCI != null) {
+    ratePerCI = pricePerCI;
+    basis = "CI";
+  } else if (pricePerBF != null) {
+    ratePerCI = pricePerBF / 144;
+    basis = "BF->CI";
+  } else {
+    return null; // no rate available
+  }
+
+  const kerf_pct_raw = toNum(top?.kerf_pct) ?? 0;     // e.g., 10 means 10%
+  const min_charge = toNum(top?.min_charge) ?? 0;
+
+  const dims_ci = L * W * H;                          // simple block volume
+  const piece_ci_with_waste = dims_ci * (1 + kerf_pct_raw / 100);
+  const rawEach = ratePerCI * piece_ci_with_waste;
+  const each = Math.max(min_charge, rawEach);
+  const extended = each * qty;
+
+  return {
+    materialName: String(top?.name ?? "Material"),
+    rateBasis: basis,
+    ratePerCI: ratePerCI!,
+    kerf_pct: kerf_pct_raw,
+    min_charge,
+    qty,
+    dims_ci,
+    piece_ci_with_waste,
+    each,
+    extended,
+  };
+}
 
 export async function POST(req: NextRequest) {
   const diag: Record<string, any> = {};
@@ -79,7 +148,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "invalid toEmail" }, { status: 400 });
     }
 
-    // ---- 1) extract ----
+    // 1) Extract
     let extracted: any = null;
     let missing: string[] | null = null;
     try {
@@ -104,7 +173,7 @@ export async function POST(req: NextRequest) {
       diag.extract_throw = e?.message || String(e);
     }
 
-    // ---- 2) suggest materials ----
+    // 2) Suggest materials
     let suggested: {
       count: number;
       items: any[];
@@ -145,7 +214,6 @@ export async function POST(req: NextRequest) {
           suggested.count = Number(j?.count ?? items.length);
           suggested.top = pickTopMaterial(items, extracted ?? null);
 
-          // Pretty slice for display
           const pretty: PrettyItem[] = items.slice(0, 8).map((it: any): PrettyItem => ({
             id: it?.id ?? null,
             name: it?.name ?? null,
@@ -154,6 +222,8 @@ export async function POST(req: NextRequest) {
             price_per_bf: toNum(it?.price_per_bf),
             price_per_ci: toNum(it?.price_per_ci),
             min_charge: toNum(it?.min_charge),
+            kerf_pct: toNum(it?.kerf_pct),
+            vendor: it?.vendor ?? null,
           }));
           suggested.itemsPretty = pretty;
 
@@ -178,7 +248,7 @@ export async function POST(req: NextRequest) {
       diag.suggest_throw = e?.message || String(e);
     }
 
-    // ---- 3) quote html (with safe fallback) ----
+    // 3) Quote HTML (base)
     let quotePayload: any = null;
     let html: string | null = null;
     try {
@@ -221,7 +291,62 @@ export async function POST(req: NextRequest) {
       diag.html_fallback = true;
     }
 
-    // ---- Dry-run enhancements: append suggestions under the preview ----
+    // 4) Preliminary pricing (only if we have enough data)
+    let pricing: PricingOut | null = null;
+    if (suggested.top) {
+      pricing = computePrelimPricing(extracted, suggested.top);
+    }
+
+    if (pricing) {
+      const block = `
+        <div style="margin-top:16px">
+          <h3 style="margin:0 0 6px 0">Pricing (preliminary)</h3>
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px">
+            <tr>
+              <td style="padding:6px 8px;color:#555">Material</td>
+              <td style="padding:6px 8px;text-align:right;color:#111"><strong>${escapeHtml(
+                pricing.materialName
+              )}</strong></td>
+            </tr>
+            <tr>
+              <td style="padding:6px 8px;color:#555">Rate</td>
+              <td style="padding:6px 8px;text-align:right;color:#111">${pricing.rateBasis === "CI"
+                ? `${money(pricing.ratePerCI)}/CI`
+                : `${money(pricing.ratePerCI * 144)}/BF (${money(pricing.ratePerCI)}/CI)`}</td>
+            </tr>
+            <tr>
+              <td style="padding:6px 8px;color:#555">Waste (kerf)</td>
+              <td style="padding:6px 8px;text-align:right;color:#111">${pricing.kerf_pct.toFixed(1)}%</td>
+            </tr>
+            <tr>
+              <td style="padding:6px 8px;color:#555">Min charge each</td>
+              <td style="padding:6px 8px;text-align:right;color:#111">${money(pricing.min_charge)}</td>
+            </tr>
+            <tr>
+              <td style="padding:6px 8px;color:#555">Unit size (in³)</td>
+              <td style="padding:6px 8px;text-align:right;color:#111">${pricing.dims_ci.toFixed(1)} → ${pricing.piece_ci_with_waste.toFixed(1)} w/ waste</td>
+            </tr>
+            <tr>
+              <td style="padding:6px 8px;color:#555">Qty</td>
+              <td style="padding:6px 8px;text-align:right;color:#111">${pricing.qty}</td>
+            </tr>
+            <tr>
+              <td style="padding:6px 8px;color:#555">Price each</td>
+              <td style="padding:6px 8px;text-align:right;color:#111"><strong>${money(pricing.each)}</strong></td>
+            </tr>
+            <tr>
+              <td style="padding:6px 8px;color:#555">Extended</td>
+              <td style="padding:6px 8px;text-align:right;color:#111"><strong>${money(pricing.extended)}</strong></td>
+            </tr>
+          </table>
+          <p style="margin:8px 0 0 0;color:#666;font-size:12px">Note: preliminary estimate based on top matched material and simple block volume; final price may change with cavities, draw, and tolerances.</p>
+        </div>
+      `.trim();
+
+      html += block;
+    }
+
+    // Also append a small suggestions block in dryRun for eyeballing
     if (input.dryRun && suggested.itemsPretty && suggested.itemsPretty.length) {
       const list = (suggested.itemsPretty as PrettyItem[])
         .slice(0, 3)
@@ -247,7 +372,7 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // ---- dryRun: preview only ----
+    // DryRun response
     if (input.dryRun) {
       return NextResponse.json(
         {
@@ -260,13 +385,14 @@ export async function POST(req: NextRequest) {
           extracted,
           missing,
           suggested,
-          diag, // diagnostics
+          pricing,  // NEW: structured pricing in the JSON
+          diag,
         },
         { status: 200 }
       );
     }
 
-    // ---- live send via Graph ----
+    // Live send
     const sendUrl = local(req, "/api/msgraph/send");
     diag.send_url = sendUrl;
     const sendRes = await fetch(sendUrl, {
@@ -293,6 +419,7 @@ export async function POST(req: NextRequest) {
         extracted,
         missing,
         suggested,
+        pricing,
         diag,
       },
       { status: 200 }
@@ -305,7 +432,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Read text safely with truncation
+// utils
 async function safeText(res: Response, max = 300) {
   try {
     const t = await res.text();
@@ -313,4 +440,11 @@ async function safeText(res: Response, max = 300) {
   } catch {
     return "<no-text>";
   }
+}
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
