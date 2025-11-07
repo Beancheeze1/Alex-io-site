@@ -1,0 +1,6 @@
+﻿{
+  "to": "25thhourdesign@gmail.com",
+  "subject": "Re: thread test",
+  "html": "<p>Reply-in-thread test (should appear in the same Outlook thread).</p>",
+  "inReplyTo": "<PUT_INTERNET_MESSAGE_ID_HERE>"
+}
