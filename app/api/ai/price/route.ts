@@ -1,5 +1,5 @@
 // app/api/ai/price/route.ts
-// DB-backed AI pricing: resolve material (by id or density) then delegate to /api/quote/foam
+// DB-backed AI pricing: dynamic column detection + delegate to /api/quote/foam
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
@@ -25,8 +25,48 @@ function requiredNumber(name: string, v: any) {
   return n;
 }
 function getBase() {
-  // Use public base if present (Render/Cloudflare), otherwise local dev
   return (process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") || "http://localhost:3000");
+}
+
+type ColMap = {
+  density: string | null;
+  per_ci: string | null;
+  per_bf: string | null;
+  per_cuft: string | null;
+  kerf_pct: string | null;
+  min_charge: string | null;
+};
+
+async function detectMaterialColumns(): Promise<ColMap> {
+  // Read available columns from public.materials
+  const cols: Array<{ column_name: string }> = await q(
+    `select column_name
+       from information_schema.columns
+      where table_schema = 'public'
+        and table_name   = 'materials'`
+  );
+
+  const have = new Set(cols.map(c => c.column_name.toLowerCase()));
+
+  // Helper to pick the first that exists
+  const pick = (candidates: string[]) => {
+    for (const c of candidates) if (have.has(c.toLowerCase())) return c;
+    return null;
+  };
+
+  return {
+    density:  pick(["density_lbft3","density_lb_ft3","density","pcf","density_lbf_ft3"]),
+    per_ci:   pick(["price_per_cuin","price_per_ci","price_per_cu_in","price_per_cubic_in","price_ci"]),
+    per_bf:   pick(["price_per_bf","price_bf","price_per_board_foot"]),
+    per_cuft: pick(["price_per_cuft","price_per_cu_ft","price_cuft","price_per_cubic_foot"]),
+    kerf_pct: pick(["kerf_waste_pct","kerf_pct","waste_pct","kerf_percent"]),
+    min_charge: pick(["min_charge_usd","min_charge","minimum_charge","min_order_charge_usd"]),
+  };
+}
+
+function sqlExprOrNull(col: string | null, cast: "numeric" | "text" = "numeric") {
+  if (!col) return `NULL::${cast}`;
+  return cast === "numeric" ? `(${col})::numeric` : `${col}`;
 }
 
 export async function POST(req: NextRequest) {
@@ -40,61 +80,71 @@ export async function POST(req: NextRequest) {
     const H = requiredNumber("internal_height_in", slots.internal_height_in);
     const U = requiredNumber("thickness_under_in", slots.thickness_under_in);
     const QTY = Number.isFinite(N(slots.qty)) ? Math.max(1, N(slots.qty)!) : 1;
-
-    // Optional cavities (just a count for now; your /quote/foam supports detailed shapes too)
     const C = Number.isFinite(N(slots.cavities)) ? Math.max(1, N(slots.cavities)!) : 1;
 
-    // --- Resolve material ---
+    // --- Discover schema & resolve material ---
+    const cmap = await detectMaterialColumns();
+
     let materialId = Number.isFinite(N(slots.foam_material_id)) ? Number(slots.foam_material_id) : NaN;
     let resolvedMaterial: any = null;
 
     if (!Number.isFinite(materialId)) {
-      const density = N(slots.density_lbft3);
-      if (!Number.isFinite(density)) {
+      const densityReq = N(slots.density_lbft3);
+      if (!Number.isFinite(densityReq)) {
         throw new Error("provide foam_material_id or density_lbft3");
       }
 
-      // Try v_material_prices first if present, else fall back to materials table.
-      // Choose the closest density (within a reasonable window) and prefer rows that have price fields populated.
+      // Build a query that only references columns that actually exist
+      const densityExpr = sqlExprOrNull(cmap.density, "numeric");
+      const perCiExpr   = sqlExprOrNull(cmap.per_ci, "numeric");
+      const perBfExpr   = sqlExprOrNull(cmap.per_bf, "numeric");
+      const perCuftExpr = sqlExprOrNull(cmap.per_cuft, "numeric");
+      const kerfExpr    = sqlExprOrNull(cmap.kerf_pct, "numeric");
+      const minExpr     = sqlExprOrNull(cmap.min_charge, "numeric");
+
+      // Choose closest density; prefer rows with *any* price column populated
       const rows = await q<any>(`
         with materials_any as (
           select
             m.id,
-            coalesce(m.name, concat('Material ', m.id::text)) as name,
-            coalesce(m.density_lbft3, m.density) as density,
-            -- common price fields across schemas you use
-            (m.price_per_cuin) as per_cu_in,
-            (m.price_per_bf) as per_bf,
-            (m.price_per_cuft) as per_cu_ft,
-            m.kerf_waste_pct,
-            m.min_charge_usd
+            coalesce(m.name, 'Material ' || m.id::text) as name,
+            ${densityExpr} as density,
+            ${perCiExpr}   as per_cu_in,
+            ${perBfExpr}   as per_bf,
+            ${perCuftExpr} as per_cu_ft,
+            ${kerfExpr}    as kerf_waste_pct,
+            ${minExpr}     as min_charge_usd
           from public.materials m
         ),
         ranked as (
           select *,
-                 abs((density)::numeric - $1::numeric) as abs_diff,
+                 abs((density) - $1::numeric) as abs_diff,
                  case when per_cu_in is not null or per_bf is not null or per_cu_ft is not null then 1 else 0 end as has_price
           from materials_any
         )
         select *
         from ranked
-        order by has_price desc, abs_diff asc
+        order by has_price desc, abs_diff asc, id asc
         limit 1
-      `, [density]);
+      `, [densityReq]);
 
       if (!rows.length) throw new Error("no material candidates");
       resolvedMaterial = rows[0];
       materialId = Number(resolvedMaterial.id);
     } else {
-      // Fetch basic info for echoing back
+      // Fetch basic info for echoing back (avoid missing columns)
+      const densityExpr = sqlExprOrNull(cmap.density, "numeric");
+      const kerfExpr    = sqlExprOrNull(cmap.kerf_pct, "numeric");
+      const minExpr     = sqlExprOrNull(cmap.min_charge, "numeric");
       resolvedMaterial = await one<any>(
-        `select id, name,
-                coalesce(density_lbft3, density) as density,
-                price_per_cuin as per_cu_in, price_per_bf as per_bf, price_per_cuft as per_cu_ft,
-                kerf_waste_pct, min_charge_usd
-         from public.materials
-         where id = $1`,
-        [materialId]
+        `select
+            m.id,
+            coalesce(m.name, 'Material ' || m.id::text) as name,
+            ${densityExpr} as density,
+            ${kerfExpr}    as kerf_waste_pct,
+            ${minExpr}     as min_charge_usd
+         from public.materials m
+         where m.id = $1`, [materialId]
       );
     }
 
@@ -107,8 +157,6 @@ export async function POST(req: NextRequest) {
       height_in: H,
       qty: QTY,
       material_id: materialId,
-      // Pass a simple under-pad as a single slot cavity-equivalent; your route will
-      // subtract cavities from the volume and apply kerf/min-charge correctly.
       cavities: [
         { label: "rect", l: L, w: W, d: U, count: C }
       ]
@@ -120,6 +168,7 @@ export async function POST(req: NextRequest) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(foamPayload),
     });
+
     const text = await res.text();
     let data: any = null;
     try { data = text ? JSON.parse(text) : null; } catch {}
@@ -131,7 +180,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Shape a concise AI-friendly result
     return NextResponse.json({
       ok: true,
       material: {
