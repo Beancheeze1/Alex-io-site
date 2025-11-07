@@ -24,7 +24,7 @@ function toNum(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// ---- origin helpers (CF/Render safe) ----
+// ---- origin helpers ----
 function getOrigin(req: NextRequest) {
   const xfProto = req.headers.get("x-forwarded-proto") || undefined;
   const xfHost =
@@ -47,7 +47,6 @@ function local(req: NextRequest, path: string) {
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-// Minimal pretty item for display
 type PrettyItem = {
   id: string | number | null;
   name: string | null;
@@ -60,37 +59,64 @@ type PrettyItem = {
   vendor?: string | null;
 };
 
-// ---- simple preliminary pricing (per piece, then extended) ----
+// ------------ Units normalization helpers ------------
+function normalizeDimsToInches(extracted: any): { L: number; W: number; H: number } | null {
+  if (!extracted?.dims) return null;
+
+  // Accept any of these shapes:
+  // { L_in, W_in, H_in }, { L, W, H, units }, { L_mm, W_mm, H_mm }, or explicit extracted.units == 'mm'
+  const d = extracted.dims;
+  let L = toNum(d?.L_in ?? d?.L);
+  let W = toNum(d?.W_in ?? d?.W);
+  let H = toNum(d?.H_in ?? d?.H);
+
+  const units =
+    d?.units ||
+    extracted?.units ||
+    (d?.L_mm || d?.W_mm || d?.H_mm ? "mm" : "in");
+
+  if (units === "mm") {
+    if (toNum(d?.L_mm) && toNum(d?.W_mm) && toNum(d?.H_mm)) {
+      L = toNum(d?.L_mm)! / 25.4;
+      W = toNum(d?.W_mm)! / 25.4;
+      H = toNum(d?.H_mm)! / 25.4;
+    } else if (L && W && H) {
+      L = L / 25.4;
+      W = W / 25.4;
+      H = H / 25.4;
+    }
+  }
+
+  if (!L || !W || !H) return null;
+  return { L, W, H };
+}
+
+// ------------ Simple CI fallback pricing ------------
 type PricingOut = {
   materialName: string;
   rateBasis: "CI" | "BF->CI";
-  ratePerCI: number;       // USD per cubic inch
-  kerf_pct: number;        // 0..100
-  min_charge: number;      // USD per piece
+  ratePerCI: number;
+  kerf_pct: number;
+  min_charge: number;
   qty: number;
-  dims_ci: number;         // L*W*H (in^3)
+  dims_ci: number;
   piece_ci_with_waste: number;
-  each: number;            // max(min_charge, ratePerCI * piece_ci_with_waste)
-  extended: number;        // each * qty
+  each: number;
+  extended: number;
   notes?: string;
 };
 
-function ciFromBF(bf: number) {
-  // 1 board foot = 144 in^3
-  return bf / 144;
-}
 function money(n: number) {
   return `$${n.toFixed(2)}`;
 }
 
-function computePrelimPricing(extracted: any, top: any): PricingOut | null {
-  if (!extracted?.dims || typeof extracted.qty === "undefined") return null;
-  const L = toNum(extracted.dims.L_in);
-  const W = toNum(extracted.dims.W_in);
-  const H = toNum(extracted.dims.H_in);
-  const qty = toNum(extracted.qty);
-  if (!L || !W || !H || !qty) return null;
-
+function computePrelimPricing(
+  qty: number,
+  L: number,
+  W: number,
+  H: number,
+  top: any
+): PricingOut | null {
   const pricePerCI = toNum(top?.price_per_ci);
   const pricePerBF = toNum(top?.price_per_bf);
   let ratePerCI: number | null = null;
@@ -103,13 +129,13 @@ function computePrelimPricing(extracted: any, top: any): PricingOut | null {
     ratePerCI = pricePerBF / 144;
     basis = "BF->CI";
   } else {
-    return null; // no rate available
+    return null;
   }
 
-  const kerf_pct_raw = toNum(top?.kerf_pct) ?? 0;     // e.g., 10 means 10%
+  const kerf_pct_raw = toNum(top?.kerf_pct) ?? 0;
   const min_charge = toNum(top?.min_charge) ?? 0;
 
-  const dims_ci = L * W * H;                          // simple block volume
+  const dims_ci = L * W * H;
   const piece_ci_with_waste = dims_ci * (1 + kerf_pct_raw / 100);
   const rawEach = ratePerCI * piece_ci_with_waste;
   const each = Math.max(min_charge, rawEach);
@@ -162,7 +188,7 @@ export async function POST(req: NextRequest) {
       });
       diag.extract_status = exRes.status;
       if (!exRes.ok) {
-        diag.extract_error = await safeText(exRes);
+        diag.extract_error = await exRes.text().catch(() => "<no-text>");
       } else {
         const j = await exRes.json();
         extracted = j?.extracted ?? null;
@@ -206,7 +232,7 @@ export async function POST(req: NextRequest) {
         diag.suggest_status = sRes.status;
 
         if (!sRes.ok) {
-          diag.suggest_error = await safeText(sRes);
+          diag.suggest_error = await sRes.text().catch(() => "<no-text>");
         } else {
           const j = await sRes.json();
           const items = Array.isArray(j?.items) ? j.items : [];
@@ -262,7 +288,7 @@ export async function POST(req: NextRequest) {
       });
       diag.quote_status = qRes.status;
       if (!qRes.ok) {
-        diag.quote_error = await safeText(qRes);
+        diag.quote_error = await qRes.text().catch(() => "<no-text>");
       } else {
         const j = await qRes.json();
         quotePayload = j ?? null;
@@ -291,60 +317,85 @@ export async function POST(req: NextRequest) {
       diag.html_fallback = true;
     }
 
-    // 4) Preliminary pricing (only if we have enough data)
-    let pricing: PricingOut | null = null;
-    if (suggested.top) {
-      pricing = computePrelimPricing(extracted, suggested.top);
+    // 4) DB price (with mm→in normalization)
+    let pricingBlockHtml = "";
+    let pricingDiag: any = {};
+    let pricingUsedDb = false;
+
+    const qty = toNum(extracted?.qty);
+    const dimsInches = normalizeDimsToInches(extracted);
+    const top = suggested.top;
+
+    if (qty && dimsInches && top?.id != null) {
+      try {
+        const priceUrl = local(req, "/api/ai/price");
+        const pRes = await fetch(priceUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            dims: { L: dimsInches.L, W: dimsInches.W, H: dimsInches.H, units: "in" },
+            qty,
+            materialId: Number(top.id),
+            cavities: 0,
+            round_to_bf: false,
+          }),
+        });
+        pricingDiag.price_status = pRes.status;
+        if (pRes.ok) {
+          const pj = await pRes.json();
+          if (pj?.ok) {
+            pricingUsedDb = true;
+            pricingBlockHtml = `
+              <div style="margin-top:16px">
+                <h3 style="margin:0 0 6px 0">Pricing (preliminary — DB)</h3>
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px">
+                  <tr><td style="padding:6px 8px;color:#555">Material</td><td style="padding:6px 8px;text-align:right;color:#111"><strong>${escapeHtml(String(top?.name ?? "Material"))}</strong></td></tr>
+                  <tr><td style="padding:6px 8px;color:#555">Dims (in)</td><td style="padding:6px 8px;text-align:right;color:#111">${dimsInches.L.toFixed(2)} × ${dimsInches.W.toFixed(2)} × ${dimsInches.H.toFixed(2)}</td></tr>
+                  <tr><td style="padding:6px 8px;color:#555">Qty</td><td style="padding:6px 8px;text-align:right;color:#111">${qty}</td></tr>
+                  <tr><td style="padding:6px 8px;color:#555">Price each</td><td style="padding:6px 8px;text-align:right;color:#111"><strong>${money(pj.each)}</strong></td></tr>
+                  <tr><td style="padding:6px 8px;color:#555">Extended</td><td style="padding:6px 8px;text-align:right;color:#111"><strong>${money(pj.extended)}</strong></td></tr>
+                </table>
+                <p style="margin:8px 0 0 0;color:#666;font-size:12px">Note: DB function result (<code>calc_foam_quote</code>).</p>
+              </div>
+            `;
+          } else {
+            pricingDiag.price_error = pj?.error ?? "unknown db price error";
+          }
+        } else {
+          pricingDiag.price_error_text = await pRes.text().catch(() => "<no-text>");
+        }
+      } catch (e: any) {
+        pricingDiag.price_throw = e?.message || String(e);
+      }
     }
 
-    if (pricing) {
-      const block = `
-        <div style="margin-top:16px">
-          <h3 style="margin:0 0 6px 0">Pricing (preliminary)</h3>
-          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px">
-            <tr>
-              <td style="padding:6px 8px;color:#555">Material</td>
-              <td style="padding:6px 8px;text-align:right;color:#111"><strong>${escapeHtml(
-                pricing.materialName
-              )}</strong></td>
-            </tr>
-            <tr>
-              <td style="padding:6px 8px;color:#555">Rate</td>
-              <td style="padding:6px 8px;text-align:right;color:#111">${pricing.rateBasis === "CI"
-                ? `${money(pricing.ratePerCI)}/CI`
-                : `${money(pricing.ratePerCI * 144)}/BF (${money(pricing.ratePerCI)}/CI)`}</td>
-            </tr>
-            <tr>
-              <td style="padding:6px 8px;color:#555">Waste (kerf)</td>
-              <td style="padding:6px 8px;text-align:right;color:#111">${pricing.kerf_pct.toFixed(1)}%</td>
-            </tr>
-            <tr>
-              <td style="padding:6px 8px;color:#555">Min charge each</td>
-              <td style="padding:6px 8px;text-align:right;color:#111">${money(pricing.min_charge)}</td>
-            </tr>
-            <tr>
-              <td style="padding:6px 8px;color:#555">Unit size (in³)</td>
-              <td style="padding:6px 8px;text-align:right;color:#111">${pricing.dims_ci.toFixed(1)} → ${pricing.piece_ci_with_waste.toFixed(1)} w/ waste</td>
-            </tr>
-            <tr>
-              <td style="padding:6px 8px;color:#555">Qty</td>
-              <td style="padding:6px 8px;text-align:right;color:#111">${pricing.qty}</td>
-            </tr>
-            <tr>
-              <td style="padding:6px 8px;color:#555">Price each</td>
-              <td style="padding:6px 8px;text-align:right;color:#111"><strong>${money(pricing.each)}</strong></td>
-            </tr>
-            <tr>
-              <td style="padding:6px 8px;color:#555">Extended</td>
-              <td style="padding:6px 8px;text-align:right;color:#111"><strong>${money(pricing.extended)}</strong></td>
-            </tr>
-          </table>
-          <p style="margin:8px 0 0 0;color:#666;font-size:12px">Note: preliminary estimate based on top matched material and simple block volume; final price may change with cavities, draw, and tolerances.</p>
-        </div>
-      `.trim();
-
-      html += block;
+    // 5) Fallback CI math if DB price not available
+    if (!pricingUsedDb && qty && dimsInches && top) {
+      const p = computePrelimPricing(qty, dimsInches.L, dimsInches.W, dimsInches.H, top);
+      if (p) {
+        pricingBlockHtml = `
+          <div style="margin-top:16px">
+            <h3 style="margin:0 0 6px 0">Pricing (preliminary)</h3>
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px">
+              <tr><td style="padding:6px 8px;color:#555">Material</td><td style="padding:6px 8px;text-align:right;color:#111"><strong>${escapeHtml(p.materialName)}</strong></td></tr>
+              <tr><td style="padding:6px 8px;color:#555">Dims (in)</td><td style="padding:6px 8px;text-align:right;color:#111">${dimsInches.L.toFixed(2)} × ${dimsInches.W.toFixed(2)} × ${dimsInches.H.toFixed(2)}</td></tr>
+              <tr><td style="padding:6px 8px;color:#555">Qty</td><td style="padding:6px 8px;text-align:right;color:#111">${p.qty}</td></tr>
+              <tr><td style="padding:6px 8px;color:#555">Rate</td><td style="padding:6px 8px;text-align:right;color:#111">${p.rateBasis === "CI" ? `${money(p.ratePerCI)}/CI` : `${money(p.ratePerCI * 144)}/BF (${money(p.ratePerCI)}/CI)`}</td></tr>
+              <tr><td style="padding:6px 8px;color:#555">Waste (kerf)</td><td style="padding:6px 8px;text-align:right;color:#111">${p.kerf_pct.toFixed(1)}%</td></tr>
+              <tr><td style="padding:6px 8px;color:#555">Min charge each</td><td style="padding:6px 8px;text-align:right;color:#111">${money(p.min_charge)}</td></tr>
+              <tr><td style="padding:6px 8px;color:#555">Unit size (in³)</td><td style="padding:6px 8px;text-align:right;color:#111">${p.dims_ci.toFixed(1)} → ${p.piece_ci_with_waste.toFixed(1)} w/ waste</td></tr>
+              <tr><td style="padding:6px 8px;color:#555">Price each</td><td style="padding:6px 8px;text-align:right;color:#111"><strong>${money(p.each)}</strong></td></tr>
+              <tr><td style="padding:6px 8px;color:#555">Extended</td><td style="padding:6px 8px;text-align:right;color:#111"><strong>${money(p.extended)}</strong></td></tr>
+            </table>
+            <p style="margin:8px 0 0 0;color:#666;font-size:12px">Note: simple CI estimate; final price may change with cavities/tolerances.</p>
+          </div>
+        `;
+      }
     }
+
+    // Append pricing block (if any)
+    if (pricingBlockHtml) html += pricingBlockHtml;
 
     // Also append a small suggestions block in dryRun for eyeballing
     if (input.dryRun && suggested.itemsPretty && suggested.itemsPretty.length) {
@@ -372,7 +423,7 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // DryRun response
+    // DryRun
     if (input.dryRun) {
       return NextResponse.json(
         {
@@ -385,16 +436,14 @@ export async function POST(req: NextRequest) {
           extracted,
           missing,
           suggested,
-          pricing,  // NEW: structured pricing in the JSON
-          diag,
+          diag: { ...diag, pricingDiag, pricingUsedDb },
         },
         { status: 200 }
       );
     }
 
-    // Live send
+    // Live send via Graph
     const sendUrl = local(req, "/api/msgraph/send");
-    diag.send_url = sendUrl;
     const sendRes = await fetch(sendUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -419,8 +468,7 @@ export async function POST(req: NextRequest) {
         extracted,
         missing,
         suggested,
-        pricing,
-        diag,
+        diag: { ...diag, pricingDiag, pricingUsedDb },
       },
       { status: 200 }
     );
@@ -432,15 +480,6 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// utils
-async function safeText(res: Response, max = 300) {
-  try {
-    const t = await res.text();
-    return t.length > max ? t.slice(0, max) + "…(truncated)" : t;
-  } catch {
-    return "<no-text>";
-  }
-}
 function escapeHtml(s: string) {
   return s
     .replace(/&/g, "&amp;")
