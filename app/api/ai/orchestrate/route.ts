@@ -1,6 +1,7 @@
 // app/api/ai/orchestrate/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { absoluteUrl } from "@/app/lib/internalFetch";
+import { pickTopMaterial } from "@/app/lib/ai/materialSelect";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,13 +36,63 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "invalid toEmail" }, { status: 400 });
     }
 
-    // ---- robust call to /api/ai/quote (never throw) ----
+    // ---- 1) extract ----
+    let extracted: any = null;
+    let missing: string[] | null = null;
+    try {
+      const extractUrl = absoluteUrl(req, "/api/ai/extract");
+      const exRes = await fetch(extractUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ text: input.text }),
+      });
+      if (exRes.ok) {
+        const j = await exRes.json();
+        extracted = j?.extracted ?? null;
+        missing = j?.missing ?? null;
+      }
+    } catch (_) {
+      // keep going; we'll still form a quote with fallback
+    }
+
+    // ---- 2) suggest materials ----
+    let suggested: { count: number; items: any[]; top: any | null } = {
+      count: 0,
+      items: [],
+      top: null,
+    };
+    try {
+      if (extracted?.dbFilter || extracted?.searchWords) {
+        const sugUrl = absoluteUrl(req, "/api/ai/suggest-materials");
+        const payload = {
+          filter: extracted?.dbFilter ?? {},
+          searchWords: extracted?.searchWords ?? [],
+        };
+        const sRes = await fetch(sugUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify(payload),
+        });
+        if (sRes.ok) {
+          const j = await sRes.json();
+          const items = Array.isArray(j?.items) ? j.items : [];
+          suggested.items = items;
+          suggested.count = Number(j?.count ?? items.length);
+          suggested.top = pickTopMaterial(items, extracted ?? null);
+        }
+      }
+    } catch (_) {
+      // ignore; suggestions are optional
+    }
+
+    // ---- 3) quote html (with safe fallback) ----
     let quotePayload: any = null;
     let html: string | null = null;
-
     try {
-      const url = absoluteUrl(req, "/api/ai/quote");
-      const qRes = await fetch(url, {
+      const quoteUrl = absoluteUrl(req, "/api/ai/quote");
+      const qRes = await fetch(quoteUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
@@ -52,12 +103,9 @@ export async function POST(req: NextRequest) {
         quotePayload = j ?? null;
         html = j?.html ?? null;
       }
-    } catch (_) {
-      // swallow; we’ll fall back to a generic email below
-    }
+    } catch (_) {}
 
     if (!html) {
-      // graceful fallback if quote service is unreachable
       html = `
         <div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;line-height:1.4;color:#111">
           <p>Thanks for reaching out — I can help quote your foam packaging quickly.</p>
@@ -74,7 +122,7 @@ export async function POST(req: NextRequest) {
       `.trim();
     }
 
-    // dry run: preview only
+    // ---- dryRun: preview only ----
     if (input.dryRun) {
       return NextResponse.json(
         {
@@ -84,12 +132,15 @@ export async function POST(req: NextRequest) {
           subject: input.subject,
           htmlPreview: html,
           quote: quotePayload?.quote ?? null,
+          extracted,
+          missing,
+          suggested, // <— surfaced for logs/UI
         },
         { status: 200 }
       );
     }
 
-    // live send
+    // ---- live send via Graph ----
     const sendUrl = absoluteUrl(req, "/api/msgraph/send");
     const sendRes = await fetch(sendUrl, {
       method: "POST",
@@ -112,6 +163,9 @@ export async function POST(req: NextRequest) {
         forwardedPath: "/api/msgraph/send",
         result: forwarded,
         quote: quotePayload?.quote ?? null,
+        extracted,
+        missing,
+        suggested,
       },
       { status: 200 }
     );
