@@ -5,21 +5,9 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * AI Orchestrator (no external LLM) — v2 baseline merge
- * - Preserves your preview & spec-heuristics
- * - When dryRun=false, forwards to /api/msgraph/send
- *
- * Accepts JSON:
- * {
- *   mode: "ai",
- *   toEmail: string,
- *   subject?: string,
- *   text?: string,
- *   html?: string,               // optional override; if provided we send this
- *   inReplyTo?: string | null,
- *   dryRun?: boolean,
- *   sketchRefs?: string[]
- * }
+ * AI Orchestrator (no external LLM) — v2.1 heuristics widened
+ * - Keeps your preview & forwarding behavior
+ * - Expands regex: qty, density (pcf, per cubic foot), fractions for thickness, inch symbol (")
  */
 type OrchestrateInput = {
   mode: "ai";
@@ -30,11 +18,9 @@ type OrchestrateInput = {
   dryRun?: boolean;
   sketchRefs?: string[];
 };
-
 type OrchestrateInputIncoming = OrchestrateInput & { html?: string };
 
 const s = (v: unknown) => String(v ?? "").trim();
-
 function isEmail(v: unknown): v is string {
   return typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v));
 }
@@ -46,7 +32,6 @@ export async function POST(req: NextRequest) {
     const input: OrchestrateInputIncoming = {
       mode: "ai",
       toEmail: s(body.toEmail),
-      // Keep your polite default subject for new threads
       subject: s(body.subject || "Re: your message"),
       text: s(body.text),
       html: s(body.html),
@@ -61,13 +46,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "invalid toEmail" }, { status: 400 });
     }
 
-    // Your existing reply builder (kept intact)
     const reply = buildReply(input);
-
-    // If caller provided explicit HTML, prefer it; otherwise use our generated preview HTML
     const htmlToSend = input.html && input.html.length > 0 ? input.html : reply.html;
 
-    // DRY RUN -> return your preview, no network call
     if (input.dryRun) {
       return NextResponse.json(
         {
@@ -85,7 +66,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // LIVE SEND -> forward to /api/msgraph/send
     const sendPayload: Record<string, any> = {
       to: input.toEmail,
       subject: input.subject,
@@ -101,10 +81,9 @@ export async function POST(req: NextRequest) {
 
     const text = await safeText(res);
     let data: any = null;
-    try { data = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+    try { data = text ? JSON.parse(text) : null; } catch {}
 
     if (!res.ok) {
-      // Soft-fail (200) so upstream chains don't hard error; include detail for debugging
       return NextResponse.json(
         {
           ok: false,
@@ -121,7 +100,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Success passthrough
     return NextResponse.json(
       {
         ok: true,
@@ -136,7 +114,6 @@ export async function POST(req: NextRequest) {
       { status: 200 }
     );
   } catch (e: any) {
-    // Preserve your error style but return JSON that won't explode dashboards
     return NextResponse.json(
       { ok: false, error: e?.message || "orchestration error" },
       { status: 500 }
@@ -145,40 +122,46 @@ export async function POST(req: NextRequest) {
 }
 
 /* =========================
-   Your original builder (unchanged)
+   Heuristics (widened)
    ========================= */
 
 function buildReply(input: OrchestrateInput) {
   const raw = s(input.text);
 
-  // Spec heuristics
+  // Dimensions (unchanged)
   const hasDims =
     /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i.test(raw) ||
     /\bL\s*=?\s*\d+(?:\.\d+)?\b.*\bW\s*=?\s*\d+(?:\.\d+)?\b.*\bH\s*=?\s*\d+(?:\.\d+)?\b/i.test(raw);
 
+  // Quantity (widened but avoids false positives with 12 x 8 x 2)
   const qtyMatch =
-    raw.match(/\bqty\s*[:=]?\s*(\d+)\b/i) ||
-    raw.match(/\b(\d+)\s*(pcs|pieces|units|ea)\b/i) ||
-    raw.match(/\b(?:need|for|make)\s+(\d{1,5})\b/i);
+    raw.match(/\b(?:qty|quantity)\s*[:=]?\s*(\d{1,5})\b/i) ||
+    raw.match(/\b(\d{1,5})\s*(?:pcs?|pieces?|units?|ea)\b/i) ||
+    raw.match(/\b(?:need|for|make|order)\s+(\d{1,5})\b/i) ||
+    raw.match(/\b(?:about|approx(?:\.|imately)?)\s*(\d{1,5})\b/i);
   const hasQty = !!qtyMatch;
 
+  // Density (adds pcf and 'per cubic foot' variants)
   const hasDensity =
-    /\b(1(\.\d+)?|2(\.\d+)?|3(\.\d+)?)\s*(lb|pounds?)\s*\/?\s*ft3\b/i.test(raw) ||
-    /\b(PE|EPE|PU|EVA)\b.*\b\d(\.\d+)?\b/i.test(raw);
+    /\b(\d(?:\.\d+)?)\s*(?:lb|pounds?)\s*(?:\/\s*(?:ft3|ft\^?3|ft³)|\s*per\s*(?:ft3|cubic\s*foot))\b/i.test(raw) ||
+    /\b(\d(?:\.\d+)?)\s*pcf\b/i.test(raw) ||
+    /\b(PE|EPE|PU|EVA)\b.*\b\d(?:\.\d+)?\b/i.test(raw);
 
+  // Thickness under (adds fractions and inch symbol ")
   const hasThicknessUnder =
-    /\b(thickness|under|bottom)\b.*\b(\d+(?:\.\d+)?)\s*(in|inch|inches|mm|millimeters?)\b/i.test(raw);
+    /\b(thickness|under|bottom)\b.*?\b((?:\d+(?:\.\d+)?|\d+\s*\/\s*\d+))\s*(in|inch|inches|mm|millimeters?|")\b/i.test(raw);
 
-  const unitsMentioned = /\b(mm|millimeter|millimeters|in|inch|inches)\b/i.test(raw);
+  // Units (adds inch symbol and cm)
+  const unitsMentioned =
+    /\b(mm|millimeter|millimeters|cm|centimeter|centimeters|in|inch|inches)\b|"/i.test(raw);
 
   const missing: string[] = [];
   if (!hasDims) missing.push("final outside dimensions (L × W × H)");
   if (!hasQty) missing.push("quantity");
-  if (!hasDensity) missing.push("foam density (e.g., 1.7 lb/ft³ PE)");
+  if (!hasDensity) missing.push("foam density (e.g., 1.7 lb/ft³ or 1.7 pcf)");
   if (!hasThicknessUnder) missing.push("thickness under the part");
-  if (!unitsMentioned) missing.push("units (in or mm)");
+  if (!unitsMentioned) missing.push('units (in, ", or mm)');
 
-  // If sketches are already on file, don't ask for one again.
   const hasSketch = (input.sketchRefs?.length || 0) > 0;
 
   const promptPart =
@@ -224,13 +207,9 @@ function buildReply(input: OrchestrateInput) {
 /* =========================
    Helpers
    ========================= */
-
 function getInternalUrl(path: string) {
   const base = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") || "http://localhost:3000";
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
 }
-
-async function safeText(r: Response) {
-  try { return await r.text(); } catch { return null; }
-}
+async function safeText(r: Response) { try { return await r.text(); } catch { return null; } }
