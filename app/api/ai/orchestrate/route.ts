@@ -29,7 +29,7 @@ function local(req: NextRequest, path: string) {
   return new URL(path, req.url).toString();
 }
 
-// Matches the shape we put in suggested.itemsPretty
+// Minimal pretty-shape for suggestions
 type PrettyItem = {
   id: string | number | null;
   name: string | null;
@@ -41,6 +41,7 @@ type PrettyItem = {
 };
 
 export async function POST(req: NextRequest) {
+  const diag: Record<string, any> = {};
   try {
     const body = (await req.json()) as Partial<OrchestrateInput>;
     const input: OrchestrateInput = {
@@ -63,19 +64,24 @@ export async function POST(req: NextRequest) {
     let missing: string[] | null = null;
     try {
       const extractUrl = local(req, "/api/ai/extract");
+      diag.extract_url = extractUrl;
       const exRes = await fetch(extractUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({ text: input.text }),
       });
-      if (exRes.ok) {
+      diag.extract_status = exRes.status;
+      if (!exRes.ok) {
+        diag.extract_error = await safeText(exRes);
+      } else {
         const j = await exRes.json();
         extracted = j?.extracted ?? null;
         missing = j?.missing ?? null;
+        diag.extract_ok = true;
       }
-    } catch {
-      /* noop */
+    } catch (e: any) {
+      diag.extract_throw = e?.message || String(e);
     }
 
     // ---- 2) suggest materials ----
@@ -92,26 +98,34 @@ export async function POST(req: NextRequest) {
         (extracted && extracted.dbFilter && Object.keys(extracted.dbFilter).length > 0) ||
         (extracted && Array.isArray(extracted.searchWords) && extracted.searchWords.length > 0);
 
+      diag.hasHints = !!hasHints;
       if (hasHints) {
         const sugUrl = local(req, "/api/ai/suggest-materials");
+        diag.suggest_url = sugUrl;
         const payload = {
           filter: extracted?.dbFilter ?? {},
           searchWords: extracted?.searchWords ?? [],
         };
+        diag.suggest_payload = payload;
+
         const sRes = await fetch(sugUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
           body: JSON.stringify(payload),
         });
-        if (sRes.ok) {
+        diag.suggest_status = sRes.status;
+
+        if (!sRes.ok) {
+          diag.suggest_error = await safeText(sRes);
+        } else {
           const j = await sRes.json();
           const items = Array.isArray(j?.items) ? j.items : [];
           suggested.items = items;
           suggested.count = Number(j?.count ?? items.length);
           suggested.top = pickTopMaterial(items, extracted ?? null);
 
-          // Pretty, minimal objects for display / logging
+          // Pretty slice for display
           const pretty: PrettyItem[] = items.slice(0, 8).map((it: any): PrettyItem => ({
             id: it?.id ?? null,
             name: it?.name ?? null,
@@ -123,7 +137,6 @@ export async function POST(req: NextRequest) {
           }));
           suggested.itemsPretty = pretty;
 
-          // One-line summary per item (used in dryRun HTML below)
           suggested.summary =
             pretty.length > 0
               ? pretty
@@ -138,10 +151,11 @@ export async function POST(req: NextRequest) {
                   })
                   .join("\n")
               : "None";
+          diag.suggest_ok = true;
         }
       }
-    } catch {
-      /* suggestions are optional */
+    } catch (e: any) {
+      diag.suggest_throw = e?.message || String(e);
     }
 
     // ---- 3) quote html (with safe fallback) ----
@@ -149,19 +163,24 @@ export async function POST(req: NextRequest) {
     let html: string | null = null;
     try {
       const quoteUrl = local(req, "/api/ai/quote");
+      diag.quote_url = quoteUrl;
       const qRes = await fetch(quoteUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({ text: input.text }),
       });
-      if (qRes.ok) {
+      diag.quote_status = qRes.status;
+      if (!qRes.ok) {
+        diag.quote_error = await safeText(qRes);
+      } else {
         const j = await qRes.json();
         quotePayload = j ?? null;
         html = j?.html ?? null;
+        diag.quote_ok = true;
       }
-    } catch {
-      /* noop */
+    } catch (e: any) {
+      diag.quote_throw = e?.message || String(e);
     }
 
     if (!html) {
@@ -179,6 +198,7 @@ export async function POST(req: NextRequest) {
           <p>— Alex-IO Estimator</p>
         </div>
       `.trim();
+      diag.html_fallback = true;
     }
 
     // ---- Dry-run enhancements: append suggestions under the preview ----
@@ -220,6 +240,7 @@ export async function POST(req: NextRequest) {
           extracted,
           missing,
           suggested, // { count, items, itemsPretty, summary, top }
+          diag,      // NEW: diagnostics to reveal failures
         },
         { status: 200 }
       );
@@ -227,6 +248,7 @@ export async function POST(req: NextRequest) {
 
     // ---- live send via Graph ----
     const sendUrl = local(req, "/api/msgraph/send");
+    diag.send_url = sendUrl;
     const sendRes = await fetch(sendUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -251,6 +273,7 @@ export async function POST(req: NextRequest) {
         extracted,
         missing,
         suggested,
+        diag,
       },
       { status: 200 }
     );
@@ -259,5 +282,15 @@ export async function POST(req: NextRequest) {
       { ok: false, error: e?.message || "orchestration error" },
       { status: 500 }
     );
+  }
+}
+
+// Read text safely with truncation to keep payloads small
+async function safeText(res: Response, max = 300) {
+  try {
+    const t = await res.text();
+    return t.length > max ? t.slice(0, max) + "…(truncated)" : t;
+  } catch {
+    return "<no-text>";
   }
 }
