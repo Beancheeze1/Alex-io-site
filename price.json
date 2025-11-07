@@ -1,0 +1,12 @@
+﻿{
+    "round_to_bf":  false,
+    "materialId":  59,
+    "dims":  {
+                 "units":  "mm",
+                 "L":  305,
+                 "W":  229,
+                 "H":  51
+             },
+    "cavities":  0,
+    "qty":  24
+}
