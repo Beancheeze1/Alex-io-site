@@ -1,0 +1,7 @@
+﻿{
+    "toEmail":  "25thhourdesign@gmail.com",
+    "html":  "\u003cp\u003eThis should land as a threaded reply via Graph.\u003c/p\u003e",
+    "inReplyTo":  "BYAPR07MB4615B5F83B1827A76CF6D70AFCC3A@BYAPR07MB4615.namprd07.prod.outlook.com",
+    "mode":  "ai",
+    "dryRun":  false
+}
