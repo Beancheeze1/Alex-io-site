@@ -1,6 +1,28 @@
 // app/api/msgraph/send/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
+/**
+ * Sends email via Microsoft Graph.
+ *
+ * Supports two modes transparently:
+ *  - "reply" (threaded): when an Internet-Message-ID is provided (best)
+ *  - "sendMail_fallback": when no thread context exists (still works, new thread)
+ *
+ * INPUT (JSON):
+ * {
+ *   "to": "customer@example.com",
+ *   "subject": "Re: something",
+ *   "html": "<p>...</p>",
+ *   // Optional threading inputs:
+ *   "internetMessageId": "<message-id@domain>",    // preferred for threading
+ *   "inReplyTo": "<message-id@domain>",            // accepted synonym; we map it
+ *   // Optional flags
+ *   "dryRun": false
+ * }
+ *
+ * OUTPUT (JSON): { ok, status, mode, note?, detail? }
+ */
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -15,202 +37,163 @@ async function getAppToken() {
   const clientId = requireEnv("MS_CLIENT_ID");
   const clientSecret = requireEnv("MS_CLIENT_SECRET");
 
-  const form = new URLSearchParams();
-  form.set("client_id", clientId);
-  form.set("client_secret", clientSecret);
-  form.set("grant_type", "client_credentials");
-  form.set("scope", "https://graph.microsoft.com/.default");
+  const tokenUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope: "https://graph.microsoft.com/.default",
+    grant_type: "client_credentials",
+  });
 
-  const res = await fetch(
-    `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
-    { method: "POST", body: form }
-  );
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    throw new Error(`token_failed ${res.status} ${t}`);
+  const r = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`token_error ${r.status}: ${t}`);
   }
-  const json = (await res.json()) as { access_token: string };
-  return json.access_token;
+  const j = await r.json();
+  return j.access_token as string;
 }
 
-type SendBody = {
-  to: string;
-  subject: string;
-  html: string;
-  // if provided, we will reply-in-thread
-  inReplyTo?: string | null;           // Internet-Message-ID (e.g., "<ABC123@outlook.com>")
-  threadId?: string | number | null;   // optional (info only)
-  internetMessageId?: string | null;   // alias; if set, used as inReplyTo
+type SendInput = {
+  to?: string;
+  subject?: string;
+  html?: string;
+  internetMessageId?: string | null;
+  inReplyTo?: string | null;
+  dryRun?: boolean;
 };
 
-export async function GET() {
-  return NextResponse.json({ ok: true, route: "/api/msgraph/send" });
-}
-
 export async function POST(req: NextRequest) {
+  const started = Date.now();
   try {
-    const from = requireEnv("MS_MAILBOX_FROM"); // e.g. sales@alex-io.com
-    const accessToken = await getAppToken();
-    const body = (await req.json().catch(() => ({}))) as SendBody;
+    const fromMailbox = requireEnv("MS_MAILBOX_FROM"); // e.g., sales@alex-io.com
+    const input = (await req.json()) as SendInput;
 
-    if (!body?.to || !body?.subject || !body?.html) {
+    const to = (input.to || "").trim();
+    const subject = input.subject ?? "";
+    const html = input.html ?? "";
+    const dryRun = !!input.dryRun;
+
+    // Normalize thread id sources
+    const threadMsgId =
+      (input.internetMessageId || input.inReplyTo || "")
+        .trim()
+        .replace(/^<|>$/g, "") || null;
+
+    if (!to || !subject || !html) {
       return NextResponse.json(
-        { ok: false, error: "missing_fields" },
+        {
+          ok: false,
+          status: 400,
+          error: "missing_fields",
+          detail: { to: !!to, subject: !!subject, html: !!html },
+        },
         { status: 400 }
       );
     }
 
-    // choose best hint for reply-in-thread
-    const inReplyTo = (body.internetMessageId ?? body.inReplyTo ?? "").trim();
-
-    // Small helper for Graph calls
-    const g = async (path: string, init?: RequestInit) => {
-      const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          ...(init?.headers || {}),
-        },
+    if (dryRun) {
+      return NextResponse.json({
+        ok: true,
+        status: 200,
+        mode: threadMsgId ? "reply(dryRun)" : "sendMail_fallback(dryRun)",
+        to,
+        subject,
+        hasThreadId: !!threadMsgId,
       });
-      return res;
-    };
-
-    // If we have an Internet-Message-ID, try true reply flow:
-    if (inReplyTo) {
-      // The value sometimes includes <...>; strip angle brackets for filter match
-      const trimmed = inReplyTo.replace(/^<|>$/g, "");
-
-      // 1) Find the original message by internetMessageId
-      //    NOTE: property is filterable; wrap value in single quotes
-      const searchRes = await g(
-        `/users/${encodeURIComponent(
-          from
-        )}/messages?$filter=internetMessageId eq '${trimmed.replace(/'/g, "''")}'&$select=id,conversationId`
-      );
-
-      if (!searchRes.ok) {
-        const t = await searchRes.text().catch(() => "");
-        // fall back to new send
-        return await sendNew(g, from, body, {
-          note: `lookup_failed_${searchRes.status}`,
-          detail: t,
-        });
-      }
-
-      const found = (await searchRes.json()) as { value?: Array<{ id: string }> };
-      const originalId = found?.value?.[0]?.id;
-
-      if (originalId) {
-        // 2) Create a reply draft
-        const createReplyRes = await g(
-          `/users/${encodeURIComponent(from)}/messages/${originalId}/createReply`,
-          { method: "POST" }
-        );
-        if (!createReplyRes.ok) {
-          const t = await createReplyRes.text().catch(() => "");
-          return await sendNew(g, from, body, {
-            note: `createReply_failed_${createReplyRes.status}`,
-            detail: t,
-          });
-        }
-        const draft = (await createReplyRes.json()) as { id: string };
-
-        // 3) Update the draft body (HTML) and recipients (ensure 'to' specified)
-        const patchRes = await g(`/users/${encodeURIComponent(from)}/messages/${draft.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            body: { contentType: "HTML", content: body.html },
-            toRecipients: [
-              {
-                emailAddress: { address: body.to },
-              },
-            ],
-          }),
-        });
-        if (!patchRes.ok) {
-          const t = await patchRes.text().catch(() => "");
-          return await sendNew(g, from, body, {
-            note: `patch_reply_failed_${patchRes.status}`,
-            detail: t,
-          });
-        }
-
-        // 4) Send the reply draft
-        const sendRes = await g(`/users/${encodeURIComponent(from)}/messages/${draft.id}/send`, {
-          method: "POST",
-        });
-        if (!sendRes.ok) {
-          const t = await sendRes.text().catch(() => "");
-          return NextResponse.json(
-            {
-              ok: false,
-              error: "reply_send_failed",
-              status: sendRes.status,
-              detail: t,
-              mode: "reply_in_thread",
-            },
-            { status: 500 }
-          );
-        }
-
-        return NextResponse.json({
-          ok: true,
-          status: 200,
-          mode: "reply_in_thread",
-          to: body.to,
-          subject: body.subject,
-        });
-      }
-
-      // Not found → fall back to new send
-      return await sendNew(g, from, body, { note: "reply_target_not_found" });
     }
 
-    // No inReplyTo provided → new message
-    return await sendNew(g, from, body);
+    const token = await getAppToken();
 
+    // Graph payload
+    // We always build a "new message" and let Graph thread it with headers when possible.
+    // NOTE: internetMessageHeaders are respected on v1.0 for sendMail(createMessage+send).
+    // If threadMsgId exists, we add In-Reply-To and References headers.
+    const message: any = {
+      subject,
+      body: { contentType: "HTML", content: html },
+      toRecipients: [{ emailAddress: { address: to } }],
+      from: { emailAddress: { address: fromMailbox } }, // explicit for clarity
+    };
+
+    if (threadMsgId) {
+      message.internetMessageHeaders = [
+        { name: "In-Reply-To", value: `<${threadMsgId}>` },
+        { name: "References", value: `<${threadMsgId}>` },
+      ];
+    }
+
+    // POST /users/{sender}/sendMail
+    const sendUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      fromMailbox
+    )}/sendMail`;
+
+    const r = await fetch(sendUrl, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        message,
+        saveToSentItems: true,
+      }),
+    });
+
+    if (!r.ok) {
+      const detail = await safeText(r);
+      // Produce structured note codes we can grep in Render logs
+      const note =
+        r.status === 403
+          ? "access_denied"
+          : r.status === 404
+          ? "reply_target_not_found"
+          : "graph_send_error";
+
+      return NextResponse.json(
+        {
+          ok: false,
+          status: r.status,
+          mode: threadMsgId ? "reply" : "sendMail_fallback",
+          note,
+          detail,
+          ms: Date.now() - started,
+        },
+        { status: 200 } // keep 200 to not confuse upstream webhook pipelines
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      status: 202,
+      mode: threadMsgId ? "reply" : "sendMail_fallback",
+      to,
+      subject,
+      hasInternetMessageId: !!threadMsgId,
+      ms: Date.now() - started,
+    });
   } catch (err: any) {
     return NextResponse.json(
-      { ok: false, error: err?.message ?? "send_exception" },
-      { status: 500 }
+      {
+        ok: false,
+        status: 500,
+        note: "msgraph_send_exception",
+        detail: String(err?.message || err),
+      },
+      { status: 200 }
     );
   }
 }
 
-// helper: normal new send
-async function sendNew(
-  g: (path: string, init?: RequestInit) => Promise<Response>,
-  from: string,
-  body: SendBody,
-  meta?: Record<string, any>
-) {
-  const newRes = await g(`/users/${encodeURIComponent(from)}/sendMail`, {
-    method: "POST",
-    body: JSON.stringify({
-      message: {
-        subject: body.subject,
-        body: { contentType: "HTML", content: body.html },
-        toRecipients: [{ emailAddress: { address: body.to } }],
-      },
-      saveToSentItems: true,
-    }),
-  });
-
-  if (!newRes.ok) {
-    const t = await newRes.text().catch(() => "");
-    return NextResponse.json(
-      { ok: false, error: "send_failed", status: newRes.status, detail: t, mode: "sendMail_fallback", ...(meta || {}) },
-      { status: 500 }
-    );
+async function safeText(r: Response) {
+  try {
+    return await r.text();
+  } catch {
+    return null;
   }
-
-  return NextResponse.json({
-    ok: true,
-    status: newRes.status,
-    mode: "sendMail_fallback",
-    to: body.to,
-    subject: body.subject,
-    ...(meta || {}),
-  });
 }

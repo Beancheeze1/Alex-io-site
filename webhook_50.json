@@ -1,0 +1,14 @@
+﻿[
+  {
+    "subscriptionType": "conversation.newMessage",
+    "messageType": "MESSAGE",
+    "changeFlag": "NEW_MESSAGE",
+    "objectId": 9642315481,
+    "message": {
+      "from": { "email": "25thhourdesign@gmail.com" }
+    },
+    "subject": "Re: foam quote",
+    "text": "Make it 50 instead",
+    "headers": { "Message-Id": "<test-123@alex-io>" }
+  }
+]

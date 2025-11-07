@@ -1,0 +1,6 @@
+﻿{
+  "to": "25thhourdesign@gmail.com",
+  "subject": "Re: thread test",
+  "html": "<p>Fallback sendMail test (no message-id available).</p>",
+  "dryRun": false
+}
