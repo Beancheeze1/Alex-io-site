@@ -1,6 +1,5 @@
 // app/api/ai/orchestrate/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { absoluteUrl } from "@/app/lib/internalFetch";
 import { pickTopMaterial } from "@/app/lib/ai/materialSelect";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +22,11 @@ const isEmail = (v: unknown): v is string =>
 function toNum(v: any): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+// Build a same-origin absolute URL from the incoming request
+function local(req: NextRequest, path: string) {
+  return new URL(path, req.url).toString();
 }
 
 // Matches the shape we put in suggested.itemsPretty
@@ -58,7 +62,7 @@ export async function POST(req: NextRequest) {
     let extracted: any = null;
     let missing: string[] | null = null;
     try {
-      const extractUrl = absoluteUrl(req, "/api/ai/extract");
+      const extractUrl = local(req, "/api/ai/extract");
       const exRes = await fetch(extractUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -84,9 +88,12 @@ export async function POST(req: NextRequest) {
     } = { count: 0, items: [], top: null };
 
     try {
-      const hasHints = extracted?.dbFilter || extracted?.searchWords;
+      const hasHints =
+        (extracted && extracted.dbFilter && Object.keys(extracted.dbFilter).length > 0) ||
+        (extracted && Array.isArray(extracted.searchWords) && extracted.searchWords.length > 0);
+
       if (hasHints) {
-        const sugUrl = absoluteUrl(req, "/api/ai/suggest-materials");
+        const sugUrl = local(req, "/api/ai/suggest-materials");
         const payload = {
           filter: extracted?.dbFilter ?? {},
           searchWords: extracted?.searchWords ?? [],
@@ -141,7 +148,7 @@ export async function POST(req: NextRequest) {
     let quotePayload: any = null;
     let html: string | null = null;
     try {
-      const quoteUrl = absoluteUrl(req, "/api/ai/quote");
+      const quoteUrl = local(req, "/api/ai/quote");
       const qRes = await fetch(quoteUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -219,7 +226,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ---- live send via Graph ----
-    const sendUrl = absoluteUrl(req, "/api/msgraph/send");
+    const sendUrl = local(req, "/api/msgraph/send");
     const sendRes = await fetch(sendUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
