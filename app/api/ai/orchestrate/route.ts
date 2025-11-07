@@ -24,9 +24,29 @@ function toNum(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Build a same-origin absolute URL from the incoming request
+// ---- origin + URL helpers (FIX for localhost:10000) ----
+function getOrigin(req: NextRequest) {
+  const xfProto = req.headers.get("x-forwarded-proto") || undefined;
+  const xfHost =
+    req.headers.get("x-forwarded-host") ||
+    req.headers.get("host") ||
+    undefined;
+  const proto = xfProto || "https";
+  if (!xfHost) {
+    // last resort: parse from req.url but do NOT trust its host in Render
+    try {
+      const u = new URL(req.url);
+      return `${proto}://${u.hostname}`;
+    } catch {
+      return `${proto}://api.alex-io.com`;
+    }
+  }
+  return `${proto}://${xfHost}`;
+}
+
 function local(req: NextRequest, path: string) {
-  return new URL(path, req.url).toString();
+  const base = getOrigin(req);
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 // Minimal pretty-shape for suggestions
@@ -239,8 +259,8 @@ export async function POST(req: NextRequest) {
           quote: quotePayload?.quote ?? null,
           extracted,
           missing,
-          suggested, // { count, items, itemsPretty, summary, top }
-          diag,      // NEW: diagnostics to reveal failures
+          suggested,
+          diag, // diagnostics
         },
         { status: 200 }
       );
@@ -285,7 +305,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Read text safely with truncation to keep payloads small
+// Read text safely with truncation
 async function safeText(res: Response, max = 300) {
   try {
     const t = await res.text();
