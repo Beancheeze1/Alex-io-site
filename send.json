@@ -1,3 +1,6 @@
-﻿{"to":"25thhourdesign@gmail.com","subject":"Re: test","html":"<div><p>Thanks for the details ΓÇö hereΓÇÖs what I have so far:</p><ul><li>Size: 12 ├ù 8 ├ù 2 in</li><li>Qty:
-           12</li></ul><p><strong>Estimate:</strong></p><div>Billable CI each: 211.2</div><div>Unit price: 2.08 USD</div><div>Est. total: 25.00 USD</div><p>ΓÇö Alex-IO
-           Estimator</p></div>","threadId":"9642315481"}
+﻿{
+    "subject":  "Alex-IO Graph test — corrected",
+    "toEmail":  "25thhourdesign@gmail.com",
+    "html":  "\u003cdiv style=\u0027font-family:Segoe UI,Arial;line-height:1.5\u0027\u003e\n               \u003cp\u003eHello from \u003cb\u003eAlex-IO\u003c/b\u003e via Microsoft Graph.\u003c/p\u003e\n             \u003c/div\u003e",
+    "dryRun":  false
+}

@@ -1,0 +1,10 @@
+﻿{
+    "messageId":  "02e...b874-71b9bc7edb1a",
+    "objectId":  9878333136,
+    "subscriptionType":  "conversation.newMessage",
+    "appId":  23140941,
+    "messageType":  "MESSAGE",
+    "occurredAt":  1762623487044,
+    "attemptNumber":  0,
+    "changeFlag":  "NEW_MESSAGE"
+}
