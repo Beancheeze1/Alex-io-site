@@ -1,0 +1,11 @@
+﻿{
+    "fragility":  "med",
+    "drop_height_in":  24,
+    "weight_lb":  8,
+    "dims":  {
+                 "units":  "mm",
+                 "L":  305,
+                 "W":  229,
+                 "H":  51
+             }
+}

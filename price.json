@@ -1,9 +1,19 @@
 ﻿{
-    "materialId":  59,
+    "kerf_pct":  10,
     "dims":  {
+                 "units":  "in",
                  "L":  12,
                  "W":  9,
                  "H":  2
              },
+    "cavities":  [
+                     {
+                         "units":  "in",
+                         "L":  3,
+                         "W":  2,
+                         "count":  2,
+                         "H":  1.5
+                     }
+                 ],
     "qty":  24
 }
