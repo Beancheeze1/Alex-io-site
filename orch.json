@@ -1,10 +1,7 @@
 ﻿{
-    "text":  "Need qty 24, 12 x 9 x 2 in, PE 1.7 pcf, 1/2 in under, black. die cut.",
     "subject":  "Re: foam",
     "toEmail":  "25thhourdesign@gmail.com",
-    "sketchRefs":  [
-                       "file:///tmp/sketch_cf14f8a41c5f7742.png"
-                   ],
+    "dryRun":  true,
     "mode":  "ai",
-    "dryRun":  true
+    "text":  "Need qty 10, 12 x 9 x 2.25 in, PE 1.7 pcf, 1/2 in under, black."
 }
