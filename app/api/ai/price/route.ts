@@ -1,141 +1,158 @@
 // app/api/ai/price/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-type Units = "in" | "mm";
-type Dims = { L: number; W: number; H: number; units?: Units };
-type Cavity = { L: number; W: number; H: number; count?: number; units?: Units };
-
-type PriceInput = {
-  dims: Dims;            // outside size (one unit)
-  qty: number;           // # of parts
-  ratePerCI?: number;    // $/cubic inch
-  ratePerBF?: number;    // $/board foot (144 CI)
-  min_charge?: number;   // $ each, minimum
-  kerf_pct?: number;     // +% waste
-  round_to_bf?: boolean; // if true, price by board foot; else by CI
-  skive_upcharge_each?: number; // $ each if thickness not integer
-  cavities?: Cavity[];   // subtract volume of cavities (count accounted)
+type PricingSettings = {
+  ratePerCI_default: number;   // $/cubic inch
+  ratePerBF_default: number;   // $/board-foot; when >0 we derive CI = BF / 1728
+  kerf_pct_default: number;    // +% waste
+  min_charge_default: number;  // minimum extended price
+  skive_upcharge_each: number; // $ per piece when thickness not on 1" increments
+  cushion_family_order?: string[]; // optional, kept in sync with admin route
 };
 
-function toInches(n: number, units?: Units) {
-  if (!Number.isFinite(n)) return 0;
-  return units === "mm" ? n / 25.4 : n;
+function settings(): PricingSettings {
+  const key = "__ALEXIO_PRICING_SETTINGS__";
+  const g = globalThis as any;
+  if (!g[key]) {
+    g[key] = {
+      ratePerCI_default: 0.06,
+      ratePerBF_default: 34,
+      kerf_pct_default: 0,
+      min_charge_default: 0,
+      skive_upcharge_each: 4.5,
+      cushion_family_order: ["EPE", "PU", "PE", "EVA"],
+    } satisfies PricingSettings;
+  }
+  const s = g[key] as PricingSettings;
+  // If BF is defined, derive CI for runtime use
+  if (s.ratePerBF_default && s.ratePerBF_default > 0) {
+    s.ratePerCI_default = s.ratePerBF_default / 1728;
+  }
+  return s;
 }
-function round2(n: number) { return Math.round(n * 100) / 100; }
-function isIntegerish(n: number, tol = 1e-6) { return Math.abs(n - Math.round(n)) <= tol; }
+
+type Units = "in" | "mm";
+const MM_PER_IN = 25.4;
+
+function toInches(v: number, units: Units): number {
+  return units === "mm" ? v / MM_PER_IN : v;
+}
+
+function roundCurrency(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function nearlyInteger(n: number, tol = 1e-6) {
+  return Math.abs(n - Math.round(n)) <= tol;
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as PriceInput;
+    const s = settings();
 
-    // --- Extract settings with safe defaults (will be overridden by admin settings on caller, if present)
-    const ratePerCI = Number.isFinite(Number(body.ratePerCI)) ? Number(body.ratePerCI) : 0.06;
-    const ratePerBF = Number.isFinite(Number(body.ratePerBF)) ? Number(body.ratePerBF) : 34;
-    const min_charge = Number.isFinite(Number(body.min_charge)) ? Number(body.min_charge) : 0;
-    const kerf_pct = Number.isFinite(Number(body.kerf_pct)) ? Number(body.kerf_pct) : 0;
-    const round_to_bf = !!body.round_to_bf;
-    const skive_upcharge_each = Number.isFinite(Number(body.skive_upcharge_each))
-      ? Number(body.skive_upcharge_each)
-      : 0; // caller may inject admin value
+    type Dim = { L: number; W: number; H: number; units?: Units };
+    type Cavity = { L: number; W: number; H: number; count?: number; units?: Units };
 
-    if (!body?.dims || !Number.isFinite(Number(body.qty))) {
-      return NextResponse.json({ ok: false, error: "dims_and_qty_required" }, { status: 400 });
+    const body = (await req.json()) as Partial<{
+      dims: Dim;      // required
+      qty: number;    // required
+      units: Units;   // optional (fallback if dims.units not set)
+      ratePerCI?: number;
+      ratePerBF?: number;
+      kerf_pct?: number;
+      min_charge?: number;
+      cavities?: Cavity[];
+      round_to_bf?: boolean;
+      materialId?: number | string;
+    }>;
+
+    if (!body?.dims || typeof body.qty !== "number") {
+      return NextResponse.json({ ok: false, error: "dims and qty are required" }, { status: 400 });
     }
 
-    const qty = Math.max(1, Number(body.qty));
-    const L_in = toInches(Number(body.dims.L ?? 0), body.dims.units);
-    const W_in = toInches(Number(body.dims.W ?? 0), body.dims.units);
-    const H_in = toInches(Number(body.dims.H ?? 0), body.dims.units);
+    const topUnits: Units | undefined = body.units;
+    const dimsUnits: Units = (body.dims.units ?? topUnits ?? "in") as Units;
 
-    if (!(L_in > 0 && W_in > 0 && H_in > 0)) {
-      return NextResponse.json({ ok: false, error: "dims_invalid" }, { status: 400 });
+    const L_in = toInches(Number(body.dims.L || 0), dimsUnits);
+    const W_in = toInches(Number(body.dims.W || 0), dimsUnits);
+    const H_in = toInches(Number(body.dims.H || 0), dimsUnits);
+
+    const qty = Math.max(0, Math.floor(Number(body.qty)));
+    if (!(L_in > 0 && W_in > 0 && H_in > 0 && qty > 0)) {
+      return NextResponse.json({ ok: false, error: "invalid numeric dims or qty <= 0" }, { status: 400 });
     }
 
-    // --- Volume for one part (CI)
-    const partCI = L_in * W_in * H_in;
-
-    // --- Subtract cavities
-    let cavitiesCI = 0;
-    if (Array.isArray(body.cavities)) {
-      for (const c of body.cavities) {
-        const cL = toInches(Number(c.L ?? 0), c.units);
-        const cW = toInches(Number(c.W ?? 0), c.units);
-        const cH = toInches(Number(c.H ?? 0), c.units);
-        const count = Math.max(1, Number(c.count ?? 1));
-        if (cL > 0 && cW > 0 && cH > 0) {
-          cavitiesCI += cL * cW * cH * count;
-        }
+    // Cavities
+    const cavities = Array.isArray(body.cavities) ? body.cavities : [];
+    let cavities_ci_total = 0;
+    for (const c of cavities) {
+      if (!c) continue;
+      const cu: Units = (c.units ?? dimsUnits) as Units;
+      const cL = toInches(Number(c.L || 0), cu);
+      const cW = toInches(Number(c.W || 0), cu);
+      const cH = toInches(Number(c.H || 0), cu);
+      const count = Math.max(0, Math.floor(Number(c.count || 1)));
+      if (cL > 0 && cW > 0 && cH > 0 && count > 0) {
+        cavities_ci_total += cL * cW * cH * count;
       }
-      // Ensure we don't subtract more than the part
-      cavitiesCI = Math.min(cavitiesCI, partCI);
     }
 
-    // --- Net CI per part, apply kerf
-    const netCI = Math.max(0, partCI - cavitiesCI);
-    const netCIWithKerf = netCI * (1 + Math.max(0, kerf_pct) / 100);
+    // Base volumes
+    const piece_ci = L_in * W_in * H_in;
+    const piece_ci_after_cavities = Math.max(0, piece_ci - cavities_ci_total);
 
-    // --- Price basis
-    let each = 0;
-    let rateBasis: "CI" | "BF" = "CI";
-    let price_per_ci = 0;
-    let price_per_bf = 0;
+    // Kerf/waste
+    const kerf_pct = Number(body.kerf_pct ?? s.kerf_pct_default ?? 0);
+    const piece_ci_with_waste = piece_ci_after_cavities * (1 + Math.max(0, kerf_pct) / 100);
 
-    if (round_to_bf) {
-      rateBasis = "BF";
-      const boardFeet = netCIWithKerf / 144; // 144 CI per BF
-      // typical rounding increment can be customized—keeping standard 2 decimals for now
-      const roundedBF = Math.ceil(boardFeet * 100) / 100;
-      each = roundedBF * ratePerBF;
-      price_per_bf = ratePerBF;
-    } else {
-      rateBasis = "CI";
-      each = netCIWithKerf * ratePerCI;
-      price_per_ci = ratePerCI;
+    // Rate per CI
+    let ratePerCI = Number(body.ratePerCI);
+    if (!(ratePerCI > 0)) {
+      const bf = Number(body.ratePerBF ?? s.ratePerBF_default ?? 0);
+      ratePerCI = bf > 0 ? bf / 1728 : (s.ratePerCI_default ?? 0.06);
     }
 
-    // --- Skive upcharge (non-integer thickness)
-    if (!isIntegerish(H_in) && skive_upcharge_each > 0) {
-      each += skive_upcharge_each;
-    }
+    // Skive upcharge if thickness not 1" increments
+    const needsSkive = !nearlyInteger(H_in);
+    const skive_each = needsSkive ? (s.skive_upcharge_each ?? 0) : 0;
 
-    // --- Min charge
-    if (each < min_charge) each = min_charge;
+    // Price
+    const each_material = piece_ci_with_waste * ratePerCI;
+    const each = each_material + skive_each;
+    let extended = each * qty;
 
-    const extended = each * qty;
+    // Min charge
+    const minCharge = Number(body.min_charge ?? s.min_charge_default ?? 0);
+    if (extended < minCharge) extended = minCharge;
 
-    return NextResponse.json({
+    const resp = {
       ok: true,
-      basis: rateBasis,
-      input: {
-        dims: body.dims,
-        qty,
-        kerf_pct,
-        round_to_bf,
-        skive_upcharge_each,
-        cavities: body.cavities ?? [],
-        ratePerCI,
-        ratePerBF,
-        min_charge,
+      status: 200,
+      dims_ci: roundCurrency(piece_ci),
+      cavity_ci_total: roundCurrency(cavities_ci_total),
+      piece_ci_with_waste: roundCurrency(piece_ci_with_waste),
+      kerf_pct,
+      ratePerCI: roundCurrency(ratePerCI),
+      each_material: roundCurrency(each_material),
+      skive_each: roundCurrency(skive_each),
+      each: roundCurrency(each),
+      qty,
+      extended: roundCurrency(extended),
+      applied: {
+        needsSkive,
+        minChargeApplied: extended === minCharge && extended > 0,
       },
-      calc: {
-        partCI: round2(partCI),
-        cavitiesCI: round2(cavitiesCI),
-        netCI: round2(netCI),
-        netCIWithKerf: round2(netCIWithKerf),
-        boardFeet: round2(netCIWithKerf / 144),
+      diag: {
+        units_used: dimsUnits,
+        round_to_bf: !!body.round_to_bf,
       },
-      pricing: {
-        rateBasis,
-        price_per_ci,
-        price_per_bf,
-        each: round2(each),
-        extended: round2(extended),
-      },
-    });
+    };
+
+    return NextResponse.json(resp, { status: 200 });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 });
+    return NextResponse.json({ ok: false, error: String(err?.message ?? err) }, { status: 500 });
   }
 }

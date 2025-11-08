@@ -1,80 +1,74 @@
 // app/api/admin/settings/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-/**
- * GET returns current effective pricing config.
- * PATCH allows updating any of the exposed fields.
- *
- * We keep this file storage-backed (in memory / env / KV / DB).
- * If you already have a DB table for settings, swap the simple store with your DB read/write.
- */
-
-export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-// Very small in-process cache (restart-safe logic should live in your DB/KV)
-// Replace with your existing storage to keep prior behavior.
-let SETTINGS: any | null = null;
-
-const DEFAULTS = {
-  ratePerCI: 0.06,
-  ratePerBF: 34,
-  kerf_pct_default: 0,
-  min_charge_default: 0,
-  skive_upcharge_each: 4.5, // NEW surfaced (defaults to 4.50 unless you PATCH it)
-  // Used by cushion logic/UI sorting — stays here for compatibility:
-  cushion_family_order: [] as string[],
+type PricingSettings = {
+  ratePerCI_default: number;
+  ratePerBF_default: number;
+  kerf_pct_default: number;
+  min_charge_default: number;
+  skive_upcharge_each: number;
+  cushion_family_order?: string[]; // keep optional, present in both files
 };
 
-function loadDefaultsFromEnv() {
-  const p = (n: string, d: number) => (Number.isFinite(Number(process.env[n])) ? Number(process.env[n]) : d);
-  return {
-    ...DEFAULTS,
-    ratePerCI: p("ALEX_RATE_PER_CI", DEFAULTS.ratePerCI),
-    ratePerBF: p("ALEX_RATE_PER_BF", DEFAULTS.ratePerBF),
-    kerf_pct_default: p("ALEX_KERF_PCT", DEFAULTS.kerf_pct_default),
-    min_charge_default: p("ALEX_MIN_CHARGE", DEFAULTS.min_charge_default),
-    skive_upcharge_each: p("ALEX_SKIVE_UPCHARGE", DEFAULTS.skive_upcharge_each),
-  };
+function getSettings(): PricingSettings {
+  const key = "__ALEXIO_PRICING_SETTINGS__";
+  const g = globalThis as any;
+  if (!g[key]) {
+    g[key] = {
+      ratePerCI_default: 0.06,
+      ratePerBF_default: 34,
+      kerf_pct_default: 0,
+      min_charge_default: 0,
+      skive_upcharge_each: 4.5,
+      cushion_family_order: ["EPE", "PU", "PE", "EVA"],
+    } satisfies PricingSettings;
+  }
+  return g[key] as PricingSettings;
 }
 
 export async function GET() {
-  try {
-    if (!SETTINGS) SETTINGS = loadDefaultsFromEnv();
-    return NextResponse.json({ ok: true, settings: SETTINGS });
-  } catch (err: any) {
-    return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 });
-  }
+  return NextResponse.json({ ok: true, settings: getSettings() }, { status: 200 });
 }
 
+/**
+ * PATCH body accepts any subset of PricingSettings:
+ * {
+ *   "skive_upcharge_each": 4.50,
+ *   "ratePerCI_default": 0.06,
+ *   "ratePerBF_default": 34,
+ *   "kerf_pct_default": 10,
+ *   "min_charge_default": 25,
+ *   "cushion_family_order": ["EPE","PU","PE","EVA"]
+ * }
+ */
 export async function PATCH(req: NextRequest) {
   try {
-    const body = await req.json();
-    if (!SETTINGS) SETTINGS = loadDefaultsFromEnv();
+    const s = getSettings();
+    const body = (await req.json()) as Partial<PricingSettings>;
 
-    const updatable = [
-      "ratePerCI",
-      "ratePerBF",
+    const keys: (keyof PricingSettings)[] = [
+      "skive_upcharge_each",
+      "ratePerCI_default",
+      "ratePerBF_default",
       "kerf_pct_default",
       "min_charge_default",
-      "skive_upcharge_each",
       "cushion_family_order",
-    ] as const;
+    ];
 
-    for (const k of updatable) {
+    for (const k of keys) {
       if (k in body) {
-        // shallow sanitize
-        (SETTINGS as any)[k] =
-          typeof (DEFAULTS as any)[k] === "number"
-            ? Number(body[k])
-            : Array.isArray((DEFAULTS as any)[k])
-            ? Array.isArray(body[k]) ? body[k] : (SETTINGS as any)[k]
-            : body[k];
+        (s as any)[k] = (body as any)[k];
       }
     }
 
-    return NextResponse.json({ ok: true, settings: SETTINGS });
+    // save back
+    (globalThis as any).__ALEXIO_PRICING_SETTINGS__ = s;
+
+    return NextResponse.json({ ok: true, settings: s }, { status: 200 });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 });
+    return NextResponse.json({ ok: false, error: String(err?.message ?? err) }, { status: 400 });
   }
 }
