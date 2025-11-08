@@ -1,234 +1,154 @@
 // app/api/hubspot/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-/**
- * HubSpot webhook → decide whether to orchestrate a reply.
- *
- * Key rules (merged to match the last known-good zip + our recent edits):
- * - Accept a single event or an array; normalize to an array early (fixes TS error).
- * - dryRun: honor ?dryRun=1 (or true) to simulate the full flow but skip sending.
- * - Extract toEmail directly when present; otherwise, look it up from HubSpot
- *   using the local helper endpoint that worked in your baseline.
- * - Only orchestrate if REPLY_ENABLED=true and we have a toEmail.
- * - Clear logs so Render shows exactly what happened.
- */
-
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-type HubSpotEvent = {
-  subscriptionType?: string; // e.g., "conversation.newMessage"
-  objectId?: string;         // message/thread object id
-  messageId?: string;        // message id (when present)
-  inReplyTo?: string | null; // replied-to message id (when present)
-  toEmail?: string | null;   // we sometimes set/receive this
-  hasText?: boolean;
-  hasHtml?: boolean;
-  text?: string;
+type LookupOut = {
+  ok: boolean;
+  email?: string;
   subject?: string;
-  from?: string | null;
+  text?: string;
+  error?: string;
+  status?: number;
+  detail?: string;
 };
 
-// ---- helpers ----
-
-function boolFromStr(v: string | null | undefined): boolean {
-  if (!v) return false;
-  const s = String(v).toLowerCase();
-  return s === "1" || s === "true" || s === "yes";
+function s(v: unknown) { return String(v ?? "").trim(); }
+function yes(v?: string) {
+  const t = (v ?? "").toLowerCase();
+  return t === "1" || t === "true" || t === "yes";
 }
 
-function getEnv(name: string, fallback?: string): string {
-  const v = process.env[name];
-  if (v && v.length) return v;
-  if (fallback !== undefined) return fallback;
-  throw new Error(`Missing env: ${name}`);
-}
+async function doLookup(path: string, origin: string, objectId: number): Promise<{trace: any, out: LookupOut}> {
+  const url = new URL(path, origin).toString();
+  const trace: any = { path, url, ok: false, status: 0 };
 
-async function json(res: Response) {
-  const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) {
-    const txt = await res.text();
-    return { ok: false, status: res.status, text: txt };
-  }
-  const body = await res.json();
-  return { ok: res.ok, status: res.status, body };
-}
-
-function log(header: string, obj: unknown) {
-  // Compact, readable server logs
-  console.log(`[webhook] ${header}`, typeof obj === "string" ? obj : obj ?? {});
-}
-
-/**
- * Normalize the posted body into an array of events.
- */
-async function readEvents(req: NextRequest): Promise<HubSpotEvent[]> {
-  let body: unknown;
   try {
-    body = await req.json();
-  } catch {
-    return [];
-  }
-  if (Array.isArray(body)) return body as HubSpotEvent[];
-  if (body && typeof body === "object") return [body as HubSpotEvent];
-  return [];
-}
-
-/**
- * Our local helper (from your working baseline) that can resolve the recipient
- * when HubSpot’s webhook doesn’t include it.
- *
- * We keep it path-relative so it works in Render without external auth.
- */
-async function tryLookupToEmailFromMessage(messageId: string): Promise<string | null> {
-  try {
-    const url = `${getEnv("NEXT_PUBLIC_BASE_URL")}/api/hubspot/messages/${encodeURIComponent(
-      messageId
-    )}`;
-    const res = await fetch(url, { cache: "no-store" });
-    const out = await json(res);
-    if (!out.ok) {
-      log("lookupEmail status_error", out);
-      return null;
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ objectId }),
+    });
+    trace.status = r.status;
+    const text = await r.text();
+    if (!r.ok) {
+      trace.ok = false;
+      return { trace, out: { ok: false, status: r.status, error: "lookup_http_error", detail: text.slice(0, 600) } };
     }
-    const to: string | undefined =
-      out.body?.toEmail ||
-      out.body?.to_address ||
-      out.body?.to?.email ||
-      out.body?.to;
-    if (to && typeof to === "string" && to.includes("@")) return to.trim();
-  } catch (e) {
-    log("lookupEmail exception", String(e));
+    let j: any = {};
+    try { j = JSON.parse(text); } catch {
+      trace.ok = false;
+      return { trace, out: { ok: false, error: "lookup_parse_error", detail: text.slice(0, 600) } };
+    }
+    trace.ok = true;
+    return { trace, out: { ok: true, email: s(j.email), subject: s(j.subject), text: s(j.text) } };
+  } catch (err: any) {
+    return { trace, out: { ok: false, error: "lookup_exception", detail: err?.message ?? String(err) } };
   }
-  return null;
 }
-
-/**
- * Decide if this event is the kind we reply to.
- * We keep it simple and permissive—same as the baseline:
- * reply on new inbound conversation messages.
- */
-function isNewInbound(ev: HubSpotEvent): boolean {
-  const t = (ev.subscriptionType || "").toLowerCase();
-  // HubSpot fires variants; treat anything that looks like a new inbound as eligible
-  return t.includes("conversation.newmessage") || t.includes("conversations.newmessage");
-}
-
-// ---- route ----
 
 export async function POST(req: NextRequest) {
-  const replyEnabled = boolFromStr(process.env.REPLY_ENABLED);
-  const dryRun = boolFromStr(req.nextUrl.searchParams.get("dryRun"));
+  const REPLY_ENABLED = yes(process.env.REPLY_ENABLED);
+  const dryRunParam = s(req.nextUrl.searchParams.get("dryRun"));
+  const dryRun = dryRunParam && dryRunParam !== "0" && dryRunParam.toLowerCase() !== "false";
 
-  // Read & normalize events (FIX: never treat union as array; we always produce an array here)
-  const events = await readEvents(req);
+  let payload: any = {};
+  try { payload = await req.json(); } catch { payload = {}; }
 
-  if (!events.length) {
-    log("received (empty body)", {});
-    return NextResponse.json({ ok: true, dryRun, send_ok: false, reason: "no_events" });
-  }
+  const subType = s(payload.subscriptionType);
+  const objectId = Number(payload.objectId ?? payload.threadId ?? 0);
+  let toEmail = s(payload.toEmail);
+  let subject = s(payload.subject);
+  let text = s(payload.text);
 
-  // We only consider the first eligible inbound event (same as baseline behavior)
-  let chosen: HubSpotEvent | null = null;
-  for (const ev of events) {
-    if (isNewInbound(ev)) {
-      chosen = ev;
-      break;
-    }
-  }
-
-  if (!chosen) {
-    log("received (non-inbound/no eligible event)", { count: events.length });
-    return NextResponse.json({ ok: true, dryRun, send_ok: false, reason: "no_eligible_event" });
-  }
-
-  // Extract details from the chosen event
-  const subType = chosen.subscriptionType || "unknown";
-  let toEmail: string | null =
-    (chosen.toEmail && chosen.toEmail.includes("@") ? chosen.toEmail : null) || null;
-
-  const inReplyTo = chosen.inReplyTo || chosen.messageId || chosen.objectId || null;
-  const hasText = Boolean(chosen.hasText ?? chosen.text);
-  const hasHtml = Boolean(chosen.hasHtml);
-
-  log("received", {
-    subType,
-    toEmail,
-    hasText,
-    hasHtml,
-    inReplyTo,
-    dryRunChosen: dryRun,
+  console.log("[webhook] -> entry", {
+    subType, objectId, toEmail_present: !!toEmail, hasText: !!text, dryRunChosen: dryRun,
   });
 
-  // If HubSpot body didn’t include the recipient, look it up the same way the baseline did.
-  if (!toEmail && inReplyTo) {
-    toEmail = await tryLookupToEmailFromMessage(inReplyTo);
+  const origin = req.nextUrl.origin;
+
+  // Always lookup if toEmail is missing (bullet-proof; ignores any env)
+  const lookupTraces: any[] = [];
+  if (!toEmail && objectId > 0) {
+    // 1) new path
+    const a = await doLookup("/api/hubspot/lookupEmail", origin, objectId);
+    lookupTraces.push(a.trace);
+    if (a.out.ok) {
+      if (!toEmail && a.out.email) toEmail = a.out.email;
+      if (!subject && a.out.subject) subject = a.out.subject;
+      if (!text && a.out.text) text = a.out.text;
+    } else {
+      // 2) fallback for older builds
+      const b = await doLookup("/api/hubspot/lookup", origin, objectId);
+      lookupTraces.push(b.trace);
+      if (b.out.ok) {
+        if (!toEmail && b.out.email) toEmail = b.out.email;
+        if (!subject && b.out.subject) subject = b.out.subject;
+        if (!text && b.out.text) text = b.out.text;
+      }
+    }
   }
 
   if (!toEmail) {
-    log("missing toEmail; skipping orchestrate", {});
-    return NextResponse.json({
+    const res = {
       ok: true,
       dryRun,
       send_ok: false,
       reason: "missing_toEmail",
-    });
+      lookup_traces: lookupTraces, // you’ll see exactly which paths/statuses were tried
+    };
+    console.log("[webhook] missing_toEmail", res);
+    return NextResponse.json(res, { status: 200 });
   }
 
-  // Respect the global reply toggle
-  if (!replyEnabled) {
-    log("REPLY_DISABLED; skipping send", { replyEnabled });
-    return NextResponse.json({
+  // Prove we would send (or actually send if enabled)
+  if (dryRun || !REPLY_ENABLED) {
+    const res = {
       ok: true,
       dryRun,
-      send_ok: false,
-      reason: "reply_disabled",
-    });
+      send_ok: true,
+      send_status: 200,
+      send_result: "would_send",
+      to: toEmail,
+      subject,
+      lookup_traces: lookupTraces,
+    };
+    console.log("[webhook] orchestrate result", res);
+    return NextResponse.json(res, { status: 200 });
   }
 
-  // Build a lightweight orchestration request to your existing route
-  const orchUrl = `${getEnv("NEXT_PUBLIC_BASE_URL")}/api/ai/orchestrate`;
-  const payload = {
-    mode: "ai" as const,
-    toEmail,
-    subject: chosen.subject || undefined,
-    text: chosen.text || undefined,
-    inReplyTo: inReplyTo || undefined,
-    dryRun,
-  };
-
-  // Send to orchestrator
-  let send_status = 0;
-  let send_ok = false;
-  let send_result: string | undefined;
-
+  // LIVE: delegate to /api/msgraph/send
   try {
-    const res = await fetch(`${orchUrl}?t=${Date.now()}`, {
+    const r = await fetch(new URL("/api/msgraph/send", origin), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
       cache: "no-store",
+      body: JSON.stringify({
+        mode: "live",
+        toEmail,
+        subject: subject || "(no subject)",
+        text: text || "(no body)",
+        dryRun: false,
+      }),
     });
-    send_status = res.status;
-    const out = await json(res);
-    send_ok = Boolean(out.ok);
-    // Prefer the orchestrator’s declared send result if present
-    // (our tests log {status: 200, ok: true, result: "sent"})
-    // fall back to a short summary.
-    send_result =
-      (out.body && (out.body.result || out.body.send_result)) ||
-      (out.ok ? "sent" : "failed");
-  } catch (e) {
-    log("orchestrate exception", String(e));
-    send_result = "exception";
+    const t = await r.text();
+    let j: any = {}; try { j = JSON.parse(t); } catch {}
+    const res = {
+      ok: r.ok,
+      dryRun: false,
+      send_ok: r.ok,
+      send_status: r.status,
+      send_result: j?.result ?? (r.ok ? "sent" : "error"),
+      to: toEmail,
+      subject,
+    };
+    console.log("[webhook] orchestrate result", res);
+    return NextResponse.json(res, { status: 200 });
+  } catch (err: any) {
+    const res = { ok: false, dryRun: false, send_ok: false, reason: "msgraph_exception", detail: err?.message ?? String(err) };
+    console.log("[webhook] orchestrate exception", res);
+    return NextResponse.json(res, { status: 200 });
   }
-
-  log("orchestrate result", { status: send_status, ok: send_ok, send_result });
-
-  return NextResponse.json({
-    ok: true,
-    dryRun,
-    send_status,
-    send_ok,
-    send_result,
-  });
 }

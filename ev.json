@@ -1,11 +1,4 @@
 ﻿{
-    "message":  {
-                    "subject":  "Re: foam quote",
-                    "from":  {
-                                 "email":  "25thhourdesign@gmail.com"
-                             },
-                    "text":  "Need qty 24, 12 x 9 x 2 in, PE 1.7 pcf, black. 1/2 in under, die cut."
-                },
-    "messageId":  "demo-123",
-    "subscriptionType":  "conversation.newMessage"
+  "subscriptionType": "conversation.newMessage",
+  "objectId": 9642315481
 }
