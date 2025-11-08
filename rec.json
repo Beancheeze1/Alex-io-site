@@ -3,9 +3,9 @@
     "drop_height_in":  24,
     "weight_lb":  8,
     "dims":  {
-                 "units":  "mm",
-                 "L":  305,
-                 "W":  229,
-                 "H":  51
+                 "units":  "in",
+                 "L":  12,
+                 "W":  9,
+                 "H":  2
              }
 }

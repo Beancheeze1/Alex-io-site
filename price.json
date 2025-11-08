@@ -1,5 +1,6 @@
 ﻿{
-    "kerf_pct":  10,
+    "round_to_bf":  false,
+    "materialId":  59,
     "dims":  {
                  "units":  "in",
                  "L":  12,
