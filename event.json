@@ -1,0 +1,11 @@
+﻿{
+    "subscriptionType":  "conversation.newMessage",
+    "message":  {
+                    "subject":  "Re: foam quote",
+                    "from":  {
+                                 "email":  "25thhourdesign@gmail.com"
+                             },
+                    "inReplyTo":  "test-thread-id",
+                    "text":  "Customer email text: need qty 24, 12 x 9 x 2 in, PE 1.7 pcf; 1/2 in under; black."
+                }
+}
