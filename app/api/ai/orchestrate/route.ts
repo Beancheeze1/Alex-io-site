@@ -5,17 +5,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * Orchestrate v2 (no external LLM)
- * Accepts:
- * {
- *   mode: "ai",
- *   toEmail: string,
- *   subject?: string,
- *   text?: string,
- *   inReplyTo?: string | null,
- *   dryRun?: boolean,
- *   sketchRefs?: string[]   // optional ids/urls previously uploaded
- * }
+ * Client payload
  */
 type OrchestrateInput = {
   mode: "ai";
@@ -24,10 +14,12 @@ type OrchestrateInput = {
   text?: string;
   inReplyTo?: string | null;
   dryRun?: boolean;
-  sketchRefs?: string[];
+  sketchRefs?: string[]; // ids/urls of previously uploaded sketches
 };
 
-// What the route returns (public shape kept simple/stable)
+/**
+ * Public response (kept stable)
+ */
 type OrchestrateResponse = {
   ok: boolean;
   dryRun: boolean;
@@ -36,22 +28,34 @@ type OrchestrateResponse = {
   htmlPreview: string;
   missing: string[];
   src: ReplyBits["src"];
-  // inert placeholders so callers that expect these keys won't break
-  quote: unknown;
-  extracted: unknown;
+  extracted: {
+    dims?: unknown;
+    dbFilter?: unknown;
+    searchWords?: string[];
+    unitsMentioned?: boolean;
+    [k: string]: unknown;
+  } | null;
   suggested: {
     count: number;
     items: unknown[];
     top?: unknown;
   };
+  pricing?: unknown;     // optional summary/object from /quote
+  quote: unknown;        // keep key for callers that expect it (null when N/A)
+  diag: Record<string, unknown>; // status/urls/errors for quick debugging
 };
 
+const BASE =
+  process.env.NEXT_PUBLIC_BASE_URL?.trim() ||
+  "https://api.alex-io.com";
+
 const s = (v: unknown) => String(v ?? "").trim();
+const isEmail = (v: unknown): v is string =>
+  typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
-function isEmail(v: unknown): v is string {
-  return typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v));
-}
-
+/** ---------------------------------------------------------------------
+ *  Reply preview (AI-less heuristics)
+ *  ------------------------------------------------------------------ */
 type ReplyBits = {
   html: string;
   missing: string[];
@@ -65,40 +69,37 @@ type ReplyBits = {
   };
 };
 
-/**
- * Build the reply preview and the list of still-missing fields.
- * Pure string/regex heuristics – no external calls.
- */
 function buildReply(input: OrchestrateInput): ReplyBits {
   const raw = s(input.text);
 
-  // Dimensions like `12 x 9 x 2`, `12x9x2`, or "L=12 W=9 H=2"
+  // dimensions: "12 x 9 x 2", "12x9x2", or "L=12 W=9 H=2"
   const hasDims =
     /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i.test(raw) ||
     /\bL\s*=?\s*\d+(?:\.\d+)?\b.*\bW\s*=?\s*\d+(?:\.\d+)?\b.*\bH\s*=?\s*\d+(?:\.\d+)?\b/i.test(raw);
 
-  // Quantity (qty: 24), or "need 24", or "24 pcs"
+  // quantity: "qty: 24", "24 pcs", or "need 24"
   const qtyMatch =
     raw.match(/\bqty\s*[:=]?\s*(\d+)\b/i) ||
     raw.match(/\b(\d{1,6})\s*(pcs|pieces|units|ea)\b/i) ||
     raw.match(/\b(?:need|for|make)\s+(\d{1,6})\b/i);
   const hasQty = !!qtyMatch;
 
-  // Density & foam family (accept pcf, lb/ft³, family tokens)
+  // density / family: "pcf", "lb/ft3", "PE", "EPE", "PU", etc.
   const hasDensity =
     /\b(?:pcf|lb\/?ft3|lb\/?ft\^?3|lb\s*per\s*cubic\s*foot)\b/i.test(raw) ||
     /\b(PE|EPE|PU|EVA|XLPE|ESTER)\b/i.test(raw) ||
-    /\b\d(?:\.\d+)?\s*(?:pcf|lb\/?ft3)\b/i.test(raw) ||
-    /\b(?:1(?:\.\d+)?|2(?:\.\d+)?|3(?:\.\d+)?)\s*(?:pcf|lb\/?ft3)\b/i.test(raw);
+    /\b\d(?:\.\d+)?\s*(?:pcf|lb\/?ft3)\b/i.test(raw);
 
-  // Thickness under part
+  // thickness under the part
   const hasThicknessUnder =
-    /\b(thickness|under|bottom)\b.*\b(\d+(?:\.\d+)?)\s*(in|inch|inches|mm|millimeters?)\b/i.test(raw);
+    /\b(thickness|under|bottom)\b.*\b(\d+(?:\.\d+)?)\s*(in|inch|inches|mm|millimeters?)\b/i.test(
+      raw
+    );
 
-  // Units mention
+  // units mention
   const unitsMentioned = /\b(mm|millimeter|millimeters|in|inch|inches)\b/i.test(raw);
 
-  // Any uploaded sketch refs?
+  // uploaded sketch?
   const hasSketch = !!(input.sketchRefs && input.sketchRefs.length > 0);
 
   const missing: string[] = [];
@@ -108,7 +109,7 @@ function buildReply(input: OrchestrateInput): ReplyBits {
   if (!hasThicknessUnder) missing.push("thickness under the part");
   if (!unitsMentioned) missing.push("units (in or mm)");
 
-  const promptLine =
+  const prompt =
     missing.length > 0
       ? `To lock in pricing, could you confirm${hasSketch ? "" : " (or attach a sketch)"}:`
       : `Great — I can run pricing; I’ll prepare a quote and send it right back.`;
@@ -128,7 +129,7 @@ function buildReply(input: OrchestrateInput): ReplyBits {
   const html = `
   <div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;color:#111">
     <p>Thanks for reaching out — I can help quote your foam packaging quickly.</p>
-    <p>${promptLine}</p>
+    <p>${prompt}</p>
     ${listHtml}
     ${sketchLine}
     <p>— Alex-IO Estimator</p>
@@ -141,18 +142,40 @@ function buildReply(input: OrchestrateInput): ReplyBits {
   };
 }
 
+/** ---------------------------------------------------------------------
+ *  Helpers for internal API calls (absolute URLs)
+ *  ------------------------------------------------------------------ */
+async function postJson<T = any>(path: string, payload: any) {
+  const url = `${BASE}${path}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload ?? {}),
+    // Node runtime: SSR safe
+    cache: "no-store",
+  });
+  const status = res.status;
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* ignore */
+  }
+  return { url, status, data };
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const bodyRaw = (await req.json()) as Partial<OrchestrateInput>;
+    const raw = (await req.json()) as Partial<OrchestrateInput>;
     const body: OrchestrateInput = {
       mode: "ai",
-      toEmail: s(bodyRaw.toEmail),
-      subject: s(bodyRaw.subject || "Re: your message"),
-      text: s(bodyRaw.text),
-      inReplyTo: bodyRaw.inReplyTo ?? null,
-      dryRun: Boolean(bodyRaw.dryRun),
-      sketchRefs: Array.isArray(bodyRaw.sketchRefs)
-        ? bodyRaw.sketchRefs.map(s).filter(Boolean)
+      toEmail: s(raw.toEmail),
+      subject: s(raw.subject || "Re: your message"),
+      text: s(raw.text),
+      inReplyTo: raw.inReplyTo ?? null,
+      dryRun: Boolean(raw.dryRun),
+      sketchRefs: Array.isArray(raw.sketchRefs)
+        ? raw.sketchRefs.map(s).filter(Boolean)
         : [],
     };
 
@@ -160,8 +183,53 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "invalid toEmail" }, { status: 400 });
     }
 
-    // Build preview + missing-fields list (the heart of this AI-less orchestrator)
+    // 1) Always build preview + missing list
     const reply = buildReply(body);
+
+    // diag collector for quick CLI checks
+    const diag: Record<string, unknown> = {};
+
+    // 2) Always run EXTRACT (DB-driven hints)
+    const ex = await postJson("/api/ai/extract", { text: body.text });
+    diag.extract_url = ex.url;
+    diag.extract_status = ex.status;
+    const extracted =
+      ex.status === 200 && ex.data && ex.data.ok ? (ex.data as any) : null;
+
+    // 3) Always run SUGGEST based on extract results
+    let suggestedCount = 0;
+    let suggestedItems: unknown[] = [];
+    let suggestedTop: unknown | undefined;
+
+    const filter = extracted?.dbFilter ?? undefined;
+    const searchWords = extracted?.searchWords ?? undefined;
+
+    const sg = await postJson("/api/ai/suggest-materials", { filter, searchWords });
+    diag.suggest_url = sg.url;
+    diag.suggest_status = sg.status;
+    if (sg.status === 200 && sg.data && sg.data.ok) {
+      suggestedCount = sg.data.count ?? 0;
+      suggestedItems = sg.data.items ?? [];
+      suggestedTop = sg.data.top;
+    }
+
+    // 4) Try a QUOTE/PRICING preview (best-effort; won't fail route)
+    //    We pass original free-text — your /quote handler already parses dims/qty/density
+    let pricing: unknown | undefined;
+    const qt = await postJson("/api/ai/quote", {
+      text: body.text,
+      previewOnly: true,
+    });
+    diag.quote_url = qt.url;
+    diag.quote_status = qt.status;
+    if (qt.status === 200 && qt.data && qt.data.ok) {
+      pricing = qt.data.pricing ?? qt.data.quote ?? qt.data;
+      diag.price_status = 200;
+    } else {
+      diag.price_status = 500;
+      diag.price_error_text =
+        qt?.data?.error || qt?.data?.message || "pricing temporarily unavailable";
+    }
 
     const payload: OrchestrateResponse = {
       ok: true,
@@ -171,10 +239,23 @@ export async function POST(req: NextRequest) {
       htmlPreview: reply.html,
       missing: reply.missing,
       src: reply.src,
-      // no quote generation here (kept for compatibility with callers that read these keys)
-      quote: null,
-      extracted: null,
-      suggested: { count: 0, items: [] },
+      extracted: extracted
+        ? {
+            dims: extracted.dims,
+            dbFilter: extracted.dbFilter,
+            searchWords: extracted.searchWords,
+            unitsMentioned: extracted.unitsMentioned,
+            ...extracted,
+          }
+        : null,
+      suggested: {
+        count: suggestedCount,
+        items: suggestedItems,
+        top: suggestedTop,
+      },
+      pricing,
+      quote: null, // keep key for compatibility with old callers
+      diag,
     };
 
     return NextResponse.json(payload, { status: 200 });
