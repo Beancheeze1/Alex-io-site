@@ -1,38 +1,31 @@
-// app/api/hubspot/lookupEmail/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/**
- * HubSpot lookupEmail endpoint
- * Used by webhook/orchestrate to identify sender email from inbound message
- * Returns: { ok: true, email, status: 200 }
- */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const payload = await req.json().catch(() => ({}));
+    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/hubspot/lookup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    });
 
-    // Try to extract the sender email from different possible shapes
-    const email =
-      body?.message?.from?.email ||
-      body?.object?.message?.from?.email ||
-      body?.email ||
-      null;
-
-    if (!email) {
-      console.log("[lookupEmail] missing email in body", body);
-      return NextResponse.json({ ok: false, status: 400, error: "missing_email" });
+    const text = await res.text();
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = { raw: text };
     }
 
-    console.log("[lookupEmail] returning sender email", email);
-    return NextResponse.json({ ok: true, status: 200, email });
+    return NextResponse.json(json, { status: res.status || 200 });
   } catch (err: any) {
-    console.error("[lookupEmail] error", err);
-    return NextResponse.json({
-      ok: false,
-      status: 500,
-      error: err.message ?? "unknown_error",
-    });
+    return NextResponse.json(
+      { ok: false, error: err?.message ?? "lookupEmail relay failed" },
+      { status: 500 }
+    );
   }
 }
