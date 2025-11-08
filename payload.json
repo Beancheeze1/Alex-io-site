@@ -1,1 +1,1 @@
-{    "subject":  "Alex-IO Graph control",    "toEmail":  "25thhourdesign@gmail.com",    "html":  "\u003cdiv style=\u0027font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.45;color:#111\u0027\u003e\u003cp\u003eControl email to confirm msgraph/send is alive.\u003c/p\u003e\u003c/div\u003e",    "inReplyTo":  null,    "dryRun": false}
+{    "subject":  "Alex-IO Graph control",    "toEmail":  "25thhourdesign@gmail.com",    "inReplyTo":  null,    "text":  "Control email to confirm msgraph/send is alive.",    "dryRun": false}
