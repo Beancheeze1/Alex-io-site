@@ -1,31 +1,32 @@
-import { NextRequest, NextResponse } from "next/server";
+// app/api/hubspot/lookupEmail/route.ts
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
-  try {
-    const payload = await req.json().catch(() => ({}));
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/hubspot/lookup`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    });
+/**
+ * Back-compat shim: forward POST body to /api/hubspot/lookup
+ * so older code paths keep working.
+ */
+export async function POST(req: Request) {
+  let body: any = {};
+  try { body = await req.json(); } catch {}
 
-    const text = await res.text();
-    let json: any;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      json = { raw: text };
-    }
+  const base =
+    process.env.NEXT_PUBLIC_BASE_URL?.trim() ||
+    process.env.BASE_URL?.trim() ||
+    "https://api.alex-io.com";
 
-    return NextResponse.json(json, { status: res.status || 200 });
-  } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err?.message ?? "lookupEmail relay failed" },
-      { status: 500 }
-    );
-  }
+  const res = await fetch(`${base}/api/hubspot/lookup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  const text = await res.text();
+  return new NextResponse(text, {
+    status: res.status,
+    headers: { "Content-Type": res.headers.get("content-type") ?? "application/json" },
+  });
 }
