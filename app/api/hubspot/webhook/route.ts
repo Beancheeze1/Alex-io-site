@@ -2,298 +2,233 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * HubSpot Webhook (App Router)
- * Robust extraction of toEmail/subject/text + fallback fetch; forwards to /api/ai/orchestrate
+ * HubSpot webhook → decide whether to orchestrate a reply.
+ *
+ * Key rules (merged to match the last known-good zip + our recent edits):
+ * - Accept a single event or an array; normalize to an array early (fixes TS error).
+ * - dryRun: honor ?dryRun=1 (or true) to simulate the full flow but skip sending.
+ * - Extract toEmail directly when present; otherwise, look it up from HubSpot
+ *   using the local helper endpoint that worked in your baseline.
+ * - Only orchestrate if REPLY_ENABLED=true and we have a toEmail.
+ * - Clear logs so Render shows exactly what happened.
  */
+
 export const dynamic = "force-dynamic";
 
-type OrchestrateBody = {
-  mode: "ai";
-  toEmail: string;
-  subject?: string;
-  text?: string;
-  inReplyTo?: string | null;
-  dryRun?: boolean;
-};
-
 type HubSpotEvent = {
-  subscriptionType?: string;
-  eventId?: string;
-  objectId?: string | number;
-  messageId?: string | number;
-  conversationId?: string | number;
-  threadId?: string | number;
-  occurredAt?: number | string;
-  appId?: string | number;
-  changeFlag?: string;
-  messageType?: string;
-  message?: any;
-  data?: any;
-  from?: { email?: string } | string;
-  to?: { email?: string } | Array<{ email?: string }> | string;
-  subject?: string;
+  subscriptionType?: string; // e.g., "conversation.newMessage"
+  objectId?: string;         // message/thread object id
+  messageId?: string;        // message id (when present)
+  inReplyTo?: string | null; // replied-to message id (when present)
+  toEmail?: string | null;   // we sometimes set/receive this
+  hasText?: boolean;
+  hasHtml?: boolean;
   text?: string;
-  html?: string;
-  [k: string]: any;
+  subject?: string;
+  from?: string | null;
 };
 
-function envOrThrow(name: string): string {
+// ---- helpers ----
+
+function boolFromStr(v: string | null | undefined): boolean {
+  if (!v) return false;
+  const s = String(v).toLowerCase();
+  return s === "1" || s === "true" || s === "yes";
+}
+
+function getEnv(name: string, fallback?: string): string {
   const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
+  if (v && v.length) return v;
+  if (fallback !== undefined) return fallback;
+  throw new Error(`Missing env: ${name}`);
 }
 
-function boolish(v: any): boolean {
-  if (v === true) return true;
-  if (typeof v === "string") {
-    const s = v.toLowerCase();
-    return s === "1" || s === "true" || s === "yes";
+async function json(res: Response) {
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.includes("application/json")) {
+    const txt = await res.text();
+    return { ok: false, status: res.status, text: txt };
   }
-  return false;
+  const body = await res.json();
+  return { ok: res.ok, status: res.status, body };
 }
 
-function pickFirstEmail(value: any): string | undefined {
-  if (!value) return undefined;
-  if (typeof value === "string" && value.includes("@")) return value;
-  if (Array.isArray(value)) {
-    for (const it of value) {
-      const e = pickFirstEmail(it);
-      if (e) return e;
-    }
-  } else if (typeof value === "object") {
-    for (const key of ["email", "address", "from", "to", "sender"]) {
-      const maybe = (value as any)[key];
-      const e = pickFirstEmail(maybe);
-      if (e) return e;
-    }
-  }
-  return undefined;
+function log(header: string, obj: unknown) {
+  // Compact, readable server logs
+  console.log(`[webhook] ${header}`, typeof obj === "string" ? obj : obj ?? {});
 }
 
-function coerceString(x: any): string | undefined {
-  if (x == null) return undefined;
-  return typeof x === "string" ? x : String(x);
-}
-
-function trimEmailLike(x?: string): string | undefined {
-  if (!x) return undefined;
-  const m = x.match(/<?([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})>?/i);
-  return m?.[1] ?? x;
-}
-
-function extractFlatFields(e: HubSpotEvent) {
-  const subject =
-    coerceString(e.subject) ??
-    coerceString(e?.message?.subject) ??
-    coerceString(e?.data?.subject);
-
-  const text =
-    coerceString(e.text) ??
-    coerceString(e?.message?.text) ??
-    coerceString(e?.data?.text) ??
-    coerceString(e?.message?.body) ??
-    coerceString(e?.data?.body);
-
-  const html =
-    coerceString(e.html) ??
-    coerceString(e?.message?.html) ??
-    coerceString(e?.data?.html);
-
-  let toEmail =
-    trimEmailLike(pickFirstEmail(e?.from)) ??
-    trimEmailLike(pickFirstEmail(e?.message?.from)) ??
-    trimEmailLike(pickFirstEmail(e?.data?.from)) ??
-    trimEmailLike(pickFirstEmail(e?.message?.recipient)) ??
-    trimEmailLike(pickFirstEmail(e?.data?.recipient)) ??
-    trimEmailLike(pickFirstEmail(e?.to));
-
-  const inReplyTo =
-    coerceString(e.messageId) ??
-    coerceString(e.objectId) ??
-    coerceString(e?.message?.id) ??
-    coerceString(e?.data?.messageId) ??
-    null;
-
-  return { subject, text, html, toEmail, inReplyTo };
-}
-
-async function getHubSpotToken(): Promise<string | undefined> {
+/**
+ * Normalize the posted body into an array of events.
+ */
+async function readEvents(req: NextRequest): Promise<HubSpotEvent[]> {
+  let body: unknown;
   try {
-    const base = envOrThrow("NEXT_PUBLIC_BASE_URL");
-    const r = await fetch(`${base}/api/hubspot/refresh`, { cache: "no-store" });
-    if (!r.ok) return undefined;
-    const j = await r.json();
-    return j?.access_token ?? j?.accessToken ?? j?.token;
+    body = await req.json();
   } catch {
-    return undefined;
+    return [];
   }
+  if (Array.isArray(body)) return body as HubSpotEvent[];
+  if (body && typeof body === "object") return [body as HubSpotEvent];
+  return [];
 }
 
-async function fetchMessageDetailIfNeeded(
-  token: string | undefined,
-  e: HubSpotEvent
-): Promise<Partial<Pick<OrchestrateBody, "toEmail" | "subject" | "text" | "inReplyTo">>> {
-  let { toEmail, subject, text, inReplyTo } = extractFlatFields(e);
-  if (toEmail && (text || subject)) return { toEmail, subject, text, inReplyTo };
-  if (!token) return {};
-
-  const msgId =
-    coerceString(e.messageId) ??
-    coerceString(e.objectId) ??
-    coerceString(e?.message?.id) ??
-    coerceString(e?.data?.messageId);
-
-  if (!msgId) return {};
-
+/**
+ * Our local helper (from your working baseline) that can resolve the recipient
+ * when HubSpot’s webhook doesn’t include it.
+ *
+ * We keep it path-relative so it works in Render without external auth.
+ */
+async function tryLookupToEmailFromMessage(messageId: string): Promise<string | null> {
   try {
-    const r = await fetch(
-      `https://api.hubapi.com/conversations/v3/conversations/messages/${encodeURIComponent(
-        msgId
-      )}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    if (r.ok) {
-      const j = await r.json();
-      toEmail =
-        trimEmailLike(
-          pickFirstEmail(j?.from) ??
-            pickFirstEmail(j?.sender) ??
-            pickFirstEmail(j?.recipient) ??
-            pickFirstEmail(j?.participants)
-        ) || toEmail;
-
-      subject = coerceString(j?.subject) ?? subject;
-      text =
-        coerceString(j?.text) ??
-        coerceString(j?.body) ??
-        coerceString(j?.message?.text) ??
-        text;
-
-      inReplyTo = inReplyTo ?? coerceString(j?.id) ?? null;
-
-      return { toEmail, subject, text, inReplyTo };
+    const url = `${getEnv("NEXT_PUBLIC_BASE_URL")}/api/hubspot/messages/${encodeURIComponent(
+      messageId
+    )}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const out = await json(res);
+    if (!out.ok) {
+      log("lookupEmail status_error", out);
+      return null;
     }
-  } catch {
-    // ignore
+    const to: string | undefined =
+      out.body?.toEmail ||
+      out.body?.to_address ||
+      out.body?.to?.email ||
+      out.body?.to;
+    if (to && typeof to === "string" && to.includes("@")) return to.trim();
+  } catch (e) {
+    log("lookupEmail exception", String(e));
   }
-
-  return {};
+  return null;
 }
 
-function chooseBodyText(text?: string, html?: string): string | undefined {
-  if (text && text.trim().length) return text;
-  if (!html) return undefined;
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .trim();
+/**
+ * Decide if this event is the kind we reply to.
+ * We keep it simple and permissive—same as the baseline:
+ * reply on new inbound conversation messages.
+ */
+function isNewInbound(ev: HubSpotEvent): boolean {
+  const t = (ev.subscriptionType || "").toLowerCase();
+  // HubSpot fires variants; treat anything that looks like a new inbound as eligible
+  return t.includes("conversation.newmessage") || t.includes("conversations.newmessage");
 }
+
+// ---- route ----
 
 export async function POST(req: NextRequest) {
-  const started = Date.now();
-  const url = new URL(req.url);
+  const replyEnabled = boolFromStr(process.env.REPLY_ENABLED);
+  const dryRun = boolFromStr(req.nextUrl.searchParams.get("dryRun"));
 
-  const dryRunQs = url.searchParams.get("dryRun");
-  const dryRunHdr = req.headers.get("x-dryrun");
-  const dryRun = boolish(dryRunQs) || boolish(dryRunHdr);
+  // Read & normalize events (FIX: never treat union as array; we always produce an array here)
+  const events = await readEvents(req);
 
-  // ---- FIX: safe/typed JSON parsing without union assignment ----
-  let incoming: unknown;
-  try {
-    incoming = await req.json();
-  } catch {
-    incoming = {};
-  }
-  const events: HubSpotEvent[] = Array.isArray(incoming)
-    ? (incoming as HubSpotEvent[])
-    : [incoming as HubSpotEvent];
-  // ---------------------------------------------------------------
-
-  const ev = events[0] ?? ({} as HubSpotEvent);
-
-  let { subject, text, html, toEmail, inReplyTo } = extractFlatFields(ev);
-
-  if (!toEmail || (!text && !html)) {
-    const token = await getHubSpotToken();
-    const fetched = await fetchMessageDetailIfNeeded(token, ev);
-    toEmail = fetched.toEmail ?? toEmail;
-    subject = fetched.subject ?? subject;
-    text = fetched.text ?? text;
-    inReplyTo = fetched.inReplyTo ?? inReplyTo ?? null;
+  if (!events.length) {
+    log("received (empty body)", {});
+    return NextResponse.json({ ok: true, dryRun, send_ok: false, reason: "no_events" });
   }
 
-  const body: OrchestrateBody = {
-    mode: "ai",
-    toEmail: (toEmail ?? "").trim(),
-    subject: subject?.trim(),
-    text: chooseBodyText(text, html),
-    inReplyTo: inReplyTo ?? null,
+  // We only consider the first eligible inbound event (same as baseline behavior)
+  let chosen: HubSpotEvent | null = null;
+  for (const ev of events) {
+    if (isNewInbound(ev)) {
+      chosen = ev;
+      break;
+    }
+  }
+
+  if (!chosen) {
+    log("received (non-inbound/no eligible event)", { count: events.length });
+    return NextResponse.json({ ok: true, dryRun, send_ok: false, reason: "no_eligible_event" });
+  }
+
+  // Extract details from the chosen event
+  const subType = chosen.subscriptionType || "unknown";
+  let toEmail: string | null =
+    (chosen.toEmail && chosen.toEmail.includes("@") ? chosen.toEmail : null) || null;
+
+  const inReplyTo = chosen.inReplyTo || chosen.messageId || chosen.objectId || null;
+  const hasText = Boolean(chosen.hasText ?? chosen.text);
+  const hasHtml = Boolean(chosen.hasHtml);
+
+  log("received", {
+    subType,
+    toEmail,
+    hasText,
+    hasHtml,
+    inReplyTo,
+    dryRunChosen: dryRun,
+  });
+
+  // If HubSpot body didn’t include the recipient, look it up the same way the baseline did.
+  if (!toEmail && inReplyTo) {
+    toEmail = await tryLookupToEmailFromMessage(inReplyTo);
+  }
+
+  if (!toEmail) {
+    log("missing toEmail; skipping orchestrate", {});
+    return NextResponse.json({
+      ok: true,
+      dryRun,
+      send_ok: false,
+      reason: "missing_toEmail",
+    });
+  }
+
+  // Respect the global reply toggle
+  if (!replyEnabled) {
+    log("REPLY_DISABLED; skipping send", { replyEnabled });
+    return NextResponse.json({
+      ok: true,
+      dryRun,
+      send_ok: false,
+      reason: "reply_disabled",
+    });
+  }
+
+  // Build a lightweight orchestration request to your existing route
+  const orchUrl = `${getEnv("NEXT_PUBLIC_BASE_URL")}/api/ai/orchestrate`;
+  const payload = {
+    mode: "ai" as const,
+    toEmail,
+    subject: chosen.subject || undefined,
+    text: chosen.text || undefined,
+    inReplyTo: inReplyTo || undefined,
     dryRun,
   };
 
-  console.log("[webhook] received {");
-  console.log(" subType:", ev?.subscriptionType ?? "unknown");
-  console.log(" toEmail:", body.toEmail || "undefined");
-  console.log(" hasText:", !!body.text);
-  console.log(" hasHtml:", !!html);
-  console.log(" inReplyTo:", body.inReplyTo);
-  console.log(" dryRunChosen:", body.dryRun === true);
-  console.log("}");
-
-  if (!body.toEmail) {
-    console.warn("[webhook] missing toEmail; skipping orchestrate");
-    return NextResponse.json(
-      { ok: true, reason: "missing_toEmail" },
-      { status: 200 }
-    );
-  }
-
-  const replyEnabled = (process.env.REPLY_ENABLED ?? "true").toLowerCase() === "true";
-  if (!replyEnabled && !dryRun) {
-    console.log(
-      "[webhook] REPLY_ENABLED=false; forcing dryRun orchestrate for safety"
-    );
-    body.dryRun = true;
-  }
+  // Send to orchestrator
+  let send_status = 0;
+  let send_ok = false;
+  let send_result: string | undefined;
 
   try {
-    const base = envOrThrow("NEXT_PUBLIC_BASE_URL");
-    const r = await fetch(`${base}/api/ai/orchestrate`, {
+    const res = await fetch(`${orchUrl}?t=${Date.now()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
       cache: "no-store",
-      body: JSON.stringify(body),
     });
-
-    const jr = await r.json().catch(() => ({}));
-    console.log("[webhook] orchestrate result {");
-    console.log(" status:", r.status);
-    console.log(" ok:", r.ok);
-    console.log(" send_status:", jr?.status ?? "n/a");
-    console.log(" send_ok:", jr?.ok ?? "n/a");
-    console.log(" send_result:", jr?.result ?? "n/a");
-    console.log("}");
-
-    return NextResponse.json(
-      { ok: true, elapsed_ms: Date.now() - started, orchestrate: jr },
-      { status: 200 }
-    );
-  } catch (err: any) {
-    console.error("[webhook] orchestrate error:", err?.message || err);
-    return NextResponse.json(
-      { ok: false, error: "orchestrate_failed" },
-      { status: 500 }
-    );
+    send_status = res.status;
+    const out = await json(res);
+    send_ok = Boolean(out.ok);
+    // Prefer the orchestrator’s declared send result if present
+    // (our tests log {status: 200, ok: true, result: "sent"})
+    // fall back to a short summary.
+    send_result =
+      (out.body && (out.body.result || out.body.send_result)) ||
+      (out.ok ? "sent" : "failed");
+  } catch (e) {
+    log("orchestrate exception", String(e));
+    send_result = "exception";
   }
-}
 
-export async function GET() {
-  return NextResponse.json({ ok: true, route: "hubspot/webhook" }, { status: 200 });
+  log("orchestrate result", { status: send_status, ok: send_ok, send_result });
+
+  return NextResponse.json({
+    ok: true,
+    dryRun,
+    send_status,
+    send_ok,
+    send_result,
+  });
 }
