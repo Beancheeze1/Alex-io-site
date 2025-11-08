@@ -1,3 +1,12 @@
 ﻿{
-    "skive_upcharge_each":  4.5
+    "cushion_family_order":  [
+                                 "EPE 1.7# White",
+                                 "EPE 2.2# Black",
+                                 "EPE 4.0#"
+                             ],
+    "ratePerCI_default":  0.019675925925925927,
+    "skive_upcharge_each":  4.5,
+    "min_charge_default":  0,
+    "kerf_pct_default":  0,
+    "ratePerBF_default":  34
 }

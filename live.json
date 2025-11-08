@@ -1,7 +1,7 @@
 ﻿{
     "subject":  "Re: foam quote",
     "toEmail":  "25thourdesign@gmail.com",
-    "dryRun":  true,
+    "dryRun":  false,
     "mode":  "ai",
     "text":  "Need qty 24, 12 x 9 x 2 in, PE 1.7 pcf, black. 1/2 in under."
 }

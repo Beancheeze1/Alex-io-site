@@ -1,10 +1,18 @@
 ﻿{
-    "round_to_bf":  false,
     "dims":  {
                  "units":  "in",
                  "L":  12,
                  "W":  9,
-                 "H":  2.25
+                 "H":  2
              },
-    "qty":  10
+    "cavities":  [
+                     {
+                         "units":  "in",
+                         "L":  3,
+                         "W":  2,
+                         "count":  2,
+                         "H":  1.5
+                     }
+                 ],
+    "qty":  24
 }
