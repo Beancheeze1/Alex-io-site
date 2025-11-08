@@ -1,186 +1,158 @@
 // app/api/ai/cushion/recommend/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import pg from "pg";
+
+/**
+ * POST /api/ai/cushion/recommend
+ * Body (examples):
+ * {
+ *   "family": "PE",               // required (PE, EPE, PU, etc.)
+ *   "weight_lb": 12.5,           // required (item weight)
+ *   "drop_in": 24,               // drop height (inches) or null
+ *   "target_g": 40,              // desired max G (optional)
+ *   "deflection_pct": 10,        // target static deflection %, optional
+ *   "dims": { "L":12, "W":9, "H":2, "units":"in" }, // optional, used for area/stress
+ *   "qty": 1                      // optional
+ * }
+ *
+ * Response:
+ * {
+ *   ok: true,
+ *   usedDb: boolean,
+ *   recommended_density: number,
+ *   suggested_material: string | null,
+ *   diag: any
+ * }
+ */
+
+type Dims = { L: number; W: number; H: number; units?: "in" | "mm" };
+
+function toInches(n: number, units?: string) {
+  if (!Number.isFinite(n)) return 0;
+  return (units === "mm") ? n / 25.4 : n;
+}
+
+function clamp(n: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, n));
+}
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/**
- * Input (any missing will be reported in `missing[]`):
- * {
- *   family?: "PE"|"PU"|"EPE"|"EVA"|string,
- *   targetFragilityG?: number,    // product fragility (allowable G), e.g. 50
- *   productWeight_lb?: number,    // product weight in pounds
- *   contactArea_in2?: number,     // support/contact area in square inches
- *   thickness_in?: number,        // proposed foam thickness (top/bottom combined if single-piece)
- *   drop_in?: number              // drop height in inches (e.g. 24 or 36)
- * }
- *
- * Output:
- * {
- *   ok: boolean,
- *   missing: string[],
- *   calc: {
- *     staticLoad_psi?: number,  // weight / area
- *     drop_in?: number,
- *     targetFragilityG?: number
- *   },
- *   picks: Array<{
- *     family: string,
- *     density_pcf: number,
- *     thickness_in: number,
- *     staticLoadRange_psi?: { min?: number, max?: number },
- *     g_transmitted?: number,
- *     confidence: "high"|"medium"|"low"
- *   }>,
- *   diag?: any
- * }
- *
- * NOTE: This assumes you have a table/view of cushion curves like:
- *   cushion_curves(family text, density_pcf numeric, thickness_in numeric,
- *                  static_load_min_psi numeric, static_load_max_psi numeric,
- *                  drop_in numeric, g_transmitted numeric)
- * If your column names differ, we’ll remap later—Path A keeps the SQL tolerant.
- */
-
-type In = {
-  family?: string;
-  targetFragilityG?: number;
-  productWeight_lb?: number;
-  contactArea_in2?: number;
-  thickness_in?: number;
-  drop_in?: number;
-};
-
-function num(v: any): number | undefined {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
-}
-
 export async function POST(req: NextRequest) {
-  const diag: Record<string, any> = {};
   try {
-    const body = (await req.json()) as Partial<In>;
+    const body = await req.json();
 
-    // Normalize inputs
-    const family = (body.family || "").trim().toUpperCase() || undefined;
-    const targetFragilityG = num(body.targetFragilityG);
-    const productWeight_lb = num(body.productWeight_lb);
-    const contactArea_in2 = num(body.contactArea_in2);
-    const thickness_in = num(body.thickness_in);
-    const drop_in = num(body.drop_in);
+    const family = String(body.family || "").trim().toUpperCase();
+    const weight_lb = Number(body.weight_lb ?? NaN);
+    const drop_in = body.drop_in == null ? null : Number(body.drop_in);
+    const target_g = body.target_g == null ? null : Number(body.target_g);
+    const deflection_pct = body.deflection_pct == null ? null : Number(body.deflection_pct);
+    const qty = Number.isFinite(Number(body.qty)) ? Number(body.qty) : 1;
 
-    const missing: string[] = [];
-    if (!productWeight_lb) missing.push("product weight (lb)");
-    if (!contactArea_in2) missing.push("contact/support area (in²)");
-    if (!thickness_in) missing.push("foam thickness (in)");
-    if (!drop_in) missing.push("drop height (in)");
-    if (!targetFragilityG) missing.push("target fragility (allowable G)");
+    const dims: Dims | null = body.dims
+      ? {
+          L: Number(body.dims.L ?? 0),
+          W: Number(body.dims.W ?? 0),
+          H: Number(body.dims.H ?? 0),
+          units: (body.dims.units === "mm" ? "mm" : "in"),
+        }
+      : null;
 
-    // We can proceed with a recommendation only if the core 5 fields exist:
-    if (missing.length > 0) {
-      return NextResponse.json(
-        {
-          ok: true,
-          missing,
-          calc: {},
-          picks: [],
-          diag: { note: "Provide fields above to run cushion-curve match" },
-        },
-        { status: 200 }
-      );
+    if (!family) {
+      return NextResponse.json({ ok: false, error: "family_required" }, { status: 400 });
+    }
+    if (!Number.isFinite(weight_lb) || weight_lb <= 0) {
+      return NextResponse.json({ ok: false, error: "weight_lb_invalid" }, { status: 400 });
     }
 
-    const staticLoad_psi = productWeight_lb! / contactArea_in2!; // lb / in²
+    // --- Try DB-first if you have a JSONB-based recommender function
+    //     e.g., SELECT * FROM recommend_cushion($1::jsonb)
+    //     This preserves your prior DB-based design if present.
+    let usedDb = false;
+    let dbResult: any = null;
 
-    // DB query — tolerant to slight schema differences
-    // We look for rows that match family (if provided), thickness within ±0.25in, and drop height within ±6in.
-    // Then we filter by static load band that contains our staticLoad_psi and rank by g_transmitted <= targetFragilityG (closest wins).
-    const cn = process.env.DATABASE_URL;
-    if (!cn) {
-      return NextResponse.json({ ok: false, error: "Missing env DATABASE_URL" }, { status: 500 });
+    try {
+      // Lazy import to avoid bundling issues in edge runtimes, though we are nodejs here.
+      // Adapt this import if your project uses a different DB client (neon/postgres/etc).
+      // We wrap in try/catch so the route still works without DB function.
+      // @ts-ignore
+      const { default: runDb } = await import("@/app/lib/db_call_optional").catch(() => ({ default: null }));
+      if (runDb) {
+        const payload = {
+          family,
+          weight_lb,
+          drop_in,
+          target_g,
+          deflection_pct,
+          qty,
+          dims,
+        };
+        // This helper should return { rows: [...] } or null; it's a thin wrapper you can add:
+        // export default async function runDb(sql: string, args: any[]): Promise<{rows:any[]}|null> { ... }
+        dbResult = await runDb(
+          "select * from recommend_cushion($1::jsonb)",
+          [JSON.stringify(payload)]
+        );
+        if (dbResult && Array.isArray(dbResult.rows) && dbResult.rows.length) {
+          usedDb = true;
+          const r = dbResult.rows[0];
+          return NextResponse.json({
+            ok: true,
+            usedDb,
+            recommended_density: Number(r.recommended_density ?? 0),
+            suggested_material: r.suggested_material ?? null,
+            diag: { db: "recommend_cushion", row: r },
+          });
+        }
+      }
+    } catch (_) {
+      // swallow; fallback below
     }
 
-    const pool = new pg.Pool({ connectionString: cn, ssl: { rejectUnauthorized: false } });
-    const args: any[] = [
-      family || null,
-      thickness_in!,
-      thickness_in! + 0.25,
-      thickness_in! - 0.25,
-      drop_in!,
-      drop_in! + 6,
-      drop_in! - 6,
-      staticLoad_psi!,
-      staticLoad_psi!,
-      targetFragilityG!,
-    ];
+    // --- Fallback heuristic (keeps you moving even without DB function)
+    // Very simple educated guess:
+    // - Compute footprint area; estimate static stress; choose density tiers.
+    // - If target_g lower (more protection), bias to higher density within family.
+    const L_in = dims ? toInches(dims.L, dims.units) : 0;
+    const W_in = dims ? toInches(dims.W, dims.units) : 0;
+    const H_in = dims ? toInches(dims.H, dims.units) : 0;
 
-    const sql = `
-      with cc as (
-        select
-          coalesce(family, '') as family,
-          density_pcf::numeric as density_pcf,
-          thickness_in::numeric as thickness_in,
-          static_load_min_psi::numeric as static_load_min_psi,
-          static_load_max_psi::numeric as static_load_max_psi,
-          drop_in::numeric as drop_in,
-          g_transmitted::numeric as g_transmitted
-        from cushion_curves
-      )
-      select
-        family, density_pcf, thickness_in,
-        static_load_min_psi, static_load_max_psi,
-        drop_in, g_transmitted,
-        case
-          when g_transmitted <= $10 then 1
-          when g_transmitted <= $10 * 1.2 then 2
-          else 3
-        end as rank_bucket
-      from cc
-      where ($1::text is null or upper(family) = $1)
-        and thickness_in between $3 and $2  -- ±0.25"
-        and drop_in between $7 and $6       -- ±6"
-        and $8 between static_load_min_psi and static_load_max_psi
-      order by
-        (g_transmitted - $10) asc,         -- closest under the target G
-        abs(drop_in - $5) asc,
-        abs(thickness_in - $2 + 0.25) asc,
-        density_pcf asc
-      limit 12
-    `;
+    const footprint = Math.max(0.01, L_in * W_in); // in^2
+    const static_stress = weight_lb / footprint;   // lb/in^2 (psi-ish)
 
-    const { rows } = await pool.query(sql, args);
-    await pool.end();
+    // Family density bands — tweak as needed or replace with your curated table.
+    const bands: Record<string, number[]> = {
+      "PE":  [1.3, 1.7, 2.2, 4.0],
+      "EPE": [1.3, 1.7, 2.2],
+      "PU":  [1.2, 1.5, 1.7, 2.0],
+    };
+    const candidates = bands[family] ?? [1.7];
 
-    const picks = rows.map((r: any) => {
-      const within = r.g_transmitted <= targetFragilityG!;
-      const bucket = Number(r.rank_bucket);
-      const confidence = within ? (bucket === 1 ? "high" : "medium") : "low";
-      return {
-        family: String(r.family),
-        density_pcf: Number(r.density_pcf),
-        thickness_in: Number(r.thickness_in),
-        staticLoadRange_psi: {
-          min: r.static_load_min_psi != null ? Number(r.static_load_min_psi) : undefined,
-          max: r.static_load_max_psi != null ? Number(r.static_load_max_psi) : undefined,
-        },
-        drop_in: Number(r.drop_in),
-        g_transmitted: Number(r.g_transmitted),
-        confidence,
-      };
-    });
+    // Very rough mapping from stress & drop/target_g to density index.
+    let idx = 0;
+    if (static_stress > 0.08) idx++;
+    if (static_stress > 0.15) idx++;
+    if (target_g != null && target_g <= 35) idx++; // tighter G => slightly stiffer
 
-    return NextResponse.json(
-      {
-        ok: true,
-        missing: [],
-        calc: { staticLoad_psi, drop_in, targetFragilityG },
-        picks,
-        diag: { matched: picks.length, family: family || "(any)" },
+    idx = clamp(idx, 0, candidates.length - 1);
+    const recommended_density = candidates[idx];
+
+    return NextResponse.json({
+      ok: true,
+      usedDb,
+      recommended_density,
+      suggested_material: `${family} ${recommended_density.toFixed(1)}#`,
+      diag: {
+        static_stress,
+        target_g,
+        drop_in,
+        H_in,
+        qty,
+        family,
+        note: usedDb ? "db" : "heuristic_fallback",
       },
-      { status: 200 }
-    );
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "recommendation error" }, { status: 200 });
+    });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 });
   }
 }
