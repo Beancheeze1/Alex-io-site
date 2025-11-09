@@ -1,7 +1,1 @@
-﻿{
-  "mode": "live",
-  "toEmail": "you@example.com",
-  "subject": "Alex-IO Graph control",
-  "text": "Control email to confirm msgraph/send is alive.",
-  "dryRun": false
-}
+﻿{ "mode": "ai", "toEmail": "you@example.com", "subject": "test", "text": "need a foam quote", "dryRun": true }
