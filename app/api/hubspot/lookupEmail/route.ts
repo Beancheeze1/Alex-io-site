@@ -89,35 +89,52 @@ function findSubjectDeep(obj: any): string {
   return "";
 }
 
-/** Prefer the *customer* address (not your mailbox/domain; avoid noreply/system). */
 function chooseCustomerEmail(
   candsIn: Iterable<string>,
   mailboxFromEnv?: string
 ): string | null {
-  const unique = Array.from(new Set(Array.from(candsIn).map((e) => e.toLowerCase()))).filter(
-    (e) => EMAIL_RE.test(e)
-  );
-  if (!unique.length) return null;
+  // normalize & keep only real emails
+  const all = Array.from(
+    new Set(Array.from(candsIn).map((e) => e.toLowerCase()))
+  ).filter((e) => EMAIL_RE.test(e));
 
-  const mailbox = (mailboxFromEnv || process.env.MS_MAILBOX_FROM || "").toLowerCase();
-  const mailboxDomain = mailbox.split("@")[1] || "";
+  if (!all.length) return null;
 
-  const systemish = (e: string) =>
+  const mailbox = (mailboxFromEnv || process.env.MS_MAILBOX_FROM || "")
+    .toLowerCase()
+    .trim();
+  const domain = mailbox.includes("@") ? mailbox.split("@")[1] : "";
+
+  const isSystem = (e: string) =>
     e.includes("no-reply") || e.includes("noreply") || e.includes("hubspot");
 
-  const publicBumps = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"];
+  // 1) Strong filter: not exact mailbox, not same domain, not system-ish
+  const strong = all.filter(
+    (e) =>
+      (!mailbox || e !== mailbox) &&
+      (!domain || !e.endsWith("@" + domain)) &&
+      !isSystem(e)
+  );
 
+  // 2) Weak fallback if strong got empty: allow other domains, still not exact mailbox/system
+  const weak = all.filter((e) => (!mailbox || e !== mailbox) && !isSystem(e));
+
+  const pool = strong.length ? strong : weak.length ? weak : all;
+
+  // light scoring (prefer consumer domains a bit)
+  const publicBumps = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"];
   const score = (e: string) => {
     let s = 0;
-    if (mailbox && e !== mailbox) s += 4; // not your exact mailbox
-    if (mailboxDomain && !e.endsWith("@" + mailboxDomain)) s += 3; // not your domain
-    if (!systemish(e)) s += 2; // not noreply/system
-    if (publicBumps.some((d) => e.endsWith("@" + d))) s += 1; // mild preference to consumer domains
+    if (mailbox && e !== mailbox) s += 4;
+    if (domain && !e.endsWith("@" + domain)) s += 3;
+    if (!isSystem(e)) s += 2;
+    if (publicBumps.some((d) => e.endsWith("@" + d))) s += 1;
     return s;
   };
 
-  return unique.sort((a, b) => score(b) - score(a))[0] ?? null;
+  return pool.sort((a, b) => score(b) - score(a))[0] ?? null;
 }
+
 
 /** Use most recent inbound (non-system) message's text as fallback. */
 function chooseLatestInbound(messages: any[]): { email: string | null; text: string } {
