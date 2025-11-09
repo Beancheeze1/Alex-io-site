@@ -1,104 +1,196 @@
-// app/api/hubspot/webhook/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// Always use production base for internal calls
-const PROD_BASE =
-  process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ||
-  "https://api.alex-io.com";
+/** env helpers */
+function flag(name: string, dflt = false) {
+  const v = process.env[name];
+  if (!v) return dflt;
+  return /^(1|true|yes|on)$/i.test(v);
+}
+function requireEnv(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
 
-// Utility: safely fetch JSON with error protection
-async function safeJsonFetch(path: string, body: any) {
-  const url = `${PROD_BASE}${path}?t=${Date.now()}`;
+/** compute our public base URL (no trailing slash) */
+function baseUrl(req: NextRequest) {
+  const fromEnv = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  // fallback to request origin (Render/CF will give https://api.alex-io.com)
+  const o = new URL(req.url).origin.replace(/\/$/, "");
+  return o;
+}
+
+/** tiny logger */
+function log(part: string, obj: any) {
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    });
-    const json = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, json, url };
-  } catch (err) {
-    return { ok: false, status: 0, json: { error: String(err) }, url };
+    // keep logs compact but readable
+    // biome-ignore lint/suspicious/noConsole: runtime log
+    console.log(part, JSON.stringify(obj, null, 2));
+  } catch {
+    // biome-ignore lint/suspicious/noConsole: runtime log
+    console.log(part, obj);
   }
 }
 
+/** types from our lookup/orchestrate endpoints */
+type LookupOut = {
+  ok: boolean;
+  email?: string;
+  subject?: string;
+  text?: string;
+  error?: string;
+  status?: number;
+  detail?: string;
+  src?: any;
+};
+
+type OrchestrateIn = {
+  mode: "ai";
+  toEmail: string;
+  subject?: string;
+  text?: string;
+  inReplyTo?: string | null;
+  dryRun?: boolean;
+};
+
 export async function POST(req: NextRequest) {
-  const dryRun = req.nextUrl.searchParams.get("dryRun") === "1";
-  const lookupTraces: any[] = [];
+  const started = Date.now();
+  const traces: Array<{ path: string; url: string; ok: boolean; status: number }> = [];
 
   try {
-    const payload = await req.json();
-    console.log("[webhook] received", payload);
-
-    const subType = payload.subscriptionType;
-    const objectId = payload.objectId;
-    const inReplyTo = payload.messageId || payload.threadId || null;
-
-    if (subType !== "conversation.newMessage" || !objectId) {
-      return NextResponse.json(
-        { ok: true, skipped: true, reason: "not_new_message_or_missing_id" },
-        { status: 200 }
-      );
+    // --- Parse HubSpot batch payload (we only need objectId) ---
+    // HubSpot sends an array of events; we handle 1+ robustly.
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {
+      body = {};
     }
 
-    // ---- 1️⃣  Lookup email via production URL ----
-    const lookupRes = await safeJsonFetch("/api/hubspot/lookupEmail", {
+    const list: any[] = Array.isArray(body) ? body : [body];
+    const first = list.find(Boolean) ?? {};
+    const objectId =
+      Number(first.objectId) ||
+      Number(first.threadId) ||
+      Number(first?.subscriptionType ? first?.objectId : undefined) ||
+      0;
+
+    log("[webhook] received", {
+      subscriptionType: first?.subscriptionType,
       objectId,
-    });
-    lookupTraces.push({
-      path: "/api/hubspot/lookupEmail",
-      url: lookupRes.url,
-      ok: lookupRes.ok,
-      status: lookupRes.status,
+      messageId: first?.messageId,
+      messageType: first?.messageType,
+      changeFlag: first?.changeFlag,
     });
 
-    const toEmail = lookupRes.json?.email;
-    if (!toEmail) {
+    // --- Dry-run detection ---
+    // Real webhooks DO NOT include ?dryRun=1, so default must be FALSE.
+    const qsDry = req.nextUrl.searchParams.get("dryRun");
+    const dryRun = qsDry === "1" || qsDry === "true";
+
+    // --- Reply enable gate (env) ---
+    const replyEnabled = flag("REPLY_ENABLED", false);
+
+    if (!objectId) {
+      const res = {
+        ok: false,
+        reason: "missing_objectId",
+      };
+      log("[webhook] error", res);
+      return NextResponse.json(res, { status: 200 });
+    }
+
+    // --- Step 1: lookup customer email/subject/text from the thread ---
+    const base = baseUrl(req);
+    const lookupUrl = `${base}/api/hubspot/lookupEmail?t=${Date.now()}`;
+    const lookupRes = await fetch(lookupUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ objectId }),
+    });
+
+    const lookupText = await lookupRes.text();
+    let lookup: LookupOut;
+    try {
+      lookup = JSON.parse(lookupText) as LookupOut;
+    } catch {
+      lookup = { ok: false, status: lookupRes.status, error: "lookup_parse_error", detail: lookupText.slice(0, 800) };
+    }
+
+    traces.push({ path: "/api/hubspot/lookupEmail", url: lookupUrl, ok: lookupRes.ok, status: lookupRes.status });
+
+    if (!lookup.ok || !lookup.email) {
       const res = {
         ok: true,
         dryRun,
         send_ok: false,
+        toEmail: lookup?.email ?? "",
         reason: "missing_toEmail",
-        lookup_traces: lookupTraces,
+        lookup_traces: traces,
       };
-      console.log("[webhook] missing_toEmail", res);
+      log("[webhook] missing_toEmail", res);
       return NextResponse.json(res, { status: 200 });
     }
 
-    // ---- 2️⃣  Pass to orchestrator (/api/ai/orchestrate) ----
-    const orchRes = await safeJsonFetch("/api/ai/orchestrate", {
+    // --- Step 2: orchestrate the reply ---
+    const orchUrl = `${base}/api/ai/orchestrate?t=${Date.now()}`;
+    const orchPayload: OrchestrateIn = {
       mode: "ai",
-      toEmail,
-      subject: lookupRes.json?.subject || "(no subject)",
-      text: lookupRes.json?.text || "",
-      inReplyTo,
-      dryRun,
-    });
-    lookupTraces.push({
-      path: "/api/ai/orchestrate",
-      url: orchRes.url,
-      ok: orchRes.ok,
-      status: orchRes.status,
+      toEmail: lookup.email,
+      subject: lookup.subject || undefined,
+      text: lookup.text || undefined,
+      inReplyTo: String(objectId),
+      dryRun, // <-- only true if ?dryRun=1 was explicitly given
+    };
+
+    // If replies are disabled AND not a manual dry-run call, skip sending but log the decision
+    if (!replyEnabled && !dryRun) {
+      log("[orchestrate] DRYRUN or REPLY_DISABLED", { dryRun: true, replyEnabled });
+      const res = {
+        ok: true,
+        dryRun: true,
+        send_ok: true,
+        toEmail: lookup.email,
+        lookup_traces: traces,
+        note: "Reply disabled by REPLY_ENABLED env; treated as dry-run.",
+      };
+      return NextResponse.json(res, { status: 200 });
+    }
+
+    const orchRes = await fetch(orchUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(orchPayload),
     });
 
-    const result = {
+    traces.push({ path: "/api/ai/orchestrate", url: orchUrl, ok: orchRes.ok, status: orchRes.status });
+
+    const out = await orchRes.json().catch(() => ({}));
+
+    const res = {
       ok: true,
       dryRun,
       send_ok: orchRes.ok,
-      toEmail,
-      lookup_traces: lookupTraces,
+      toEmail: lookup.email,
+      ms: Date.now() - started,
+      lookup_traces: traces,
+      orchestrate_status: orchRes.status,
+      orchestrate_result: out,
     };
-    console.log("[webhook] done", result);
-    return NextResponse.json(result, { status: 200 });
+    log("[webhook] done", res);
+    return NextResponse.json(res, { status: 200 });
   } catch (err: any) {
-    console.error("[webhook] fatal", err);
-    return NextResponse.json(
-      { ok: false, error: String(err), lookup_traces: lookupTraces },
-      { status: 500 }
-    );
+    const res = {
+      ok: false,
+      error: err?.message ?? "webhook_route_exception",
+    };
+    log("[webhook] exception", res);
+    return NextResponse.json(res, { status: 200 });
   }
 }
