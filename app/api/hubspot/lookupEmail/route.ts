@@ -4,24 +4,41 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/* ------------------------------ helpers ------------------------------ */
+/* ------------------------------ types ------------------------------ */
 
 type TokenResult =
   | { ok: true; token: string }
   | { ok: false; error: string; status?: number; detail?: string };
 
+type LookupOut = {
+  ok: boolean;
+  email?: string;
+  subject?: string;
+  text?: string;
+  threadId?: number;
+  error?: string;
+  status?: number;
+  detail?: string;
+  src?: {
+    email: string;
+    subject: string;
+    text: string;
+  };
+};
+
+/* ----------------------------- helpers ----------------------------- */
+
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 
-// Single-line key regex (no x-flag, no multiline) to avoid TS parse issues.
-const KEY_RE =
-  /(^|\.)(from|replyTo|sender|actor|initiatingActor|owner|participant|participants|to|cc|bcc|recipients|emails|addresses|email|emailAddress)(\.|$)/i;
-
+// true email string (not “Name <addr>”); tolerant to whitespace.
 function isEmail(s: unknown): s is string {
-  return typeof s === "string" && /[^@\s]+@[^@\s]+\.[^@\s]+/.test(s);
+  if (typeof s !== "string") return false;
+  const m = s.trim().match(EMAIL_RE);
+  return !!(m && m.length === 1 && m[0].length === s.trim().length);
 }
 
-/** Collect *all* email-looking strings from any JSON shape. */
-function collectEmailsDeep(value: any, out: Set<string>) {
+/** Collect ALL email-looking strings from any JSON shape. */
+function collectEmailsDeep(value: any, out: Set<string>): void {
   if (value == null) return;
   const t = typeof value;
 
@@ -38,7 +55,12 @@ function collectEmailsDeep(value: any, out: Set<string>) {
 
   if (t === "object") {
     for (const [k, v] of Object.entries(value)) {
-      if (KEY_RE.test(k)) {
+      // common key names where emails hide; if nested, still walk
+      if (
+        /(^|\.)(from|replyTo|sender|actor|initiatingActor|owner|participant|participants|to|cc|bcc|recipients|emails?|addresses?|emailAddress)$/i.test(
+          k
+        )
+      ) {
         collectEmailsDeep(v, out);
       } else if (typeof v === "object") {
         collectEmailsDeep(v, out);
@@ -58,20 +80,22 @@ function findSubjectDeep(obj: any): string {
     const cur = stack.pop();
     if (!cur || typeof cur !== "object") continue;
     for (const [k, v] of Object.entries(cur)) {
-      if (typeof v === "string" && /subject/i.test(k)) return v.trim();
+      if (typeof v === "string" && v.trim() && /subject/i.test(k)) {
+        return v.trim();
+      }
       if (v && typeof v === "object") stack.push(v);
     }
   }
   return "";
 }
 
-/** Prefer the *customer* address (not your mailbox/domain; avoid noreply/hubspot). */
+/** Prefer the *customer* address (not your mailbox/domain; avoid noreply/system). */
 function chooseCustomerEmail(
   candsIn: Iterable<string>,
   mailboxFromEnv?: string
 ): string | null {
   const unique = Array.from(new Set(Array.from(candsIn).map((e) => e.toLowerCase()))).filter(
-    isEmail
+    (e) => EMAIL_RE.test(e)
   );
   if (!unique.length) return null;
 
@@ -85,23 +109,35 @@ function chooseCustomerEmail(
 
   const score = (e: string) => {
     let s = 0;
-    if (mailbox && e !== mailbox) s += 4; // not exactly your mailbox
+    if (mailbox && e !== mailbox) s += 4; // not your exact mailbox
     if (mailboxDomain && !e.endsWith("@" + mailboxDomain)) s += 3; // not your domain
-    if (!systemish(e)) s += 2; // avoid noreply/systemish
-    if (publicBumps.some((d) => e.endsWith("@" + d))) s += 1; // small bump for consumer mail
+    if (!systemish(e)) s += 2; // not noreply/system
+    if (publicBumps.some((d) => e.endsWith("@" + d))) s += 1; // mild preference to consumer domains
     return s;
-    // Highest score wins
   };
 
   return unique.sort((a, b) => score(b) - score(a))[0] ?? null;
 }
 
+/** Use most recent inbound (non-system) message's text as fallback. */
+function chooseLatestInbound(messages: any[]): { email: string | null; text: string } {
+  const pick =
+    [...messages].reverse().find((m) => {
+      const dir = String(m?.direction ?? "").toUpperCase();
+      const type = String(m?.type ?? m?.messageType ?? "").toUpperCase();
+      return dir !== "OUTBOUND" && type !== "SYSTEM" && type !== "NOTE";
+    }) ?? messages[messages.length - 1];
+
+  const body = String(pick?.text ?? pick?.body ?? pick?.content ?? "");
+  const e = pick?.from?.email ?? pick?.from?.emailAddress ?? null;
+  return { email: isEmail(e) ? e : null, text: body };
+}
+
+/** Get HubSpot access token: prefer direct bearer, else refresh flow. */
 async function getAccessToken(): Promise<TokenResult> {
-  // Direct bearer first (for dev)
   const direct = process.env.HUBSPOT_ACCESS_TOKEN?.trim();
   if (direct) return { ok: true, token: direct };
 
-  // Refresh flow
   const refresh = process.env.HUBSPOT_REFRESH_TOKEN?.trim();
   const cid = process.env.HUBSPOT_CLIENT_ID?.trim();
   const secret = process.env.HUBSPOT_CLIENT_SECRET?.trim();
@@ -129,35 +165,19 @@ async function getAccessToken(): Promise<TokenResult> {
     const token = String(j.access_token || "");
     if (!token) return { ok: false, error: "no_access_token_in_response" };
     return { ok: true, token };
-  } catch (e) {
+  } catch {
     return { ok: false, error: "refresh_parse_error", detail: text.slice(0, 800) };
   }
 }
 
-/** Choose most recent inbound-ish message for a text fallback. */
-function chooseLatestInbound(messages: any[]): { email: string | null; text: string } {
-  if (!Array.isArray(messages) || !messages.length) return { email: null, text: "" };
-  const pick =
-    [...messages].reverse().find((m) => {
-      const dir = String(m?.direction ?? "").toUpperCase(); // INBOUND / OUTBOUND
-      const type = String(m?.type ?? m?.messageType ?? "").toUpperCase();
-      return dir !== "OUTBOUND" && type !== "SYSTEM" && type !== "NOTE";
-    }) ?? messages[messages.length - 1];
-
-  const body = String(pick?.text ?? pick?.body ?? pick?.content ?? "");
-  const e = pick?.from?.email ?? pick?.from?.emailAddress ?? null;
-
-  return { email: isEmail(e) ? e : null, text: body };
-}
-
-/* -------------------------------- route -------------------------------- */
+/* -------------------------------- route ------------------------------- */
 
 export async function POST(req: Request) {
   try {
-    const payload = await req.json().catch(() => ({}));
+    const payload = (await req.json().catch(() => ({}))) as any;
     const objectId = Number(payload.objectId ?? payload.threadId);
     if (!objectId) {
-      return NextResponse.json(
+      return NextResponse.json<LookupOut>(
         { ok: false, error: "missing objectId or threadId" },
         { status: 200 }
       );
@@ -165,14 +185,14 @@ export async function POST(req: Request) {
 
     const tok = await getAccessToken();
     if (!tok.ok) {
-      return NextResponse.json(
+      return NextResponse.json<LookupOut>(
         { ok: false, error: tok.error, status: tok.status, detail: tok.detail },
         { status: 200 }
       );
     }
 
-    // Fetch thread + messages + participants in parallel
-    const headers = { Authorization: `Bearer ${tok.token}` } as const;
+    // Fetch thread + messages + participants in parallel.
+    const headers = { Authorization: `Bearer ${tok.token}` };
 
     const [tRes, mRes, pRes] = await Promise.all([
       fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}`, {
@@ -191,12 +211,18 @@ export async function POST(req: Request) {
 
     const [tRaw, mRaw, pRaw] = await Promise.all([tRes.text(), mRes.text(), pRes.text()]);
     if (!tRes.ok) {
-      return NextResponse.json(
-        { ok: false, status: tRes.status, error: "hubspot_thread_fetch_failed", body: tRaw.slice(0, 800) },
+      return NextResponse.json<LookupOut>(
+        {
+          ok: false,
+          status: tRes.status,
+          error: "hubspot_thread_fetch_failed",
+          detail: tRaw.slice(0, 800),
+        },
         { status: 200 }
       );
     }
 
+    // Parse, but tolerate shape differences.
     let thread: any = {};
     let messages: any[] = [];
     let participants: any[] = [];
@@ -213,34 +239,34 @@ export async function POST(req: Request) {
       participants = Array.isArray(pj?.results) ? pj.results : Array.isArray(pj) ? pj : [];
     } catch {}
 
-    // Subject: try direct fields; then deep scan anywhere.
+    // SUBJECT: direct fields first, then deep scan anywhere.
     let subject =
       thread?.subject ??
       thread?.threadSubject ??
       thread?.title ??
-      thread?.summary ??
+      (thread?.summary ? String(thread.summary) : "") ??
       "";
     if (!subject) subject = findSubjectDeep({ thread, messages, participants });
 
-    // Text fallback from messages
-    const textPick = chooseLatestInbound(messages);
-    const text = textPick.text || "";
+    // TEXT fallback (and possibly a candidate from its "from")
+    const latest = chooseLatestInbound(messages);
+    const text = latest.text || "";
 
-    // Build an email candidate set from anything that smells like an email
+    // EMAIL candidates from everything that smells like an email.
     const emailSet = new Set<string>();
     collectEmailsDeep(messages, emailSet);
     collectEmailsDeep(participants, emailSet);
     collectEmailsDeep(thread, emailSet);
+    if (latest.email) emailSet.add(latest.email.toLowerCase());
 
-    // Prefer customer (not our mailbox/domain and not noreply/system)
     const picked = chooseCustomerEmail(emailSet, process.env.MS_MAILBOX_FROM);
     const email = picked ?? "";
 
-    return NextResponse.json(
+    return NextResponse.json<LookupOut>(
       {
         ok: true,
         email,
-        subject,
+        subject: subject || "",
         text,
         threadId: objectId,
         src: {
@@ -252,7 +278,7 @@ export async function POST(req: Request) {
       { status: 200 }
     );
   } catch (err: any) {
-    return NextResponse.json(
+    return NextResponse.json<LookupOut>(
       { ok: false, error: err?.message ?? "lookup_route_exception" },
       { status: 200 }
     );
