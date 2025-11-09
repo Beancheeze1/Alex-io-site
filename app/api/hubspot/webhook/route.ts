@@ -1,196 +1,79 @@
-import { NextResponse, NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** env helpers */
-function flag(name: string, dflt = false) {
-  const v = process.env[name];
-  if (!v) return dflt;
-  return /^(1|true|yes|on)$/i.test(v);
-}
-function requireEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
+function b(v: any) { return String(v ?? "").toLowerCase() === "true"; }
 
-/** compute our public base URL (no trailing slash) */
-function baseUrl(req: NextRequest) {
-  const fromEnv = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "");
-  if (fromEnv) return fromEnv;
-  // fallback to request origin (Render/CF will give https://api.alex-io.com)
-  const o = new URL(req.url).origin.replace(/\/$/, "");
-  return o;
-}
-
-/** tiny logger */
-function log(part: string, obj: any) {
-  try {
-    // keep logs compact but readable
-    // biome-ignore lint/suspicious/noConsole: runtime log
-    console.log(part, JSON.stringify(obj, null, 2));
-  } catch {
-    // biome-ignore lint/suspicious/noConsole: runtime log
-    console.log(part, obj);
-  }
-}
-
-/** types from our lookup/orchestrate endpoints */
-type LookupOut = {
-  ok: boolean;
-  email?: string;
-  subject?: string;
-  text?: string;
-  error?: string;
-  status?: number;
-  detail?: string;
-  src?: any;
-};
-
-type OrchestrateIn = {
-  mode: "ai";
-  toEmail: string;
-  subject?: string;
-  text?: string;
-  inReplyTo?: string | null;
-  dryRun?: boolean;
-};
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   const started = Date.now();
-  const traces: Array<{ path: string; url: string; ok: boolean; status: number }> = [];
-
   try {
-    // --- Parse HubSpot batch payload (we only need objectId) ---
-    // HubSpot sends an array of events; we handle 1+ robustly.
-    let body: any = {};
-    try {
-      body = await req.json();
-    } catch {
-      body = {};
+    const ev = await req.json();
+
+    const sub = String(ev?.subscriptionType ?? ev?.subscription_type ?? "");
+    if (!/conversation\.newMessage/i.test(sub)) {
+      return NextResponse.json({ ok: true, ignored: true }, { status: 200 });
     }
 
-    const list: any[] = Array.isArray(body) ? body : [body];
-    const first = list.find(Boolean) ?? {};
-    const objectId =
-      Number(first.objectId) ||
-      Number(first.threadId) ||
-      Number(first?.subscriptionType ? first?.objectId : undefined) ||
-      0;
-
-    log("[webhook] received", {
-      subscriptionType: first?.subscriptionType,
-      objectId,
-      messageId: first?.messageId,
-      messageType: first?.messageType,
-      changeFlag: first?.changeFlag,
-    });
-
-    // --- Dry-run detection ---
-    // Real webhooks DO NOT include ?dryRun=1, so default must be FALSE.
-    const qsDry = req.nextUrl.searchParams.get("dryRun");
-    const dryRun = qsDry === "1" || qsDry === "true";
-
-    // --- Reply enable gate (env) ---
-    const replyEnabled = flag("REPLY_ENABLED", false);
-
+    const objectId = Number(ev?.objectId ?? ev?.object_id);
     if (!objectId) {
-      const res = {
-        ok: false,
-        reason: "missing_objectId",
-      };
-      log("[webhook] error", res);
-      return NextResponse.json(res, { status: 200 });
+      return NextResponse.json({ ok: true, ignored: true, reason: "missing_objectId" }, { status: 200 });
     }
 
-    // --- Step 1: lookup customer email/subject/text from the thread ---
-    const base = baseUrl(req);
-    const lookupUrl = `${base}/api/hubspot/lookupEmail?t=${Date.now()}`;
-    const lookupRes = await fetch(lookupUrl, {
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "";
+    const lookupUrl = `${base}/api/hubspot/lookupEmail`;
+    const orchUrl = `${base}/api/ai/orchestrate`;
+
+    // 1) lookup real customer email + subject/text
+    const lr = await fetch(`${lookupUrl}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      cache: "no-store",
       body: JSON.stringify({ objectId }),
+      cache: "no-store",
     });
+    const lookup = await lr.json().catch(() => ({}));
 
-    const lookupText = await lookupRes.text();
-    let lookup: LookupOut;
-    try {
-      lookup = JSON.parse(lookupText) as LookupOut;
-    } catch {
-      lookup = { ok: false, status: lookupRes.status, error: "lookup_parse_error", detail: lookupText.slice(0, 800) };
+    const toEmail: string = String(lookup?.email ?? "").trim();
+    const subject: string = String(lookup?.subject ?? "").trim();
+    const text: string = String(lookup?.text ?? "").trim();
+
+    if (!toEmail) {
+      return NextResponse.json(
+        {
+          ok: true,
+          dryRun: false,
+          send_ok: false,
+          reason: "missing_toEmail",
+          lookup_traces: [{ path: "/api/hubspot/lookupEmail", url: lookupUrl, ok: lr.ok, status: lr.status }],
+        },
+        { status: 200 },
+      );
     }
 
-    traces.push({ path: "/api/hubspot/lookupEmail", url: lookupUrl, ok: lookupRes.ok, status: lookupRes.status });
+    // 2) send via orchestrate (which calls msgraph/send)
+    const replyEnabled = b(process.env.REPLY_ENABLED);
+    const orchBody = { mode: "live" as const, toEmail, subject, text, inReplyTo: null, dryRun: !replyEnabled };
 
-    if (!lookup.ok || !lookup.email) {
-      const res = {
-        ok: true,
-        dryRun,
-        send_ok: false,
-        toEmail: lookup?.email ?? "",
-        reason: "missing_toEmail",
-        lookup_traces: traces,
-      };
-      log("[webhook] missing_toEmail", res);
-      return NextResponse.json(res, { status: 200 });
-    }
-
-    // --- Step 2: orchestrate the reply ---
-    const orchUrl = `${base}/api/ai/orchestrate?t=${Date.now()}`;
-    const orchPayload: OrchestrateIn = {
-      mode: "ai",
-      toEmail: lookup.email,
-      subject: lookup.subject || undefined,
-      text: lookup.text || undefined,
-      inReplyTo: String(objectId),
-      dryRun, // <-- only true if ?dryRun=1 was explicitly given
-    };
-
-    // If replies are disabled AND not a manual dry-run call, skip sending but log the decision
-    if (!replyEnabled && !dryRun) {
-      log("[orchestrate] DRYRUN or REPLY_DISABLED", { dryRun: true, replyEnabled });
-      const res = {
-        ok: true,
-        dryRun: true,
-        send_ok: true,
-        toEmail: lookup.email,
-        lookup_traces: traces,
-        note: "Reply disabled by REPLY_ENABLED env; treated as dry-run.",
-      };
-      return NextResponse.json(res, { status: 200 });
-    }
-
-    const orchRes = await fetch(orchUrl, {
+    const or = await fetch(`${orchUrl}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(orchBody),
       cache: "no-store",
-      body: JSON.stringify(orchPayload),
     });
+    const oj = await or.json().catch(() => ({}));
 
-    traces.push({ path: "/api/ai/orchestrate", url: orchUrl, ok: orchRes.ok, status: orchRes.status });
-
-    const out = await orchRes.json().catch(() => ({}));
-
-    const res = {
-      ok: true,
-      dryRun,
-      send_ok: orchRes.ok,
-      toEmail: lookup.email,
-      ms: Date.now() - started,
-      lookup_traces: traces,
-      orchestrate_status: orchRes.status,
-      orchestrate_result: out,
-    };
-    log("[webhook] done", res);
-    return NextResponse.json(res, { status: 200 });
+    return NextResponse.json(
+      {
+        ok: true,
+        dryRun: !replyEnabled,
+        send_ok: Boolean(oj?.send_ok ?? oj?.ok),
+        toEmail,
+        ms: Date.now() - started,
+        lookup_traces: [{ path: "/api/hubspot/lookupEmail", url: lookupUrl, ok: lr.ok, status: lr.status }],
+      },
+      { status: 200 },
+    );
   } catch (err: any) {
-    const res = {
-      ok: false,
-      error: err?.message ?? "webhook_route_exception",
-    };
-    log("[webhook] exception", res);
-    return NextResponse.json(res, { status: 200 });
+    return NextResponse.json({ ok: false, error: err?.message ?? "webhook_exception" }, { status: 200 });
   }
 }
