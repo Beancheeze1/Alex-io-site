@@ -1,5 +1,6 @@
 ﻿{
-  "toEmail": "25thhourdesign@gmail.com",
+  "mode": "live",
+  "toEmail": "you@example.com",
   "subject": "Alex-IO Graph control",
   "text": "Control email to confirm msgraph/send is alive.",
   "dryRun": false

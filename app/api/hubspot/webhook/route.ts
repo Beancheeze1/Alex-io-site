@@ -1,198 +1,104 @@
 // app/api/hubspot/webhook/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Helpers */
-function boolEnv(name: string, fallback = false): boolean {
-  const v = process.env[name];
-  if (v == null) return fallback;
-  const s = String(v).trim().toLowerCase();
-  return ["1", "true", "yes", "on"].includes(s);
-}
+// Always use production base for internal calls
+const PROD_BASE =
+  process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ||
+  "https://api.alex-io.com";
 
-type LookupOut = {
-  ok: boolean;
-  email?: string;
-  subject?: string;
-  text?: string;
-  error?: string;
-  status?: number;
-  detail?: string;
-  src?: any;
-  threadId?: number;
-};
-
-function getOriginFromReq(req: Request): string {
+// Utility: safely fetch JSON with error protection
+async function safeJsonFetch(path: string, body: any) {
+  const url = `${PROD_BASE}${path}?t=${Date.now()}`;
   try {
-    const u = new URL(req.url);
-    return `${u.protocol}//${u.host}`;
-  } catch {
-    // Absolute last-resort fallback if req.url is ever malformed.
-    // Prefer configured public base if present; otherwise do NOT use localhost.
-    const envBase = process.env.NEXT_PUBLIC_BASE_URL || process.env.BASE_URL;
-    if (envBase) return envBase.replace(/\/+$/, "");
-    throw new Error("Cannot derive request origin and no BASE_URL is set");
-  }
-}
-
-/** Route */
-export async function POST(req: Request) {
-  const url = new URL(req.url);
-  const isDryRun = url.searchParams.get("dryRun") === "1";
-  const REPLY_ENABLED = boolEnv("REPLY_ENABLED", true);
-
-  // Read payload safely
-  let payload: any = {};
-  try {
-    payload = await req.json().catch(() => ({}));
-  } catch {
-    payload = {};
-  }
-
-  const objectId = Number(payload.objectId ?? payload.threadId ?? 0);
-  if (!objectId) {
-    return NextResponse.json(
-      { ok: false, error: "missing objectId or threadId" },
-      { status: 200 }
-    );
-  }
-
-  // ---- Bullet-proof origin for internal call
-  const origin = getOriginFromReq(req);
-
-  // Call lookupEmail **at the same origin** (Render), never localhost.
-  const lookupUrl = `${origin}/api/hubspot/lookupEmail?t=${Date.now()}`;
-  const lookupReqBody = JSON.stringify({ objectId });
-
-  const lookup_traces: Array<{ path: string; url: string; ok: boolean; status: number }> = [];
-
-  let toEmail = "";
-  let subject = "";
-  let text = "";
-  let threadId: number | undefined = undefined;
-
-  try {
-    const r = await fetch(lookupUrl, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: lookupReqBody,
+      body: JSON.stringify(body),
       cache: "no-store",
-      // small timeout guard
-      // @ts-ignore
-      next: { revalidate: 0 },
     });
-
-    const j = (await r.json().catch(() => ({}))) as LookupOut;
-
-    lookup_traces.push({ path: "/api/hubspot/lookupEmail", url: lookupUrl, ok: !!j?.ok, status: r.status });
-
-    if (j?.ok) {
-      toEmail = String(j.email || "");
-      subject = String(j.subject || "");
-      text = String(j.text || "");
-      threadId = j.threadId ?? objectId;
-    }
+    const json = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, json, url };
   } catch (err) {
-    lookup_traces.push({ path: "/api/hubspot/lookupEmail", url: lookupUrl, ok: false, status: 0 });
+    return { ok: false, status: 0, json: { error: String(err) }, url };
   }
+}
 
-  if (!toEmail) {
-    const res = {
-      ok: true,
-      dryRun: isDryRun,
-      send_ok: false,
-      reason: "missing_toEmail",
-      lookup_traces,
-    };
-    console.log("[webhook] missing_toEmail", res);
-    return NextResponse.json(res, { status: 200 });
-  }
+export async function POST(req: NextRequest) {
+  const dryRun = req.nextUrl.searchParams.get("dryRun") === "1";
+  const lookupTraces: any[] = [];
 
-  // If this is a dry run, stop here with success so we can prove lookup is fixed.
-  if (isDryRun) {
-    const res = {
-      ok: true,
-      dryRun: true,
-      send_ok: true,
-      reason: "send_ok",
-      toEmail,
-      subject,
-      text,
-      threadId,
-      lookup_traces,
-    };
-    console.log("[webhook] dryRun OK", res);
-    return NextResponse.json(res, { status: 200 });
-  }
-
-  if (!REPLY_ENABLED) {
-    const res = {
-      ok: true,
-      dryRun: false,
-      send_ok: false,
-      reason: "reply_disabled",
-      toEmail,
-      subject,
-      text,
-      threadId,
-      lookup_traces,
-    };
-    console.log("[webhook] reply disabled", res);
-    return NextResponse.json(res, { status: 200 });
-  }
-
-  // ---- Real send via Graph (calls your existing route)
   try {
-    const sendUrl = `${origin}/api/msgraph/send?t=${Date.now()}`;
-    const body = JSON.stringify({
-      mode: "live",
-      toEmail,
-      subject,
-      text,
+    const payload = await req.json();
+    console.log("[webhook] received", payload);
+
+    const subType = payload.subscriptionType;
+    const objectId = payload.objectId;
+    const inReplyTo = payload.messageId || payload.threadId || null;
+
+    if (subType !== "conversation.newMessage" || !objectId) {
+      return NextResponse.json(
+        { ok: true, skipped: true, reason: "not_new_message_or_missing_id" },
+        { status: 200 }
+      );
+    }
+
+    // ---- 1️⃣  Lookup email via production URL ----
+    const lookupRes = await safeJsonFetch("/api/hubspot/lookupEmail", {
+      objectId,
+    });
+    lookupTraces.push({
+      path: "/api/hubspot/lookupEmail",
+      url: lookupRes.url,
+      ok: lookupRes.ok,
+      status: lookupRes.status,
     });
 
-    const r = await fetch(sendUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-      cache: "no-store",
-      // @ts-ignore
-      next: { revalidate: 0 },
+    const toEmail = lookupRes.json?.email;
+    if (!toEmail) {
+      const res = {
+        ok: true,
+        dryRun,
+        send_ok: false,
+        reason: "missing_toEmail",
+        lookup_traces: lookupTraces,
+      };
+      console.log("[webhook] missing_toEmail", res);
+      return NextResponse.json(res, { status: 200 });
+    }
+
+    // ---- 2️⃣  Pass to orchestrator (/api/ai/orchestrate) ----
+    const orchRes = await safeJsonFetch("/api/ai/orchestrate", {
+      mode: "ai",
+      toEmail,
+      subject: lookupRes.json?.subject || "(no subject)",
+      text: lookupRes.json?.text || "",
+      inReplyTo,
+      dryRun,
+    });
+    lookupTraces.push({
+      path: "/api/ai/orchestrate",
+      url: orchRes.url,
+      ok: orchRes.ok,
+      status: orchRes.status,
     });
 
-    const j = await r.json().catch(() => ({}));
-
-    const ok = r.ok && (j?.ok === true || r.status === 202);
-    const res = {
-      ok,
-      dryRun: false,
-      send_ok: ok,
-      reason: ok ? "send_ok" : "send_failed",
+    const result = {
+      ok: true,
+      dryRun,
+      send_ok: orchRes.ok,
       toEmail,
-      subject,
-      text,
-      threadId,
-      lookup_traces,
-      msgraph_status: r.status,
+      lookup_traces: lookupTraces,
     };
-    console.log("[webhook] send result", res);
-    return NextResponse.json(res, { status: 200 });
+    console.log("[webhook] done", result);
+    return NextResponse.json(result, { status: 200 });
   } catch (err: any) {
-    const res = {
-      ok: false,
-      dryRun: false,
-      send_ok: false,
-      reason: "send_exception",
-      error: err?.message || String(err),
-      toEmail,
-      subject,
-      text,
-      threadId,
-      lookup_traces,
-    };
-    console.error("[webhook] send exception", res);
-    return NextResponse.json(res, { status: 200 });
+    console.error("[webhook] fatal", err);
+    return NextResponse.json(
+      { ok: false, error: String(err), lookup_traces: lookupTraces },
+      { status: 500 }
+    );
   }
 }
