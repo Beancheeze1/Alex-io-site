@@ -145,22 +145,57 @@ function mergeFacts(a: Partial<Facts>, b: Partial<Facts>): Facts {
 function extractFactsFreeText(text: string): Partial<Facts> {
   if (!isStr(text) || !text.trim()) return {};
   const out: Partial<Facts> = {};
-  const d = text.match(DIM_RE);
+
+  // dims: 2x3x1, 2 x 3 x 1 in, 2*3*1
+  const d = text.match(/\b(\d+(?:\.\d+)?)\s*(?:x|\*|X)\s*(\d+(?:\.\d+)?)\s*(?:x|\*|X)\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches)?)\b/);
   if (d) out.dims = `${d[1]}x${d[2]}x${d[3]}`;
-  const q = text.match(QTY_RE);
+
+  // quantity: "qty 250", "250 pcs"
+  const q = text.match(/\bqty\W*(\d{1,7})\b|\b(\d{1,7})\s*(?:pcs|pieces|units|qty)\b/i);
   if (q) out.qty = Number(q[1] || q[2]);
-  const den = text.match(DENS_RE);
-  if (den) out.density = den[1].replace(/\s+/g, "");
-  const mat = text.match(MAT_RE);
+
+  // density: "1.7 lb", "1.7lb", "1.9lb"
+  const den = text.match(/\b([0-9](?:\.[0-9])?)\s*lb\b/i);
+  if (den) out.density = `${den[1]}lb`;
+
+  // foam/material indicators
+  const mat = text.match(/\b(PE|EPE|PU|XLPE|polyethylene|polyurethane)\b.*?(?:\bfoam\b)?/i);
   if (mat) out.material = mat[0].replace(/\s+/g, " ").trim();
-  const ph = text.match(PHONE_RE);
+
+  // color
+  const color = text.match(/\b(black|white|gray|grey|blue|red|green|yellow|tan)\b/i);
+  if (color) out.color = color[1].toLowerCase();
+
+  // “under” thickness (pad under the part): “under pad 0.5 in”, “0.25" under”
+  const under = text.match(/\b(?:under|under\-pad|bottom|base)\s*(?:pad|thickness)?\s*(\d+(?:\.\d+)?)\s*(?:in|inch|")/i);
+  if (under) out.notes = [out.notes, `under=${under[1]}in`].filter(Boolean).join(" ");
+
+  // cavities or impressions
+  const cav = text.match(/\b(cavities?|impressions?)\b\W*(\d{1,4})\b/i);
+  if (cav) out.notes = [out.notes, `cavities=${cav[2]}`].filter(Boolean).join(" ");
+
+  // part name
+  const pn = text.match(/\bpart(?:\s*name)?[:\s\-]*([A-Za-z0-9\-_ ]{3,40})/i);
+  if (pn) out.notes = [out.notes, `part=${pn[1].trim()}`].filter(Boolean).join(" ");
+
+  // phone / email
+  const ph = text.match(/(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?){2}\d{4}/);
   if (ph) out.phone = ph[0];
-  const em = text.match(EMAIL_RE);
+  const em = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   if (em) out.email = em[0];
-  const po = text.match(PO_RE);
-  if (po) out.notes = `PO:${po[1]}`;
+
+  // PO
+  const po = text.match(/\bPO[:\s#-]*([A-Za-z0-9\-]{3,})\b/i);
+  if (po) out.notes = [out.notes, `PO=${po[1]}`].filter(Boolean).join(" ");
+
+  // ship-by / asap
+  if (/ASAP/i.test(text)) out.shipBy = "ASAP";
+  const sb = text.match(/\bneed(?:ed)?\s*(?:by|before)\s*([A-Za-z]{3,}\s*\d{1,2}(?:,\s*\d{4})?|\d{1,2}[\/\.-]\d{1,2}(?:[\/\.-]\d{2,4})?)\b/i);
+  if (sb) out.shipBy = sb[1];
+
   return out;
 }
+
 
 function factsFromThread(messages: HSMessage[]): Facts {
   // newest last:
@@ -302,20 +337,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2) Build memory/facts from the whole thread
-    const facts = factsFromThread(threadMsgs.concat([{ direction: "INBOUND", text: lastInboundText } as HSMessage]));
+// existing:
+const facts = factsFromThread(
+  threadMsgs.concat([{ direction: "INBOUND", text: lastInboundText } as HSMessage])
+);
 
-    // 3) Build a compact thread context
-    const context = pickThreadContext(threadMsgs);
+// ADD this line (new info overwrites old):
+const latest = extractFactsFreeText(lastInboundText);
+const mergedFacts = mergeFacts(facts, latest);
 
-    // 4) Generate reply using known facts (no re-asking)
-    const aiText = await renderReply(lastInboundText, facts, context);
+// use mergedFacts for everything below:
+const context = pickThreadContext(threadMsgs);
+const aiText = await renderReply(lastInboundText, mergedFacts, context);
+const replyBody = `${aiText}${renderMemoryTag(mergedFacts)}`;
+const toEmail = explicitTo || mergedFacts.email || process.env.MS_MAILBOX_FROM || "";
 
-    // 5) Append hidden memory tag so the next turn still knows what we know
-    const replyBody = `${aiText}${renderMemoryTag(facts)}`;
 
-    // 6) Decide destination
-    const toEmail = explicitTo || facts.email || process.env.MS_MAILBOX_FROM || "";
+
+
+
+
+   
 
     // DRY RUN path (kept): show what we *would* send
     if (dryRun) {

@@ -1,5 +1,7 @@
 ﻿{
-  "to": "25thhourdesign@gmail.com",
-  "subject": "Graph Live Send — OK",
-  "text": "Hello from Alex-IO Graph (live)."
+  "mode": "ai",
+  "toEmail": "you@example.com",
+  "subject": "Quote request",
+  "text": "Need 2x3x1 inch PE foam, 1.7lb, qty 250.",
+  "dryRun": true
 }
