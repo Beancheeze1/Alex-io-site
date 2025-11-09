@@ -1,66 +1,95 @@
-import { NextRequest, NextResponse } from "next/server";
+// app/api/ai/orchestrate/route.ts
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type In = {
-  mode?: "live" | "ai";
-  toEmail?: string;
-  subject?: string;
-  text?: string;
-  inReplyTo?: string | null;
-  dryRun?: boolean;
-};
+// Always target production base — never localhost
+const BASE =
+  (process.env.NEXT_PUBLIC_BASE_URL?.trim() ||
+    "https://api.alex-io.com").replace(/\/+$/, "");
 
-export async function POST(req: NextRequest) {
-  const started = Date.now();
+/** minimal guard */
+function isEmail(s: unknown): s is string {
+  return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+/** tiny on-box “AI” (template) so replies aren’t echoes */
+function composeAiReply(userText: string): string {
+  const t = (userText || "").trim();
+  // short, safe default
+  if (!t) {
+    return "Thanks for reaching out — we received your message and will respond with details shortly.";
+  }
+  // include a short acknowledgement but never echo the whole message back verbatim
+  const preview = t.length > 140 ? `${t.slice(0, 140)}…` : t;
+  return `Thanks for your message. Based on your note (“${preview}”), we’ll draft a quote and follow up with next steps. If we missed anything (dimensions, quantity, timeline), reply here and we’ll adjust.`;
+}
+
+async function postJson<T>(url: string, body: any) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify(body ?? {}),
+  });
+  const status = r.status;
+  const txt = await r.text();
   try {
-    const body = (await req.json().catch(() => ({}))) as In;
+    const json = JSON.parse(txt) as T;
+    return { ok: r.ok, status, json };
+  } catch {
+    return { ok: r.ok, status, text: txt };
+  }
+}
 
-    const replyEnabled = (process.env.REPLY_ENABLED ?? "").toLowerCase() === "true";
-    const dryRun = Boolean(body.dryRun) || !replyEnabled;
+export async function POST(req: Request) {
+  console.log("\n////////////////////////////////////////////");
+  console.log("[orchestrate] entry");
 
-    // STRICT: never allow the demo placeholder through
-    const toEmail = String(body.toEmail ?? "").trim();
-    if (!toEmail || toEmail.toLowerCase() === "you@example.com") {
-      return NextResponse.json(
-        { ok: true, dryRun, send_ok: false, reason: "missing_toEmail" },
-        { status: 200 },
-      );
-    }
+  const payload: any = await req.json().catch(() => ({}));
 
-    const payload = {
-      mode: "live",
-      toEmail,
-      subject: String(body.subject ?? "").trim(),
-      text: String(body.text ?? "").trim(),
-      inReplyTo: body.inReplyTo ?? null,
-      dryRun,
-    };
+  const toEmail = String(payload?.toEmail || "");
+  const rawSubject = String(payload?.subject || "");
+  const rawText = String(payload?.text || "");
+  const dryRun = Boolean(payload?.dryRun);
 
-    const r = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ""}/api/msgraph/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    });
-    const j = await r.json().catch(() => ({}));
-
+  if (!isEmail(toEmail)) {
+    console.log("[orchestrate] invalid toEmail", toEmail);
     return NextResponse.json(
-      {
-        ok: true,
-        dryRun,
-        send_ok: Boolean(j?.ok),
-        toEmail,
-        ms: Date.now() - started,
-        result: j,
-      },
-      { status: 200 },
-    );
-  } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err?.message ?? "orchestrate_exception" },
-      { status: 200 },
+      { ok: false, error: "invalid_toEmail" },
+      { status: 200 }
     );
   }
+
+  // Compose the human-friendly reply
+  const subject = rawSubject || "Re: your message";
+  const text = composeAiReply(rawText);
+
+  // Delegate to your working msgraph sender route
+  const sendUrl = `${BASE}/api/msgraph/send?t=${Date.now()}`;
+  const sendBody = {
+    mode: dryRun ? "dryrun" : "live",
+    toEmail,
+    subject,
+    text,
+    inReplyTo: payload?.inReplyTo ?? null,
+    dryRun, // msgraph route already supports this
+  };
+
+  console.log("[orchestrate] msgraph/send →", sendUrl, "{ to:", `'${toEmail}'`, ", dryRun:", dryRun, "}");
+
+  const sendRes = await postJson<{ ok: boolean; result?: string }>(sendUrl, sendBody);
+
+  const out = {
+    ok: Boolean(sendRes.ok),
+    mode: dryRun ? "dryrun" : "live",
+    to: toEmail,
+    subject,
+    result: (sendRes as any).json?.result || (sendRes as any).text || "",
+  };
+
+  console.log("[orchestrate] result", out);
+
+  return NextResponse.json(out, { status: 200 });
 }
