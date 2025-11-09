@@ -1,7 +1,6 @@
 ﻿{
-    "subject":  "Re: foam quote",
-    "toEmail":  "25thhourdesign@gmail.com",
-    "dryRun":  true,
-    "mode":  "ai",
-    "text":  "Need qty 24, 12 x 9 x 2 in, PE 1.7 pcf, 1/2 in under, black. die cut."
+  "mode": "ai",
+  "toEmail": "you@example.com",
+  "subject": "PE foam insert for 2 monitors",
+  "text": "Need foam 23 x 13 x 5 in, 2-up, 120 pcs, PE around 1.7 lb if possible. Need by next week."
 }
