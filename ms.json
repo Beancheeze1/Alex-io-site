@@ -1,1 +1,7 @@
-﻿{ "mode": "ai", "toEmail": "you@example.com", "subject": "test", "text": "need a foam quote", "dryRun": true }
+﻿{
+  "mode": "ai",
+  "toEmail": "test@alex-io.com",
+  "subject": "foam quote",
+  "text": "Please quote 2x3x1\" PE foam 1.7lb",
+  "dryRun": true
+}

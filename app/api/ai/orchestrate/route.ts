@@ -1,234 +1,358 @@
-import { NextRequest, NextResponse } from "next/server";
+// app/api/ai/orchestrate/route.ts
+import { NextResponse, NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type OrchestrateInput = {
-  mode: "ai";
-  toEmail: string;
-  subject?: string;
+// ---------- small utils ----------
+const isStr = (v: unknown): v is string => typeof v === "string";
+const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+
+function requireEnv(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
+
+function ok<T>(data: T, status = 200) {
+  return NextResponse.json(data as any, { status });
+}
+function fail(error: string, detail?: any, status = 200) {
+  return NextResponse.json({ ok: false, error, detail }, { status });
+}
+
+// ---------- HubSpot auth (kept from your prior flow) ----------
+type TokenResult =
+  | { ok: true; token: string }
+  | { ok: false; error: string; status?: number; detail?: string };
+
+async function getAccessToken(): Promise<TokenResult> {
+  const direct = process.env.HUBSPOT_ACCESS_TOKEN?.trim();
+  if (direct) return { ok: true, token: direct };
+
+  const refresh = process.env.HUBSPOT_REFRESH_TOKEN2?.trim();
+  const cid = process.env.HUBSPOT_CLIENT_ID?.trim();
+  const secret = process.env.HUBSPOT_CLIENT_SECRET?.trim();
+  if (!refresh || !cid || !secret) {
+    return { ok: false, error: "missing_refresh_flow_envs" };
+  }
+  const form = new URLSearchParams();
+  form.set("grant_type", "refresh_token");
+  form.set("client_id", cid);
+  form.set("client_secret", secret);
+  form.set("refresh_token", refresh);
+
+  const r = await fetch("https://api.hubapi.com/oauth/v1/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  const text = await r.text();
+  if (!r.ok) return { ok: false, error: "refresh_failed", status: r.status, detail: text.slice(0, 800) };
+  try {
+    const j = JSON.parse(text);
+    const token = String(j.access_token || "");
+    if (!token) return { ok: false, error: "no_access_token_in_response" };
+    return { ok: true, token };
+  } catch {
+    return { ok: false, error: "refresh_parse_error", detail: text.slice(0, 800) };
+  }
+}
+
+// ---------- Conversations fetch ----------
+type HSMessage = {
+  id?: string | number;
+  direction?: "INBOUND" | "OUTBOUND";
+  type?: string;
+  messageType?: string;
   text?: string;
-  inReplyTo?: string | null;
-  dryRun?: boolean;
-  promptKey?: string | null;
+  body?: string;
+  content?: string;
+  createdAt?: string | number;
+};
+type HSThread = any;
+
+async function fetchThreadBundle(objectId: number, token: string) {
+  const headers = { Authorization: `Bearer ${token}` };
+  const [tRaw, mRaw] = await Promise.all([
+    fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}`, { headers, cache: "no-store" }).then(r => r.text()),
+    fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/messages?limit=100`, { headers, cache: "no-store" }).then(r => r.text()),
+  ]);
+
+  let thread: HSThread = {};
+  let messages: HSMessage[] = [];
+  try { thread = JSON.parse(tRaw); } catch {}
+  try {
+    const mj = JSON.parse(mRaw);
+    messages = Array.isArray(mj?.results) ? mj.results : (Array.isArray(mj) ? mj : []);
+  } catch {}
+
+  return { thread, messages };
+}
+
+// ---------- Memory extraction (regex + our own tag) ----------
+type Facts = {
+  dims?: string;       // e.g., "2x3x1"
+  qty?: number;
+  material?: string;   // "PE foam 1.7lb" etc.
+  density?: string;    // "1.7lb" etc.
+  color?: string;
+  shipBy?: string;     // date or "ASAP"
+  company?: string;
+  contact?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  notes?: string;
 };
 
-/* ----------------------------- utilities ----------------------------- */
+const DIM_RE = /\b(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches)?)\b/;
+const QTY_RE = /\bqty\W*(\d{1,6})\b|\b(\d{1,6})\s*(?:pcs|pieces|units|qty)\b/i;
+const DENS_RE = /\b([0-9](?:\.[0-9])?\s*lb)\b/i;
+const MAT_RE = /\b(PE|EPE|PU|polyethylene|polyurethane|foam|st\-.+|xlpe)\b.*?(?:\bfoam\b)?/i;
+const PHONE_RE = /(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?){2}\d{4}/;
+const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+const PO_RE = /\bPO[:\s#-]*([A-Za-z0-9\-]{3,})\b/i;
 
-function s(x: unknown): string {
-  return typeof x === "string" ? x : x == null ? "" : String(x);
+function parseAlexioMemoryTag(text: string): Partial<Facts> {
+  // looks for <!--ALEXIO:MEMORY {...} -->
+  if (!isStr(text)) return {};
+  const m = text.match(/<!--ALEXIO:MEMORY\s+({[\s\S]*?})\s*-->/i);
+  if (!m) return {};
+  try {
+    const j = JSON.parse(m[1]);
+    return j && typeof j === "object" ? (j as Partial<Facts>) : {};
+  } catch { return {}; }
 }
 
-function tidy(x: string): string {
-  return s(x).replace(/\s+/g, " ").trim();
+function mergeFacts(a: Partial<Facts>, b: Partial<Facts>): Facts {
+  return {
+    dims: b.dims || a.dims,
+    qty: b.qty ?? a.qty,
+    material: b.material || a.material,
+    density: b.density || a.density,
+    color: b.color || a.color,
+    shipBy: b.shipBy || a.shipBy,
+    company: b.company || a.company,
+    contact: b.contact || a.contact,
+    phone: b.phone || a.phone,
+    email: b.email || a.email,
+    address: b.address || a.address,
+    notes: [a.notes, b.notes].filter(Boolean).join(" ").trim() || undefined,
+  };
 }
 
-function stripNoise(raw: string): string {
-  let t = raw || "";
-  t = t
-    .split(/\nOn .* wrote:\n/i)[0]
-    .split(/\nFrom:\s.*\nSent:\s.*\nTo:\s.*\nSubject:\s.*\n/i)[0]
-    .split(/\n-{2,}\s*Original Message\s*-{2,}\n/i)[0];
-  t = t.split(/\n--\s*\n/)[0];
-  t = t.split(/\nThanks[,.! ]*?\n/i)[0];
-  return t.trim().slice(0, 1600);
+function extractFactsFreeText(text: string): Partial<Facts> {
+  if (!isStr(text) || !text.trim()) return {};
+  const out: Partial<Facts> = {};
+  const d = text.match(DIM_RE);
+  if (d) out.dims = `${d[1]}x${d[2]}x${d[3]}`;
+  const q = text.match(QTY_RE);
+  if (q) out.qty = Number(q[1] || q[2]);
+  const den = text.match(DENS_RE);
+  if (den) out.density = den[1].replace(/\s+/g, "");
+  const mat = text.match(MAT_RE);
+  if (mat) out.material = mat[0].replace(/\s+/g, " ").trim();
+  const ph = text.match(PHONE_RE);
+  if (ph) out.phone = ph[0];
+  const em = text.match(EMAIL_RE);
+  if (em) out.email = em[0];
+  const po = text.match(PO_RE);
+  if (po) out.notes = `PO:${po[1]}`;
+  return out;
 }
 
-function nonEchoFallback(subject: string): string {
-  const topic = tidy(subject) || "your request";
-  return [
-    `Hi there — thanks for reaching out about ${topic}.`,
-    `We’ve received your message and will follow up with next steps and timing shortly.`,
-    ``,
-    `— Alex-IO Team`,
-  ].join("\n");
+function factsFromThread(messages: HSMessage[]): Facts {
+  // newest last:
+  const sorted = [...messages].sort((a, b) => {
+    const at = Number(a?.createdAt ?? 0);
+    const bt = Number(b?.createdAt ?? 0);
+    return at - bt;
+  });
+
+  let f: Facts = {};
+  for (const m of sorted) {
+    const raw = String(m.text ?? m.body ?? m.content ?? "");
+    if (!raw) continue;
+    // hidden memory first (strongest)
+    f = mergeFacts(f, parseAlexioMemoryTag(raw));
+    // then free-text regex (weaker)
+    f = mergeFacts(f, extractFactsFreeText(raw));
+  }
+  return f;
 }
 
-/** Remove any quoted blocks and any long fragments copied from inbound. */
-function scrubEcho(out: string, inbound: string): string {
-  let r = out || "";
+function missingList(f: Facts): string[] {
+  const miss: string[] = [];
+  if (!f.dims) miss.push("length x width x height (inches)");
+  if (typeof f.qty !== "number") miss.push("quantity");
+  if (!f.material) miss.push("foam type (PE/EPE/PU) and density (lb/ft³)");
+  return miss;
+}
 
-  // Strip hard-quoted blocks and “> ” quote lines
-  r = r
-    .replace(/^>.*$/gm, "")
-    .replace(/“[^”]{12,}”/g, "") // long smart-quoted spans
-    .replace(/"[^"]{12,}"/g, ""); // long straight-quoted spans
+function renderMemoryTag(f: Facts) {
+  return `\n\n<!--ALEXIO:MEMORY ${JSON.stringify(f)} -->`;
+}
 
-  // Remove any substring (>=12 chars) that appears in inbound (case-insensitive)
-  const cleanIn = inbound.toLowerCase();
-  if (cleanIn.length >= 12) {
-    // sliding window over reply words
-    const words = r.split(/\s+/);
-    for (let w = words.length; w >= 2; w--) {
-      const window = words.slice(0, w).join(" ");
+// ---------- Build thread context (trim to ~3–4k chars) ----------
+function pickThreadContext(messages: HSMessage[]): string {
+  // Keep alternating customer/bot snippets, newest last; trim long html.
+  const pieces: string[] = [];
+  const maxChars = 3500;
+
+  const cleaned = messages
+    .slice(-15)
+    .map(m => {
+      const who = m.direction === "OUTBOUND" ? "BOT" : "CUSTOMER";
+      const raw = String(m.text ?? m.body ?? m.content ?? "").replace(/<[^>]+>/g, " ");
+      const line = `[${who}] ${raw}`.replace(/\s+/g, " ").trim();
+      return line.slice(0, 600);
+    });
+
+  for (const line of cleaned) {
+    pieces.push(line);
+    if (pieces.join("\n").length > maxChars) break;
+  }
+  return pieces.join("\n");
+}
+
+// ---------- OpenAI reply ----------
+async function renderReply(
+  userText: string,
+  facts: Facts,
+  threadContext: string,
+  model = process.env.OPENAI_MODEL || "gpt-4o-mini"
+): Promise<string> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) {
+    // Fallback "canned but context aware" reply when no key
+    const miss = missingList(facts);
+    if (miss.length) {
+      return `Thanks for the details—we still need: ${miss.join(", ")}. Reply with the missing items and we'll price it right away.`;
     }
-    // simpler: split reply into sentences and drop those mostly present in inbound
-    r = r
-      .split(/(\.|\!|\?)\s+/)
-      .reduce<string[]>((acc, chunk) => {
-        const c = tidy(chunk);
-        if (!c) return acc;
-        const present = cleanIn.includes(c.toLowerCase());
-        if (!present) acc.push(c);
-        return acc;
-      }, [])
-      .join(". ");
+    return `Thanks! We'll run the quote now and follow up shortly.`;
   }
 
-  // Collapse whitespace
-  r = r.replace(/\n{3,}/g, "\n\n").trim();
+  const sys = [
+    `You are Alex-IO, a quoting assistant for protective foam packaging (PE/EPE/PU).`,
+    `Use the provided facts from earlier in the thread; **do not ask again** for any detail that is already present.`,
+    `Only request information that is truly missing. Be concise, professional, and specific to foam quoting.`,
+    `If all required details exist (dims, qty, material/density), produce a short confirmation and next step (no price math yet).`,
+  ].join("\n");
 
-  return r;
-}
+  const factsLine = `KNOWN_FACTS: ${JSON.stringify(facts)}`;
+  const ctx = `THREAD_CONTEXT:\n${threadContext}`;
 
-/* ----------------------------- prompt registry ----------------------------- */
-
-const PROMPTS: Record<string, string> = {
-  general: [
-    "You are Alex-IO, a helpful quoting assistant.",
-    "Do NOT quote or copy the customer’s text. Do NOT include quoted blocks. No '>' lines. No text in quotes taken from the customer.",
-    "Write a short, professional reply: summarize in your own words, then list clear next steps.",
-    "Keep 80–160 words. Plain language. Friendly and confident.",
-  ].join(" "),
-  foam_quote: [
-    "You are Alex-IO, a quoting assistant for foam/corrugated/crates.",
-    "Do NOT quote/copy the customer. No quoted blocks. Use your own words only.",
-    "If specs are missing, ask for: Dimensions (L×W×H in), Density (e.g., 1.7 lb/ft³ PE), Quantity, Cavities/cutouts (count + size), Under-product thickness.",
-    "If specs are present, confirm them succinctly and ask for only what’s missing. Give a preliminary timeline.",
-    "90–150 words. Professional and friendly.",
-  ].join(" "),
-  followup: [
-    "You are Alex-IO. Send a brief, friendly follow-up.",
-    "Do NOT quote/copy the customer. No quoted blocks.",
-    "Recap what we need and invite a quick reply. 60–100 words.",
-  ].join(" "),
-  terse_ack: [
-    "Acknowledge receipt in 1–3 short sentences. No quotes. No copying customer text.",
-    "If next step is on us, say what we’ll do and when to expect an update. Max 60 words.",
-  ].join(" "),
-};
-
-function detectPromptKey(subject: string, body: string): keyof typeof PROMPTS {
-  const hay = `${subject} ${body}`.toLowerCase();
-  if (/foam|poly|pe|epe|density|cushion|insert|cavity|cutout|quote|pricing|rfq|dimensions?|l\s*x\s*w\s*x\s*h/i.test(hay))
-    return "foam_quote";
-  if (/follow[\s-]?up|checking in|any update|status/i.test(hay)) return "followup";
-  if (/received|got it|ok|thanks|thx|ack/i.test(hay) && hay.length < 240) return "terse_ack";
-  return "general";
-}
-
-/* ----------------------------- model call ----------------------------- */
-
-async function callOpenAI(system: string, user: string): Promise<string | null> {
-  const key = tidy(process.env.OPENAI_API_KEY || "");
-  if (!key) return null;
-  const model = tidy(process.env.AI_MODEL || "") || "gpt-4o-mini";
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: `${factsLine}\n${ctx}\n\nLATEST_CUSTOMER_MESSAGE:\n${userText}` },
+    ],
+    temperature: 0.2,
+  };
 
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: system },
-        {
-          role: "user",
-          content:
-            user +
-            "\n\nIMPORTANT: Do not quote or copy any customer text. Do not include quoted blocks. Summarize in your own words only.",
-        },
-      ],
-      temperature: 0.4,
-      max_tokens: 350,
-    }),
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify(body),
   });
 
-  if (!r.ok) return null;
-  const j: any = await r.json().catch(() => ({}));
-  const out = tidy(j?.choices?.[0]?.message?.content || "");
-  return out || null;
+  const j = await r.json().catch(() => ({}));
+  const text =
+    j?.choices?.[0]?.message?.content ||
+    `Thanks! We'll review and follow up shortly.`;
+
+  return String(text);
 }
 
-/* ------------------------------- route ------------------------------- */
+// ---------- route ----------
+type OrchestrateInput = {
+  mode: "ai";
+  toEmail?: string;         // explicit override (tests)
+  subject?: string;
+  text?: string;
+  threadId?: number;        // HubSpot objectId
+  dryRun?: boolean;
+};
 
 export async function POST(req: NextRequest) {
   try {
-    const input = (await req.json().catch(() => ({}))) as Partial<OrchestrateInput>;
-    const mode = tidy((input.mode || "ai").toLowerCase());
-    const toEmail = tidy(input.toEmail || "");
-    const subject = tidy(input.subject || "");
-    const rawText = s(input.text || "");
-    const inReplyTo = input.inReplyTo ?? null;
-    const dryRun = !!input.dryRun;
-    const forcedKey = tidy(input.promptKey || "").toLowerCase();
+    const payload = (await req.json().catch(() => ({}))) as Partial<OrchestrateInput>;
+    const mode = payload.mode || "ai";
+    if (mode !== "ai") return fail("unsupported_mode");
 
-    if (mode !== "ai") return NextResponse.json({ ok: false, error: "unsupported_mode", mode }, { status: 200 });
-    if (!toEmail) return NextResponse.json({ ok: false, error: "missing_toEmail" }, { status: 200 });
+    const dryRun = !!payload.dryRun;
+    const objectId = Number(payload.threadId || 0);
+    const explicitTo = payload.toEmail?.trim();
 
-    const cleaned = tidy(stripNoise(rawText));
-    const key = (forcedKey && PROMPTS[forcedKey]) ? (forcedKey as keyof typeof PROMPTS) : detectPromptKey(subject, cleaned);
+    // 1) If we have a thread, pull context; else minimal
+    let threadMsgs: HSMessage[] = [];
+    let lastInboundText = String(payload.text || "").trim();
 
-    const system = PROMPTS[key] || PROMPTS.general;
-    const userMsg = [
-      subject ? `Subject: ${subject}` : "",
-      "",
-      "Customer message (cleaned, for context only — DO NOT QUOTE):",
-      cleaned || "(empty)",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    // Generate
-    let reply = await callOpenAI(system, userMsg);
-
-    // Scrub any echo/quotes if model slipped them in
-    if (reply) reply = scrubEcho(reply, cleaned);
-
-    // If no AI or reply is too short after scrubbing, use non-echo fallback
-    if (!reply || reply.replace(/\s+/g, " ").trim().length < 24) {
-      reply = nonEchoFallback(subject);
+    if (objectId) {
+      const tok = await getAccessToken();
+      if (!tok.ok) return fail("hubspot_auth_error", tok, 200);
+      const { messages } = await fetchThreadBundle(objectId, tok.token);
+      threadMsgs = Array.isArray(messages) ? messages : [];
+      // pick the latest inbound text if not provided
+      if (!lastInboundText) {
+        const pick = [...threadMsgs].reverse().find(m => (m.direction || "").toUpperCase() === "INBOUND");
+        lastInboundText = String(pick?.text ?? pick?.body ?? pick?.content ?? "").trim();
+      }
     }
 
-    // Final guard: remove any leftover '>' quote lines
-    reply = reply.replace(/^>.*$/gm, "").trim();
+    // 2) Build memory/facts from the whole thread
+    const facts = factsFromThread(threadMsgs.concat([{ direction: "INBOUND", text: lastInboundText } as HSMessage]));
 
-    // Send via Graph
-    const base = tidy(process.env.NEXT_PUBLIC_BASE_URL || "");
-    const url = `${base}/api/msgraph/send?t=${Math.random()}`;
-    const payload = {
-      toEmail,
-      subject: subject || "Thanks — we’re on it",
-      text: reply,
-      inReplyTo,
-      dryRun,
-    };
+    // 3) Build a compact thread context
+    const context = pickThreadContext(threadMsgs);
 
-    const sendRes = await fetch(url, {
+    // 4) Generate reply using known facts (no re-asking)
+    const aiText = await renderReply(lastInboundText, facts, context);
+
+    // 5) Append hidden memory tag so the next turn still knows what we know
+    const replyBody = `${aiText}${renderMemoryTag(facts)}`;
+
+    // 6) Decide destination
+    const toEmail = explicitTo || facts.email || process.env.MS_MAILBOX_FROM || "";
+
+    // DRY RUN path (kept): show what we *would* send
+    if (dryRun) {
+      return ok({
+        ok: true,
+        mode: "dryrun",
+        to: toEmail,
+        subject: payload.subject || "(no subject)",
+        preview: replyBody.slice(0, 800),
+        facts,
+      });
+    }
+
+    // 7) Real send — reuse your working /msgraph/send route by POSTing
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const sendUrl = `${base}/api/msgraph/send`;
+    const sendRes = await fetch(sendUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        toEmail,
+        subject: payload.subject || "Re: your foam quote request",
+        text: replyBody,
+        dryRun: false,
+      }),
     });
+    const sendJson = await sendRes.json().catch(() => ({}));
 
-    let sendJson: any = {};
-    try { sendJson = await sendRes.json(); } catch {}
-
-    return NextResponse.json(
-      {
-        ok: true,
-        mode: "ai",
-        dryRun,
-        to: toEmail,
-        subject: payload.subject,
-        promptKey: key,
-        used_ai: !!process.env.OPENAI_API_KEY,
-        result: sendRes.ok ? "sent" : "send_failed",
-        msgraph_status: sendRes.status,
-        preview: dryRun ? reply : undefined,
-      },
-      { status: 200 }
-    );
+    return ok({
+      ok: true,
+      sent: sendRes.ok,
+      toEmail,
+      ms: sendJson?.ms ?? undefined,
+      result: sendJson?.result ?? (sendRes.ok ? "sent" : "failed"),
+      facts,
+    });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message ?? "orchestrate_exception" }, { status: 200 });
+    return fail("orchestrate_exception", err?.message ?? String(err));
   }
 }
