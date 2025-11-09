@@ -93,47 +93,53 @@ function chooseCustomerEmail(
   candsIn: Iterable<string>,
   mailboxFromEnv?: string
 ): string | null {
-  // normalize & keep only real emails
-  const all = Array.from(
-    new Set(Array.from(candsIn).map((e) => e.toLowerCase()))
-  ).filter((e) => EMAIL_RE.test(e));
+  const EMAIL = (s: string) => s.toLowerCase().trim();
 
-  if (!all.length) return null;
+  const uniq = Array.from(new Set(Array.from(candsIn).map(EMAIL)))
+    .filter((e) => EMAIL_RE.test(e)); // only real emails
 
-  const mailbox = (mailboxFromEnv || process.env.MS_MAILBOX_FROM || "")
-    .toLowerCase()
-    .trim();
-  const domain = mailbox.includes("@") ? mailbox.split("@")[1] : "";
+  if (!uniq.length) return null;
+
+  // Mailbox + domain from env
+  const mailbox = EMAIL(mailboxFromEnv || process.env.MS_MAILBOX_FROM || "");
+  const envDomain = mailbox.includes("@") ? mailbox.split("@")[1] : "";
+
+  // 🔒 hard ban our own brand domain too (covers cases when mailbox env is missing/mismatched)
+  const bannedDomains = new Set<string>(
+    [envDomain, "alex-io.com"].filter(Boolean) // keep "alex-io.com" here for you
+  );
 
   const isSystem = (e: string) =>
     e.includes("no-reply") || e.includes("noreply") || e.includes("hubspot");
 
-  // 1) Strong filter: not exact mailbox, not same domain, not system-ish
-  const strong = all.filter(
+  // 1) strong filter: not our mailbox, not a banned domain, not systemish
+  const strong = uniq.filter(
     (e) =>
       (!mailbox || e !== mailbox) &&
-      (!domain || !e.endsWith("@" + domain)) &&
+      !Array.from(bannedDomains).some((d) => d && e.endsWith("@" + d)) &&
       !isSystem(e)
   );
 
-  // 2) Weak fallback if strong got empty: allow other domains, still not exact mailbox/system
-  const weak = all.filter((e) => (!mailbox || e !== mailbox) && !isSystem(e));
+  // 2) weak fallback: still not exact mailbox/system
+  const weak = uniq.filter((e) => (!mailbox || e !== mailbox) && !isSystem(e));
 
-  const pool = strong.length ? strong : weak.length ? weak : all;
+  const pool = strong.length ? strong : weak.length ? weak : uniq;
 
-  // light scoring (prefer consumer domains a bit)
+  // Light scoring: prefer non-system + consumer domains
   const publicBumps = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"];
   const score = (e: string) => {
+    const d = e.split("@")[1] || "";
     let s = 0;
     if (mailbox && e !== mailbox) s += 4;
-    if (domain && !e.endsWith("@" + domain)) s += 3;
+    if (envDomain && d !== envDomain) s += 3;                     // not our domain
     if (!isSystem(e)) s += 2;
-    if (publicBumps.some((d) => e.endsWith("@" + d))) s += 1;
+    if (publicBumps.includes(d)) s += 1;
     return s;
   };
 
   return pool.sort((a, b) => score(b) - score(a))[0] ?? null;
 }
+
 
 
 /** Use most recent inbound (non-system) message's text as fallback. */
