@@ -13,11 +13,47 @@ type In = {
   threadId?: string | number;
   threadMsgs?: any[];
   dryRun?: boolean;
+
+  // Not strictly typed before, but we may receive these:
+  // inReplyTo?: string;
+  // messageId?: string;
 };
 type Mem = Record<string, any>;
 
 function ok(extra: Record<string, any> = {}) { return NextResponse.json({ ok: true, ...extra }, { status: 200 }); }
 function err(error: string, detail?: any) { return NextResponse.json({ ok: false, error, detail }, { status: 200 }); }
+
+// ---------- NEW (tiny helpers for stable thread key) ----------
+function normalizeId(s?: string): string {
+  const raw = String(s ?? "").trim();
+  if (!raw) return "";
+  const noAngles = raw.replace(/^<|>$/g, "").trim().toLowerCase();
+  if (!noAngles) return "";
+  if (noAngles.length > 120 || /\s/.test(noAngles)) {
+    // FNV-1a 32-bit (compact, deterministic)
+    let h = 0x811c9dc5;
+    for (let i = 0; i < noAngles.length; i++) {
+      h ^= noAngles.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return `h:${h.toString(16)}`;
+  }
+  return noAngles;
+}
+function canonicalThreadKey(input: {
+  threadId?: string | number;
+  inReplyTo?: string;
+  messageId?: string;
+}): string {
+  const t = input.threadId != null ? String(input.threadId) : "";
+  return (
+    normalizeId(t) ||
+    normalizeId(input.inReplyTo) ||
+    normalizeId(input.messageId) ||
+    ""
+  );
+}
+// ---------- /NEW ----------
 
 function compact<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
@@ -73,7 +109,7 @@ async function aiReply(lastInbound: string, facts: Mem, context: string): Promis
         `Facts: ${Object.entries(facts).map(([k,v])=>`${k}=${v}`).join(", ") || "(none)"}`,
         context ? `Thread context:\n${context}` : "",
         "",
-        `Customer message:\n${lastInbound || "(none)"}`,
+        `Customer message:\n${lastInbound || "(none)"}`
       ].join("\n");
       const r = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
@@ -132,38 +168,46 @@ export async function POST(req: NextRequest) {
     const p = await parse(req);
     const dryRun   = !!p.dryRun;
     const lastText = String(p.text || "");
-    const threadId = String(p.threadId ?? "").trim();
+
+    // ---------- CHANGED: compute single canonical thread key ----------
+    const threadKey = canonicalThreadKey({
+      threadId: p.threadId as any,
+      inReplyTo: (p as any)?.inReplyTo,
+      messageId: (p as any)?.messageId,
+    });
+    if (!threadKey) {
+      return err("missing_threadId", { reason: "No threadId/inReplyTo/messageId provided for memory keying." });
+    }
+    // -----------------------------------------------------------------
 
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
     const newly  = extractFactsFromText(lastText);
-    const loaded = await loadFacts(threadId);
+    const loaded = await loadFacts(threadKey);
     const merged = mergeFacts(loaded, newly);
-    await saveFacts(threadId, merged);
+    await saveFacts(threadKey, merged);
 
     const context = pickThreadContext(threadMsgs);
     const reply   = await aiReply(lastText, merged, context);
     const body    = `${reply}${renderFooter(merged)}`;
 
     // Recipient resolution (STRICT: no fallback to our mailbox)
-const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
-const toEmail = String(p.toEmail || "").trim().toLowerCase();
+    const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
+    const toEmail = String(p.toEmail || "").trim().toLowerCase();
 
-if (!toEmail) {
-  // Do not send without a real customer address
-  return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
-}
+    if (!toEmail) {
+      // Do not send without a real customer address
+      return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
+    }
 
-// Block self-replies to our mailbox/domain
-const ownDomain = mailbox.split("@")[1] || "";
-if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
-  return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
-}
+    // Block self-replies to our mailbox/domain
+    const ownDomain = mailbox.split("@")[1] || "";
+    if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
+      return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
+    }
 
-// optional: clearer log
-console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, "}");
-
-    if (!toEmail) return err("missing_toEmail");
+    // optional: clearer log
+    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadKey:", threadKey, "}");
 
     if (dryRun) {
       return ok({
@@ -172,7 +216,7 @@ console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRu
         subject: p.subject || "Quote",
         preview: body.slice(0, 800),
         facts: merged,
-        mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
+        mem: { threadKey, loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         store: LAST_STORE,  // <— report where we stored facts
       });
     }
@@ -198,6 +242,7 @@ console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRu
       result: sent?.result || null,
       facts: merged,
       store: LAST_STORE,
+      threadKey,
     });
   } catch (e:any) {
     return err("orchestrate_exception", String(e?.message || e));
