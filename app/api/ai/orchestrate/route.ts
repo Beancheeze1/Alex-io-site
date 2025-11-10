@@ -1,6 +1,8 @@
 // app/api/ai/orchestrate/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { loadFacts, saveFacts } from "@/app/lib/memory";
+import { loadFacts, saveFacts, lastStoreUsed, type StoreName } from "@/app/lib/memory";
+
+
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -169,7 +171,8 @@ console.log("[orchestrate] sending", {
         subject: p.subject || "Quote",
         preview: body.slice(0, 800),
         facts: merged,
-        mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) }
+        mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
+        store: lastStoreUsed,
       });
     }
 
