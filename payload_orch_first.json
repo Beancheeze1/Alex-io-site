@@ -1,0 +1,8 @@
+﻿{
+  "mode": "ai",
+  "toEmail": "customer@example.com",
+  "subject": "Foam Quote",
+  "text": "Need foam 10x8x2 PE 1.7 lb qty 12",
+  "threadId": "9894090460",
+  "dryRun": true
+}

@@ -1,0 +1,8 @@
+﻿{
+  "mode": "ai",
+  "toEmail": "customer@example.com",
+  "subject": "Foam Quote Follow-Up",
+  "text": "Just confirming material and qty again.",
+  "threadId": "987654",
+  "dryRun": true
+}

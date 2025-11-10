@@ -1,0 +1,6 @@
+﻿{
+  "toEmail": "youremainbox@outlook.com",
+  "subject": "Alex-IO Graph Live Check",
+  "text": "This is a live message sent via /api/msgraph/send.",
+  "dryRun": false
+}

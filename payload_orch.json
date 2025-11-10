@@ -1,0 +1,8 @@
+﻿{
+  "mode": "ai",
+  "toEmail": "customer@example.com",
+  "subject": "Foam Quote",
+  "text": "Dims 10x8x2 qty 12 PE 1.7lb",
+  "threadId": "987654",
+  "dryRun": true
+}

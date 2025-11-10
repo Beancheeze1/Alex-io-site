@@ -52,12 +52,14 @@ async function getAppToken() {
   return json.access_token;
 }
 
-async function sendViaGraph({
-  to,
-  subject,
-  html,
-  inReplyTo,
-}: {
+/**
+ * Instrumented send:
+ * 1) POST /users/{from}/messages   -> create draft (optionally inject headers)
+ * 2) GET  /users/{from}/messages/{id} -> fetch internetMessageId
+ * 3) POST /users/{from}/messages/{id}/send -> send
+ * Returns: { id, internetMessageId }
+ */
+async function sendViaGraphInstrumented(opts: {
   to: string;
   subject: string;
   html: string;
@@ -65,38 +67,75 @@ async function sendViaGraph({
 }) {
   const accessToken = await getAppToken();
   const from = requireEnv("MS_MAILBOX_FROM"); // e.g., sales@alex-io.com
-  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
-    from
-  )}/sendMail`;
+  const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}`;
 
-  // Basic new message; if you later wire true replies, you’ll use reply endpoints.
-  const body = {
-    message: {
-      subject,
-      body: { contentType: "HTML", content: html },
-      toRecipients: [{ emailAddress: { address: to } }],
-    },
-    saveToSentItems: true,
+  // Build message body
+  const message: any = {
+    subject: opts.subject,
+    body: { contentType: "HTML", content: opts.html },
+    toRecipients: [{ emailAddress: { address: opts.to } }],
   };
 
-  const resp = await fetch(url, {
+  // Best-effort threading hints (will be ignored if not allowed)
+  const irt = String(opts.inReplyTo ?? "").trim();
+  if (irt) {
+    // Many tenants accept custom headers on create; safe to include.
+    message.internetMessageHeaders = [
+      { name: "In-Reply-To", value: irt },
+      { name: "References", value: irt },
+    ];
+  }
+
+  // 1) Create draft
+  const createResp = await fetch(`${base}/messages`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(message),
   });
 
-  if (!resp.ok) {
-    const t = await resp.text();
-    throw new Error(`Graph send error ${resp.status}: ${t}`);
+  if (!createResp.ok) {
+    const t = await createResp.text();
+    throw new Error(`Graph create message error ${createResp.status}: ${t}`);
   }
+
+  const created = (await createResp.json()) as { id: string };
+  const createdId = created?.id;
+  if (!createdId) throw new Error("Graph create message did not return an id");
+
+  // 2) Look up internetMessageId (read-only; useful for threading & NDR correlation)
+  let internetMessageId: string | undefined = undefined;
+  try {
+    const getResp = await fetch(
+      `${base}/messages/${encodeURIComponent(createdId)}?$select=id,internetMessageId`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (getResp.ok) {
+      const j = (await getResp.json()) as { id: string; internetMessageId?: string };
+      internetMessageId = j?.internetMessageId;
+    }
+  } catch {
+    // non-fatal
+  }
+
+  // 3) Send
+  const sendResp = await fetch(`${base}/messages/${encodeURIComponent(createdId)}/send`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!sendResp.ok) {
+    const t = await sendResp.text();
+    throw new Error(`Graph send error ${sendResp.status}: ${t}`);
+  }
+
+  return { id: createdId, internetMessageId };
 }
 
 // --- handlers ---
 export async function GET() {
-  // Intentionally disallow GET; keep the health semantics you test for.
   return NextResponse.json({ ok: false, error: "Method Not Allowed" }, { status: 405 });
 }
 
@@ -134,7 +173,6 @@ export async function POST(req: NextRequest) {
           : "";
 
     if (!htmlBody) {
-      // Old error was "missing_html" — keep compatibility but more forgiving now.
       return NextResponse.json(
         { ok: false, error: "missing_html_or_text" },
         { status: 400 }
@@ -153,7 +191,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    await sendViaGraph({
+    const { id, internetMessageId } = await sendViaGraphInstrumented({
       to: toEmail,
       subject,
       html: htmlBody,
@@ -167,6 +205,8 @@ export async function POST(req: NextRequest) {
       to: toEmail,
       subject,
       result: "sent",
+      messageId: id,
+      internetMessageId: internetMessageId || null,
     });
   } catch (err: any) {
     const msg = err?.message || String(err);

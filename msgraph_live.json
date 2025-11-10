@@ -1,0 +1,6 @@
+﻿{
+  "toEmail": "youremail@gmail.com",
+  "subject": "Graph Live Check",
+  "text": "Live send from Alex-IO via Graph.",
+  "dryRun": false
+}
