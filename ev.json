@@ -1,8 +1,5 @@
-﻿[
-  {
-    "subscriptionType":"conversation.newMessage",
-    "objectId": 9642315481,
-    "messageId": "m-123",
-    "changeFlag":"NEW_MESSAGE"
-  }
-]
+﻿{
+  "subscriptionType": "conversation.newMessage",
+  "objectId": 9642315481,
+  "changeFlag": "NEW_MESSAGE"
+}

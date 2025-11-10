@@ -1,7 +1,8 @@
 ﻿{
-    "subject":  "Quote",
-    "toEmail":  "you@example.com",
-    "dryRun":  true,
-    "text":  "Change to EPE.",
-    "threadId":  "redis-check-2"
+  "mode": "ai",
+  "toEmail": "you@example.com",
+  "subject": "Quote",
+  "text": "Make it EPE.",
+  "threadId": "T-fbf655898d704c099648f4b96a39fac1",
+  "dryRun": true
 }

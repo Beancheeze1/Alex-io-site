@@ -132,7 +132,8 @@ export async function POST(req: NextRequest) {
     const p = await parse(req);
     const dryRun   = !!p.dryRun;
     const lastText = String(p.text || "");
-    const threadId = p.threadId ?? "";
+    const threadId = String(p.threadId ?? "").trim();
+
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
     const newly  = extractFactsFromText(lastText);
