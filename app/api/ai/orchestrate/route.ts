@@ -4,21 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/**
- * POST body shape
- * {
- *   mode: "ai",
- *   toEmail: string,
- *   subject?: string,
- *   text?: string,               // last inbound text from customer
- *   threadId?: string | number,  // optional
- *   threadMsgs?: any[],          // optional: array of prior messages in the thread
- *   dryRun?: boolean
- * }
- */
-
 type OrchestrateInput = {
-  mode: "ai";
+  mode?: string;
   toEmail?: string;
   subject?: string;
   text?: string;
@@ -39,33 +26,24 @@ function err(error: string, status = 200, detail?: any): Err {
 
 /* ------------------------------ AI helpers ------------------------------ */
 
-/** Tiny “NLP” extractor for the foam use case. */
 function extractFactsFromText(input: string = ""): Record<string, any> {
   const txt = input.toLowerCase();
-
-  // qty
   const qtyMatch = txt.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) || txt.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
   const qty = qtyMatch ? Number(qtyMatch[1]) : undefined;
-
-  // dims 2x3x1, 2 x 3 x 1, 2"x3"x1"
   const dimsMatch =
     txt.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
   const dims = dimsMatch ? `${dimsMatch[1]}x${dimsMatch[2]}x${dimsMatch[3]}` : undefined;
-
-  // density like 1.7lb or 1.7 lb
   const densMatch = txt.match(/\b(\d+(?:\.\d+)?)\s*lb\b/);
   const density = densMatch ? `${densMatch[1]}lb` : undefined;
 
-  // material
   let material: string | undefined;
   if (/\bpolyethylene\b|\bpe\b/.test(txt)) material = "PE";
   else if (/\bpolyurethane\b|\bpu\b/.test(txt)) material = "PU";
-  else if (/\bexpanded\b|\bepe\b/.test(txt)) material = "EPE";
+  else if (/\bepe\b/.test(txt)) material = "EPE";
 
   return compact({ dims, qty, material, density });
 }
 
-/** Make a concise prompt from context + facts. */
 function buildPrompt(lastInbound: string, facts: Record<string, any>, context: string): string {
   const have = Object.entries(facts)
     .map(([k, v]) => `${k}=${v}`)
@@ -82,21 +60,15 @@ function buildPrompt(lastInbound: string, facts: Record<string, any>, context: s
   ].join("\n");
 }
 
-/** Render a reply with OpenAI if key available; otherwise fall back to rules. */
 async function renderReply(lastInbound: string, mergedFacts: Record<string, any>, context: string): Promise<string> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (key) {
     try {
       const prompt = buildPrompt(lastInbound, mergedFacts, context);
-      // Minimal, dependency-free OpenAI call (Responses API)
       const r = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({
-          model: "gpt-4.1-mini",
-          input: prompt,
-          max_output_tokens: 350
-        })
+        body: JSON.stringify({ model: "gpt-4.1-mini", input: prompt, max_output_tokens: 350 })
       });
       const j = await r.json().catch(() => ({}));
       const text =
@@ -106,12 +78,9 @@ async function renderReply(lastInbound: string, mergedFacts: Record<string, any>
         j?.choices?.[0]?.text ||
         "";
       if (text) return String(text).trim();
-    } catch {
-      // fall through to template
-    }
+    } catch {}
   }
 
-  // Template fallback
   const need: string[] = [];
   if (!mergedFacts.dims) need.push("dimensions (L x W x H)");
   if (!mergedFacts.qty) need.push("quantity");
@@ -138,7 +107,6 @@ async function renderReply(lastInbound: string, mergedFacts: Record<string, any>
   return lines.join("\n");
 }
 
-/** Pull a short thread context string (safe to keep very small). */
 function pickThreadContext(threadMsgs: any[] = []): string {
   const take = threadMsgs.slice(-3);
   const snippets = take
@@ -148,7 +116,6 @@ function pickThreadContext(threadMsgs: any[] = []): string {
   return snippets.join("\n---\n");
 }
 
-/** Memory tag save/restore */
 function renderMemoryTag(facts: Record<string, any>): string {
   const payload = JSON.stringify(compact(facts));
   return payload && payload !== "{}" ? `\n\n<!--ALEXIO:MEMORY ${payload} -->` : "";
@@ -173,7 +140,6 @@ function mergeFacts(oldF: Record<string, any>, newF: Record<string, any>): Recor
   return { ...(oldF || {}), ...cleaned };
 }
 
-/** Remove undefined/null/empty-string entries. */
 function compact<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(obj || {})) {
@@ -182,13 +148,50 @@ function compact<T extends Record<string, any>>(obj: T): T {
   return out as T;
 }
 
+/* ------------------------------ Body parsing ----------------------------- */
+
+async function parseBody(req: NextRequest): Promise<OrchestrateInput> {
+  // first try JSON
+  try {
+    const j = (await req.json()) as any;
+    if (j && typeof j === "object") return j;
+  } catch {}
+  // then raw text (maybe JSON string)
+  try {
+    const t = await req.text();
+    if (!t) return {};
+    // handle cases like body = "\"{...}\"" or urlencoded
+    let s = t.trim();
+    if (s.startsWith('"') && s.endsWith('"')) {
+      s = JSON.parse(s); // unwrap quotes
+    }
+    if (s.startsWith("{") && s.endsWith("}")) {
+      const j = JSON.parse(s);
+      if (j && typeof j === "object") return j;
+    }
+    // very defensive: try to extract JSON braces if extra text around
+    const first = s.indexOf("{");
+    const last = s.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      const j = JSON.parse(s.slice(first, last + 1));
+      if (j && typeof j === "object") return j;
+    }
+  } catch {}
+  return {};
+}
+
 /* --------------------------------- Route -------------------------------- */
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json().catch(() => ({}))) as OrchestrateInput;
-    if ((payload.mode as string) !== "ai") {
-      return NextResponse.json(err("invalid_mode"), { status: 200 });
+    const payload = (await parseBody(req)) as OrchestrateInput;
+
+    // Accept anything; default to AI
+    const mode = String(payload.mode ?? "ai").toLowerCase();
+    const isAI = mode === "ai" || mode === "" || mode === "orchestrate";
+    if (!isAI) {
+      // still proceed as AI, but let caller know what we saw
+      // (we do NOT bail anymore)
     }
 
     const dryRun = !!payload.dryRun;
@@ -196,21 +199,14 @@ export async function POST(req: NextRequest) {
     const lastInboundText = String(payload.text || "");
     const threadMsgs = Array.isArray(payload.threadMsgs) ? payload.threadMsgs : [];
 
-    // 1) Base facts from latest inbound
     const freshFacts = extractFactsFromText(lastInboundText);
-
-    // 2) Read prior thread memory and merge (new wins)
     const persistedFacts = readMemoryTagFromThread(threadMsgs);
     const mergedFacts = mergeFacts(persistedFacts, freshFacts);
-
-    // 3) Tiny context
     const context = pickThreadContext(threadMsgs);
 
-    // 4) AI reply text + append memory tag for persistence
     const aiText = await renderReply(lastInboundText, mergedFacts, context);
     const replyBody = `${aiText}${renderMemoryTag(mergedFacts)}`;
 
-    // Decide recipient (we keep it simple here: trust orchestrate input)
     const toEmail = explicitTo || process.env.MS_MAILBOX_FROM || "";
     if (!toEmail) {
       return NextResponse.json(err("missing_toEmail"), { status: 200 });
@@ -220,6 +216,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         ok({
           mode: "dryrun",
+          sawMode: mode,
           toEmail,
           subject: payload.subject || "Quote",
           preview: replyBody.slice(0, 800),
@@ -229,7 +226,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Real send — reuse your working /msgraph/send route
     const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
     const sendUrl = `${base}/api/msgraph/send`;
     const r = await fetch(sendUrl, {
@@ -251,6 +247,7 @@ export async function POST(req: NextRequest) {
         sent: okHttp,
         status: r.status,
         toEmail,
+        sawMode: mode,
         result: sent?.result || (okHttp ? "sent" : "error"),
         facts: mergedFacts
       }),
