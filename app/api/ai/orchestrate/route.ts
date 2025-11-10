@@ -1,8 +1,6 @@
 // app/api/ai/orchestrate/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { loadFacts, saveFacts, lastStoreUsed, type StoreName } from "@/app/lib/memory";
-
-
+import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -38,10 +36,6 @@ function pickThreadContext(threadMsgs: any[] = []): string {
     .map((s) => (s.length > 200 ? s.slice(0, 200) + "…" : s));
   return snippets.join("\n---\n");
 }
-
-
-
-
 
 function extractFactsFromText(input = ""): Mem {
   const t = input.toLowerCase();
@@ -79,7 +73,7 @@ async function aiReply(lastInbound: string, facts: Mem, context: string): Promis
         `Facts: ${Object.entries(facts).map(([k,v])=>`${k}=${v}`).join(", ") || "(none)"}`,
         context ? `Thread context:\n${context}` : "",
         "",
-        `Customer message:\n${lastInbound || "(none)"}`
+        `Customer message:\n${lastInbound || "(none)"}`,
       ].join("\n");
       const r = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
@@ -96,7 +90,7 @@ async function aiReply(lastInbound: string, facts: Mem, context: string): Promis
       if (text) return String(text).trim();
     } catch {}
   }
-  // fallback
+  // fallback template
   const need: string[] = [];
   if (!facts.dims)     need.push("dimensions (LxWxH)");
   if (!facts.qty)      need.push("quantity");
@@ -135,14 +129,13 @@ async function parse(req: NextRequest): Promise<In> {
 
 export async function POST(req: NextRequest) {
   try {
-    console.log("[orchestrate] START", new Date().toISOString());
     const p = await parse(req);
     const dryRun   = !!p.dryRun;
     const lastText = String(p.text || "");
     const threadId = p.threadId ?? "";
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
-    const newly = extractFactsFromText(lastText);
+    const newly  = extractFactsFromText(lastText);
     const loaded = await loadFacts(threadId);
     const merged = mergeFacts(loaded, newly);
     await saveFacts(threadId, merged);
@@ -154,16 +147,6 @@ export async function POST(req: NextRequest) {
     const toEmail = String(p.toEmail || process.env.MS_MAILBOX_FROM || "").trim();
     if (!toEmail) return err("missing_toEmail");
 
-
-console.log("[orchestrate] sending", {
-  toEmail,
-  threadId,
-  mergedFacts: merged,
-  loadedFacts: loaded
-});
-
-
-
     if (dryRun) {
       return ok({
         mode: "dryrun",
@@ -172,7 +155,7 @@ console.log("[orchestrate] sending", {
         preview: body.slice(0, 800),
         facts: merged,
         mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
-        store: lastStoreUsed,
+        store: LAST_STORE,  // <— report where we stored facts
       });
     }
 
@@ -181,11 +164,23 @@ console.log("[orchestrate] sending", {
     const r = await fetch(sendUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toEmail, subject: p.subject || "Re: your foam quote request", text: body, dryRun: false }),
+      body: JSON.stringify({
+        toEmail,
+        subject: p.subject || "Re: your foam quote request",
+        text: body,
+        dryRun: false
+      }),
       cache: "no-store",
     });
     const sent = await r.json().catch(()=> ({}));
-    return ok({ sent: r.ok || r.status === 202, status: r.status, toEmail, result: sent?.result || null, facts: merged });
+    return ok({
+      sent: r.ok || r.status === 202,
+      status: r.status,
+      toEmail,
+      result: sent?.result || null,
+      facts: merged,
+      store: LAST_STORE,
+    });
   } catch (e:any) {
     return err("orchestrate_exception", String(e?.message || e));
   }

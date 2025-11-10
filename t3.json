@@ -2,6 +2,6 @@
   "toEmail": "you@example.com",
   "subject": "Quote",
   "text": "Make it EPE.",
-  "threadId": "redis-check-123",
+  "threadId": "redis-check-NEW",
   "dryRun": true
 }

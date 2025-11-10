@@ -1,8 +1,7 @@
 ﻿{
-  "mode": "ai",
   "toEmail": "you@example.com",
   "subject": "Quote",
   "text": "Need PE foam 1.7lb, 2x3x1 inches, qty 250.",
-  "threadId": "9642315481",
+  "threadId": "redis-check-123",
   "dryRun": true
 }
