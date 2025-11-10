@@ -13,47 +13,11 @@ type In = {
   threadId?: string | number;
   threadMsgs?: any[];
   dryRun?: boolean;
-
-  // Not strictly typed before, but we may receive these:
-  // inReplyTo?: string;
-  // messageId?: string;
 };
 type Mem = Record<string, any>;
 
 function ok(extra: Record<string, any> = {}) { return NextResponse.json({ ok: true, ...extra }, { status: 200 }); }
 function err(error: string, detail?: any) { return NextResponse.json({ ok: false, error, detail }, { status: 200 }); }
-
-// ---------- NEW (tiny helpers for stable thread key) ----------
-function normalizeId(s?: string): string {
-  const raw = String(s ?? "").trim();
-  if (!raw) return "";
-  const noAngles = raw.replace(/^<|>$/g, "").trim().toLowerCase();
-  if (!noAngles) return "";
-  if (noAngles.length > 120 || /\s/.test(noAngles)) {
-    // FNV-1a 32-bit (compact, deterministic)
-    let h = 0x811c9dc5;
-    for (let i = 0; i < noAngles.length; i++) {
-      h ^= noAngles.charCodeAt(i);
-      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
-    }
-    return `h:${h.toString(16)}`;
-  }
-  return noAngles;
-}
-function canonicalThreadKey(input: {
-  threadId?: string | number;
-  inReplyTo?: string;
-  messageId?: string;
-}): string {
-  const t = input.threadId != null ? String(input.threadId) : "";
-  return (
-    normalizeId(t) ||
-    normalizeId(input.inReplyTo) ||
-    normalizeId(input.messageId) ||
-    ""
-  );
-}
-// ---------- /NEW ----------
 
 function compact<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
@@ -109,7 +73,7 @@ async function aiReply(lastInbound: string, facts: Mem, context: string): Promis
         `Facts: ${Object.entries(facts).map(([k,v])=>`${k}=${v}`).join(", ") || "(none)"}`,
         context ? `Thread context:\n${context}` : "",
         "",
-        `Customer message:\n${lastInbound || "(none)"}`
+        `Customer message:\n${lastInbound || "(none)"}`,
       ].join("\n");
       const r = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
@@ -168,24 +132,19 @@ export async function POST(req: NextRequest) {
     const p = await parse(req);
     const dryRun   = !!p.dryRun;
     const lastText = String(p.text || "");
-
-    // ---------- CHANGED: compute single canonical thread key ----------
-    const threadKey = canonicalThreadKey({
-      threadId: p.threadId as any,
-      inReplyTo: (p as any)?.inReplyTo,
-      messageId: (p as any)?.messageId,
-    });
-    if (!threadKey) {
-      return err("missing_threadId", { reason: "No threadId/inReplyTo/messageId provided for memory keying." });
-    }
-    // -----------------------------------------------------------------
-
+    const threadId = String(p.threadId ?? "").trim();
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
+    // === memory load/update ===
     const newly  = extractFactsFromText(lastText);
-    const loaded = await loadFacts(threadKey);
-    const merged = mergeFacts(loaded, newly);
-    await saveFacts(threadKey, merged);
+    const loaded = await loadFacts(threadId);
+    // Preserve special keys
+    const carry = {
+      __lastMessageId: loaded?.__lastMessageId || "",
+      __lastInternetMessageId: loaded?.__lastInternetMessageId || "",
+    };
+    const merged = mergeFacts({ ...loaded, ...carry }, newly);
+    await saveFacts(threadId, merged);
 
     const context = pickThreadContext(threadMsgs);
     const reply   = await aiReply(lastText, merged, context);
@@ -196,18 +155,19 @@ export async function POST(req: NextRequest) {
     const toEmail = String(p.toEmail || "").trim().toLowerCase();
 
     if (!toEmail) {
-      // Do not send without a real customer address
       return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
     }
-
     // Block self-replies to our mailbox/domain
     const ownDomain = mailbox.split("@")[1] || "";
     if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
       return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
     }
 
-    // optional: clearer log
-    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadKey:", threadKey, "}");
+    // === NEW: thread continuity (In-Reply-To) ===
+    // If we have a previous outbound internetMessageId, pass it to Graph so clients thread perfectly.
+    const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
+
+    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId, ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
 
     if (dryRun) {
       return ok({
@@ -216,8 +176,9 @@ export async function POST(req: NextRequest) {
         subject: p.subject || "Quote",
         preview: body.slice(0, 800),
         facts: merged,
-        mem: { threadKey, loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
-        store: LAST_STORE,  // <— report where we stored facts
+        mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
+        inReplyTo: inReplyTo || null,
+        store: LAST_STORE,
       });
     }
 
@@ -230,19 +191,33 @@ export async function POST(req: NextRequest) {
         toEmail,
         subject: p.subject || "Re: your foam quote request",
         text: body,
+        inReplyTo: inReplyTo || null,
         dryRun: false
       }),
       cache: "no-store",
     });
     const sent = await r.json().catch(()=> ({}));
+
+    // === NEW: persist outbound IDs for next turn ===
+    // When send succeeds, remember Graph's message id + SMTP internetMessageId
+    if ((r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
+      const updated = {
+        ...merged,
+        __lastGraphMessageId: sent?.messageId || merged?.__lastGraphMessageId || "",
+        __lastInternetMessageId: sent?.internetMessageId || merged?.__lastInternetMessageId || "",
+      };
+      await saveFacts(threadId, updated);
+    }
+
     return ok({
       sent: r.ok || r.status === 202,
       status: r.status,
       toEmail,
       result: sent?.result || null,
+      messageId: sent?.messageId || null,
+      internetMessageId: sent?.internetMessageId || null,
       facts: merged,
       store: LAST_STORE,
-      threadKey,
     });
   } catch (e:any) {
     return err("orchestrate_exception", String(e?.message || e));
