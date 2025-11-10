@@ -1,0 +1,7 @@
+﻿{
+  "mode": "ai",
+  "toEmail": "you@example.com",
+  "subject": "Quote",
+  "text": "Please proceed."
+  ,"dryRun": true
+}
