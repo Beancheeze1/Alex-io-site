@@ -133,6 +133,7 @@ async function parse(req: NextRequest): Promise<In> {
 
 export async function POST(req: NextRequest) {
   try {
+    console.log("[orchestrate] START", new Date().toISOString());
     const p = await parse(req);
     const dryRun   = !!p.dryRun;
     const lastText = String(p.text || "");
@@ -150,6 +151,16 @@ export async function POST(req: NextRequest) {
 
     const toEmail = String(p.toEmail || process.env.MS_MAILBOX_FROM || "").trim();
     if (!toEmail) return err("missing_toEmail");
+
+
+console.log("[orchestrate] sending", {
+  toEmail,
+  threadId,
+  mergedFacts: merged,
+  loadedFacts: loaded
+});
+
+
 
     if (dryRun) {
       return ok({
