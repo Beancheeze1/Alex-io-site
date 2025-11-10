@@ -2,6 +2,7 @@
   "mode": "ai",
   "toEmail": "you@example.com",
   "subject": "Quote",
-  "text": "Please proceed."
-  ,"dryRun": true
+  "text": "Make it EPE, thanks.",
+  "threadId": "9642315481",
+  "dryRun": true
 }

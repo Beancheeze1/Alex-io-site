@@ -4,123 +4,95 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/* utils */
-function envBool(name: string, d = false) {
-  const v = process.env[name]?.trim().toLowerCase();
-  return v ? v === "1" || v === "true" || v === "yes" : d;
-}
-function baseUrl(req: NextRequest) {
-  const e = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "");
-  if (e) return e;
-  const u = new URL(req.url);
-  u.pathname = "";
-  u.search = "";
-  u.hash = "";
-  return u.toString().replace(/\/+$/, "");
-}
+type HubSpotEvent = {
+  subscriptionType?: string;
+  objectId?: number | string;
+  messageId?: string;
+  changeFlag?: string;
+};
 
-/* hubspot payload: can be array */
-type HS = { subscriptionType?: string; objectId?: number | string; messageId?: string; [k: string]: any };
-const asEvents = (x: any): HS[] => (Array.isArray(x) ? x : x ? [x] : []);
-const pickEvent = (evs: HS[]) =>
-  evs.find(e => String(e.subscriptionType ?? "").includes("conversation.newMessage")) ??
-  evs.find(e => Number(e.objectId ?? 0) > 0) ??
-  evs[0] ?? null;
-
-async function lookupWithRetry(
-  url: string,
-  body: any,
-  tries = 8,
-  firstDelay = 0,
-  step = 800
-) {
-  const traces: any[] = [];
-  for (let i = 0; i < tries; i++) {
-    if (i > 0) await new Promise(r => setTimeout(r, firstDelay + step * (i - 1)));
-    const r = await fetch(`${url}/api/hubspot/lookupEmail?t=${Math.random()}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify(body),
-    });
-    let j: any = null, jsonOk = false;
-    try { j = await r.json(); jsonOk = true; } catch {}
-    const got = jsonOk && typeof j?.email === "string" && j.email.length > 0;
-    traces.push({
-      attempt: i + 1,
-      path: "/api/hubspot/lookupEmail",
-      url: `${url}/api/hubspot/lookupEmail`,
-      httpOk: r.ok,
-      status: r.status,
-      jsonOk,
-      gotEmail: got,
-      keys: jsonOk ? Object.keys(j) : [],
-      src: j?.src,
-    });
-    if (jsonOk && j?.ok && got) return { ok: true, j, traces };
-  }
-  return { ok: false, j: null as any, traces };
+function ok(extra: Record<string, any> = {}) {
+  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
+}
+function fail(error: string, detail?: any) {
+  return NextResponse.json({ ok: false, error, detail }, { status: 200 });
 }
 
 export async function POST(req: NextRequest) {
-  const replyEnabled = envBool("REPLY_ENABLED", true); // keep true if you’re actively testing
-  const dryRun = /^(1|true|yes)$/i.test(req.nextUrl.searchParams.get("dryRun") ?? "");
-  console.log("////////////////////////////////////////////////////////");
+  try {
+    const body = await req.json().catch(() => null);
+    const ev: HubSpotEvent | null =
+      Array.isArray(body) && body.length ? (body[0] as any) :
+      (body && typeof body === "object" ? (body as any) : null);
 
-  let raw: any = null;
-  try { raw = await req.json(); } catch {}
-  const events = asEvents(raw);
-  const ev = pickEvent(events);
+    if (!ev) return fail("bad_payload");
 
-  const sub = String(ev?.subscriptionType ?? "undefined");
-  const objectId = Number(ev?.objectId ?? 0);
-  const messageId = String(ev?.messageId ?? "");
+    const objectId = String(ev.objectId ?? "").trim();
+    if (!objectId) return fail("missing_objectId", { ev });
 
-  console.log("[webhook] received {",
-    `subscriptionType: '${sub}',`,
-    `objectId: ${objectId},`,
-    `messageId: '${messageId}'`,
-  "}");
+    // 1) ask our lookup to extract email/subject/text for this thread
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const lookupUrl = `${base}/api/hubspot/lookupEmail`;
+    const lookupRes = await fetch(lookupUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ objectId }),
+      cache: "no-store",
+    });
+    const lookupJson = await lookupRes.json().catch(() => ({}));
 
-  if (!replyEnabled) {
-    return NextResponse.json({ ok: true, dryRun: true, send_ok: false, reason: "reply_disabled" }, { status: 200 });
+    const toEmail: string = lookupJson?.email || "";
+    const subject: string = lookupJson?.subject || "";
+    const text: string = lookupJson?.text || "";
+    const threadMsgs: any[] = lookupJson?.messages ?? [];
+
+    if (!toEmail) {
+      console.log("[webhook] missing_toEmail", {
+        objectId,
+        status: lookupRes.status,
+        jsonKeys: Object.keys(lookupJson || {}),
+      });
+      return ok({
+        dryRun: false,
+        send_ok: false,
+        toEmail,
+        reason: "missing_toEmail",
+        lookup_traces: [
+          { path: "/api/hubspot/lookupEmail", status: lookupRes.status }
+        ],
+      });
+    }
+
+    // 2) forward to orchestrator with the CRITICAL threadId
+    const orchestrateUrl = `${base}/api/ai/orchestrate`;
+    const orchPayload = {
+      mode: "ai",
+      toEmail,
+      subject: subject || "Quote",
+      text,
+      threadId: objectId,     // <<< STABLE KEY FOR MEMORY
+      threadMsgs,             // optional context
+      dryRun: false,
+    };
+
+    const orchRes = await fetch(orchestrateUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(orchPayload),
+      cache: "no-store",
+    });
+
+    const orchJson = await orchRes.json().catch(() => ({}));
+    console.log("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:false, status:", orchRes.status, "}");
+
+    return ok({
+      dryRun: false,
+      send_ok: (!!orchRes.ok || orchRes.status === 200 || orchRes.status === 202),
+      toEmail,
+      status: orchRes.status,
+      result: orchJson?.result ?? null,
+    });
+  } catch (e: any) {
+    return fail("webhook_exception", String(e?.message || e));
   }
-  if (!objectId) {
-    return NextResponse.json(
-      { ok: true, dryRun, send_ok: false, reason: "missing_objectId_or_bad_payload", batchSize: events.length },
-      { status: 200 }
-    );
-  }
-
-  const BASE = baseUrl(req);
-
-  // NEW: pass both thread + message
-  const { ok, j, traces } = await lookupWithRetry(BASE, { objectId, messageId }, 8, 0, 800);
-  if (!ok || !j?.email) {
-    console.log("[webhook] missing_toEmail", { ok: true, dryRun, send_ok: false, toEmail: "", lookup_traces: traces });
-    return NextResponse.json(
-      { ok: true, dryRun, send_ok: false, toEmail: "", reason: "missing_toEmail", lookup_traces: traces },
-      { status: 200 }
-    );
-  }
-
-  const toEmail = j.email;
-  const subject = j.subject ?? "";
-  const text = j.text ?? "";
-
-  const orch = await fetch(`${BASE}/api/ai/orchestrate?t=${Math.random()}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-    body: JSON.stringify({ mode: "ai", toEmail, subject, text, inReplyTo: null, dryRun }),
-  });
-
-  let o: any = {};
-  try { o = await orch.json(); } catch {}
-
-  console.log("[webhook] done { ok: true, dryRun:", dryRun, ", send_ok:", orch.ok, ", toEmail:", `'${toEmail}'`, "}");
-  return NextResponse.json(
-    { ok: true, dryRun, send_ok: orch.ok, toEmail, lookup_traces: traces, orchestrate_status: orch.status, orch_keys: Object.keys(o ?? {}) },
-    { status: 200 }
-  );
 }
