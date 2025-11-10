@@ -64,6 +64,21 @@ function findSubjectDeep(obj: any): string {
   return "";
 }
 
+// Light “find field” utility (case-insensitive, dotted keys allowed)
+function findFieldDeep(obj: any, re: RegExp): string {
+  if (!obj || typeof obj !== "object") return "";
+  const stack: any[] = [obj];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (!cur || typeof cur !== "object") continue;
+    for (const [k, v] of Object.entries(cur)) {
+      if (typeof v === "string" && re.test(k)) return v.trim();
+      if (v && typeof v === "object") stack.push(v);
+    }
+  }
+  return "";
+}
+
 function chooseCustomerEmail(candsIn: Iterable<string>, mailboxFromEnv?: string): string | null {
   const unique = Array.from(new Set([...candsIn].map(s => s.toLowerCase()))).filter(isEmail);
   if (!unique.length) return null;
@@ -127,89 +142,126 @@ async function getAccessToken(): Promise<TokenResult> {
   }
 }
 
-/* ------------------------------- route ------------------------------- */
+/* ------------------------------ core work ------------------------------ */
+
+async function handleLookup(objectId: number, messageIdIn?: string) {
+  if (!objectId) {
+    return NextResponse.json({ ok: false, error: "missing objectId or threadId" }, { status: 200 });
+  }
+
+  const tok = await getAccessToken();
+  if (!tok.ok) {
+    return NextResponse.json({ ok: false, error: tok.error, status: tok.status, detail: tok.detail }, { status: 200 });
+  }
+  const headers = { Authorization: `Bearer ${tok.token}` };
+
+  // Fetch thread, messages, participants
+  const [tRes, mRes, pRes] = await Promise.all([
+    fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}`, { headers, cache: "no-store" }),
+    fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/messages?limit=200`, { headers, cache: "no-store" }),
+    fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/participants`, { headers, cache: "no-store" }),
+  ]);
+
+  const [tText, mText, pText] = await Promise.all([tRes.text(), mRes.text(), pRes.text()]);
+
+  let thread: any = {}; try { thread = JSON.parse(tText); } catch {}
+  let mJ: any = {}; let messages: any[] = [];
+  try { mJ = JSON.parse(mText); messages = Array.isArray(mJ?.results) ? mJ.results : Array.isArray(mJ) ? mJ : []; } catch {}
+  let pJ: any = {}; let participants: any[] = [];
+  try { pJ = JSON.parse(pText); participants = Array.isArray(pJ?.results) ? pJ.results : Array.isArray(pJ) ? pJ : []; } catch {}
+
+  // Subject
+  let subject =
+    thread?.subject ??
+    thread?.threadSubject ??
+    thread?.title ??
+    thread?.summary ??
+    findSubjectDeep({ thread, messages, participants }) ??
+    "";
+
+  // Text fallback – choose most recent inbound non-system
+  const pickInbound = (arr: any[]): any =>
+    [...arr].reverse().find(m => {
+      const dir = String(m?.direction ?? "").toUpperCase();
+      const type = String(m?.type ?? m?.messageType ?? "").toUpperCase();
+      return dir === "INBOUND" && type !== "SYSTEM" && type !== "NOTE";
+    }) ?? arr[arr.length - 1];
+
+  const picked = pickInbound(messages) ?? {};
+  const text = String(picked?.text ?? picked?.body ?? picked?.content ?? "").trim();
+
+  // Email candidates
+  const emailSet = new Set<string>();
+  collectEmailsDeep(messages, emailSet);
+  collectEmailsDeep(participants, emailSet);
+  collectEmailsDeep(thread, emailSet);
+
+  // EXTRA: if we have a messageId, try to bias toward its sender/actors
+  const messageId = String(
+    messageIdIn ??
+    messages.find(m => String(m?.id ?? m?.messageId ?? "") === messageIdIn)?.messageId ??
+    picked?.messageId ??
+    picked?.id ??
+    ""
+  ).trim();
+  if (messageId) {
+    const byId = messages.find(m => String(m?.id ?? m?.messageId ?? "") === messageId) || picked;
+    if (byId) collectEmailsDeep(byId, emailSet);
+  }
+
+  // Try to find an inReplyTo-like field if HubSpot exposes it
+  const inReplyTo =
+    findFieldDeep(picked, /in[_-]?reply[_-]?to/i) ||
+    findFieldDeep(thread, /in[_-]?reply[_-]?to/i) ||
+    "";
+
+  const email = chooseCustomerEmail(emailSet);
+
+  return NextResponse.json(
+    {
+      ok: true,
+      email: email ?? "",
+      subject,
+      text,
+      // IMPORTANT: always string for canonicalizers downstream
+      threadId: String(objectId),
+      // helpful extras for canonical thread derivation
+      inReplyTo: inReplyTo || "",
+      messageId: messageId || "",
+      src: {
+        emailDeepChooser: email ? "hit" : "miss",
+        keys_thread: Object.keys(thread ?? {}),
+        keys_messages: Object.keys(mJ ?? {}),
+        keys_participants: Object.keys(pJ ?? {}),
+      },
+    },
+    { status: 200 }
+  );
+}
+
+/* ------------------------------- routes ------------------------------- */
+
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const objectIdStr = url.searchParams.get("objectId") || url.searchParams.get("threadId") || "";
+    const messageId = url.searchParams.get("messageId") || "";
+    const objectId = Number(objectIdStr);
+    return await handleLookup(objectId, messageId || undefined);
+  } catch (err: any) {
+    return NextResponse.json(
+      { ok: false, error: err?.message ?? "lookup_route_exception" },
+      { status: 200 }
+    );
+  }
+}
 
 export async function POST(req: Request) {
   try {
     const payload = await req.json().catch(() => ({}));
     const objectId = Number(payload.objectId ?? payload.threadId);
     const messageId = String(payload.messageId ?? "");
-
-    if (!objectId) {
-      return NextResponse.json({ ok: false, error: "missing objectId or threadId" }, { status: 200 });
-    }
-
-    const tok = await getAccessToken();
-    if (!tok.ok) {
-      return NextResponse.json({ ok: false, error: tok.error, status: tok.status, detail: tok.detail }, { status: 200 });
-    }
-    const headers = { Authorization: `Bearer ${tok.token}` };
-
-    // Fetch thread, messages, participants
-    const [tRes, mRes, pRes] = await Promise.all([
-      fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}`, { headers, cache: "no-store" }),
-      fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/messages?limit=200`, { headers, cache: "no-store" }),
-      fetch(`https://api.hubapi.com/conversations/v3/conversations/threads/${objectId}/participants`, { headers, cache: "no-store" }),
-    ]);
-
-    const [tText, mText, pText] = await Promise.all([tRes.text(), mRes.text(), pRes.text()]);
-
-    let thread: any = {}; try { thread = JSON.parse(tText); } catch {}
-    let mJ: any = {}; let messages: any[] = [];
-    try { mJ = JSON.parse(mText); messages = Array.isArray(mJ?.results) ? mJ.results : Array.isArray(mJ) ? mJ : []; } catch {}
-    let pJ: any = {}; let participants: any[] = [];
-    try { pJ = JSON.parse(pText); participants = Array.isArray(pJ?.results) ? pJ.results : Array.isArray(pJ) ? pJ : []; } catch {}
-
-    // Subject
-    let subject =
-      thread?.subject ??
-      thread?.threadSubject ??
-      thread?.title ??
-      thread?.summary ??
-      findSubjectDeep({ thread, messages, participants }) ??
-      "";
-
-    // Text fallback – choose most recent inbound non-system
-    const pickInbound = (arr: any[]): any =>
-      [...arr].reverse().find(m => {
-        const dir = String(m?.direction ?? "").toUpperCase();
-        const type = String(m?.type ?? m?.messageType ?? "").toUpperCase();
-        return dir === "INBOUND" && type !== "SYSTEM" && type !== "NOTE";
-      }) ?? arr[arr.length - 1];
-
-    const picked = pickInbound(messages) ?? {};
-    const text = String(picked?.text ?? picked?.body ?? picked?.content ?? "").trim();
-
-    // Email candidates
-    const emailSet = new Set<string>();
-    collectEmailsDeep(messages, emailSet);
-    collectEmailsDeep(participants, emailSet);
-    collectEmailsDeep(thread, emailSet);
-
-    // EXTRA: if we have a messageId, try to bias toward its sender/actors
-    if (messageId) {
-      const byId = messages.find(m => String(m?.id ?? m?.messageId ?? "") === messageId);
-      if (byId) collectEmailsDeep(byId, emailSet);
-    }
-
-    const email = chooseCustomerEmail(emailSet);
-
-    return NextResponse.json(
-      {
-        ok: true,
-        email: email ?? "",
-        subject,
-        text,
-        threadId: objectId,
-        src: {
-          emailDeepChooser: email ? "hit" : "miss",
-          keys_thread: Object.keys(thread ?? {}),
-          keys_messages: Object.keys(mJ ?? {}),
-          keys_participants: Object.keys(pJ ?? {}),
-        },
-      },
-      { status: 200 }
-    );
+    return await handleLookup(objectId, messageId || undefined);
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: err?.message ?? "lookup_route_exception" },

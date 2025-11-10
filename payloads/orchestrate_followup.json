@@ -1,8 +1,8 @@
-﻿{
+{
   "mode": "ai",
   "toEmail": "customer@example.com",
-  "subject": "Foam Quote",
-  "text": "Need foam 10x8x2 PE 1.7 lb qty 12",
+  "subject": "Foam Quote Follow-Up",
+  "text": "adding notes after first reply",
   "threadId": "thread001@mx.example",
   "dryRun": true
 }

@@ -1,0 +1,6 @@
+{
+  "toEmail": "youremail@example.com",
+  "subject": "Graph Send Warm-Up",
+  "text": "This is a live outbound test from Alex-IO.",
+  "dryRun": false
+}
