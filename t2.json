@@ -1,8 +1,7 @@
 ﻿{
-  "mode": "ai",
-  "toEmail": "you@example.com",
-  "subject": "Quote",
-  "text": "Make it EPE.",
-  "threadId": "T-fbf655898d704c099648f4b96a39fac1",
-  "dryRun": true
+    "subject":  "Quote",
+    "toEmail":  "you@example.com",
+    "dryRun":  true,
+    "text":  "Make it EPE.",
+    "threadId":  "9642315481"
 }

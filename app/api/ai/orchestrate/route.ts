@@ -145,7 +145,24 @@ export async function POST(req: NextRequest) {
     const reply   = await aiReply(lastText, merged, context);
     const body    = `${reply}${renderFooter(merged)}`;
 
-    const toEmail = String(p.toEmail || process.env.MS_MAILBOX_FROM || "").trim();
+    // Recipient resolution (STRICT: no fallback to our mailbox)
+const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
+const toEmail = String(p.toEmail || "").trim().toLowerCase();
+
+if (!toEmail) {
+  // Do not send without a real customer address
+  return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
+}
+
+// Block self-replies to our mailbox/domain
+const ownDomain = mailbox.split("@")[1] || "";
+if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
+  return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
+}
+
+// optional: clearer log
+console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, "}");
+
     if (!toEmail) return err("missing_toEmail");
 
     if (dryRun) {
