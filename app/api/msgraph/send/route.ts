@@ -53,33 +53,31 @@ async function getAppToken() {
 }
 
 /**
- * Instrumented send:
- * 1) POST /users/{from}/messages   -> create draft (optionally inject headers)
- * 2) GET  /users/{from}/messages/{id} -> fetch internetMessageId
- * 3) POST /users/{from}/messages/{id}/send -> send
- * Returns: { id, internetMessageId }
+ * Core: create -> (optional) get -> send
+ * When includeHeaders=true and inReplyTo is provided, add In-Reply-To/References.
+ * Returns { id, internetMessageId }.
  */
-async function sendViaGraphInstrumented(opts: {
+async function createGetSend(opts: {
+  accessToken: string;
+  from: string;
   to: string;
   subject: string;
   html: string;
   inReplyTo?: string | null;
+  includeHeaders: boolean;
 }) {
-  const accessToken = await getAppToken();
-  const from = requireEnv("MS_MAILBOX_FROM"); // e.g., sales@alex-io.com
+  const { accessToken, from, to, subject, html, inReplyTo, includeHeaders } = opts;
   const base = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}`;
 
-  // Build message body
   const message: any = {
-    subject: opts.subject,
-    body: { contentType: "HTML", content: opts.html },
-    toRecipients: [{ emailAddress: { address: opts.to } }],
+    subject,
+    body: { contentType: "HTML", content: html },
+    toRecipients: [{ emailAddress: { address: to } }],
   };
 
-  // Best-effort threading hints (will be ignored if not allowed)
-  const irt = String(opts.inReplyTo ?? "").trim();
-  if (irt) {
-    // Many tenants accept custom headers on create; safe to include.
+  // Best-effort threading hints (tenant-permitting)
+  if (includeHeaders && inReplyTo && String(inReplyTo).trim()) {
+    const irt = String(inReplyTo).trim();
     message.internetMessageHeaders = [
       { name: "In-Reply-To", value: irt },
       { name: "References", value: irt },
@@ -98,40 +96,111 @@ async function sendViaGraphInstrumented(opts: {
 
   if (!createResp.ok) {
     const t = await createResp.text();
-    throw new Error(`Graph create message error ${createResp.status}: ${t}`);
+    return {
+      ok: false as const,
+      stage: "create",
+      status: createResp.status,
+      text: t.slice(0, 2000),
+    };
   }
 
   const created = (await createResp.json()) as { id: string };
-  const createdId = created?.id;
-  if (!createdId) throw new Error("Graph create message did not return an id");
+  const id = created?.id;
+  if (!id) {
+    return { ok: false as const, stage: "create", status: 500, text: "No id from create" };
+  }
 
-  // 2) Look up internetMessageId (read-only; useful for threading & NDR correlation)
-  let internetMessageId: string | undefined = undefined;
+  // 2) Try to read internetMessageId (non-fatal if it fails)
+  let internetMessageId: string | undefined;
   try {
     const getResp = await fetch(
-      `${base}/messages/${encodeURIComponent(createdId)}?$select=id,internetMessageId`,
+      `${base}/messages/${encodeURIComponent(id)}?$select=id,internetMessageId`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
     if (getResp.ok) {
       const j = (await getResp.json()) as { id: string; internetMessageId?: string };
       internetMessageId = j?.internetMessageId;
     }
-  } catch {
-    // non-fatal
-  }
+  } catch {}
 
   // 3) Send
-  const sendResp = await fetch(`${base}/messages/${encodeURIComponent(createdId)}/send`, {
+  const sendResp = await fetch(`${base}/messages/${encodeURIComponent(id)}/send`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
   if (!sendResp.ok) {
     const t = await sendResp.text();
-    throw new Error(`Graph send error ${sendResp.status}: ${t}`);
+    return {
+      ok: false as const,
+      stage: "send",
+      status: sendResp.status,
+      text: t.slice(0, 2000),
+      id,
+      internetMessageId,
+    };
   }
 
-  return { id: createdId, internetMessageId };
+  return { ok: true as const, id, internetMessageId };
+}
+
+/**
+ * Instrumented send with auto-retry:
+ *  - Attempt 1: include headers if inReplyTo present.
+ *  - On 4xx/5xx failure: retry once WITHOUT headers.
+ */
+async function sendViaGraphInstrumented(opts: {
+  to: string;
+  subject: string;
+  html: string;
+  inReplyTo?: string | null;
+}) {
+  const accessToken = await getAppToken();
+  const from = requireEnv("MS_MAILBOX_FROM");
+
+  // First attempt: include headers if we have inReplyTo
+  const try1 = await createGetSend({
+    accessToken,
+    from,
+    to: opts.to,
+    subject: opts.subject,
+    html: opts.html,
+    inReplyTo: opts.inReplyTo ?? null,
+    includeHeaders: !!opts.inReplyTo,
+  });
+
+  if (try1.ok) {
+    return { id: try1.id!, internetMessageId: try1.internetMessageId };
+  }
+
+  // If first attempt failed and we tried to include headers, do a single fallback without them
+  if (opts.inReplyTo && (try1.status >= 400 && try1.status <= 599)) {
+    console.warn("[msgraph] try1 failed, retrying without headers", {
+      stage: try1.stage,
+      status: try1.status,
+    });
+
+    const try2 = await createGetSend({
+      accessToken,
+      from,
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      inReplyTo: null,
+      includeHeaders: false,
+    });
+
+    if (try2.ok) {
+      return { id: try2.id!, internetMessageId: try2.internetMessageId };
+    }
+
+    throw new Error(
+      `Graph send failed after retry (stage=${try2.stage} status=${try2.status}). First error: [${try1.stage} ${try1.status}] ${try1.text}`
+    );
+  }
+
+  // No retry path applicable
+  throw new Error(`Graph send error (stage=${try1.stage} status=${try1.status}): ${try1.text}`);
 }
 
 // --- handlers ---
@@ -179,7 +248,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Dry-run short circuit
     if (dryRun) {
       return NextResponse.json({
         ok: true,

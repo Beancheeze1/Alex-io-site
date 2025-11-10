@@ -1,0 +1,8 @@
+﻿{
+  "mode": "ai",
+  "toEmail": "youremail@gmail.com",
+  "subject": "Re: Foam Quote",
+  "text": "Following up with a new note.",
+  "threadId": "THR-THREAD-DEMO-001",
+  "dryRun": false
+}
