@@ -37,6 +37,10 @@ function pickThreadContext(threadMsgs: any[] = []): string {
   return snippets.join("\n---\n");
 }
 
+
+
+
+
 function extractFactsFromText(input = ""): Mem {
   const t = input.toLowerCase();
   const dimsMatch = t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
