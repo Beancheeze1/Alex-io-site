@@ -1,4 +1,4 @@
-// app/api/ai/orchestrate/route.ts 
+// app/api/ai/orchestrate/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
 
@@ -61,25 +61,37 @@ function renderFooter(_: Mem): string {
   return "";
 }
 
-// === UPDATED: allow real AI wording, keep blanks if missing; return {text, ai} ===
-async function aiReply(lastInbound: string, _facts: Mem, context: string): Promise<{ text: string; ai: boolean }> {
+/* ================== AI reply (fills provided facts, blanks others) ================== */
+async function aiReply(
+  lastInbound: string,
+  facts: Mem,
+  context: string
+): Promise<{ text: string; ai: boolean; reason?: string }> {
   const key = process.env.OPENAI_API_KEY?.trim();
+
+  // Build bullets with values we actually have; em dash for missing.
+  const withOrDash = (v?: any) => (v === 0 || v ? String(v) : "—");
+  const bulletsFromFacts =
+    [
+      `• Dimensions: ${withOrDash(facts?.dims)}`,
+      `• Quantity: ${withOrDash(facts?.qty)}`,
+      `• Material: ${withOrDash(facts?.material)}`,
+      `• Density: ${withOrDash(facts?.density)}`
+    ].join("\n");
+
   if (key) {
     try {
       const prompt = [
         "You are Alex-IO, a quoting assistant for protective foam packaging.",
         "Write a short, friendly, businesslike reply in your own words.",
-        "Do NOT invent or restate specs; if a field isn't explicitly provided by the customer, leave it blank with an em dash.",
-        "Avoid metadata, footers, or internal notes.",
+        "Fill ONLY the fields that the customer actually provided. Leave an em dash (—) for any missing field.",
+        "Do NOT guess, invent, or restate specs that weren't provided. No metadata or footers.",
         "",
-        "Use this lightweight structure (you may add one short sentence above or below it for context):",
-        "• Dimensions: —",
-        "• Quantity: —",
-        "• Material: —",
-        "• Density: —",
+        "Output these bullets (you may add one short sentence above or below for clarity):",
+        bulletsFromFacts,
         "",
-        "Ask the customer to fill in the blanks or attach a sketch if helpful.",
-        context ? `\nThread context (for tone/continuity only; do not copy specs verbatim):\n${context}` : "",
+        "Ask the customer to fill in any blanks or attach a sketch if helpful.",
+        context ? `\nThread context (for tone/continuity only; do not copy specs):\n${context}` : "",
         `\nCustomer message:\n${lastInbound || "(none)"}`
       ].join("\n");
 
@@ -89,31 +101,41 @@ async function aiReply(lastInbound: string, _facts: Mem, context: string): Promi
         body: JSON.stringify({ model: "gpt-4.1-mini", input: prompt, max_output_tokens: 300 }),
         cache: "no-store",
       });
-      const j = await r.json().catch(()=> ({}));
-      const text =
-        j?.output_text ||
-        j?.choices?.[0]?.message?.content?.[0]?.text ||
-        j?.choices?.[0]?.message?.content ||
-        j?.choices?.[0]?.text || "";
-      if (text) return { text: String(text).trim(), ai: true };
-    } catch {}
+
+      const raw = await r.text();
+      let j: any = {};
+      try { j = JSON.parse(raw); } catch {}
+
+      if (r.ok) {
+        const text =
+          j?.output_text ||
+          j?.choices?.[0]?.message?.content?.[0]?.text ||
+          j?.choices?.[0]?.message?.content ||
+          j?.choices?.[0]?.text || "";
+        if (text) return { text: String(text).trim(), ai: true };
+        return { text: bulletsFromFacts + "\n\nPlease confirm the blanks or attach a sketch.", ai: false, reason: "ai_no_text" };
+      }
+
+      return { text: bulletsFromFacts + "\n\nPlease confirm the blanks or attach a sketch.", ai: false, reason: `ai_http_${r.status}` };
+    } catch (e: any) {
+      return { text: bulletsFromFacts + "\n\nPlease confirm the blanks or attach a sketch.", ai: false, reason: String(e?.message || "ai_exception") };
+    }
   }
 
-  // Deterministic fallback (no facts echoed).
+  // No API key present: deterministic fallback that still fills provided facts.
   return {
     ai: false,
+    reason: "no_api_key",
     text: [
       "Thanks for the details so far.",
       "",
-      "• Dimensions: —",
-      "• Quantity: —",
-      "• Material: —",
-      "• Density: —",
+      bulletsFromFacts,
       "",
       "Please confirm the blanks above (or paste your specs). If you have a drawing or sketch, you can attach it."
     ].join("\n")
   };
 }
+/* ===================================================================== */
 
 async function parse(req: NextRequest): Promise<In> {
   try { const j = await req.json(); if (j && typeof j === "object") return j; } catch {}
@@ -156,9 +178,9 @@ export async function POST(req: NextRequest) {
     }
 
     const context = pickThreadContext(threadMsgs);
-    const { text: replyText, ai } = await aiReply(lastText, merged, context);
+    const { text: replyText, ai, reason: ai_reason } = await aiReply(lastText, merged, context);
 
-    // IMPORTANT: no footer appended
+    // No footer appended
     const body = replyText;
 
     // Recipient resolution (STRICT: no fallback to our mailbox)
@@ -177,7 +199,7 @@ export async function POST(req: NextRequest) {
     // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
-    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", ", ai:", ai, "}");
+    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", ", ai:", ai, ", ai_reason:", ai_reason || "n/a", "}");
 
     if (dryRun) {
       return ok({
@@ -190,6 +212,7 @@ export async function POST(req: NextRequest) {
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
         ai,
+        ai_reason,
       });
     }
 
@@ -229,6 +252,7 @@ export async function POST(req: NextRequest) {
       facts: merged,
       store: LAST_STORE,
       ai,
+      ai_reason,
     });
   } catch (e:any) {
     return err("orchestrate_exception", String(e?.message || e));
