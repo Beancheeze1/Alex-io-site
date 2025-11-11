@@ -36,14 +36,14 @@ function compact<T extends Record<string, any>>(obj: T): T {
 
 /** Merge with special handling:
  * - keep existing when new is empty
- * - for arrays (e.g., cavityDims) => union (preserve order, dedupe)
+ * - arrays => union (preserve order, dedupe)
  */
 function mergeFactsDeep(a: Mem, b: Mem): Mem {
   const out: Mem = { ...(a || {}) };
   for (const [k, v] of Object.entries(b || {})) {
     if (v === undefined || v === null || (typeof v === "string" && v.trim() === "")) continue;
     if (Array.isArray(v)) {
-      const prev = Array.isArray(out[k]) ? out[k] as any[] : [];
+      const prev = Array.isArray(out[k]) ? (out[k] as any[]) : [];
       const seen = new Set<string>(prev.map(String));
       const merged = [...prev];
       for (const item of v) {
@@ -67,44 +67,82 @@ function pickThreadContext(threadMsgs: any[] = []): string {
   return snippets.join("\n---\n");
 }
 
-/* ===================== Parsing helpers (expanded) ===================== */
+/* ===================== Parsing helpers (expanded & context-aware) ===================== */
+
+const CAVITY_TOKENS = /(cavities|cavity|pockets?|cut[- ]?outs?|holes?|slots?|recess(?:es)?)/i;
 
 /** Normalize a dim token like 5 x 5 x 1" → 5x5x1 */
 function normDims(s: string) {
   return s.replace(/\s+/g, "").replace(/×/g, "x").replace(/"+$/,"").toLowerCase();
 }
 
-/** Parse LxWxH style dims anywhere in text */
-function grabDims(t: string) {
-  const m = t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
-  return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
+/** Base LxWxH finder (returns all matches with indices) */
+function findDimsAll(t: string) {
+  const re = /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/gi;
+  const out: Array<{ dims: string; index: number }> = [];
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    out.push({ dims: `${m[1]}x${m[2]}x${m[3]}`, index: m.index });
+  }
+  return out;
 }
 
-/** Parse qty variants */
+/** Context-aware dims classifier:
+ * if a dims match is within ±40 chars of a cavity token → treat as cavity size
+ * else treat as overall part dimensions.
+ */
+function classifyDimsByContext(t: string): { partDims?: string; cavDims?: string[] } {
+  const matches = findDimsAll(t);
+  if (!matches.length) return {};
+  const cavList: string[] = [];
+  let part: string | undefined;
+
+  for (const m of matches) {
+    const start = Math.max(0, m.index - 40);
+    const end = Math.min(t.length, m.index + 60);
+    const window = t.slice(start, end);
+    const dims = normDims(m.dims);
+    if (CAVITY_TOKENS.test(window)) {
+      if (!cavList.includes(dims)) cavList.push(dims);
+    } else if (!part) {
+      part = dims; // keep first non-cavity dims as “Dimensions”
+    } else {
+      // If we already have part dims, additional bare dims are more likely cavity-like in a thread → add to cav list
+      if (!cavList.includes(dims)) cavList.push(dims);
+    }
+  }
+  const out: any = {};
+  if (part) out.partDims = part;
+  if (cavList.length) out.cavDims = cavList;
+  return out;
+}
+
+/** Quantity */
 function grabQty(t: string) {
   const m =
-    t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) ||
-    t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) ||
-    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|sets?|pairs?)\b/);
+    t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/i) ||
+    t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/i) ||
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|sets?|pairs?)\b/i);
   return m ? Number(m[1]) : undefined;
 }
 
-/** Parse density variants like 1.7#, 1.7 lb, 1.7lbs */
+/** Density (1.7#, 1.7 lb, 1.7lbs) + typo tolerance (densitty, dens, etc.) */
 function grabDensity(t: string) {
-  const m = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
+  const m =
+    t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/i) ||
+    t.match(/\bdens(?:ity|it|ty)?\s*[:=]?\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#))?\b/i);
   return m ? `${m[1]}lb` : undefined;
 }
 
-/** Parse material synonyms (expanded) */
+/** Material synonyms (expanded) */
 function grabMaterial(t: string) {
-  // Common aliases
-  if (/\bpolyethylene\b|\bpe\b|\bldpe\b|\bhdpe\b|\bxlpe\b|\bcross[-\s]?linked\b/.test(t)) return "PE";
-  if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) return "EPE";
-  if (/\bpolyurethane\b|\bpu\b|\bester\b|\beth(?:er)?\b/.test(t)) return "PU";
+  if (/\bpolyethylene\b|\bpe\b|\bldpe\b|\bhdpe\b|\bxlpe\b|\bcross[-\s]?linked\b/i.test(t)) return "PE";
+  if (/\bexpanded\s*pe\b|\bepe\b/i.test(t)) return "EPE";
+  if (/\bpolyurethane\b|\bpu\b|\bester\b|\beth(?:er)?\b/i.test(t)) return "PU";
   return undefined;
 }
 
-/** Pull labeled lines like “Dimensions: 5x5x1”, “Cavities: 2”, “Cavity size: 1x2x3 each, 0.5x0.5x0.25” */
+/** Labeled lines (“Dimensions: …”, “Cavity sizes: …”, etc.) */
 function extractLabeledLines(s: string) {
   const out: Mem = {};
   const lines = (s || "").split(/\r?\n/);
@@ -118,102 +156,101 @@ function extractLabeledLines(s: string) {
 
   for (const lineRaw of lines) {
     const line = lineRaw.trim().replace(/^•\s*/, "");
-    const t = line.toLowerCase();
+    const tl = line.toLowerCase();
 
     // Dimensions / Size / Measurements
-    let m = t.match(/^(?:dimensions?|size|overall\s*size|measurements?)\s*[:\-]\s*(.+)$/);
+    let m = tl.match(/^(?:dimensions?|size|overall\s*size|measurements?)\s*[:\-]\s*(.+)$/i);
     if (m) {
-      const dims = grabDims(m[1]);
-      if (dims) out.dims = normDims(dims);
+      const whole = m[1].toLowerCase();
+      const cls = classifyDimsByContext(whole);
+      if (cls.partDims) out.dims = cls.partDims;
+      if (cls.cavDims?.length) out.cavityDims = (out.cavityDims || []).concat(cls.cavDims);
       continue;
     }
 
     // Quantity
-    m = t.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/);
+    m = tl.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/i);
     if (m) { out.qty = Number(m[1]); continue; }
 
     // Material
-    if (/^(?:foam\s*)?material\s*[:\-]/.test(t)) {
-      const mat = grabMaterial(t);
+    if (/^(?:foam\s*)?material\s*[:\-]/i.test(tl)) {
+      const mat = grabMaterial(tl);
       if (mat) out.material = mat;
       continue;
     }
 
     // Density
-    m = t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#))?\b/);
+    m = tl.match(/^dens(?:ity|it|ty)?\s*[:\-]\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#))?\b/i);
     if (m) { out.density = `${m[1]}lb`; continue; }
 
-    // Cavities / pockets / features
-    // Count
-    m = t.match(/^(?:cavities|cavity|pockets?|cut[- ]?outs?|holes|slots|recess(?:es)?)\s*[:\-]\s*(\d{1,4})\b/);
+    // Cavity count
+    m = tl.match(/^(?:cavities|cavity|pockets?|cut[- ]?outs?|holes?|slots?|recess(?:es)?)\s*[:\-]\s*(\d{1,4})\b/i);
     if (m) { out.cavityCount = Number(m[1]); continue; }
 
-    // Sizes (comma separated, “each”, Ødia x depth, LxW(H))
-    m = t.match(/^(?:cavity|pocket|cut[- ]?out|hole|slot|recess)\s*(?:size|sizes)\s*[:\-]\s*(.+)$/);
+    // Cavity sizes (comma list; Ødia x depth; LxWxD)
+    m = tl.match(/^(?:cavity|pocket|cut[- ]?out|hole|slot|recess)\s*(?:size|sizes)\s*[:\-]\s*(.+)$/i);
     if (m) {
       const part = m[1].replace(/\beach\b/gi, "");
       const tokens = part.split(/[,;]+/);
       for (const tok of tokens) {
-        const tokT = tok.trim();
+        const tokT = tok.trim().toLowerCase();
         // Ødia x depth / dia x deep
         const md =
           tokT.match(/[øØo0]?\s*(?:dia(?:meter)?\.?)\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)(?:\s*(?:d|deep|depth))?/i) ||
           tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)(?:\s*(?:d|deep|depth))?/i);
         if (md) { addCavity(`Ø${md[1]}x${md[2]}`); continue; }
-        const dd = grabDims(tokT);
-        if (dd) { addCavity(dd); continue; }
+        const cls = classifyDimsByContext(tokT);
+        if (cls.cavDims?.length) cls.cavDims.forEach(addCavity);
+        else if (cls.partDims) addCavity(cls.partDims); // bare dim after “sizes” is a cavity dim
       }
       continue;
     }
-
-    // Single inline cavity dim on one line
-    const inlineCav = t.match(/(?:cavities?|pockets?|cut[- ]?outs?|holes|slots|recess(?:es)?)[:\s]+(?:size|sizes)?[:\s]*((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/);
-    if (inlineCav) addCavity(inlineCav[1]);
   }
-  return out;
+  return compact(out);
 }
 
-/** Free-text sweep for dims/qty/density/material + cavity cues */
+/** Free-text sweep + context classification */
 function extractFreeText(s = ""): Mem {
   const t = (s || "").toLowerCase();
   const out: Mem = {};
-  const dims = grabDims(t);
-  if (dims) out.dims = normDims(dims);
+
+  // Dims with context → either overall or cavity
+  const cls = classifyDimsByContext(t);
+  if (cls.partDims) out.dims = cls.partDims;
+  if (cls.cavDims?.length) out.cavityDims = cls.cavDims;
+
   const qty = grabQty(t);
   if (qty !== undefined) out.qty = qty;
+
   const density = grabDensity(t);
   if (density) out.density = density;
+
   const material = grabMaterial(t);
   if (material) out.material = material;
 
-  // “2 cavities each 1x2x3” / “two cutouts 0.5x0.5x0.25” (numeric only, we don’t parse words → numbers)
-  const count = t.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?|holes|slots|recess(?:es)?)\b/);
+  // Cavity count
+  const count = t.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?|holes?|slots?|recess(?:es)?)\b/i);
   if (count) out.cavityCount = Number(count[1]);
 
-  // “each 1x2x3” / comma-separated list
-  const afterEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?(?:\s*,\s*(?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)+)/);
+  // “each 1x2x3” list
+  const afterEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?(?:\s*,\s*(?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)+)/i);
   if (afterEach) {
     const list = afterEach[1].split(/\s*,\s*/).map(normDims);
-    out.cavityDims = list;
+    out.cavityDims = (out.cavityDims || []).concat(list);
   } else {
-    const singleEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/);
-    if (singleEach) out.cavityDims = [normDims(singleEach[1])];
+    const singleEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/i);
+    if (singleEach) out.cavityDims = (out.cavityDims || []).concat([normDims(singleEach[1])]);
   }
 
-  // Ødia x depth
-  const roundCav =
-    t.match(/[øØo0]?\s*(?:dia(?:meter)?\.?)\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)(?:\s*(?:d|deep|depth))?/i) ||
-    t.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)(?:\s*(?:d|deep|depth))?/i);
-  if (roundCav) {
-    const list = (out.cavityDims as string[] | undefined) || [];
-    list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
-    out.cavityDims = list;
+  // Ødia x depth from freestyle text
+  const roundCavAll = t.match(new RegExp(`[${"øØ"}o0]?\\s*(?:dia(?:meter)?\\.?)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:in|")?\\s*(?:x|by|\\*)\\s*(\\d+(?:\\.\\d+)?)(?:\\s*(?:d|deep|depth))?`, "i"));
+  if (roundCavAll) {
+    out.cavityDims = (out.cavityDims || []).concat([`Ø${roundCavAll[1]}x${roundCavAll[2]}`]);
   }
 
   return compact(out);
 }
 
-/** Parse subject too (customers often put dims/qty up there) */
 function extractFromSubject(s = ""): Mem {
   if (!s) return {};
   return extractFreeText(s);
@@ -226,88 +263,108 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   return mergeFactsDeep(mergeFactsDeep(fromTextFree, fromTextLabels), fromSubject);
 }
 
-/* ===================== Human Q&A rendering with randomized phrasing ===================== */
+/* ===================== Human Q&A rendering (ask-only) + HTML ===================== */
 
-const HUMAN_OPENERS = [
-  "Appreciate the details—once we lock a few specs I’ll price this out.",
-  "Thanks for sending this—happy to quote it as soon as I confirm a couple items.",
-  "Got it—let me confirm a few specs and I’ll run pricing.",
-  "Thanks for the info—if I can fill a couple gaps I’ll send numbers right away.",
+const OPENERS = [
+  "Thanks for the note—once I confirm a couple details I’ll turn pricing around.",
+  "Appreciate the info—let me fill a few gaps and I’ll get you numbers.",
+  "Got it—if I can confirm a couple specs I’ll price this out right away.",
+  "Thanks for reaching out—just a few quick checks and I’ll send a quote.",
 ];
 
-function hseed(s: string) {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
-  return h >>> 0;
-}
-function choose<T>(arr: T[], seed: string) { return arr[hseed(seed) % arr.length]; }
+function hseed(s: string) { let h = 2166136261>>>0; for (let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0;} return h>>>0; }
+function choose<T>(arr: T[], seed: string) { return arr[hseed(seed)%arr.length]; }
 
 const Q_DIMENSIONS = [
-  "• Could you confirm the finished part dimensions (L×W×H, inches)?",
-  "• What are the overall dimensions (length × width × height in inches)?",
-  "• Please share the part size in L×W×H (in).",
+  "Could you confirm the finished part dimensions (L×W×H, inches)?",
+  "What are the overall dimensions (length × width × height, in)?",
+  "Please share the part size in L×W×H (inches).",
 ];
 const Q_QUANTITY = [
-  "• What quantity should I price?",
-  "• How many pieces should I quote?",
-  "• What’s the run quantity?",
+  "What quantity should I price?",
+  "How many pieces should I quote?",
+  "What’s the run quantity?",
 ];
 const Q_MATERIAL = [
-  "• Do you prefer PE, EPE, or PU for this job?",
-  "• Which foam type works here—PE, EPE, or PU?",
-  "• Foam material preference (PE / EPE / PU)?",
+  "Do you prefer PE, EPE, or PU for this job?",
+  "Which foam type works here—PE, EPE, or PU?",
+  "Foam material preference (PE / EPE / PU)?",
 ];
 const Q_DENSITY = [
-  "• If PE/EPE, what density (e.g., 1.7 lb)?",
-  "• What foam density should I use (e.g., 1.7 lb for PE/EPE)?",
-  "• Please confirm the density for PE/EPE (e.g., 1.7 lb).",
+  "If PE/EPE, what density should I use (e.g., 1.7 lb)?",
+  "What foam density do you want for PE/EPE (e.g., 1.7 lb)?",
+  "Please confirm the PE/EPE density (e.g., 1.7 lb).",
 ];
 const Q_CAVITIES = [
-  "• How many cavities/pockets are needed, if any?",
-  "• Number of cutouts/pockets?",
-  "• How many features (cavities) should I plan for?",
+  "How many cavities/pockets are needed, if any?",
+  "Number of cutouts/pockets to include?",
+  "How many features (cavities) should I plan for?",
 ];
 const Q_CAV_SIZES = [
-  "• What are the cavity sizes? (L×W×Depth). If round, a diameter × depth like Ø3×0.75 works.",
-  "• Please share cavity dimensions (L×W×D) or round Ø×depth (e.g., Ø3×0.75).",
-  "• Cavity details: rectangular L×W×D or round Ø×depth?",
+  "What are the cavity sizes? For rectangles use L×W×Depth; for round features a Ø×depth like Ø3×0.75 works.",
+  "Please share cavity dimensions: L×W×D or round Ø×depth (e.g., Ø3×0.75).",
+  "Cavity details needed—rectangular L×W×D or round Ø×depth.",
 ];
 
-function qaLine(label: string, value: any, seed: string): string {
-  const missing = value === undefined || value === null || (typeof value === "string" && value.trim() === "");
-  if (missing) {
-    switch (label) {
-      case "Dimensions": return choose(Q_DIMENSIONS, seed + label);
-      case "Quantity":   return choose(Q_QUANTITY,   seed + label);
-      case "Material":   return choose(Q_MATERIAL,   seed + label);
-      case "Density":    return choose(Q_DENSITY,    seed + label);
-      case "Cavities":   return choose(Q_CAVITIES,   seed + label);
-      case "Cavity sizes": return choose(Q_CAV_SIZES, seed + label);
-      default: return `• ${label}?`;
-    }
-  }
-  // When present, state as answer (plain, no bullets restating all fields—only what changed gets asked above)
-  return `${label}: ${Array.isArray(value) ? value.join(", ") : String(value)}`;
+function buildQuestions(f: Mem, seed: string): string[] {
+  const qs: string[] = [];
+  if (!f.dims)        qs.push(choose(Q_DIMENSIONS, seed+"d"));
+  if (f.qty === undefined) qs.push(choose(Q_QUANTITY, seed+"q"));
+  if (!f.material)    qs.push(choose(Q_MATERIAL, seed+"m"));
+  if (!f.density)     qs.push(choose(Q_DENSITY, seed+"z"));
+  if (f.cavityCount === undefined) qs.push(choose(Q_CAVITIES, seed+"c"));
+  if (!(Array.isArray(f.cavityDims) && f.cavityDims.length)) qs.push(choose(Q_CAV_SIZES, seed+"s"));
+  return qs;
 }
 
-function renderQA(f: Mem, threadKey: string) {
-  const opener = choose(HUMAN_OPENERS, threadKey);
-  const lines: string[] = [opener, ""];
-
-  // Only ask for the missing pieces (answers included for fields that were explicitly provided this turn)
-  lines.push(qaLine("Dimensions", f.dims, threadKey));
-  lines.push(qaLine("Quantity",   f.qty,  threadKey));
-  lines.push(qaLine("Material",   f.material, threadKey));
-  lines.push(qaLine("Density",    f.density,  threadKey));
-
-  // Cavities
-  lines.push(qaLine("Cavities",     f.cavityCount, threadKey));
-  lines.push(qaLine("Cavity sizes", (Array.isArray(f.cavityDims) && f.cavityDims.length ? f.cavityDims : undefined), threadKey));
-
+function toPlainText(opener: string, qs: string[]): string {
+  const lines = [opener, ""];
+  for (const q of qs) lines.push("• " + q);
   lines.push("");
   lines.push("If you have a quick sketch or drawing, you can attach it and I’ll make sure I captured everything.");
-
   return lines.join("\n");
+}
+
+function toHtmlTemplate(opener: string, qs: string[], subject: string) {
+  const items = qs.map(q => `<li>${q}</li>`).join("");
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="x-apple-disable-message-reformatting">
+    <meta name="format-detection" content="telephone=no">
+    <title>Alex-IO Quote</title>
+  </head>
+  <body style="margin:0;padding:24px;background:#f6f8fb;font-family:Segoe UI,Arial,Helvetica,sans-serif;color:#0f172a;">
+    <div style="max-width:680px;margin:0 auto;">
+      <div style="background:#0f172a;color:#fff;padding:14px 18px;border-radius:10px 10px 0 0;">
+        <div style="font-size:16px;font-weight:600;letter-spacing:0.2px;">Alex-IO</div>
+        <div style="opacity:0.8;font-size:12px;">Re: ${escapeHtml(subject || "Your foam quote request")}</div>
+      </div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;padding:18px 20px;">
+        <p style="margin:0 0 10px 0;font-size:14px;line-height:1.55;">${escapeHtml(opener)}</p>
+        <ul style="margin:10px 0 14px 18px;padding:0 0 0 10px;font-size:14px;line-height:1.55;">
+          ${items}
+        </ul>
+        <p style="margin:14px 0 0 0;font-size:13px;line-height:1.55;color:#334155;">
+          If you have a quick sketch or drawing, feel free to attach it—I'll make sure I captured everything correctly.
+        </p>
+      </div>
+      <div style="text-align:center;color:#64748b;font-size:12px;margin-top:10px;">
+        Sent by Alex-IO — quick, accurate foam quotes
+      </div>
+    </div>
+  </body>
+</html>`;
+}
+
+function escapeHtml(s: string) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 /* ===================== Optional: tiny AI opener (kept) ===================== */
@@ -355,21 +412,7 @@ function normalizeSubject(s: string) {
     .trim();
 }
 
-/* ===================== DB enrichment hook (placeholder) ===================== */
-// NOTE: Current orchestrator does not read your DB.
-// When you’re ready, wire a read-only endpoint and enrich facts here.
-/*
-async function enrichFromDB(facts: Mem): Promise<Mem> {
-  try {
-    // Example:
-    // if (!facts.density && facts.material === "PE") {
-    //   const defaultDensity = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/materials/default-density?mat=PE`).then(r => r.json());
-    //   return { ...facts, density: defaultDensity?.value || facts.density };
-    // }
-    return facts;
-  } catch { return facts; }
-}
-*/
+/* ===================== route ===================== */
 
 async function parse(req: NextRequest): Promise<In> {
   try { const j = await req.json(); if (j && typeof j === "object") return j; } catch {}
@@ -382,8 +425,6 @@ async function parse(req: NextRequest): Promise<In> {
   } catch {}
   return {};
 }
-
-/* ===================== route ===================== */
 
 export async function POST(req: NextRequest) {
   try {
@@ -398,7 +439,7 @@ export async function POST(req: NextRequest) {
     // Parse current turn
     const newly = extractAllFromTextAndSubject(lastText, subject);
 
-    // Load + merge with prior facts (PERSISTENT: try primary thread, then alias)
+    // Load + merge with prior facts (primary thread + alias)
     const subjKey = normalizeSubject(subject);
     const aliasKey = toEmail && subjKey ? `hsu:${toEmail}::${subjKey}` : "";
 
@@ -406,9 +447,7 @@ export async function POST(req: NextRequest) {
     if (threadId) loaded = await loadFacts(threadId);
     if ((!loaded || Object.keys(loaded).length === 0) && aliasKey) {
       const aliasLoaded = await loadFacts(aliasKey);
-      if (aliasLoaded && Object.keys(aliasLoaded).length) {
-        loaded = { ...aliasLoaded };
-      }
+      if (aliasLoaded && Object.keys(aliasLoaded).length) loaded = { ...aliasLoaded };
     }
 
     const carry = {
@@ -417,10 +456,7 @@ export async function POST(req: NextRequest) {
     };
     let merged = mergeFactsDeep({ ...loaded, ...carry }, newly);
 
-    // Optional DB enrichment (placeholder)
-    // merged = await enrichFromDB(merged);
-
-    // Debug visibility in logs
+    // Debug visibility
     const primaryKeys = Object.keys(loaded || {});
     const aliasKeys = ["dims","qty","material","density","cavityCount","cavityDims","__lastGraphMessageId","__lastInternetMessageId"].filter(k=>k in loaded);
     console.log("[facts] keys { primary:", threadId || "(none)", ", alias:", aliasKey || "(none)", "}");
@@ -429,14 +465,17 @@ export async function POST(req: NextRequest) {
     console.log("[facts] newly:", newly);
     console.log("[facts] merged:", merged);
 
-    // Save to both primary + alias to survive HubSpot quirks
+    // Save to both keys
     if (threadId) await saveFacts(threadId, merged);
     if (aliasKey) await saveFacts(aliasKey, merged);
 
-    // Compose human Q&A body
-    const context = pickThreadContext(threadMsgs);
-    const openerAI = await aiOpener(lastText, context);
-    const body = (openerAI ? openerAI : choose(HUMAN_OPENERS, threadId || subjKey || toEmail || "")) + "\n\n" + renderQA(merged, threadId || subjKey || toEmail || "");
+    // Compose “ask-only” body (text + HTML)
+    const seed = threadId || subjKey || toEmail || "";
+    const openerAI = await aiOpener(lastText, pickThreadContext(threadMsgs));
+    const opener = openerAI || choose(OPENERS, seed);
+    const questions = buildQuestions(merged, seed);
+    const bodyText = toPlainText(opener, questions);
+    const bodyHtml = toHtmlTemplate(opener, questions, subject);
 
     // Recipient guardrails (unchanged)
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
@@ -456,7 +495,8 @@ export async function POST(req: NextRequest) {
         mode: "dryrun",
         toEmail,
         subject: p.subject || "Quote",
-        preview: body.slice(0, 900),
+        preview: bodyText.slice(0, 900),
+        htmlPreview: bodyHtml.slice(0, 900),
         facts: merged,
         mem: { threadId: String(threadId), aliasKey, loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         inReplyTo: inReplyTo || null,
@@ -472,7 +512,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         toEmail,
         subject: p.subject || "Re: your foam quote request",
-        text: body,
+        text: bodyText,      // for clients that prefer plain text
+        html: bodyHtml,      // primary rendering
         inReplyTo: inReplyTo || null,
         dryRun: false
       }),
