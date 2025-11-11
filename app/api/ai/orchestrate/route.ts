@@ -16,12 +16,8 @@ type In = {
 };
 type Mem = Record<string, any>;
 
-function ok(extra: Record<string, any> = {}) {
-  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
-}
-function err(error: string, detail?: any) {
-  return NextResponse.json({ ok: false, error, detail }, { status: 200 });
-}
+function ok(extra: Record<string, any> = {}) { return NextResponse.json({ ok: true, ...extra }, { status: 200 }); }
+function err(error: string, detail?: any) { return NextResponse.json({ ok: false, error, detail }, { status: 200 }); }
 
 function compact<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
@@ -30,9 +26,7 @@ function compact<T extends Record<string, any>>(obj: T): T {
   }
   return out as T;
 }
-function mergeFacts(a: Mem, b: Mem): Mem {
-  return { ...(a || {}), ...compact(b || {}) };
-}
+function mergeFacts(a: Mem, b: Mem): Mem { return { ...(a || {}), ...compact(b || {}) }; }
 
 function pickThreadContext(threadMsgs: any[] = []): string {
   const take = threadMsgs.slice(-3);
@@ -43,123 +37,91 @@ function pickThreadContext(threadMsgs: any[] = []): string {
   return snippets.join("\n---\n");
 }
 
+// --- Parser: now catches 1.7#, 1.7 lb, 1.7lbs, etc.
 function extractFactsFromText(input = ""): Mem {
-  const t = input.toLowerCase();
-  const dimsMatch = t.match(
-    /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/
-  );
-  const densMatch = t.match(/\b(\d+(?:\.\d+)?)\s*lb\b/);
-  const qtyMatch = t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) || t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
+  const t = (input || "").toLowerCase();
 
+  // 5x5x1, 12 x 9 x 2", etc.
+  const dimsMatch =
+    t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
+
+  // qty 12 / quantity: 12 / 12 pcs
+  const qtyMatch =
+    t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) ||
+    t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) ||
+    t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
+
+  // density 1.7#, 1.7 lb, 1.7lbs
+  const densMatch = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
+
+  // material PE/EPE/PU (robust)
   let material: string | undefined;
   if (/\bpolyethylene\b|\bpe\b/.test(t)) material = "PE";
+  else if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) material = "EPE";
   else if (/\bpolyurethane\b|\bpu\b/.test(t)) material = "PU";
-  else if (/\bepe\b/.test(t)) material = "EPE";
 
   return compact({
-    dims: dimsMatch ? `${dimsMatch[1]}x${dimsMatch[2]}x${dimsMatch[3]}` : undefined,
-    density: densMatch ? `${densMatch[1]}lb` : undefined,
-    qty: qtyMatch ? Number(qtyMatch[1]) : undefined,
+    dims:    dimsMatch ? `${dimsMatch[1]}x${dimsMatch[2]}x${dimsMatch[3]}` : undefined,
+    density: densMatch ? `${densMatch[1]}lb` : undefined, // normalize to "lb"
+    qty:     qtyMatch ? Number(qtyMatch[1]) : undefined,
     material,
   });
 }
 
-// Footer intentionally disabled.
+// Footer disabled
 function renderFooter(_: Mem): string { return ""; }
 
-// ---------- bullet block helpers ----------
-function valueOrDash(v: any): string {
-  return v === undefined || v === null || (typeof v === "string" && v.trim() === "") ? "—" : String(v);
-}
-function bulletsFromFacts(f: Mem): string {
-  const lines = [
-    `• Dimensions: ${valueOrDash(f?.dims)}`,
-    `• Quantity: ${valueOrDash(f?.qty)}`,
-    `• Material: ${valueOrDash(f?.material)}`,
-    `• Density: ${valueOrDash(f?.density)}`,
-  ];
-  return lines.join("\n");
+// Deterministic bullet list using known facts
+function renderBullets(f: Mem): string {
+  const v = (x: any) => (x === undefined || x === null || String(x).trim() === "" ? "—" : String(x));
+  return [
+    `• Dimensions: ${v(f.dims)}`,
+    `• Quantity: ${v(f.qty)}`,
+    `• Material: ${v(f.material)}`,
+    `• Density: ${v(f.density)}`,
+  ].join("\n");
 }
 
-// --- Improved AI reply: use known facts; leave blanks for unknown; strong fallback ---
-async function aiReply(
-  lastInbound: string,
-  facts: Mem,
-  context: string
-): Promise<{ text: string; ai: boolean; reason?: string }> {
+// One-sentence opener via model; bullets are always deterministic
+async function aiOpener(lastInbound: string, context: string): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
-  const bullets = bulletsFromFacts(facts);
+  if (!key) return null;
+  try {
+    const prompt = [
+      "Write ONE short, friendly sentence acknowledging the message and saying you'll price it once specs are confirmed.",
+      "Do not include bullets, footers, or extra lines. One sentence only.",
+      context ? `Context:\n${context}` : "",
+      `Customer message:\n${lastInbound || "(none)"}`,
+    ].filter(Boolean).join("\n\n");
 
-  if (key) {
-    try {
-      const prompt = [
-        "You are Alex-IO, a quoting assistant for protective foam packaging.",
-        "Write a short, friendly, businesslike reply in your own words.",
-        "Never guess specs. Use the provided bullet block exactly as given: if a value is missing, it shows an em dash (—).",
-        "Do NOT add metadata, internal notes, or any footer.",
-        "",
-        "Open with one short sentence thanking the customer or acknowledging the request.",
-        "Then output the bullet block EXACTLY as provided below (do not reorder, do not rename):",
-        "",
-        bullets,
-        "",
-        "Finish with one line asking the customer to confirm/fill blanks or attach a sketch if helpful.",
-        context ? `\nThread context (for tone/continuity only; do not copy specs verbatim):\n${context}` : "",
-        `\nCustomer message:\n${lastInbound || "(none)"}`,
-      ].join("\n");
-
-      const r = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({
-          model: "gpt-4.1-mini",
-          input: prompt,
-          max_output_tokens: 320,
-        }),
-        cache: "no-store",
-      });
-
-      const j = await r.json().catch(() => ({}));
-      let text =
-        j?.output_text ||
-        j?.output?.[0]?.content?.[0]?.text ||
-        j?.choices?.[0]?.message?.content?.[0]?.text ||
-        j?.choices?.[0]?.message?.content ||
-        j?.choices?.[0]?.text ||
-        "";
-
-      if (text && typeof text === "string" && text.trim().length > 0) {
-        console.log("[aiReply] ✅ text_from_model", text.slice(0, 120) + "…");
-        return { text: String(text).trim(), ai: true };
-      }
-
-      console.warn("[aiReply] ⚠️ ai_no_text", { j });
-      return { text: "", ai: false, reason: "ai_no_text" };
-    } catch (e: any) {
-      console.error("[aiReply] exception", e?.message || e);
-      return { text: "", ai: false, reason: "ai_exception" };
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: "gpt-4.1-mini", input: prompt, max_output_tokens: 60 }),
+      cache: "no-store",
+    });
+    const j = await r.json().catch(() => ({}));
+    const text =
+      j?.output_text ||
+      j?.output?.[0]?.content?.[0]?.text ||
+      j?.choices?.[0]?.message?.content?.[0]?.text ||
+      j?.choices?.[0]?.message?.content ||
+      j?.choices?.[0]?.text ||
+      "";
+    const one = String(text || "").trim().replace(/\s+/g, " ");
+    if (one) {
+      console.log("[aiReply] opener_from_model", one.slice(0, 120));
+      return one;
     }
+    return null;
+  } catch (e:any) {
+    console.warn("[aiReply] opener_exception", e?.message || e);
+    return null;
   }
-
-  // Fallback: deterministic, includes known facts and dashes for unknown
-  return {
-    ai: false,
-    reason: "no_api_key",
-    text: [
-      "Thanks for the details so far.",
-      "",
-      bullets,
-      "",
-      "Please confirm the blanks above (or paste your specs). If you have a drawing or sketch, you can attach it.",
-    ].join("\n"),
-  };
 }
 
 async function parse(req: NextRequest): Promise<In> {
-  try {
-    const j = await req.json();
-    if (j && typeof j === "object") return j;
-  } catch {}
+  try { const j = await req.json(); if (j && typeof j === "object") return j; } catch {}
   try {
     const t = await req.text();
     let s = t?.trim() ?? "";
@@ -173,13 +135,14 @@ async function parse(req: NextRequest): Promise<In> {
 export async function POST(req: NextRequest) {
   try {
     const p = await parse(req);
-    const dryRun = !!p.dryRun;
+    const dryRun   = !!p.dryRun;
     const lastText = String(p.text || "");
     const threadId = String(p.threadId ?? "").trim();
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
-    // Extract new facts from this turn; merge with memory
-    const newly = extractFactsFromText(lastText);
+    // === memory load/update ===
+    const newly  = extractFactsFromText(lastText);
+
     let loaded: Mem = {};
     if (threadId) loaded = await loadFacts(threadId);
 
@@ -187,42 +150,31 @@ export async function POST(req: NextRequest) {
       __lastMessageId: loaded?.__lastMessageId || "",
       __lastInternetMessageId: loaded?.__lastInternetMessageId || "",
     };
+
     const merged = mergeFacts({ ...loaded, ...carry }, newly);
     if (threadId) await saveFacts(threadId, merged);
 
+    // Compose reply
     const context = pickThreadContext(threadMsgs);
-    const { text: replyText, ai, reason: ai_reason } = await aiReply(lastText, merged, context);
+    const opener = await aiOpener(lastText, context);
+    const bullets = renderBullets(merged);
+    const closer = "Please confirm any blanks (or attach a quick sketch) and I’ll finalize pricing.";
 
-    const body = replyText; // no footer
+    const body = [opener || "Thanks for the details so far.", "", bullets, "", closer].join("\n");
+
+    // Recipient guardrails
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
     const toEmail = String(p.toEmail || "").trim().toLowerCase();
-
-    if (!toEmail) {
-      return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
-    }
+    if (!toEmail) return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
     const ownDomain = mailbox.split("@")[1] || "";
     if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
       return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
     }
 
-    // Thread continuity: use last saved internetMessageId (msgraph now enriches/falls back)
+    // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
-    console.info(
-      "[orchestrate] msgraph/send { to:",
-      toEmail,
-      ", dryRun:",
-      !!p.dryRun,
-      ", threadId:",
-      threadId || "<none>",
-      ", inReplyTo:",
-      inReplyTo ? "<id>" : "none",
-      ", ai:",
-      ai,
-      ", ai_reason:",
-      ai_reason || "n/a",
-      "}"
-    );
+    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
 
     if (dryRun) {
       return ok({
@@ -231,8 +183,6 @@ export async function POST(req: NextRequest) {
         subject: p.subject || "Quote",
         preview: body.slice(0, 800),
         facts: merged,
-        ai,
-        ai_reason,
         mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
@@ -249,12 +199,13 @@ export async function POST(req: NextRequest) {
         subject: p.subject || "Re: your foam quote request",
         text: body,
         inReplyTo: inReplyTo || null,
-        dryRun: false,
+        dryRun: false
       }),
       cache: "no-store",
     });
-    const sent = await r.json().catch(() => ({}));
+    const sent = await r.json().catch(()=> ({}));
 
+    // Persist outbound IDs for next turn
     if (threadId && (r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
       const updated = {
         ...merged,
@@ -273,10 +224,8 @@ export async function POST(req: NextRequest) {
       internetMessageId: sent?.internetMessageId || null,
       facts: merged,
       store: LAST_STORE,
-      ai,
-      ai_reason,
     });
-  } catch (e: any) {
+  } catch (e:any) {
     return err("orchestrate_exception", String(e?.message || e));
   }
 }
