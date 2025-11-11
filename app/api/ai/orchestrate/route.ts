@@ -37,11 +37,41 @@ function pickThreadContext(threadMsgs: any[] = []): string {
   return snippets.join("\n---\n");
 }
 
-// --- Parser: now catches 1.7#, 1.7 lb, 1.7lbs, etc.
-function extractFactsFromText(input = ""): Mem {
-  const t = (input || "").toLowerCase();
+/* ----------------- Parsing helpers (expanded) ----------------- */
 
-  // 5x5x1, 12 x 9 x 2", etc.
+// Pull “Dimensions: 5x5x1”, “Quantity: 12”, etc., from bullet/label lines
+function extractLabeledLines(s: string) {
+  const out: Mem = {};
+  const lines = (s || "").split(/\r?\n/);
+  for (const line of lines) {
+    const t = line.toLowerCase().trim().replace(/^•\s*/, "");
+    // Dimensions
+    const mDims =
+      t.match(/^dimensions?\s*[:\-]\s*([0-9.]+\s*[x×]\s*[0-9.]+\s*[x×]\s*[0-9.]+)/);
+    if (mDims) out.dims = mDims[1].replace(/\s+/g, "").replace(/×/g, "x");
+    // Quantity
+    const mQty =
+      t.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/);
+    if (mQty) out.qty = Number(mQty[1]);
+    // Material
+    if (/^material\s*[:\-]/.test(t)) {
+      if (/\bpe\b|\bpolyethylene\b/.test(t)) out.material = "PE";
+      else if (/\bepe\b|expanded\s*pe/.test(t)) out.material = "EPE";
+      else if (/\bpu\b|\bpolyurethane\b/.test(t)) out.material = "PU";
+    }
+    // Density
+    const mDen =
+      t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
+    if (mDen) out.density = `${mDen[1]}lb`;
+  }
+  return out;
+}
+
+// Free-text extraction (dims, qty, density, material) — expanded density & qty
+function extractFreeText(s = ""): Mem {
+  const t = (s || "").toLowerCase();
+
+  // dims: 5x5x1, 12 x 9 x 2", etc.
   const dimsMatch =
     t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
 
@@ -54,7 +84,7 @@ function extractFactsFromText(input = ""): Mem {
   // density 1.7#, 1.7 lb, 1.7lbs
   const densMatch = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
 
-  // material PE/EPE/PU (robust)
+  // material
   let material: string | undefined;
   if (/\bpolyethylene\b|\bpe\b/.test(t)) material = "PE";
   else if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) material = "EPE";
@@ -62,16 +92,18 @@ function extractFactsFromText(input = ""): Mem {
 
   return compact({
     dims:    dimsMatch ? `${dimsMatch[1]}x${dimsMatch[2]}x${dimsMatch[3]}` : undefined,
-    density: densMatch ? `${densMatch[1]}lb` : undefined, // normalize to "lb"
+    density: densMatch ? `${densMatch[1]}lb` : undefined,
     qty:     qtyMatch ? Number(qtyMatch[1]) : undefined,
     material,
   });
 }
 
-// Footer disabled
-function renderFooter(_: Mem): string { return ""; }
+// Parse subject too (customers often put dims/qty up there)
+function extractFromSubject(s = ""): Mem {
+  if (!s) return {};
+  return extractFreeText(s);
+}
 
-// Deterministic bullet list using known facts
 function renderBullets(f: Mem): string {
   const v = (x: any) => (x === undefined || x === null || String(x).trim() === "" ? "—" : String(x));
   return [
@@ -82,7 +114,7 @@ function renderBullets(f: Mem): string {
   ].join("\n");
 }
 
-// One-sentence opener via model; bullets are always deterministic
+// Tiny opener from the model (optional)
 async function aiOpener(lastInbound: string, context: string): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
@@ -132,17 +164,24 @@ async function parse(req: NextRequest): Promise<In> {
   return {};
 }
 
+/* ------------------------------ route ------------------------------ */
+
 export async function POST(req: NextRequest) {
   try {
     const p = await parse(req);
     const dryRun   = !!p.dryRun;
     const lastText = String(p.text || "");
+    const subject  = String(p.subject || "");
     const threadId = String(p.threadId ?? "").trim();
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
-    // === memory load/update ===
-    const newly  = extractFactsFromText(lastText);
+    // Parse everything we can from current turn
+    const fromTextFree   = extractFreeText(lastText);
+    const fromTextLabels = extractLabeledLines(lastText);
+    const fromSubject    = extractFromSubject(subject);
+    const newly          = mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject);
 
+    // Load + merge with prior facts
     let loaded: Mem = {};
     if (threadId) loaded = await loadFacts(threadId);
 
@@ -150,8 +189,13 @@ export async function POST(req: NextRequest) {
       __lastMessageId: loaded?.__lastMessageId || "",
       __lastInternetMessageId: loaded?.__lastInternetMessageId || "",
     };
-
     const merged = mergeFacts({ ...loaded, ...carry }, newly);
+
+    // Debug visibility in Render logs
+    console.log("[facts] loaded_keys:", Object.keys(loaded || {}).join(",") || "(none)");
+    console.log("[facts] newly:", newly);
+    console.log("[facts] merged:", merged);
+
     if (threadId) await saveFacts(threadId, merged);
 
     // Compose reply
@@ -159,7 +203,6 @@ export async function POST(req: NextRequest) {
     const opener = await aiOpener(lastText, context);
     const bullets = renderBullets(merged);
     const closer = "Please confirm any blanks (or attach a quick sketch) and I’ll finalize pricing.";
-
     const body = [opener || "Thanks for the details so far.", "", bullets, "", closer].join("\n");
 
     // Recipient guardrails
