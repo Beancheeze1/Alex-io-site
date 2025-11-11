@@ -37,81 +37,40 @@ function pickThreadContext(threadMsgs: any[] = []): string {
   return snippets.join("\n---\n");
 }
 
-/* ===================== Normalization ===================== */
-function normalizeInput(s = "") {
-  return String(s)
-    .replace(/[\u201C\u201D\u2033]/g, '"')   // “ ” ″ -> "
-    .replace(/\u00D7/g, "x")                // × -> x
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /* ===================== Parsing helpers (expanded) ===================== */
 
-/** Normalize dims token like 5 x 5 x 1" → 5x5x1 */
+/** Normalize a dim token like 5 x 5 x 1" → 5x5x1 */
 function normDims(s: string) {
-  return s.replace(/\s+/g, "").replace(/[×]/g, "x").replace(/"+$/,"").toLowerCase();
+  return s.replace(/\s+/g, "").replace(/×/g, "x").replace(/"+$/,"").toLowerCase();
 }
 
 /** Parse LxWxH style dims anywhere in text */
 function grabDims(t: string) {
-  const m = t.match(/\b(\d+(?:\.\d+)?)\s*[x]\s*(\d+(?:\.\d+)?)\s*[x]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/i);
+  const m = t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
   return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
 }
 
 /** Parse qty variants */
 function grabQty(t: string) {
-  const m =
-    t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/i) ||
-    t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/i) ||
-    t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/i);
+  const m = t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) || t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) || t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
   return m ? Number(m[1]) : undefined;
 }
 
-/** Parse material synonyms (return canonical) */
+/** Parse density variants like 1.7#, 1.7 lb, 1.7lbs */
+function grabDensity(t: string) {
+  const m = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
+  return m ? `${m[1]}lb` : undefined;
+}
+
+/** Parse material synonyms */
 function grabMaterial(t: string) {
-  if (/\bpolyethylene\b|\bpe\b/i.test(t)) return "PE";
-  if (/\bexpanded\s*pe\b|\bepe\b/i.test(t)) return "EPE";
-  if (/\bpolyurethane\b|\bpu\b/i.test(t)) return "PU";
+  if (/\bpolyethylene\b|\bpe\b/.test(t)) return "PE";
+  if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) return "EPE";
+  if (/\bpolyurethane\b|\bpu\b/.test(t)) return "PU";
   return undefined;
 }
 
-/** Parse density: 1.7#, 1.7 lb, 1.7lbs, or bare 1.7 (we’ll append lb if plausible) */
-function grabDensity(t: string, material?: string) {
-  let m = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/i);
-  if (m) return `${m[1]}lb`;
-
-  // bare number near the word density, or followed by "pound"
-  m = t.match(/\bdensity[^.\d]{0,10}(\d+(?:\.\d+)?)/i) || t.match(/\b(\d+(?:\.\d+)?)\s*pound\b/i);
-  if (m) return `${m[1]}lb`;
-
-  // very common shorthand: “… be 1.7 black PE”
-  if (!m) {
-    const bare = t.match(/\b(\d+(?:\.\d+)?)\b/);
-    if (bare && (material === "PE" || material === "EPE")) {
-      const val = parseFloat(bare[1]);
-      if (!Number.isNaN(val) && val > 0 && val <= 5) return `${bare[1]}lb`;
-    }
-  }
-  return undefined;
-}
-
-/** Round cavity patterns */
-function grabRoundCavity(t: string): string[] {
-  const out: string[] = [];
-
-  // Ø6 x 1, 6 dia x 1, 6" dia x 1"
-  const p1 = [...t.matchAll(/\b(?:ø|dia|diameter)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:in|")?\s*(?:dia|diameter)?\s*(?:x|by)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:in|")?\b/gi)];
-  for (const m of p1) out.push(`Ø${m[1]}x${m[2]}`);
-
-  // “6" diameter and 1" deep” | “6 in diameter, 1 in deep”
-  const p2 = [...t.matchAll(/\b([0-9]+(?:\.[0-9]+)?)\s*(?:in|")\s*diameter[^0-9]+([0-9]+(?:\.[0-9]+)?)\s*(?:in|")\s*(?:deep|depth)\b/gi)];
-  for (const m of p2) out.push(`Ø${m[1]}x${m[2]}`);
-
-  return out;
-}
-
-/** Pull labeled lines including cavities */
+/** Pull labeled lines like “Dimensions: 5x5x1”, “Cavities: 2”, “Cavity size: 1x2x3 each, 0.5x0.5x0.25” */
 function extractLabeledLines(s: string) {
   const out: Mem = {};
   const lines = (s || "").split(/\r?\n/);
@@ -122,105 +81,102 @@ function extractLabeledLines(s: string) {
     out.cavityDims = list;
   };
 
-  for (const raw of lines) {
-    const line = normalizeInput(raw).replace(/^•\s*/,"");
+  for (const lineRaw of lines) {
+    const line = lineRaw.trim().replace(/^•\s*/, "");
     const t = line.toLowerCase();
 
     // Dimensions
-    let m = t.match(/^dimensions?\s*[:\-]\s*(.+)$/i);
+    let m = t.match(/^dimensions?\s*[:\-]\s*(.+)$/);
     if (m) {
       const dims = grabDims(m[1]);
       if (dims) out.dims = normDims(dims);
       continue;
     }
+
     // Quantity
-    m = t.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/i);
+    m = t.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/);
     if (m) { out.qty = Number(m[1]); continue; }
 
     // Material
-    if (/^material\s*[:\-]/i.test(t)) {
+    if (/^material\s*[:\-]/.test(t)) {
       const mat = grabMaterial(t);
       if (mat) out.material = mat;
       continue;
     }
 
     // Density
-    m = t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#))?\b/i);
+    m = t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#))?\b/);
     if (m) { out.density = `${m[1]}lb`; continue; }
 
-    // Cavities count
-    m = t.match(/^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]\s*(\d{1,4})\b/i);
+    // Cavities / pockets / cutouts
+    // Count
+    m = t.match(/^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]\s*(\d{1,4})\b/);
     if (m) { out.cavityCount = Number(m[1]); continue; }
 
-    // Cavity sizes
-    m = t.match(/^(?:cavity|pocket|cut[- ]?out)\s*(?:size|sizes)\s*[:\-]\s*(.+)$/i);
+    // Sizes (allow comma separated, “each”, mix of Ø and LxW(H))
+    // e.g., "cavity size: 1x2x3 each, Ø3 x 0.75", "pocket sizes: 1.5x0.5x0.25, 0.75x0.25x0.25"
+    m = t.match(/^(?:cavity|pocket|cut[- ]?out)\s*(?:size|sizes)\s*[:\-]\s*(.+)$/);
     if (m) {
       const part = m[1].replace(/\beach\b/gi, "");
       const tokens = part.split(/[,;]+/);
       for (const tok of tokens) {
-        const tokT = normalizeInput(tok);
-        const rds = grabRoundCavity(tokT);
-        if (rds.length) { rds.forEach(addCavity); continue; }
+        const tokT = tok.trim();
+        // Ødia x depth
+        const md = tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
+                   tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
+        if (md) { addCavity(`Ø${md[1]}x${md[2]}`); continue; }
         const dd = grabDims(tokT);
         if (dd) { addCavity(dd); continue; }
       }
       continue;
     }
 
-    // single inline cavity dim
-    const inlineCav = t.match(/(?:cavities?|pockets?|cut[- ]?outs?)[:\s]+(?:size|sizes)?[:\s]*((?:\d+(?:\.\d+)?\s*x\s*){2}\d+(?:\.\d+)?)/i);
+    // Single inline cavity dim on one line
+    const inlineCav = t.match(/(?:cavities?|pockets?|cut[- ]?outs?)[:\s]+(?:size|sizes)?[:\s]*((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/);
     if (inlineCav) addCavity(inlineCav[1]);
   }
   return out;
 }
 
-/** Free-text sweep (dims/qty/material/density + round cavities + “single cavity”) */
+/** Free-text sweep for dims/qty/density/material + simple cavity cues */
 function extractFreeText(s = ""): Mem {
-  const t = normalizeInput(s);
+  const t = (s || "").toLowerCase();
   const out: Mem = {};
-
   const dims = grabDims(t);
   if (dims) out.dims = normDims(dims);
-
-  // qty
   const qty = grabQty(t);
   if (qty !== undefined) out.qty = qty;
-
-  // material first so density fallback can use it
+  const density = grabDensity(t);
+  if (density) out.density = density;
   const material = grabMaterial(t);
   if (material) out.material = material;
 
-  // density
-  const density = grabDensity(t, material);
-  if (density) out.density = density;
-
-  // “single cavity”
-  if (/\bsingle\s+(?:cavity|pocket|cut[- ]?out)\b/i.test(t)) out.cavityCount = out.cavityCount ?? 1;
-
-  // N cavities
-  const count = t.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/i);
+  // “2 cavities each 1x2x3” / “two cutouts 0.5x0.5x0.25”
+  const count = t.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
   if (count) out.cavityCount = Number(count[1]);
 
-  // round cavities
-  const rounds = grabRoundCavity(t);
-  if (rounds.length) {
-    out.cavityDims = [...(out.cavityDims || []), ...rounds.map(normDims)];
-  }
-
-  // “each 1x2x3” / comma separated
-  const afterEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*x\s*){2}\d+(?:\.\d+)?(?:\s*,\s*(?:\d+(?:\.\d+)?\s*x\s*){2}\d+(?:\.\d+)?)+)/i);
+  // “each 1x2x3” / comma-separated
+  const afterEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?(?:\s*,\s*(?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)+)/);
   if (afterEach) {
     const list = afterEach[1].split(/\s*,\s*/).map(normDims);
-    out.cavityDims = [...(out.cavityDims || []), ...list];
+    out.cavityDims = list;
   } else {
-    const singleEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*x\s*){2}\d+(?:\.\d+)?)/i);
-    if (singleEach) out.cavityDims = [...(out.cavityDims || []), normDims(singleEach[1])];
+    const singleEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/);
+    if (singleEach) out.cavityDims = [normDims(singleEach[1])];
+  }
+
+  // Ødia x depth
+  const roundCav = t.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
+  if (roundCav) {
+    const list = (out.cavityDims as string[] | undefined) || [];
+    list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
+    out.cavityDims = list;
   }
 
   return compact(out);
 }
 
-/** Parse subject too */
+/** Parse subject too (customers often put dims/qty up there) */
 function extractFromSubject(s = ""): Mem {
   if (!s) return {};
   return extractFreeText(s);
@@ -236,36 +192,55 @@ const HUMAN_OPENERS = [
 ];
 
 function chooseOpener(seed: string) {
+  // Simple deterministic hash so a thread gets a consistent opener
   let h = 2166136261 >>> 0;
   const s = seed || String(Date.now());
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
   return HUMAN_OPENERS[h % HUMAN_OPENERS.length];
 }
 
-function questionsNeeded(f: Mem): string[] {
-  const qs: string[] = [];
-  if (!f.dims)         qs.push("• Could you confirm the finished part dimensions (L×W×H, inches)?");
-  if (f.qty == null)   qs.push("• What quantity should I price?");
-  if (!f.material)     qs.push("• Do you prefer PE, EPE, or PU for this job?");
-  if (!f.density)      qs.push("• If PE/EPE, what density would you like (e.g., 1.7 lb)?");
-  if (f.cavityCount==null) qs.push("• How many cavities/pockets are needed, if any?");
-  if (!f.cavityDims || f.cavityDims.length === 0) qs.push("• What are the cavity sizes? For round, a diameter × depth like Ø6×1 works.");
-  return qs;
+function qaLine(label: string, value?: any): string {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    // Ask a natural question for missing fields
+    switch (label) {
+      case "Dimensions": return "• Could you confirm the finished part dimensions (L×W×H, inches)?";
+      case "Quantity": return "• What quantity should I price?";
+      case "Material": return "• Do you prefer PE, EPE, or PU for this job?";
+      case "Density": return "• If PE/EPE, what density (e.g., 1.7 lb)?";
+      case "Cavities": return "• How many cavities/pockets are needed, if any?";
+      case "Cavity sizes": return "• What are the cavity sizes? (L×W×Depth) If round, a diameter × depth like Ø3×0.75 works.";
+      default: return `• ${label}?`;
+    }
+  }
+  // When present, state as answer
+  return `${label}: ${String(value)}`;
 }
 
-function capabilityTeaser() {
-  return [
-    "Quick things I can do",
-    "• Quote PE / EPE / PU foam from your dimensions",
-    "• Handle cavities: rectangular L×W×Depth or round Ø×depth",
-    "• Suggest foam types & densities if you’re unsure",
-    "• Accept sketches/photos and extract specs",
-    "• Support quantity tiers and quick-turn options",
-    "",
-  ].join("\n");
+function renderQA(f: Mem, threadKey: string) {
+  const opener = chooseOpener(threadKey);
+  const lines: string[] = [opener, ""];
+
+  lines.push(qaLine("Dimensions", f.dims));
+  lines.push(qaLine("Quantity", f.qty));
+  lines.push(qaLine("Material", f.material));
+  lines.push(qaLine("Density", f.density));
+
+  // Cavities
+  const cavCount = f.cavityCount;
+  const cavDims = Array.isArray(f.cavityDims) ? f.cavityDims : undefined;
+
+  lines.push(qaLine("Cavities", cavCount));
+  lines.push(qaLine("Cavity sizes", cavDims && cavDims.length ? cavDims.join(", ") : undefined));
+
+  lines.push("");
+  lines.push("If you have a quick sketch or drawing, you can attach it and I’ll make sure I captured everything.");
+
+  return lines.join("\n");
 }
 
-/* ===================== Optional tiny AI opener ===================== */
+/* ===================== Optional: tiny AI opener (kept, model configurable) ===================== */
+const OPENAI_MODEL = process.env.OPENAI_RESPONSES_MODEL?.trim() || "gpt-4.1-mini";
+
 async function aiOpener(lastInbound: string, context: string): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
@@ -280,35 +255,43 @@ async function aiOpener(lastInbound: string, context: string): Promise<string | 
     const r = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: "gpt-4.1-mini", input: prompt, max_output_tokens: 60 }),
+      body: JSON.stringify({ model: OPENAI_MODEL, input: prompt, max_output_tokens: 60 }),
       cache: "no-store",
     });
     const j = await r.json().catch(() => ({}));
     const text =
-      j?.output_text ||
-      j?.output?.[0]?.content?.[0]?.text ||
-      j?.choices?.[0]?.message?.content?.[0]?.text ||
-      j?.choices?.[0]?.message?.content ||
-      j?.choices?.[0]?.text || "";
+      (j as any)?.output_text ||
+      (j as any)?.output?.[0]?.content?.[0]?.text ||
+      (j as any)?.choices?.[0]?.message?.content?.[0]?.text ||
+      (j as any)?.choices?.[0]?.message?.content ||
+      (j as any)?.choices?.[0]?.text || "";
     const one = String(text || "").trim().replace(/\s+/g, " ");
-    return one || null;
-  } catch { return null; }
+    if (one) {
+      console.log("[aiOpener] model:", OPENAI_MODEL, "| text:", one.slice(0, 120));
+      return one;
+    }
+    return null;
+  } catch (e:any) {
+    console.warn("[aiOpener] exception", e?.message || e);
+    return null;
+  }
 }
 
 /* ===================== Subject/Body Parsing ===================== */
 function extractAllFromTextAndSubject(body: string, subject: string): Mem {
-  const fromTextFree   = extractFreeText(body);
+  const fromTextFree = extractFreeText(body);
   const fromTextLabels = extractLabeledLines(body);
-  const fromSubject    = extractFromSubject(subject);
+  const fromSubject = extractFromSubject(subject);
   return mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject);
 }
 
-/* ===================== DB enrichment hook (placeholder) ===================== */
-// When you're ready, point this to a read-only endpoint that returns defaults
-// (e.g., default PE density, color options, min thickness) based on material.
+/* ===================== DB enrichment hook (not active yet) ===================== */
+// NOTE: Current orchestrator does not read your DB.
+// When you’re ready, wire a read-only endpoint and enrich facts here.
 /*
 async function enrichFromDB(facts: Mem): Promise<Mem> {
   try {
+    // Example: if (!facts.density && facts.material) { fetch default density from your materials table }
     return facts;
   } catch { return facts; }
 }
@@ -332,8 +315,8 @@ export async function POST(req: NextRequest) {
   try {
     const p = await parse(req);
     const dryRun   = !!p.dryRun;
-    const lastText = normalizeInput(String(p.text || ""));
-    const subject  = normalizeInput(String(p.subject || ""));
+    const lastText = String(p.text || "");
+    const subject  = String(p.subject || "");
     const threadId = String(p.threadId ?? "").trim();
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
@@ -350,9 +333,10 @@ export async function POST(req: NextRequest) {
     };
     let merged = mergeFacts({ ...loaded, ...carry }, newly);
 
-    // merged = await enrichFromDB(merged); // (future)
+    // Optionally enrich from DB later
+    // merged = await enrichFromDB(merged);
 
-    // Debug visibility
+    // Debug visibility in logs
     const primaryKeys = Object.keys(loaded || {});
     const aliasKeys = ["dims","qty","material","density","cavityCount","cavityDims","__lastGraphMessageId","__lastInternetMessageId"].filter(k=>k in loaded);
     console.log("[facts] keys { primary:", threadId || "(none)", ", alias:", (p.toEmail ? `hsu:${String(p.toEmail).toLowerCase()}::${subject.toLowerCase()}` : "(none)"), "}");
@@ -363,22 +347,10 @@ export async function POST(req: NextRequest) {
 
     if (threadId) await saveFacts(threadId, merged);
 
-    // Compose body: opener + (first-turn teaser) + only the questions that are still missing
+    // Compose human Q&A body
     const context = pickThreadContext(threadMsgs);
     const openerAI = await aiOpener(lastText, context);
-    const opener = openerAI || chooseOpener(threadId || subject);
-
-    const qs = questionsNeeded(merged);
-    let body = opener + "\n\n";
-    const isFirstTurn = primaryKeys.length === 0 && !loaded.__lastInternetMessageId;
-
-    if (isFirstTurn) body += capabilityTeaser();
-    if (qs.length) {
-      body += qs.join("\n") + "\n\n";
-      body += "If you have a quick sketch or drawing, feel free to attach it—I'll make sure I captured everything.";
-    } else {
-      body += "Perfect — I’ve got what I need and will prepare your quote now.";
-    }
+    const body = (openerAI ? openerAI : chooseOpener(threadId || subject)) + "\n\n" + renderQA(merged, threadId || subject);
 
     // Recipient guardrails
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
@@ -404,6 +376,7 @@ export async function POST(req: NextRequest) {
         mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
+        openai_model: OPENAI_MODEL, // visibility in dry runs
       });
     }
 
