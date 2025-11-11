@@ -50,6 +50,22 @@ function collectEmailsDeep(value: any, out: Set<string>) {
   }
 }
 
+function isPlaceholderEmail(e: string) {
+  const s = e.toLowerCase();
+  if (s.endsWith("@example.com")) return true;
+  if (s.includes("@mx.example")) return true;
+  if (s === "youremail@gmail.com" || s === "yourgmail@gmail.com" || s === "customer@example.com") return true;
+  const local = s.split("@")[0] || "";
+  return /^(your(email)?|test|sample|foo|bar|customer)$/i.test(local);
+}
+
+function firstEmailFrom(value: any): string | null {
+  const set = new Set<string>();
+  collectEmailsDeep(value, set);
+  const arr = Array.from(set).filter(isEmail);
+  return arr.length ? arr[0] : null;
+}
+
 function findSubjectDeep(obj: any): string {
   if (!obj || typeof obj !== "object") return "";
   const stack: any[] = [obj];
@@ -190,7 +206,15 @@ async function handleLookup(objectId: number, messageIdIn?: string) {
   const picked = pickInbound(messages) ?? {};
   const text = String(picked?.text ?? picked?.body ?? picked?.content ?? "").trim();
 
-  // Email candidates
+  // --- NEW: strongly prefer the actual inbound sender ---
+  let senderEmail =
+    firstEmailFrom(picked?.from) ||
+    firstEmailFrom(picked?.sender) ||
+    firstEmailFrom(picked?.initiatingActor) ||
+    firstEmailFrom(picked?.actor) ||
+    firstEmailFrom(picked);
+
+  // Email candidates (existing deep-scan)
   const emailSet = new Set<string>();
   collectEmailsDeep(messages, emailSet);
   collectEmailsDeep(participants, emailSet);
@@ -215,7 +239,26 @@ async function handleLookup(objectId: number, messageIdIn?: string) {
     findFieldDeep(thread, /in[_-]?reply[_-]?to/i) ||
     "";
 
-  const email = chooseCustomerEmail(emailSet);
+  // --- NEW: mailbox/own-domain guard + placeholder filter + sender-first selection ---
+  const mailbox = (process.env.MS_MAILBOX_FROM ?? "").toLowerCase();
+  const ownDomain = mailbox.split("@")[1] || "";
+  const isOwn = (e: string) => e.toLowerCase() === mailbox || (ownDomain && e.toLowerCase().endsWith("@"+ownDomain));
+
+  let email: string | null = null;
+
+  // A. Prefer the actual inbound sender if valid
+  if (senderEmail && isEmail(senderEmail) && !isOwn(senderEmail) && !isPlaceholderEmail(senderEmail)) {
+    email = senderEmail.toLowerCase();
+  }
+
+  // B. Otherwise fall back to chooser with filtering
+  if (!email) {
+    const filtered = Array.from(emailSet).filter(e =>
+      isEmail(e) && !isOwn(e) && !isPlaceholderEmail(e)
+    );
+    email = chooseCustomerEmail(filtered, mailbox);
+  }
+  // --------------------------------------------------------------------
 
   return NextResponse.json(
     {
