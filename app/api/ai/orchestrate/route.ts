@@ -34,9 +34,10 @@ function compact<T extends Record<string, any>>(obj: T): T {
   return out as T;
 }
 
-/** Merge with special handling:
- * - keep existing when new is empty
- * - arrays => union (preserve order, dedupe)
+/** Deep merge:
+ * - primitives override when provided
+ * - arrays => union (preserve order, dedupe by string form)
+ * - missing values never delete existing
  */
 function mergeFactsDeep(a: Mem, b: Mem): Mem {
   const out: Mem = { ...(a || {}) };
@@ -69,16 +70,18 @@ function pickThreadContext(threadMsgs: any[] = []): string {
 
 /* ===================== Parsing helpers (expanded & context-aware) ===================== */
 
-const CAVITY_TOKENS = /(cavities|cavity|pockets?|cut[- ]?outs?|holes?|slots?|recess(?:es)?)/i;
+/** number token supports leading-dot decimals like .25 */
+const N = String.raw`(?:\d+(?:\.\d+)?|\.\d+)`;
+const CAVITY_TOKENS = new RegExp(`(cavities|cavity|pockets?|cut[- ]?outs?|holes?|slots?|recess(?:es)?)`,"i");
 
-/** Normalize a dim token like 5 x 5 x 1" → 5x5x1 */
+/** Normalize dims: ' 5 x .25 x 1" ' → '5x.25x1' */
 function normDims(s: string) {
   return s.replace(/\s+/g, "").replace(/×/g, "x").replace(/"+$/,"").toLowerCase();
 }
 
-/** Base LxWxH finder (returns all matches with indices) */
+/** Find all LxWxH occurrences with indices */
 function findDimsAll(t: string) {
-  const re = /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/gi;
+  const re = new RegExp(`(${N})\\s*[x×]\\s*(${N})\\s*[x×]\\s*(${N})(?:\\s*(?:in|inch|inches|"))?\\b`, "gi");
   const out: Array<{ dims: string; index: number }> = [];
   let m;
   while ((m = re.exec(t)) !== null) {
@@ -87,10 +90,7 @@ function findDimsAll(t: string) {
   return out;
 }
 
-/** Context-aware dims classifier:
- * if a dims match is within ±40 chars of a cavity token → treat as cavity size
- * else treat as overall part dimensions.
- */
+/** Context classifier: dims near a cavity token (±50 chars) → cavity; else overall dims */
 function classifyDimsByContext(t: string): { partDims?: string; cavDims?: string[] } {
   const matches = findDimsAll(t);
   if (!matches.length) return {};
@@ -98,16 +98,15 @@ function classifyDimsByContext(t: string): { partDims?: string; cavDims?: string
   let part: string | undefined;
 
   for (const m of matches) {
-    const start = Math.max(0, m.index - 40);
-    const end = Math.min(t.length, m.index + 60);
+    const start = Math.max(0, m.index - 50);
+    const end = Math.min(t.length, m.index + 70);
     const window = t.slice(start, end);
     const dims = normDims(m.dims);
     if (CAVITY_TOKENS.test(window)) {
       if (!cavList.includes(dims)) cavList.push(dims);
     } else if (!part) {
-      part = dims; // keep first non-cavity dims as “Dimensions”
+      part = dims;
     } else {
-      // If we already have part dims, additional bare dims are more likely cavity-like in a thread → add to cav list
       if (!cavList.includes(dims)) cavList.push(dims);
     }
   }
@@ -117,24 +116,24 @@ function classifyDimsByContext(t: string): { partDims?: string; cavDims?: string
   return out;
 }
 
-/** Quantity */
+/** Quantity (qty, quantity, 25 pcs, 25 pieces, sets, pairs) */
 function grabQty(t: string) {
   const m =
-    t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/i) ||
-    t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/i) ||
-    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|sets?|pairs?)\b/i);
+    t.match(new RegExp(`\\bqty\\s*[:=]?\\s*(\\d{1,6})\\b`,"i")) ||
+    t.match(new RegExp(`\\bquantity\\s*[:=]?\\s*(\\d{1,6})\\b`,"i")) ||
+    t.match(new RegExp(`\\b(\\d{1,6})\\s*(?:pcs?|pieces?|sets?|pairs?)\\b`,"i"));
   return m ? Number(m[1]) : undefined;
 }
 
-/** Density (1.7#, 1.7 lb, 1.7lbs) + typo tolerance (densitty, dens, etc.) */
+/** Density: 1.7#, 1.7 lb, .9 lb; also 'density: 1.7' */
 function grabDensity(t: string) {
   const m =
-    t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/i) ||
-    t.match(/\bdens(?:ity|it|ty)?\s*[:=]?\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#))?\b/i);
+    t.match(new RegExp(`\\b(${N})\\s*(?:lb|lbs|#)\\b`,"i")) ||
+    t.match(new RegExp(`\\bdens(?:ity|it|ty)?\\s*[:=]?\\s*(${N})(?:\\s*(?:lb|lbs|#))?\\b`,"i"));
   return m ? `${m[1]}lb` : undefined;
 }
 
-/** Material synonyms (expanded) */
+/** Material: expanded list */
 function grabMaterial(t: string) {
   if (/\bpolyethylene\b|\bpe\b|\bldpe\b|\bhdpe\b|\bxlpe\b|\bcross[-\s]?linked\b/i.test(t)) return "PE";
   if (/\bexpanded\s*pe\b|\bepe\b/i.test(t)) return "EPE";
@@ -142,7 +141,7 @@ function grabMaterial(t: string) {
   return undefined;
 }
 
-/** Labeled lines (“Dimensions: …”, “Cavity sizes: …”, etc.) */
+/** Labeled lines + inline cavity sizes */
 function extractLabeledLines(s: string) {
   const out: Mem = {};
   const lines = (s || "").split(/\r?\n/);
@@ -154,15 +153,15 @@ function extractLabeledLines(s: string) {
     out.cavityDims = list;
   };
 
-  for (const lineRaw of lines) {
-    const line = lineRaw.trim().replace(/^•\s*/, "");
+  for (const raw of lines) {
+    const line = raw.trim().replace(/^•\s*/, "");
     const tl = line.toLowerCase();
 
-    // Dimensions / Size / Measurements
+    // Overall dimensions / size / measurements
     let m = tl.match(/^(?:dimensions?|size|overall\s*size|measurements?)\s*[:\-]\s*(.+)$/i);
     if (m) {
-      const whole = m[1].toLowerCase();
-      const cls = classifyDimsByContext(whole);
+      const payload = m[1].toLowerCase();
+      const cls = classifyDimsByContext(payload);
       if (cls.partDims) out.dims = cls.partDims;
       if (cls.cavDims?.length) out.cavityDims = (out.cavityDims || []).concat(cls.cavDims);
       continue;
@@ -180,41 +179,40 @@ function extractLabeledLines(s: string) {
     }
 
     // Density
-    m = tl.match(/^dens(?:ity|it|ty)?\s*[:\-]\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#))?\b/i);
+    m = tl.match(new RegExp(`^dens(?:ity|it|ty)?\\s*[:\\-]\\s*(${N})(?:\\s*(?:lb|lbs|#))?\\b`,"i"));
     if (m) { out.density = `${m[1]}lb`; continue; }
 
     // Cavity count
     m = tl.match(/^(?:cavities|cavity|pockets?|cut[- ]?outs?|holes?|slots?|recess(?:es)?)\s*[:\-]\s*(\d{1,4})\b/i);
-    if (m) { out.cavityCount = Number(m[1]); continue; }
+    if (m) { out.cavityCount = Number(m[1]); /* don't continue; sizes may follow on same line */ }
 
-    // Cavity sizes (comma list; Ødia x depth; LxWxD)
-    m = tl.match(/^(?:cavity|pocket|cut[- ]?out|hole|slot|recess)\s*(?:size|sizes)\s*[:\-]\s*(.+)$/i);
-    if (m) {
-      const part = m[1].replace(/\beach\b/gi, "");
-      const tokens = part.split(/[,;]+/);
-      for (const tok of tokens) {
-        const tokT = tok.trim().toLowerCase();
-        // Ødia x depth / dia x deep
-        const md =
-          tokT.match(/[øØo0]?\s*(?:dia(?:meter)?\.?)\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)(?:\s*(?:d|deep|depth))?/i) ||
-          tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)(?:\s*(?:d|deep|depth))?/i);
-        if (md) { addCavity(`Ø${md[1]}x${md[2]}`); continue; }
-        const cls = classifyDimsByContext(tokT);
-        if (cls.cavDims?.length) cls.cavDims.forEach(addCavity);
-        else if (cls.partDims) addCavity(cls.partDims); // bare dim after “sizes” is a cavity dim
+    // Inline cavity sizes after a cavity token in same line
+    // Examples:
+    //   "Cavities are 1x1x.25 each"
+    //   "Pockets: .25 x 1 x 2, 0.5x0.5x.25"
+    //   "Cutouts: Ø3 x .75"
+    if (CAVITY_TOKENS.test(tl)) {
+      // Ødia x depth
+      const roundAll = line.match(new RegExp(`[${"øØ"}o0]?\\s*(?:dia(?:meter)?\\.?)?\\s*(${N})\\s*(?:in|")?\\s*(?:x|by|\\*)\\s*(${N})(?:\\s*(?:d|deep|depth))?`,"ig"));
+      if (roundAll) {
+        for (const r of roundAll) {
+          const rr = r.match(new RegExp(`(${N}).*?(?:x|by|\\*)\\s*(${N})`,"i"));
+          if (rr) addCavity(`Ø${rr[1]}x${rr[2]}`);
+        }
       }
-      continue;
+      // Rectangular sequences (one or many)
+      const rects = line.match(new RegExp(`(${N}\\s*[x×]\\s*${N}\\s*[x×]\\s*${N})`,"ig"));
+      if (rects) rects.forEach(tok => addCavity(tok));
     }
   }
   return compact(out);
 }
 
-/** Free-text sweep + context classification */
+/** Free-text sweep + context classifier + “each …” lists */
 function extractFreeText(s = ""): Mem {
   const t = (s || "").toLowerCase();
   const out: Mem = {};
 
-  // Dims with context → either overall or cavity
   const cls = classifyDimsByContext(t);
   if (cls.partDims) out.dims = cls.partDims;
   if (cls.cavDims?.length) out.cavityDims = cls.cavDims;
@@ -232,20 +230,20 @@ function extractFreeText(s = ""): Mem {
   const count = t.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?|holes?|slots?|recess(?:es)?)\b/i);
   if (count) out.cavityCount = Number(count[1]);
 
-  // “each 1x2x3” list
-  const afterEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?(?:\s*,\s*(?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)+)/i);
-  if (afterEach) {
-    const list = afterEach[1].split(/\s*,\s*/).map(normDims);
+  // “each 1x2x3, .5x.5x.25 …”
+  const afterEachList = t.match(new RegExp(`\\beach\\s+((?:${N}\\s*[x×]\\s*${N}\\s*[x×]\\s*${N})(?:\\s*,\\s*(?:${N}\\s*[x×]\\s*${N}\\s*[x×]\\s*${N}))+)`,"i"));
+  if (afterEachList) {
+    const list = afterEachList[1].split(/\s*,\s*/).map(normDims);
     out.cavityDims = (out.cavityDims || []).concat(list);
   } else {
-    const singleEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/i);
+    const singleEach = t.match(new RegExp(`\\beach\\s+(${N}\\s*[x×]\\s*${N}\\s*[x×]\\s*${N})`,"i"));
     if (singleEach) out.cavityDims = (out.cavityDims || []).concat([normDims(singleEach[1])]);
   }
 
-  // Ødia x depth from freestyle text
-  const roundCavAll = t.match(new RegExp(`[${"øØ"}o0]?\\s*(?:dia(?:meter)?\\.?)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:in|")?\\s*(?:x|by|\\*)\\s*(\\d+(?:\\.\\d+)?)(?:\\s*(?:d|deep|depth))?`, "i"));
-  if (roundCavAll) {
-    out.cavityDims = (out.cavityDims || []).concat([`Ø${roundCavAll[1]}x${roundCavAll[2]}`]);
+  // Round Ø×depth anywhere in text
+  const round = t.match(new RegExp(`[${"øØ"}o0]?\\s*(?:dia(?:meter)?\\.?)?\\s*(${N})\\s*(?:in|")?\\s*(?:x|by|\\*)\\s*(${N})(?:\\s*(?:d|deep|depth))?`,"i"));
+  if (round) {
+    out.cavityDims = (out.cavityDims || []).concat([`Ø${round[1]}x${round[2]}`]);
   }
 
   return compact(out);
@@ -317,16 +315,30 @@ function buildQuestions(f: Mem, seed: string): string[] {
   return qs;
 }
 
-function toPlainText(opener: string, qs: string[]): string {
+function toPlainText(opener: string, qs: string[], firstReplyExtra?: string[]): string {
   const lines = [opener, ""];
+  if (firstReplyExtra && firstReplyExtra.length) {
+    lines.push("Quick things I can do:");
+    for (const e of firstReplyExtra) lines.push(`• ${e}`);
+    lines.push("");
+  }
   for (const q of qs) lines.push("• " + q);
   lines.push("");
   lines.push("If you have a quick sketch or drawing, you can attach it and I’ll make sure I captured everything.");
   return lines.join("\n");
 }
 
-function toHtmlTemplate(opener: string, qs: string[], subject: string) {
+function toHtmlTemplate(opener: string, qs: string[], subject: string, firstReplyExtra?: string[]) {
   const items = qs.map(q => `<li>${q}</li>`).join("");
+  const extras = (firstReplyExtra && firstReplyExtra.length)
+    ? `<div style="margin:0 0 10px 0;">
+         <div style="font-weight:600;margin:0 0 4px 0;">Quick things I can do</div>
+         <ul style="margin:6px 0 0 18px;padding:0 0 0 10px;">
+           ${firstReplyExtra.map(e=>`<li>${e}</li>`).join("")}
+         </ul>
+       </div>`
+    : "";
+
   return `<!doctype html>
 <html>
   <head>
@@ -343,6 +355,7 @@ function toHtmlTemplate(opener: string, qs: string[], subject: string) {
       </div>
       <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;padding:18px 20px;">
         <p style="margin:0 0 10px 0;font-size:14px;line-height:1.55;">${escapeHtml(opener)}</p>
+        ${extras}
         <ul style="margin:10px 0 14px 18px;padding:0 0 0 10px;font-size:14px;line-height:1.55;">
           ${items}
         </ul>
@@ -404,12 +417,27 @@ async function aiOpener(lastInbound: string, context: string): Promise<string | 
   }
 }
 
-/* ===================== Subject/Body Parsing ===================== */
+/* ===================== DB enrichment hook (off for now) ===================== */
+// When you’re ready, point this at a read-only endpoint to nudge defaults
+// (e.g., default PE density by thickness, popular materials, etc.).
+/*
+async function enrichFromDB(facts: Mem): Promise<Mem> {
+  try {
+    // Example:
+    // if (!facts.density && facts.material === "PE") {
+    //   const r = await fetch(process.env.NEXT_PUBLIC_BASE_URL + "/api/admin/materials?kind=PE", { cache: "no-store" });
+    //   const j = await r.json();
+    //   if (j?.defaultDensity) facts.density = j.defaultDensity;
+    // }
+    return facts;
+  } catch {
+    return facts;
+  }
+}
+*/
+
 function normalizeSubject(s: string) {
-  return (s || "")
-    .toLowerCase()
-    .replace(/^\s*(re|fwd|fw)\s*:\s*/g, "")
-    .trim();
+  return (s || "").toLowerCase().replace(/^\s*(re|fwd|fw)\s*:\s*/g, "").trim();
 }
 
 /* ===================== route ===================== */
@@ -439,7 +467,7 @@ export async function POST(req: NextRequest) {
     // Parse current turn
     const newly = extractAllFromTextAndSubject(lastText, subject);
 
-    // Load + merge with prior facts (primary thread + alias)
+    // Load existing memory (primary + alias)
     const subjKey = normalizeSubject(subject);
     const aliasKey = toEmail && subjKey ? `hsu:${toEmail}::${subjKey}` : "";
 
@@ -454,7 +482,10 @@ export async function POST(req: NextRequest) {
       __lastMessageId: loaded?.__lastMessageId || "",
       __lastInternetMessageId: loaded?.__lastInternetMessageId || "",
     };
+
+    // Merge + (optional) DB enrich
     let merged = mergeFactsDeep({ ...loaded, ...carry }, newly);
+    // merged = await enrichFromDB(merged);
 
     // Debug visibility
     const primaryKeys = Object.keys(loaded || {});
@@ -469,15 +500,26 @@ export async function POST(req: NextRequest) {
     if (threadId) await saveFacts(threadId, merged);
     if (aliasKey) await saveFacts(aliasKey, merged);
 
-    // Compose “ask-only” body (text + HTML)
+    // First-reply detection (only show capabilities card on the first outbound)
+    const isFirstReply = !loaded || (!loaded.__lastGraphMessageId && !loaded.__lastInternetMessageId);
+
+    const CAPABILITIES = [
+      "Quote PE / EPE / PU foam from your dimensions",
+      "Handle cavities: rectangular L×W×Depth or round Ø×depth",
+      "Suggest foam types & densities if you’re unsure",
+      "Accept sketches/photos and extract specs",
+      "Support quantity tiers and quick-turn options",
+    ];
+
+    // Compose ask-only email (text + HTML)
     const seed = threadId || subjKey || toEmail || "";
     const openerAI = await aiOpener(lastText, pickThreadContext(threadMsgs));
     const opener = openerAI || choose(OPENERS, seed);
     const questions = buildQuestions(merged, seed);
-    const bodyText = toPlainText(opener, questions);
-    const bodyHtml = toHtmlTemplate(opener, questions, subject);
+    const bodyText = toPlainText(opener, questions, isFirstReply ? CAPABILITIES : undefined);
+    const bodyHtml = toHtmlTemplate(opener, questions, subject, isFirstReply ? CAPABILITIES : undefined);
 
-    // Recipient guardrails (unchanged)
+    // Recipient guardrails
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
     if (!toEmail) return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
     const ownDomain = mailbox.split("@")[1] || "";
@@ -485,7 +527,6 @@ export async function POST(req: NextRequest) {
       return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
     }
 
-    // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
     console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId || "<none>", ", alias:", aliasKey || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
@@ -512,8 +553,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         toEmail,
         subject: p.subject || "Re: your foam quote request",
-        text: bodyText,      // for clients that prefer plain text
-        html: bodyHtml,      // primary rendering
+        text: bodyText,
+        html: bodyHtml,
         inReplyTo: inReplyTo || null,
         dryRun: false
       }),
