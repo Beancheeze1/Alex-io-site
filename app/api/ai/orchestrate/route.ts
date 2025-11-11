@@ -125,12 +125,30 @@ function grabQty(t: string) {
   return m ? Number(m[1]) : undefined;
 }
 
-/** Density: 1.7#, 1.7 lb, .9 lb; also 'density: 1.7' */
+/** DENSITY — robust:
+ *  - 1.7#, 1.7 lb, 1.7lbs, .9 lb
+ *  - density: 1.7 (unit implied)
+ *  - PE 1.7#, 1.7# PE
+ */
 function grabDensity(t: string) {
-  const m =
-    t.match(new RegExp(`\\b(${N})\\s*(?:lb|lbs|#)\\b`,"i")) ||
-    t.match(new RegExp(`\\bdens(?:ity|it|ty)?\\s*[:=]?\\s*(${N})(?:\\s*(?:lb|lbs|#))?\\b`,"i"));
-  return m ? `${m[1]}lb` : undefined;
+  // explicit unit anywhere
+  let m =
+    t.match(new RegExp(`\\b(${N})\\s*(?:lb|lbs|#)\\b`,"i"));
+  if (m) return `${m[1]}lb`;
+
+  // labeled "density:" (unit optional)
+  m = t.match(new RegExp(`\\bdens(?:ity|it|ty)?\\s*[:=]?\\s*(${N})(?:\\s*(?:lb|lbs|#))?\\b`,"i"));
+  if (m) return `${m[1]}lb`;
+
+  // material + unit near number: "PE 1.7#", "EPE 1.9 lb"
+  m = t.match(new RegExp(`\\b(?:pe|epe|pu)\\s*(${N})\\s*(?:lb|lbs|#)\\b`,"i"));
+  if (m) return `${m[1]}lb`;
+
+  // number + unit + material: "1.7# pe"
+  m = t.match(new RegExp(`\\b(${N})\\s*(?:lb|lbs|#)\\s*(?:pe|epe|pu)\\b`,"i"));
+  if (m) return `${m[1]}lb`;
+
+  return undefined;
 }
 
 /** Material: expanded list */
@@ -178,7 +196,7 @@ function extractLabeledLines(s: string) {
       continue;
     }
 
-    // Density
+    // Density (unit optional)
     m = tl.match(new RegExp(`^dens(?:ity|it|ty)?\\s*[:\\-]\\s*(${N})(?:\\s*(?:lb|lbs|#))?\\b`,"i"));
     if (m) { out.density = `${m[1]}lb`; continue; }
 
@@ -187,10 +205,6 @@ function extractLabeledLines(s: string) {
     if (m) { out.cavityCount = Number(m[1]); /* don't continue; sizes may follow on same line */ }
 
     // Inline cavity sizes after a cavity token in same line
-    // Examples:
-    //   "Cavities are 1x1x.25 each"
-    //   "Pockets: .25 x 1 x 2, 0.5x0.5x.25"
-    //   "Cutouts: Ø3 x .75"
     if (CAVITY_TOKENS.test(tl)) {
       // Ødia x depth
       const roundAll = line.match(new RegExp(`[${"øØ"}o0]?\\s*(?:dia(?:meter)?\\.?)?\\s*(${N})\\s*(?:in|")?\\s*(?:x|by|\\*)\\s*(${N})(?:\\s*(?:d|deep|depth))?`,"ig"));
@@ -418,14 +432,12 @@ async function aiOpener(lastInbound: string, context: string): Promise<string | 
 }
 
 /* ===================== DB enrichment hook (off for now) ===================== */
-// When you’re ready, point this at a read-only endpoint to nudge defaults
-// (e.g., default PE density by thickness, popular materials, etc.).
 /*
 async function enrichFromDB(facts: Mem): Promise<Mem> {
   try {
     // Example:
     // if (!facts.density && facts.material === "PE") {
-    //   const r = await fetch(process.env.NEXT_PUBLIC_BASE_URL + "/api/admin/materials?kind=PE", { cache: "no-store" });
+    //   const r = await fetch(process.env.NEXT_PUBLIC_BASE_URL + "/api/materials/suggest?material=PE", { cache: "no-store" });
     //   const j = await r.json();
     //   if (j?.defaultDensity) facts.density = j.defaultDensity;
     // }
