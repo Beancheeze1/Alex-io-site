@@ -160,6 +160,36 @@ async function getAccessToken(): Promise<TokenResult> {
 
 /* ------------------------------ core work ------------------------------ */
 
+// NEW: Detect bounce/NDR/system messages so we never pick them as “inbound”
+function isBounceMessage(msg: any): boolean {
+  try {
+    const subj = String(msg?.subject || msg?.title || "").trim();
+    if (/^(undeliverable|delivery status notification|mail delivery|returned mail)/i.test(subj)) return true;
+
+    const sender =
+      firstEmailFrom(msg?.from) ||
+      firstEmailFrom(msg?.sender) ||
+      firstEmailFrom(msg?.initiatingActor) ||
+      firstEmailFrom(msg?.actor) ||
+      "";
+
+    if (sender) {
+      const s = sender.toLowerCase();
+      if (/^(postmaster|mailer-daemon|no-reply|noreply)@/.test(s)) return true;
+      // Exchange internal “addr@*.prod.outlook.com” style bounce artifacts
+      if (/\.prod\.outlook\.com$/i.test(s.split("@")[1] || "")) return true;
+    }
+
+    // Some bounces identify themselves in body text; cheap heuristic:
+    const body = String(msg?.text || msg?.body || msg?.content || "").slice(0, 400).toLowerCase();
+    if (body.includes("couldn't be delivered") || body.includes("delivery has failed")) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function handleLookup(objectId: number, messageIdIn?: string) {
   if (!objectId) {
     return NextResponse.json({ ok: false, error: "missing objectId or threadId" }, { status: 200 });
@@ -195,18 +225,25 @@ async function handleLookup(objectId: number, messageIdIn?: string) {
     findSubjectDeep({ thread, messages, participants }) ??
     "";
 
-  // Text fallback – choose most recent inbound non-system
-  const pickInbound = (arr: any[]): any =>
-    [...arr].reverse().find(m => {
+  // NEW: pick most recent INBOUND that is not SYSTEM/NOTE and not a bounce/NDR
+  const pickInboundSmart = (arr: any[]): any | undefined => {
+    const reversed = [...arr].reverse();
+    for (const m of reversed) {
       const dir = String(m?.direction ?? "").toUpperCase();
       const type = String(m?.type ?? m?.messageType ?? "").toUpperCase();
-      return dir === "INBOUND" && type !== "SYSTEM" && type !== "NOTE";
-    }) ?? arr[arr.length - 1];
+      if (dir !== "INBOUND") continue;
+      if (type === "SYSTEM" || type === "NOTE") continue;
+      if (isBounceMessage(m)) continue;
+      return m;
+    }
+    // fallback to the last item if nothing matched
+    return reversed.find(m => String(m?.direction ?? "").toUpperCase() === "INBOUND") ?? arr[arr.length - 1];
+  };
 
-  const picked = pickInbound(messages) ?? {};
+  const picked = pickInboundSmart(messages) ?? {};
   const text = String(picked?.text ?? picked?.body ?? picked?.content ?? "").trim();
 
-  // --- NEW: strongly prefer the actual inbound sender ---
+  // Prefer the actual inbound sender
   let senderEmail =
     firstEmailFrom(picked?.from) ||
     firstEmailFrom(picked?.sender) ||
@@ -214,13 +251,15 @@ async function handleLookup(objectId: number, messageIdIn?: string) {
     firstEmailFrom(picked?.actor) ||
     firstEmailFrom(picked);
 
-  // Email candidates (existing deep-scan)
+  // Email candidates (deep scan)
   const emailSet = new Set<string>();
-  collectEmailsDeep(messages, emailSet);
+  // NEW: Avoid poisoning the pool with obvious bounces
+  const nonBounceMessages = messages.filter(m => !isBounceMessage(m));
+  collectEmailsDeep(nonBounceMessages, emailSet);
   collectEmailsDeep(participants, emailSet);
   collectEmailsDeep(thread, emailSet);
 
-  // EXTRA: if we have a messageId, try to bias toward its sender/actors
+  // Bias by message id if provided
   const messageId = String(
     messageIdIn ??
     messages.find(m => String(m?.id ?? m?.messageId ?? "") === messageIdIn)?.messageId ??
@@ -230,35 +269,30 @@ async function handleLookup(objectId: number, messageIdIn?: string) {
   ).trim();
   if (messageId) {
     const byId = messages.find(m => String(m?.id ?? m?.messageId ?? "") === messageId) || picked;
-    if (byId) collectEmailsDeep(byId, emailSet);
+    if (byId && !isBounceMessage(byId)) collectEmailsDeep(byId, emailSet);
   }
 
-  // Try to find an inReplyTo-like field if HubSpot exposes it
+  // inReplyTo if available
   const inReplyTo =
     findFieldDeep(picked, /in[_-]?reply[_-]?to/i) ||
     findFieldDeep(thread, /in[_-]?reply[_-]?to/i) ||
     "";
 
-  // --- NEW: mailbox/own-domain guard + placeholder filter + sender-first selection ---
+  // mailbox/own-domain guard + placeholder filter + sender-first selection
   const mailbox = (process.env.MS_MAILBOX_FROM ?? "").toLowerCase();
   const ownDomain = mailbox.split("@")[1] || "";
-  const isOwn = (e: string) => e.toLowerCase() === mailbox || (ownDomain && e.toLowerCase().endsWith("@"+ownDomain));
+  const isOwn = (e: string) => e.toLowerCase() === mailbox || (ownDomain && e.toLowerCase().endsWith("@" + ownDomain));
 
   let email: string | null = null;
-
-  // A. Prefer the actual inbound sender if valid
   if (senderEmail && isEmail(senderEmail) && !isOwn(senderEmail) && !isPlaceholderEmail(senderEmail)) {
     email = senderEmail.toLowerCase();
   }
-
-  // B. Otherwise fall back to chooser with filtering
   if (!email) {
     const filtered = Array.from(emailSet).filter(e =>
       isEmail(e) && !isOwn(e) && !isPlaceholderEmail(e)
     );
     email = chooseCustomerEmail(filtered, mailbox);
   }
-  // --------------------------------------------------------------------
 
   return NextResponse.json(
     {
@@ -266,9 +300,7 @@ async function handleLookup(objectId: number, messageIdIn?: string) {
       email: email ?? "",
       subject,
       text,
-      // IMPORTANT: always string for canonicalizers downstream
       threadId: String(objectId),
-      // helpful extras for canonical thread derivation
       inReplyTo: inReplyTo || "",
       messageId: messageId || "",
       src: {
