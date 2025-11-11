@@ -121,15 +121,20 @@ export async function POST(req: Request) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({
-        mode: "ai",
-        toEmail: toEmail,
-        subject: subject || "(no subject)",
-        text: text || "",
-        inReplyTo: rawMessageId || undefined,
-        dryRun: false, // LIVE SEND
-        hubspot: { objectId },
-      }),
+     body: JSON.stringify({
+  mode: "ai",
+  toEmail: toEmail,
+  subject: subject || "(no subject)",
+  text: text || "",
+  // use the HubSpot conversation as the canonical thread key
+  threadId: `hs:${objectId}`,
+  // (optional context bucket; fine to keep empty for now)
+  threadMsgs: [],
+  inReplyTo: rawMessageId || undefined,
+  dryRun: false, // LIVE SEND
+  hubspot: { objectId },
+}),
+
     });
     const ai = await aiRes.json().catch(() => ({}));
 

@@ -1,4 +1,4 @@
-// app/api/ai/orchestrate/route.ts
+// app/api/ai/orchestrate/route.ts 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
 
@@ -56,42 +56,37 @@ function extractFactsFromText(input = ""): Mem {
   });
 }
 
-// Previously encoded footer; now intentionally disabled.
+// Footer intentionally disabled.
 function renderFooter(_: Mem): string {
   return "";
 }
 
-// === CHANGED: produce a clean, non-prefilled reply ===
-async function aiReply(lastInbound: string, _facts: Mem, context: string): Promise<string> {
+// === UPDATED: allow real AI wording, keep blanks if missing; return {text, ai} ===
+async function aiReply(lastInbound: string, _facts: Mem, context: string): Promise<{ text: string; ai: boolean }> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (key) {
     try {
-      // Strong guardrails so the model never echoes parsed facts or adds a footer.
       const prompt = [
         "You are Alex-IO, a quoting assistant for protective foam packaging.",
-        "Write a short, friendly, businesslike reply.",
-        "Do NOT restate or guess customer specs. Do NOT include any metadata or footers.",
-        "ALWAYS return the following template with BLANK bullets (em dashes).",
+        "Write a short, friendly, businesslike reply in your own words.",
+        "Do NOT invent or restate specs; if a field isn't explicitly provided by the customer, leave it blank with an em dash.",
+        "Avoid metadata, footers, or internal notes.",
         "",
-        "Template to output exactly (customize tone minimally, but keep blanks):",
-        "Thanks for the details so far.",
-        "",
+        "Use this lightweight structure (you may add one short sentence above or below it for context):",
         "• Dimensions: —",
         "• Quantity: —",
         "• Material: —",
         "• Density: —",
         "",
-        "To proceed, please confirm the blanks above (or paste specs).",
-        "If you have a drawing or sketch, you can attach it in your reply.",
-        "",
-        context ? `Thread context (do not quote back specs):\n${context}` : "",
-        "",
-        `Customer message (do not mirror specs):\n${lastInbound || "(none)"}`
+        "Ask the customer to fill in the blanks or attach a sketch if helpful.",
+        context ? `\nThread context (for tone/continuity only; do not copy specs verbatim):\n${context}` : "",
+        `\nCustomer message:\n${lastInbound || "(none)"}`
       ].join("\n");
+
       const r = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model: "gpt-4.1-mini", input: prompt, max_output_tokens: 350 }),
+        body: JSON.stringify({ model: "gpt-4.1-mini", input: prompt, max_output_tokens: 300 }),
         cache: "no-store",
       });
       const j = await r.json().catch(()=> ({}));
@@ -100,22 +95,24 @@ async function aiReply(lastInbound: string, _facts: Mem, context: string): Promi
         j?.choices?.[0]?.message?.content?.[0]?.text ||
         j?.choices?.[0]?.message?.content ||
         j?.choices?.[0]?.text || "";
-      if (text) return String(text).trim();
+      if (text) return { text: String(text).trim(), ai: true };
     } catch {}
   }
 
-  // Deterministic fallback (no facts).
-  return [
-    "Thanks for the details so far.",
-    "",
-    "• Dimensions: —",
-    "• Quantity: —",
-    "• Material: —",
-    "• Density: —",
-    "",
-    "To proceed, please confirm the blanks above (or paste specs).",
-    "If you have a drawing or sketch, you can attach it in your reply."
-  ].join("\n");
+  // Deterministic fallback (no facts echoed).
+  return {
+    ai: false,
+    text: [
+      "Thanks for the details so far.",
+      "",
+      "• Dimensions: —",
+      "• Quantity: —",
+      "• Material: —",
+      "• Density: —",
+      "",
+      "Please confirm the blanks above (or paste your specs). If you have a drawing or sketch, you can attach it."
+    ].join("\n")
+  };
 }
 
 async function parse(req: NextRequest): Promise<In> {
@@ -138,22 +135,31 @@ export async function POST(req: NextRequest) {
     const threadId = String(p.threadId ?? "").trim();
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
-    // === memory load/update ===
+    // === memory load/update (guard against empty threadId) ===
     const newly  = extractFactsFromText(lastText);
-    const loaded = await loadFacts(threadId);
-    // Preserve special keys
+
+    let loaded: Mem = {};
+    if (threadId) {
+      loaded = await loadFacts(threadId);
+    }
+
+    // Preserve special keys if present
     const carry = {
       __lastMessageId: loaded?.__lastMessageId || "",
       __lastInternetMessageId: loaded?.__lastInternetMessageId || "",
     };
+
     const merged = mergeFacts({ ...loaded, ...carry }, newly);
-    await saveFacts(threadId, merged);
+
+    if (threadId) {
+      await saveFacts(threadId, merged);
+    }
 
     const context = pickThreadContext(threadMsgs);
-    const reply   = await aiReply(lastText, merged, context);
+    const { text: replyText, ai } = await aiReply(lastText, merged, context);
 
-    // IMPORTANT: no `-- alexio:facts --` footer appended
-    const body    = reply;
+    // IMPORTANT: no footer appended
+    const body = replyText;
 
     // Recipient resolution (STRICT: no fallback to our mailbox)
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
@@ -171,7 +177,7 @@ export async function POST(req: NextRequest) {
     // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
-    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId, ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
+    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", ", ai:", ai, "}");
 
     if (dryRun) {
       return ok({
@@ -183,6 +189,7 @@ export async function POST(req: NextRequest) {
         mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
+        ai,
       });
     }
 
@@ -202,8 +209,8 @@ export async function POST(req: NextRequest) {
     });
     const sent = await r.json().catch(()=> ({}));
 
-    // Persist outbound IDs
-    if ((r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
+    // Persist outbound IDs (only if we have a real thread key)
+    if (threadId && (r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
       const updated = {
         ...merged,
         __lastGraphMessageId: sent?.messageId || merged?.__lastGraphMessageId || "",
@@ -221,6 +228,7 @@ export async function POST(req: NextRequest) {
       internetMessageId: sent?.internetMessageId || null,
       facts: merged,
       store: LAST_STORE,
+      ai,
     });
   } catch (e:any) {
     return err("orchestrate_exception", String(e?.message || e));
