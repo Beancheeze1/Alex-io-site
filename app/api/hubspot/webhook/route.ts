@@ -210,43 +210,49 @@ const threadIdCanonical =
       }
     }
 
-    // Resolve recipient (with one-shot retry for participant lag)
-    let toEmail = String(lookup?.email || "").trim();
-    const subject = String(lookup?.subject || "Re: your foam quote request");
-    const textRaw = String(lookup?.text || "");
+  // Resolve recipient (with retries for HubSpot participant indexing lag)
+let toEmail = String(lookup?.email || "").trim();
+const subject = String(lookup?.subject || "Re: your foam quote request");
+const textRaw = String(lookup?.text || "");
 
-    if (!toEmail) {
-      console.log("[webhook] missing_toEmail_first_try", {
+if (!toEmail) {
+  const waits = [10_000, 25_000]; // ~10s then ~25s
+  for (const ms of waits) {
+    console.log("[webhook] missing_toEmail_retry_after", ms, {
+      url: lookupURL,
+      httpOk: lookupRes.ok,
+      status: lookupRes.status,
+    });
+    await delay(ms);
+    ({ res: lookupRes, j: lookup, url: lookupURL } = await lookupOnce());
+    toEmail = String(lookup?.email || "").trim();
+    if (toEmail) break;
+  }
+
+  if (!toEmail) {
+    console.log("[webhook] missing_toEmail_after_retries", {
+      url: lookupURL,
+      httpOk: lookupRes.ok,
+      status: lookupRes.status,
+      jsonKeys: Object.keys(lookup || {}),
+    });
+    return ok({
+      dryRun: false,
+      send_ok: false,
+      toEmail: "",
+      reason: "missing_toEmail_after_retries",
+      lookup_trace: {
+        path: "/api/hubspot/lookupEmail",
         url: lookupURL,
         httpOk: lookupRes.ok,
         status: lookupRes.status,
-      });
-      await delay(12_000);
-      ({ res: lookupRes, j: lookup, url: lookupURL } = await lookupOnce());
-      toEmail = String(lookup?.email || "").trim();
-      if (!toEmail) {
-        console.log("[webhook] missing_toEmail_after_retry", {
-          url: lookupURL,
-          httpOk: lookupRes.ok,
-          status: lookupRes.status,
-          jsonKeys: Object.keys(lookup || {}),
-        });
-        return ok({
-          dryRun: false,
-          send_ok: false,
-          toEmail: "",
-          reason: "missing_toEmail_after_retry",
-          lookup_trace: {
-            path: "/api/hubspot/lookupEmail",
-            url: lookupURL,
-            httpOk: lookupRes.ok,
-            status: lookupRes.status,
-            jsonOk: !!lookup && typeof lookup === "object",
-            jsonKeys: Object.keys(lookup || {}),
-          },
-        });
-      }
-    }
+        jsonOk: !!lookup && typeof lookup === "object",
+        jsonKeys: Object.keys(lookup || {}),
+      },
+    });
+  }
+}
+
 
     if (!replyEnabled) {
       return ok({
