@@ -1,6 +1,7 @@
 // app/api/ai/orchestrate/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
+import { one } from "@/lib/db"; // <— NEW: DB helper
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -62,10 +63,7 @@ function grabQty(t: string) {
     t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
   return m ? Number(m[1]) : undefined;
 }
-/* Density expansion:
-   - "1.7#","1.7 lb","1.7lbs","1.7 pcf"
-   - bare number when near "density" or "pcf"
-*/
+/* Density expansion */
 function grabDensity(t: string) {
   const withUnit = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#|pcf)\b/);
   if (withUnit) return withUnit[1] + "lb";
@@ -80,7 +78,6 @@ function grabMaterial(t: string) {
   return undefined;
 }
 
-/** Pull labeled lines: Dimensions, Qty, Material, Density, Cavities, Cavity sizes */
 function extractLabeledLines(s: string) {
   const out: Mem = {};
   const lines = (s || "").split(/\r?\n/);
@@ -92,7 +89,7 @@ function extractLabeledLines(s: string) {
   };
 
   for (const raw of lines) {
-    const line = raw.trim().replace(/^•\s*/, "");
+    const line = raw.trim().replace(/^-\s*/, "").replace(/^•\s*/, "");
     const t = line.toLowerCase();
 
     let m = t.match(/^dimensions?\s*[:\-]\s*(.+)$/);
@@ -120,14 +117,12 @@ function extractLabeledLines(s: string) {
       continue;
     }
 
-    // Counts
     m = t.match(/^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]\s*(\d{1,4})\b/);
     if (m) {
       out.cavityCount = Number(m[1]);
       continue;
     }
 
-    // Size lists
     m = t.match(/^(?:cavity|pocket|cut[- ]?out)\s*(?:size|sizes)\s*[:\-]\s*(.+)$/);
     if (m) {
       const part = m[1].replace(/\beach\b/gi, "");
@@ -226,24 +221,23 @@ function chooseOpener(seed: string) {
 function qaLineAsk(label: string): string {
   switch (label) {
     case "Dimensions":
-      return "• Could you confirm the finished part dimensions (L×W×H, inches)?";
+      return "- Could you confirm the finished part dimensions (L×W×H, inches)?";
     case "Quantity":
-      return "• What quantity should I price?";
+      return "- What quantity should I price?";
     case "Material":
-      return "• Do you prefer PE, EPE, or PU for this job?";
+      return "- Do you prefer PE, EPE, or PU for this job?";
     case "Density":
-      return "• If PE/EPE, what density should I use (e.g., 1.7 lb)?";
+      return "- If PE/EPE, what density should I use (e.g., 1.7 lb)?";
     case "Cavities":
-      return "• How many cavities/pockets are needed, if any?";
+      return "- How many cavities/pockets are needed, if any?";
     case "Cavity sizes":
-      return "• What are the cavity sizes? (L×W×Depth). For round, a diameter × depth like Ø3×0.75 works.";
+      return "- What are the cavity sizes? (L×W×Depth). For round, a diameter × depth like Ø3×0.75 works.";
     default:
-      return `• ${label}?`;
+      return `- ${label}?`;
   }
 }
 
 function renderQAAskOnlyMissing(f: Mem) {
-  // We only ask for missing fields to avoid redundancy
   const missing: string[] = [];
   if (!f.dims) missing.push("Dimensions");
   if (!f.qty) missing.push("Quantity");
@@ -262,10 +256,10 @@ function renderQAAskOnlyMissing(f: Mem) {
 function capabilitiesBlurb() {
   return [
     "FYI — I can also help with:",
-    "• Picking foam type/density for your use case",
-    "• Multiple cavities/cutouts (rectangular or round)",
-    "• Attaching sketches or simple drawings to speed quoting",
-    "• Breaking out quantities for price breaks",
+    "- Picking foam type/density for your use case",
+    "- Multiple cavities/cutouts (rectangular or round)",
+    "- Attaching sketches or simple drawings to speed quoting",
+    "- Breaking out quantities for price breaks",
   ].join("\n");
 }
 
@@ -292,11 +286,11 @@ async function aiOpener(model: string, lastInbound: string, context: string): Pr
     });
     const j = await r.json().catch(() => ({}));
     const text =
-      j?.output_text ||
-      j?.output?.[0]?.content?.[0]?.text ||
-      j?.choices?.[0]?.message?.content?.[0]?.text ||
-      j?.choices?.[0]?.message?.content ||
-      j?.choices?.[0]?.text ||
+      (j as any)?.output_text ||
+      (j as any)?.output?.[0]?.content?.[0]?.text ||
+      (j as any)?.choices?.[0]?.message?.content?.[0]?.text ||
+      (j as any)?.choices?.[0]?.message?.content ||
+      (j as any)?.choices?.[0]?.text ||
       "";
     const one = String(text || "").trim().replace(/\s+/g, " ");
     return one || null;
@@ -305,15 +299,7 @@ async function aiOpener(model: string, lastInbound: string, context: string): Pr
   }
 }
 
-/* ===================== Hybrid LLM selection =====================
-
-   Default: mini.
-   Escalate to full if:
-   - multiple key fields missing, OR
-   - message is long/rambling with vague terms, OR
-   - cavity info is mentioned but incomplete, OR
-   - explicit override via env.
-*/
+/* ===================== Hybrid LLM selection ===================== */
 
 function scoreAmbiguity(lastText: string, facts: Mem): number {
   let score = 0;
@@ -340,10 +326,9 @@ function chooseModel(modeEnv: string | undefined, lastText: string, facts: Mem):
   if (force === "full") return "gpt-4.1";
 
   const mode = (modeEnv || "hybrid").toLowerCase(); // "mini" | "full" | "hybrid"
-  if (mode === "mini") return "gpt-4.1";
+  if (mode === "mini") return "gpt-4.1-mini";
   if (mode === "full") return "gpt-4.1";
 
-  // hybrid
   const s = scoreAmbiguity(lastText, facts);
   const threshold = Number(process.env.ALEXIO_LLM_ESCALATE_THRESHOLD || 2);
   return s >= threshold ? "gpt-4.1" : "gpt-4.1-mini";
@@ -358,13 +343,69 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   return mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject);
 }
 
-/* ===================== DB enrichment hook (placeholder) ===================== */
-// async function enrichFromDB(facts: Mem): Promise<Mem> {
-//   try {
-//     // Example: if (!facts.density && facts.material) -> fetch default density from materials table
-//     return facts;
-//   } catch { return facts; }
-// }
+/* ===================== DB enrichment hook ===================== */
+async function enrichFromDB(facts: Mem): Promise<Mem> {
+  try {
+    // Only enrich when we have a material but no explicit density from the user
+    if (!facts.material || facts.density) return facts;
+
+    const mat = String(facts.material || "").toUpperCase();
+    const like = mat === "PE" ? "%pe%" : mat === "EPE" ? "%epe%" : mat === "PU" ? "%pu%" : `%${mat.toLowerCase()}%`;
+
+    // Prefer 1.7 for PE when available, else lowest density for that material
+    const target = mat === "PE" ? 1.7 : null;
+
+    // Build query with optional target bias
+    // NOTE: materials schema: id, name, density_lb_ft3, active, etc.
+    let row:
+      | { id: number; name: string; density_lb_ft3: number | null }
+      | null = null;
+
+    if (target !== null) {
+      row = await one(
+        `
+        SELECT id, name, density_lb_ft3
+        FROM materials
+        WHERE active = true
+          AND density_lb_ft3 IS NOT NULL
+          AND (
+            name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1
+          )
+        ORDER BY ABS(density_lb_ft3 - $2), density_lb_ft3 ASC
+        LIMIT 1
+        `,
+        [like, target]
+      );
+    } else {
+      row = await one(
+        `
+        SELECT id, name, density_lb_ft3
+        FROM materials
+        WHERE active = true
+          AND density_lb_ft3 IS NOT NULL
+          AND (
+            name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1
+          )
+        ORDER BY density_lb_ft3 ASC
+        LIMIT 1
+        `,
+        [like]
+      );
+    }
+
+    if (!row) return facts;
+
+    const next: Mem = { ...facts };
+    if (row.id && !next.material_id) next.material_id = row.id;
+    if (!next.density && row.density_lb_ft3 != null) {
+      const d = Number(row.density_lb_ft3);
+      if (Number.isFinite(d) && d > 0) next.density = `${d}lb`;
+    }
+    return next;
+  } catch {
+    return facts; // never block on enrichment
+  }
+}
 
 /* ===================== Parse body ===================== */
 
@@ -412,7 +453,8 @@ export async function POST(req: NextRequest) {
     // bump turn counter (persist only if we have a thread key)
     merged.__turnCount = (merged.__turnCount || 0) + 1;
 
-    // merged = await enrichFromDB(merged); // (inactive placeholder)
+    // NEW: DB enrichment
+    merged = await enrichFromDB(merged);
 
     // Persist facts
     if (threadId) await saveFacts(threadId, merged);
