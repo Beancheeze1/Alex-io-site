@@ -1,0 +1,8 @@
+﻿{
+  "mode": "ai",
+  "toEmail": "COPY_FROM_STEP1_email",
+  "subject": "Live Pipeline Check",
+  "text": "Testing live send on this thread.",
+  "threadId": "THREAD_ID_HERE",
+  "dryRun": false
+}

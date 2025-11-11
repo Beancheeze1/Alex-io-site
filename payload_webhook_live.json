@@ -1,5 +1,5 @@
 ﻿{
   "subscriptionType": "conversation.newMessage",
-  "objectId": "9894090460",
-  "messageId": "MSG-9894090460@mx.example"
+  "objectId": "THREAD_ID_HERE",
+  "messageId": "MSG-THREAD_ID_HERE"
 }

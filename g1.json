@@ -1,0 +1,6 @@
+﻿{
+  "toEmail": "youremail@gmail.com",
+  "subject": "Reply-Retry Anchor",
+  "text": "Anchor message.",
+  "dryRun": false
+}

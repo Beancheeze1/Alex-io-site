@@ -21,7 +21,7 @@ function escapeHtml(s: string) {
 }
 
 function wrapTextAsHtml(text: string) {
-  const safe = escapeHtml(text);
+  const safe = escapeHtml(text || "");
   return `<div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;color:#111"><pre style="white-space:pre-wrap;margin:0">${safe}</pre></div>`;
 }
 
@@ -43,19 +43,16 @@ async function getAppToken() {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
+  if (!r.ok) throw new Error(`Graph token error ${r.status}: ${await r.text()}`);
 
-  if (!r.ok) {
-    const t = await r.text();
-    throw new Error(`Graph token error ${r.status}: ${t}`);
-  }
-  const json = (await r.json()) as { access_token: string };
-  return json.access_token;
+  const j = (await r.json()) as { access_token: string };
+  return j.access_token;
 }
 
 /**
- * Core: create -> (optional) get -> send
+ * Core send: create -> (optional) get -> send
  * When includeHeaders=true and inReplyTo is provided, add In-Reply-To/References.
- * Returns { id, internetMessageId }.
+ * Returns { id, internetMessageId } or an error descriptor.
  */
 async function createGetSend(opts: {
   accessToken: string;
@@ -93,49 +90,37 @@ async function createGetSend(opts: {
     },
     body: JSON.stringify(message),
   });
-
   if (!createResp.ok) {
-    const t = await createResp.text();
-    return {
-      ok: false as const,
-      stage: "create",
-      status: createResp.status,
-      text: t.slice(0, 2000),
-    };
+    return { ok: false as const, stage: "create", status: createResp.status, text: (await createResp.text()).slice(0, 2000) };
   }
 
   const created = (await createResp.json()) as { id: string };
   const id = created?.id;
-  if (!id) {
-    return { ok: false as const, stage: "create", status: 500, text: "No id from create" };
-  }
+  if (!id) return { ok: false as const, stage: "create", status: 500, text: "No id from create" };
 
-  // 2) Try to read internetMessageId (non-fatal if it fails)
+  // 2) Try to read internetMessageId (non-fatal)
   let internetMessageId: string | undefined;
   try {
-    const getResp = await fetch(
-      `${base}/messages/${encodeURIComponent(id)}?$select=id,internetMessageId`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+    const getResp = await fetch(`${base}/messages/${encodeURIComponent(id)}?$select=id,internetMessageId`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
     if (getResp.ok) {
       const j = (await getResp.json()) as { id: string; internetMessageId?: string };
       internetMessageId = j?.internetMessageId;
     }
-  } catch {}
+  } catch { /* ignore */ }
 
   // 3) Send
   const sendResp = await fetch(`${base}/messages/${encodeURIComponent(id)}/send`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-
   if (!sendResp.ok) {
-    const t = await sendResp.text();
     return {
       ok: false as const,
       stage: "send",
       status: sendResp.status,
-      text: t.slice(0, 2000),
+      text: (await sendResp.text()).slice(0, 2000),
       id,
       internetMessageId,
     };
@@ -147,9 +132,14 @@ async function createGetSend(opts: {
 /**
  * Instrumented send with auto-retry:
  *  - Attempt 1: include headers if inReplyTo present.
- *  - On 4xx/5xx failure: retry once WITHOUT headers.
+ *  - On 4xx/5xx failure: retry once WITHOUT headers (still returns IDs).
  */
-async function sendViaGraphInstrumented(opts: {
+async function sendViaGraphInstrumented({
+  to,
+  subject,
+  html,
+  inReplyTo,
+}: {
   to: string;
   subject: string;
   html: string;
@@ -158,53 +148,47 @@ async function sendViaGraphInstrumented(opts: {
   const accessToken = await getAppToken();
   const from = requireEnv("MS_MAILBOX_FROM");
 
-  // First attempt: include headers if we have inReplyTo
+  // First attempt (with headers if we have an inReplyTo)
   const try1 = await createGetSend({
     accessToken,
     from,
-    to: opts.to,
-    subject: opts.subject,
-    html: opts.html,
-    inReplyTo: opts.inReplyTo ?? null,
-    includeHeaders: !!opts.inReplyTo,
+    to,
+    subject,
+    html,
+    inReplyTo: inReplyTo ?? null,
+    includeHeaders: !!inReplyTo,
   });
 
   if (try1.ok) {
-    return { id: try1.id!, internetMessageId: try1.internetMessageId };
+    return { id: try1.id!, internetMessageId: try1.internetMessageId || null };
   }
 
-  // If first attempt failed and we tried to include headers, do a single fallback without them
-  if (opts.inReplyTo && (try1.status >= 400 && try1.status <= 599)) {
-    console.warn("[msgraph] try1 failed, retrying without headers", {
-      stage: try1.stage,
-      status: try1.status,
-    });
-
+  // Retry once without headers if first attempt failed and we tried headers
+  if (inReplyTo && (try1.status >= 400 && try1.status <= 599)) {
+    console.warn("[msgraph] retrying without headers", { stage: try1.stage, status: try1.status });
     const try2 = await createGetSend({
       accessToken,
       from,
-      to: opts.to,
-      subject: opts.subject,
-      html: opts.html,
+      to,
+      subject,
+      html,
       inReplyTo: null,
       includeHeaders: false,
     });
-
     if (try2.ok) {
-      return { id: try2.id!, internetMessageId: try2.internetMessageId };
+      return { id: try2.id!, internetMessageId: try2.internetMessageId || null };
     }
-
     throw new Error(
       `Graph send failed after retry (stage=${try2.stage} status=${try2.status}). First error: [${try1.stage} ${try1.status}] ${try1.text}`
     );
   }
 
-  // No retry path applicable
   throw new Error(`Graph send error (stage=${try1.stage} status=${try1.status}): ${try1.text}`);
 }
 
 // --- handlers ---
 export async function GET() {
+  // Intentionally disallow GET; keep the health semantics you test for.
   return NextResponse.json({ ok: false, error: "Method Not Allowed" }, { status: 405 });
 }
 
@@ -227,13 +211,10 @@ export async function POST(req: NextRequest) {
     } = await req.json();
 
     if (!toEmail || !subject) {
-      return NextResponse.json(
-        { ok: false, error: "missing_to_or_subject" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "missing_to_or_subject" }, { status: 400 });
     }
 
-    // Accept html OR text; if only text is provided, wrap it as HTML.
+    // Accept html OR text; if only text is provided, wrap to HTML.
     const htmlBody =
       (html && typeof html === "string" && html.trim().length > 0)
         ? html
@@ -242,10 +223,7 @@ export async function POST(req: NextRequest) {
           : "";
 
     if (!htmlBody) {
-      return NextResponse.json(
-        { ok: false, error: "missing_html_or_text" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "missing_html_or_text" }, { status: 400 });
     }
 
     if (dryRun) {
@@ -274,7 +252,7 @@ export async function POST(req: NextRequest) {
       subject,
       result: "sent",
       messageId: id,
-      internetMessageId: internetMessageId || null,
+      internetMessageId,
     });
   } catch (err: any) {
     const msg = err?.message || String(err);

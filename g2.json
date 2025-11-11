@@ -1,0 +1,7 @@
+﻿{
+  "toEmail": "youremail@gmail.com",
+  "subject": "Re: Reply-Retry Anchor",
+  "text": "This should thread (or auto-fallback).",
+  "inReplyTo": "<paste_the_internetMessageId_here>",
+  "dryRun": false
+}
