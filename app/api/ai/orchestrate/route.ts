@@ -46,12 +46,10 @@ function extractLabeledLines(s: string) {
   for (const line of lines) {
     const t = line.toLowerCase().trim().replace(/^•\s*/, "");
     // Dimensions
-    const mDims =
-      t.match(/^dimensions?\s*[:\-]\s*([0-9.]+\s*[x×]\s*[0-9.]+\s*[x×]\s*[0-9.]+)/);
+    const mDims = t.match(/^dimensions?\s*[:\-]\s*([0-9.]+\s*[x×]\s*[0-9.]+\s*[x×]\s*[0-9.]+)/);
     if (mDims) out.dims = mDims[1].replace(/\s+/g, "").replace(/×/g, "x");
     // Quantity
-    const mQty =
-      t.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/);
+    const mQty = t.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/);
     if (mQty) out.qty = Number(mQty[1]);
     // Material
     if (/^material\s*[:\-]/.test(t)) {
@@ -60,14 +58,13 @@ function extractLabeledLines(s: string) {
       else if (/\bpu\b|\bpolyurethane\b/.test(t)) out.material = "PU";
     }
     // Density
-    const mDen =
-      t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
+    const mDen = t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
     if (mDen) out.density = `${mDen[1]}lb`;
   }
   return out;
 }
 
-// Free-text extraction (dims, qty, density, material) — expanded density & qty
+// Free-text extraction (dims, qty, density, material)
 function extractFreeText(s = ""): Mem {
   const t = (s || "").toLowerCase();
 
@@ -102,6 +99,19 @@ function extractFreeText(s = ""): Mem {
 function extractFromSubject(s = ""): Mem {
   if (!s) return {};
   return extractFreeText(s);
+}
+
+// NEW: parse recent thread messages (last 5) for labeled or free-text specs
+function extractFromThreadMsgs(threadMsgs: any[] = []): Mem {
+  let out: Mem = {};
+  const take = threadMsgs.slice(-5);
+  for (const m of take) {
+    const text = String(m?.text || m?.body || m?.content || "").trim();
+    if (!text) continue;
+    out = mergeFacts(out, extractLabeledLines(text));
+    out = mergeFacts(out, extractFreeText(text));
+  }
+  return out;
 }
 
 function renderBullets(f: Mem): string {
@@ -175,11 +185,12 @@ export async function POST(req: NextRequest) {
     const threadId = String(p.threadId ?? "").trim();
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
-    // Parse everything we can from current turn
-    const fromTextFree   = extractFreeText(lastText);
-    const fromTextLabels = extractLabeledLines(lastText);
-    const fromSubject    = extractFromSubject(subject);
-    const newly          = mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject);
+    // Parse everything we can from current turn + subject + recent msgs
+    const fromTextFree    = extractFreeText(lastText);
+    const fromTextLabels  = extractLabeledLines(lastText);
+    const fromSubject     = extractFromSubject(subject);
+    const fromThreadMsgs  = extractFromThreadMsgs(threadMsgs);
+    const newly           = mergeFacts(mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject), fromThreadMsgs);
 
     // Load + merge with prior facts
     let loaded: Mem = {};
