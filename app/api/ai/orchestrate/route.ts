@@ -5,6 +5,8 @@ import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/* ===================== Types & helpers ===================== */
+
 type In = {
   mode?: string;
   toEmail?: string;
@@ -16,8 +18,12 @@ type In = {
 };
 type Mem = Record<string, any>;
 
-function ok(extra: Record<string, any> = {}) { return NextResponse.json({ ok: true, ...extra }, { status: 200 }); }
-function err(error: string, detail?: any) { return NextResponse.json({ ok: false, error, detail }, { status: 200 }); }
+function ok(extra: Record<string, any> = {}) {
+  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
+}
+function err(error: string, detail?: any) {
+  return NextResponse.json({ ok: false, error, detail }, { status: 200 });
+}
 
 function compact<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
@@ -26,43 +32,47 @@ function compact<T extends Record<string, any>>(obj: T): T {
   }
   return out as T;
 }
-function mergeFacts(a: Mem, b: Mem): Mem { return { ...(a || {}), ...compact(b || {}) }; }
+function mergeFacts(a: Mem, b: Mem): Mem {
+  return { ...(a || {}), ...compact(b || {}) };
+}
 
+/* Keep last few messages for tone; not used for parsing */
 function pickThreadContext(threadMsgs: any[] = []): string {
   const take = threadMsgs.slice(-3);
   const snippets = take
     .map((m) => String(m?.text || m?.body || m?.content || "").trim())
     .filter(Boolean)
-    .map((s) => (s.length > 200 ? s.slice(0, 200) + "…" : s));
+    .map((s) => (s.length > 220 ? s.slice(0, 220) + "…" : s));
   return snippets.join("\n---\n");
 }
 
 /* ===================== Parsing helpers (expanded) ===================== */
 
-/** Normalize a dim token like 5 x 5 x 1" → 5x5x1 */
 function normDims(s: string) {
-  return s.replace(/\s+/g, "").replace(/×/g, "x").replace(/"+$/,"").toLowerCase();
+  return s.replace(/\s+/g, "").replace(/×/g, "x").replace(/"+$/, "").toLowerCase();
 }
-
-/** Parse LxWxH style dims anywhere in text */
 function grabDims(t: string) {
   const m = t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
   return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
 }
-
-/** Parse qty variants */
 function grabQty(t: string) {
-  const m = t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) || t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) || t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
+  const m =
+    t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) ||
+    t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) ||
+    t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
   return m ? Number(m[1]) : undefined;
 }
-
-/** Parse density variants like 1.7#, 1.7 lb, 1.7lbs */
+/* Density expansion:
+   - "1.7#","1.7 lb","1.7lbs","1.7 pcf"
+   - bare number when near "density" or "pcf"
+*/
 function grabDensity(t: string) {
-  const m = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
-  return m ? `${m[1]}lb` : undefined;
+  const withUnit = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#|pcf)\b/);
+  if (withUnit) return withUnit[1] + "lb";
+  const nearWord = t.match(/(?:density|foam\s*density|pcf)\D{0,8}(\d+(?:\.\d+)?)/);
+  if (nearWord) return nearWord[1] + "lb";
+  return undefined;
 }
-
-/** Parse material synonyms */
 function grabMaterial(t: string) {
   if (/\bpolyethylene\b|\bpe\b/.test(t)) return "PE";
   if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) return "EPE";
@@ -70,7 +80,7 @@ function grabMaterial(t: string) {
   return undefined;
 }
 
-/** Pull labeled lines like “Dimensions: 5x5x1”, “Cavities: 2”, “Cavity size: 1x2x3 each, 0.5x0.5x0.25” */
+/** Pull labeled lines: Dimensions, Qty, Material, Density, Cavities, Cavity sizes */
 function extractLabeledLines(s: string) {
   const out: Mem = {};
   const lines = (s || "").split(/\r?\n/);
@@ -81,11 +91,10 @@ function extractLabeledLines(s: string) {
     out.cavityDims = list;
   };
 
-  for (const lineRaw of lines) {
-    const line = lineRaw.trim().replace(/^•\s*/, "");
+  for (const raw of lines) {
+    const line = raw.trim().replace(/^•\s*/, "");
     const t = line.toLowerCase();
 
-    // Dimensions
     let m = t.match(/^dimensions?\s*[:\-]\s*(.+)$/);
     if (m) {
       const dims = grabDims(m[1]);
@@ -93,70 +102,85 @@ function extractLabeledLines(s: string) {
       continue;
     }
 
-    // Quantity
     m = t.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/);
-    if (m) { out.qty = Number(m[1]); continue; }
+    if (m) {
+      out.qty = Number(m[1]);
+      continue;
+    }
 
-    // Material
     if (/^material\s*[:\-]/.test(t)) {
       const mat = grabMaterial(t);
       if (mat) out.material = mat;
       continue;
     }
 
-    // Density
-    m = t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#))?\b/);
-    if (m) { out.density = `${m[1]}lb`; continue; }
+    m = t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#|pcf))?\b/);
+    if (m) {
+      out.density = `${m[1]}lb`;
+      continue;
+    }
 
-    // Cavities / pockets / cutouts
-    // Count
+    // Counts
     m = t.match(/^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]\s*(\d{1,4})\b/);
-    if (m) { out.cavityCount = Number(m[1]); continue; }
+    if (m) {
+      out.cavityCount = Number(m[1]);
+      continue;
+    }
 
-    // Sizes (allow comma separated, “each”, mix of Ø and LxW(H))
-    // e.g., "cavity size: 1x2x3 each, Ø3 x 0.75", "pocket sizes: 1.5x0.5x0.25, 0.75x0.25x0.25"
+    // Size lists
     m = t.match(/^(?:cavity|pocket|cut[- ]?out)\s*(?:size|sizes)\s*[:\-]\s*(.+)$/);
     if (m) {
       const part = m[1].replace(/\beach\b/gi, "");
       const tokens = part.split(/[,;]+/);
       for (const tok of tokens) {
         const tokT = tok.trim();
-        // Ødia x depth
-        const md = tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
-                   tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
-        if (md) { addCavity(`Ø${md[1]}x${md[2]}`); continue; }
+        const md =
+          tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
+          tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
+        if (md) {
+          addCavity(`Ø${md[1]}x${md[2]}`);
+          continue;
+        }
         const dd = grabDims(tokT);
-        if (dd) { addCavity(dd); continue; }
+        if (dd) {
+          addCavity(dd);
+          continue;
+        }
       }
       continue;
     }
 
-    // Single inline cavity dim on one line
-    const inlineCav = t.match(/(?:cavities?|pockets?|cut[- ]?outs?)[:\s]+(?:size|sizes)?[:\s]*((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/);
+    const inlineCav = t.match(
+      /(?:cavities?|pockets?|cut[- ]?outs?)[:\s]+(?:size|sizes)?[:\s]*((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/,
+    );
     if (inlineCav) addCavity(inlineCav[1]);
   }
+
   return out;
 }
 
-/** Free-text sweep for dims/qty/density/material + simple cavity cues */
 function extractFreeText(s = ""): Mem {
   const t = (s || "").toLowerCase();
   const out: Mem = {};
+
   const dims = grabDims(t);
   if (dims) out.dims = normDims(dims);
+
   const qty = grabQty(t);
   if (qty !== undefined) out.qty = qty;
+
   const density = grabDensity(t);
   if (density) out.density = density;
+
   const material = grabMaterial(t);
   if (material) out.material = material;
 
-  // “2 cavities each 1x2x3” / “two cutouts 0.5x0.5x0.25”
   const count = t.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
   if (count) out.cavityCount = Number(count[1]);
 
-  // “each 1x2x3” / comma-separated
-  const afterEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?(?:\s*,\s*(?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)+)/);
+  const afterEach = t.match(
+    /\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?(?:\s*,\s*(?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)+)/,
+  );
   if (afterEach) {
     const list = afterEach[1].split(/\s*,\s*/).map(normDims);
     out.cavityDims = list;
@@ -165,7 +189,6 @@ function extractFreeText(s = ""): Mem {
     if (singleEach) out.cavityDims = [normDims(singleEach[1])];
   }
 
-  // Ødia x depth
   const roundCav = t.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
   if (roundCav) {
     const list = (out.cavityDims as string[] | undefined) || [];
@@ -176,13 +199,12 @@ function extractFreeText(s = ""): Mem {
   return compact(out);
 }
 
-/** Parse subject too (customers often put dims/qty up there) */
 function extractFromSubject(s = ""): Mem {
   if (!s) return {};
   return extractFreeText(s);
 }
 
-/* ===================== Rendering (human Q&A) ===================== */
+/* ===================== Human Q&A rendering ===================== */
 
 const HUMAN_OPENERS = [
   "Appreciate the details—once we lock a few specs I’ll price this out.",
@@ -192,56 +214,64 @@ const HUMAN_OPENERS = [
 ];
 
 function chooseOpener(seed: string) {
-  // Simple deterministic hash so a thread gets a consistent opener
   let h = 2166136261 >>> 0;
   const s = seed || String(Date.now());
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
   return HUMAN_OPENERS[h % HUMAN_OPENERS.length];
 }
 
-function qaLine(label: string, value?: any): string {
-  if (value === undefined || value === null || String(value).trim() === "") {
-    // Ask a natural question for missing fields
-    switch (label) {
-      case "Dimensions": return "• Could you confirm the finished part dimensions (L×W×H, inches)?";
-      case "Quantity": return "• What quantity should I price?";
-      case "Material": return "• Do you prefer PE, EPE, or PU for this job?";
-      case "Density": return "• If PE/EPE, what density (e.g., 1.7 lb)?";
-      case "Cavities": return "• How many cavities/pockets are needed, if any?";
-      case "Cavity sizes": return "• What are the cavity sizes? (L×W×Depth) If round, a diameter × depth like Ø3×0.75 works.";
-      default: return `• ${label}?`;
-    }
+function qaLineAsk(label: string): string {
+  switch (label) {
+    case "Dimensions":
+      return "• Could you confirm the finished part dimensions (L×W×H, inches)?";
+    case "Quantity":
+      return "• What quantity should I price?";
+    case "Material":
+      return "• Do you prefer PE, EPE, or PU for this job?";
+    case "Density":
+      return "• If PE/EPE, what density should I use (e.g., 1.7 lb)?";
+    case "Cavities":
+      return "• How many cavities/pockets are needed, if any?";
+    case "Cavity sizes":
+      return "• What are the cavity sizes? (L×W×Depth). For round, a diameter × depth like Ø3×0.75 works.";
+    default:
+      return `• ${label}?`;
   }
-  // When present, state as answer
-  return `${label}: ${String(value)}`;
 }
 
-function renderQA(f: Mem, threadKey: string) {
-  const opener = chooseOpener(threadKey);
-  const lines: string[] = [opener, ""];
+function renderQAAskOnlyMissing(f: Mem) {
+  // We only ask for missing fields to avoid redundancy
+  const missing: string[] = [];
+  if (!f.dims) missing.push("Dimensions");
+  if (!f.qty) missing.push("Quantity");
+  if (!f.material) missing.push("Material");
+  if (!f.density) missing.push("Density");
+  if (f.cavityCount === undefined) missing.push("Cavities");
+  if ((f.cavityCount ?? 0) > 0 && !(Array.isArray(f.cavityDims) && f.cavityDims.length)) {
+    missing.push("Cavity sizes");
+  }
 
-  lines.push(qaLine("Dimensions", f.dims));
-  lines.push(qaLine("Quantity", f.qty));
-  lines.push(qaLine("Material", f.material));
-  lines.push(qaLine("Density", f.density));
+  if (!missing.length) return "Great — I have everything I need. I’ll run pricing now and follow up shortly.";
 
-  // Cavities
-  const cavCount = f.cavityCount;
-  const cavDims = Array.isArray(f.cavityDims) ? f.cavityDims : undefined;
-
-  lines.push(qaLine("Cavities", cavCount));
-  lines.push(qaLine("Cavity sizes", cavDims && cavDims.length ? cavDims.join(", ") : undefined));
-
-  lines.push("");
-  lines.push("If you have a quick sketch or drawing, you can attach it and I’ll make sure I captured everything.");
-
-  return lines.join("\n");
+  return missing.map(qaLineAsk).join("\n");
 }
 
-/* ===================== Optional: tiny AI opener (kept, model configurable) ===================== */
-const OPENAI_MODEL = process.env.OPENAI_RESPONSES_MODEL?.trim() || "gpt-4.1-mini";
+function capabilitiesBlurb() {
+  return [
+    "FYI — I can also help with:",
+    "• Picking foam type/density for your use case",
+    "• Multiple cavities/cutouts (rectangular or round)",
+    "• Attaching sketches or simple drawings to speed quoting",
+    "• Breaking out quantities for price breaks",
+  ].join("\n");
+}
 
-async function aiOpener(lastInbound: string, context: string): Promise<string | null> {
+/* ===================== Tiny LLM opener (Hybrid model) ===================== */
+
+async function aiOpener(model: string, lastInbound: string, context: string): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
   try {
@@ -250,34 +280,77 @@ async function aiOpener(lastInbound: string, context: string): Promise<string | 
       "No bullets or extra lines. Keep it friendly and concise.",
       context ? `Context:\n${context}` : "",
       `Customer message:\n${lastInbound || "(none)"}`,
-    ].filter(Boolean).join("\n\n");
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     const r = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: OPENAI_MODEL, input: prompt, max_output_tokens: 60 }),
+      body: JSON.stringify({ model, input: prompt, max_output_tokens: 60 }),
       cache: "no-store",
     });
     const j = await r.json().catch(() => ({}));
     const text =
-      (j as any)?.output_text ||
-      (j as any)?.output?.[0]?.content?.[0]?.text ||
-      (j as any)?.choices?.[0]?.message?.content?.[0]?.text ||
-      (j as any)?.choices?.[0]?.message?.content ||
-      (j as any)?.choices?.[0]?.text || "";
+      j?.output_text ||
+      j?.output?.[0]?.content?.[0]?.text ||
+      j?.choices?.[0]?.message?.content?.[0]?.text ||
+      j?.choices?.[0]?.message?.content ||
+      j?.choices?.[0]?.text ||
+      "";
     const one = String(text || "").trim().replace(/\s+/g, " ");
-    if (one) {
-      console.log("[aiOpener] model:", OPENAI_MODEL, "| text:", one.slice(0, 120));
-      return one;
-    }
-    return null;
-  } catch (e:any) {
-    console.warn("[aiOpener] exception", e?.message || e);
+    return one || null;
+  } catch {
     return null;
   }
 }
 
-/* ===================== Subject/Body Parsing ===================== */
+/* ===================== Hybrid LLM selection =====================
+
+   Default: mini.
+   Escalate to full if:
+   - multiple key fields missing, OR
+   - message is long/rambling with vague terms, OR
+   - cavity info is mentioned but incomplete, OR
+   - explicit override via env.
+*/
+
+function scoreAmbiguity(lastText: string, facts: Mem): number {
+  let score = 0;
+  const t = (lastText || "").toLowerCase();
+
+  const missing =
+    (facts.dims ? 0 : 1) +
+    (facts.qty ? 0 : 1) +
+    (facts.material ? 0 : 1) +
+    (facts.density ? 0 : 1);
+
+  score += missing;
+
+  if (/\b(asap|rough|about|ish|similar|like last time|close enough|ballpark)\b/.test(t)) score += 1;
+  if ((facts.cavityCount ?? 0) > 0 && !(Array.isArray(facts.cavityDims) && facts.cavityDims.length)) score += 1;
+  if ((lastText || "").length > 600) score += 1;
+
+  return score; // 0..N
+}
+
+function chooseModel(modeEnv: string | undefined, lastText: string, facts: Mem): "gpt-4.1-mini" | "gpt-4.1" {
+  const force = (process.env.ALEXIO_LLM_FORCE || "").toLowerCase(); // "mini" | "full" | ""
+  if (force === "mini") return "gpt-4.1-mini";
+  if (force === "full") return "gpt-4.1";
+
+  const mode = (modeEnv || "hybrid").toLowerCase(); // "mini" | "full" | "hybrid"
+  if (mode === "mini") return "gpt-4.1";
+  if (mode === "full") return "gpt-4.1";
+
+  // hybrid
+  const s = scoreAmbiguity(lastText, facts);
+  const threshold = Number(process.env.ALEXIO_LLM_ESCALATE_THRESHOLD || 2);
+  return s >= threshold ? "gpt-4.1" : "gpt-4.1-mini";
+}
+
+/* ===================== Subject/Body parsing aggregator ===================== */
+
 function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const fromTextFree = extractFreeText(body);
   const fromTextLabels = extractLabeledLines(body);
@@ -285,20 +358,21 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   return mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject);
 }
 
-/* ===================== DB enrichment hook (not active yet) ===================== */
-// NOTE: Current orchestrator does not read your DB.
-// When you’re ready, wire a read-only endpoint and enrich facts here.
-/*
-async function enrichFromDB(facts: Mem): Promise<Mem> {
-  try {
-    // Example: if (!facts.density && facts.material) { fetch default density from your materials table }
-    return facts;
-  } catch { return facts; }
-}
-*/
+/* ===================== DB enrichment hook (placeholder) ===================== */
+// async function enrichFromDB(facts: Mem): Promise<Mem> {
+//   try {
+//     // Example: if (!facts.density && facts.material) -> fetch default density from materials table
+//     return facts;
+//   } catch { return facts; }
+// }
+
+/* ===================== Parse body ===================== */
 
 async function parse(req: NextRequest): Promise<In> {
-  try { const j = await req.json(); if (j && typeof j === "object") return j; } catch {}
+  try {
+    const j = await req.json();
+    if (j && typeof j === "object") return j;
+  } catch {}
   try {
     const t = await req.text();
     let s = t?.trim() ?? "";
@@ -309,14 +383,14 @@ async function parse(req: NextRequest): Promise<In> {
   return {};
 }
 
-/* ===================== route ===================== */
+/* ===================== Route ===================== */
 
 export async function POST(req: NextRequest) {
   try {
     const p = await parse(req);
-    const dryRun   = !!p.dryRun;
+    const dryRun = !!p.dryRun;
     const lastText = String(p.text || "");
-    const subject  = String(p.subject || "");
+    const subject = String(p.subject || "");
     const threadId = String(p.threadId ?? "").trim();
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
@@ -330,32 +404,40 @@ export async function POST(req: NextRequest) {
     const carry = {
       __lastMessageId: loaded?.__lastMessageId || "",
       __lastInternetMessageId: loaded?.__lastInternetMessageId || "",
+      __turnCount: typeof loaded?.__turnCount === "number" ? loaded.__turnCount : 0,
     };
+
     let merged = mergeFacts({ ...loaded, ...carry }, newly);
 
-    // Optionally enrich from DB later
-    // merged = await enrichFromDB(merged);
+    // bump turn counter (persist only if we have a thread key)
+    merged.__turnCount = (merged.__turnCount || 0) + 1;
 
-    // Debug visibility in logs
-    const primaryKeys = Object.keys(loaded || {});
-    const aliasKeys = ["dims","qty","material","density","cavityCount","cavityDims","__lastGraphMessageId","__lastInternetMessageId"].filter(k=>k in loaded);
-    console.log("[facts] keys { primary:", threadId || "(none)", ", alias:", (p.toEmail ? `hsu:${String(p.toEmail).toLowerCase()}::${subject.toLowerCase()}` : "(none)"), "}");
-    console.log("[facts] loaded_primary_keys:", primaryKeys.join(",") || "(none)");
-    console.log("[facts] loaded_alias_keys:", aliasKeys.join(",") || "(none)");
-    console.log("[facts] newly:", newly);
-    console.log("[facts] merged:", merged);
+    // merged = await enrichFromDB(merged); // (inactive placeholder)
 
+    // Persist facts
     if (threadId) await saveFacts(threadId, merged);
 
-    // Compose human Q&A body
+    // LLM selection (hybrid)
+    const llmSelected = chooseModel(process.env.ALEXIO_LLM_MODE, lastText, merged);
+
+    // Compose human Q&A body — opener from LLM (selected), questions only for missing fields
     const context = pickThreadContext(threadMsgs);
-    const openerAI = await aiOpener(lastText, context);
-    const body = (openerAI ? openerAI : chooseOpener(threadId || subject)) + "\n\n" + renderQA(merged, threadId || subject);
+    const openerLLM = (await aiOpener(llmSelected, lastText, context)) || chooseOpener(threadId || subject);
+
+    const questions = renderQAAskOnlyMissing(merged);
+
+    const firstReplyExtras =
+      merged.__turnCount === 1
+        ? "\n\n" + capabilitiesBlurb()
+        : "";
+
+    const body = `${openerLLM}\n\n${questions}${firstReplyExtras}`;
 
     // Recipient guardrails
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
     const toEmail = String(p.toEmail || "").trim().toLowerCase();
-    if (!toEmail) return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
+    if (!toEmail)
+      return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
     const ownDomain = mailbox.split("@")[1] || "";
     if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
       return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
@@ -364,7 +446,21 @@ export async function POST(req: NextRequest) {
     // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
-    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
+    console.info(
+      "[orchestrate] msgraph/send { to:",
+      toEmail,
+      ", dryRun:",
+      !!p.dryRun,
+      ", threadId:",
+      threadId || "<none>",
+      ", inReplyTo:",
+      inReplyTo ? "<id>" : "none",
+      ", llm:",
+      llmSelected,
+      ", turn:",
+      merged.__turnCount,
+      "}",
+    );
 
     if (dryRun) {
       return ok({
@@ -376,7 +472,7 @@ export async function POST(req: NextRequest) {
         mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
-        openai_model: OPENAI_MODEL, // visibility in dry runs
+        llm: llmSelected,
       });
     }
 
@@ -388,13 +484,13 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         toEmail,
         subject: p.subject || "Re: your foam quote request",
-        text: body,
+        text: body, // plain text; msgraph route wraps to HTML
         inReplyTo: inReplyTo || null,
-        dryRun: false
+        dryRun: false,
       }),
       cache: "no-store",
     });
-    const sent = await r.json().catch(()=> ({}));
+    const sent = await r.json().catch(() => ({}));
 
     // Persist outbound IDs for next turn
     if (threadId && (r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
@@ -415,8 +511,9 @@ export async function POST(req: NextRequest) {
       internetMessageId: sent?.internetMessageId || null,
       facts: merged,
       store: LAST_STORE,
+      llm: llmSelected,
     });
-  } catch (e:any) {
+  } catch (e: any) {
     return err("orchestrate_exception", String(e?.message || e));
   }
 }
