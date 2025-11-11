@@ -52,7 +52,7 @@ async function getAppToken() {
   return json.access_token;
 }
 
-/** Core create->(get)->send. Returns { ok, id, internetMessageId } or error info. */
+/** Core create->(get)->send->(re-get)->(fallback list). Returns { ok, id, internetMessageId } or error info. */
 async function createGetSend(opts: {
   accessToken: string;
   from: string;
@@ -96,7 +96,7 @@ async function createGetSend(opts: {
   const id = created?.id;
   if (!id) return { ok: false as const, stage: "create", status: 500, text: "No id from create" };
 
-  // 2) Try to read internetMessageId (non-fatal)
+  // 2) Try to read internetMessageId (non-fatal, often empty pre-send)
   let internetMessageId: string | undefined;
   try {
     const getResp = await fetch(
@@ -123,6 +123,39 @@ async function createGetSend(opts: {
       id,
       internetMessageId,
     };
+  }
+
+  // 4) Re-check the same message now that it’s sent (many tenants populate after send)
+  try {
+    const reget = await fetch(
+      `${base}/messages/${encodeURIComponent(id)}?$select=id,internetMessageId`,
+      { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
+    );
+    if (reget.ok) {
+      const jj = (await reget.json()) as { id: string; internetMessageId?: string };
+      if (jj?.internetMessageId) internetMessageId = jj.internetMessageId;
+    }
+  } catch {}
+
+  // 5) Fallback: ask Sent Items for the latest message’s internetMessageId
+  if (!internetMessageId) {
+    try {
+      const listUrl =
+        `${base}/mailFolders('sentitems')/messages?$top=1&$orderby=sentDateTime desc` +
+        `&$select=id,internetMessageId,sentDateTime`;
+      const meta = await fetch(listUrl, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: "no-store",
+      });
+      if (meta.ok) {
+        const j = await meta.json().catch(() => ({}));
+        const first = j?.value?.[0];
+        if (first?.internetMessageId) {
+          internetMessageId = String(first.internetMessageId);
+        }
+      }
+    } catch {}
   }
 
   return { ok: true as const, id, internetMessageId };

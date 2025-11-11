@@ -26,8 +26,7 @@ function err(error: string, detail?: any) {
 function compact<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(obj || {})) {
-    if (v !== undefined && v !== null && !(typeof v === "string" && v.trim() === ""))
-      out[k] = v;
+    if (v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "")) out[k] = v;
   }
   return out as T;
 }
@@ -50,8 +49,7 @@ function extractFactsFromText(input = ""): Mem {
     /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/
   );
   const densMatch = t.match(/\b(\d+(?:\.\d+)?)\s*lb\b/);
-  const qtyMatch =
-    t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) || t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
+  const qtyMatch = t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) || t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
 
   let material: string | undefined;
   if (/\bpolyethylene\b|\bpe\b/.test(t)) material = "PE";
@@ -67,48 +65,56 @@ function extractFactsFromText(input = ""): Mem {
 }
 
 // Footer intentionally disabled.
-function renderFooter(_: Mem): string {
-  return "";
+function renderFooter(_: Mem): string { return ""; }
+
+// ---------- bullet block helpers ----------
+function valueOrDash(v: any): string {
+  return v === undefined || v === null || (typeof v === "string" && v.trim() === "") ? "—" : String(v);
+}
+function bulletsFromFacts(f: Mem): string {
+  const lines = [
+    `• Dimensions: ${valueOrDash(f?.dims)}`,
+    `• Quantity: ${valueOrDash(f?.qty)}`,
+    `• Material: ${valueOrDash(f?.material)}`,
+    `• Density: ${valueOrDash(f?.density)}`,
+  ];
+  return lines.join("\n");
 }
 
-// --- Improved AI reply logic with robust output parsing ---
+// --- Improved AI reply: use known facts; leave blanks for unknown; strong fallback ---
 async function aiReply(
   lastInbound: string,
-  _facts: Mem,
+  facts: Mem,
   context: string
 ): Promise<{ text: string; ai: boolean; reason?: string }> {
   const key = process.env.OPENAI_API_KEY?.trim();
+  const bullets = bulletsFromFacts(facts);
+
   if (key) {
     try {
       const prompt = [
         "You are Alex-IO, a quoting assistant for protective foam packaging.",
         "Write a short, friendly, businesslike reply in your own words.",
-        "Do NOT invent or restate specs; if a field isn't explicitly provided by the customer, leave it blank with an em dash.",
-        "Avoid metadata, footers, or internal notes.",
+        "Never guess specs. Use the provided bullet block exactly as given: if a value is missing, it shows an em dash (—).",
+        "Do NOT add metadata, internal notes, or any footer.",
         "",
-        "Use this lightweight structure (you may add one short sentence above or below it for context):",
-        "• Dimensions: —",
-        "• Quantity: —",
-        "• Material: —",
-        "• Density: —",
+        "Open with one short sentence thanking the customer or acknowledging the request.",
+        "Then output the bullet block EXACTLY as provided below (do not reorder, do not rename):",
         "",
-        "Ask the customer to fill in the blanks or attach a sketch if helpful.",
-        context
-          ? `\nThread context (for tone/continuity only; do not copy specs verbatim):\n${context}`
-          : "",
+        bullets,
+        "",
+        "Finish with one line asking the customer to confirm/fill blanks or attach a sketch if helpful.",
+        context ? `\nThread context (for tone/continuity only; do not copy specs verbatim):\n${context}` : "",
         `\nCustomer message:\n${lastInbound || "(none)"}`,
       ].join("\n");
 
       const r = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
         body: JSON.stringify({
           model: "gpt-4.1-mini",
           input: prompt,
-          max_output_tokens: 300,
+          max_output_tokens: 320,
         }),
         cache: "no-store",
       });
@@ -123,11 +129,11 @@ async function aiReply(
         "";
 
       if (text && typeof text === "string" && text.trim().length > 0) {
-        console.log("[aiReply] ✅ text_from_model", text.slice(0, 120) + "...");
+        console.log("[aiReply] ✅ text_from_model", text.slice(0, 120) + "…");
         return { text: String(text).trim(), ai: true };
       }
 
-      console.warn("[aiReply] ⚠️ no_text", { j });
+      console.warn("[aiReply] ⚠️ ai_no_text", { j });
       return { text: "", ai: false, reason: "ai_no_text" };
     } catch (e: any) {
       console.error("[aiReply] exception", e?.message || e);
@@ -135,17 +141,14 @@ async function aiReply(
     }
   }
 
-  // Fallback when no API key configured
+  // Fallback: deterministic, includes known facts and dashes for unknown
   return {
     ai: false,
     reason: "no_api_key",
     text: [
       "Thanks for the details so far.",
       "",
-      "• Dimensions: —",
-      "• Quantity: —",
-      "• Material: —",
-      "• Density: —",
+      bullets,
       "",
       "Please confirm the blanks above (or paste your specs). If you have a drawing or sketch, you can attach it.",
     ].join("\n"),
@@ -175,6 +178,7 @@ export async function POST(req: NextRequest) {
     const threadId = String(p.threadId ?? "").trim();
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
+    // Extract new facts from this turn; merge with memory
     const newly = extractFactsFromText(lastText);
     let loaded: Mem = {};
     if (threadId) loaded = await loadFacts(threadId);
@@ -189,24 +193,20 @@ export async function POST(req: NextRequest) {
     const context = pickThreadContext(threadMsgs);
     const { text: replyText, ai, reason: ai_reason } = await aiReply(lastText, merged, context);
 
-    const body = replyText;
+    const body = replyText; // no footer
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
     const toEmail = String(p.toEmail || "").trim().toLowerCase();
 
-    if (!toEmail)
-      return err("missing_toEmail", {
-        reason: "Lookup did not produce a recipient; refusing to fall back to mailbox.",
-      });
-
+    if (!toEmail) {
+      return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
+    }
     const ownDomain = mailbox.split("@")[1] || "";
-    if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`)))
-      return err("bad_toEmail", {
-        toEmail,
-        reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies.",
-      });
+    if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
+      return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
+    }
 
-    const inReplyTo =
-      String(merged?.__lastInternetMessageId || "").trim() || undefined;
+    // Thread continuity: use last saved internetMessageId (msgraph now enriches/falls back)
+    const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
     console.info(
       "[orchestrate] msgraph/send { to:",
@@ -233,11 +233,7 @@ export async function POST(req: NextRequest) {
         facts: merged,
         ai,
         ai_reason,
-        mem: {
-          threadId: String(threadId),
-          loadedKeys: Object.keys(loaded),
-          mergedKeys: Object.keys(merged),
-        },
+        mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
       });
@@ -262,10 +258,8 @@ export async function POST(req: NextRequest) {
     if (threadId && (r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
       const updated = {
         ...merged,
-        __lastGraphMessageId:
-          sent?.messageId || merged?.__lastGraphMessageId || "",
-        __lastInternetMessageId:
-          sent?.internetMessageId || merged?.__lastInternetMessageId || "",
+        __lastGraphMessageId: sent?.messageId || merged?.__lastGraphMessageId || "",
+        __lastInternetMessageId: sent?.internetMessageId || merged?.__lastInternetMessageId || "",
       };
       await saveFacts(threadId, updated);
     }
