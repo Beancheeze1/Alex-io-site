@@ -173,13 +173,18 @@ export async function POST(req: NextRequest) {
 
     let { res: lookupRes, j: lookup, url: lookupURL } = await lookupOnce();
 
-    // Compute ONE canonical thread id
-    const threadIdCanonical = canonicalThreadId({
-      lookupThreadId: String(lookup?.threadId || ""),
-      objectId: objectId,
-      inReplyTo: String(lookup?.inReplyTo || ""),
-      messageId: String(lookup?.messageId || messageId || ""),
-    });
+// ALWAYS key by HubSpot conversation id when present.
+// This guarantees a single Redis key across the whole thread.
+const threadIdCanonical =
+  objectId
+    ? `hs:${normalizeId(objectId)}`
+    : canonicalThreadId({
+        lookupThreadId: String(lookup?.threadId || ""),
+        objectId: "", // (we already handled objectId)
+        inReplyTo: String(lookup?.inReplyTo || ""),
+        messageId: String(lookup?.messageId || messageId || ""),
+      });
+
 
     if (!threadIdCanonical) {
       console.log("[webhook] missing_threadId", { objectId, lookupKeys: Object.keys(lookup || {}) });

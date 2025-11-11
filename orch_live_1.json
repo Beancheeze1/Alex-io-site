@@ -2,7 +2,7 @@
   "mode": "ai",
   "toEmail": "youremail@gmail.com",
   "subject": "Foam Quote",
-  "text": "Dims 10x8x2 qty 12 PE 1.7lb",
-  "threadId": "THR-THREAD-DEMO-001",
+  "text": "Need foam 10x8x2 PE 1.7 lb qty 12",
+  "threadId": "THR-DEMO-1",
   "dryRun": false
 }
