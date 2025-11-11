@@ -56,24 +56,37 @@ function extractFactsFromText(input = ""): Mem {
   });
 }
 
-function renderFooter(facts: Mem): string {
-  if (!facts || !Object.keys(facts).length) return "";
-  const b64 = Buffer.from(JSON.stringify(facts)).toString("base64url");
-  return `\n\n-- alexio:facts -- ${b64}`;
+// Previously encoded footer; now intentionally disabled.
+function renderFooter(_: Mem): string {
+  return "";
 }
 
-async function aiReply(lastInbound: string, facts: Mem, context: string): Promise<string> {
+// === CHANGED: produce a clean, non-prefilled reply ===
+async function aiReply(lastInbound: string, _facts: Mem, context: string): Promise<string> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (key) {
     try {
+      // Strong guardrails so the model never echoes parsed facts or adds a footer.
       const prompt = [
         "You are Alex-IO, a quoting assistant for protective foam packaging.",
         "Write a short, friendly, businesslike reply.",
-        "Only ask for info that is missing. If dims, qty, material, and density are all present, acknowledge and say you’ll prepare the quote.",
-        `Facts: ${Object.entries(facts).map(([k,v])=>`${k}=${v}`).join(", ") || "(none)"}`,
-        context ? `Thread context:\n${context}` : "",
+        "Do NOT restate or guess customer specs. Do NOT include any metadata or footers.",
+        "ALWAYS return the following template with BLANK bullets (em dashes).",
         "",
-        `Customer message:\n${lastInbound || "(none)"}`,
+        "Template to output exactly (customize tone minimally, but keep blanks):",
+        "Thanks for the details so far.",
+        "",
+        "• Dimensions: —",
+        "• Quantity: —",
+        "• Material: —",
+        "• Density: —",
+        "",
+        "To proceed, please confirm the blanks above (or paste specs).",
+        "If you have a drawing or sketch, you can attach it in your reply.",
+        "",
+        context ? `Thread context (do not quote back specs):\n${context}` : "",
+        "",
+        `Customer message (do not mirror specs):\n${lastInbound || "(none)"}`
       ].join("\n");
       const r = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
@@ -90,29 +103,19 @@ async function aiReply(lastInbound: string, facts: Mem, context: string): Promis
       if (text) return String(text).trim();
     } catch {}
   }
-  // fallback template
-  const need: string[] = [];
-  if (!facts.dims)     need.push("dimensions (LxWxH)");
-  if (!facts.qty)      need.push("quantity");
-  if (!facts.material) need.push("material (PE/EPE/PU)");
-  if (!facts.density)  need.push("desired density (e.g., 1.7 lb)");
-  const lines: string[] = [];
-  if (Object.keys(facts).length) {
-    lines.push("Thanks for the details so far:");
-    lines.push(`• Dimensions: ${facts.dims ?? "—"}`);
-    lines.push(`• Quantity: ${facts.qty ?? "—"}`);
-    lines.push(`• Material: ${facts.material ?? "—"}`);
-    lines.push(`• Density: ${facts.density ?? "—"}`);
-  }
-  if (need.length) {
-    lines.push("");
-    lines.push("To proceed, please confirm:");
-    need.forEach(n => lines.push(`• ${n}`));
-  } else {
-    lines.push("");
-    lines.push("Perfect — I’ll prepare your quote now and follow up shortly.");
-  }
-  return lines.join("\n");
+
+  // Deterministic fallback (no facts).
+  return [
+    "Thanks for the details so far.",
+    "",
+    "• Dimensions: —",
+    "• Quantity: —",
+    "• Material: —",
+    "• Density: —",
+    "",
+    "To proceed, please confirm the blanks above (or paste specs).",
+    "If you have a drawing or sketch, you can attach it in your reply."
+  ].join("\n");
 }
 
 async function parse(req: NextRequest): Promise<In> {
@@ -148,7 +151,9 @@ export async function POST(req: NextRequest) {
 
     const context = pickThreadContext(threadMsgs);
     const reply   = await aiReply(lastText, merged, context);
-    const body    = `${reply}${renderFooter(merged)}`;
+
+    // IMPORTANT: no `-- alexio:facts --` footer appended
+    const body    = reply;
 
     // Recipient resolution (STRICT: no fallback to our mailbox)
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
@@ -163,8 +168,7 @@ export async function POST(req: NextRequest) {
       return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
     }
 
-    // === NEW: thread continuity (In-Reply-To) ===
-    // If we have a previous outbound internetMessageId, pass it to Graph so clients thread perfectly.
+    // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
     console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId, ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
@@ -198,8 +202,7 @@ export async function POST(req: NextRequest) {
     });
     const sent = await r.json().catch(()=> ({}));
 
-    // === NEW: persist outbound IDs for next turn ===
-    // When send succeeds, remember Graph's message id + SMTP internetMessageId
+    // Persist outbound IDs
     if ((r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
       const updated = {
         ...merged,
