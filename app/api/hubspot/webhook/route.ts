@@ -1,175 +1,303 @@
-// app/api/msgraph/send/route.ts
+// app/api/hubspot/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { loadFacts, saveFacts } from "@/app/lib/memory";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// --- helpers ---
-function requireEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
+type HubSpotEvent = {
+  subscriptionType?: string;   // "conversation.newMessage"
+  objectId?: number | string;  // HubSpot conversation (thread) id
+  messageId?: string;
+  changeFlag?: string;         // "NEW_MESSAGE"
+};
+
+function ok(extra: Record<string, any> = {}) {
+  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
+}
+function err(error: string, detail?: any, status = 200) {
+  return NextResponse.json({ ok: false, error, detail }, { status });
 }
 
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+/* ------------------- helpers ------------------- */
 
-function wrapTextAsHtml(text: string) {
-  const safe = escapeHtml(text);
-  return `<div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;color:#111"><pre style="white-space:pre-wrap;margin:0">${safe}</pre></div>`;
-}
-
-async function getAppToken() {
-  const tenant = requireEnv("MS_TENANT_ID");
-  const clientId = requireEnv("MS_CLIENT_ID");
-  const clientSecret = requireEnv("MS_CLIENT_SECRET");
-
-  const tokenUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
-  const body = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
-    scope: "https://graph.microsoft.com/.default",
-    grant_type: "client_credentials",
-  });
-
-  const r = await fetch(tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-
-  if (!r.ok) {
-    const t = await r.text();
-    throw new Error(`Graph token error ${r.status}: ${t}`);
+// Normalize IDs (strip <>, trim, lowercase). If very long, hash to a short stable id.
+function normalizeId(s?: string): string {
+  const raw = String(s ?? "").trim();
+  if (!raw) return "";
+  const noAngles = raw.replace(/^<|>$/g, "").trim().toLowerCase();
+  if (!noAngles) return "";
+  if (noAngles.length > 120 || /\s/.test(noAngles)) {
+    // Tiny, deterministic hash (FNV-1a 32-bit)
+    let h = 0x811c9dc5;
+    for (let i = 0; i < noAngles.length; i++) {
+      h ^= noAngles.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return `h:${h.toString(16)}`;
   }
-  const json = (await r.json()) as { access_token: string };
-  return json.access_token;
+  return noAngles;
 }
 
-async function sendViaGraph({
-  to,
-  subject,
-  html,
-  inReplyTo,
-}: {
-  to: string;
-  subject: string;
-  html: string;
-  inReplyTo?: string | null;
-}) {
-  const accessToken = await getAppToken();
-  const from = requireEnv("MS_MAILBOX_FROM"); // e.g., sales@alex-io.com
-  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
-    from
-  )}/sendMail`;
+// Build ONE canonical thread id with a clear priority order.
+function canonicalThreadId(input: {
+  lookupThreadId?: string;
+  objectId?: string;
+  inReplyTo?: string;
+  messageId?: string;
+}): string {
+  return (
+    normalizeId(input.lookupThreadId) ||
+    normalizeId(input.objectId) ||
+    normalizeId(input.inReplyTo) ||
+    normalizeId(input.messageId) ||
+    ""
+  );
+}
 
-  // Basic new message; if you later wire true replies, you’ll use reply endpoints.
-  const body = {
-    message: {
-      subject,
-      body: { contentType: "HTML", content: html },
-      toRecipients: [{ emailAddress: { address: to } }],
-    },
-    saveToSentItems: true,
+// Sleep helper for one-shot retry
+const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+async function parseJSON(req: NextRequest): Promise<any> {
+  try {
+    const j = await req.json();
+    if (j && typeof j === "object") return j;
+  } catch {}
+  try {
+    const t = await req.text();
+    if (!t) return {};
+    let s = t.trim();
+    if (s.startsWith('"') && s.endsWith('"')) s = JSON.parse(s);
+    if (s.startsWith("{") && s.endsWith("}")) return JSON.parse(s);
+  } catch {}
+  return {};
+}
+
+/** Map a raw object from HubSpot into our HubSpotEvent shape. */
+function mapToEvent(o: any): HubSpotEvent {
+  const sub =
+    o?.subscriptionType ?? o?.subscription_type ?? o?.eventType ?? "";
+  const oid =
+    o?.objectId ?? o?.objectID ?? o?.threadId ?? o?.id ?? o?.subjectId ?? o?.resourceId;
+  const mid =
+    o?.messageId ?? o?.messageID ?? o?.msgId ?? (typeof o?.id === "string" ? o.id : undefined);
+  const chg = o?.changeFlag ?? o?.change ?? o?.eventType ?? "";
+
+  return {
+    subscriptionType: typeof sub === "string" ? sub : String(sub || ""),
+    objectId: typeof oid === "number" || typeof oid === "string" ? oid : undefined,
+    messageId: typeof mid === "string" ? mid : undefined,
+    changeFlag: typeof chg === "string" ? chg : undefined,
   };
+}
 
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+/**
+ * Normalize any HubSpot payload (object, array, or wrapper) into a list of events.
+ * Supports:
+ *  - single event object (as seen in HubSpot Monitoring)
+ *  - array of events
+ *  - wrappers with `events` or `results`
+ */
+function normalizeHubSpotEvents(body: any): { events: HubSpotEvent[]; shape: string; keys: string[] } {
+  const keys = body && typeof body === "object" ? Object.keys(body) : [];
+  const out: HubSpotEvent[] = [];
 
-  if (!resp.ok) {
-    const t = await resp.text();
-    throw new Error(`Graph send error ${resp.status}: ${t}`);
+  if (Array.isArray(body)) {
+    for (const item of body) out.push(mapToEvent(item));
+    return { events: out, shape: "array", keys: [] };
   }
+
+  if (body && typeof body === "object") {
+    // common wrappers
+    if (Array.isArray(body.events)) {
+      for (const item of body.events) out.push(mapToEvent(item));
+      return { events: out, shape: "wrapper.events", keys };
+    }
+    if (Array.isArray(body.results)) {
+      for (const item of body.results) out.push(mapToEvent(item));
+      return { events: out, shape: "wrapper.results", keys };
+    }
+
+    // single object (Monitoring page shows this form)
+    out.push(mapToEvent(body));
+    return { events: out, shape: "object", keys };
+  }
+
+  return { events: [], shape: "unknown", keys: [] };
 }
 
-// --- handlers ---
-export async function GET() {
-  // Intentionally disallow GET; keep the health semantics you test for.
-  return NextResponse.json({ ok: false, error: "Method Not Allowed" }, { status: 405 });
-}
+/* ----------------------------- route ----------------------------- */
 
 export async function POST(req: NextRequest) {
+  const replyEnabled = (process.env.ALEXIO_REPLY_ENABLED ?? "true").toLowerCase() === "true";
+
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const urlLookup = `${base}/api/hubspot/lookupEmail`;
+  const urlOrchestrate = `${base}/api/ai/orchestrate`;
+
   try {
-    const {
-      toEmail,
-      subject,
-      text,
-      html,
-      inReplyTo,
-      dryRun,
-    }: {
-      toEmail?: string;
-      subject?: string;
-      text?: string;
-      html?: string;
-      inReplyTo?: string | null;
-      dryRun?: boolean;
-    } = await req.json();
+    const raw = await parseJSON(req);
+    const { events, shape, keys } = normalizeHubSpotEvents(raw);
 
-    if (!toEmail || !subject) {
-      return NextResponse.json(
-        { ok: false, error: "missing_to_or_subject" },
-        { status: 400 }
-      );
+    if (!events.length) {
+      // Never 400 here; tell HubSpot we accepted it but didn't act.
+      console.warn("[webhook] unsupported_shape", { shape, keys });
+      return ok({ send_ok: false, reason: "unsupported_shape", shape, keys });
     }
 
-    // Accept html OR text; if only text is provided, wrap it as HTML.
-    const htmlBody =
-      (html && typeof html === "string" && html.trim().length > 0)
-        ? html
-        : (text && typeof text === "string" && text.trim().length > 0)
-          ? wrapTextAsHtml(text)
-          : "";
+    // Prefer a conversation.newMessage if present; else take first
+    const ev =
+      events.find(e => String(e?.subscriptionType || "").toLowerCase().includes("conversation.newmessage")) ||
+      events[0];
 
-    if (!htmlBody) {
-      // Old error was "missing_html" — keep compatibility but more forgiving now.
-      return NextResponse.json(
-        { ok: false, error: "missing_html_or_text" },
-        { status: 400 }
-      );
+    const objectId = String(ev?.objectId ?? "").trim();
+    const messageId = String(ev?.messageId ?? "").trim();
+
+    console.log("[webhook] received", {
+      shape,
+      keys,
+      subscriptionType: ev?.subscriptionType || "",
+      objectId: objectId || 0,
+      messageId: messageId || "",
+      changeFlag: ev?.changeFlag || "",
+      replyEnabled,
+    });
+
+    // Always call our normalizer to get { email, subject, text, threadId, inReplyTo, messageId }
+    const lookupOnce = async () => {
+      const lookupURL = objectId ? `${urlLookup}?objectId=${encodeURIComponent(objectId)}` : urlLookup;
+      const res = await fetch(lookupURL, { method: "GET", cache: "no-store" });
+      const j = await res.json().catch(() => ({} as any));
+      return { res, j, url: lookupURL };
+    };
+
+    let { res: lookupRes, j: lookup, url: lookupURL } = await lookupOnce();
+
+    // Compute ONE canonical thread id
+    const threadIdCanonical = canonicalThreadId({
+      lookupThreadId: String(lookup?.threadId || ""),
+      objectId: objectId,
+      inReplyTo: String(lookup?.inReplyTo || ""),
+      messageId: String(lookup?.messageId || messageId || ""),
+    });
+
+    if (!threadIdCanonical) {
+      console.log("[webhook] missing_threadId", { objectId, lookupKeys: Object.keys(lookup || {}) });
+      return ok({ dryRun: false, send_ok: false, reason: "missing_threadId" });
     }
 
-    // Dry-run short circuit
-    if (dryRun) {
-      return NextResponse.json({
-        ok: true,
-        status: 202,
-        mode: "dry",
-        to: toEmail,
-        subject,
-        result: "sent",
+    // Idempotency / duplicate guard
+    if (messageId) {
+      const mem = await loadFacts(threadIdCanonical).catch(() => ({} as any));
+      const last = String((mem && mem.__lastMessageId) || "");
+      if (last && last === messageId) {
+        console.log("[webhook] skip_duplicate", { threadId: threadIdCanonical, messageId });
+        return ok({
+          dryRun: false,
+          send_ok: false,
+          reason: "duplicate_message",
+          threadId: threadIdCanonical,
+          messageId,
+        });
+      }
+    }
+
+    // Resolve recipient (with one-shot retry for participant lag)
+    let toEmail = String(lookup?.email || "").trim();
+    const subject = String(lookup?.subject || "Re: your foam quote request");
+    const textRaw = String(lookup?.text || "");
+
+    if (!toEmail) {
+      console.log("[webhook] missing_toEmail_first_try", {
+        url: lookupURL,
+        httpOk: lookupRes.ok,
+        status: lookupRes.status,
+      });
+      await delay(12_000);
+      ({ res: lookupRes, j: lookup, url: lookupURL } = await lookupOnce());
+      toEmail = String(lookup?.email || "").trim();
+      if (!toEmail) {
+        console.log("[webhook] missing_toEmail_after_retry", {
+          url: lookupURL,
+          httpOk: lookupRes.ok,
+          status: lookupRes.status,
+          jsonKeys: Object.keys(lookup || {}),
+        });
+        return ok({
+          dryRun: false,
+          send_ok: false,
+          toEmail: "",
+          reason: "missing_toEmail_after_retry",
+          lookup_trace: {
+            path: "/api/hubspot/lookupEmail",
+            url: lookupURL,
+            httpOk: lookupRes.ok,
+            status: lookupRes.status,
+            jsonOk: !!lookup && typeof lookup === "object",
+            jsonKeys: Object.keys(lookup || {}),
+          },
+        });
+      }
+    }
+
+    if (!replyEnabled) {
+      return ok({
+        dryRun: true,
+        replyEnabled,
+        toEmail,
+        threadId: threadIdCanonical,
+        preview: (textRaw || "").slice(0, 500),
       });
     }
 
-    await sendViaGraph({
-      to: toEmail,
+    const orchBody = {
+      mode: "ai",
+      toEmail,
       subject,
-      html: htmlBody,
-      inReplyTo: inReplyTo ?? null,
+      text: textRaw,
+      threadId: threadIdCanonical,  // ***stable key used by memory load/save***
+      dryRun: false,
+    };
+
+    console.log("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:false , threadKey:", threadIdCanonical, "}");
+    const orchRes = await fetch(`${urlOrchestrate}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(orchBody),
+      cache: "no-store",
+    });
+    const orchJson = await orchRes.json().catch(() => ({} as any));
+
+    // Update last processed message id on success
+    if ((orchRes.ok || orchJson?.sent) && messageId) {
+      try {
+        const mem = await loadFacts(threadIdCanonical).catch(() => ({} as any));
+        await saveFacts(threadIdCanonical, { ...(mem || {}), __lastMessageId: messageId });
+      } catch (e) {
+        console.warn("[webhook] save_lastMessageId_failed", String((e as any)?.message || e));
+      }
+    }
+
+    console.log("[webhook] done", {
+      ok: orchRes.ok,
+      dryRun: false,
+      send_ok: !!orchJson?.sent,
+      toEmail,
+      threadId: threadIdCanonical,
+      ms: orchJson?.ms || undefined,
     });
 
-    return NextResponse.json({
-      ok: true,
-      status: 202,
-      mode: "live",
-      to: toEmail,
-      subject,
-      result: "sent",
+    return ok({
+      ok: orchRes.ok,
+      dryRun: false,
+      send_ok: !!orchJson?.sent,
+      toEmail,
+      threadId: threadIdCanonical,
+      ms: orchJson?.ms || undefined,
     });
-  } catch (err: any) {
-    const msg = err?.message || String(err);
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+  } catch (e: any) {
+    console.error("[webhook] exception", e?.message || e);
+    // Important: still 200 to avoid HubSpot retry storms; report error in body.
+    return err("webhook_exception", String(e?.message || e));
   }
 }

@@ -43,17 +43,16 @@ async function getAppToken() {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  if (!r.ok) throw new Error(`Graph token error ${r.status}: ${await r.text()}`);
 
-  const j = (await r.json()) as { access_token: string };
-  return j.access_token;
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Graph token error ${r.status}: ${t}`);
+  }
+  const json = (await r.json()) as { access_token: string };
+  return json.access_token;
 }
 
-/**
- * Core send: create -> (optional) get -> send
- * When includeHeaders=true and inReplyTo is provided, add In-Reply-To/References.
- * Returns { id, internetMessageId } or an error descriptor.
- */
+/** Core create->(get)->send. Returns { ok, id, internetMessageId } or error info. */
 async function createGetSend(opts: {
   accessToken: string;
   from: string;
@@ -72,7 +71,7 @@ async function createGetSend(opts: {
     toRecipients: [{ emailAddress: { address: to } }],
   };
 
-  // Best-effort threading hints (tenant-permitting)
+  // Best-effort threading (some tenants block custom headers)
   if (includeHeaders && inReplyTo && String(inReplyTo).trim()) {
     const irt = String(inReplyTo).trim();
     message.internetMessageHeaders = [
@@ -93,7 +92,6 @@ async function createGetSend(opts: {
   if (!createResp.ok) {
     return { ok: false as const, stage: "create", status: createResp.status, text: (await createResp.text()).slice(0, 2000) };
   }
-
   const created = (await createResp.json()) as { id: string };
   const id = created?.id;
   if (!id) return { ok: false as const, stage: "create", status: 500, text: "No id from create" };
@@ -101,14 +99,15 @@ async function createGetSend(opts: {
   // 2) Try to read internetMessageId (non-fatal)
   let internetMessageId: string | undefined;
   try {
-    const getResp = await fetch(`${base}/messages/${encodeURIComponent(id)}?$select=id,internetMessageId`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    const getResp = await fetch(
+      `${base}/messages/${encodeURIComponent(id)}?$select=id,internetMessageId`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
     if (getResp.ok) {
       const j = (await getResp.json()) as { id: string; internetMessageId?: string };
       internetMessageId = j?.internetMessageId;
     }
-  } catch { /* ignore */ }
+  } catch {}
 
   // 3) Send
   const sendResp = await fetch(`${base}/messages/${encodeURIComponent(id)}/send`, {
@@ -129,11 +128,7 @@ async function createGetSend(opts: {
   return { ok: true as const, id, internetMessageId };
 }
 
-/**
- * Instrumented send with auto-retry:
- *  - Attempt 1: include headers if inReplyTo present.
- *  - On 4xx/5xx failure: retry once WITHOUT headers (still returns IDs).
- */
+/** Auto-retry wrapper: try with headers; on 4xx/5xx, retry once without. */
 async function sendViaGraphInstrumented({
   to,
   subject,
@@ -148,7 +143,6 @@ async function sendViaGraphInstrumented({
   const accessToken = await getAppToken();
   const from = requireEnv("MS_MAILBOX_FROM");
 
-  // First attempt (with headers if we have an inReplyTo)
   const try1 = await createGetSend({
     accessToken,
     from,
@@ -163,7 +157,6 @@ async function sendViaGraphInstrumented({
     return { id: try1.id!, internetMessageId: try1.internetMessageId || null };
   }
 
-  // Retry once without headers if first attempt failed and we tried headers
   if (inReplyTo && (try1.status >= 400 && try1.status <= 599)) {
     console.warn("[msgraph] retrying without headers", { stage: try1.stage, status: try1.status });
     const try2 = await createGetSend({
@@ -188,7 +181,6 @@ async function sendViaGraphInstrumented({
 
 // --- handlers ---
 export async function GET() {
-  // Intentionally disallow GET; keep the health semantics you test for.
   return NextResponse.json({ ok: false, error: "Method Not Allowed" }, { status: 405 });
 }
 
@@ -227,14 +219,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (dryRun) {
-      return NextResponse.json({
-        ok: true,
-        status: 202,
-        mode: "dry",
-        to: toEmail,
-        subject,
-        result: "sent",
-      });
+      return NextResponse.json({ ok: true, status: 202, mode: "dry", to: toEmail, subject, result: "sent" });
     }
 
     const { id, internetMessageId } = await sendViaGraphInstrumented({
