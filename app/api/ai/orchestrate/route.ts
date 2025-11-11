@@ -37,7 +37,9 @@ function pickThreadContext(threadMsgs: any[] = []): string {
   return snippets.join("\n---\n");
 }
 
-/* ----------------- Parsing helpers (expanded) ----------------- */
+/* ----------------- Parse helpers ----------------- */
+
+// Pull “Dimensions: 5x5x1”, “Quantity: 12”, etc., from bullet/label lines
 function extractLabeledLines(s: string) {
   const out: Mem = {};
   const lines = (s || "").split(/\r?\n/);
@@ -58,20 +60,16 @@ function extractLabeledLines(s: string) {
   return out;
 }
 
+// Free-text extraction (dims, qty, density, material)
 function extractFreeText(s = ""): Mem {
   const t = (s || "").toLowerCase();
   const dimsMatch = t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
-  const qtyMatch =
-    t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) ||
-    t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) ||
-    t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
+  const qtyMatch = t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) || t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) || t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
   const densMatch = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
-
   let material: string | undefined;
   if (/\bpolyethylene\b|\bpe\b/.test(t)) material = "PE";
   else if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) material = "EPE";
   else if (/\bpolyurethane\b|\bpu\b/.test(t)) material = "PU";
-
   return compact({
     dims:    dimsMatch ? `${dimsMatch[1]}x${dimsMatch[2]}x${dimsMatch[3]}` : undefined,
     density: densMatch ? `${densMatch[1]}lb` : undefined,
@@ -79,18 +77,10 @@ function extractFreeText(s = ""): Mem {
     material,
   });
 }
-function extractFromSubject(s = ""): Mem { return s ? extractFreeText(s) : {}; }
 
-function extractFromThreadMsgs(threadMsgs: any[] = []): Mem {
-  let out: Mem = {};
-  const take = threadMsgs.slice(-5);
-  for (const m of take) {
-    const text = String(m?.text || m?.body || m?.content || "").trim();
-    if (!text) continue;
-    out = mergeFacts(out, extractLabeledLines(text));
-    out = mergeFacts(out, extractFreeText(text));
-  }
-  return out;
+function extractFromSubject(s = ""): Mem {
+  if (!s) return {};
+  return extractFreeText(s);
 }
 
 function renderBullets(f: Mem): string {
@@ -103,27 +93,33 @@ function renderBullets(f: Mem): string {
   ].join("\n");
 }
 
-// --- NEW: a stable alias key to survive new HubSpot threadIds ---
-function normalizeSubject(s: string) {
-  let x = (s || "").toLowerCase().trim();
-  x = x.replace(/^(re|fw|fwd)\s*:\s*/g, ""); // strip common prefixes
-  x = x.replace(/\s+/g, " ").trim();
-  return x;
+/* ----------------- Stable alias key ----------------- */
+
+function normalizeEmail(s: string) {
+  return String(s || "").trim().toLowerCase();
 }
-function makeAliasKey(email: string, subject: string) {
-  const e = (email || "").toLowerCase().trim();
-  const s = normalizeSubject(subject || "");
-  return e && s ? `hsu:${e}::${s}` : "";
+function subjectRoot(s: string) {
+  let t = String(s || "").toLowerCase().trim();
+  t = t.replace(/^(re|fwd?|aw):\s*/g, ""); // strip leading reply/forward tokens
+  t = t.replace(/\s+/g, " ").trim();
+  return t;
+}
+function makeAlias(toEmail?: string, subject?: string) {
+  const e = normalizeEmail(toEmail || "");
+  const r = subjectRoot(subject || "");
+  if (!e || !r) return "";
+  return `hsu:${e}::${r}`;
 }
 
-// Tiny opener
+/* ----------------- AI opener (one sentence) ----------------- */
+
 async function aiOpener(lastInbound: string, context: string): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
   try {
     const prompt = [
       "Write ONE short, friendly sentence acknowledging the message and saying you'll price it once specs are confirmed.",
-      "Do not include bullets, footers, or extra lines. One sentence only.",
+      "No bullets, no footer, one sentence.",
       context ? `Context:\n${context}` : "",
       `Customer message:\n${lastInbound || "(none)"}`,
     ].filter(Boolean).join("\n\n");
@@ -140,8 +136,7 @@ async function aiOpener(lastInbound: string, context: string): Promise<string | 
       j?.output?.[0]?.content?.[0]?.text ||
       j?.choices?.[0]?.message?.content?.[0]?.text ||
       j?.choices?.[0]?.message?.content ||
-      j?.choices?.[0]?.text ||
-      "";
+      j?.choices?.[0]?.text || "";
     const one = String(text || "").trim().replace(/\s+/g, " ");
     if (one) {
       console.log("[aiReply] opener_from_model", one.slice(0, 120));
@@ -153,6 +148,8 @@ async function aiOpener(lastInbound: string, context: string): Promise<string | 
     return null;
   }
 }
+
+/* ----------------- Parsing the request ----------------- */
 
 async function parse(req: NextRequest): Promise<In> {
   try { const j = await req.json(); if (j && typeof j === "object") return j; } catch {}
@@ -174,48 +171,44 @@ export async function POST(req: NextRequest) {
     const dryRun   = !!p.dryRun;
     const lastText = String(p.text || "");
     const subject  = String(p.subject || "");
-    const threadId = String(p.threadId ?? "").trim();
-    const toEmail  = String(p.toEmail || "").trim().toLowerCase();
+    const threadIdRaw = String(p.threadId ?? "").trim();
+    const threadId = threadIdRaw ? `hs:${threadIdRaw}` : "";           // normalize primary key
+    const alias    = makeAlias(p.toEmail, subject);                    // stable secondary key
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
-    // Parse current turn + subject + recent msgs
-    const fromTextFree    = extractFreeText(lastText);
-    const fromTextLabels  = extractLabeledLines(lastText);
-    const fromSubject     = extractFromSubject(subject);
-    const fromThreadMsgs  = extractFromThreadMsgs(threadMsgs);
-    const newly           = mergeFacts(mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject), fromThreadMsgs);
+    // Parse everything we can from current turn
+    const fromTextFree   = extractFreeText(lastText);
+    const fromTextLabels = extractLabeledLines(lastText);
+    const fromSubject    = extractFromSubject(subject);
+    const newly          = mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject);
 
-    // Keys
-    const primaryKey = threadId ? String(threadId) : "";
-    const hsKey = primaryKey ? (primaryKey.startsWith("hs:") ? primaryKey : `hs:${primaryKey}`) : "";
-    const aliasKey = makeAliasKey(toEmail, subject);
+    // Load from BOTH keys (when available)
+    let loadedPrimary: Mem = {};
+    let loadedAlias: Mem = {};
+    if (threadId) loadedPrimary = await loadFacts(threadId).catch(()=> ({}));
+    if (alias)    loadedAlias   = await loadFacts(alias).catch(()=> ({}));
 
-    // Load both
-    let memPrimary: Mem = {};
-    let memAlias: Mem = {};
-    if (hsKey) memPrimary = await loadFacts(hsKey).catch(() => ({}));
-    if (aliasKey) memAlias = await loadFacts(aliasKey).catch(() => ({}));
-
-    // Carry special ids from either store
     const carry = {
-      __lastMessageId: memPrimary.__lastMessageId || memAlias.__lastMessageId || "",
-      __lastInternetMessageId: memPrimary.__lastInternetMessageId || memAlias.__lastInternetMessageId || "",
+      __lastMessageId: loadedPrimary?.__lastMessageId || loadedAlias?.__lastMessageId || "",
+      __lastInternetMessageId: loadedPrimary?.__lastInternetMessageId || loadedAlias?.__lastInternetMessageId || "",
+      __lastGraphMessageId: loadedPrimary?.__lastGraphMessageId || loadedAlias?.__lastGraphMessageId || "",
     };
 
-    // Merge precedence: previous (primary ⊕ alias) ⊕ newly
-    const prev = mergeFacts(memAlias, memPrimary);
-    const merged = mergeFacts({ ...prev, ...carry }, newly);
+    // Merge order: (older) loadedPrimary <- loadedAlias <- carry <- newly (newest)
+    const merged = mergeFacts(mergeFacts(mergeFacts(loadedPrimary, loadedAlias), carry), newly);
 
-    // Debug
-    console.log("[facts] keys { primary:", hsKey || "(none)", ", alias:", aliasKey || "(none)", "}");
-    console.log("[facts] loaded_primary_keys:", Object.keys(memPrimary || {}).join(",") || "(none)");
-    console.log("[facts] loaded_alias_keys:", Object.keys(memAlias || {}).join(",") || "(none)");
+    // Debug visibility in Render logs
+    console.log("[facts] keys { primary:", threadId || "(none)", ", alias:", alias || "(none)", "}");
+    console.log("[facts] loaded_primary_keys:", Object.keys(loadedPrimary || {}).join(",") || "(none)");
+    console.log("[facts] loaded_alias_keys:", Object.keys(loadedAlias || {}).join(",") || "(none)");
     console.log("[facts] newly:", newly);
     console.log("[facts] merged:", merged);
 
-    // Save back to both keys so next turn hits either
-    if (hsKey) await saveFacts(hsKey, merged).catch(() => {});
-    if (aliasKey) await saveFacts(aliasKey, merged).catch(() => {});
+    // Save back to whichever keys we have (both when we can)
+    const saveTargets: string[] = [];
+    if (threadId) saveTargets.push(threadId);
+    if (alias)    saveTargets.push(alias);
+    await Promise.all(saveTargets.map(k => saveFacts(k, merged)));
 
     // Compose reply
     const context = pickThreadContext(threadMsgs);
@@ -226,6 +219,7 @@ export async function POST(req: NextRequest) {
 
     // Recipient guardrails
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
+    const toEmail = String(p.toEmail || "").trim().toLowerCase();
     if (!toEmail) return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
     const ownDomain = mailbox.split("@")[1] || "";
     if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
@@ -235,7 +229,7 @@ export async function POST(req: NextRequest) {
     // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
-    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", hsKey || "<none>", ", alias:", aliasKey || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
+    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId || "<none>", ", alias:", alias || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
 
     if (dryRun) {
       return ok({
@@ -245,11 +239,11 @@ export async function POST(req: NextRequest) {
         preview: body.slice(0, 800),
         facts: merged,
         mem: {
-          threadKey: hsKey || null,
-          aliasKey: aliasKey || null,
-          primaryLoaded: Object.keys(memPrimary || {}),
-          aliasLoaded: Object.keys(memAlias || {}),
-          mergedKeys: Object.keys(merged || {}),
+          primaryKey: threadId || null,
+          aliasKey: alias || null,
+          loadedPrimaryKeys: Object.keys(loadedPrimary),
+          loadedAliasKeys: Object.keys(loadedAlias),
+          mergedKeys: Object.keys(merged),
         },
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
@@ -272,15 +266,14 @@ export async function POST(req: NextRequest) {
     });
     const sent = await r.json().catch(()=> ({}));
 
-    // Persist outbound IDs to both keys (so either path has the latest)
+    // Persist outbound IDs for next turn to BOTH keys
     if ((r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
-      const update = {
+      const updated = {
         ...merged,
         __lastGraphMessageId: sent?.messageId || merged?.__lastGraphMessageId || "",
         __lastInternetMessageId: sent?.internetMessageId || merged?.__lastInternetMessageId || "",
       };
-      if (hsKey) await saveFacts(hsKey, update).catch(() => {});
-      if (aliasKey) await saveFacts(aliasKey, update).catch(() => {});
+      await Promise.all(saveTargets.map(k => saveFacts(k, updated)));
     }
 
     return ok({
@@ -292,7 +285,8 @@ export async function POST(req: NextRequest) {
       internetMessageId: sent?.internetMessageId || null,
       facts: merged,
       store: LAST_STORE,
-      keys: { threadKey: hsKey || null, aliasKey: aliasKey || null },
+      primaryKey: threadId || null,
+      aliasKey: alias || null,
     });
   } catch (e:any) {
     return err("orchestrate_exception", String(e?.message || e));
