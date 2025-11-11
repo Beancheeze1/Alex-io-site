@@ -38,50 +38,35 @@ function pickThreadContext(threadMsgs: any[] = []): string {
 }
 
 /* ----------------- Parsing helpers (expanded) ----------------- */
-
-// Pull “Dimensions: 5x5x1”, “Quantity: 12”, etc., from bullet/label lines
 function extractLabeledLines(s: string) {
   const out: Mem = {};
   const lines = (s || "").split(/\r?\n/);
   for (const line of lines) {
     const t = line.toLowerCase().trim().replace(/^•\s*/, "");
-    // Dimensions
     const mDims = t.match(/^dimensions?\s*[:\-]\s*([0-9.]+\s*[x×]\s*[0-9.]+\s*[x×]\s*[0-9.]+)/);
     if (mDims) out.dims = mDims[1].replace(/\s+/g, "").replace(/×/g, "x");
-    // Quantity
     const mQty = t.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/);
     if (mQty) out.qty = Number(mQty[1]);
-    // Material
     if (/^material\s*[:\-]/.test(t)) {
       if (/\bpe\b|\bpolyethylene\b/.test(t)) out.material = "PE";
       else if (/\bepe\b|expanded\s*pe/.test(t)) out.material = "EPE";
       else if (/\bpu\b|\bpolyurethane\b/.test(t)) out.material = "PU";
     }
-    // Density
     const mDen = t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
     if (mDen) out.density = `${mDen[1]}lb`;
   }
   return out;
 }
 
-// Free-text extraction (dims, qty, density, material)
 function extractFreeText(s = ""): Mem {
   const t = (s || "").toLowerCase();
-
-  // dims: 5x5x1, 12 x 9 x 2", etc.
-  const dimsMatch =
-    t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
-
-  // qty 12 / quantity: 12 / 12 pcs
+  const dimsMatch = t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
   const qtyMatch =
     t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) ||
     t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) ||
     t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
-
-  // density 1.7#, 1.7 lb, 1.7lbs
   const densMatch = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#)\b/);
 
-  // material
   let material: string | undefined;
   if (/\bpolyethylene\b|\bpe\b/.test(t)) material = "PE";
   else if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) material = "EPE";
@@ -94,14 +79,8 @@ function extractFreeText(s = ""): Mem {
     material,
   });
 }
+function extractFromSubject(s = ""): Mem { return s ? extractFreeText(s) : {}; }
 
-// Parse subject too (customers often put dims/qty up there)
-function extractFromSubject(s = ""): Mem {
-  if (!s) return {};
-  return extractFreeText(s);
-}
-
-// NEW: parse recent thread messages (last 5) for labeled or free-text specs
 function extractFromThreadMsgs(threadMsgs: any[] = []): Mem {
   let out: Mem = {};
   const take = threadMsgs.slice(-5);
@@ -124,7 +103,20 @@ function renderBullets(f: Mem): string {
   ].join("\n");
 }
 
-// Tiny opener from the model (optional)
+// --- NEW: a stable alias key to survive new HubSpot threadIds ---
+function normalizeSubject(s: string) {
+  let x = (s || "").toLowerCase().trim();
+  x = x.replace(/^(re|fw|fwd)\s*:\s*/g, ""); // strip common prefixes
+  x = x.replace(/\s+/g, " ").trim();
+  return x;
+}
+function makeAliasKey(email: string, subject: string) {
+  const e = (email || "").toLowerCase().trim();
+  const s = normalizeSubject(subject || "");
+  return e && s ? `hsu:${e}::${s}` : "";
+}
+
+// Tiny opener
 async function aiOpener(lastInbound: string, context: string): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
@@ -183,31 +175,47 @@ export async function POST(req: NextRequest) {
     const lastText = String(p.text || "");
     const subject  = String(p.subject || "");
     const threadId = String(p.threadId ?? "").trim();
+    const toEmail  = String(p.toEmail || "").trim().toLowerCase();
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
-    // Parse everything we can from current turn + subject + recent msgs
+    // Parse current turn + subject + recent msgs
     const fromTextFree    = extractFreeText(lastText);
     const fromTextLabels  = extractLabeledLines(lastText);
     const fromSubject     = extractFromSubject(subject);
     const fromThreadMsgs  = extractFromThreadMsgs(threadMsgs);
     const newly           = mergeFacts(mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject), fromThreadMsgs);
 
-    // Load + merge with prior facts
-    let loaded: Mem = {};
-    if (threadId) loaded = await loadFacts(threadId);
+    // Keys
+    const primaryKey = threadId ? String(threadId) : "";
+    const hsKey = primaryKey ? (primaryKey.startsWith("hs:") ? primaryKey : `hs:${primaryKey}`) : "";
+    const aliasKey = makeAliasKey(toEmail, subject);
 
+    // Load both
+    let memPrimary: Mem = {};
+    let memAlias: Mem = {};
+    if (hsKey) memPrimary = await loadFacts(hsKey).catch(() => ({}));
+    if (aliasKey) memAlias = await loadFacts(aliasKey).catch(() => ({}));
+
+    // Carry special ids from either store
     const carry = {
-      __lastMessageId: loaded?.__lastMessageId || "",
-      __lastInternetMessageId: loaded?.__lastInternetMessageId || "",
+      __lastMessageId: memPrimary.__lastMessageId || memAlias.__lastMessageId || "",
+      __lastInternetMessageId: memPrimary.__lastInternetMessageId || memAlias.__lastInternetMessageId || "",
     };
-    const merged = mergeFacts({ ...loaded, ...carry }, newly);
 
-    // Debug visibility in Render logs
-    console.log("[facts] loaded_keys:", Object.keys(loaded || {}).join(",") || "(none)");
+    // Merge precedence: previous (primary ⊕ alias) ⊕ newly
+    const prev = mergeFacts(memAlias, memPrimary);
+    const merged = mergeFacts({ ...prev, ...carry }, newly);
+
+    // Debug
+    console.log("[facts] keys { primary:", hsKey || "(none)", ", alias:", aliasKey || "(none)", "}");
+    console.log("[facts] loaded_primary_keys:", Object.keys(memPrimary || {}).join(",") || "(none)");
+    console.log("[facts] loaded_alias_keys:", Object.keys(memAlias || {}).join(",") || "(none)");
     console.log("[facts] newly:", newly);
     console.log("[facts] merged:", merged);
 
-    if (threadId) await saveFacts(threadId, merged);
+    // Save back to both keys so next turn hits either
+    if (hsKey) await saveFacts(hsKey, merged).catch(() => {});
+    if (aliasKey) await saveFacts(aliasKey, merged).catch(() => {});
 
     // Compose reply
     const context = pickThreadContext(threadMsgs);
@@ -218,7 +226,6 @@ export async function POST(req: NextRequest) {
 
     // Recipient guardrails
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
-    const toEmail = String(p.toEmail || "").trim().toLowerCase();
     if (!toEmail) return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
     const ownDomain = mailbox.split("@")[1] || "";
     if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
@@ -228,7 +235,7 @@ export async function POST(req: NextRequest) {
     // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
-    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", threadId || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
+    console.info("[orchestrate] msgraph/send { to:", toEmail, ", dryRun:", !!p.dryRun, ", threadId:", hsKey || "<none>", ", alias:", aliasKey || "<none>", ", inReplyTo:", inReplyTo ? "<id>" : "none", "}");
 
     if (dryRun) {
       return ok({
@@ -237,7 +244,13 @@ export async function POST(req: NextRequest) {
         subject: p.subject || "Quote",
         preview: body.slice(0, 800),
         facts: merged,
-        mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
+        mem: {
+          threadKey: hsKey || null,
+          aliasKey: aliasKey || null,
+          primaryLoaded: Object.keys(memPrimary || {}),
+          aliasLoaded: Object.keys(memAlias || {}),
+          mergedKeys: Object.keys(merged || {}),
+        },
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
       });
@@ -259,14 +272,15 @@ export async function POST(req: NextRequest) {
     });
     const sent = await r.json().catch(()=> ({}));
 
-    // Persist outbound IDs for next turn
-    if (threadId && (r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
-      const updated = {
+    // Persist outbound IDs to both keys (so either path has the latest)
+    if ((r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
+      const update = {
         ...merged,
         __lastGraphMessageId: sent?.messageId || merged?.__lastGraphMessageId || "",
         __lastInternetMessageId: sent?.internetMessageId || merged?.__lastInternetMessageId || "",
       };
-      await saveFacts(threadId, updated);
+      if (hsKey) await saveFacts(hsKey, update).catch(() => {});
+      if (aliasKey) await saveFacts(aliasKey, update).catch(() => {});
     }
 
     return ok({
@@ -278,6 +292,7 @@ export async function POST(req: NextRequest) {
       internetMessageId: sent?.internetMessageId || null,
       facts: merged,
       store: LAST_STORE,
+      keys: { threadKey: hsKey || null, aliasKey: aliasKey || null },
     });
   } catch (e:any) {
     return err("orchestrate_exception", String(e?.message || e));
