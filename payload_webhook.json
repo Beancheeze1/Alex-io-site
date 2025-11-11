@@ -1,5 +1,1 @@
-﻿{
-  "subscriptionType": "conversation.newMessage",
-  "objectId": "987654",
-  "messageId": "MSG-1@mx.example"
-}
+﻿{"subscriptionType":"conversation.newMessage","objectId":"9890679044"}

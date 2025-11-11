@@ -163,13 +163,16 @@ export async function POST(req: NextRequest) {
       replyEnabled,
     });
 
-    // Always call our normalizer to get { email, subject, text, threadId, inReplyTo, messageId }
     const lookupOnce = async () => {
-      const lookupURL = objectId ? `${urlLookup}?objectId=${encodeURIComponent(objectId)}` : urlLookup;
-      const res = await fetch(lookupURL, { method: "GET", cache: "no-store" });
-      const j = await res.json().catch(() => ({} as any));
-      return { res, j, url: lookupURL };
-    };
+  const qs: string[] = [];
+  if (objectId) qs.push(`objectId=${encodeURIComponent(objectId)}`);
+  if (messageId) qs.push(`messageId=${encodeURIComponent(messageId)}`); // <<< NEW
+  const lookupURL = qs.length ? `${urlLookup}?${qs.join("&")}` : urlLookup;
+  const res = await fetch(lookupURL, { method: "GET", cache: "no-store" });
+  const j = await res.json().catch(() => ({} as any));
+  return { res, j, url: lookupURL };
+};
+
 
     let { res: lookupRes, j: lookup, url: lookupURL } = await lookupOnce();
 
