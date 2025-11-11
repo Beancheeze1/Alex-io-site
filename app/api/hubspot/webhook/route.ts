@@ -1,147 +1,195 @@
 // app/api/hubspot/webhook/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Safe stringify for logs */
-function j(x: any) { try { return JSON.stringify(x); } catch { return String(x); } }
-async function readBody(req: Request) { try { return await req.json(); } catch { return null; } }
-function getHeader(h: Headers, name: string) { return h.get(name) ?? h.get(name.toLowerCase()) ?? null; }
-
-const log = {
-  info: (...a: any[]) => console.log(...a),
-  warn: (...a: any[]) => console.warn(...a),
-  error: (...a: any[]) => console.error(...a),
+type HubSpotEvent = {
+  subscriptionType?: string;
+  objectId?: number | string;
+  messageId?: string;
+  changeFlag?: string;
 };
 
-export async function POST(req: Request) {
-  const t0 = Date.now();
-  const method = req.method;
-  const url = new URL(req.url);
+function ok(extra: Record<string, any> = {}) {
+  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
+}
+function err(error: string, detail?: any, status = 200) {
+  return NextResponse.json({ ok: false, error, detail }, { status });
+}
 
-  log.info("[webhook] -> entry {");
-  log.info("  method:", method + ",");
-  log.info("  path:", j(url.pathname) + ",");
-  log.info("  headers: {");
-  for (const k of [
-    "content-type","content-length",
-    "x-hubspot-signature","x-hubspot-signature-v3","x-hubspot-request-timestamp",
-    "x-forwarded-host","x-forwarded-proto"
-  ]) {
-    const v = req.headers.get(k); if (v) log.info(`  '${k}': '${v}',`);
+/* ---------------- helpers ---------------- */
+
+async function parseJSON(req: NextRequest): Promise<any> {
+  try {
+    const j = await req.json();
+    if (j && typeof j === "object") return j;
+  } catch {}
+  try {
+    const t = await req.text();
+    if (!t) return {};
+    let s = t.trim();
+    if (s.startsWith('"') && s.endsWith('"')) s = JSON.parse(s);
+    if (s.startsWith("{") && s.endsWith("}")) return JSON.parse(s);
+  } catch {}
+  return {};
+}
+
+function mapToEvent(o: any): HubSpotEvent {
+  const sub = o?.subscriptionType ?? o?.subscription_type ?? o?.eventType ?? "";
+  const oid = o?.objectId ?? o?.objectID ?? o?.threadId ?? o?.id ?? o?.subjectId ?? o?.resourceId;
+  const mid = o?.messageId ?? o?.messageID ?? (typeof o?.id === "string" ? o.id : undefined);
+  const chg = o?.changeFlag ?? o?.change ?? o?.eventType ?? "";
+  return {
+    subscriptionType: typeof sub === "string" ? sub : String(sub || ""),
+    objectId: typeof oid === "number" || typeof oid === "string" ? oid : undefined,
+    messageId: typeof mid === "string" ? mid : undefined,
+    changeFlag: typeof chg === "string" ? chg : undefined,
+  };
+}
+
+function normalizeEvents(body: any): { events: HubSpotEvent[]; shape: string; keys: string[] } {
+  const keys = body && typeof body === "object" ? Object.keys(body) : [];
+  if (Array.isArray(body)) return { events: body.map(mapToEvent), shape: "array", keys: [] };
+  if (body && typeof body === "object") {
+    if (Array.isArray(body.events)) return { events: body.events.map(mapToEvent), shape: "wrapper.events", keys };
+    if (Array.isArray(body.results)) return { events: body.results.map(mapToEvent), shape: "wrapper.results", keys };
+    return { events: [mapToEvent(body)], shape: "object", keys };
   }
-  log.info("  }");
-  log.info("}");
+  return { events: [], shape: "unknown", keys: [] };
+}
 
-  const SELF = process.env.NEXT_PUBLIC_BASE_URL || `${url.protocol}//${url.host}`;
-  // Accept either flag name (old/new)
-  const REPLY_ENABLED =
-    (process.env.ALEXIO_REPLY_ENABLED ?? process.env.REPLY_ENABLED ?? "false").toLowerCase() === "true";
-  const SKIP_LOOKUP = (process.env.HUBSPOT_SKIP_LOOKUP ?? "0") === "1";
+const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
-  const HAS_CREDENTIALS =
-    !!process.env.HUBSPOT_ACCESS_TOKEN ||
-    (!!process.env.HUBSPOT_REFRESH_TOKEN && !!process.env.HUBSPOT_CLIENT_ID && !!process.env.HUBSPOT_CLIENT_SECRET);
+function subjectRoot(s: string) {
+  let t = String(s || "").trim();
+  t = t.replace(/^(re|fwd?|aw):\s*/i, "");
+  t = t.replace(/\s+/g, " ").trim();
+  return t;
+}
 
-  const body = await readBody(req);
-  if (!Array.isArray(body) || body.length === 0) {
-    log.warn("[webhook] empty_or_invalid_body");
-    return NextResponse.json({ ok: true, ignored: true, reason: "empty_or_invalid_body" });
-  }
+/* ---------------- route ---------------- */
 
-  // Focus on conversation.newMessage
-  const evt = body.find((e: any) => (e?.subscriptionType ?? "").includes("conversation.newMessage")) ?? body[0];
-  const objectId = Number(evt?.objectId ?? evt?.eventId ?? 0) || null;
-  const changeFlag = (evt?.changeFlag ?? "").toString();
-  const message = evt?.message ?? {};
-  let subject: string = (evt?.subject ?? "").toString();
-  let text: string = (evt?.text ?? "").toString();
-  let toEmail: string | null = null;
-
-  const rawMessageId =
-    getHeader(req.headers, "message-id") ||
-    getHeader(req.headers, "Message-Id") ||
-    getHeader(req.headers, "x-message-id") ||
-    null;
-
-  // Lookup if needed
-  if (!toEmail || !text || !subject) {
-    if (SKIP_LOOKUP || !HAS_CREDENTIALS) {
-      log.info("[webhook] exit {");
-      log.info("  reason: 'lookup_skipped',");
-      log.info("  extra:", j({ SKIP_LOOKUP, HAS_TOKEN: HAS_CREDENTIALS }) + ",");
-      log.info("  ms:", Date.now() - t0);
-      log.info("}");
-      return NextResponse.json({ ok: true, ignored: true, reason: "lookup_skipped", extra: { SKIP_LOOKUP, HAS_TOKEN: HAS_CREDENTIALS } });
-    }
-    if (!objectId) {
-      log.info("[webhook] exit { reason: 'no_objectId_for_lookup' }");
-      return NextResponse.json({ ok: true, ignored: true, reason: "no_objectId_for_lookup" });
-    }
-
-    try {
-      // ⬇️ Switched to the actual resolver in your codebase
-      const res = await fetch(`${SELF}/api/hubspot/lookupEmail`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ objectId, messageId: rawMessageId }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        log.warn("[webhook] lookup_failed", res.status, j(data).slice(0, 400));
-      } else {
-        toEmail = data.email || toEmail;
-        subject = (data.subject ?? subject).toString();
-        text = (data.text ?? text).toString();
-        log.info("[webhook] lookup_ok", j({ email: toEmail, subject: subject?.slice(0, 80), threadId: data.threadId }));
-      }
-    } catch (e: any) {
-      log.error("[webhook] lookup_exception", e?.message || String(e));
-    }
-  }
-
-  if (!toEmail) {
-    log.info("[webhook] exit {");
-    log.info("  reason: 'no_email_lookup_failed',");
-    log.info("  extra:", j({ objectId, changeFlag }) + ",");
-    log.info("  ms:", Date.now() - t0);
-    log.info("}");
-    return NextResponse.json({ ok: true, ignored: true, reason: "no_email_lookup_failed", extra: { objectId, changeFlag } });
-  }
-
-  if (!REPLY_ENABLED) {
-    log.info("[webhook] exit { reason: 'reply_disabled', to:", toEmail, "}");
-    return NextResponse.json({ ok: true, ignored: true, reason: "reply_disabled", to: toEmail });
-  }
+export async function POST(req: NextRequest) {
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const urlLookup = `${base}/api/hubspot/lookupEmail`;
+  const urlOrchestrate = `${base}/api/ai/orchestrate`;
 
   try {
-    const aiRes = await fetch(`${SELF}/api/ai/orchestrate`, {
+    // Visible entry log (headers subset)
+    {
+      const headersLog: Record<string, string> = {};
+      for (const k of [
+        "content-type",
+        "content-length",
+        "x-hubspot-signature",
+        "x-hubspot-signature-v3",
+        "x-hubspot-request-timestamp",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+      ]) {
+        const v = req.headers.get(k);
+        if (v) headersLog[k] = v;
+      }
+      console.info("[webhook] -> entry {");
+      console.info("  method:", req.method + ",");
+      console.info("  path:", JSON.stringify(new URL(req.url).pathname) + ",");
+      console.info("  headers:", headersLog, "\n}");
+    }
+
+    const raw = await parseJSON(req);
+    const { events, shape, keys } = normalizeEvents(raw);
+    if (!events.length) {
+      console.warn("[webhook] unsupported_shape", { shape, keys });
+      return ok({ send_ok: false, reason: "unsupported_shape", shape, keys });
+    }
+
+    // Prefer conversation.newMessage
+    const ev =
+      events.find(e => String(e?.subscriptionType || "").toLowerCase().includes("conversation.newmessage")) ||
+      events[0];
+
+    const objectId = String(ev?.objectId ?? "").trim();
+    const messageId = String(ev?.messageId ?? "").trim();
+
+    // Lookup with light retry (covers participant lag)
+    const lookupOnce = async () => {
+      const qs: string[] = [];
+      if (objectId) qs.push(`objectId=${encodeURIComponent(objectId)}`);
+      if (messageId) qs.push(`messageId=${encodeURIComponent(messageId)}`);
+      const lookupURL = qs.length ? `${urlLookup}?${qs.join("&")}` : urlLookup;
+      const res = await fetch(lookupURL, { method: "GET", cache: "no-store" });
+      const j = await res.json().catch(() => ({} as any));
+      return { res, j, url: lookupURL };
+    };
+
+    let { res: lookupRes, j: lookup, url: lookupURL } = await lookupOnce();
+    if (!lookup?.email) {
+      await delay(1200);
+      ({ res: lookupRes, j: lookup, url: lookupURL } = await lookupOnce());
+    }
+
+    const toEmail = String(lookup?.email || "").trim();
+    const subject = String(lookup?.subject || "").trim(); // ALWAYS forward subject
+    const textRaw = String(lookup?.text || "");
+    const threadId = String(lookup?.threadId || objectId || "").trim();
+
+    const alias = toEmail && subject ? `hsu:${toEmail.toLowerCase()}::${subjectRoot(subject).toLowerCase()}` : "";
+
+    console.info(
+      "[webhook] lookup_ok",
+      JSON.stringify({ email: toEmail || null, subject: subject || "(no subject)", threadId: threadId || "(none)" })
+    );
+
+    if (!toEmail) {
+      console.info(
+        "[webhook] exit {",
+        "reason: 'no_email_lookup_failed',",
+        "extra:",
+        JSON.stringify({ objectId, changeFlag: ev?.changeFlag || "" }),
+        "}"
+      );
+      return ok({ ignored: true, reason: "no_email_lookup_failed", extra: { objectId, changeFlag: ev?.changeFlag || "" } });
+    }
+
+    // Build orchestrate payload — subject is ALWAYS included
+    const orchBody = {
+      mode: "ai" as const,
+      toEmail,
+      subject: subject || "(no subject)",
+      text: textRaw || "",
+      threadId: threadId ? `hs:${threadId}` : undefined, // primary memory key
+      dryRun: false,
+    };
+
+    console.info(
+      "[orchestrate] msgraph/send { to:",
+      toEmail,
+      ", dryRun: false , threadId:",
+      orchBody.threadId || "<none>",
+      ", alias:",
+      alias || "<none>",
+      ", inReplyTo:",
+      "none",
+      "}"
+    );
+
+    const orchRes = await fetch(urlOrchestrate, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(orchBody),
       cache: "no-store",
-     body: JSON.stringify({
-  mode: "ai",
-  toEmail: toEmail,
-  subject: subject || "(no subject)",
-  text: text || "",
-  // use the HubSpot conversation as the canonical thread key
-  threadId: `hs:${objectId}`,
-  // (optional context bucket; fine to keep empty for now)
-  threadMsgs: [],
-  inReplyTo: rawMessageId || undefined,
-  dryRun: false, // LIVE SEND
-  hubspot: { objectId },
-}),
-
     });
-    const ai = await aiRes.json().catch(() => ({}));
 
-    log.info("[webhook] AI ok", j({ to: toEmail, status: aiRes.status, ms: Date.now() - t0 }));
-    return NextResponse.json({ ok: true, to: toEmail, aiStatus: aiRes.status, ai }, { status: 200 });
+    const ms = Date.now();
+    console.info(
+      "[webhook] AI ok",
+      JSON.stringify({ to: toEmail, status: orchRes.status, ms: ms % 100000 }) // short ms tag
+    );
+
+    return ok({ status: orchRes.status });
   } catch (e: any) {
-    log.error("[webhook] AI exception", e?.message || String(e));
-    return NextResponse.json({ ok: false, error: "ai_exception", message: e?.message || String(e) });
+    console.error("[webhook] exception", e?.message || e);
+    return err("webhook_exception", String(e?.message || e));
   }
 }
