@@ -1,7 +1,11 @@
 // app/api/ai/orchestrate/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
-import { one } from "@/lib/db"; // <— NEW: DB helper
+import { one } from "@/lib/db";
+// ⬅️ NEW: bring in your HTML email template (present in your zip)
+// We assume it exports a function that returns an HTML string;
+// we pass a rich object, but the template can safely ignore extras.
+import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -63,7 +67,6 @@ function grabQty(t: string) {
     t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
   return m ? Number(m[1]) : undefined;
 }
-/* Density expansion */
 function grabDensity(t: string) {
   const withUnit = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#|pcf)\b/);
   if (withUnit) return withUnit[1] + "lb";
@@ -247,9 +250,7 @@ function renderQAAskOnlyMissing(f: Mem) {
   if ((f.cavityCount ?? 0) > 0 && !(Array.isArray(f.cavityDims) && f.cavityDims.length)) {
     missing.push("Cavity sizes");
   }
-
   if (!missing.length) return "Great — I have everything I need. I’ll run pricing now and follow up shortly.";
-
   return missing.map(qaLineAsk).join("\n");
 }
 
@@ -346,17 +347,12 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 /* ===================== DB enrichment hook ===================== */
 async function enrichFromDB(facts: Mem): Promise<Mem> {
   try {
-    // Only enrich when we have a material but no explicit density from the user
     if (!facts.material || facts.density) return facts;
 
     const mat = String(facts.material || "").toUpperCase();
     const like = mat === "PE" ? "%pe%" : mat === "EPE" ? "%epe%" : mat === "PU" ? "%pu%" : `%${mat.toLowerCase()}%`;
-
-    // Prefer 1.7 for PE when available, else lowest density for that material
     const target = mat === "PE" ? 1.7 : null;
 
-    // Build query with optional target bias
-    // NOTE: materials schema: id, name, density_lb_ft3, active, etc.
     let row:
       | { id: number; name: string; density_lb_ft3: number | null }
       | null = null;
@@ -368,9 +364,7 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
         FROM materials
         WHERE active = true
           AND density_lb_ft3 IS NOT NULL
-          AND (
-            name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1
-          )
+          AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
         ORDER BY ABS(density_lb_ft3 - $2), density_lb_ft3 ASC
         LIMIT 1
         `,
@@ -383,9 +377,7 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
         FROM materials
         WHERE active = true
           AND density_lb_ft3 IS NOT NULL
-          AND (
-            name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1
-          )
+          AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
         ORDER BY density_lb_ft3 ASC
         LIMIT 1
         `,
@@ -403,7 +395,7 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
     }
     return next;
   } catch {
-    return facts; // never block on enrichment
+    return facts;
   }
 }
 
@@ -453,7 +445,7 @@ export async function POST(req: NextRequest) {
     // bump turn counter (persist only if we have a thread key)
     merged.__turnCount = (merged.__turnCount || 0) + 1;
 
-    // NEW: DB enrichment
+    // DB enrichment (fills density/material_id when possible)
     merged = await enrichFromDB(merged);
 
     // Persist facts
@@ -462,18 +454,79 @@ export async function POST(req: NextRequest) {
     // LLM selection (hybrid)
     const llmSelected = chooseModel(process.env.ALEXIO_LLM_MODE, lastText, merged);
 
-    // Compose human Q&A body — opener from LLM (selected), questions only for missing fields
+    // Compose text body (always include specs so later turns never “lose” details)
     const context = pickThreadContext(threadMsgs);
     const openerLLM = (await aiOpener(llmSelected, lastText, context)) || chooseOpener(threadId || subject);
-
     const questions = renderQAAskOnlyMissing(merged);
+    const firstReplyExtras = merged.__turnCount === 1 ? "\n\n" + capabilitiesBlurb() : "";
 
-    const firstReplyExtras =
-      merged.__turnCount === 1
-        ? "\n\n" + capabilitiesBlurb()
-        : "";
+    const specs = {
+      dims: merged.dims || null,
+      qty: merged.qty ?? null,
+      material: merged.material || null,
+      density: merged.density || null,
+      cavityCount: merged.cavityCount ?? null,
+      cavityDims: Array.isArray(merged.cavityDims) ? merged.cavityDims : [],
+    };
 
-    const body = `${openerLLM}\n\n${questions}${firstReplyExtras}`;
+    // Plain-text fallback with a Specs echo
+    const textSpecsLines = [
+      specs.dims ? `• Dimensions: ${specs.dims}` : "",
+      specs.qty != null ? `• Quantity: ${specs.qty}` : "",
+      specs.material ? `• Material: ${specs.material}` : "",
+      specs.density ? `• Density: ${specs.density}` : "",
+      specs.cavityCount != null ? `• Cavities: ${specs.cavityCount}` : "",
+      specs.cavityDims && specs.cavityDims.length ? `• Cavity sizes: ${specs.cavityDims.join(", ")}` : "",
+    ].filter(Boolean);
+
+    const textBody =
+      `${openerLLM}\n\n${questions}${firstReplyExtras}` +
+      (textSpecsLines.length
+        ? `\n\n— Specs (parsed) —\n${textSpecsLines.join("\n")}`
+        : "");
+
+    // HTML body using your template (rich, branded)
+    let htmlBody = "";
+    try {
+      htmlBody = String(
+        await (renderQuoteEmail as any)({
+          opener: openerLLM,
+          subject: subject || "Your quote",
+          specs,
+          missing: questions
+            .split("\n")
+            .map((s) => s.replace(/^-+\s?/, "").trim())
+            .filter((s) => !!s && !/^fyi/i.test(s)),
+          includeCapabilities: merged.__turnCount === 1,
+          contextSnippet: context,
+          threadId: threadId || null,
+        }),
+      );
+    } catch {
+      // If template blows up for any reason, fall back to a simple HTML wrapper.
+      const li = textSpecsLines.map((l) => `<li>${l.replace(/^•\s?/, "")}</li>`).join("");
+      const missingHtml = questions
+        .split("\n")
+        .map((l) => `<li>${l.replace(/^-+\s?/, "")}</li>`)
+        .join("");
+      htmlBody = `
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.4;color:#111">
+          <p>${openerLLM}</p>
+          ${missingHtml ? `<ul>${missingHtml}</ul>` : `<p>Great — I have everything I need. I’ll run pricing now and follow up shortly.</p>`}
+          ${li ? `<h3 style="margin-top:16px;margin-bottom:6px">Specs (parsed)</h3><ul>${li}</ul>` : ""}
+          ${merged.__turnCount === 1 ? `
+            <div style="margin-top:10px;color:#444">
+              <strong>FYI — I can also help with:</strong>
+              <ul>
+                <li>Picking foam type/density for your use case</li>
+                <li>Multiple cavities/cutouts (rectangular or round)</li>
+                <li>Attaching sketches or simple drawings to speed quoting</li>
+                <li>Breaking out quantities for price breaks</li>
+              </ul>
+            </div>` : ""}
+        </div>
+      `;
+    }
 
     // Recipient guardrails
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
@@ -509,7 +562,9 @@ export async function POST(req: NextRequest) {
         mode: "dryrun",
         toEmail,
         subject: p.subject || "Quote",
-        preview: body.slice(0, 900),
+        preview: textBody.slice(0, 900),
+        htmlPreview: htmlBody.slice(0, 900),
+        specs,
         facts: merged,
         mem: { threadId: String(threadId), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         inReplyTo: inReplyTo || null,
@@ -526,7 +581,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         toEmail,
         subject: p.subject || "Re: your foam quote request",
-        text: body, // plain text; msgraph route wraps to HTML
+        text: textBody,     // plain fallback
+        html: htmlBody,     // NEW: rich HTML template body
         inReplyTo: inReplyTo || null,
         dryRun: false,
       }),
@@ -551,6 +607,7 @@ export async function POST(req: NextRequest) {
       result: sent?.result || null,
       messageId: sent?.messageId || null,
       internetMessageId: sent?.internetMessageId || null,
+      specs,
       facts: merged,
       store: LAST_STORE,
       llm: llmSelected,
