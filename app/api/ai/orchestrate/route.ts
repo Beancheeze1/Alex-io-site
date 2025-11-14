@@ -87,13 +87,16 @@ function grabDims(raw: string) {
  *  - quantity 250 / quantity is 250 / quantity of 250
  *  - 250 pcs / 250 pieces / 250 pc
  *  - 250 12"x12"x3" pieces of foam
+ *  - change qty to 300 / change quantity to 300 / qty to 300
  */
 function grabQty(raw: string) {
   const t = raw.toLowerCase();
 
   let m =
-    t.match(/\bqty\s*(?:is|=|of)?\s*(\d{1,6})\b/) ||
-    t.match(/\bquantity\s*(?:is|=|of)?\s*(\d{1,6})\b/) ||
+    t.match(/\bqty\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
+    t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
+    t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
+    t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
     t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
 
   if (m) return Number(m[1]);
@@ -250,7 +253,7 @@ function extractLabeledLines(s: string) {
     }
 
     // Qty labels
-    m = t.match(/^(?:qty|quantity)\s*(?:is|=|of)?\s*(\d{1,6})\b/);
+    m = t.match(/^(?:qty|quantity)\s*(?:is|=|of|to)?\s*(\d{1,6})\b/);
     if (m) {
       out.qty = Number(m[1]);
       continue;
@@ -478,11 +481,7 @@ async function aiOpener(model: string, lastInbound: string, context: string): Pr
 
 /* ===================== NEW: LLM-assisted parsing ===================== */
 
-async function aiParseFacts(
-  model: string,
-  body: string,
-  subject: string,
-): Promise<Mem> {
+async function aiParseFacts(model: string, body: string, subject: string): Promise<Mem> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return {};
   if (!body && !subject) return {};
@@ -791,11 +790,11 @@ export async function POST(req: NextRequest) {
     // LLM-assisted parsing to fill any remaining gaps (mini-only, no guessing)
     const needsLLM =
       (!!process.env.OPENAI_API_KEY &&
-        ( !newly.dims ||
+        (!newly.dims ||
           !newly.qty ||
           !newly.material ||
           !newly.density ||
-          newly.cavityCount === undefined )) &&
+          newly.cavityCount === undefined)) &&
       (lastText.length + subject.length) < 4000;
 
     if (needsLLM) {
@@ -808,6 +807,29 @@ export async function POST(req: NextRequest) {
     // Load + merge with prior facts
     let loaded: Mem = {};
     if (threadKey) loaded = await loadFacts(threadKey);
+
+    // NEW: multi-turn helper —
+    // if we already have an outside size, and the new message mentions a cavity
+    // and contains a bare LxWxH, treat that new size as a cavity dim instead
+    // of overwriting the outer dims.
+    if (loaded && loaded.dims && newly.dims && newly.dims !== loaded.dims) {
+      const lower = lastText.toLowerCase();
+      const cavityCtx = /\b(cavity|cavities|pocket|pockets|cut[- ]?out|cutouts?)\b/.test(lower);
+      const outsideCtx = /\b(outside|overall|finished)\s+(size|dimension|dimensions)\b/.test(lower);
+      if (cavityCtx && !outsideCtx) {
+        const prevCav = Array.isArray(loaded.cavityDims) ? loaded.cavityDims.slice() : [];
+        const nextCav = Array.isArray(newly.cavityDims) ? newly.cavityDims.slice() : [];
+        const combined: string[] = [...prevCav];
+
+        const maybeNew = [newly.dims, ...nextCav];
+        for (const cd of maybeNew) {
+          if (cd && !combined.includes(cd)) combined.push(cd);
+        }
+
+        newly.cavityDims = combined;
+        delete (newly as any).dims; // keep original outer dims from loaded
+      }
+    }
 
     const carry = {
       __lastMessageId: loaded?.__lastMessageId || "",
