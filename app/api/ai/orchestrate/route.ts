@@ -226,7 +226,9 @@ function extractLabeledLines(s: string) {
         for (const tok of tokens) {
           const tokT = tok.trim();
           const md =
-            tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
+            tokT.match(
+              /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+            ) ||
             tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
           if (md) {
             addCavity(`Ø${md[1]}x${md[2]}`);
@@ -291,7 +293,9 @@ function extractLabeledLines(s: string) {
       for (const tok of tokens) {
         const tokT = tok.trim();
         const md =
-          tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
+          tokT.match(
+            /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+          ) ||
           tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
         if (md) {
           addCavity(`Ø${md[1]}x${md[2]}`);
@@ -312,9 +316,14 @@ function extractLabeledLines(s: string) {
     if (inlineCav) addCavity(inlineCav[1]);
 
     const cavDiaDepth = t.match(
-      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
+      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
     );
     if (cavDiaDepth) addCavity(`Ø${cavDiaDepth[1]}x${cavDiaDepth[2]}`);
+  }
+
+  // If we clearly have a list of cavity sizes but no count, sync count to list length
+  if (Array.isArray(out.cavityDims) && out.cavityDims.length && out.cavityCount === undefined) {
+    out.cavityCount = out.cavityDims.length;
   }
 
   return out;
@@ -354,10 +363,14 @@ function extractFreeText(s = ""): Mem {
     if (singleEach) out.cavityDims = [normDims(singleEach[1])];
   }
 
-  // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1"
+  // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1", "6 inch round x 1 deep"
   const roundCav =
-    lower.match(/(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:diameter|dia)\b.*?(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:deep|depth)/i) ||
-    lower.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
+    lower.match(
+      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b.*?(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)/i,
+    ) ||
+    lower.match(
+      /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+    );
   if (roundCav) {
     const list = (out.cavityDims as string[] | undefined) || [];
     list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
@@ -365,12 +378,17 @@ function extractFreeText(s = ""): Mem {
   }
 
   const cavDiaDepth = lower.match(
-    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
+    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
   );
   if (cavDiaDepth) {
     const list = (out.cavityDims as string[] | undefined) || [];
     list.push(`Ø${cavDiaDepth[1]}x${cavDiaDepth[2]}`);
     out.cavityDims = list;
+  }
+
+  // If we clearly have a list of cavity sizes but no count, sync count to list length
+  if (Array.isArray(out.cavityDims) && out.cavityDims.length && out.cavityCount === undefined) {
+    out.cavityCount = out.cavityDims.length;
   }
 
   return compact(out);
@@ -817,7 +835,7 @@ export async function POST(req: NextRequest) {
       const cavityCtx = /\b(cavity|cavities|pocket|pockets|cut[- ]?out|cutouts?)\b/.test(lower);
       const outsideCtx = /\b(outside|overall|finished)\s+(size|dimension|dimensions)\b/.test(lower);
       if (cavityCtx && !outsideCtx) {
-                const prevCav = Array.isArray(loaded.cavityDims) ? loaded.cavityDims.slice() : [];
+        const prevCav = Array.isArray(loaded.cavityDims) ? loaded.cavityDims.slice() : [];
         const nextCav = Array.isArray(newly.cavityDims) ? newly.cavityDims.slice() : [];
         const combined: string[] = [...prevCav];
 
@@ -834,7 +852,6 @@ export async function POST(req: NextRequest) {
         }
 
         delete (newly as any).dims; // keep original outer dims from loaded
-
       }
     }
 
