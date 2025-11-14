@@ -30,7 +30,9 @@ function err(error: string, detail?: any) {
 function compact<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(obj || {})) {
-    if (v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "")) out[k] = v;
+    if (v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "")) {
+      out[k] = v;
+    }
   }
   return out as T;
 }
@@ -74,7 +76,7 @@ function grabDims(raw: string) {
     .replace(/\s+/g, " ");
 
   const m = cleaned.match(
-    /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/
+    /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/,
   );
   return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
 }
@@ -92,15 +94,19 @@ function grabQty(raw: string) {
   let m =
     t.match(/\bqty\s*(?:is|=|of)?\s*(\d{1,6})\b/) ||
     t.match(/\bquantity\s*(?:is|=|of)?\s*(\d{1,6})\b/) ||
-    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?)\b/);
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
 
   if (m) return Number(m[1]);
 
   // Handle “quantity of 250 12"x12"x3" pieces of foam”
   const norm = t.replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/g, "$1 "); // strip quotes before x
   m = norm.match(
-    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)(?:\s*(?:pcs?|pieces?))\b/
+    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)(?:\s*(?:pcs?|pieces?))\b/,
   );
+  if (m) return Number(m[1]);
+
+  // Fallback: “for 250 pieces”, “for 250”
+  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?)?\b/);
   if (m) return Number(m[1]);
 
   return undefined;
@@ -143,11 +149,97 @@ function extractLabeledLines(s: string) {
     out.cavityDims = list;
   };
 
-  for (const raw of lines) {
+  let inCutouts = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
     const line = raw.trim().replace(/^-\s*/, "").replace(/^•\s*/, "");
     const t = line.toLowerCase();
 
-    // Dimensions / size labels
+    if (!t) continue;
+
+    // Section headers
+    if (/^cutouts?$/i.test(line)) {
+      inCutouts = true;
+      continue;
+    }
+
+    // Handle 2-line table cells: "Quantity" \n "250"
+    const nextRaw = lines[i + 1] ?? "";
+    const next = nextRaw.trim();
+    const nextLower = next.toLowerCase();
+
+    // Outside size (dimensions broken into next line)
+    if (/^outside\s*size$/i.test(line) && next) {
+      const dims = grabDims(nextLower) || grabDims(line + " " + nextLower);
+      if (dims) {
+        out.dims = normDims(dims);
+        i++; // consume next line
+        continue;
+      }
+    }
+
+    // Quantity  (label then numeric on next line)
+    if (/^quantity$/i.test(line) && /^\d{1,6}\b/.test(nextLower)) {
+      out.qty = Number(nextLower.match(/(\d{1,6})/)![1]);
+      i++;
+      continue;
+    }
+
+    // Density  (label then value on next line)
+    if (/^density$/i.test(line) && nextLower) {
+      const dens = grabDensity(nextLower);
+      if (dens) {
+        out.density = dens;
+        i++;
+        continue;
+      }
+    }
+
+    // Foam family (PE/EPE/PU on next line)
+    if (/^foam\s*family$/i.test(line) && nextLower) {
+      const mat = grabMaterial(nextLower);
+      if (mat) {
+        out.material = mat;
+        i++;
+        continue;
+      }
+    }
+
+    // Cutouts section lines: Count / Sizes
+    if (inCutouts) {
+      // "Count: 1"
+      let m = t.match(/^count\s*[:\-]\s*(\d{1,4})\b/);
+      if (m) {
+        out.cavityCount = Number(m[1]);
+        continue;
+      }
+
+      // "Sizes: ø6x1" or "Sizes: Ø6 x 1"
+      m = t.match(/^sizes?\s*[:\-]\s*(.+)$/);
+      if (m) {
+        const part = m[1].replace(/\beach\b/gi, "");
+        const tokens = part.split(/[,;]+/);
+        for (const tok of tokens) {
+          const tokT = tok.trim();
+          const md =
+            tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
+            tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
+          if (md) {
+            addCavity(`Ø${md[1]}x${md[2]}`);
+            continue;
+          }
+          const dd = grabDims(tokT);
+          if (dd) {
+            addCavity(dd);
+            continue;
+          }
+        }
+        continue;
+      }
+    }
+
+    // Single-line dimension / size labels (original logic)
     let m =
       t.match(/^(?:finished|overall|outside)?\s*(?:size|dimensions?)\s*[:\-]\s*(.+)$/) ||
       t.match(/^dims?\s*[:\-]\s*(.+)$/);
@@ -182,7 +274,7 @@ function extractLabeledLines(s: string) {
       continue;
     }
     m = t.match(
-      /^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b/
+      /^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b/,
     );
     if (m) {
       out.cavityCount = WORD_NUM[m[1]];
@@ -217,7 +309,7 @@ function extractLabeledLines(s: string) {
     if (inlineCav) addCavity(inlineCav[1]);
 
     const cavDiaDepth = t.match(
-      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/
+      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
     );
     if (cavDiaDepth) addCavity(`Ø${cavDiaDepth[1]}x${cavDiaDepth[2]}`);
   }
@@ -244,7 +336,7 @@ function extractFreeText(s = ""): Mem {
   const countNum = lower.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
   if (countNum) out.cavityCount = Number(countNum[1]);
   const countWord = lower.match(
-    /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/,
   );
   if (countWord) out.cavityCount = WORD_NUM[countWord[1]];
 
@@ -270,7 +362,7 @@ function extractFreeText(s = ""): Mem {
   }
 
   const cavDiaDepth = lower.match(
-    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/
+    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
   );
   if (cavDiaDepth) {
     const list = (out.cavityDims as string[] | undefined) || [];
@@ -384,6 +476,91 @@ async function aiOpener(model: string, lastInbound: string, context: string): Pr
   }
 }
 
+/* ===================== NEW: LLM-assisted parsing ===================== */
+
+async function aiParseFacts(
+  model: string,
+  body: string,
+  subject: string,
+): Promise<Mem> {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) return {};
+  if (!body && !subject) return {};
+  try {
+    const prompt = `
+You are a careful parser for foam quote emails.
+
+Extract ONLY information that is **explicitly** stated in the email or subject.
+Do NOT guess or infer anything that is not clearly written.
+
+Return a JSON object with these keys:
+- "dims": string | null         // outside part size like "12x12x3" (inches)
+- "qty": number | null          // quantity of parts to price
+- "material": "PE" | "EPE" | "PU" | null
+- "density": string | null      // like "1.7lb", "2lb"
+- "cavityCount": number | null  // how many cavities/pockets/cutouts
+- "cavityDims": string[] | null // each like "2x3x1" or "Ø6x1"
+
+Rules:
+- Only fill a field if you can point to the exact words in the text.
+- If you are not sure, use null.
+- For dimensions, convert 12" x 12" x 3" or 12 × 12 × 3 in to "12x12x3".
+- For round cavities, convert 6" diameter x 1" deep to "Ø6x1".
+- For density, just use the number with "lb" suffix (e.g., "1.7lb").
+
+Return ONLY the JSON, no explanation.
+
+Subject:
+${subject || "(none)"}
+
+Body:
+${body || "(none)"}
+`.trim();
+
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        input: prompt,
+        max_output_tokens: 180,
+      }),
+      cache: "no-store",
+    });
+
+    const raw = await r.text();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) return {};
+    const jsonSlice = raw.slice(start, end + 1);
+    const parsed = JSON.parse(jsonSlice);
+
+    const out: Mem = {};
+    if (parsed.dims && typeof parsed.dims === "string") out.dims = normDims(parsed.dims);
+    if (typeof parsed.qty === "number" && parsed.qty > 0) out.qty = parsed.qty;
+    if (typeof parsed.material === "string") {
+      const m = parsed.material.toUpperCase();
+      if (m === "PE" || m === "EPE" || m === "PU") out.material = m;
+    }
+    if (typeof parsed.density === "string" && parsed.density.trim()) {
+      out.density = parsed.density.trim();
+    }
+    if (typeof parsed.cavityCount === "number" && parsed.cavityCount >= 0) {
+      out.cavityCount = parsed.cavityCount;
+    }
+    if (Array.isArray(parsed.cavityDims)) {
+      const cleaned = parsed.cavityDims
+        .filter((x: any) => typeof x === "string" && x.trim())
+        .map((x: string) => normDims(x));
+      if (cleaned.length) out.cavityDims = cleaned;
+    }
+
+    return compact(out);
+  } catch {
+    return {};
+  }
+}
+
 /* ===================== Hybrid LLM selection ===================== */
 
 function scoreAmbiguity(lastText: string, facts: Mem): number {
@@ -408,7 +585,7 @@ function scoreAmbiguity(lastText: string, facts: Mem): number {
 function chooseModel(
   modeEnv: string | undefined,
   lastText: string,
-  facts: Mem
+  facts: Mem,
 ): "gpt-4.1-mini" | "gpt-4.1" {
   const force = (process.env.ALEXIO_LLM_FORCE || "").toLowerCase(); // "mini" | "full" | ""
   if (force === "mini") return "gpt-4.1-mini";
@@ -433,13 +610,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 }
 
 /* ===================== DB enrichment hook (stronger resolver) ===================== */
-// ...  ⚠️  Everything from here down is identical to the version you pasted.
-// I’m leaving it as-is to keep Path-A minimal.
-// (enrichFromDB, calc fetcher, parse(), and POST handler)
-// -------------------------------------------------------------------
 
-
-/* ===================== DB enrichment hook (stronger resolver) ===================== */
 async function enrichFromDB(facts: Mem): Promise<Mem> {
   try {
     const next: Mem = { ...facts };
@@ -614,8 +785,25 @@ export async function POST(req: NextRequest) {
 
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
-    // Parse current turn
-    const newly = extractAllFromTextAndSubject(lastText, subject);
+    // Parse current turn (rule-based)
+    let newly = extractAllFromTextAndSubject(lastText, subject);
+
+    // LLM-assisted parsing to fill any remaining gaps (mini-only, no guessing)
+    const needsLLM =
+      (!!process.env.OPENAI_API_KEY &&
+        ( !newly.dims ||
+          !newly.qty ||
+          !newly.material ||
+          !newly.density ||
+          newly.cavityCount === undefined )) &&
+      (lastText.length + subject.length) < 4000;
+
+    if (needsLLM) {
+      const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
+      if (llmFacts && Object.keys(llmFacts).length) {
+        newly = mergeFacts(newly, llmFacts);
+      }
+    }
 
     // Load + merge with prior facts
     let loaded: Mem = {};
@@ -638,7 +826,7 @@ export async function POST(req: NextRequest) {
     // Persist facts
     if (threadKey) await saveFacts(threadKey, merged);
 
-    // LLM selection (hybrid)
+    // LLM selection (hybrid) – used for openers, not parsing
     const llmSelected = chooseModel(process.env.ALEXIO_LLM_MODE, lastText, merged);
 
     // Compose text body (always include specs so later turns never “lose” details)
