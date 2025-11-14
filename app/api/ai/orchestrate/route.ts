@@ -34,6 +34,8 @@ function compact<T extends Record<string, any>>(obj: T): T {
   }
   return out as T;
 }
+
+/** Merge while ignoring empty/undefined values from the right */
 function mergeFacts(a: Mem, b: Mem): Mem {
   return { ...(a || {}), ...compact(b || {}) };
 }
@@ -51,101 +53,90 @@ function pickThreadContext(threadMsgs: any[] = []): string {
 /* ===================== Parsing helpers (expanded) ===================== */
 
 function normDims(s: string) {
-  return s
-    .replace(/\s+/g, "")
-    .replace(/×/g, "x")
-    .replace(/by/gi, "x")
-    .replace(/"+$/, "")
-    .toLowerCase();
+  return s.replace(/\s+/g, "").replace(/×/g, "x").replace(/"+$/, "").toLowerCase();
 }
 
-// 12 x 12 x 3, 12×12×3, 12 by 12 by 3, with optional “in/inch/thick”
-function grabDims(t: string) {
-  const m =
+/** Very flexible dimension extractor: handles lots of formats */
+function grabDimsFlexible(t: string): string | undefined {
+  // 1) Plain 12x12x3 or 12 x 12 x 3
+  let m =
     t.match(
-      /\b(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|thick|"))?\b/i,
-    ) ||
-    t.match(
-      /\bsize\s*(?:is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)/i,
+      /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/i,
     );
-  return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
-}
+  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
 
-// ---------- QUANTITY (more variations) ----------
-
-function grabQty(t: string) {
-  let m: RegExpMatchArray | null;
-
-  // 1) “qty 250”, “q’ty 250”, “qty: 250”
-  m =
-    t.match(/\bq(?:ty|uantity|['’]ty)\s*[:=]?\s*(\d{1,6})\b/) ||
-    t.match(/\bqty\.?\s*(\d{1,6})\b/);
-  if (m) return Number(m[1]);
-
-  // 2) “quantity 250”
-  m = t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/);
-  if (m) return Number(m[1]);
-
-  // 3) “quantity of 250”, “Quantity is 250”
-  m =
-    t.match(/\bquantity\s+(?:of\s+)?(\d{1,6})\b/) ||
-    t.match(/\bquantity\s+(?:is|=)\s*(\d{1,6})\b/);
-  if (m) return Number(m[1]);
-
-  // 4) “250 pcs”, “250 pieces/parts/units/sets”
+  // 2) L=12 W=12 H=3 or L:12 W:12 H:3
   m = t.match(
-    /\b(\d{1,6})\s*(?:pcs?|pieces?|parts?|units?|sets?)\b/,
+    /\b[lL]\s*[:=]?\s*(\d+(?:\.\d+)?)[^\d]+[wW]\s*[:=]?\s*(\d+(?:\.\d+)?)[^\d]+[hH]\s*[:=]?\s*(\d+(?:\.\d+)?)/,
   );
-  if (m) return Number(m[1]);
+  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
 
-  // 5) “need 250 pieces”, “run 250 pcs”, “order 250 units”
+  // 3) 12L x 12W x 3H
   m = t.match(
-    /\b(?:need|for|run|order|quote|doing|looking\s+for)\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?|units?|sets?)?\b/,
+    /\b(\d+(?:\.\d+)?)\s*[lL]\b[^\d]+(\d+(?:\.\d+)?)\s*[wW]\b[^\d]+(\d+(?:\.\d+)?)\s*[hH]\b/,
   );
-  if (m) return Number(m[1]);
+  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
 
-  // 6) “a run of 250”, “a qty of 250”
-  m = t.match(/\b(?:run|lot|batch|qty)\s+of\s+(\d{1,6})\b/);
-  if (m) return Number(m[1]);
+  // 4) "12 long x 12 wide x 3 tall" or "12 length x 12 width x 3 height"
+  m = t.match(
+    /(\d+(?:\.\d+)?)\s*(?:l|long|length)\b[^\d]+(\d+(?:\.\d+)?)\s*(?:w|wide|width)\b[^\d]+(\d+(?:\.\d+)?)(?:\s*(?:h|high|height|tall)\b)?/i,
+  );
+  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
+
+  // 5) "finished dimensions are 12\"x12\"x3\"" etc. (already covered by #1, but keep a direct shot)
+  m = t.match(
+    /dimensions?[^0-9]{0,12}(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?/i,
+  );
+  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
 
   return undefined;
 }
 
-// ---------- DENSITY (more forgiving) ----------
+function grabDims(t: string) {
+  return grabDimsFlexible(t);
+}
+
+/** Quantity: try to catch LOTS of styles */
+function grabQty(t: string) {
+  let m =
+    // QTY: 250 / qty=250 / QTY-250
+    t.match(/\bqty\s*[:=\-]?\s*(\d{1,6})\b/i) ||
+    // Quantity 250 / Quantity is 250 / Quantity=250 / quantity - 250
+    t.match(/\bquantity\s*(?:is|=|:|-)?\s*(\d{1,6})\b/i) ||
+    // Q'ty 250
+    t.match(/\bq['’]?ty\s*[:=\-]?\s*(\d{1,6})\b/i) ||
+    // 250 pcs / 250 pieces / 250 sets
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|sets?)\b/i);
+
+  if (m) return Number(m[1]);
+
+  // "We need 250", "Need 250 of these"
+  m = t.match(/\bneed\s+(\d{1,6})\b/i);
+  if (m) return Number(m[1]);
+
+  // "Please quote 250 12x12x3 pieces"
+  m = t.match(
+    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\s*(?:pcs?|pieces?|sets?)\b/i,
+  );
+  if (m) return Number(m[1]);
+
+  return undefined;
+}
 
 function grabDensity(t: string) {
-  let m: RegExpMatchArray | null;
-
-  // 1) Numbers followed by unit: “1.7#”, “1.7 lb”, “1.7 lbs”, “1.7 pcf”
-  m = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb\/?ft?3|lb(?:s)?|pcf|#)\b/);
-  if (m) return `${m[1]}lb`;
-
-  // 2) “#1.7 PE”, “# 1.7” style
-  m = t.match(/#\s*(\d+(?:\.\d+)?)/);
-  if (m) return `${m[1]}lb`;
-
-  // 3) “foam density 1.7”, “density 1.7”, “pcf 1.7”
-  m =
-    t.match(/(?:density|foam\s*density|pcf)\D{0,10}(\d+(?:\.\d+)?)/) ||
-    t.match(/\b(\d+(?:\.\d+)?)\s*pcf\b/);
-  if (m) return `${m[1]}lb`;
-
-  return undefined;
+  const m =
+    // 1.7 pcf / 1.7 lb/ft3 / 1.7 lb
+    t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb\/?ft?3|lb(?:s)?|#|pcf|pounds?\s+per\s+cf)\b/i) ||
+    // "density 1.7"
+    t.match(/(?:density|foam\s*density|pcf)\D{0,12}(\d+(?:\.\d+)?)/i);
+  return m ? `${m[1]}lb` : undefined;
 }
 
-// ---------- MATERIAL (extra synonyms) ----------
-
 function grabMaterial(t: string) {
-  // PE / polyethylene
-  if (/\bpolyethylene\b|\bpe\b|\bpe\s+foam\b|\bpoly\s+foam\b/.test(t)) return "PE";
-  // EPE
-  if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) return "EPE";
-  // PU / polyurethane / urethane
-  if (/\bpolyurethane\b|\bpu\b|\burethane\s+foam\b/.test(t)) return "PU";
-  // Crosslink / XLPE
-  if (/\bxlpe\b|\bcross[-\s]?link(?:ed)?\s+foam\b/.test(t)) return "XLPE";
-  // EVA
-  if (/\beva\s+foam\b|\beva\b/.test(t)) return "EVA";
+  if (/\bpolyethylene\b|\bpe\b/i.test(t)) return "PE";
+  if (/\bexpanded\s*pe\b|\bepe\b/i.test(t)) return "EPE";
+  if (/\bpolyurethane\b|\bpu\b|\burethane\b/i.test(t)) return "PU";
+  if (/\bxlpe\b|\bcross[-\s]?link(ed)?\b/i.test(t)) return "XLPE";
   return undefined;
 }
 
@@ -179,12 +170,21 @@ function extractLabeledLines(s: string) {
 
     let m = t.match(/^dimensions?\s*[:\-]\s*(.+)$/);
     if (m) {
-      const dims = grabDims(m[1]);
+      const dims = grabDimsFlexible(m[1]);
       if (dims) out.dims = normDims(dims);
       continue;
     }
 
-    m = t.match(/^qty(?:uantity|['’]ty)?\s*[:\-]\s*(\d{1,6})\b/);
+    m = t.match(/^finished\s+dimensions?\s*[:\-]\s*(.+)$/);
+    if (m) {
+      const dims = grabDimsFlexible(m[1]);
+      if (dims) out.dims = normDims(dims);
+      continue;
+    }
+
+    m =
+      t.match(/^qty(?:uantity)?\s*[:=\-]\s*(\d{1,6})\b/) ||
+      t.match(/^quantity\s*(?:is|=|:|-)?\s*(\d{1,6})\b/);
     if (m) {
       out.qty = Number(m[1]);
       continue;
@@ -222,13 +222,15 @@ function extractLabeledLines(s: string) {
       for (const tok of tokens) {
         const tokT = tok.trim();
         const md =
-          tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
+          tokT.match(
+            /[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+          ) ||
           tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
         if (md) {
           addCavity(`Ø${md[1]}x${md[2]}`);
           continue;
         }
-        const dd = grabDims(tokT);
+        const dd = grabDimsFlexible(tokT);
         if (dd) {
           addCavity(dd);
           continue;
@@ -255,7 +257,7 @@ function extractFreeText(s = ""): Mem {
   const t = (s || "").toLowerCase();
   const out: Mem = {};
 
-  const dims = grabDims(t);
+  const dims = grabDimsFlexible(t);
   if (dims) out.dims = normDims(dims);
 
   const qty = grabQty(t);
@@ -281,15 +283,20 @@ function extractFreeText(s = ""): Mem {
     const list = afterEach[1].split(/\s*,\s*/).map(normDims);
     out.cavityDims = list;
   } else {
-    const singleEach = t.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/);
+    const singleEach = t.match(
+      /\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/,
+    );
     if (singleEach) out.cavityDims = [normDims(singleEach[1])];
   }
 
+  // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1"
   const roundCav =
     t.match(
       /(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:diameter|dia)\b.*?(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:deep|depth)/i,
     ) ||
-    t.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
+    t.match(
+      /[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+    );
   if (roundCav) {
     const list = (out.cavityDims as string[] | undefined) || [];
     list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
@@ -418,7 +425,10 @@ function scoreAmbiguity(lastText: string, facts: Mem): number {
   const t = (lastText || "").toLowerCase();
 
   const missing =
-    (facts.dims ? 0 : 1) + (facts.qty ? 0 : 1) + (facts.material ? 0 : 1) + (facts.density ? 0 : 1);
+    (facts.dims ? 0 : 1) +
+    (facts.qty ? 0 : 1) +
+    (facts.material ? 0 : 1) +
+    (facts.density ? 0 : 1);
 
   score += missing;
 
@@ -465,7 +475,13 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
     if (!family) return next;
 
     const like =
-      family === "PE" ? "%pe%" : family === "EPE" ? "%epe%" : family === "PU" ? "%pu%" : `%${family.toLowerCase()}%`;
+      family === "PE"
+        ? "%pe%"
+        : family === "EPE"
+        ? "%epe%"
+        : family === "PU"
+        ? "%pu%"
+        : `%${family.toLowerCase()}%`;
 
     const densMatch = String(facts.density || "").match(/(\d+(?:\.\d+)?)/);
     const target = densMatch ? Number(densMatch[1]) : null;
@@ -487,8 +503,8 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
           id,
           name,
           density_lb_ft3,
-          kerf_waste_pct AS kerf_pct,
-          min_charge_usd AS min_charge
+          kerf_waste_pct AS kerf_pct,      -- real column, aliased
+          min_charge_usd AS min_charge     -- real column, aliased
         FROM materials
         WHERE active = true
           AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
@@ -505,8 +521,8 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
           id,
           name,
           density_lb_ft3,
-          kerf_waste_pct AS kerf_pct,
-          min_charge_usd AS min_charge
+          kerf_waste_pct AS kerf_pct,      -- real column, aliased
+          min_charge_usd AS min_charge     -- real column, aliased
         FROM materials
         WHERE active = true
           AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
@@ -519,6 +535,7 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
 
     if (!row) return next;
 
+    // Fill everything we can, but don't overwrite explicit user input
     if (!next.material_id && row.id) next.material_id = row.id;
     if (!next.material_name && row.name) next.material_name = row.name;
     if (!next.density && row.density_lb_ft3 != null) {
@@ -549,7 +566,11 @@ function densityToPcf(density: string | null) {
   return m ? Number(m[1]) : null;
 }
 
-function specsCompleteForQuote(s: { dims: string | null; qty: number | null; material_id: number | null }) {
+function specsCompleteForQuote(s: {
+  dims: string | null;
+  qty: number | null;
+  material_id: number | null;
+}) {
   return !!(s.dims && s.qty && s.material_id);
 }
 
@@ -612,14 +633,18 @@ export async function POST(req: NextRequest) {
     const lastText = String(p.text || "");
     const subject = String(p.subject || "");
 
+    /** Thread key fallback when no explicit threadId provided */
     const providedThreadId = String(p.threadId ?? "").trim();
     const threadKey =
-      providedThreadId || (subject ? `sub:${subject.toLowerCase().slice(0, 180)}` : "");
+      providedThreadId ||
+      (subject ? `sub:${subject.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 180)}` : "");
 
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
+    // Parse current turn
     const newly = extractAllFromTextAndSubject(lastText, subject);
 
+    // Load + merge with prior facts
     let loaded: Mem = {};
     if (threadKey) loaded = await loadFacts(threadKey);
 
@@ -631,14 +656,19 @@ export async function POST(req: NextRequest) {
 
     let merged = mergeFacts({ ...loaded, ...carry }, newly);
 
+    // bump turn counter (persist only if we have a key)
     merged.__turnCount = (merged.__turnCount || 0) + 1;
 
+    // DB enrichment (fills density/material_id/kerf/min_charge when possible)
     merged = await enrichFromDB(merged);
 
+    // Persist facts
     if (threadKey) await saveFacts(threadKey, merged);
 
+    // LLM selection (hybrid)
     const llmSelected = chooseModel(process.env.ALEXIO_LLM_MODE, lastText, merged);
 
+    // Compose text body (always include specs so later turns never “lose” details)
     const context = pickThreadContext(threadMsgs);
     const openerLLM =
       (await aiOpener(llmSelected, lastText, context)) || chooseOpener(threadKey || subject);
@@ -658,6 +688,7 @@ export async function POST(req: NextRequest) {
       material_id: typeof merged.material_id === "number" ? merged.material_id : null,
     };
 
+    // Plain-text fallback with a Specs echo
     const textSpecsLines = [
       specs.dims ? `• Dimensions: ${specs.dims}` : "",
       specs.qty != null ? `• Quantity: ${specs.qty}` : "",
@@ -675,6 +706,7 @@ export async function POST(req: NextRequest) {
         ? `\n\n— Specs (parsed) —\n${textSpecsLines.join("\n")}`
         : "");
 
+    /* ========= If specs complete, call /api/quotes/calc to get pricing ========= */
     let calc: any = null;
     if (specsCompleteForQuote({ dims: specs.dims, qty: specs.qty, material_id: specs.material_id })) {
       try {
@@ -686,13 +718,18 @@ export async function POST(req: NextRequest) {
           round_to_bf: false,
         });
         if (calc) {
-          const previewTotal = calc.total ?? calc.price_total ?? calc.prelim_total ?? null;
+          const previewTotal =
+            calc.total ?? calc.price_total ?? calc.prelim_total ?? null;
           if (previewTotal != null) {
             textBody += `\n\n— Preliminary total: ${previewTotal}`;
           }
         }
-      } catch {}
+      } catch {
+        // silent fail; we still send a template without pricing
+      }
     }
+
+    /* ========= Map parsed facts + calc to template signature ========= */
 
     const dimsNums = parseDimsNums(specs.dims);
     const densityPcf = densityToPcf(specs.density);
@@ -742,10 +779,12 @@ export async function POST(req: NextRequest) {
         .filter((s) => !!s && !/^fyi/i.test(s)),
     };
 
+    // HTML body from your template
     let htmlBody = "";
     try {
       htmlBody = String(renderQuoteEmail(templateInput as any));
 
+      // Append a small Cutouts section if we have them
       const cavCount = specs.cavityCount ?? null;
       const cavList = Array.isArray(specs.cavityDims) ? specs.cavityDims : [];
       if (cavCount != null || cavList.length > 0) {
@@ -762,12 +801,17 @@ export async function POST(req: NextRequest) {
       htmlBody = `
         <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.4;color:#111">
           <p>${openerLLM}</p>
-          ${missingHtml ? `<ul>${missingHtml}</ul>` : `<p>Great — I have everything I need. I’ll run pricing now and follow up shortly.</p>`}
+          ${
+            missingHtml
+              ? `<ul>${missingHtml}</ul>`
+              : `<p>Great — I have everything I need. I’ll run pricing now and follow up shortly.</p>`
+          }
           ${li ? `<h3 style="margin-top:16px;margin-bottom:6px">Specs (parsed)</h3><ul>${li}</ul>` : ""}
         </div>
       `;
     }
 
+    // Recipient guardrails
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
     const toEmail = String(p.toEmail || "").trim().toLowerCase();
     if (!toEmail)
@@ -782,6 +826,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
     console.info(
@@ -818,11 +863,7 @@ export async function POST(req: NextRequest) {
         },
         calc: calc || null,
         facts: merged,
-        mem: {
-          threadKey: String(threadKey),
-          loadedKeys: Object.keys(loaded),
-          mergedKeys: Object.keys(merged),
-        },
+        mem: { threadKey: String(threadKey), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
         llm: llmSelected,
@@ -837,8 +878,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         toEmail,
         subject: p.subject || "Re: your foam quote request",
-        text: textBody,
-        html: htmlBody,
+        text: textBody, // plain fallback
+        html: htmlBody, // template w/ pricing if available
         inReplyTo: inReplyTo || null,
         dryRun: false,
       }),
@@ -846,6 +887,7 @@ export async function POST(req: NextRequest) {
     });
     const sent = await r.json().catch(() => ({}));
 
+    // Persist outbound IDs for next turn
     if (threadKey && (r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
       const updated = {
         ...merged,
