@@ -66,7 +66,7 @@ function grabQty(t: string) {
   if (m) return Number(m[1]);
   // “250 12x12x3 pieces”
   m = t.match(
-    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)\s*(?:pcs?|pieces?)\b/
+    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)\s*(?:pcs?|pieces?)\b/,
   );
   if (m) return Number(m[1]);
   return undefined;
@@ -86,7 +86,16 @@ function grabMaterial(t: string) {
 
 /** Word numbers like "one cavity" */
 const WORD_NUM: Record<string, number> = {
-  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
 };
 
 function extractLabeledLines(s: string) {
@@ -133,7 +142,9 @@ function extractLabeledLines(s: string) {
       out.cavityCount = Number(m[1]);
       continue;
     }
-    m = t.match(/^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b/);
+    m = t.match(
+      /^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b/,
+    );
     if (m) {
       out.cavityCount = WORD_NUM[m[1]];
       continue;
@@ -146,11 +157,19 @@ function extractLabeledLines(s: string) {
       for (const tok of tokens) {
         const tokT = tok.trim();
         const md =
-          tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
+          tokT.match(
+            /[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+          ) ||
           tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
-        if (md) { addCavity(`Ø${md[1]}x${md[2]}`); continue; }
+        if (md) {
+          addCavity(`Ø${md[1]}x${md[2]}`);
+          continue;
+        }
         const dd = grabDims(tokT);
-        if (dd) { addCavity(dd); continue; }
+        if (dd) {
+          addCavity(dd);
+          continue;
+        }
       }
       continue;
     }
@@ -161,7 +180,7 @@ function extractLabeledLines(s: string) {
     if (inlineCav) addCavity(inlineCav[1]);
 
     const cavDiaDepth = t.match(
-      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/
+      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
     );
     if (cavDiaDepth) addCavity(`Ø${cavDiaDepth[1]}x${cavDiaDepth[2]}`);
   }
@@ -187,7 +206,9 @@ function extractFreeText(s = ""): Mem {
 
   const countNum = t.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
   if (countNum) out.cavityCount = Number(countNum[1]);
-  const countWord = t.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
+  const countWord = t.match(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/,
+  );
   if (countWord) out.cavityCount = WORD_NUM[countWord[1]];
 
   const afterEach = t.match(
@@ -202,18 +223,21 @@ function extractFreeText(s = ""): Mem {
   }
 
   // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1"
-const roundCav =
-  t.match(/(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:diameter|dia)\b.*?(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:deep|depth)/i) ||
-  t.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
-if (roundCav) {
-  const list = (out.cavityDims as string[] | undefined) || [];
-  list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
-  out.cavityDims = list;
-}
-
+  const roundCav =
+    t.match(
+      /(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:diameter|dia)\b.*?(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:deep|depth)/i,
+    ) ||
+    t.match(
+      /[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+    );
+  if (roundCav) {
+    const list = (out.cavityDims as string[] | undefined) || [];
+    list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
+    out.cavityDims = list;
+  }
 
   const cavDiaDepth = t.match(
-    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/
+    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
   );
   if (cavDiaDepth) {
     const list = (out.cavityDims as string[] | undefined) || [];
@@ -348,7 +372,11 @@ function scoreAmbiguity(lastText: string, facts: Mem): number {
   return score; // 0..N
 }
 
-function chooseModel(modeEnv: string | undefined, lastText: string, facts: Mem): "gpt-4.1-mini" | "gpt-4.1" {
+function chooseModel(
+  modeEnv: string | undefined,
+  lastText: string,
+  facts: Mem,
+): "gpt-4.1-mini" | "gpt-4.1" {
   const force = (process.env.ALEXIO_LLM_FORCE || "").toLowerCase(); // "mini" | "full" | ""
   if (force === "mini") return "gpt-4.1-mini";
   if (force === "full") return "gpt-4.1";
@@ -372,6 +400,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 }
 
 /* ===================== DB enrichment hook (stronger resolver) ===================== */
+
 async function enrichFromDB(facts: Mem): Promise<Mem> {
   try {
     const next: Mem = { ...facts };
@@ -380,10 +409,13 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
     if (!family) return next;
 
     const like =
-      family === "PE"  ? "%pe%"  :
-      family === "EPE" ? "%epe%" :
-      family === "PU"  ? "%pu%"  :
-      `%${family.toLowerCase()}%`;
+      family === "PE"
+        ? "%pe%"
+        : family === "EPE"
+        ? "%epe%"
+        : family === "PU"
+        ? "%pu%"
+        : `%${family.toLowerCase()}%`;
 
     const densMatch = String(facts.density || "").match(/(\d+(?:\.\d+)?)/);
     const target = densMatch ? Number(densMatch[1]) : null;
@@ -414,7 +446,7 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
         ORDER BY ABS(density_lb_ft3 - $2), density_lb_ft3 ASC
         LIMIT 1
         `,
-        [like, target]
+        [like, target],
       );
     } else {
       row = await one<MatRow>(
@@ -431,7 +463,7 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
         ORDER BY density_lb_ft3 NULLS LAST, id ASC
         LIMIT 1
         `,
-        [like]
+        [like],
       );
     }
 
@@ -456,12 +488,12 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
   }
 }
 
-
-
 /* ===================== NEW: price fetch helper ===================== */
 
 function parseDimsNums(dims: string | null) {
-  const d = String(dims || "").split("x").map((n) => Number(n));
+  const d = String(dims || "")
+    .split("x")
+    .map((n) => Number(n));
   const [L, W, H] = [d[0] || 0, d[1] || 0, d[2] || 0];
   return { L, W, H };
 }
@@ -470,11 +502,7 @@ function densityToPcf(density: string | null) {
   return m ? Number(m[1]) : null;
 }
 
-function specsCompleteForQuote(s: {
-  dims: string | null;
-  qty: number | null;
-  material_id: number | null;
-}) {
+function specsCompleteForQuote(s: { dims: string | null; qty: number | null; material_id: number | null }) {
   return !!(s.dims && s.qty && s.material_id);
 }
 
@@ -540,8 +568,7 @@ export async function POST(req: NextRequest) {
     /** Thread key fallback when no explicit threadId provided */
     const providedThreadId = String(p.threadId ?? "").trim();
     const threadKey =
-      providedThreadId ||
-      (subject ? `sub:${subject.toLowerCase().slice(0, 180)}` : "");
+      providedThreadId || (subject ? `sub:${subject.toLowerCase().slice(0, 180)}` : "");
 
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
@@ -574,7 +601,8 @@ export async function POST(req: NextRequest) {
 
     // Compose text body (always include specs so later turns never “lose” details)
     const context = pickThreadContext(threadMsgs);
-    const openerLLM = (await aiOpener(llmSelected, lastText, context)) || chooseOpener(threadKey || subject);
+    const openerLLM =
+      (await aiOpener(llmSelected, lastText, context)) || chooseOpener(threadKey || subject);
     const questions = renderQAAskOnlyMissing(merged);
     const firstReplyExtras = merged.__turnCount === 1 ? "\n\n" + capabilitiesBlurb() : "";
 
@@ -588,7 +616,7 @@ export async function POST(req: NextRequest) {
       kerf_pct: typeof merged.kerf_pct === "number" ? merged.kerf_pct : null,
       min_charge: typeof merged.min_charge === "number" ? merged.min_charge : null,
       material_name: merged.material_name || null,
-      material_id: typeof merged.material_id === "number" ? merged.material_id : null, // NEW
+      material_id: typeof merged.material_id === "number" ? merged.material_id : null,
     };
 
     // Plain-text fallback with a Specs echo
@@ -598,7 +626,9 @@ export async function POST(req: NextRequest) {
       specs.material ? `• Material: ${specs.material}` : "",
       specs.density ? `• Density: ${specs.density}` : "",
       specs.cavityCount != null ? `• Cavities: ${specs.cavityCount}` : "",
-      specs.cavityDims && specs.cavityDims.length ? `• Cavity sizes: ${specs.cavityDims.join(", ")}` : "",
+      specs.cavityDims && specs.cavityDims.length
+        ? `• Cavity sizes: ${specs.cavityDims.join(", ")}`
+        : "",
     ].filter(Boolean);
 
     let textBody =
@@ -619,7 +649,6 @@ export async function POST(req: NextRequest) {
           round_to_bf: false,
         });
         if (calc) {
-          // optional: add a one-line teaser to the text fallback
           const previewTotal =
             calc.total ?? calc.price_total ?? calc.prelim_total ?? null;
           if (previewTotal != null) {
@@ -634,9 +663,13 @@ export async function POST(req: NextRequest) {
     const dimsNums = parseDimsNums(specs.dims);
     const densityPcf = densityToPcf(specs.density);
     const qtyNum = Number(specs.qty || 0) || 0;
-    const kerfPct = typeof specs.kerf_pct === "number" ? specs.kerf_pct : (typeof calc?.kerf_pct === "number" ? calc.kerf_pct : 0);
+    const kerfPct =
+      typeof specs.kerf_pct === "number"
+        ? specs.kerf_pct
+        : typeof calc?.kerf_pct === "number"
+        ? calc.kerf_pct
+        : 0;
 
-    // derive CI if calc absent
     const piece_ci_fallback = Math.max(0, dimsNums.L * dimsNums.W * dimsNums.H);
     const order_ci_fallback = piece_ci_fallback * qtyNum;
     const order_ci_waste_fallback = Math.round(order_ci_fallback * (1 + kerfPct / 100));
@@ -675,24 +708,23 @@ export async function POST(req: NextRequest) {
         .filter((s) => !!s && !/^fyi/i.test(s)),
     };
 
-    // 3) HTML body from your template
+    // HTML body from your template
     let htmlBody = "";
     try {
       htmlBody = String(renderQuoteEmail(templateInput as any));
 
-      // === Append a tiny Cutouts section if we parsed any ===
+      // Tiny Cutouts section if we parsed any
       const cavCount = specs.cavityCount ?? null;
       const cavList = Array.isArray(specs.cavityDims) ? specs.cavityDims : [];
-      if ((cavCount != null) || (cavList.length > 0)) {
+      if (cavCount != null || cavList.length > 0) {
         const listHtml = cavList.length ? `<li>Sizes: ${cavList.join(", ")}</li>` : "";
-        const countHtml = (cavCount != null) ? `<li>Count: ${cavCount}</li>` : "";
+        const countHtml = cavCount != null ? `<li>Count: ${cavCount}</li>` : "";
         htmlBody += `
           <h3 style="margin:18px 0 8px 0">Cutouts</h3>
           <ul style="margin:0 0 12px 20px">${countHtml}${listHtml}</ul>
         `;
       }
     } catch {
-      // Fallback tiny HTML if template throws
       const li = textSpecsLines.map((l) => `<li>${l.replace(/^•\s?/, "")}</li>`).join("");
       const missingHtml = templateInput.missing.map((l) => `<li>${l}</li>`).join("");
       htmlBody = `
@@ -708,10 +740,15 @@ export async function POST(req: NextRequest) {
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
     const toEmail = String(p.toEmail || "").trim().toLowerCase();
     if (!toEmail)
-      return err("missing_toEmail", { reason: "Lookup did not produce a recipient; refusing to fall back to mailbox." });
+      return err("missing_toEmail", {
+        reason: "Lookup did not produce a recipient; refusing to fall back to mailbox.",
+      });
     const ownDomain = mailbox.split("@")[1] || "";
     if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
-      return err("bad_toEmail", { toEmail, reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies." });
+      return err("bad_toEmail", {
+        toEmail,
+        reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies.",
+      });
     }
 
     // Thread continuity
@@ -751,7 +788,11 @@ export async function POST(req: NextRequest) {
         },
         calc: calc || null,
         facts: merged,
-        mem: { threadKey: String(threadKey), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
+        mem: {
+          threadKey: String(threadKey),
+          loadedKeys: Object.keys(loaded),
+          mergedKeys: Object.keys(merged),
+        },
         inReplyTo: inReplyTo || null,
         store: LAST_STORE,
         llm: llmSelected,
@@ -766,8 +807,8 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         toEmail,
         subject: p.subject || "Re: your foam quote request",
-        text: textBody,     // plain fallback
-        html: htmlBody,     // template w/ pricing if available
+        text: textBody,
+        html: htmlBody,
         inReplyTo: inReplyTo || null,
         dryRun: false,
       }),

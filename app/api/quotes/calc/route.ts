@@ -28,26 +28,24 @@ function num(v: any): number | null {
 
 /** GET supports:
  *  - plain help (no params)
- *  - ?inspect=1  -> lists matching function signatures in DB
+ *  - ?inspect=1  -> lists calc_foam_quote() function signatures in DB
  */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   if (url.searchParams.get("inspect")) {
-    const rows = await q<any>(`
-  SELECT calc_foam_quote(
-    $1::numeric, $2::numeric, $3::numeric,
-    $4::integer, $5::integer,
-    $6::jsonb, $7::boolean
-  ) AS result;
+    const funcs = await q<{ schema: string; name: string; args: string }>(
       `
+      SELECT n.nspname AS schema,
+             p.proname AS name,
+             pg_get_function_arguments(p.oid) AS args
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE p.proname = 'calc_foam_quote'
+      ORDER BY 1,2;
+      `,
     );
 
-const result = rows[0]?.result || rows[0]?.calc_foam_quote;
-
-    return NextResponse.json({
-  ok: true,
-  calc: result,
-});
+    return NextResponse.json({ ok: true, functions: funcs });
   }
 
   return ok({
@@ -94,14 +92,11 @@ export async function POST(req: NextRequest) {
   if (material_id == null) return bad("missing_or_bad_material_id");
   if (qty == null) return bad("missing_or_bad_qty");
 
-  // Cavities are optional. If provided, ensure string[]
   const cavitiesArr =
     Array.isArray(body.cavities) && body.cavities.length
       ? body.cavities.map((s) => String(s))
       : null;
 
-  // We’ll try a few likely signatures in order.
-  // Each attempt has its own SQL and adjusted params/casts.
   const attempts: Array<{ label: string; sql: string; params: any[] }> = [];
 
   // A) 7-arg: (..., text[], boolean)
@@ -214,11 +209,9 @@ export async function POST(req: NextRequest) {
       tried.push({ label: att.label, ok: false, message: "no rows returned" });
     } catch (e: any) {
       tried.push({ label: att.label, ok: false, message: String(e?.message || e) });
-      // keep trying next variant
     }
   }
 
-  // If all variants failed, surface helpful info + available DB signatures
   const funcs = await q<{ schema: string; name: string; args: string }>(
     `
     SELECT n.nspname AS schema,
@@ -228,7 +221,7 @@ export async function POST(req: NextRequest) {
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE p.proname = 'calc_foam_quote'
     ORDER BY 1,2;
-    `
+    `,
   );
 
   return bad("db_error", { tried, available_functions: funcs }, 500);
