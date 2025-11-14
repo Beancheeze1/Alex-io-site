@@ -201,12 +201,16 @@ function extractFreeText(s = ""): Mem {
     if (singleEach) out.cavityDims = [normDims(singleEach[1])];
   }
 
-  const roundCav = t.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
-  if (roundCav) {
-    const list = (out.cavityDims as string[] | undefined) || [];
-    list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
-    out.cavityDims = list;
-  }
+  // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1"
+const roundCav =
+  t.match(/(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:diameter|dia)\b.*?(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:deep|depth)/i) ||
+  t.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
+if (roundCav) {
+  const list = (out.cavityDims as string[] | undefined) || [];
+  list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
+  out.cavityDims = list;
+}
+
 
   const cavDiaDepth = t.match(
     /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/

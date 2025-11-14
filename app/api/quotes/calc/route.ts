@@ -33,18 +33,21 @@ function num(v: any): number | null {
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   if (url.searchParams.get("inspect")) {
-    const rows = await q<{ schema: string; name: string; args: string }>(
-      `
-      SELECT n.nspname AS schema,
-             p.proname AS name,
-             pg_get_function_arguments(p.oid) AS args
-      FROM pg_proc p
-      JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE p.proname = 'calc_foam_quote'
-      ORDER BY 1,2;
+    const rows = await q<any>(`
+  SELECT calc_foam_quote(
+    $1::numeric, $2::numeric, $3::numeric,
+    $4::integer, $5::integer,
+    $6::jsonb, $7::boolean
+  ) AS result;
       `
     );
-    return ok({ functions: rows });
+
+const result = rows[0]?.result || rows[0]?.calc_foam_quote;
+
+    return NextResponse.json({
+  ok: true,
+  calc: result,
+});
   }
 
   return ok({
