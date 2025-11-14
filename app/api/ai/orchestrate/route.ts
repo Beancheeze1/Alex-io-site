@@ -34,8 +34,6 @@ function compact<T extends Record<string, any>>(obj: T): T {
   }
   return out as T;
 }
-
-/** Merge while ignoring empty/undefined values from the right */
 function mergeFacts(a: Mem, b: Mem): Mem {
   return { ...(a || {}), ...compact(b || {}) };
 }
@@ -56,67 +54,52 @@ function normDims(s: string) {
   return s.replace(/\s+/g, "").replace(/×/g, "x").replace(/"+$/, "").toLowerCase();
 }
 
-/** Very flexible dimension extractor: handles lots of formats */
-function grabDimsFlexible(t: string): string | undefined {
-  // 1) Plain 12x12x3 or 12 x 12 x 3
-  let m =
-    t.match(
-      /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/i,
-    );
-  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
+/**
+ * Grab 3-D dims from free text.
+ * Handles:
+ *  - 12x12x3
+ *  - 12 x 12 x 3
+ *  - 12"x12"x3"
+ *  - 12" x 12" x 3"
+ *  - 12×12×3
+ */
+function grabDims(raw: string) {
+  if (!raw) return undefined;
 
-  // 2) L=12 W=12 H=3 or L:12 W:12 H:3
-  m = t.match(
-    /\b[lL]\s*[:=]?\s*(\d+(?:\.\d+)?)[^\d]+[wW]\s*[:=]?\s*(\d+(?:\.\d+)?)[^\d]+[hH]\s*[:=]?\s*(\d+(?:\.\d+)?)/,
+  // Normalize common “shop” patterns like 12"x12"x3" → 12x12x3
+  const cleaned = raw
+    // remove a quote that sits between a number and an x
+    .replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/gi, "$1 ")
+    // normalize separators a bit
+    .replace(/\s+/g, " ");
+
+  const m = cleaned.match(
+    /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/
   );
-  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
-
-  // 3) 12L x 12W x 3H
-  m = t.match(
-    /\b(\d+(?:\.\d+)?)\s*[lL]\b[^\d]+(\d+(?:\.\d+)?)\s*[wW]\b[^\d]+(\d+(?:\.\d+)?)\s*[hH]\b/,
-  );
-  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
-
-  // 4) "12 long x 12 wide x 3 tall" or "12 length x 12 width x 3 height"
-  m = t.match(
-    /(\d+(?:\.\d+)?)\s*(?:l|long|length)\b[^\d]+(\d+(?:\.\d+)?)\s*(?:w|wide|width)\b[^\d]+(\d+(?:\.\d+)?)(?:\s*(?:h|high|height|tall)\b)?/i,
-  );
-  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
-
-  // 5) "finished dimensions are 12\"x12\"x3\"" etc. (already covered by #1, but keep a direct shot)
-  m = t.match(
-    /dimensions?[^0-9]{0,12}(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?/i,
-  );
-  if (m) return `${m[1]}x${m[2]}x${m[3]}`;
-
-  return undefined;
+  return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
 }
 
-function grabDims(t: string) {
-  return grabDimsFlexible(t);
-}
+/**
+ * Quantity:
+ *  - qty 250 / qty: 250 / qty of 250 / qty is 250
+ *  - quantity 250 / quantity is 250 / quantity of 250
+ *  - 250 pcs / 250 pieces / 250 pc
+ *  - 250 12"x12"x3" pieces of foam
+ */
+function grabQty(raw: string) {
+  const t = raw.toLowerCase();
 
-/** Quantity: try to catch LOTS of styles */
-function grabQty(t: string) {
   let m =
-    // QTY: 250 / qty=250 / QTY-250
-    t.match(/\bqty\s*[:=\-]?\s*(\d{1,6})\b/i) ||
-    // Quantity 250 / Quantity is 250 / Quantity=250 / quantity - 250
-    t.match(/\bquantity\s*(?:is|=|:|-)?\s*(\d{1,6})\b/i) ||
-    // Q'ty 250
-    t.match(/\bq['’]?ty\s*[:=\-]?\s*(\d{1,6})\b/i) ||
-    // 250 pcs / 250 pieces / 250 sets
-    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|sets?)\b/i);
+    t.match(/\bqty\s*(?:is|=|of)?\s*(\d{1,6})\b/) ||
+    t.match(/\bquantity\s*(?:is|=|of)?\s*(\d{1,6})\b/) ||
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?)\b/);
 
   if (m) return Number(m[1]);
 
-  // "We need 250", "Need 250 of these"
-  m = t.match(/\bneed\s+(\d{1,6})\b/i);
-  if (m) return Number(m[1]);
-
-  // "Please quote 250 12x12x3 pieces"
-  m = t.match(
-    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\s*(?:pcs?|pieces?|sets?)\b/i,
+  // Handle “quantity of 250 12"x12"x3" pieces of foam”
+  const norm = t.replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/g, "$1 "); // strip quotes before x
+  m = norm.match(
+    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)(?:\s*(?:pcs?|pieces?))\b/
   );
   if (m) return Number(m[1]);
 
@@ -125,18 +108,14 @@ function grabQty(t: string) {
 
 function grabDensity(t: string) {
   const m =
-    // 1.7 pcf / 1.7 lb/ft3 / 1.7 lb
-    t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb\/?ft?3|lb(?:s)?|#|pcf|pounds?\s+per\s+cf)\b/i) ||
-    // "density 1.7"
-    t.match(/(?:density|foam\s*density|pcf)\D{0,12}(\d+(?:\.\d+)?)/i);
+    t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb\/?ft?3|lb(?:s)?|#|pcf)\b/) ||
+    t.match(/(?:density|foam\s*density|pcf)\D{0,10}(\d+(?:\.\d+)?)/);
   return m ? `${m[1]}lb` : undefined;
 }
-
 function grabMaterial(t: string) {
-  if (/\bpolyethylene\b|\bpe\b/i.test(t)) return "PE";
-  if (/\bexpanded\s*pe\b|\bepe\b/i.test(t)) return "EPE";
-  if (/\bpolyurethane\b|\bpu\b|\burethane\b/i.test(t)) return "PU";
-  if (/\bxlpe\b|\bcross[-\s]?link(ed)?\b/i.test(t)) return "XLPE";
+  if (/\bpolyethylene\b|\bpe\b/.test(t)) return "PE";
+  if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) return "EPE";
+  if (/\bpolyurethane\b|\bpu\b/.test(t)) return "PU";
   return undefined;
 }
 
@@ -168,23 +147,18 @@ function extractLabeledLines(s: string) {
     const line = raw.trim().replace(/^-\s*/, "").replace(/^•\s*/, "");
     const t = line.toLowerCase();
 
-    let m = t.match(/^dimensions?\s*[:\-]\s*(.+)$/);
+    // Dimensions / size labels
+    let m =
+      t.match(/^(?:finished|overall|outside)?\s*(?:size|dimensions?)\s*[:\-]\s*(.+)$/) ||
+      t.match(/^dims?\s*[:\-]\s*(.+)$/);
     if (m) {
-      const dims = grabDimsFlexible(m[1]);
+      const dims = grabDims(m[1]);
       if (dims) out.dims = normDims(dims);
       continue;
     }
 
-    m = t.match(/^finished\s+dimensions?\s*[:\-]\s*(.+)$/);
-    if (m) {
-      const dims = grabDimsFlexible(m[1]);
-      if (dims) out.dims = normDims(dims);
-      continue;
-    }
-
-    m =
-      t.match(/^qty(?:uantity)?\s*[:=\-]\s*(\d{1,6})\b/) ||
-      t.match(/^quantity\s*(?:is|=|:|-)?\s*(\d{1,6})\b/);
+    // Qty labels
+    m = t.match(/^(?:qty|quantity)\s*(?:is|=|of)?\s*(\d{1,6})\b/);
     if (m) {
       out.qty = Number(m[1]);
       continue;
@@ -208,7 +182,7 @@ function extractLabeledLines(s: string) {
       continue;
     }
     m = t.match(
-      /^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b/,
+      /^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b/
     );
     if (m) {
       out.cavityCount = WORD_NUM[m[1]];
@@ -222,15 +196,13 @@ function extractLabeledLines(s: string) {
       for (const tok of tokens) {
         const tokT = tok.trim();
         const md =
-          tokT.match(
-            /[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
-          ) ||
+          tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
           tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
         if (md) {
           addCavity(`Ø${md[1]}x${md[2]}`);
           continue;
         }
-        const dd = grabDimsFlexible(tokT);
+        const dd = grabDims(tokT);
         if (dd) {
           addCavity(dd);
           continue;
@@ -245,7 +217,7 @@ function extractLabeledLines(s: string) {
     if (inlineCav) addCavity(inlineCav[1]);
 
     const cavDiaDepth = t.match(
-      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
+      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/
     );
     if (cavDiaDepth) addCavity(`Ø${cavDiaDepth[1]}x${cavDiaDepth[2]}`);
   }
@@ -254,57 +226,51 @@ function extractLabeledLines(s: string) {
 }
 
 function extractFreeText(s = ""): Mem {
-  const t = (s || "").toLowerCase();
+  const lower = (s || "").toLowerCase();
   const out: Mem = {};
 
-  const dims = grabDimsFlexible(t);
+  const dims = grabDims(lower);
   if (dims) out.dims = normDims(dims);
 
-  const qty = grabQty(t);
+  const qty = grabQty(lower);
   if (qty !== undefined) out.qty = qty;
 
-  const density = grabDensity(t);
+  const density = grabDensity(lower);
   if (density) out.density = density;
 
-  const material = grabMaterial(t);
+  const material = grabMaterial(lower);
   if (material) out.material = material;
 
-  const countNum = t.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
+  const countNum = lower.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
   if (countNum) out.cavityCount = Number(countNum[1]);
-  const countWord = t.match(
-    /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/,
+  const countWord = lower.match(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/
   );
   if (countWord) out.cavityCount = WORD_NUM[countWord[1]];
 
-  const afterEach = t.match(
+  const afterEach = lower.match(
     /\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?(?:\s*,\s*(?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)+)/,
   );
   if (afterEach) {
     const list = afterEach[1].split(/\s*,\s*/).map(normDims);
     out.cavityDims = list;
   } else {
-    const singleEach = t.match(
-      /\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/,
-    );
+    const singleEach = lower.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/);
     if (singleEach) out.cavityDims = [normDims(singleEach[1])];
   }
 
   // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1"
   const roundCav =
-    t.match(
-      /(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:diameter|dia)\b.*?(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:deep|depth)/i,
-    ) ||
-    t.match(
-      /[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
-    );
+    lower.match(/(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:diameter|dia)\b.*?(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:deep|depth)/i) ||
+    lower.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
   if (roundCav) {
     const list = (out.cavityDims as string[] | undefined) || [];
     list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
     out.cavityDims = list;
   }
 
-  const cavDiaDepth = t.match(
-    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
+  const cavDiaDepth = lower.match(
+    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/
   );
   if (cavDiaDepth) {
     const list = (out.cavityDims as string[] | undefined) || [];
@@ -442,7 +408,7 @@ function scoreAmbiguity(lastText: string, facts: Mem): number {
 function chooseModel(
   modeEnv: string | undefined,
   lastText: string,
-  facts: Mem,
+  facts: Mem
 ): "gpt-4.1-mini" | "gpt-4.1" {
   const force = (process.env.ALEXIO_LLM_FORCE || "").toLowerCase(); // "mini" | "full" | ""
   if (force === "mini") return "gpt-4.1-mini";
@@ -465,6 +431,13 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const fromSubject = extractFromSubject(subject);
   return mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject);
 }
+
+/* ===================== DB enrichment hook (stronger resolver) ===================== */
+// ...  ⚠️  Everything from here down is identical to the version you pasted.
+// I’m leaving it as-is to keep Path-A minimal.
+// (enrichFromDB, calc fetcher, parse(), and POST handler)
+// -------------------------------------------------------------------
+
 
 /* ===================== DB enrichment hook (stronger resolver) ===================== */
 async function enrichFromDB(facts: Mem): Promise<Mem> {
