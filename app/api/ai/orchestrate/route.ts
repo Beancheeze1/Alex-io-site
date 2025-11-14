@@ -586,10 +586,25 @@ export async function POST(req: NextRequest) {
     };
 
     // 3) HTML body from your template
-    let htmlBody = "";
-    try {
-      htmlBody = String(renderQuoteEmail(templateInput as any));
-    } catch {
+   // 3) HTML body from your template
+let htmlBody = "";
+try {
+  htmlBody = String(renderQuoteEmail(templateInput as any));
+
+  // === Append a tiny Cutouts section if we parsed any ===
+  const cavCount = specs.cavityCount ?? null;
+  const cavList = Array.isArray(specs.cavityDims) ? specs.cavityDims : [];
+  if ((cavCount != null) || (cavList.length > 0)) {
+    const listHtml = cavList.length ? `<li>Sizes: ${cavList.join(", ")}</li>` : "";
+    const countHtml = (cavCount != null) ? `<li>Count: ${cavCount}</li>` : "";
+    htmlBody += `
+      <h3 style="margin:18px 0 8px 0">Cutouts</h3>
+      <ul style="margin:0 0 12px 20px">${countHtml}${listHtml}</ul>
+    `;
+  }
+} catch {
+
+
       // Fallback tiny HTML if template throws
       const li = textSpecsLines.map((l) => `<li>${l.replace(/^•\s?/, "")}</li>`).join("");
       const missingHtml = templateInput.missing.map((l) => `<li>${l}</li>`).join("");
