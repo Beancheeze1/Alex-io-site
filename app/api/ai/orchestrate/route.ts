@@ -817,7 +817,7 @@ export async function POST(req: NextRequest) {
       const cavityCtx = /\b(cavity|cavities|pocket|pockets|cut[- ]?out|cutouts?)\b/.test(lower);
       const outsideCtx = /\b(outside|overall|finished)\s+(size|dimension|dimensions)\b/.test(lower);
       if (cavityCtx && !outsideCtx) {
-        const prevCav = Array.isArray(loaded.cavityDims) ? loaded.cavityDims.slice() : [];
+                const prevCav = Array.isArray(loaded.cavityDims) ? loaded.cavityDims.slice() : [];
         const nextCav = Array.isArray(newly.cavityDims) ? newly.cavityDims.slice() : [];
         const combined: string[] = [...prevCav];
 
@@ -827,7 +827,14 @@ export async function POST(req: NextRequest) {
         }
 
         newly.cavityDims = combined;
+
+        // Keep cavity count in sync with the list when we’re clearly talking about cavities
+        if (combined.length) {
+          newly.cavityCount = combined.length;
+        }
+
         delete (newly as any).dims; // keep original outer dims from loaded
+
       }
     }
 
