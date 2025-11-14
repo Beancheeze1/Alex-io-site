@@ -58,19 +58,32 @@ function grabDims(t: string) {
   return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
 }
 function grabQty(t: string) {
-  const m =
+  // 1) Classic: "qty: 250", "quantity 250", "250 pcs/pieces"
+  let m =
     t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) ||
     t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) ||
-    t.match(/\b(\d{1,6})\s*(pcs?|pieces?)\b/);
-  return m ? Number(m[1]) : undefined;
-}
-function grabDensity(t: string) {
-  const withUnit = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|#|pcf)\b/);
-  if (withUnit) return withUnit[1] + "lb";
-  const nearWord = t.match(/(?:density|foam\s*density|pcf)\D{0,8}(\d+(?:\.\d+)?)/);
-  if (nearWord) return nearWord[1] + "lb";
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?)\b/);
+  if (m) return Number(m[1]);
+
+  // 2) New: "250 12x12x3 pieces" (number before dims, "pieces" after dims)
+  m = t.match(
+    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)\s*(?:pcs?|pieces?)\b/
+  );
+  if (m) return Number(m[1]);
+
   return undefined;
 }
+
+
+function grabDensity(t: string) {
+  // Accept: "1.7#", "1.7 lb", "1.7 pcf", "1.7 lb/ft3", "1.7lbft3"
+  const m =
+    t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb\/?ft?3|lb(?:s)?|#|pcf)\b/) ||
+    t.match(/(?:density|foam\s*density|pcf)\D{0,10}(\d+(?:\.\d+)?)/);
+  return m ? `${m[1]}lb` : undefined;
+}
+
+
 function grabMaterial(t: string) {
   if (/\bpolyethylene\b|\bpe\b/.test(t)) return "PE";
   if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) return "EPE";
