@@ -106,8 +106,9 @@ export async function POST(req: NextRequest) {
 
     // Prefer conversation.newMessage
     const ev =
-      events.find(e => String(e?.subscriptionType || "").toLowerCase().includes("conversation.newmessage")) ||
-      events[0];
+      events.find((e) =>
+        String(e?.subscriptionType || "").toLowerCase().includes("conversation.newmessage"),
+      ) || events[0];
 
     const objectId = String(ev?.objectId ?? "").trim();
     const messageId = String(ev?.messageId ?? "").trim();
@@ -132,13 +133,25 @@ export async function POST(req: NextRequest) {
     const toEmail = String(lookup?.email || "").trim();
     const subject = String(lookup?.subject || "").trim(); // ALWAYS forward subject
     const textRaw = String(lookup?.text || "");
-    const threadId = String(lookup?.threadId || objectId || "").trim();
+    const threadIdRaw = String(lookup?.threadId || objectId || "").trim();
 
-    const alias = toEmail && subject ? `hsu:${toEmail.toLowerCase()}::${subjectRoot(subject).toLowerCase()}` : "";
+    const alias =
+      toEmail && subject
+        ? `hsu:${toEmail.toLowerCase()}::${subjectRoot(subject).toLowerCase()}`
+        : "";
+
+    // NEW: use alias as the primary memory key, fallback to hs:<threadId>
+    const threadKey = alias || (threadIdRaw ? `hs:${threadIdRaw}` : "");
 
     console.info(
       "[webhook] lookup_ok",
-      JSON.stringify({ email: toEmail || null, subject: subject || "(no subject)", threadId: threadId || "(none)" })
+      JSON.stringify({
+        email: toEmail || null,
+        subject: subject || "(no subject)",
+        threadId: threadIdRaw || "(none)",
+        alias: alias || "(none)",
+        threadKey: threadKey || "(none)",
+      }),
     );
 
     if (!toEmail) {
@@ -147,9 +160,13 @@ export async function POST(req: NextRequest) {
         "reason: 'no_email_lookup_failed',",
         "extra:",
         JSON.stringify({ objectId, changeFlag: ev?.changeFlag || "" }),
-        "}"
+        "}",
       );
-      return ok({ ignored: true, reason: "no_email_lookup_failed", extra: { objectId, changeFlag: ev?.changeFlag || "" } });
+      return ok({
+        ignored: true,
+        reason: "no_email_lookup_failed",
+        extra: { objectId, changeFlag: ev?.changeFlag || "" },
+      });
     }
 
     // Build orchestrate payload — subject is ALWAYS included
@@ -158,20 +175,18 @@ export async function POST(req: NextRequest) {
       toEmail,
       subject: subject || "(no subject)",
       text: textRaw || "",
-      threadId: threadId ? `hs:${threadId}` : undefined, // primary memory key
+      threadId: threadKey || undefined, // primary memory key (alias first, then hs:threadId)
       dryRun: false,
     };
 
     console.info(
       "[orchestrate] msgraph/send { to:",
       toEmail,
-      ", dryRun: false , threadId:",
+      ", dryRun: false , threadKey:",
       orchBody.threadId || "<none>",
-      ", alias:",
-      alias || "<none>",
       ", inReplyTo:",
-      "none",
-      "}"
+      "auto",
+      "}",
     );
 
     const orchRes = await fetch(urlOrchestrate, {
@@ -184,7 +199,7 @@ export async function POST(req: NextRequest) {
     const ms = Date.now();
     console.info(
       "[webhook] AI ok",
-      JSON.stringify({ to: toEmail, status: orchRes.status, ms: ms % 100000 }) // short ms tag
+      JSON.stringify({ to: toEmail, status: orchRes.status, ms: ms % 100000 }), // short ms tag
     );
 
     return ok({ status: orchRes.status });
