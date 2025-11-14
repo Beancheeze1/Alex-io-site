@@ -51,36 +51,101 @@ function pickThreadContext(threadMsgs: any[] = []): string {
 /* ===================== Parsing helpers (expanded) ===================== */
 
 function normDims(s: string) {
-  return s.replace(/\s+/g, "").replace(/×/g, "x").replace(/"+$/, "").toLowerCase();
+  return s
+    .replace(/\s+/g, "")
+    .replace(/×/g, "x")
+    .replace(/by/gi, "x")
+    .replace(/"+$/, "")
+    .toLowerCase();
 }
+
+// 12 x 12 x 3, 12×12×3, 12 by 12 by 3, with optional “in/inch/thick”
 function grabDims(t: string) {
-  const m = t.match(/\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/);
+  const m =
+    t.match(
+      /\b(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|thick|"))?\b/i,
+    ) ||
+    t.match(
+      /\bsize\s*(?:is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)/i,
+    );
   return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
 }
+
+// ---------- QUANTITY (more variations) ----------
+
 function grabQty(t: string) {
-  // classic patterns
-  let m =
-    t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) ||
-    t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) ||
-    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?)\b/);
+  let m: RegExpMatchArray | null;
+
+  // 1) “qty 250”, “q’ty 250”, “qty: 250”
+  m =
+    t.match(/\bq(?:ty|uantity|['’]ty)\s*[:=]?\s*(\d{1,6})\b/) ||
+    t.match(/\bqty\.?\s*(\d{1,6})\b/);
   if (m) return Number(m[1]);
-  // “250 12x12x3 pieces”
+
+  // 2) “quantity 250”
+  m = t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/);
+  if (m) return Number(m[1]);
+
+  // 3) “quantity of 250”, “Quantity is 250”
+  m =
+    t.match(/\bquantity\s+(?:of\s+)?(\d{1,6})\b/) ||
+    t.match(/\bquantity\s+(?:is|=)\s*(\d{1,6})\b/);
+  if (m) return Number(m[1]);
+
+  // 4) “250 pcs”, “250 pieces/parts/units/sets”
   m = t.match(
-    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)\s*(?:pcs?|pieces?)\b/,
+    /\b(\d{1,6})\s*(?:pcs?|pieces?|parts?|units?|sets?)\b/,
   );
   if (m) return Number(m[1]);
+
+  // 5) “need 250 pieces”, “run 250 pcs”, “order 250 units”
+  m = t.match(
+    /\b(?:need|for|run|order|quote|doing|looking\s+for)\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?|units?|sets?)?\b/,
+  );
+  if (m) return Number(m[1]);
+
+  // 6) “a run of 250”, “a qty of 250”
+  m = t.match(/\b(?:run|lot|batch|qty)\s+of\s+(\d{1,6})\b/);
+  if (m) return Number(m[1]);
+
   return undefined;
 }
+
+// ---------- DENSITY (more forgiving) ----------
+
 function grabDensity(t: string) {
-  const m =
-    t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb\/?ft?3|lb(?:s)?|#|pcf)\b/) ||
-    t.match(/(?:density|foam\s*density|pcf)\D{0,10}(\d+(?:\.\d+)?)/);
-  return m ? `${m[1]}lb` : undefined;
+  let m: RegExpMatchArray | null;
+
+  // 1) Numbers followed by unit: “1.7#”, “1.7 lb”, “1.7 lbs”, “1.7 pcf”
+  m = t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb\/?ft?3|lb(?:s)?|pcf|#)\b/);
+  if (m) return `${m[1]}lb`;
+
+  // 2) “#1.7 PE”, “# 1.7” style
+  m = t.match(/#\s*(\d+(?:\.\d+)?)/);
+  if (m) return `${m[1]}lb`;
+
+  // 3) “foam density 1.7”, “density 1.7”, “pcf 1.7”
+  m =
+    t.match(/(?:density|foam\s*density|pcf)\D{0,10}(\d+(?:\.\d+)?)/) ||
+    t.match(/\b(\d+(?:\.\d+)?)\s*pcf\b/);
+  if (m) return `${m[1]}lb`;
+
+  return undefined;
 }
+
+// ---------- MATERIAL (extra synonyms) ----------
+
 function grabMaterial(t: string) {
-  if (/\bpolyethylene\b|\bpe\b/.test(t)) return "PE";
+  // PE / polyethylene
+  if (/\bpolyethylene\b|\bpe\b|\bpe\s+foam\b|\bpoly\s+foam\b/.test(t)) return "PE";
+  // EPE
   if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) return "EPE";
-  if (/\bpolyurethane\b|\bpu\b/.test(t)) return "PU";
+  // PU / polyurethane / urethane
+  if (/\bpolyurethane\b|\bpu\b|\burethane\s+foam\b/.test(t)) return "PU";
+  // Crosslink / XLPE
+  if (/\bxlpe\b|\bcross[-\s]?link(?:ed)?\s+foam\b/.test(t)) return "XLPE";
+  // EVA
+  if (/\beva\s+foam\b|\beva\b/.test(t)) return "EVA";
   return undefined;
 }
 
@@ -119,7 +184,7 @@ function extractLabeledLines(s: string) {
       continue;
     }
 
-    m = t.match(/^qty(?:uantity)?\s*[:\-]\s*(\d{1,6})\b/);
+    m = t.match(/^qty(?:uantity|['’]ty)?\s*[:\-]\s*(\d{1,6})\b/);
     if (m) {
       out.qty = Number(m[1]);
       continue;
@@ -157,9 +222,7 @@ function extractLabeledLines(s: string) {
       for (const tok of tokens) {
         const tokT = tok.trim();
         const md =
-          tokT.match(
-            /[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
-          ) ||
+          tokT.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i) ||
           tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
         if (md) {
           addCavity(`Ø${md[1]}x${md[2]}`);
@@ -222,14 +285,11 @@ function extractFreeText(s = ""): Mem {
     if (singleEach) out.cavityDims = [normDims(singleEach[1])];
   }
 
-  // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1"
   const roundCav =
     t.match(
       /(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:diameter|dia)\b.*?(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:deep|depth)/i,
     ) ||
-    t.match(
-      /[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
-    );
+    t.match(/[øØo0]?\s*dia?\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
   if (roundCav) {
     const list = (out.cavityDims as string[] | undefined) || [];
     list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
@@ -358,10 +418,7 @@ function scoreAmbiguity(lastText: string, facts: Mem): number {
   const t = (lastText || "").toLowerCase();
 
   const missing =
-    (facts.dims ? 0 : 1) +
-    (facts.qty ? 0 : 1) +
-    (facts.material ? 0 : 1) +
-    (facts.density ? 0 : 1);
+    (facts.dims ? 0 : 1) + (facts.qty ? 0 : 1) + (facts.material ? 0 : 1) + (facts.density ? 0 : 1);
 
   score += missing;
 
@@ -400,7 +457,6 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 }
 
 /* ===================== DB enrichment hook (stronger resolver) ===================== */
-
 async function enrichFromDB(facts: Mem): Promise<Mem> {
   try {
     const next: Mem = { ...facts };
@@ -409,13 +465,7 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
     if (!family) return next;
 
     const like =
-      family === "PE"
-        ? "%pe%"
-        : family === "EPE"
-        ? "%epe%"
-        : family === "PU"
-        ? "%pu%"
-        : `%${family.toLowerCase()}%`;
+      family === "PE" ? "%pe%" : family === "EPE" ? "%epe%" : family === "PU" ? "%pu%" : `%${family.toLowerCase()}%`;
 
     const densMatch = String(facts.density || "").match(/(\d+(?:\.\d+)?)/);
     const target = densMatch ? Number(densMatch[1]) : null;
@@ -437,8 +487,8 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
           id,
           name,
           density_lb_ft3,
-          kerf_waste_pct AS kerf_pct,      -- real column, aliased
-          min_charge_usd AS min_charge     -- real column, aliased
+          kerf_waste_pct AS kerf_pct,
+          min_charge_usd AS min_charge
         FROM materials
         WHERE active = true
           AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
@@ -455,8 +505,8 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
           id,
           name,
           density_lb_ft3,
-          kerf_waste_pct AS kerf_pct,      -- real column, aliased
-          min_charge_usd AS min_charge     -- real column, aliased
+          kerf_waste_pct AS kerf_pct,
+          min_charge_usd AS min_charge
         FROM materials
         WHERE active = true
           AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
@@ -469,7 +519,6 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
 
     if (!row) return next;
 
-    // Fill everything we can, but don't overwrite explicit user input
     if (!next.material_id && row.id) next.material_id = row.id;
     if (!next.material_name && row.name) next.material_name = row.name;
     if (!next.density && row.density_lb_ft3 != null) {
@@ -491,9 +540,7 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
 /* ===================== NEW: price fetch helper ===================== */
 
 function parseDimsNums(dims: string | null) {
-  const d = String(dims || "")
-    .split("x")
-    .map((n) => Number(n));
+  const d = String(dims || "").split("x").map((n) => Number(n));
   const [L, W, H] = [d[0] || 0, d[1] || 0, d[2] || 0];
   return { L, W, H };
 }
@@ -565,17 +612,14 @@ export async function POST(req: NextRequest) {
     const lastText = String(p.text || "");
     const subject = String(p.subject || "");
 
-    /** Thread key fallback when no explicit threadId provided */
     const providedThreadId = String(p.threadId ?? "").trim();
     const threadKey =
       providedThreadId || (subject ? `sub:${subject.toLowerCase().slice(0, 180)}` : "");
 
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
 
-    // Parse current turn
     const newly = extractAllFromTextAndSubject(lastText, subject);
 
-    // Load + merge with prior facts
     let loaded: Mem = {};
     if (threadKey) loaded = await loadFacts(threadKey);
 
@@ -587,19 +631,14 @@ export async function POST(req: NextRequest) {
 
     let merged = mergeFacts({ ...loaded, ...carry }, newly);
 
-    // bump turn counter (persist only if we have a key)
     merged.__turnCount = (merged.__turnCount || 0) + 1;
 
-    // DB enrichment (fills density/material_id/kerf/min_charge when possible)
     merged = await enrichFromDB(merged);
 
-    // Persist facts
     if (threadKey) await saveFacts(threadKey, merged);
 
-    // LLM selection (hybrid)
     const llmSelected = chooseModel(process.env.ALEXIO_LLM_MODE, lastText, merged);
 
-    // Compose text body (always include specs so later turns never “lose” details)
     const context = pickThreadContext(threadMsgs);
     const openerLLM =
       (await aiOpener(llmSelected, lastText, context)) || chooseOpener(threadKey || subject);
@@ -619,7 +658,6 @@ export async function POST(req: NextRequest) {
       material_id: typeof merged.material_id === "number" ? merged.material_id : null,
     };
 
-    // Plain-text fallback with a Specs echo
     const textSpecsLines = [
       specs.dims ? `• Dimensions: ${specs.dims}` : "",
       specs.qty != null ? `• Quantity: ${specs.qty}` : "",
@@ -637,7 +675,6 @@ export async function POST(req: NextRequest) {
         ? `\n\n— Specs (parsed) —\n${textSpecsLines.join("\n")}`
         : "");
 
-    /* ========= NEW: if specs complete, call /api/quotes/calc to get pricing ========= */
     let calc: any = null;
     if (specsCompleteForQuote({ dims: specs.dims, qty: specs.qty, material_id: specs.material_id })) {
       try {
@@ -649,16 +686,13 @@ export async function POST(req: NextRequest) {
           round_to_bf: false,
         });
         if (calc) {
-          const previewTotal =
-            calc.total ?? calc.price_total ?? calc.prelim_total ?? null;
+          const previewTotal = calc.total ?? calc.price_total ?? calc.prelim_total ?? null;
           if (previewTotal != null) {
             textBody += `\n\n— Preliminary total: ${previewTotal}`;
           }
         }
       } catch {}
     }
-
-    /* ========= Map parsed facts + calc to YOUR quoteTemplate signature ========= */
 
     const dimsNums = parseDimsNums(specs.dims);
     const densityPcf = densityToPcf(specs.density);
@@ -708,12 +742,10 @@ export async function POST(req: NextRequest) {
         .filter((s) => !!s && !/^fyi/i.test(s)),
     };
 
-    // HTML body from your template
     let htmlBody = "";
     try {
       htmlBody = String(renderQuoteEmail(templateInput as any));
 
-      // Tiny Cutouts section if we parsed any
       const cavCount = specs.cavityCount ?? null;
       const cavList = Array.isArray(specs.cavityDims) ? specs.cavityDims : [];
       if (cavCount != null || cavList.length > 0) {
@@ -736,7 +768,6 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // Recipient guardrails
     const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
     const toEmail = String(p.toEmail || "").trim().toLowerCase();
     if (!toEmail)
@@ -751,7 +782,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Thread continuity
     const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
 
     console.info(
@@ -816,7 +846,6 @@ export async function POST(req: NextRequest) {
     });
     const sent = await r.json().catch(() => ({}));
 
-    // Persist outbound IDs for next turn
     if (threadKey && (r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
       const updated = {
         ...merged,
