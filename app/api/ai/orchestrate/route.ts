@@ -370,12 +370,6 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 /* ===================== DB enrichment hook (stronger resolver) ===================== */
 async function enrichFromDB(facts: Mem): Promise<Mem> {
   try {
-    // We want to *always* resolve material_id when we can.
-    // Strategy:
-    //  1) Detect family from text (PE/EPE/PU).
-    //  2) Parse density number if present (e.g., "1.7lb" -> 1.7).
-    //  3) Pick ACTIVE row in materials with nearest density within that family.
-    //  4) If no density, just pick the first ACTIVE row that matches the family.
     const next: Mem = { ...facts };
 
     const family = String(facts.material || "").toUpperCase();
@@ -390,15 +384,25 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
     const densMatch = String(facts.density || "").match(/(\d+(?:\.\d+)?)/);
     const target = densMatch ? Number(densMatch[1]) : null;
 
-    // Prefer nearest-by-density if we have a target
-    let row:
-      | { id: number; name: string; density_lb_ft3: number | null; kerf_pct?: number | null; min_charge?: number | null }
-      | null = null;
+    type MatRow = {
+      id: number;
+      name: string;
+      density_lb_ft3: number | null;
+      kerf_pct: number | null;
+      min_charge: number | null;
+    };
+
+    let row: MatRow | null = null;
 
     if (target != null) {
-      row = await one(
+      row = await one<MatRow>(
         `
-        SELECT id, name, density_lb_ft3, kerf_pct, min_charge
+        SELECT
+          id,
+          name,
+          density_lb_ft3,
+          kerf_waste_pct AS kerf_pct,      -- real column, aliased
+          min_charge_usd AS min_charge     -- real column, aliased
         FROM materials
         WHERE active = true
           AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
@@ -409,9 +413,14 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
         [like, target]
       );
     } else {
-      row = await one(
+      row = await one<MatRow>(
         `
-        SELECT id, name, density_lb_ft3, kerf_pct, min_charge
+        SELECT
+          id,
+          name,
+          density_lb_ft3,
+          kerf_waste_pct AS kerf_pct,      -- real column, aliased
+          min_charge_usd AS min_charge     -- real column, aliased
         FROM materials
         WHERE active = true
           AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
@@ -427,15 +436,22 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
     // Fill everything we can, but don't overwrite explicit user input
     if (!next.material_id && row.id) next.material_id = row.id;
     if (!next.material_name && row.name) next.material_name = row.name;
-    if (!next.density && row.density_lb_ft3 != null) next.density = `${Number(row.density_lb_ft3)}lb`;
-    if (typeof next.kerf_pct !== "number" && row.kerf_pct != null) next.kerf_pct = Number(row.kerf_pct);
-    if (typeof next.min_charge !== "number" && row.min_charge != null) next.min_charge = Number(row.min_charge);
+    if (!next.density && row.density_lb_ft3 != null) {
+      next.density = `${Number(row.density_lb_ft3)}lb`;
+    }
+    if (typeof next.kerf_pct !== "number" && row.kerf_pct != null) {
+      next.kerf_pct = Number(row.kerf_pct);
+    }
+    if (typeof next.min_charge !== "number" && row.min_charge != null) {
+      next.min_charge = Number(row.min_charge);
+    }
 
     return next;
   } catch {
     return facts;
   }
 }
+
 
 
 /* ===================== NEW: price fetch helper ===================== */

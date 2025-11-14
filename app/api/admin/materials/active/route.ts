@@ -17,14 +17,15 @@ export async function GET(_req: NextRequest) {
       min_charge: number | null;
       active: boolean;
     }>(`
-      SELECT id,
-             name,
-             category,
-             subcategory,
-             density_lb_ft3,
-             kerf_pct,
-             min_charge,
-             active
+      SELECT
+        id,
+        name,
+        category,
+        subcategory,
+        density_lb_ft3,
+        kerf_waste_pct AS kerf_pct,       -- real column, aliased
+        min_charge_usd AS min_charge,     -- real column, aliased
+        active
       FROM materials
       WHERE active = true
       ORDER BY name ASC
@@ -36,7 +37,6 @@ export async function GET(_req: NextRequest) {
       { status: 200 }
     );
   } catch (e: any) {
-    // This will show up in Render logs
     console.error("[admin/materials/active] error", e);
     return NextResponse.json(
       { ok: false, error: "db_error", detail: String(e?.message || e) },
