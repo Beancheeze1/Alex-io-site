@@ -367,27 +367,42 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   return mergeFacts(mergeFacts(fromTextFree, fromTextLabels), fromSubject);
 }
 
-/* ===================== DB enrichment hook ===================== */
+/* ===================== DB enrichment hook (stronger resolver) ===================== */
 async function enrichFromDB(facts: Mem): Promise<Mem> {
   try {
-    if (!facts.material || facts.density) return facts;
+    // We want to *always* resolve material_id when we can.
+    // Strategy:
+    //  1) Detect family from text (PE/EPE/PU).
+    //  2) Parse density number if present (e.g., "1.7lb" -> 1.7).
+    //  3) Pick ACTIVE row in materials with nearest density within that family.
+    //  4) If no density, just pick the first ACTIVE row that matches the family.
+    const next: Mem = { ...facts };
 
-    const mat = String(facts.material || "").toUpperCase();
-    const like = mat === "PE" ? "%pe%" : mat === "EPE" ? "%epe%" : mat === "PU" ? "%pu%" : `%${mat.toLowerCase()}%`;
-    const target = mat === "PE" ? 1.7 : null;
+    const family = String(facts.material || "").toUpperCase();
+    if (!family) return next;
 
+    const like =
+      family === "PE"  ? "%pe%"  :
+      family === "EPE" ? "%epe%" :
+      family === "PU"  ? "%pu%"  :
+      `%${family.toLowerCase()}%`;
+
+    const densMatch = String(facts.density || "").match(/(\d+(?:\.\d+)?)/);
+    const target = densMatch ? Number(densMatch[1]) : null;
+
+    // Prefer nearest-by-density if we have a target
     let row:
       | { id: number; name: string; density_lb_ft3: number | null; kerf_pct?: number | null; min_charge?: number | null }
       | null = null;
 
-    if (target !== null) {
+    if (target != null) {
       row = await one(
         `
         SELECT id, name, density_lb_ft3, kerf_pct, min_charge
         FROM materials
         WHERE active = true
-          AND density_lb_ft3 IS NOT NULL
           AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
+          AND density_lb_ft3 IS NOT NULL
         ORDER BY ABS(density_lb_ft3 - $2), density_lb_ft3 ASC
         LIMIT 1
         `,
@@ -399,28 +414,29 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
         SELECT id, name, density_lb_ft3, kerf_pct, min_charge
         FROM materials
         WHERE active = true
-          AND density_lb_ft3 IS NOT NULL
           AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
-        ORDER BY density_lb_ft3 ASC
+        ORDER BY density_lb_ft3 NULLS LAST, id ASC
         LIMIT 1
         `,
         [like]
       );
     }
 
-    if (!row) return facts;
+    if (!row) return next;
 
-    const next: Mem = { ...facts };
-    if (row.id && !next.material_id) next.material_id = row.id;
+    // Fill everything we can, but don't overwrite explicit user input
+    if (!next.material_id && row.id) next.material_id = row.id;
+    if (!next.material_name && row.name) next.material_name = row.name;
     if (!next.density && row.density_lb_ft3 != null) next.density = `${Number(row.density_lb_ft3)}lb`;
-    if (row.kerf_pct != null) next.kerf_pct = Number(row.kerf_pct);
-    if (row.min_charge != null) next.min_charge = Number(row.min_charge);
-    if (row.name) next.material_name = row.name;
+    if (typeof next.kerf_pct !== "number" && row.kerf_pct != null) next.kerf_pct = Number(row.kerf_pct);
+    if (typeof next.min_charge !== "number" && row.min_charge != null) next.min_charge = Number(row.min_charge);
+
     return next;
   } catch {
     return facts;
   }
 }
+
 
 /* ===================== NEW: price fetch helper ===================== */
 
