@@ -58,32 +58,25 @@ function grabDims(t: string) {
   return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
 }
 function grabQty(t: string) {
-  // 1) Classic: "qty: 250", "quantity 250", "250 pcs/pieces"
+  // classic patterns
   let m =
     t.match(/\bqty\s*[:=]?\s*(\d{1,6})\b/) ||
     t.match(/\bquantity\s*[:=]?\s*(\d{1,6})\b/) ||
     t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?)\b/);
   if (m) return Number(m[1]);
-
-  // 2) New: "250 12x12x3 pieces" (number before dims, "pieces" after dims)
+  // “250 12x12x3 pieces”
   m = t.match(
     /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)\s*(?:pcs?|pieces?)\b/
   );
   if (m) return Number(m[1]);
-
   return undefined;
 }
-
-
 function grabDensity(t: string) {
-  // Accept: "1.7#", "1.7 lb", "1.7 pcf", "1.7 lb/ft3", "1.7lbft3"
   const m =
     t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb\/?ft?3|lb(?:s)?|#|pcf)\b/) ||
     t.match(/(?:density|foam\s*density|pcf)\D{0,10}(\d+(?:\.\d+)?)/);
   return m ? `${m[1]}lb` : undefined;
 }
-
-
 function grabMaterial(t: string) {
   if (/\bpolyethylene\b|\bpe\b/.test(t)) return "PE";
   if (/\bexpanded\s*pe\b|\bepe\b/.test(t)) return "EPE";
@@ -140,7 +133,6 @@ function extractLabeledLines(s: string) {
       out.cavityCount = Number(m[1]);
       continue;
     }
-    /** NEW: "one cavity" style lines */
     m = t.match(/^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b/);
     if (m) {
       out.cavityCount = WORD_NUM[m[1]];
@@ -168,7 +160,6 @@ function extractLabeledLines(s: string) {
     );
     if (inlineCav) addCavity(inlineCav[1]);
 
-    /** NEW: English phrasing like `6" diameter and 1" deep` */
     const cavDiaDepth = t.match(
       /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/
     );
@@ -196,7 +187,6 @@ function extractFreeText(s = ""): Mem {
 
   const countNum = t.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
   if (countNum) out.cavityCount = Number(countNum[1]);
-  /** NEW: "one cavity" phrasing in free text */
   const countWord = t.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
   if (countWord) out.cavityCount = WORD_NUM[countWord[1]];
 
@@ -218,7 +208,6 @@ function extractFreeText(s = ""): Mem {
     out.cavityDims = list;
   }
 
-  /** NEW: English phrasing like `6" diameter and 1" deep` */
   const cavDiaDepth = t.match(
     /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/
   );
@@ -433,6 +422,59 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
   }
 }
 
+/* ===================== NEW: price fetch helper ===================== */
+
+function parseDimsNums(dims: string | null) {
+  const d = String(dims || "").split("x").map((n) => Number(n));
+  const [L, W, H] = [d[0] || 0, d[1] || 0, d[2] || 0];
+  return { L, W, H };
+}
+function densityToPcf(density: string | null) {
+  const m = String(density || "").match(/(\d+(?:\.\d+)?)/);
+  return m ? Number(m[1]) : null;
+}
+
+function specsCompleteForQuote(s: {
+  dims: string | null;
+  qty: number | null;
+  material_id: number | null;
+}) {
+  return !!(s.dims && s.qty && s.material_id);
+}
+
+async function fetchCalcQuote(opts: {
+  dims: string;
+  qty: number;
+  material_id: number;
+  cavities: string[];
+  round_to_bf?: boolean;
+}) {
+  const { L, W, H } = parseDimsNums(opts.dims);
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const url = `${base}/api/quotes/calc`;
+
+  const body = {
+    length_in: L,
+    width_in: W,
+    height_in: H,
+    material_id: opts.material_id,
+    qty: opts.qty,
+    cavities: opts.cavities && opts.cavities.length ? opts.cavities : null,
+    round_to_bf: !!opts.round_to_bf,
+  };
+
+  const r = await fetch(`${url}?t=${Date.now()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  const j = await r.json().catch(() => ({} as any));
+  if (!r.ok || !j?.ok) return null;
+  return j?.result || null;
+}
+
 /* ===================== Parse body ===================== */
 
 async function parse(req: NextRequest): Promise<In> {
@@ -510,6 +552,7 @@ export async function POST(req: NextRequest) {
       kerf_pct: typeof merged.kerf_pct === "number" ? merged.kerf_pct : null,
       min_charge: typeof merged.min_charge === "number" ? merged.min_charge : null,
       material_name: merged.material_name || null,
+      material_id: typeof merged.material_id === "number" ? merged.material_id : null, // NEW
     };
 
     // Plain-text fallback with a Specs echo
@@ -522,34 +565,45 @@ export async function POST(req: NextRequest) {
       specs.cavityDims && specs.cavityDims.length ? `• Cavity sizes: ${specs.cavityDims.join(", ")}` : "",
     ].filter(Boolean);
 
-    const textBody =
+    let textBody =
       `${openerLLM}\n\n${questions}${firstReplyExtras}` +
       (textSpecsLines.length
         ? `\n\n— Specs (parsed) —\n${textSpecsLines.join("\n")}`
         : "");
 
-    /* ========= Map parsed facts to YOUR quoteTemplate signature ========= */
+    /* ========= NEW: if specs complete, call /api/quotes/calc to get pricing ========= */
+    let calc: any = null;
+    if (specsCompleteForQuote({ dims: specs.dims, qty: specs.qty, material_id: specs.material_id })) {
+      try {
+        calc = await fetchCalcQuote({
+          dims: specs.dims as string,
+          qty: Number(specs.qty),
+          material_id: Number(specs.material_id),
+          cavities: specs.cavityDims || [],
+          round_to_bf: false,
+        });
+        if (calc) {
+          // optional: add a one-line teaser to the text fallback
+          const previewTotal =
+            calc.total ?? calc.price_total ?? calc.prelim_total ?? null;
+          if (previewTotal != null) {
+            textBody += `\n\n— Preliminary total: ${previewTotal}`;
+          }
+        }
+      } catch {}
+    }
 
-    // 1) Specs for template: L/W/H/qty/density_pcf/family
-    const dimsNums = (() => {
-      const d = String(specs.dims || "").split("x").map((n) => Number(n));
-      const [L, W, H] = [d[0] || 0, d[1] || 0, d[2] || 0];
-      return { L, W, H };
-    })();
+    /* ========= Map parsed facts + calc to YOUR quoteTemplate signature ========= */
 
-    const densityPcf = (() => {
-      // "1.7lb" -> 1.7
-      const m = String(specs.density || "").match(/(\d+(?:\.\d+)?)/);
-      return m ? Number(m[1]) : null;
-    })();
+    const dimsNums = parseDimsNums(specs.dims);
+    const densityPcf = densityToPcf(specs.density);
+    const qtyNum = Number(specs.qty || 0) || 0;
+    const kerfPct = typeof specs.kerf_pct === "number" ? specs.kerf_pct : (typeof calc?.kerf_pct === "number" ? calc.kerf_pct : 0);
 
-    // 2) Material & prelim pricing bits
-    const qty = Number(specs.qty || 0) || 0;
-    const kerfPct = typeof specs.kerf_pct === "number" ? specs.kerf_pct : 0;
-    const piece_ci = Math.max(0, dimsNums.L * dimsNums.W * dimsNums.H);
-    const order_ci = piece_ci * (qty || 0);
-    const order_ci_with_waste = Math.round(order_ci * (1 + kerfPct / 100));
-    const min_charge = typeof specs.min_charge === "number" ? specs.min_charge : null;
+    // derive CI if calc absent
+    const piece_ci_fallback = Math.max(0, dimsNums.L * dimsNums.W * dimsNums.H);
+    const order_ci_fallback = piece_ci_fallback * qtyNum;
+    const order_ci_waste_fallback = Math.round(order_ci_fallback * (1 + kerfPct / 100));
 
     const templateInput = {
       customerLine: openerLLM,
@@ -558,7 +612,7 @@ export async function POST(req: NextRequest) {
         W_in: Number(dimsNums.W) || 0,
         H_in: Number(dimsNums.H) || 0,
         thickness_under_in: null,
-        qty: qty || 0,
+        qty: qtyNum || 0,
         density_pcf: densityPcf,
         foam_family: specs.material ? String(specs.material).toUpperCase() : null,
         color: null,
@@ -567,17 +621,17 @@ export async function POST(req: NextRequest) {
         name: specs.material_name || (specs.material ? String(specs.material).toUpperCase() : null),
         density_lbft3: densityPcf,
         kerf_pct: kerfPct || 0,
-        price_per_ci: null,
-        price_per_bf: null,
-        min_charge: min_charge,
+        price_per_ci: calc?.price_per_ci ?? null,
+        price_per_bf: calc?.price_per_bf ?? null,
+        min_charge: specs.min_charge ?? (calc?.min_charge ?? null),
       },
       pricing: {
-        piece_ci,
-        order_ci,
-        order_ci_with_waste,
-        raw: null,                // we’re not computing dollars here yet
-        total: 0,                 // placeholder; template shows as “Prelim”
-        used_min_charge: false,   // not applied at this stage
+        piece_ci: calc?.piece_ci ?? piece_ci_fallback,
+        order_ci: calc?.order_ci ?? order_ci_fallback,
+        order_ci_with_waste: calc?.order_ci_with_waste ?? order_ci_waste_fallback,
+        raw: calc?.raw ?? calc?.price_raw ?? null,
+        total: calc?.total ?? calc?.price_total ?? 0,
+        used_min_charge: !!(calc?.used_min_charge || calc?.min_charge_applied),
       },
       missing: questions
         .split("\n")
@@ -586,25 +640,22 @@ export async function POST(req: NextRequest) {
     };
 
     // 3) HTML body from your template
-   // 3) HTML body from your template
-let htmlBody = "";
-try {
-  htmlBody = String(renderQuoteEmail(templateInput as any));
+    let htmlBody = "";
+    try {
+      htmlBody = String(renderQuoteEmail(templateInput as any));
 
-  // === Append a tiny Cutouts section if we parsed any ===
-  const cavCount = specs.cavityCount ?? null;
-  const cavList = Array.isArray(specs.cavityDims) ? specs.cavityDims : [];
-  if ((cavCount != null) || (cavList.length > 0)) {
-    const listHtml = cavList.length ? `<li>Sizes: ${cavList.join(", ")}</li>` : "";
-    const countHtml = (cavCount != null) ? `<li>Count: ${cavCount}</li>` : "";
-    htmlBody += `
-      <h3 style="margin:18px 0 8px 0">Cutouts</h3>
-      <ul style="margin:0 0 12px 20px">${countHtml}${listHtml}</ul>
-    `;
-  }
-} catch {
-
-
+      // === Append a tiny Cutouts section if we parsed any ===
+      const cavCount = specs.cavityCount ?? null;
+      const cavList = Array.isArray(specs.cavityDims) ? specs.cavityDims : [];
+      if ((cavCount != null) || (cavList.length > 0)) {
+        const listHtml = cavList.length ? `<li>Sizes: ${cavList.join(", ")}</li>` : "";
+        const countHtml = (cavCount != null) ? `<li>Count: ${cavCount}</li>` : "";
+        htmlBody += `
+          <h3 style="margin:18px 0 8px 0">Cutouts</h3>
+          <ul style="margin:0 0 12px 20px">${countHtml}${listHtml}</ul>
+        `;
+      }
+    } catch {
       // Fallback tiny HTML if template throws
       const li = textSpecsLines.map((l) => `<li>${l.replace(/^•\s?/, "")}</li>`).join("");
       const missingHtml = templateInput.missing.map((l) => `<li>${l}</li>`).join("");
@@ -660,7 +711,9 @@ try {
           density: specs.density,
           cavityCount: specs.cavityCount,
           cavityDims: specs.cavityDims,
+          material_id: specs.material_id,
         },
+        calc: calc || null,
         facts: merged,
         mem: { threadKey: String(threadKey), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
         inReplyTo: inReplyTo || null,
@@ -678,7 +731,7 @@ try {
         toEmail,
         subject: p.subject || "Re: your foam quote request",
         text: textBody,     // plain fallback
-        html: htmlBody,     // your branded template
+        html: htmlBody,     // template w/ pricing if available
         inReplyTo: inReplyTo || null,
         dryRun: false,
       }),
@@ -710,7 +763,9 @@ try {
         density: specs.density,
         cavityCount: specs.cavityCount,
         cavityDims: specs.cavityDims,
+        material_id: specs.material_id,
       },
+      calc: calc || null,
       facts: merged,
       store: LAST_STORE,
       llm: llmSelected,
