@@ -1,0 +1,11 @@
+﻿{
+    "length_in":  10,
+    "width_in":  10,
+    "height_in":  0.5,
+    "material_id":  1,
+    "qty":  15,
+    "cavities":  [
+                     "10x10x0.5"
+                 ],
+    "round_to_bf":  false
+}

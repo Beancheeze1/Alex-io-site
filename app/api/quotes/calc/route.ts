@@ -11,24 +11,27 @@ type In = {
   height_in: number | string;
   material_id: number | string;
   qty: number | string;
-  cavities?: string[] | null;   // e.g., ["3x1x0.5", "Ø6x1"]
-  round_to_bf?: boolean;        // optional (if the function supports it)
+  cavities?: string[] | null;   // e.g., ["3x2x1", "Ø6x1"]
+  round_to_bf?: boolean;        // optional
 };
 
 function bad(msg: string, detail?: any, code = 400) {
   return NextResponse.json({ ok: false, error: msg, detail }, { status: code });
 }
+
 function ok(extra: Record<string, any> = {}) {
   return NextResponse.json({ ok: true, ...extra }, { status: 200 });
 }
+
 function num(v: any): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
-/** GET supports:
+/**
+ * GET:
  *  - plain help (no params)
- *  - ?inspect=1  -> lists calc_foam_quote() function signatures in DB
+ *  - ?inspect=1  -> list calc_foam_quote() function signatures in DB
  */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -44,8 +47,7 @@ export async function GET(req: NextRequest) {
       ORDER BY 1,2;
       `,
     );
-
-    return NextResponse.json({ ok: true, functions: funcs });
+    return ok({ functions: funcs });
   }
 
   return ok({
@@ -57,7 +59,7 @@ export async function GET(req: NextRequest) {
       material_id: "integer",
       qty: "integer",
       cavities: "string[] (optional) e.g. ['2x3x0.5','Ø6x1']",
-      round_to_bf: "boolean (optional if function supports it)",
+      round_to_bf: "boolean (optional, billable board-foot step, default false)",
     },
     example: {
       length_in: 12,
@@ -97,132 +99,54 @@ export async function POST(req: NextRequest) {
       ? body.cavities.map((s) => String(s))
       : null;
 
-  const attempts: Array<{ label: string; sql: string; params: any[] }> = [];
+  // SINGLE, KNOWN-GOOD SIGNATURE:
+  // calc_foam_quote(
+  //   length_in numeric, width_in numeric, height_in numeric,
+  //   material_id integer, qty integer,
+  //   cavities text[], round_to_bf boolean
+  // ) RETURNS TABLE(...)
+  const sql = `
+    SELECT *
+    FROM calc_foam_quote(
+      $1::numeric, $2::numeric, $3::numeric,
+      $4::integer, $5::integer,
+      $6::text[], $7::boolean
+    );
+  `;
 
-  // A) 7-arg: (..., text[], boolean)
-  attempts.push({
-    label: "text[] + boolean (7 args)",
-    sql: `
-      SELECT * FROM calc_foam_quote(
-        $1::numeric, $2::numeric, $3::numeric,
-        $4::integer, $5::integer,
-        $6::text[], $7::boolean
-      );
-    `,
-    params: [length_in, width_in, height_in, material_id, qty, cavitiesArr, round_to_bf],
-  });
-
-  // B) 6-arg: (..., text[])  — no round_to_bf
-  attempts.push({
-    label: "text[] only (6 args)",
-    sql: `
-      SELECT * FROM calc_foam_quote(
-        $1::numeric, $2::numeric, $3::numeric,
-        $4::integer, $5::integer,
-        $6::text[]
-      );
-    `,
-    params: [length_in, width_in, height_in, material_id, qty, cavitiesArr],
-  });
-
-  // C) 7-arg: (..., jsonb, boolean) — pass cavities as JSON
-  attempts.push({
-    label: "jsonb + boolean (7 args)",
-    sql: `
-      SELECT * FROM calc_foam_quote(
-        $1::numeric, $2::numeric, $3::numeric,
-        $4::integer, $5::integer,
-        $6::jsonb, $7::boolean
-      );
-    `,
-    params: [
+  try {
+    const row = await one<any>(sql, [
       length_in,
       width_in,
       height_in,
       material_id,
       qty,
-      cavitiesArr ? JSON.stringify(cavitiesArr) : null,
+      cavitiesArr,
       round_to_bf,
-    ],
-  });
+    ]);
 
-  // D) 6-arg: (..., jsonb) — pass cavities as JSON, no round_to_bf
-  attempts.push({
-    label: "jsonb only (6 args)",
-    sql: `
-      SELECT * FROM calc_foam_quote(
-        $1::numeric, $2::numeric, $3::numeric,
-        $4::integer, $5::integer,
-        $6::jsonb
-      );
-    `,
-    params: [
-      length_in,
-      width_in,
-      height_in,
-      material_id,
-      qty,
-      cavitiesArr ? JSON.stringify(cavitiesArr) : null,
-    ],
-  });
-
-  // E) 6-arg: (..., text) — single text blob (some older versions)
-  attempts.push({
-    label: "text single (6 args)",
-    sql: `
-      SELECT * FROM calc_foam_quote(
-        $1::numeric, $2::numeric, $3::numeric,
-        $4::integer, $5::integer,
-        $6::text
-      );
-    `,
-    params: [
-      length_in,
-      width_in,
-      height_in,
-      material_id,
-      qty,
-      cavitiesArr ? cavitiesArr.join(",") : null,
-    ],
-  });
-
-  const tried: Array<{ label: string; ok: boolean; message?: string }> = [];
-
-  for (const att of attempts) {
-    try {
-      const row = await one<any>(att.sql, att.params);
-      if (row) {
-        return ok({
-          input: {
-            length_in,
-            width_in,
-            height_in,
-            material_id,
-            qty,
-            cavities: cavitiesArr,
-            round_to_bf,
-          },
-          variant_used: att.label,
-          result: row,
-        });
-      }
-      tried.push({ label: att.label, ok: false, message: "no rows returned" });
-    } catch (e: any) {
-      tried.push({ label: att.label, ok: false, message: String(e?.message || e) });
-    }
+    return ok({
+      input: {
+        length_in,
+        width_in,
+        height_in,
+        material_id,
+        qty,
+        cavities: cavitiesArr,
+        round_to_bf,
+      },
+      variant_used: "text[] + boolean (7 args)",
+      result: row,
+    });
+  } catch (e: any) {
+    return bad(
+      "db_error",
+      {
+        message: String(e?.message || e),
+        attempted_signature:
+          "calc_foam_quote(numeric,numeric,numeric,integer,integer,text[],boolean)",
+      },
+      500,
+    );
   }
-
-  const funcs = await q<{ schema: string; name: string; args: string }>(
-    `
-    SELECT n.nspname AS schema,
-           p.proname AS name,
-           pg_get_function_arguments(p.oid) AS args
-    FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE p.proname = 'calc_foam_quote'
-    ORDER BY 1,2;
-    `,
-  );
-
-  return bad("db_error", { tried, available_functions: funcs }, 500);
 }
