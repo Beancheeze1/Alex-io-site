@@ -956,6 +956,12 @@ export async function POST(req: NextRequest) {
 
     /* ========= If specs complete, call /api/quotes/calc to get pricing ========= */
     let calc: any = null;
+    let calcRaw: number | null = null;
+    let calcMinCharge: number | null =
+      typeof specs.min_charge === "number" ? specs.min_charge : null;
+    let calcTotal: number | null = null;
+    let calcUsedMinCharge = false;
+
     if (specsCompleteForQuote({ dims: specs.dims, qty: specs.qty, material_id: specs.material_id })) {
       try {
         calc = await fetchCalcQuote({
@@ -965,9 +971,49 @@ export async function POST(req: NextRequest) {
           cavities: specs.cavityDims || [],
           round_to_bf: false,
         });
+
         if (calc) {
-          const previewTotal =
-            calc.total ?? calc.price_total ?? calc.prelim_total ?? null;
+          const rawTotal =
+            typeof calc.raw === "number"
+              ? calc.raw
+              : typeof calc.price_raw === "number"
+              ? calc.price_raw
+              : null;
+
+          const baseTotal =
+            typeof calc.total === "number"
+              ? calc.total
+              : typeof calc.price_total === "number"
+              ? calc.price_total
+              : typeof calc.prelim_total === "number"
+              ? calc.prelim_total
+              : null;
+
+          const minChargeFromCalc =
+            typeof calc.min_charge === "number" ? calc.min_charge : calcMinCharge;
+
+          let finalTotal = baseTotal;
+          let usedMinFlag = !!(calc.used_min_charge || calc.min_charge_applied);
+
+          // If the calc result didn't already bake in min charge, compute a safe fallback
+          if (finalTotal == null && (rawTotal != null || minChargeFromCalc != null)) {
+            if (rawTotal != null && minChargeFromCalc != null) {
+              finalTotal = Math.max(rawTotal, minChargeFromCalc);
+              usedMinFlag = finalTotal === minChargeFromCalc;
+            } else if (rawTotal != null) {
+              finalTotal = rawTotal;
+            } else {
+              finalTotal = minChargeFromCalc!;
+              usedMinFlag = true;
+            }
+          }
+
+          calcRaw = rawTotal;
+          calcMinCharge = minChargeFromCalc ?? calcMinCharge;
+          calcTotal = finalTotal;
+          calcUsedMinCharge = usedMinFlag;
+
+          const previewTotal = finalTotal ?? baseTotal;
           if (previewTotal != null) {
             textBody += `\n\n— Preliminary total: ${previewTotal}`;
           }
@@ -1011,15 +1057,16 @@ export async function POST(req: NextRequest) {
         kerf_pct: kerfPct || 0,
         price_per_ci: calc?.price_per_ci ?? null,
         price_per_bf: calc?.price_per_bf ?? null,
-        min_charge: specs.min_charge ?? (calc?.min_charge ?? null),
+        min_charge: calcMinCharge,
       },
       pricing: {
         piece_ci: calc?.piece_ci ?? piece_ci_fallback,
         order_ci: calc?.order_ci ?? order_ci_fallback,
         order_ci_with_waste: calc?.order_ci_with_waste ?? order_ci_waste_fallback,
-        raw: calc?.raw ?? calc?.price_raw ?? null,
-        total: calc?.total ?? calc?.price_total ?? 0,
-        used_min_charge: !!(calc?.used_min_charge || calc?.min_charge_applied),
+        raw: calcRaw ?? (calc?.raw ?? calc?.price_raw ?? null),
+        total: calcTotal ?? (calc?.total ?? calc?.price_total ?? 0),
+        used_min_charge:
+          calcUsedMinCharge || !!(calc?.used_min_charge || calc?.min_charge_applied),
       },
       missing: questions
         .split("\n")
