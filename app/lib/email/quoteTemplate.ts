@@ -93,8 +93,22 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
        <ul style="margin:0 0 12px 20px">${i.missing.slice(0,6).map(x=>`<li>${x}</li>`).join("")}</ul>`
     : "";
 
-  const exampleBlock =
-    i.missing && i.missing.length ? EXAMPLE_INPUT_HTML : "";
+  const exampleBlock = `
+  <div
+    style="
+      margin:0 0 8px 0;
+      padding:6px 8px;
+      border-radius:4px;
+      background:#f5f5f5;
+      border:1px solid #ddd;
+      font-size:11px;
+      line-height:1.3;
+    "
+  >
+    <strong style="display:block;margin-bottom:2px;">Example input:</strong>
+    250 pcs – 10×10×3 in, 1.7 lb black PE, 2 cavities (Ø6×0.5 in and 1×1×0.5 in).
+  </div>
+`;
 
 
 
