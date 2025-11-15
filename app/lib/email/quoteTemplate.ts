@@ -1,204 +1,162 @@
 // app/lib/email/quoteTemplate.ts
+//
+// Unified HTML template for Alex-IO foam quotes.
+// Path-A safe. Contains: DIA cavity format, skiving option logic (Option A),
+// cleaner layout, consistent rendering on all turns, and cavity clarification.
+//
+// Input shape (from orchestrator):
+// templateInput = {
+//   customerLine: string,
+//   specs: { L_in, W_in, H_in, thickness_under_in, qty, density_pcf, foam_family, color },
+//   material: { name, density_lbft3, kerf_pct, price_per_ci, price_per_bf, min_charge },
+//   pricing: { piece_ci, order_ci, order_ci_with_waste, raw, total, used_min_charge },
+//   missing: string[]
+// }
+//
+// NOTE: We DO accept cavity info from orchestrator & append in “Cutouts” section.
+// NOTE: Option A skiving → show only when thickness NOT in 1" increments.
+// NOTE: Round cavity + DIA formatting preserved.
 
-// Self-contained USD formatter so we don't depend on external helpers
-function usd(value: number | null | undefined): string {
-  const n =
-    typeof value === "number" && isFinite(value)
-      ? value
-      : 0;
-
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(n);
-  } catch {
-    return `$${n.toFixed(2)}`;
-  }
+function fmtMoney(n: number | null | undefined): string {
+  if (n == null || isNaN(n)) return "$0.00";
+  return `$${Number(n).toFixed(2)}`;
 }
 
-const EXAMPLE_INPUT_HTML = `
-<div style="margin:6px 0 10px 0;padding:8px 10px;border-radius:8px;background:#f4f4f8;border:1px solid #ddd;">
-  <div style="font-weight:600;margin-bottom:2px;">Example input:</div>
-  <div style="font-family:Consolas,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.2;margin:0;">
-    250 pcs — 10×10×3 in, 1.7 lb black PE, 2 cavities (Ø6×0.5 in and 1×1×0.5 in).
-  </div>
-</div>
-`.trim();
-
-type QuoteRenderInput = {
-  customerLine?: string;
-  specs: {
-    L_in: number;
-    W_in: number;
-    H_in: number;
-    thickness_under_in?: number | null;
-    qty: number;
-    density_pcf?: number | null;
-    foam_family?: string | null;
-    color?: string | null;
-  };
-  material?: {
-    name?: string | null;
-    density_lbft3?: number | null;
-    kerf_pct?: number | null;
-    price_per_ci?: number | null;
-    price_per_bf?: number | null;
-    min_charge?: number | null;
-  } | null;
-  pricing: {
-    piece_ci: number;
-    order_ci: number;
-    order_ci_with_waste: number;
-    raw?: number | null;
-    total: number;
-    used_min_charge?: boolean;
-  };
-  missing?: string[];
-};
-
-function row(label: string, value: string) {
-  return `<tr>
-    <td style="padding:6px 8px;color:#555">${label}</td>
-    <td style="padding:6px 8px;text-align:right;color:#111"><strong>${value}</strong></td>
-  </tr>`;
+function safe(v: any) {
+  return v == null ? "" : String(v);
 }
 
-export function renderQuoteEmail(i: QuoteRenderInput) {
-  const s = i.specs || ({} as QuoteRenderInput["specs"]);
-  const p = i.pricing || ({} as QuoteRenderInput["pricing"]);
-  const m = i.material || ({} as NonNullable<QuoteRenderInput["material"]>);
+export function renderQuoteEmail(input: any): string {
+  const s = input?.specs || {};
+  const m = input?.material || {};
+  const p = input?.pricing || {};
+  const missing: string[] = Array.isArray(input?.missing) ? input.missing : [];
 
-  const dimsText =
-    s.L_in && s.W_in && s.H_in ? `${s.L_in} × ${s.W_in} × ${s.H_in} in` : "TBD";
-  const qtyText = s.qty ? s.qty.toLocaleString() : "TBD";
-  const densityText =
-    typeof s.density_pcf === "number" && isFinite(s.density_pcf)
-      ? `${s.density_pcf} pcf`
-      : "TBD";
-  const foamFamilyText = s.foam_family || "TBD";
+  const dims = `${s.L_in || 0} × ${s.W_in || 0} × ${s.H_in || 0}"`;
+  const fam = s.foam_family ? String(s.foam_family).toUpperCase() : null;
+  const density = s.density_pcf != null ? `${s.density_pcf} lb/ft³` : null;
 
-  const specsTable = `
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px">
-    ${row("Outside size", dimsText)}
-    ${row("Quantity", qtyText)}
-    ${row("Density", densityText)}
-    ${row("Foam family", foamFamilyText)}
-  </table>
-  `;
+  /* ---------------------- Skiving Logic (Option A) ---------------------- */
+  const thickness = Number(s.H_in || 0);
+  const requiresSkive = thickness > 0 && Math.abs(thickness - Math.round(thickness)) > 0.001;
 
-  const matBits: string[] = [];
-  if (m.name) matBits.push(String(m.name));
-  if (typeof m.density_lbft3 === "number" && isFinite(m.density_lbft3)) {
-    matBits.push(`${m.density_lbft3} pcf`);
-  }
-  const matLine = matBits.length ? matBits.join(" — ") : "TBD";
-
-  const kerfPct =
-    typeof m.kerf_pct === "number" && isFinite(m.kerf_pct) ? m.kerf_pct : 0;
-
-  const minCharge =
-    typeof m.min_charge === "number" && isFinite(m.min_charge)
-      ? m.min_charge
-      : 0;
-
-  const pieceCi =
-    typeof p.piece_ci === "number" && isFinite(p.piece_ci) ? p.piece_ci : 0;
-  const orderCi =
-    typeof p.order_ci === "number" && isFinite(p.order_ci) ? p.order_ci : 0;
-  const orderCiWaste =
-    typeof p.order_ci_with_waste === "number" && isFinite(p.order_ci_with_waste)
-      ? p.order_ci_with_waste
-      : orderCi;
-
-  const total =
-    typeof p.total === "number" && isFinite(p.total) ? p.total : 0;
-
-  const totalLabel = p.used_min_charge
-    ? "Order total (min charge applied)"
-    : "Order total";
-
-  const priceRows: string[] = [];
-  priceRows.push(row("Material", matLine));
-  priceRows.push(row("Material waste (kerf)", `${kerfPct}%`));
-  priceRows.push(row("Piece volume (CI)", `${pieceCi.toFixed(0)} in³`));
-  priceRows.push(
-    row("Order volume + waste (CI)", `${orderCiWaste.toFixed(0)} in³`),
-  );
-
-  if (p.raw != null && typeof p.raw === "number" && isFinite(p.raw)) {
-    priceRows.push(row("Computed price (before min charge)", usd(p.raw)));
-  }
-
-  priceRows.push(row("Minimum charge (if applied)", usd(minCharge)));
-  priceRows.push(row(totalLabel, usd(total)));
-
-  const priceTable = `
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px">
-    ${priceRows.join("")}
-  </table>
-  `;
-
-  const perPiece =
-    s.qty > 0 && total > 0
-      ? total / Math.max(1, s.qty)
-      : null;
-
-  let priceBreaksHtml = "";
-  if (perPiece && s.qty > 0) {
-    priceBreaksHtml = `
-    <h3 style="margin:18px 0 8px 0">Price breaks</h3>
-    <p style="margin:0 0 4px 0;">
-      At ${s.qty.toLocaleString()} pcs, this works out to about <strong>${usd(
-        perPiece,
-      )}</strong> per piece.
-    </p>
-    <p style="margin:4px 0 0 0;color:#555;">
-      If you'd like, I can add formal price breaks at higher quantities (for example 2×, 5×, or 10× this volume) — just reply with the ranges you'd like to see.
-    </p>
-    `;
-  }
-
-  const missingItems = (i.missing || []).filter(
-    (line) => !!line && line.trim().length,
-  );
-  const missingList = missingItems.length
-    ? `
-      <p style="margin:0 0 8px 0;">To finalize, please confirm:</p>
-      <ul style="margin:0 0 14px 18px;padding:0;color:#111;">
-        ${missingItems.map((m) => `<li>${m}</li>`).join("")}
-      </ul>
-    `
-    : `
-      <p style="margin:0 0 12px 0;">
-        Great — I have everything I need for a preliminary price based on these specs.
-      </p>
-    `;
-
-  const exampleBlock = EXAMPLE_INPUT_HTML
-    ? `<div style="margin-bottom:14px;">${EXAMPLE_INPUT_HTML}</div>`
+  // Example surcharge (Option 2 formatting)
+  const skiveRatePct = 0.20;                // 20%
+  const skiveSetup = 12.00;                 // flat setup fee
+  const skiveCost = requiresSkive ? (p.total * skiveRatePct + skiveSetup) : 0;
+  const skiveLine = requiresSkive
+    ? `<tr>
+         <td style="padding:4px 0;color:#900;">Skiving surcharge (non-standard thickness)</td>
+         <td style="padding:4px 0;text-align:right;color:#900;">${fmtMoney(skiveCost)}</td>
+       </tr>`
     : "";
 
+  // Final total with skiving included (only when needed)
+  const grandTotal = requiresSkive ? p.total + skiveCost : p.total;
+
+  /* ---------------------- Cavity Section ---------------------- */
+  const cavCount = input?.facts?.cavityCount ?? null;
+  const cavDims = Array.isArray(input?.facts?.cavityDims)
+    ? input.facts.cavityDims.filter((x: string) => x && x.trim())
+    : [];
+
+  // Format: replace "Ø" style with DIA for clarity
+  const cavDimsClean = cavDims.map((c: string) => {
+    if (c.startsWith("ø") || c.startsWith("Ø")) {
+      const rest = c.slice(1);
+      return `DIA ${rest}`;
+    }
+    return c;
+  });
+
+  const cavCountLine =
+    cavCount != null
+      ? `<li><strong>Count:</strong> ${cavCount}</li>`
+      : "";
+
+  const cavSizesLine =
+    cavDimsClean.length
+      ? `<li><strong>Sizes:</strong> ${cavDimsClean.join(", ")}</li>`
+      : "";
+
+  const cutoutSection =
+    cavCountLine || cavSizesLine
+      ? `
+      <h3 style="margin:22px 0 10px 0;font-size:16px;">Cutouts</h3>
+      <ul style="margin:0 0 12px 18px;padding:0;">
+        ${cavCountLine}
+        ${cavSizesLine}
+      </ul>
+    `
+      : "";
+
+  /* ---------------------- Missing Data Section ---------------------- */
+  const missingHtml =
+    missing.length > 0
+      ? `<ul style="margin:6px 0 14px 20px;color:#555;">
+           ${missing.map((m) => `<li>${m}</li>`).join("")}
+         </ul>`
+      : "";
+
+  /* ---------------------- HTML Template ---------------------- */
   return `
-  <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#111;">
-    ${exampleBlock}
-    <p style="margin:0 0 12px 0;">
-      ${
-        i.customerLine ||
-        "Thanks for reaching out — here's your preliminary quote."
-      }
-    </p>
-    ${missingList}
-    <h3 style="margin:14px 0 8px 0">Specs</h3>
-    ${specsTable}
-    <h3 style="margin:18px 0 8px 0">Pricing</h3>
-    ${priceTable}
-    ${priceBreaksHtml}
-    <p style="color:#666;margin-top:12px">
-      This is a preliminary price based on the information we have so far. We'll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
-    </p>
-    <p>— Alex-IO Estimator</p>
-  </div>
-  `.trim();
+<div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#111;line-height:1.45;">
+
+  <p>${safe(input.customerLine)}</p>
+
+  <!-- Missing / follow-up questions -->
+  ${missingHtml}
+
+  <h3 style="margin:20px 0 8px 0;font-size:16px;">Specifications</h3>
+  <table style="border-collapse:collapse;width:100%;max-width:520px;">
+    <tr>
+      <td style="padding:4px 0;">Dimensions</td>
+      <td style="padding:4px 0;text-align:right;"><strong>${dims}</strong></td>
+    </tr>
+    <tr>
+      <td style="padding:4px 0;">Quantity</td>
+      <td style="padding:4px 0;text-align:right;"><strong>${safe(s.qty)}</strong></td>
+    </tr>
+    <tr>
+      <td style="padding:4px 0;">Foam family</td>
+      <td style="padding:4px 0;text-align:right;"><strong>${fam || "-"}</strong></td>
+    </tr>
+    <tr>
+      <td style="padding:4px 0;">Density</td>
+      <td style="padding:4px 0;text-align:right;"><strong>${density || "-"}</strong></td>
+    </tr>
+  </table>
+
+  ${cutoutSection}
+
+  <h3 style="margin:22px 0 8px 0;font-size:16px;">Pricing</h3>
+  <table style="border-collapse:collapse;width:100%;max-width:520px;">
+    <tr>
+      <td style="padding:4px 0;">Total (foam only)</td>
+      <td style="padding:4px 0;text-align:right;"><strong>${fmtMoney(p.total)}</strong></td>
+    </tr>
+
+    ${skiveLine}
+
+    <tr>
+      <td style="padding:6px 0;font-size:15px;"><strong>Grand total</strong></td>
+      <td style="padding:6px 0;font-size:15px;text-align:right;"><strong>${fmtMoney(grandTotal)}</strong></td>
+    </tr>
+  </table>
+
+  ${requiresSkive
+    ? `<p style="color:#900;margin-top:6px;font-size:13px;">
+         * Skiving required because thickness is not in 1" increments.
+       </p>`
+    : ""}
+
+  <hr style="margin:28px 0 14px 0;border:0;border-top:1px solid #ddd;">
+
+  <p style="font-size:13px;color:#666;">
+    Let me know if you'd like price breaks, different densities, alternate foam types,
+    or if you'd like to attach a sketch for a multi-cavity job.
+  </p>
+
+</div>
+  `;
 }
