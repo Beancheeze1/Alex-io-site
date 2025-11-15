@@ -29,26 +29,26 @@ function err(error: string, detail?: any) {
 
 function compact<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v === null || v === undefined) continue;
-    if (typeof v === "string" && !v.trim()) continue;
-    out[k] = v;
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "")) {
+      out[k] = v;
+    }
   }
   return out as T;
 }
-
-/* ===================== Memory helpers ===================== */
-
-/* ===================== Memory helpers ===================== */
-
-async function loadMem(key: string): Promise<Mem> {
-  const facts = await loadFacts(key);
-  return facts || {};
-}
-async function saveMem(key: string, mem: Mem) {
-  await saveFacts(key, mem);
+function mergeFacts(a: Mem, b: Mem): Mem {
+  return { ...(a || {}), ...compact(b || {}) };
 }
 
+/* Keep last few messages for tone; not used for parsing */
+function pickThreadContext(threadMsgs: any[] = []): string {
+  const take = threadMsgs.slice(-3);
+  const snippets = take
+    .map((m) => String(m?.text || m?.body || m?.content || "").trim())
+    .filter(Boolean)
+    .map((s) => (s.length > 220 ? s.slice(0, 220) + "…" : s));
+  return snippets.join("\n---\n");
+}
 
 /* ===================== Parsing helpers (expanded) ===================== */
 
@@ -80,31 +80,41 @@ function grabDims(raw: string) {
 
   const m = cleaned.match(
     new RegExp(
-      `(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:(?:\\s*(?:in|inch|"))\\b)?`,
+      `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches|"))?\\b`,
       "i",
     ),
   );
-  if (!m) return undefined;
-  const [L, W, H] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  if (!L || !W || !H) return undefined;
-  return `${L}x${W}x${H}`;
+  return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
 }
 
-function grabQty(t: string) {
-  const norm = t.toLowerCase();
+/**
+ * Quantity:
+ *  - qty 250 / qty: 250 / qty of 250 / qty is 250
+ *  - quantity 250 / quantity is 250 / quantity of 250
+ *  - 250 pcs / 250pieces / 250 pc
+ *  - 250 12"x12"x3" pieces of foam
+ *  - change qty to 300 / change quantity to 300 / qty to 300
+ */
+function grabQty(raw: string) {
+  const t = raw.toLowerCase();
 
-  // “Qty 250”, “QTY: 250 pcs”
   let m =
-    norm.match(/\bqty\s*[:\-]?\s*(\d{1,6})\b/) ||
-    norm.match(/\bquantity\s*[:\-]?\s*(\d{1,6})\b/);
+    t.match(/\bqty\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
+    t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
+    t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
+    t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
+
   if (m) return Number(m[1]);
 
-  // “250 pcs”, “250 pieces”
-  m = norm.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
-  if (m) return Number(m[1]);
-
-  // “250 of these”
-  m = norm.match(/\b(\d{1,6})\s+of\b/);
+  // Handle “quantity of 250 12"x12"x3" pieces of foam”
+  const norm = t.replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/g, "$1 "); // strip quotes before x
+  m = norm.match(
+    new RegExp(
+      `\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?))\\b`,
+      "i",
+    ),
+  );
   if (m) return Number(m[1]);
 
   // Fallback: “for 250 pieces”, “for 250”
@@ -141,79 +151,115 @@ const WORD_NUM: Record<string, number> = {
   ten: 10,
 };
 
-function grabCavityCount(t: string) {
-  const lower = t.toLowerCase();
-  let m = lower.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
-  if (m) return Number(m[1]);
-
-  for (const [word, num] of Object.entries(WORD_NUM)) {
-    if (lower.includes(`${word} cavity`) || lower.includes(`${word} cavities`)) {
-      return num;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Quick “free text” extractor.
- * Looks across body/subject for dims, qty, density, material, cutouts.
- */
-function extractFreeText(text: string): Mem {
-  if (!text) return {};
-  const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+function extractLabeledLines(s: string) {
   const out: Mem = {};
+  const lines = (s || "").split(/\r?\n/);
 
-  for (const line of lines) {
+  const addCavity = (val: string) => {
+    const list = (out.cavityDims as string[] | undefined) || [];
+    list.push(normDims(val));
+    out.cavityDims = list;
+  };
+
+  let inCutouts = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trim().replace(/^-\s*/, "").replace(/^•\s*/, "");
     const t = line.toLowerCase();
 
-    // Dims
-    const dims = grabDims(line);
-    if (dims) {
-      out.dims = normDims(dims);
+    if (!t) continue;
+
+    // Section headers
+    if (/^cutouts?$/i.test(line)) {
+      inCutouts = true;
+      continue;
     }
 
-    // Qty
-    const qty = grabQty(line);
-    if (qty && !out.qty) out.qty = qty;
+    // Handle 2-line table cells: "Quantity" \n "250"
+    const nextRaw = lines[i + 1] ?? "";
+    const next = nextRaw.trim();
+    const nextLower = next.toLowerCase();
 
-    // Density
-    const density = grabDensity(line);
-    if (density && !out.density) out.density = density;
+    // Outside size (dimensions broken into next line)
+    if (/^outside\s*size$/i.test(line) && next) {
+      const dims = grabDims(nextLower) || grabDims(line + " " + nextLower);
+      if (dims) {
+        out.dims = normDims(dims);
+        i++; // consume next line
+        continue;
+      }
+    }
 
-    // Material
-    const mat = grabMaterial(t);
-    if (mat && !out.material) out.material = mat;
+    // Quantity  (label then numeric on next line)
+    if (/^quantity$/i.test(line) && /^\d{1,6}\b/.test(nextLower)) {
+      out.qty = Number(nextLower.match(/(\d{1,6})/)![1]);
+      i++;
+      continue;
+    }
 
-    // Cavity count
-    const cavCount = grabCavityCount(line);
-    if (cavCount && !out.cavityCount) out.cavityCount = cavCount;
-  }
+    // Density  (label then value on next line)
+    if (/^density$/i.test(line) && nextLower) {
+      const dens = grabDensity(nextLower);
+      if (dens) {
+        out.density = dens;
+        i++;
+        continue;
+      }
+    }
 
-  return out;
-}
+    // Foam family (PE/EPE/PU on next line)
+    if (/^foam\s*family$/i.test(line) && nextLower) {
+      const mat = grabMaterial(nextLower);
+      if (mat) {
+        out.material = mat;
+        i++;
+        continue;
+      }
+    }
 
-/**
- * Lines like:
- *  - Outside: 12x12x3
- *  - Qty: 250
- *  - Density: 1.7 lb
- *  - Material: EPE
- *  - Cavities: 2
- *  - Cavity dims: 3x3x1, Ø6x1
- */
-function extractLabeledLines(text: string): Mem {
-  if (!text) return {};
-  const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  const out: Mem = {};
+    // Cutouts section lines: Count / Sizes
+    if (inCutouts) {
+      // "Count: 1"
+      let m = t.match(/^count\s*[:\-]\s*(\d{1,4})\b/);
+      if (m) {
+        out.cavityCount = Number(m[1]);
+        continue;
+      }
 
-  for (const line of lines) {
-    const t = line.toLowerCase();
+      // "Sizes: ø6x1" or "Sizes: Ø6 x 1" or decimals
+      m = t.match(/^sizes?\s*[:\-]\s*(.+)$/);
+      if (m) {
+        const part = m[1].replace(/\beach\b/gi, "");
+        const tokens = part.split(/[,;]+/);
+        for (const tok of tokens) {
+          const tokT = tok.trim();
+          const md =
+            tokT.match(
+              new RegExp(
+                `[øØo0]?\\s*dia?\\s*\\.?\\s*(${NUM})\\s*(?:in|")?\\s*(?:x|by|\\*)\\s*(${NUM})`,
+                "i",
+              ),
+            ) ||
+            tokT.match(new RegExp(`[øØ]\\s*(${NUM})\\s*(?:x|by|\\*)\\s*(${NUM})`, "i"));
+          if (md) {
+            addCavity(`Ø${md[1]}x${md[2]}`);
+            continue;
+          }
+          const dd = grabDims(tokT);
+          if (dd) {
+            addCavity(dd);
+            continue;
+          }
+        }
+        continue;
+      }
+    }
 
-    // Outside dims
+    // Single-line dimension / size labels (original logic)
     let m =
-      t.match(/^outside(?:\s*size)?\s*[:\-]\s*(.+)$/i) ||
-      t.match(/^inside(?:\s*size)?\s*[:\-]\s*(.+)$/i) ||
-      t.match(/^block\s*size\s*[:\-]\s*(.+)$/i);
+      t.match(/^(?:finished|overall|outside)?\s*(?:size|dimensions?)\s*[:\-]\s*(.+)$/) ||
+      t.match(/^dims?\s*[:\-]\s*(.+)$/);
     if (m) {
       const dims = grabDims(m[1]);
       if (dims) out.dims = normDims(dims);
@@ -244,65 +290,111 @@ function extractLabeledLines(text: string): Mem {
       out.cavityCount = Number(m[1]);
       continue;
     }
+    m = t.match(
+      /^(?:cavities|cavity|pockets?|cut[- ]?outs?)\s*[:\-]?\s*(one|two|three|four|five|six|seven|eight|nine|ten)\b/,
+    );
+    if (m) {
+      out.cavityCount = WORD_NUM[m[1]];
+      continue;
+    }
 
-    // Cavity dims, maybe comma-separated
-    if (/^cavity\s*(?:dims|sizes)?\s*[:\-]/.test(t)) {
-      const rest = line.split(/[:\-]/, 2)[1] || "";
-      const parts = rest
-        .split(/[,;]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      const dimsList: string[] = [];
-      for (const part of parts) {
-        const d = grabDims(part);
-        if (d) {
-          dimsList.push(normDims(d));
+    m = t.match(/^(?:cavity|pocket|cut[- ]?out)\s*(?:size|sizes)\s*[:\-]\s*(.+)$/);
+    if (m) {
+      const part = m[1].replace(/\beach\b/gi, "");
+      const tokens = part.split(/[,;]+/);
+      for (const tok of tokens) {
+        const tokT = tok.trim();
+        const md =
+          tokT.match(
+            new RegExp(
+              `[øØo0]?\\s*dia?\\s*\\.?\\s*(${NUM})\\s*(?:in|")?\\s*(?:x|by|\\*)\\s*(${NUM})`,
+              "i",
+            ),
+          ) ||
+          tokT.match(new RegExp(`[øØ]\\s*(${NUM})\\s*(?:x|by|\\*)\\s*(${NUM})`, "i"));
+        if (md) {
+          addCavity(`Ø${md[1]}x${md[2]}`);
           continue;
         }
-        const diaDepth = part.match(
-          new RegExp(
-            `(${NUM})\\s*(?:in|inch|")?\\s*(?:diameter|dia)\\b[^0-9]{0,12}(${NUM})\\s*(?:in|inch|")?\\s*(?:deep|depth)\\b`,
-            "i",
-          ),
-        );
-        if (diaDepth) {
-          dimsList.push(`Ø${diaDepth[1]}x${diaDepth[2]}`);
+        const dd = grabDims(tokT);
+        if (dd) {
+          addCavity(dd);
+          continue;
         }
       }
-      if (dimsList.length) out.cavityDims = dimsList;
+      continue;
     }
+
+    const inlineCav = t.match(
+      new RegExp(
+        `(?:cavities?|pockets?|cut[- ]?outs?)[:\\s]+(?:size|sizes)?[:\\s]*((?:${NUM}\\s*[x×]\\s*){2}${NUM})`,
+      ),
+    );
+    if (inlineCav) addCavity(inlineCav[1]);
+
+    const cavDiaDepth = t.match(
+      new RegExp(
+        `(${NUM})\\s*(?:in|inch|")?\\s*(?:diameter|dia)\\b[^0-9]{0,12}(${NUM})\\s*(?:in|inch|")?\\s*(?:deep|depth)\\b`,
+      ),
+    );
+    if (cavDiaDepth) addCavity(`Ø${cavDiaDepth[1]}x${cavDiaDepth[2]}`);
   }
 
   return out;
 }
 
-/**
- * Merge two fact maps, preferring `b` (later) when both have a value.
- */
-function mergeFacts(a: Mem, b: Mem): Mem {
-  const out: Mem = { ...a };
-  for (const [k, v] of Object.entries(b)) {
-    if (v === undefined || v === null) continue;
-    out[k] = v;
-  }
-  return out;
-}
+function extractFreeText(s = ""): Mem {
+  const lower = (s || "").toLowerCase();
+  const out: Mem = {};
 
-/**
- * Attempt to extract more cavity details from looser free text.
- */
-function enrichCavitiesFromLooseText(facts: Mem, text: string): Mem {
-  const lower = text.toLowerCase();
-  const out = { ...facts };
+  const dims = grabDims(lower);
+  if (dims) out.dims = normDims(dims);
 
-  // Round cavities like “2 round cavities at Ø6x1”
-  const roundCav = lower.match(
+  const qty = grabQty(lower);
+  if (qty !== undefined) out.qty = qty;
+
+  const density = grabDensity(lower);
+  if (density) out.density = density;
+
+  const material = grabMaterial(lower);
+  if (material) out.material = material;
+
+  const countNum = lower.match(/\b(\d{1,4})\s*(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/);
+  if (countNum) out.cavityCount = Number(countNum[1]);
+  const countWord = lower.match(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:cavities|cavity|pockets?|cut[- ]?outs?)\b/,
+  );
+  if (countWord) out.cavityCount = WORD_NUM[countWord[1]];
+
+  const afterEach = lower.match(
     new RegExp(
-      `\\b(?:round\\s+)?cavities?\\b[^0-9]{0,20}(${NUM})\\s*(?:in|inch|")?\\s*(?:diameter|dia)\\b[^0-9]{0,12}(${NUM})\\s*(?:in|inch|")?\\s*(?:deep|depth)\\b`,
-      "i",
+      `\\beach\\s+((?:${NUM}\\s*[x×]\\s*){2}${NUM}(?:\\s*,\\s*(?:${NUM}\\s*[x×]\\s*){2}${NUM})+)`,
     ),
   );
+  if (afterEach) {
+    const list = afterEach[1].split(/\s*,\s*/).map(normDims);
+    out.cavityDims = list;
+  } else {
+    const singleEach = lower.match(
+      new RegExp(`\\beach\\s+((?:${NUM}\\s*[x×]\\s*){2}${NUM})`),
+    );
+    if (singleEach) out.cavityDims = [normDims(singleEach[1])];
+  }
+
+  // round cavity: "6\" diameter and .5\" deep", "Ø6 x .5", "dia 6 x .5"
+  const roundCav =
+    lower.match(
+      new RegExp(
+        `(${NUM})\\s*(?:in|")?\\s*(?:diameter|dia)\\b.*?(${NUM})\\s*(?:in|")?\\s*(?:deep|depth)`,
+        "i",
+      ),
+    ) ||
+    lower.match(
+      new RegExp(
+        `[øØo0]?\\s*dia?\\s*\\.?\\s*(${NUM})\\s*(?:in|")?\\s*(?:x|by|\\*)\\s*(${NUM})`,
+        "i",
+      ),
+    );
   if (roundCav) {
     const list = (out.cavityDims as string[] | undefined) || [];
     list.push(`Ø${roundCav[1]}x${roundCav[2]}`);
@@ -312,7 +404,6 @@ function enrichCavitiesFromLooseText(facts: Mem, text: string): Mem {
   const cavDiaDepth = lower.match(
     new RegExp(
       `(${NUM})\\s*(?:in|inch|")?\\s*(?:diameter|dia)\\b[^0-9]{0,12}(${NUM})\\s*(?:in|inch|")?\\s*(?:deep|depth)\\b`,
-      "i",
     ),
   );
   if (cavDiaDepth) {
@@ -331,74 +422,220 @@ function extractFromSubject(s = ""): Mem {
 
 /* ===================== Human Q&A rendering ===================== */
 
-const HUMAN_QA_LINES = [
-  "Here’s what I have so far:",
-  "- Outside size (L×W×H)",
-  "- Quantity to price",
-  "- Foam family + density",
-  "- Number of cavities / pockets",
-  "- Breaking out quantities for price breaks",
-  "",
-  "Write ONE natural sentence acknowledging the message and saying you'll price it once specs are confirmed.",
+const HUMAN_OPENERS = [
+  "Appreciate the details—once we lock a few specs I’ll price this out.",
+  "Thanks for sending this—happy to quote it as soon as I confirm a couple items.",
+  "Got it—let me confirm a few specs and I’ll run pricing.",
+  "Thanks for the info—if I can fill a couple gaps I’ll send numbers right away.",
 ];
 
-function buildQuestionsFromMissing(missing: string[]): string {
-  if (!missing.length) return "";
-  const bullets = missing.map((m) => `- ${m}`).join("\n");
-  return `To finalize your quote, I still need:\n${bullets}`;
+function chooseOpener(seed: string) {
+  let h = 2166136261 >>> 0;
+  const s = seed || String(Date.now());
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return HUMAN_OPENERS[h % HUMAN_OPENERS.length];
 }
 
-/* ===================== NEW: price fetch helper ===================== */
-
-function parseDimsNums(dims: string | null) {
-  const d = String(dims || "").split("x").map((n) => Number(n));
-  const [L, W, H] = [d[0] || 0, d[1] || 0, d[2] || 0];
-  return { L, W, H };
+function qaLineAsk(label: string): string {
+  switch (label) {
+    case "Dimensions":
+      return "- Could you confirm the finished part dimensions (L×W×H, inches)?";
+    case "Quantity":
+      return "- What quantity should I price?";
+    case "Material":
+      return "- Do you prefer PE, EPE, or PU for this job?";
+    case "Density":
+      return "- If PE/EPE, what density should I use (e.g., 1.7 lb)?";
+    case "Cavities":
+      return "- How many cavities/pockets are needed, if any?";
+    case "Cavity sizes":
+      return "- What are the cavity sizes? (L×W×Depth). For round, a diameter × depth like Ø3×0.75 works.";
+    default:
+      return `- ${label}?`;
+  }
 }
-function densityToPcf(density: string | null) {
-  const m = String(density || "").match(/(\d+(?:\.\d+)?)/);
-  return m ? Number(m[1]) : null;
+
+function renderQAAskOnlyMissing(f: Mem) {
+  const missing: string[] = [];
+  if (!f.dims) missing.push("Dimensions");
+  if (!f.qty) missing.push("Quantity");
+  if (!f.material) missing.push("Material");
+  if (!f.density) missing.push("Density");
+  if (f.cavityCount === undefined) missing.push("Cavities");
+  if ((f.cavityCount ?? 0) > 0 && !(Array.isArray(f.cavityDims) && f.cavityDims.length)) {
+    missing.push("Cavity sizes");
+  }
+  if (!missing.length) return "Great — I have everything I need. I’ll run pricing now and follow up shortly.";
+  return missing.map(qaLineAsk).join("\n");
 }
 
-function specsCompleteForQuote(s: {
-  dims: string | null;
-  qty: number | null;
-  material_id: number | null;
-}) {
-  return !!(s.dims && s.qty && s.material_id);
+function capabilitiesBlurb() {
+  return [
+    "FYI — I can also help with:",
+    "- Picking foam type/density for your use case",
+    "- Multiple cavities/cutouts (rectangular or round)",
+    "- Attaching sketches or simple drawings to speed quoting",
+    "- Breaking out quantities for price breaks",
+  ].join("\n");
 }
 
-async function fetchCalcQuote(opts: {
-  dims: string;
-  qty: number;
-  material_id: number;
-  cavities: string[];
-  round_to_bf?: boolean;
-}) {
-  const { L, W, H } = parseDimsNums(opts.dims);
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
-  const url = `${base}/api/quotes/calc`;
+/* ===================== Tiny LLM opener (Hybrid model) ===================== */
 
-  const body = {
-    length_in: L,
-    width_in: W,
-    height_in: H,
-    material_id: opts.material_id,
-    qty: opts.qty,
-    cavities: opts.cavities && opts.cavities.length ? opts.cavities : null,
-    round_to_bf: !!opts.round_to_bf,
-  };
+async function aiOpener(model: string, lastInbound: string, context: string): Promise<string | null> {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) return null;
+  try {
+    const prompt = [
+      "Write ONE natural sentence acknowledging the message and saying you'll price it once specs are confirmed.",
+      "No bullets or extra lines. Keep it friendly and concise.",
+      context ? `Context:\n${context}` : "",
+      `Customer message:\n${lastInbound || "(none)"}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
-  const r = await fetch(`${url}?t=${Date.now()}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, input: prompt, max_output_tokens: 60 }),
+      cache: "no-store",
+    });
+    const j = await r.json().catch(() => ({}));
+    const text =
+      (j as any)?.output_text ||
+      (j as any)?.output?.[0]?.content?.[0]?.text ||
+      (j as any)?.choices?.[0]?.message?.content?.[0]?.text ||
+      (j as any)?.choices?.[0]?.message?.content ||
+      (j as any)?.choices?.[0]?.text ||
+      "";
+    const one = String(text || "").trim().replace(/\s+/g, " ");
+    return one || null;
+  } catch {
+    return null;
+  }
+}
 
-  const j = (await r.json().catch(() => ({} as any))) as any;
-  if (!r.ok || !j?.ok) return null;
-  return j?.result || null;
+/* ===================== NEW: LLM-assisted parsing ===================== */
+
+async function aiParseFacts(model: string, body: string, subject: string): Promise<Mem> {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) return {};
+  if (!body && !subject) return {};
+  try {
+    const prompt = `
+You are a careful parser for foam quote emails.
+
+Extract ONLY information that is **explicitly** stated in the email or subject.
+Do NOT guess or infer anything that is not clearly written.
+
+Return a JSON object with these keys:
+- "dims": string | null         // outside part size like "12x12x3" (inches)
+- "qty": number | null          // quantity of parts to price
+- "material": "PE" | "EPE" | "PU" | null
+- "density": string | null      // like "1.7lb", "2lb"
+- "cavityCount": number | null  // how many cavities/pockets/cutouts
+- "cavityDims": string[] | null // each like "2x3x1" or "Ø6x1"
+
+Rules:
+- Only fill a field if you can point to the exact words in the text.
+- If you are not sure, use null.
+- For dimensions, convert 12" x 12" x 3" or 12 × 12 × 3 in to "12x12x3".
+- For round cavities, convert 6" diameter x 1" deep to "Ø6x1".
+- For density, just use the number with "lb" suffix (e.g., "1.7lb").
+
+Return ONLY the JSON, no explanation.
+
+Subject:
+${subject || "(none)"}
+
+Body:
+${body || "(none)"}
+`.trim();
+
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        input: prompt,
+        max_output_tokens: 180,
+      }),
+      cache: "no-store",
+    });
+
+    const raw = await r.text();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) return {};
+    const jsonSlice = raw.slice(start, end + 1);
+    const parsed = JSON.parse(jsonSlice);
+
+    const out: Mem = {};
+    if (parsed.dims && typeof parsed.dims === "string") out.dims = normDims(parsed.dims);
+    if (typeof parsed.qty === "number" && parsed.qty > 0) out.qty = parsed.qty;
+    if (typeof parsed.material === "string") {
+      const m = parsed.material.toUpperCase();
+      if (m === "PE" || m === "EPE" || m === "PU") out.material = m;
+    }
+    if (typeof parsed.density === "string" && parsed.density.trim()) {
+      out.density = parsed.density.trim();
+    }
+    if (typeof parsed.cavityCount === "number" && parsed.cavityCount >= 0) {
+      out.cavityCount = parsed.cavityCount;
+    }
+    if (Array.isArray(parsed.cavityDims)) {
+      const cleaned = parsed.cavityDims
+        .filter((x: any) => typeof x === "string" && x.trim())
+        .map((x: string) => normDims(x));
+      if (cleaned.length) out.cavityDims = cleaned;
+    }
+
+    return compact(out);
+  } catch {
+    return {};
+  }
+}
+
+/* ===================== Hybrid LLM selection ===================== */
+
+function scoreAmbiguity(lastText: string, facts: Mem): number {
+  let score = 0;
+  const t = (lastText || "").toLowerCase();
+
+  const missing =
+    (facts.dims ? 0 : 1) +
+    (facts.qty ? 0 : 1) +
+    (facts.material ? 0 : 1) +
+    (facts.density ? 0 : 1);
+
+  score += missing;
+
+  if (/\b(asap|rough|about|ish|similar|like last time|close enough|ballpark)\b/.test(t)) score += 1;
+  if ((facts.cavityCount ?? 0) > 0 && !(Array.isArray(facts.cavityDims) && facts.cavityDims.length)) score += 1;
+  if ((lastText || "").length > 600) score += 1;
+
+  return score; // 0..N
+}
+
+function chooseModel(
+  modeEnv: string | undefined,
+  lastText: string,
+  facts: Mem,
+): "gpt-4.1-mini" | "gpt-4.1" {
+  const force = (process.env.ALEXIO_LLM_FORCE || "").toLowerCase(); // "mini" | "full" | ""
+  if (force === "mini") return "gpt-4.1-mini";
+  if (force === "full") return "gpt-4.1";
+
+  const mode = (modeEnv || "hybrid").toLowerCase(); // "mini" | "full" | "hybrid"
+  if (mode === "mini") return "gpt-4.1-mini";
+  if (mode === "full") return "gpt-4.1";
+
+  const s = scoreAmbiguity(lastText, facts);
+  const threshold = Number(process.env.ALEXIO_LLM_ESCALATE_THRESHOLD || 2);
+  return s >= threshold ? "gpt-4.1" : "gpt-4.1-mini";
 }
 
 /* ===================== Subject/Body parsing aggregator ===================== */
@@ -499,72 +736,57 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
   }
 }
 
-/* ===================== LLM helper (for opener line) ===================== */
+/* ===================== NEW: price fetch helper ===================== */
 
-async function callLLMForOpener(input: {
-  customer_text: string;
-  specs_summary: string;
-  questions_block: string;
+function parseDimsNums(dims: string | null) {
+  const d = String(dims || "").split("x").map((n) => Number(n));
+  const [L, W, H] = [d[0] || 0, d[1] || 0, d[2] || 0];
+  return { L, W, H };
+}
+function densityToPcf(density: string | null) {
+  const m = String(density || "").match(/(\d+(?:\.\d+)?)/);
+  return m ? Number(m[1]) : null;
+}
+
+function specsCompleteForQuote(s: {
+  dims: string | null;
+  qty: number | null;
+  material_id: number | null;
 }) {
-  const apiBase = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
+  return !!(s.dims && s.qty && s.material_id);
+}
 
-  try {
-    const body = {
-      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You help write short, natural email sentences for a foam packaging estimator bot. ONE sentence only.",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: [
-                "Customer wrote:",
-                input.customer_text,
-                "",
-                "Specs we think we see:",
-                input.specs_summary,
-                "",
-                "Questions we still have:",
-                input.questions_block || "(none)",
-                "",
-                "Write ONE friendly sentence that acknowledges what they sent and says you'll price it once any missing specs are confirmed.",
-              ].join("\n"),
-            },
-          ],
-        },
-      ],
-      max_tokens: 80,
-      temperature: 0.3,
-    };
+async function fetchCalcQuote(opts: {
+  dims: string;
+  qty: number;
+  material_id: number;
+  cavities: string[];
+  round_to_bf?: boolean;
+}) {
+  const { L, W, H } = parseDimsNums(opts.dims);
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const url = `${base}/api/quotes/calc`;
 
-    const r = await fetch(`${apiBase}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-    const j = await r.json().catch(() => ({}));
-    const text =
-      (j as any)?.output_text ||
-      (j as any)?.output?.[0]?.content?.[0]?.text ||
-      (j as any)?.choices?.[0]?.message?.content?.[0]?.text ||
-      (j as any)?.choices?.[0]?.message?.content ||
-      (j as any)?.choices?.[0]?.text ||
-      "";
-    const one = String(text || "").trim().replace(/\s+/g, " ");
-    return one || null;
-  } catch {
-    return null;
-  }
+  const body = {
+    length_in: L,
+    width_in: W,
+    height_in: H,
+    material_id: opts.material_id,
+    qty: opts.qty,
+    cavities: opts.cavities && opts.cavities.length ? opts.cavities : null,
+    round_to_bf: !!opts.round_to_bf,
+  };
+
+  const r = await fetch(`${url}?t=${Date.now()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  const j = await r.json().catch(() => ({} as any));
+  if (!r.ok || !j?.ok) return null;
+  return j?.result || null;
 }
 
 /* ===================== Parse body ===================== */
@@ -590,78 +812,151 @@ export async function POST(req: NextRequest) {
   try {
     const p = await parse(req);
     const dryRun = !!p.dryRun;
-    const lastText = String(p.text || "").trim();
+    const lastText = String(p.text || "");
     const subject = String(p.subject || "");
-    const toEmail = String(p.toEmail || "");
 
-    if (!toEmail || !lastText) {
-      return err("Missing toEmail or text");
+    /** Thread key fallback when no explicit threadId provided */
+    const providedThreadId = String(p.threadId ?? "").trim();
+    const threadKey =
+      providedThreadId ||
+      (subject ? `sub:${subject.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 180)}` : "");
+
+    const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
+
+    // Parse current turn (rule-based)
+    let newly = extractAllFromTextAndSubject(lastText, subject);
+
+    // LLM-assisted parsing to fill any remaining gaps (mini-only, no guessing)
+    const needsLLM =
+      (!!process.env.OPENAI_API_KEY &&
+        (!newly.dims ||
+          !newly.qty ||
+          !newly.material ||
+          !newly.density ||
+          newly.cavityCount === undefined)) &&
+      (lastText.length + subject.length) < 4000;
+
+    if (needsLLM) {
+      const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
+      if (llmFacts && Object.keys(llmFacts).length) {
+        newly = mergeFacts(newly, llmFacts);
+      }
     }
 
-    // Parse + extract specs
-    const baseFacts = extractAllFromTextAndSubject(lastText, subject);
-    let specs = await enrichFromDB(baseFacts);
+    // Load + merge with prior facts
+    let loaded: Mem = {};
+    if (threadKey) loaded = await loadFacts(threadKey);
 
-    // Extra cavity enrichment pass
-    specs = enrichCavitiesFromLooseText(specs, lastText);
+    // Multi-turn helper:
+    // If we already have an outside size and a NEW message talks about cavities,
+    // treat a conflicting new LxWxH as a cavity ONLY when it is clearly tied to
+    // "cavity / cutout" wording. Otherwise, let it update the outside size.
+    if (loaded && loaded.dims && newly.dims && newly.dims !== loaded.dims) {
+      const lower = lastText.toLowerCase();
 
-    // Build human-facing “missing” questions summary
-    const missing: string[] = [];
-    if (!specs.dims) missing.push("Outside size (inside cavity if needed)");
-    if (!specs.qty) missing.push("Quantity to price");
-    if (!specs.material) missing.push("Foam family (PE / EPE / PU, etc.)");
-    if (!specs.density) missing.push("Density (e.g. 1.7 lb)");
-    if (!specs.cavityCount && !specs.cavityDims) {
-      missing.push("Number of cavities / pockets and their sizes");
+      const outsidePhrase =
+        /\b(outside|overall|finished)\s+(size|dimension|dimensions)\b/.test(lower) ||
+        /\bblock\s+size\b/.test(lower) ||
+        /\bchange\s+(the\s+)?(overall|outside)?\s*size\s*(to|from)\b/.test(lower);
+
+      const cavityPhrase = /\b(cavity|cavities|pocket|pockets|cut[- ]?out|cutouts?)\b/.test(lower);
+
+      const dimsNearCavity = new RegExp(
+        `(?:cavity|cavities|pocket|pockets|cut[- ]?out|cutouts?).{0,40}(${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})`,
+      ).test(lower);
+
+      const treatAsCavity =
+        !outsidePhrase &&
+        cavityPhrase &&
+        (dimsNearCavity || /\bcavity sizes?\s*[:]/.test(lower));
+
+      if (treatAsCavity) {
+        const prevCav = Array.isArray(loaded.cavityDims) ? loaded.cavityDims.slice() : [];
+        const nextCav = Array.isArray(newly.cavityDims) ? newly.cavityDims.slice() : [];
+        const combined: string[] = [...prevCav];
+
+        const maybeNew = [newly.dims, ...nextCav];
+        for (const cd of maybeNew) {
+          if (cd && !combined.includes(cd)) combined.push(cd);
+        }
+
+        newly.cavityDims = combined;
+
+        // Only derive cavityCount from the list when neither side had an explicit count
+        if (
+          combined.length &&
+          newly.cavityCount === undefined &&
+          (loaded?.cavityCount === undefined || loaded.cavityCount === null)
+        ) {
+          newly.cavityCount = combined.length;
+        }
+
+        // Keep original outer dims from loaded
+        delete (newly as any).dims;
+      }
     }
 
-    const questions = buildQuestionsFromMissing(missing);
+    const carry = {
+      __lastMessageId: loaded?.__lastMessageId || "",
+      __lastInternetMessageId: loaded?.__lastInternetMessageId || "",
+      __turnCount: typeof loaded?.__turnCount === "number" ? loaded.__turnCount : 0,
+    };
 
-    // Load/merge memory (thread-based)
-    const memKey = `thread:${p.threadId || "default"}`;
-    const prevMem = await loadMem(memKey);
-    const mergedSpecs = mergeFacts(prevMem.specs || {}, specs);
+    let merged = mergeFacts({ ...loaded, ...carry }, newly);
 
-    // Save updated memory
-    await saveMem(memKey, { ...prevMem, specs: mergedSpecs });
+    // bump turn counter (persist only if we have a key)
+    merged.__turnCount = (merged.__turnCount || 0) + 1;
 
-    specs = mergedSpecs;
+    // DB enrichment (fills density/material_id/kerf/min_charge when possible)
+    merged = await enrichFromDB(merged);
 
-    // Short “opener” text from LLM (hybrid strategy)
-    let openerLLM =
-      await callLLMForOpener({
-        customer_text: lastText.slice(0, 1200),
-        specs_summary: JSON.stringify(specs, null, 2),
-        questions_block: questions,
-      });
+    // Persist facts
+    if (threadKey) await saveFacts(threadKey, merged);
 
-    if (!openerLLM) {
-      // Fall back to a deterministic sentence if LLM call fails
-      openerLLM =
-        "Thanks for the details — I’ll use these specs to build your quote and confirm anything that’s missing.";
-    }
+    // LLM selection (hybrid) – used for openers, not parsing
+    const llmSelected = chooseModel(process.env.ALEXIO_LLM_MODE, lastText, merged);
 
-    // Human readable questions block for plain-text body
-    let textBody = openerLLM;
-    if (questions) {
-      textBody += `\n\n${questions}`;
-    }
+    // Compose text body (always include specs so later turns never “lose” details)
+    const context = pickThreadContext(threadMsgs);
+    const openerLLM =
+      (await aiOpener(llmSelected, lastText, context)) || chooseOpener(threadKey || subject);
+    const questions = renderQAAskOnlyMissing(merged);
+    const firstReplyExtras = merged.__turnCount === 1 ? "\n\n" + capabilitiesBlurb() : "";
+
+    const specs = {
+      dims: merged.dims || null,
+      qty: merged.qty ?? null,
+      material: merged.material || null,
+      density: merged.density || null,
+      cavityCount: merged.cavityCount ?? null,
+      cavityDims: Array.isArray(merged.cavityDims) ? merged.cavityDims : [],
+      kerf_pct: typeof merged.kerf_pct === "number" ? merged.kerf_pct : null,
+      min_charge: typeof merged.min_charge === "number" ? merged.min_charge : null,
+      material_name: merged.material_name || null,
+      material_id: typeof merged.material_id === "number" ? merged.material_id : null,
+    };
+
+    // Plain-text fallback with a Specs echo
+    const textSpecsLines = [
+      specs.dims ? `• Dimensions: ${specs.dims}` : "",
+      specs.qty != null ? `• Quantity: ${specs.qty}` : "",
+      specs.material ? `• Material: ${specs.material}` : "",
+      specs.density ? `• Density: ${specs.density}` : "",
+      specs.cavityCount != null ? `• Cavities: ${specs.cavityCount}` : "",
+      specs.cavityDims && specs.cavityDims.length
+        ? `• Cavity sizes: ${specs.cavityDims.join(", ")}`
+        : "",
+    ].filter(Boolean);
+
+    let textBody =
+      `${openerLLM}\n\n${questions}${firstReplyExtras}` +
+      (textSpecsLines.length
+        ? `\n\n— Specs (parsed) —\n${textSpecsLines.join("\n")}`
+        : "");
 
     /* ========= If specs complete, call /api/quotes/calc to get pricing ========= */
     let calc: any = null;
-    let calcRaw: number | null = null;
-    let calcMinCharge: number | null =
-      typeof specs.min_charge === "number" ? specs.min_charge : null;
-    let calcTotal: number | null = null;
-    let calcUsedMinCharge = false;
-
-    if (
-      specsCompleteForQuote({
-        dims: specs.dims,
-        qty: specs.qty,
-        material_id: specs.material_id,
-      })
-    ) {
+    if (specsCompleteForQuote({ dims: specs.dims, qty: specs.qty, material_id: specs.material_id })) {
       try {
         calc = await fetchCalcQuote({
           dims: specs.dims as string,
@@ -670,49 +965,9 @@ export async function POST(req: NextRequest) {
           cavities: specs.cavityDims || [],
           round_to_bf: false,
         });
-
         if (calc) {
-          const rawTotal =
-            typeof calc.raw === "number"
-              ? calc.raw
-              : typeof calc.price_raw === "number"
-              ? calc.price_raw
-              : null;
-
-          const baseTotal =
-            typeof calc.total === "number"
-              ? calc.total
-              : typeof calc.price_total === "number"
-              ? calc.price_total
-              : typeof calc.prelim_total === "number"
-              ? calc.prelim_total
-              : null;
-
-          const minChargeFromCalc =
-            typeof calc.min_charge === "number" ? calc.min_charge : calcMinCharge;
-
-          let finalTotal = baseTotal;
-          let usedMinFlag = !!(calc.used_min_charge || calc.min_charge_applied);
-
-          // If the calc result didn't already bake in min charge, compute a safe fallback
-          if (finalTotal == null && (rawTotal != null || minChargeFromCalc != null)) {
-            if (rawTotal != null && minChargeFromCalc != null) {
-              finalTotal = Math.max(rawTotal, minChargeFromCalc);
-              usedMinFlag = finalTotal === minChargeFromCalc;
-            } else if (rawTotal != null) {
-              finalTotal = rawTotal;
-            } else {
-              finalTotal = minChargeFromCalc!;
-              usedMinFlag = true;
-            }
-          }
-
-          calcRaw = rawTotal;
-          calcMinCharge = minChargeFromCalc ?? calcMinCharge;
-          calcTotal = finalTotal;
-          calcUsedMinCharge = usedMinFlag;
-
-          const previewTotal = finalTotal ?? baseTotal;
+          const previewTotal =
+            calc.total ?? calc.price_total ?? calc.prelim_total ?? null;
           if (previewTotal != null) {
             textBody += `\n\n— Preliminary total: ${previewTotal}`;
           }
@@ -751,23 +1006,20 @@ export async function POST(req: NextRequest) {
         color: null,
       },
       material: {
-        name:
-          specs.material_name ||
-          (specs.material ? String(specs.material).toUpperCase() : null),
+        name: specs.material_name || (specs.material ? String(specs.material).toUpperCase() : null),
         density_lbft3: densityPcf,
         kerf_pct: kerfPct || 0,
         price_per_ci: calc?.price_per_ci ?? null,
         price_per_bf: calc?.price_per_bf ?? null,
-        min_charge: calcMinCharge,
+        min_charge: specs.min_charge ?? (calc?.min_charge ?? null),
       },
       pricing: {
         piece_ci: calc?.piece_ci ?? piece_ci_fallback,
         order_ci: calc?.order_ci ?? order_ci_fallback,
         order_ci_with_waste: calc?.order_ci_with_waste ?? order_ci_waste_fallback,
-        raw: calcRaw ?? (calc?.raw ?? calc?.price_raw ?? null),
-        total: calcTotal ?? (calc?.total ?? calc?.price_total ?? 0),
-        used_min_charge:
-          calcUsedMinCharge || !!(calc?.used_min_charge || calc?.min_charge_applied),
+        raw: calc?.raw ?? calc?.price_raw ?? null,
+        total: calc?.total ?? calc?.price_total ?? 0,
+        used_min_charge: !!(calc?.used_min_charge || calc?.min_charge_applied),
       },
       missing: questions
         .split("\n")
@@ -781,46 +1033,140 @@ export async function POST(req: NextRequest) {
       htmlBody = String(renderQuoteEmail(templateInput as any));
 
       // Append a small Cutouts section if we have them
-      const cavCount = specs.cavityCount || (specs.cavityDims && specs.cavityDims.length);
-      if (cavCount) {
-        const cavLines: string[] = [];
-        if (specs.cavityCount) cavLines.push(`Count: ${specs.cavityCount}`);
-        if (specs.cavityDims && specs.cavityDims.length) {
-          cavLines.push(`Sizes: ${specs.cavityDims.join(", ")}`);
-        }
+      const cavCount = specs.cavityCount ?? null;
+      const cavList = Array.isArray(specs.cavityDims) ? specs.cavityDims : [];
+      if (cavCount != null || cavList.length > 0) {
+        const listHtml = cavList.length ? `<li>Sizes: ${cavList.join(", ")}</li>` : "";
+        const countHtml = cavCount != null ? `<li>Count: ${cavCount}</li>` : "";
         htmlBody += `
-          <h3 style="margin:18px 0 8px 0">Cutouts / Cavities</h3>
-          <p style="margin:0 0 8px 0">${cavLines.join("<br/>")}</p>
+          <h3 style="margin:18px 0 8px 0">Cutouts</h3>
+          <ul style="margin:0 0 12px 20px">${countHtml}${listHtml}</ul>
         `;
       }
-    } catch (e: any) {
-      console.error("renderQuoteEmail error", e);
+    } catch {
+      const li = textSpecsLines.map((l) => `<li>${l.replace(/^•\s?/, "")}</li>`).join("");
+      const missingHtml = templateInput.missing.map((l) => `<li>${l}</li>`).join("");
+      htmlBody = `
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.4;color:#111">
+          <p>${openerLLM}</p>
+          ${
+            missingHtml
+              ? `<ul>${missingHtml}</ul>`
+              : `<p>Great — I have everything I need. I’ll run pricing now and follow up shortly.</p>`
+          }
+          ${li ? `<h3 style="margin-top:16px;margin-bottom:6px">Specs (parsed)</h3><ul>${li}</ul>` : ""}
+        </div>
+      `;
     }
 
-    if (dryRun) {
-      return ok({
-        mode: "dryRun",
+    // Recipient guardrails
+    const mailbox = String(process.env.MS_MAILBOX_FROM || "").trim().toLowerCase();
+    const toEmail = String(p.toEmail || "").trim().toLowerCase();
+    if (!toEmail)
+      return err("missing_toEmail", {
+        reason: "Lookup did not produce a recipient; refusing to fall back to mailbox.",
+      });
+    const ownDomain = mailbox.split("@")[1] || "";
+    if (toEmail === mailbox || (ownDomain && toEmail.endsWith(`@${ownDomain}`))) {
+      return err("bad_toEmail", {
         toEmail,
-        subject,
-        textBody,
-        templateInput,
-        htmlBody,
-        calc,
+        reason: "Recipient is our own mailbox/domain; blocking to avoid self-replies.",
       });
     }
 
-    // At this point, msgraph/send is responsible for actually sending
-    return ok({
-      mode: "ai",
+    // Thread continuity
+    const inReplyTo = String(merged?.__lastInternetMessageId || "").trim() || undefined;
+
+    console.info(
+      "[orchestrate] msgraph/send { to:",
       toEmail,
-      subject,
-      textBody,
-      htmlBody,
-      templateInput,
-      calc,
+      ", dryRun:",
+      !!p.dryRun,
+      ", threadKey:",
+      threadKey || "<none>",
+      ", inReplyTo:",
+      inReplyTo ? "<id>" : "none",
+      ", llm:",
+      llmSelected,
+      ", turn:",
+      merged.__turnCount,
+      "}",
+    );
+
+    if (dryRun) {
+      return ok({
+        mode: "dryrun",
+        toEmail,
+        subject: p.subject || "Quote",
+        preview: textBody.slice(0, 900),
+        htmlPreview: htmlBody.slice(0, 900),
+        specs: {
+          dims: specs.dims,
+          qty: specs.qty,
+          material: specs.material,
+          density: specs.density,
+          cavityCount: specs.cavityCount,
+          cavityDims: specs.cavityDims,
+          material_id: specs.material_id,
+        },
+        calc: calc || null,
+        facts: merged,
+        mem: { threadKey: String(threadKey), loadedKeys: Object.keys(loaded), mergedKeys: Object.keys(merged) },
+        inReplyTo: inReplyTo || null,
+        store: LAST_STORE,
+        llm: llmSelected,
+      });
+    }
+
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const sendUrl = `${base}/api/msgraph/send`;
+    const r = await fetch(sendUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        toEmail,
+        subject: p.subject || "Re: your foam quote request",
+        text: textBody, // plain fallback
+        html: htmlBody, // template w/ pricing if available
+        inReplyTo: inReplyTo || null,
+        dryRun: false,
+      }),
+      cache: "no-store",
+    });
+    const sent = await r.json().catch(() => ({}));
+
+    // Persist outbound IDs for next turn
+    if (threadKey && (r.ok || r.status === 202) && (sent?.messageId || sent?.internetMessageId)) {
+      const updated = {
+        ...merged,
+        __lastGraphMessageId: sent?.messageId || merged?.__lastGraphMessageId || "",
+        __lastInternetMessageId: sent?.internetMessageId || merged?.__lastInternetMessageId || "",
+      };
+      await saveFacts(threadKey, updated);
+    }
+
+    return ok({
+      sent: r.ok || r.status === 202,
+      status: r.status,
+      toEmail,
+      result: sent?.result || null,
+      messageId: sent?.messageId || null,
+      internetMessageId: sent?.internetMessageId || null,
+      specs: {
+        dims: specs.dims,
+        qty: specs.qty,
+        material: specs.material,
+        density: specs.density,
+        cavityCount: specs.cavityCount,
+        cavityDims: specs.cavityDims,
+        material_id: specs.material_id,
+      },
+      calc: calc || null,
+      facts: merged,
+      store: LAST_STORE,
+      llm: llmSelected,
     });
   } catch (e: any) {
-    console.error("AI orchestrate error", e);
-    return err("orchestrate_failed", { message: String(e?.message || e) });
+    return err("orchestrate_exception", String(e?.message || e));
   }
 }

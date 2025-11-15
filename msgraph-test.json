@@ -1,0 +1,6 @@
+﻿{
+  "toEmail": "25thhourdesign@gmail.com",
+  "subject": "msgraph direct test (msgraph/send)",
+  "text": "This is a direct /api/msgraph/send test from PowerShell.",
+  "dryRun": false
+}
