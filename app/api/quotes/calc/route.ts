@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
   `;
 
   try {
-    const row = await one<any>(sql, [
+    const rows = await q<any>(sql, [
       length_in,
       width_in,
       height_in,
@@ -124,6 +124,8 @@ export async function POST(req: NextRequest) {
       cavitiesArr,
       round_to_bf,
     ]);
+
+    const row = rows && rows.length > 0 ? rows[0] : null;
 
     return ok({
       input: {
@@ -136,6 +138,8 @@ export async function POST(req: NextRequest) {
         round_to_bf,
       },
       variant_used: "text[] + boolean (7 args)",
+      rowsCount: rows ? rows.length : 0,
+      rows,
       result: row,
     });
   } catch (e: any) {
