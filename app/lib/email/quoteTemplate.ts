@@ -2,9 +2,9 @@
 import { usd } from "@/app/lib/money";
 
 const EXAMPLE_INPUT_HTML = `
-<div style="margin:10px 0 14px 0;padding:10px 12px;border-radius:8px;background:#f4f4f8;border:1px solid #ddd;">
-  <div style="font-weight:600;margin-bottom:4px;">Example of a great first message:</div>
-  <div style="font-family:Consolas,Menlo,monospace;font-size:12px;white-space:pre-wrap;">
+<div style="margin:6px 0 10px 0;padding:8px 10px;border-radius:8px;background:#f4f4f8;border:1px solid #ddd;">
+  <div style="font-weight:600;margin-bottom:2px;">Example of a great first message:</div>
+  <div style="font-family:Consolas,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.2;margin:0;">
     Outside size: 18x12x3 in<br/>
     Quantity: 250<br/>
     Foam family: EPE<br/>
@@ -14,6 +14,7 @@ const EXAMPLE_INPUT_HTML = `
   </div>
 </div>
 `.trim();
+
 
 
 type QuoteRenderInput = {
@@ -98,9 +99,12 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
 
 
   return `
-  <div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#111;line-height:1.45">
-    <p>${i.customerLine || "Thanks for reaching out — here’s your preliminary quote."}</p>
-    ${missingList}${exampleBlock}
+  <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#111;">
+    ${exampleBlock}
+    <p style="margin:0 0 12px 0;">
+      ${i.customerLine || "Thanks for reaching out — here’s your preliminary quote."}
+    </p>
+    ${missingList}
     <h3 style="margin:14px 0 8px 0">Specs</h3>
     ${specsTable}
     <h3 style="margin:18px 0 8px 0">Pricing</h3>
