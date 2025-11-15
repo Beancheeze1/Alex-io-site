@@ -177,7 +177,7 @@ async function sendViaGraphInstrumented({
   }
 
   throw new Error(`Graph send error (stage=${try1.stage} status=${try1.status}): ${try1.text}`);
-}
+} 
 
 // --- handlers ---
 export async function GET() {
