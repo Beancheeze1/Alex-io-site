@@ -956,12 +956,7 @@ export async function POST(req: NextRequest) {
 
     /* ========= If specs complete, call /api/quotes/calc to get pricing ========= */
     let calc: any = null;
-    let calcRaw: number | null = null;
-    let calcMinCharge: number | null =
-      typeof specs.min_charge === "number" ? specs.min_charge : null;
-    let calcTotal: number | null = null;
-    let calcUsedMinCharge = false;
-
+    let cavityVolumeSuspicious = false;
     if (specsCompleteForQuote({ dims: specs.dims, qty: specs.qty, material_id: specs.material_id })) {
       try {
         calc = await fetchCalcQuote({
@@ -973,49 +968,23 @@ export async function POST(req: NextRequest) {
         });
 
         if (calc) {
-          const rawTotal =
-            typeof calc.raw === "number"
-              ? calc.raw
-              : typeof calc.price_raw === "number"
-              ? calc.price_raw
-              : null;
-
-          const baseTotal =
-            typeof calc.total === "number"
-              ? calc.total
-              : typeof calc.price_total === "number"
-              ? calc.price_total
-              : typeof calc.prelim_total === "number"
-              ? calc.prelim_total
-              : null;
-
-          const minChargeFromCalc =
-            typeof calc.min_charge === "number" ? calc.min_charge : calcMinCharge;
-
-          let finalTotal = baseTotal;
-          let usedMinFlag = !!(calc.used_min_charge || calc.min_charge_applied);
-
-          // If the calc result didn't already bake in min charge, compute a safe fallback
-          if (finalTotal == null && (rawTotal != null || minChargeFromCalc != null)) {
-            if (rawTotal != null && minChargeFromCalc != null) {
-              finalTotal = Math.max(rawTotal, minChargeFromCalc);
-              usedMinFlag = finalTotal === minChargeFromCalc;
-            } else if (rawTotal != null) {
-              finalTotal = rawTotal;
-            } else {
-              finalTotal = minChargeFromCalc!;
-              usedMinFlag = true;
-            }
-          }
-
-          calcRaw = rawTotal;
-          calcMinCharge = minChargeFromCalc ?? calcMinCharge;
-          calcTotal = finalTotal;
-          calcUsedMinCharge = usedMinFlag;
-
-          const previewTotal = finalTotal ?? baseTotal;
+          const previewTotal =
+            calc.total ?? calc.price_total ?? calc.prelim_total ?? null;
           if (previewTotal != null) {
             textBody += `\n\n— Preliminary total: ${previewTotal}`;
+          }
+
+          // Option C: warn but continue when cavities consume ~all of the block
+          if (
+            typeof calc.piece_ci_raw === "number" &&
+            typeof calc.cavities_ci === "number" &&
+            calc.piece_ci_raw > 0 &&
+            calc.cavities_ci >= calc.piece_ci_raw * 0.95
+          ) {
+            cavityVolumeSuspicious = true;
+            textBody +=
+              "\n\nNOTE: The total cavity / cutout volume is equal to or larger than the foam block. " +
+              "Please double-check the cavity dimensions to make sure this configuration is physically possible.";
           }
         }
       } catch {
@@ -1039,6 +1008,18 @@ export async function POST(req: NextRequest) {
     const order_ci_fallback = piece_ci_fallback * qtyNum;
     const order_ci_waste_fallback = Math.round(order_ci_fallback * (1 + kerfPct / 100));
 
+        const missingList = questions
+      .split("\n")
+      .map((s) => s.replace(/^-+\s?/, "").trim())
+      .filter((s) => !!s && !/^fyi/i.test(s));
+
+    if (cavityVolumeSuspicious) {
+      missingList.push(
+        "Please double-check the cavity dimensions—total cutout volume is equal to or larger than the foam block, " +
+          "so this might not be physically possible."
+      );
+    }
+
     const templateInput = {
       customerLine: openerLLM,
       specs: {
@@ -1057,22 +1038,19 @@ export async function POST(req: NextRequest) {
         kerf_pct: kerfPct || 0,
         price_per_ci: calc?.price_per_ci ?? null,
         price_per_bf: calc?.price_per_bf ?? null,
-        min_charge: calcMinCharge,
+        min_charge: specs.min_charge ?? (calc?.min_charge ?? null),
       },
       pricing: {
         piece_ci: calc?.piece_ci ?? piece_ci_fallback,
         order_ci: calc?.order_ci ?? order_ci_fallback,
         order_ci_with_waste: calc?.order_ci_with_waste ?? order_ci_waste_fallback,
-        raw: calcRaw ?? (calc?.raw ?? calc?.price_raw ?? null),
-        total: calcTotal ?? (calc?.total ?? calc?.price_total ?? 0),
-        used_min_charge:
-          calcUsedMinCharge || !!(calc?.used_min_charge || calc?.min_charge_applied),
+        raw: calc?.raw ?? calc?.price_raw ?? null,
+        total: calc?.total ?? calc?.price_total ?? 0,
+        used_min_charge: !!(calc?.used_min_charge || calc?.min_charge_applied),
       },
-      missing: questions
-        .split("\n")
-        .map((s) => s.replace(/^-+\s?/, "").trim())
-        .filter((s) => !!s && !/^fyi/i.test(s)),
+      missing: missingList,
     };
+
 
     // HTML body from your template
     let htmlBody = "";
