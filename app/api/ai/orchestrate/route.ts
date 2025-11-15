@@ -88,15 +88,27 @@ function grabDims(raw: string) {
  *  - 250 pcs / 250 pieces / 250 pc
  *  - 250 12"x12"x3" pieces of foam
  *  - change qty to 300 / change quantity to 300 / qty to 300
+ *  - run 300 / quote 300 / price 300 / let's do 300 / total 300
  */
 function grabQty(raw: string) {
   const t = raw.toLowerCase();
 
   let m =
+    // direct qty/quantity phrases
     t.match(/\bqty\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
     t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
+    t.match(/\b(?:qty|quantity)\s*[:\-]\s*(\d{1,6})\b/) ||
+    // "change qty to 300"
     t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
+    // conversational: "make it 300", "let's do 300", "do 300"
     t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
+    t.match(/\b(?:let['’]s|lets)\s+do\s+(\d{1,6})\b/) ||
+    t.match(/\b(?:run|do|do\s+a\s+run\s+of)\s+(\d{1,6})\b/) ||
+    // "quote 300", "price 300"
+    t.match(/\b(?:quote|price)\s+(\d{1,6})\b/) ||
+    // "total 300", "total of 300"
+    t.match(/\btotal\s*(?:is|=|of)?\s*(\d{1,6})\b/) ||
+    // generic "250 pcs"
     t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
 
   if (m) return Number(m[1]);
@@ -108,8 +120,8 @@ function grabQty(raw: string) {
   );
   if (m) return Number(m[1]);
 
-  // Fallback: “for 250 pieces”, “for 250”
-  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?)?\b/);
+  // Fallback: “for 250 pieces”, “for 250”, “for a run of 250”
+  m = norm.match(/\bfor\s+(?:a\s+run\s+of\s+)?(\d{1,6})\s*(?:pcs?|pieces?|parts?|total)?\b/);
   if (m) return Number(m[1]);
 
   return undefined;
@@ -218,7 +230,7 @@ function extractLabeledLines(s: string) {
         continue;
       }
 
-      // "Sizes: ø6x1" or "Sizes: Ø6 x 1"
+      // "Sizes: ø6x1" or "Sizes: Ø6 x 1" or "Sizes: 6\" round x 1\" deep"
       m = t.match(/^sizes?\s*[:\-]\s*(.+)$/);
       if (m) {
         const part = m[1].replace(/\beach\b/gi, "");
@@ -227,7 +239,7 @@ function extractLabeledLines(s: string) {
           const tokT = tok.trim();
           const md =
             tokT.match(
-              /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+              /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
             ) ||
             tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
           if (md) {
@@ -294,7 +306,7 @@ function extractLabeledLines(s: string) {
         const tokT = tok.trim();
         const md =
           tokT.match(
-            /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+            /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
           ) ||
           tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
         if (md) {
@@ -316,7 +328,7 @@ function extractLabeledLines(s: string) {
     if (inlineCav) addCavity(inlineCav[1]);
 
     const cavDiaDepth = t.match(
-      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
+      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b[^0-9]{0,20}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
     );
     if (cavDiaDepth) addCavity(`Ø${cavDiaDepth[1]}x${cavDiaDepth[2]}`);
   }
@@ -363,7 +375,7 @@ function extractFreeText(s = ""): Mem {
     if (singleEach) out.cavityDims = [normDims(singleEach[1])];
   }
 
-  // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1", "6 inch round x 1 deep"
+  // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1", "6 inch round x 1 inch deep"
   const roundCav =
     lower.match(
       /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b.*?(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)/i,
@@ -378,7 +390,7 @@ function extractFreeText(s = ""): Mem {
   }
 
   const cavDiaDepth = lower.match(
-    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b[^0-9]{0,12}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
+    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b[^0-9]{0,20}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
   );
   if (cavDiaDepth) {
     const list = (out.cavityDims as string[] | undefined) || [];
@@ -522,7 +534,7 @@ Rules:
 - Only fill a field if you can point to the exact words in the text.
 - If you are not sure, use null.
 - For dimensions, convert 12" x 12" x 3" or 12 × 12 × 3 in to "12x12x3".
-- For round cavities, convert 6" diameter x 1" deep to "Ø6x1".
+- For round cavities, convert 6" diameter x 1" deep or 6" round x 1" deep to "Ø6x1".
 - For density, just use the number with "lb" suffix (e.g., "1.7lb").
 
 Return ONLY the JSON, no explanation.
@@ -570,6 +582,11 @@ ${body || "(none)"}
         .filter((x: any) => typeof x === "string" && x.trim())
         .map((x: string) => normDims(x));
       if (cleaned.length) out.cavityDims = cleaned;
+    }
+
+    // If LLM gives a list but no count, infer count from list length
+    if (Array.isArray(out.cavityDims) && out.cavityDims.length && out.cavityCount === undefined) {
+      out.cavityCount = out.cavityDims.length;
     }
 
     return compact(out);
@@ -826,10 +843,8 @@ export async function POST(req: NextRequest) {
     let loaded: Mem = {};
     if (threadKey) loaded = await loadFacts(threadKey);
 
-    // NEW: multi-turn helper —
-    // if we already have an outside size, and the new message mentions a cavity
-    // and contains a bare LxWxH, treat that new size as a cavity dim instead
-    // of overwriting the outer dims.
+    // multi-turn helper: if we already have outer dims and new dims appear in a cavity context,
+    // treat new dims as cavity sizes instead of overwriting outer dims.
     if (loaded && loaded.dims && newly.dims && newly.dims !== loaded.dims) {
       const lower = lastText.toLowerCase();
       const cavityCtx = /\b(cavity|cavities|pocket|pockets|cut[- ]?out|cutouts?)\b/.test(lower);
@@ -862,6 +877,11 @@ export async function POST(req: NextRequest) {
     };
 
     let merged = mergeFacts({ ...loaded, ...carry }, newly);
+
+    // If at this point we still have cavityDims but no cavityCount, sync count
+    if (Array.isArray(merged.cavityDims) && merged.cavityDims.length && merged.cavityCount === undefined) {
+      merged.cavityCount = merged.cavityDims.length;
+    }
 
     // bump turn counter (persist only if we have a key)
     merged.__turnCount = (merged.__turnCount || 0) + 1;
