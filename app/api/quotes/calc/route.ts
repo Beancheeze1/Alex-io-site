@@ -11,28 +11,73 @@ type In = {
   height_in: number | string;
   material_id: number | string;
   qty: number | string;
-  cavities?: string[] | null;   // e.g., ["3x2x1", "Ø6x1"]
-  round_to_bf?: boolean;        // optional
+  cavities?: string[] | null; // e.g., ["3x3x1", "Ø6x1"]
+  round_to_bf?: boolean;
+};
+
+type MaterialRow = {
+  id: number;
+  name: string;
+  price_per_bf: number | null;
+  kerf_waste_pct: number | null;
+  min_charge_usd: number | null;
+  price_per_cuin: number | null;
+  cost_per_ci_usd: number | null;
+  skiving_upcharge_pct: number | null;
+  cutting_setup_fee_usd: number | null;
+  thickness_in: number | null;
 };
 
 function bad(msg: string, detail?: any, code = 400) {
   return NextResponse.json({ ok: false, error: msg, detail }, { status: code });
 }
-
 function ok(extra: Record<string, any> = {}) {
   return NextResponse.json({ ok: true, ...extra }, { status: 200 });
 }
 
-function num(v: any): number | null {
+function toNum(v: any, label: string): number {
   const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+  if (!Number.isFinite(n)) {
+    throw new Error(`bad_${label}`);
+  }
+  return n;
+}
+function safeNum(v: any, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+function round2(v: number) {
+  return Math.round(v * 100) / 100;
+}
+function round4(v: number) {
+  return Math.round(v * 10000) / 10000;
 }
 
-/**
- * GET:
- *  - plain help (no params)
- *  - ?inspect=1  -> list calc_foam_quote() function signatures in DB
- */
+/** Parse cavity strings like "2x3x0.5" or "Ø6x1" (dia x depth) into cubic inches. */
+function cavityVolumeCi(s: string): number {
+  const raw = s.trim().toLowerCase().replace(/\s+/g, "").replace(/×/g, "x");
+  if (!raw) return 0;
+
+  // Round cavity: "ø6x1", "o6x1"
+  const roundMatch = raw.match(/^([øo0]?)(\d*\.?\d+)x(\d*\.?\d+)$/i);
+  if (roundMatch && roundMatch[1]) {
+    const dia = Number(roundMatch[2]);
+    const depth = Number(roundMatch[3]);
+    if (!Number.isFinite(dia) || !Number.isFinite(depth)) return 0;
+    const radius = dia / 2;
+    return Math.PI * radius * radius * depth;
+  }
+
+  // Rectangular cavity: "2x3x1"
+  const parts = raw.split("x").map((p) => Number(p));
+  if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+    return parts[0] * parts[1] * parts[2];
+  }
+
+  return 0;
+}
+
+/** GET = simple help / function inspector (unchanged behavior) */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   if (url.searchParams.get("inspect")) {
@@ -47,11 +92,12 @@ export async function GET(req: NextRequest) {
       ORDER BY 1,2;
       `,
     );
-    return ok({ functions: funcs });
+
+    return NextResponse.json({ ok: true, functions: funcs });
   }
 
   return ok({
-    usage: "POST JSON to run calc_foam_quote()",
+    usage: "POST JSON to compute a foam quote",
     expects: {
       length_in: "number",
       width_in: "number",
@@ -59,7 +105,7 @@ export async function GET(req: NextRequest) {
       material_id: "integer",
       qty: "integer",
       cavities: "string[] (optional) e.g. ['2x3x0.5','Ø6x1']",
-      round_to_bf: "boolean (optional, billable board-foot step, default false)",
+      round_to_bf: "boolean (optional)",
     },
     example: {
       length_in: 12,
@@ -73,6 +119,19 @@ export async function GET(req: NextRequest) {
   });
 }
 
+/**
+ * POST: deterministic volumetric quote
+ *
+ * - Uses materials table for:
+ *   - price_per_cuin / price_per_bf / cost_per_ci_usd
+ *   - kerf_waste_pct
+ *   - min_charge_usd
+ *   - skiving_upcharge_pct (applied when thickness NOT a whole inch)
+ *   - cutting_setup_fee_usd
+ *
+ * - Cavities subtract volume per piece.
+ * - Returns a single row in `result` that orchestrate already knows how to read.
+ */
 export async function POST(req: NextRequest) {
   let body: In;
   try {
@@ -81,51 +140,133 @@ export async function POST(req: NextRequest) {
     return bad("invalid_json");
   }
 
-  const length_in = num(body.length_in);
-  const width_in = num(body.width_in);
-  const height_in = num(body.height_in);
-  const qty = num(body.qty);
-  const material_id = num(body.material_id);
-  const round_to_bf = !!body.round_to_bf;
-
-  if (length_in == null || width_in == null || height_in == null) {
-    return bad("missing_or_bad_dimensions", { length_in, width_in, height_in });
-  }
-  if (material_id == null) return bad("missing_or_bad_material_id");
-  if (qty == null) return bad("missing_or_bad_qty");
-
-  const cavitiesArr =
-    Array.isArray(body.cavities) && body.cavities.length
-      ? body.cavities.map((s) => String(s))
-      : null;
-
-  // SINGLE, KNOWN-GOOD SIGNATURE:
-  // calc_foam_quote(
-  //   length_in numeric, width_in numeric, height_in numeric,
-  //   material_id integer, qty integer,
-  //   cavities text[], round_to_bf boolean
-  // ) RETURNS TABLE(...)
-  const sql = `
-    SELECT *
-    FROM calc_foam_quote(
-      $1::numeric, $2::numeric, $3::numeric,
-      $4::integer, $5::integer,
-      $6::text[], $7::boolean
-    );
-  `;
-
   try {
-    const rows = await q<any>(sql, [
-      length_in,
-      width_in,
-      height_in,
-      material_id,
-      qty,
-      cavitiesArr,
-      round_to_bf,
-    ]);
+    const length_in = toNum(body.length_in, "length_in");
+    const width_in = toNum(body.width_in, "width_in");
+    const height_in = toNum(body.height_in, "height_in");
+    const qty = toNum(body.qty, "qty");
+    const material_id = toNum(body.material_id, "material_id");
+    const round_to_bf = !!body.round_to_bf;
 
-    const row = rows && rows.length > 0 ? rows[0] : null;
+    if (length_in <= 0 || width_in <= 0 || height_in <= 0) {
+      return bad("dims_must_be_positive", { length_in, width_in, height_in });
+    }
+    if (qty <= 0) {
+      return bad("qty_must_be_positive", { qty });
+    }
+
+    const cavitiesArr =
+      Array.isArray(body.cavities) && body.cavities.length
+        ? body.cavities.map((s) => String(s))
+        : [];
+
+    // Load material row
+    const mat = await one<MaterialRow>(
+      `
+      SELECT
+        id,
+        name,
+        price_per_bf,
+        kerf_waste_pct,
+        min_charge_usd,
+        price_per_cuin,
+        cost_per_ci_usd,
+        skiving_upcharge_pct,
+        cutting_setup_fee_usd,
+        thickness_in
+      FROM materials
+      WHERE id = $1
+      `,
+      [material_id],
+    );
+
+    if (!mat) {
+      return bad("material_not_found", { material_id });
+    }
+
+    // --- Volumes (cubic inches) ---
+    const piece_ci_raw = length_in * width_in * height_in;
+    let cavities_ci = 0;
+    for (const c of cavitiesArr) {
+      cavities_ci += cavityVolumeCi(c);
+    }
+    const piece_ci = Math.max(piece_ci_raw - cavities_ci, 0);
+    const order_ci = piece_ci * qty;
+
+    // Kerf / waste
+    const kerf_pct = safeNum(mat.kerf_waste_pct, 10);
+    const order_ci_with_waste = order_ci * (1 + kerf_pct / 100);
+
+    // --- Pricing base ---
+    const price_per_ci_direct = mat.price_per_cuin;
+    const price_per_ci_from_bf =
+      mat.price_per_bf != null ? Number(mat.price_per_bf) / 144 : null;
+    const price_per_ci_from_cost =
+      mat.cost_per_ci_usd != null ? Number(mat.cost_per_ci_usd) * 1.35 : null; // simple markup
+
+    const price_per_ci =
+      (price_per_ci_direct as number | null) ??
+      (price_per_ci_from_bf as number | null) ??
+      (price_per_ci_from_cost as number | null) ??
+      0.02; // hard fallback
+
+    const price_per_bf =
+      (mat.price_per_bf as number | null) ?? round2(price_per_ci * 144);
+
+    // Skiving upcharge: if height is NOT within 0.01 of a whole inch
+    const skive_pct =
+      mat.skiving_upcharge_pct != null
+        ? Number(mat.skiving_upcharge_pct)
+        : 0;
+    const is_skived =
+      Math.abs(height_in - Math.round(height_in)) > 0.01 && skive_pct > 0;
+
+    const setup_fee =
+      mat.cutting_setup_fee_usd != null
+        ? Number(mat.cutting_setup_fee_usd)
+        : 0;
+
+    // Raw total
+    let raw_total = order_ci_with_waste * price_per_ci;
+    if (is_skived) {
+      raw_total *= 1 + skive_pct / 100;
+    }
+    raw_total += setup_fee;
+
+    // Board-foot rounding (optional / mild effect)
+    if (round_to_bf) {
+      const bf = order_ci_with_waste / 144;
+      const bf_rounded = Math.ceil(bf * 4) / 4; // quarter-board increments
+      raw_total = bf_rounded * price_per_bf;
+    }
+
+    const min_charge = safeNum(mat.min_charge_usd, 0);
+    let total = raw_total;
+    let used_min_charge = false;
+    if (min_charge > 0 && total < min_charge) {
+      total = min_charge;
+      used_min_charge = true;
+    }
+
+    const result = {
+      piece_ci: round4(piece_ci),
+      order_ci: round4(order_ci),
+      order_ci_with_waste: round4(order_ci_with_waste),
+      price_per_ci: round4(price_per_ci),
+      price_per_bf: round2(price_per_bf),
+      min_charge: round2(min_charge),
+      total: round2(total),
+      used_min_charge,
+
+      // Extra debug / for templates
+      kerf_pct,
+      is_skived,
+      skive_pct,
+      setup_fee: round2(setup_fee),
+      cavities_ci: round4(cavities_ci),
+      piece_ci_raw: round4(piece_ci_raw),
+      material_name: mat.name,
+    };
 
     return ok({
       input: {
@@ -137,20 +278,10 @@ export async function POST(req: NextRequest) {
         cavities: cavitiesArr,
         round_to_bf,
       },
-      variant_used: "text[] + boolean (7 args)",
-      rowsCount: rows ? rows.length : 0,
-      rows,
-      result: row,
+      variant_used: "ts_volumetric_v1",
+      result,
     });
   } catch (e: any) {
-    return bad(
-      "db_error",
-      {
-        message: String(e?.message || e),
-        attempted_signature:
-          "calc_foam_quote(numeric,numeric,numeric,integer,integer,text[],boolean)",
-      },
-      500,
-    );
+    return bad("calc_exception", { message: String(e?.message || e) }, 500);
   }
 }
