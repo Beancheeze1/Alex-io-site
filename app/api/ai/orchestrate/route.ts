@@ -64,6 +64,7 @@ function normDims(s: string) {
  *  - 12"x12"x3"
  *  - 12" x 12" x 3"
  *  - 12×12×3
+ *  - 1x1x.5 / .5x1x1  (leading-dot decimals)
  */
 function grabDims(raw: string) {
   if (!raw) return undefined;
@@ -71,13 +72,16 @@ function grabDims(raw: string) {
   // Normalize common “shop” patterns like 12"x12"x3" → 12x12x3
   const cleaned = raw
     // remove a quote that sits between a number and an x
-    .replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/gi, "$1 ")
+    .replace(/(\d+(?:\.\d+)?|\.\d+)\s*"\s*(?=[x×])/gi, "$1 ")
     // normalize separators a bit
     .replace(/\s+/g, " ");
 
-  const m = cleaned.match(
-    /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:in|inch|inches|"))?\b/,
+  const num = "(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
+  const re = new RegExp(
+    String.raw`\b(${num})\s*[x×]\s*(${num})\s*[x×]\s*(${num})(?:\s*(?:in|inch|inches|"))?\b`,
+    "i",
   );
+  const m = cleaned.match(re);
   return m ? `${m[1]}x${m[2]}x${m[3]}` : undefined;
 }
 
@@ -88,40 +92,28 @@ function grabDims(raw: string) {
  *  - 250 pcs / 250 pieces / 250 pc
  *  - 250 12"x12"x3" pieces of foam
  *  - change qty to 300 / change quantity to 300 / qty to 300
- *  - run 300 / quote 300 / price 300 / let's do 300 / total 300
  */
 function grabQty(raw: string) {
   const t = raw.toLowerCase();
 
   let m =
-    // direct qty/quantity phrases
     t.match(/\bqty\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
     t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
-    t.match(/\b(?:qty|quantity)\s*[:\-]\s*(\d{1,6})\b/) ||
-    // "change qty to 300"
     t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
-    // conversational: "make it 300", "let's do 300", "do 300"
     t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
-    t.match(/\b(?:let['’]s|lets)\s+do\s+(\d{1,6})\b/) ||
-    t.match(/\b(?:run|do|do\s+a\s+run\s+of)\s+(\d{1,6})\b/) ||
-    // "quote 300", "price 300"
-    t.match(/\b(?:quote|price)\s+(\d{1,6})\b/) ||
-    // "total 300", "total of 300"
-    t.match(/\btotal\s*(?:is|=|of)?\s*(\d{1,6})\b/) ||
-    // generic "250 pcs"
     t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
 
   if (m) return Number(m[1]);
 
   // Handle “quantity of 250 12"x12"x3" pieces of foam”
-  const norm = t.replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/g, "$1 "); // strip quotes before x
+  const norm = t.replace(/(\d+(?:\.\d+)?|\.\d+)\s*"\s*(?=[x×])/g, "$1 "); // strip quotes before x
   m = norm.match(
-    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?\s*[x×]\s*\d+(?:\.\d+)?)(?:\s*(?:pcs?|pieces?))\b/,
+    /\b(\d{1,6})\s+(?:\d+(?:\.\d+)?|\.\d+)\s*[x×]\s*(?:\d+(?:\.\d+)?|\.\d+)\s*[x×]\s*(?:\d+(?:\.\d+)?|\.\d+)(?:\s*(?:pcs?|pieces?))\b/,
   );
   if (m) return Number(m[1]);
 
-  // Fallback: “for 250 pieces”, “for 250”, “for a run of 250”
-  m = norm.match(/\bfor\s+(?:a\s+run\s+of\s+)?(\d{1,6})\s*(?:pcs?|pieces?|parts?|total)?\b/);
+  // Fallback: “for 250 pieces”, “for 250”
+  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?)?\b/);
   if (m) return Number(m[1]);
 
   return undefined;
@@ -129,8 +121,8 @@ function grabQty(raw: string) {
 
 function grabDensity(t: string) {
   const m =
-    t.match(/\b(\d+(?:\.\d+)?)\s*(?:lb\/?ft?3|lb(?:s)?|#|pcf)\b/) ||
-    t.match(/(?:density|foam\s*density|pcf)\D{0,10}(\d+(?:\.\d+)?)/);
+    t.match(/\b(\d+(?:\.\d+)?|\.\d+)\s*(?:lb\/?ft?3|lb(?:s)?|#|pcf)\b/) ||
+    t.match(/(?:density|foam\s*density|pcf)\D{0,10}(\d+(?:\.\d+)?|\.\d+)/);
   return m ? `${m[1]}lb` : undefined;
 }
 function grabMaterial(t: string) {
@@ -230,18 +222,28 @@ function extractLabeledLines(s: string) {
         continue;
       }
 
-      // "Sizes: ø6x1" or "Sizes: Ø6 x 1" or "Sizes: 6\" round x 1\" deep"
+      // "Sizes: ø6x1" or "Sizes: Ø6 x 1"
       m = t.match(/^sizes?\s*[:\-]\s*(.+)$/);
       if (m) {
         const part = m[1].replace(/\beach\b/gi, "");
         const tokens = part.split(/[,;]+/);
         for (const tok of tokens) {
           const tokT = tok.trim();
+
+          const roundNum = "(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
           const md =
             tokT.match(
-              /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+              new RegExp(
+                String.raw`[øØo0]?\s*dia?\s*\.?\s*(${roundNum})\s*(?:in|")?\s*(?:x|by|\*)\s*(${roundNum})`,
+                "i",
+              ),
             ) ||
-            tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
+            tokT.match(
+              new RegExp(
+                String.raw`[øØ]\s*(${roundNum})\s*(?:x|by|\*)\s*(${roundNum})`,
+                "i",
+              ),
+            );
           if (md) {
             addCavity(`Ø${md[1]}x${md[2]}`);
             continue;
@@ -279,7 +281,7 @@ function extractLabeledLines(s: string) {
       continue;
     }
 
-    m = t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs|#|pcf))?\b/);
+    m = t.match(/^density\s*[:\-]\s*(\d+(?:\.\d+)?|\.\d+)(?:\s*(?:lb|lbs|#|pcf))?\b/);
     if (m) {
       out.density = `${m[1]}lb`;
       continue;
@@ -304,11 +306,20 @@ function extractLabeledLines(s: string) {
       const tokens = part.split(/[,;]+/);
       for (const tok of tokens) {
         const tokT = tok.trim();
+        const roundNum = "(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
         const md =
           tokT.match(
-            /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+            new RegExp(
+              String.raw`[øØo0]?\s*dia?\s*\.?\s*(${roundNum})\s*(?:in|")?\s*(?:x|by|\*)\s*(${roundNum})`,
+              "i",
+            ),
           ) ||
-          tokT.match(/[øØ]\s*(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i);
+          tokT.match(
+            new RegExp(
+              String.raw`[øØ]\s*(${roundNum})\s*(?:x|by|\*)\s*(${roundNum})`,
+              "i",
+            ),
+          );
         if (md) {
           addCavity(`Ø${md[1]}x${md[2]}`);
           continue;
@@ -323,19 +334,18 @@ function extractLabeledLines(s: string) {
     }
 
     const inlineCav = t.match(
-      /(?:cavities?|pockets?|cut[- ]?outs?)[:\s]+(?:size|sizes)?[:\s]*((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/,
+      /(?:cavities?|pockets?|cut[- ]?outs?)[:\s]+(?:size|sizes)?[:\s]*((?:\d+(?:\.\d+)?|\.\d+)\s*[x×]\s*){2}(?:\d+(?:\.\d+)?|\.\d+)/,
     );
     if (inlineCav) addCavity(inlineCav[1]);
 
+    const roundNum = "(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
     const cavDiaDepth = t.match(
-      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b[^0-9]{0,20}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
+      new RegExp(
+        String.raw`(${roundNum})\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9.]{0,12}(${roundNum})\s*(?:in|inch|")?\s*(?:deep|depth)\b`,
+        "i",
+      ),
     );
     if (cavDiaDepth) addCavity(`Ø${cavDiaDepth[1]}x${cavDiaDepth[2]}`);
-  }
-
-  // If we clearly have a list of cavity sizes but no count, sync count to list length
-  if (Array.isArray(out.cavityDims) && out.cavityDims.length && out.cavityCount === undefined) {
-    out.cavityCount = out.cavityDims.length;
   }
 
   return out;
@@ -365,23 +375,32 @@ function extractFreeText(s = ""): Mem {
   if (countWord) out.cavityCount = WORD_NUM[countWord[1]];
 
   const afterEach = lower.match(
-    /\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?(?:\s*,\s*(?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)+)/,
+    /\beach\s+((?:\d+(?:\.\d+)?|\.\d+)\s*[x×]\s*){2}(?:\d+(?:\.\d+)?|\.\d+)(?:\s*,\s*(?:\d+(?:\.\d+)?|\.\d+)\s*[x×]\s*(?:\d+(?:\.\d+)?|\.\d+)\s*[x×]\s*(?:\d+(?:\.\d+)?|\.\d+))+/,
   );
   if (afterEach) {
     const list = afterEach[1].split(/\s*,\s*/).map(normDims);
     out.cavityDims = list;
   } else {
-    const singleEach = lower.match(/\beach\s+((?:\d+(?:\.\d+)?\s*[x×]\s*){2}\d+(?:\.\d+)?)/);
+    const singleEach = lower.match(
+      /\beach\s+((?:\d+(?:\.\d+)?|\.\d+)\s*[x×]\s*){2}(?:\d+(?:\.\d+)?|\.\d+)/,
+    );
     if (singleEach) out.cavityDims = [normDims(singleEach[1])];
   }
 
-  // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1", "6 inch round x 1 inch deep"
+  // round cavity: "6\" diameter and 1\" deep", "Ø6 x 1", "dia 6 x 1"
+  const roundNum = "(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
   const roundCav =
     lower.match(
-      /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b.*?(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)/i,
+      new RegExp(
+        String.raw`(${roundNum})\s*(?:in|")?\s*(?:diameter|dia)\b.*?(${roundNum})\s*(?:in|")?\s*(?:deep|depth)`,
+        "i",
+      ),
     ) ||
     lower.match(
-      /[øØo0]?\s*(?:dia?|round|circle)\s*\.?\s*(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)/i,
+      new RegExp(
+        String.raw`[øØo0]?\s*dia?\s*\.?\s*(${roundNum})\s*(?:in|")?\s*(?:x|by|\*)\s*(${roundNum})`,
+        "i",
+      ),
     );
   if (roundCav) {
     const list = (out.cavityDims as string[] | undefined) || [];
@@ -390,17 +409,15 @@ function extractFreeText(s = ""): Mem {
   }
 
   const cavDiaDepth = lower.match(
-    /(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:diameter|dia|round|circle)\b[^0-9]{0,20}(\d+(?:\.\d+)?)\s*(?:in|inch|")?\s*(?:deep|depth)\b/,
+    new RegExp(
+      String.raw`(${roundNum})\s*(?:in|inch|")?\s*(?:diameter|dia)\b[^0-9.]{0,12}(${roundNum})\s*(?:in|inch|")?\s*(?:deep|depth)\b`,
+      "i",
+    ),
   );
   if (cavDiaDepth) {
     const list = (out.cavityDims as string[] | undefined) || [];
     list.push(`Ø${cavDiaDepth[1]}x${cavDiaDepth[2]}`);
     out.cavityDims = list;
-  }
-
-  // If we clearly have a list of cavity sizes but no count, sync count to list length
-  if (Array.isArray(out.cavityDims) && out.cavityDims.length && out.cavityCount === undefined) {
-    out.cavityCount = out.cavityDims.length;
   }
 
   return compact(out);
@@ -534,7 +551,7 @@ Rules:
 - Only fill a field if you can point to the exact words in the text.
 - If you are not sure, use null.
 - For dimensions, convert 12" x 12" x 3" or 12 × 12 × 3 in to "12x12x3".
-- For round cavities, convert 6" diameter x 1" deep or 6" round x 1" deep to "Ø6x1".
+- For round cavities, convert 6" diameter x 1" deep to "Ø6x1".
 - For density, just use the number with "lb" suffix (e.g., "1.7lb").
 
 Return ONLY the JSON, no explanation.
@@ -584,11 +601,6 @@ ${body || "(none)"}
       if (cleaned.length) out.cavityDims = cleaned;
     }
 
-    // If LLM gives a list but no count, infer count from list length
-    if (Array.isArray(out.cavityDims) && out.cavityDims.length && out.cavityCount === undefined) {
-      out.cavityCount = out.cavityDims.length;
-    }
-
     return compact(out);
   } catch {
     return {};
@@ -610,7 +622,8 @@ function scoreAmbiguity(lastText: string, facts: Mem): number {
   score += missing;
 
   if (/\b(asap|rough|about|ish|similar|like last time|close enough|ballpark)\b/.test(t)) score += 1;
-  if ((facts.cavityCount ?? 0) > 0 && !(Array.isArray(facts.cavityDims) && facts.cavityDims.length)) score += 1;
+  if ((facts.cavityCount ?? 0) > 0 && !(Array.isArray(facts.cavityDims) && facts.cavityDims.length))
+    score += 1;
   if ((lastText || "").length > 600) score += 1;
 
   return score; // 0..N
@@ -661,7 +674,7 @@ async function enrichFromDB(facts: Mem): Promise<Mem> {
         ? "%pu%"
         : `%${family.toLowerCase()}%`;
 
-    const densMatch = String(facts.density || "").match(/(\d+(?:\.\d+)?)/);
+    const densMatch = String(facts.density || "").match(/(\d+(?:\.\d+)?|\.\d+)/);
     const target = densMatch ? Number(densMatch[1]) : null;
 
     type MatRow = {
@@ -740,7 +753,7 @@ function parseDimsNums(dims: string | null) {
   return { L, W, H };
 }
 function densityToPcf(density: string | null) {
-  const m = String(density || "").match(/(\d+(?:\.\d+)?)/);
+  const m = String(density || "").match(/(\d+(?:\.\d+)?|\.\d+)/);
   return m ? Number(m[1]) : null;
 }
 
@@ -822,14 +835,18 @@ export async function POST(req: NextRequest) {
     // Parse current turn (rule-based)
     let newly = extractAllFromTextAndSubject(lastText, subject);
 
-    // LLM-assisted parsing to fill any remaining gaps (mini-only, no guessing)
+    // LLM-assisted parsing to fill any remaining gaps.
+    const hasCavityWords = /\b(cavity|cavities|pocket|pockets|cut[- ]?out|cutouts?)\b/i.test(
+      (lastText || "") + " " + (subject || ""),
+    );
     const needsLLM =
-      (!!process.env.OPENAI_API_KEY &&
-        (!newly.dims ||
-          !newly.qty ||
-          !newly.material ||
-          !newly.density ||
-          newly.cavityCount === undefined)) &&
+      !!process.env.OPENAI_API_KEY &&
+      (!newly.dims ||
+        !newly.qty ||
+        !newly.material ||
+        !newly.density ||
+        newly.cavityCount === undefined ||
+        (hasCavityWords && !(Array.isArray(newly.cavityDims) && newly.cavityDims.length))) &&
       (lastText.length + subject.length) < 4000;
 
     if (needsLLM) {
@@ -843,12 +860,23 @@ export async function POST(req: NextRequest) {
     let loaded: Mem = {};
     if (threadKey) loaded = await loadFacts(threadKey);
 
-    // multi-turn helper: if we already have outer dims and new dims appear in a cavity context,
-    // treat new dims as cavity sizes instead of overwriting outer dims.
+    // Multi-turn helper —
+    // if we already have an outside size, and the new message mentions a cavity
+    // and contains a bare LxWxH, treat that new size as a cavity dim instead
+    // of overwriting the outer dims — EXCEPT when user clearly says “change the size…”
     if (loaded && loaded.dims && newly.dims && newly.dims !== loaded.dims) {
       const lower = lastText.toLowerCase();
       const cavityCtx = /\b(cavity|cavities|pocket|pockets|cut[- ]?out|cutouts?)\b/.test(lower);
-      const outsideCtx = /\b(outside|overall|finished)\s+(size|dimension|dimensions)\b/.test(lower);
+
+      const explicitOutsideCtx = /\b(outside|overall|finished)\s+(size|dimension|dimensions)\b/.test(
+        lower,
+      );
+      const sizeChangeCtx = /\b(change|make|set)\s+(the\s+)?(overall\s+|outside\s+)?size\b/.test(
+        lower,
+      );
+
+      const outsideCtx = explicitOutsideCtx || sizeChangeCtx;
+
       if (cavityCtx && !outsideCtx) {
         const prevCav = Array.isArray(loaded.cavityDims) ? loaded.cavityDims.slice() : [];
         const nextCav = Array.isArray(newly.cavityDims) ? newly.cavityDims.slice() : [];
@@ -861,7 +889,6 @@ export async function POST(req: NextRequest) {
 
         newly.cavityDims = combined;
 
-        // Keep cavity count in sync with the list when we’re clearly talking about cavities
         if (combined.length) {
           newly.cavityCount = combined.length;
         }
@@ -877,11 +904,6 @@ export async function POST(req: NextRequest) {
     };
 
     let merged = mergeFacts({ ...loaded, ...carry }, newly);
-
-    // If at this point we still have cavityDims but no cavityCount, sync count
-    if (Array.isArray(merged.cavityDims) && merged.cavityDims.length && merged.cavityCount === undefined) {
-      merged.cavityCount = merged.cavityDims.length;
-    }
 
     // bump turn counter (persist only if we have a key)
     merged.__turnCount = (merged.__turnCount || 0) + 1;
