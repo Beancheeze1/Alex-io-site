@@ -15,38 +15,35 @@ const EXAMPLE_INPUT_HTML = `
 </div>
 `.trim();
 
-
-
 type QuoteRenderInput = {
-  customerLine?: string;               // e.g., "Thanks for reaching out — here’s your preliminary quote."
+  customerLine?: string | null;
   specs: {
-    L_in: number; W_in: number; H_in: number;
-    thickness_under_in?: number | null;
+    L_in: number;
+    W_in: number;
+    H_in: number;
+    thickness_under_in: number | null;
     qty: number;
-    density_pcf?: number | null;
-    foam_family?: string | null;
-    color?: string | null;
+    density_pcf: number | null;
+    foam_family: string | null;
+    color: string | null;
   };
-  material?: {
-    name?: string | null;
-    density_lbft3?: number | null;
-    kerf_pct?: number | null;
-    price_per_ci?: number | null;
-    price_per_bf?: number | null;
-    min_charge?: number | null;
-  } | null;
+  material: {
+    name: string | null;
+    density_lbft3: number | null;
+    kerf_pct: number | null;
+    price_per_ci: number | null;
+    price_per_bf: number | null;
+    min_charge: number | null;
+  };
   pricing: {
     piece_ci: number;
     order_ci: number;
     order_ci_with_waste: number;
-    raw?: number | null;
+    raw: number | null;
     total: number;
-    used_min_charge?: boolean;
+    used_min_charge: boolean;
   };
-  missing?: string[];
-
-
-  
+  missing: string[];
 };
 
 function row(label: string, value: string) {
@@ -64,16 +61,16 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
   const specsTable = `
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px">
     ${row("Outside size", `${s.L_in} × ${s.W_in} × ${s.H_in} in`)}
-    ${s.thickness_under_in!=null ? row("Thickness under", `${s.thickness_under_in} in`) : ""}
+    ${s.thickness_under_in != null ? row("Thickness under", `${s.thickness_under_in} in`) : ""}
     ${row("Quantity", String(s.qty))}
-    ${s.density_pcf!=null ? row("Density", `${s.density_pcf} pcf`) : ""}
+    ${s.density_pcf != null ? row("Density", `${s.density_pcf} pcf`) : ""}
     ${s.foam_family ? row("Foam family", s.foam_family.toUpperCase()) : ""}
     ${s.color ? row("Color", s.color) : ""}
   </table>`;
 
   const matBits: string[] = [];
   if (m.name) matBits.push(m.name);
-  if (m.density_lbft3!=null) matBits.push(`${m.density_lbft3} pcf`);
+  if (m.density_lbft3 != null) matBits.push(`${m.density_lbft3} pcf`);
   const matLine = matBits.length ? matBits.join(" — ") : "TBD";
 
   const priceTable = `
@@ -82,25 +79,32 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
     ${row("Material waste (kerf)", `${m.kerf_pct ?? 0}%`)}
     ${row("Piece volume (CI)", `${p.piece_ci.toFixed(0)} in³`)}
     ${row("Order volume + waste (CI)", `${p.order_ci_with_waste.toFixed(0)} in³`)}
-    ${p.raw!=null ? row("Computed price", usd(p.raw)) : ""}
-    ${row("Minimum charge", usd(m.min_charge ?? 0))}
-    ${row("Prelim total", usd(p.total))}
+    ${p.raw != null ? row("Base computed total", usd(p.raw)) : ""}
+    ${m.min_charge != null ? row("Minimum charge (if applied)", usd(m.min_charge)) : ""}
+    ${row(
+      p.used_min_charge ? "Order total (min charge applied)" : "Order total (preliminary)",
+      usd(p.total),
+    )}
   </table>
   `;
 
-  const missingList = (i.missing && i.missing.length)
-    ? `<p style="margin:12px 0 6px 0">To finalize, please confirm:</p>
-       <ul style="margin:0 0 12px 20px">${i.missing.slice(0,6).map(x=>`<li>${x}</li>`).join("")}</ul>`
-    : "";
+  const missingList =
+    i.missing && i.missing.length
+      ? `<p style="margin:12px 0 6px 0">To finalize, please confirm:</p>
+       <ul style="margin:0 0 12px 20px">${i.missing
+         .slice(0, 6)
+         .map((x) => `<li>${x}</li>`)
+         .join("")}</ul>`
+      : "";
 
   const exampleBlock = `
   <div
     style="
-      margin:0 0 8px 0;
-      padding:6px 8px;
-      border-radius:4px;
-      background:#f5f5f5;
-      border:1px solid #ddd;
+      margin:0 0 12px 0;
+      padding:8px 10px;
+      border-radius:8px;
+      background:#f4f4f8;
+      border:1px dashed #ccc;
       font-size:11px;
       line-height:1.3;
     "
@@ -109,8 +113,6 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
     250 pcs – 10×10×3 in, 1.7 lb black PE, 2 cavities (Ø6×0.5 in and 1×1×0.5 in).
   </div>
 `;
-
-
 
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#111;">
@@ -123,7 +125,7 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
     ${specsTable}
     <h3 style="margin:18px 0 8px 0">Pricing</h3>
     ${priceTable}
-    <p style="color:#666;margin-top:12px">This is a preliminary price based on the details above. I’ll firm it up once we confirm any missing info or adjustments.</p>
+    <p style="color:#666;margin-top:12px">This is a preliminary price based on the information we have so far. We’ll firm it up once we confirm any missing details, and we can also add <strong>price breaks at higher quantities</strong> (for example 2×, 5×, or 10× this volume) if you let us know the ranges you’d like to see.</p>
     <p>— Alex-IO Estimator</p>
   </div>
   `.trim();
