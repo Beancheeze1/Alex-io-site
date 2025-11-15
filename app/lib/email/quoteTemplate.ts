@@ -1,6 +1,21 @@
 // app/lib/email/quoteTemplate.ts
 import { usd } from "@/app/lib/money";
 
+const EXAMPLE_INPUT_HTML = `
+<div style="margin:10px 0 14px 0;padding:10px 12px;border-radius:8px;background:#f4f4f8;border:1px solid #ddd;">
+  <div style="font-weight:600;margin-bottom:4px;">Example of a great first message:</div>
+  <div style="font-family:Consolas,Menlo,monospace;font-size:12px;white-space:pre-wrap;">
+    Outside size: 18x12x3 in<br/>
+    Quantity: 250<br/>
+    Foam family: EPE<br/>
+    Density: 1.7 lb<br/>
+    Cavities: 2<br/>
+    Cavity sizes: Ø6x1, 3x3x1
+  </div>
+</div>
+`.trim();
+
+
 type QuoteRenderInput = {
   customerLine?: string;               // e.g., "Thanks for reaching out — here’s your preliminary quote."
   specs: {
@@ -28,6 +43,9 @@ type QuoteRenderInput = {
     used_min_charge?: boolean;
   };
   missing?: string[];
+
+
+  
 };
 
 function row(label: string, value: string) {
@@ -74,10 +92,15 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
        <ul style="margin:0 0 12px 20px">${i.missing.slice(0,6).map(x=>`<li>${x}</li>`).join("")}</ul>`
     : "";
 
+  const exampleBlock =
+    i.missing && i.missing.length ? EXAMPLE_INPUT_HTML : "";
+
+
+
   return `
   <div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#111;line-height:1.45">
     <p>${i.customerLine || "Thanks for reaching out — here’s your preliminary quote."}</p>
-    ${missingList}
+    ${missingList}${exampleBlock}
     <h3 style="margin:14px 0 8px 0">Specs</h3>
     ${specsTable}
     <h3 style="margin:18px 0 8px 0">Pricing</h3>
