@@ -1,11 +1,28 @@
 // app/lib/email/quoteTemplate.ts
-import { usd } from "@/app/lib/money";
+
+// Self-contained USD formatter so we don't depend on external helpers
+function usd(value: number | null | undefined): string {
+  const n =
+    typeof value === "number" && isFinite(value)
+      ? value
+      : 0;
+
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 2,
+    }).format(n);
+  } catch {
+    return `$${n.toFixed(2)}`;
+  }
+}
 
 const EXAMPLE_INPUT_HTML = `
 <div style="margin:6px 0 10px 0;padding:8px 10px;border-radius:8px;background:#f4f4f8;border:1px solid #ddd;">
   <div style="font-weight:600;margin-bottom:2px;">Example input:</div>
   <div style="font-family:Consolas,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.2;margin:0;">
-    250 pcs — 10×10×3 in, 1.7 lb PE, 2 cavities (Ø6×0.5 in and 1×1×0.5 in).
+    250 pcs — 10×10×3 in, 1.7 lb black PE, 2 cavities (Ø6×0.5 in and 1×1×0.5 in).
   </div>
 </div>
 `.trim();
@@ -49,15 +66,17 @@ function row(label: string, value: string) {
 }
 
 export function renderQuoteEmail(i: QuoteRenderInput) {
-  const s = i.specs;
-  const p = i.pricing;
-  const m = i.material || {};
+  const s = i.specs || ({} as QuoteRenderInput["specs"]);
+  const p = i.pricing || ({} as QuoteRenderInput["pricing"]);
+  const m = i.material || ({} as NonNullable<QuoteRenderInput["material"]>);
 
   const dimsText =
     s.L_in && s.W_in && s.H_in ? `${s.L_in} × ${s.W_in} × ${s.H_in} in` : "TBD";
   const qtyText = s.qty ? s.qty.toLocaleString() : "TBD";
   const densityText =
-    typeof s.density_pcf === "number" ? `${s.density_pcf} pcf` : "TBD";
+    typeof s.density_pcf === "number" && isFinite(s.density_pcf)
+      ? `${s.density_pcf} pcf`
+      : "TBD";
   const foamFamilyText = s.foam_family || "TBD";
 
   const specsTable = `
@@ -71,26 +90,49 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
 
   const matBits: string[] = [];
   if (m.name) matBits.push(String(m.name));
-  if (typeof m.density_lbft3 === "number") matBits.push(`${m.density_lbft3} pcf`);
+  if (typeof m.density_lbft3 === "number" && isFinite(m.density_lbft3)) {
+    matBits.push(`${m.density_lbft3} pcf`);
+  }
   const matLine = matBits.length ? matBits.join(" — ") : "TBD";
 
-  const minCharge = m.min_charge ?? 0;
+  const kerfPct =
+    typeof m.kerf_pct === "number" && isFinite(m.kerf_pct) ? m.kerf_pct : 0;
+
+  const minCharge =
+    typeof m.min_charge === "number" && isFinite(m.min_charge)
+      ? m.min_charge
+      : 0;
+
+  const pieceCi =
+    typeof p.piece_ci === "number" && isFinite(p.piece_ci) ? p.piece_ci : 0;
+  const orderCi =
+    typeof p.order_ci === "number" && isFinite(p.order_ci) ? p.order_ci : 0;
+  const orderCiWaste =
+    typeof p.order_ci_with_waste === "number" && isFinite(p.order_ci_with_waste)
+      ? p.order_ci_with_waste
+      : orderCi;
+
+  const total =
+    typeof p.total === "number" && isFinite(p.total) ? p.total : 0;
+
   const totalLabel = p.used_min_charge
     ? "Order total (min charge applied)"
     : "Order total";
 
   const priceRows: string[] = [];
   priceRows.push(row("Material", matLine));
-  priceRows.push(row("Material waste (kerf)", `${m.kerf_pct ?? 0}%`));
-  priceRows.push(row("Piece volume (CI)", `${p.piece_ci.toFixed(0)} in³`));
+  priceRows.push(row("Material waste (kerf)", `${kerfPct}%`));
+  priceRows.push(row("Piece volume (CI)", `${pieceCi.toFixed(0)} in³`));
   priceRows.push(
-    row("Order volume + waste (CI)", `${p.order_ci_with_waste.toFixed(0)} in³`),
+    row("Order volume + waste (CI)", `${orderCiWaste.toFixed(0)} in³`),
   );
-  if (p.raw != null) {
+
+  if (p.raw != null && typeof p.raw === "number" && isFinite(p.raw)) {
     priceRows.push(row("Computed price (before min charge)", usd(p.raw)));
   }
+
   priceRows.push(row("Minimum charge (if applied)", usd(minCharge)));
-  priceRows.push(row(totalLabel, usd(p.total)));
+  priceRows.push(row(totalLabel, usd(total)));
 
   const priceTable = `
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px">
@@ -99,7 +141,9 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
   `;
 
   const perPiece =
-    s.qty > 0 && p.total > 0 ? p.total / Math.max(1, s.qty) : null;
+    s.qty > 0 && total > 0
+      ? total / Math.max(1, s.qty)
+      : null;
 
   let priceBreaksHtml = "";
   if (perPiece && s.qty > 0) {
@@ -116,7 +160,9 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
     `;
   }
 
-  const missingItems = (i.missing || []).filter((s) => !!s && s.trim().length);
+  const missingItems = (i.missing || []).filter(
+    (line) => !!line && line.trim().length,
+  );
   const missingList = missingItems.length
     ? `
       <p style="margin:0 0 8px 0;">To finalize, please confirm:</p>
@@ -138,7 +184,10 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
   <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#111;">
     ${exampleBlock}
     <p style="margin:0 0 12px 0;">
-      ${i.customerLine || "Thanks for reaching out — here's your preliminary quote."}
+      ${
+        i.customerLine ||
+        "Thanks for reaching out — here's your preliminary quote."
+      }
     </p>
     ${missingList}
     <h3 style="margin:14px 0 8px 0">Specs</h3>
@@ -147,7 +196,7 @@ export function renderQuoteEmail(i: QuoteRenderInput) {
     ${priceTable}
     ${priceBreaksHtml}
     <p style="color:#666;margin-top:12px">
-      This is a preliminary price based on the information we have so far. We'll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes.
+      This is a preliminary price based on the information we have so far. We'll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
     </p>
     <p>— Alex-IO Estimator</p>
   </div>
