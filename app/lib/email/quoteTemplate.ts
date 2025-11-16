@@ -4,14 +4,12 @@
 //
 // Inputs come from app/api/ai/orchestrate/route.ts via renderQuoteEmail(input).
 // This version:
-// - Shows Quote # at the top with a status pill (DRAFT / SENT / ACCEPTED, etc.)
-// - Renders specs + pricing blocks in compact light-blue tables
-// - Adds buttons: Forward to sales, View printable quote, Schedule a call
-// - Uses /quote?quote_no=... for the print view
-// - Uses a neutral intro line (no "I'll price it later")
-// - Adds a clear "preliminary price" + next-step instructions
-// - Shows a Price breaks section with bold price-per-piece
-// - Shows skiving info and thickness under part
+// - Shows Quote # + status pill, with a one-line example-input pill beside it
+// - Compact light-blue Specs / Pricing tables
+// - Cavities row in Specs
+// - Skiving row in Pricing + red callout note if skiving is needed
+// - Bold per-piece price in Price breaks
+// - Buttons: Forward to sales, View printable quote, Schedule a call
 
 export type QuoteSpecs = {
   L_in: number | null;
@@ -37,14 +35,12 @@ export type QuotePricing = {
   order_ci?: number | null;
   order_ci_with_waste?: number | null;
   used_min_charge?: boolean | null;
-  // raw calc payload from /api/quotes/calc (for future use)
-  raw?: any;
+  raw?: any; // raw calc payload (optional)
 };
 
 export type QuoteRenderInput = {
-  customerLine?: string | null; // still passed, but we don't echo the "I'll price later" text
+  customerLine?: string | null;
   quoteNumber?: string | number | null;
-  // status for the pill (e.g. "draft", "sent", "accepted")
   status?: string | null;
   specs: QuoteSpecs;
   material: QuoteMaterial;
@@ -95,8 +91,18 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   const facts = input.facts || {};
 
   const quoteNo = input.quoteNumber ? String(input.quoteNumber) : "";
-  const exampleInput =
+  const exampleInputRaw =
     (facts && (facts.exampleInput || facts.rawText || facts.originalEmail)) || "";
+
+  // Flatten and normalize example input: single line, no diameter symbol
+  const exampleLine = String(exampleInputRaw)
+    .replace(/Ø/gi, "dia ")
+    .replace(/\s+/g, " ")
+    .trim();
+  let exampleShort = exampleLine;
+  if (exampleShort.length > 120) {
+    exampleShort = exampleShort.slice(0, 117) + "...";
+  }
 
   const outsideSize = fmtDims(specs.L_in, specs.W_in, specs.H_in);
   const qty = fmtQty(specs.qty);
@@ -211,6 +217,7 @@ ${missingList}`
   const thicknessForSkive =
     thicknessVal != null ? thicknessVal : specs.H_in != null ? specs.H_in : null;
   let skivingText = "Not needed for this thickness";
+  let skiveNeeded = false;
   if (
     thicknessForSkive != null &&
     !Number.isNaN(Number(thicknessForSkive))
@@ -218,10 +225,11 @@ ${missingList}`
     const h = Number(thicknessForSkive);
     if (Math.abs(h - Math.round(h)) > 1e-2) {
       skivingText = 'Yes — includes skive for non-1" thickness';
+      skiveNeeded = true;
     }
   }
 
-  // Price-break line with bold per-piece price when available
+  // Price-break HTML with bold per-piece price when available
   let priceBreakHtml: string;
   if (piecePrice != null) {
     const qtyLabel = qty || "this";
@@ -240,6 +248,28 @@ ${missingList}`
     );
   }
 
+  // Cavity info from facts
+  const cavityCount =
+    typeof (facts as any).cavityCount === "number"
+      ? (facts as any).cavityCount
+      : null;
+  const cavityDims = Array.isArray((facts as any).cavityDims)
+    ? ((facts as any).cavityDims as string[])
+    : [];
+  let cavityLabel: string;
+  if (cavityCount != null) {
+    const word = cavityCount === 1 ? "cavity" : "cavities";
+    if (cavityDims.length) {
+      cavityLabel = `${cavityCount} ${word} (${cavityDims.join(", ")})`;
+    } else {
+      cavityLabel = `${cavityCount} ${word}`;
+    }
+  } else if (cavityDims.length) {
+    cavityLabel = `${cavityDims.length} cavities (${cavityDims.join(", ")})`;
+  } else {
+    cavityLabel = "None noted";
+  }
+
   // Shared colors
   const lightBlueBg = "#eef2ff";
   const lightBlueBorder = "#c7d2fe";
@@ -255,18 +285,7 @@ ${missingList}`
     <div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; padding:16px; background-color:#f3f4f6;">
       <div style="max-width:720px; margin:0 auto; background-color:#ffffff; border-radius:16px; padding:20px 24px 24px 24px; box-shadow:0 10px 30px rgba(15,23,42,0.08);">
 
-        ${
-          exampleInput
-            ? `<div style="font-size:12px; background:${lightBlueBg}; border-radius:10px; padding:8px 10px; border:1px solid ${lightBlueBorder}; margin-bottom:10px;">
-  <div style="font-weight:500; color:${darkBlue}; margin-bottom:2px;">Example input:</div>
-  <div style="color:#374151; white-space:pre-wrap;">${htmlEscape(
-    String(exampleInput)
-  )}</div>
-</div>`
-            : ""
-        }
-
-        <div style="margin-bottom:8px; font-size:13px; color:#111827;">
+        <div style="margin-bottom:8px; font-size:13px; color:#111827; white-space:normal;">
           ${
             quoteNo
               ? `<span style="font-weight:600;">Quote # ${htmlEscape(
@@ -277,6 +296,13 @@ ${missingList}`
           <span style="display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px; background-color:${statusBg}; color:${statusFg}; font-size:11px; font-weight:500;">
             ${htmlEscape(statusLabel)}
           </span>
+          ${
+            exampleShort
+              ? `<span style="display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px; background-color:${darkBlue}; color:#ffffff; font-size:11px; max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${htmlEscape(exampleShort)}
+            </span>`
+              : ""
+          }
         </div>
 
         <p style="margin:0 0 6px 0; font-size:13px; color:#111827;">
@@ -305,6 +331,12 @@ ${missingList}`
               <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${thicknessLabel || "—"}</td>
             </tr>
             <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Cavities</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${htmlEscape(
+                cavityLabel
+              )}</td>
+            </tr>
+            <tr style="background:${lightBlueBg};">
               <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Foam family</td>
               <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${foamFamily || "TBD"}</td>
             </tr>
@@ -312,7 +344,7 @@ ${missingList}`
         </table>
 
         <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Pricing</h3>
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:8px;">
+        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:6px;">
           <tbody>
             <tr style="background:${lightBlueBg};">
               <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; width:35%; color:#6b7280;">Material</td>
@@ -363,6 +395,14 @@ ${missingList}`
           </tbody>
         </table>
 
+        ${
+          skiveNeeded
+            ? `<p style="margin:2px 0 8px 0; font-size:11px; color:#b91c1c;">
+* Note: This job requires skiving — quoted pricing includes skiving set-up and the up-charge for non-standard thickness.
+</p>`
+            : ""
+        }
+
         <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Price breaks</h3>
         <p style="margin:0 0 4px 0; font-size:12px; color:#111827;">
           ${priceBreakHtml}
@@ -371,7 +411,7 @@ ${missingList}`
           If you&apos;d like, I can add formal price breaks at higher quantities (for example 2×, 3×, 5×, and 10× this volume) — just reply with the ranges you&apos;d like to see.
         </p>
         <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
-          For cavities, replying with a short list like “2×3×1 qty 4; Ø6×1 qty 2” works best — I&apos;ll keep that separate from the overall outside size.
+          For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best — I&apos;ll keep that separate from the overall outside size.
         </p>
 
         <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
