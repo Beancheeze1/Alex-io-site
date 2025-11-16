@@ -1,350 +1,337 @@
 // app/lib/email/quoteTemplate.ts
+//
+// Unified HTML template for Alex-IO foam quotes.
+//
+// Inputs come from app/api/ai/orchestrate/route.ts via renderQuoteEmail(input).
+// This version:
+// - Shows Quote # at the top
+// - Renders specs + pricing blocks
+// - Adds buttons: Forward to sales, View printable quote, Schedule a call
+// - Uses /quote?quote_no=... for the print view
+// - Uses a neutral intro line (no "I'll price it later")
+// - Adds a clear "preliminary price" + next-step instructions
 
-// Simple USD formatter so we don't depend on external helpers
-function usd(value: number | null | undefined): string {
-  const n =
-    typeof value === "number" && isFinite(value)
-      ? value
-      : 0;
+export type QuoteSpecs = {
+  L_in: number | null;
+  W_in: number | null;
+  H_in: number | null;
+  thickness_under_in?: number | null;
+  qty: number | string | null;
+  density_pcf: number | null;
+  foam_family: string | null;
+  color?: string | null;
+};
 
+export type QuoteMaterial = {
+  name?: string | null;
+  density_lbft3?: number | null;
+  kerf_pct?: number | null;
+  min_charge?: number | null;
+};
+
+export type QuotePricing = {
+  total: number | null;
+  piece_ci?: number | null;
+  order_ci?: number | null;
+  order_ci_with_waste?: number | null;
+  used_min_charge?: boolean | null;
+};
+
+export type QuoteRenderInput = {
+  customerLine?: string | null; // still passed, but we don't echo the "I'll price later" text
+  quoteNumber?: string | number | null;
+  specs: QuoteSpecs;
+  material: QuoteMaterial;
+  pricing: QuotePricing;
+  missing: string[];
+  facts: Record<string, any>;
+};
+
+function fmtDims(L: number | null, W: number | null, H: number | null) {
+  if (!L || !W || !H) return "";
+  return `${L} × ${W} × ${H} in`;
+}
+
+function fmtQty(q: number | string | null) {
+  if (q == null) return "";
+  return String(q);
+}
+
+function fmtDensity(d: number | null) {
+  if (!d && d !== 0) return "";
+  return `${d} pcf`;
+}
+
+function fmtMoney(n: number | null | undefined) {
+  if (n == null || !isFinite(Number(n))) return "";
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(n);
+      maximumFractionDigits: 2
+    }).format(Number(n));
   } catch {
-    return `$${n.toFixed(2)}`;
+    return `$${Number(n).toFixed(2)}`;
   }
 }
 
-const EXAMPLE_INPUT_HTML = `
-<div style="margin:4px 0 8px 0;padding:6px 8px;border-radius:6px;background:#e8f2ff;border:1px solid #c3d7ff;">
-  <div style="font-weight:600;margin-bottom:2px;">Example input:</div>
-  <div style="font-family:Consolas,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.2;margin:0;">
-    250 pcs — 10×10×3 in, 1.7 lb black PE, 2 cavities (Ø6×0.5 in and 1×1×0.5 in).
-  </div>
-</div>
-`.trim();
-
-type QuoteRenderInput = {
-  customerLine?: string;
-
-  // NEW: optional quote number for display & buttons
-  quoteNumber?: string | number;
-
-  specs: {
-    L_in: number;
-    W_in: number;
-    H_in: number;
-    thickness_under_in?: number | null;
-    qty: number;
-    density_pcf?: number | null;
-    foam_family?: string | null;
-    color?: string | null;
-  };
-  material?: {
-    name?: string | null;
-    density_lbft3?: number | null;
-    kerf_pct?: number | null;
-    price_per_ci?: number | null;
-    price_per_bf?: number | null;
-    min_charge?: number | null;
-  } | null;
-  pricing: {
-    piece_ci: number;
-    order_ci: number;
-    order_ci_with_waste: number;
-    raw?: number | null;
-    total: number;
-    used_min_charge?: boolean;
-
-    // Optional skiving-aware fields if the API ever provides them
-    foam_only_total?: number | null;
-    skive_surcharge?: number | null;
-    grand_total?: number | null;
-    is_skived?: boolean;
-    skive_pct?: number | null;
-  };
-  missing?: string[];
-};
-
-function row(label: string, value: string) {
-  return `<tr>
-    <td style="padding:3px 8px;color:#555;font-size:13px;border-bottom:1px solid #d7e3ff;">${label}</td>
-    <td style="padding:3px 8px;text-align:right;color:#111;font-size:13px;border-bottom:1px solid #d7e3ff;"><strong>${value}</strong></td>
-  </tr>`;
+function htmlEscape(s: string) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-export function renderQuoteEmail(i: QuoteRenderInput): string {
-  const s = i.specs || ({} as QuoteRenderInput["specs"]);
-  const p = i.pricing || ({} as QuoteRenderInput["pricing"]);
-  const m = i.material || ({} as NonNullable<QuoteRenderInput["material"]>);
+export function renderQuoteEmail(input: QuoteRenderInput): string {
+  const { specs, material, pricing, missing, facts } = input;
+  const quoteNo = input.quoteNumber ? String(input.quoteNumber) : "";
+  const exampleInput =
+    (facts && (facts.exampleInput || facts.rawText || facts.originalEmail)) || "";
 
-  /* ---------- Quote info / URLs ---------- */
+  const outsideSize = fmtDims(specs.L_in, specs.W_in, specs.H_in);
+  const qty = fmtQty(specs.qty);
+  const density = fmtDensity(specs.density_pcf);
+  const foamFamily =
+    specs.foam_family && specs.foam_family.trim()
+      ? specs.foam_family.trim()
+      : material?.name || "TBD";
 
-  const quoteNumber =
-    typeof i.quoteNumber === "number" || typeof i.quoteNumber === "string"
-      ? String(i.quoteNumber)
-      : "";
+  const baseUrl =
+    process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") ||
+    "https://alex-io.com";
 
-  const quoteLabel = quoteNumber ? `Quote ${quoteNumber}` : "Foam quote";
+  const printUrl =
+    quoteNo !== ""
+      ? `${baseUrl}/quote?quote_no=${encodeURIComponent(quoteNo)}`
+      : undefined;
 
-  // Base site URL for "printable" link
-  const rawBase =
-    process.env.NEXT_PUBLIC_BASE_URL && process.env.NEXT_PUBLIC_BASE_URL.trim()
-      ? process.env.NEXT_PUBLIC_BASE_URL.trim()
-      : "https://alex-io.com";
+  const forwardToSalesEmail =
+    process.env.NEXT_PUBLIC_SALES_FORWARD_TO ||
+    "sales@example.com";
 
-  const baseUrl = rawBase.replace(/\/+$/, "");
-  const printUrl = quoteNumber
-    ? `${baseUrl}/quote/${encodeURIComponent(quoteNumber)}`
-    : baseUrl;
+  const salesSubject =
+    quoteNo !== ""
+      ? `Foam quote ${quoteNo}`
+      : "Foam quote from Alex-IO";
 
-  const salesEmail = "sales@example.com"; // TODO: replace with real sales address later
+  const scheduleUrl =
+    quoteNo !== ""
+      ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
+          `Call about foam quote ${quoteNo}`
+        )}&details=${encodeURIComponent(
+          `Let's review your foam packaging quote ${quoteNo} and any questions you might have.`
+        )}`
+      : `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
+          "Foam quote call"
+        )}`;
 
   const forwardHref = `mailto:${encodeURIComponent(
-    salesEmail,
+    forwardToSalesEmail
   )}?subject=${encodeURIComponent(
-    quoteLabel,
+    salesSubject
   )}&body=${encodeURIComponent(
-    `Please review ${quoteLabel}.\n\n(Forwarded from Alex-IO bot.)`,
+    `Please review the attached foam quote.\n\nQuote number: ${quoteNo || "(not set)"}`
   )}`;
 
-  const quoteNumberBlock = quoteNumber
-    ? `<p style="margin:0 0 4px 0;font-size:13px;color:#555;">Quote # <strong>${quoteNumber}</strong></p>`
-    : "";
+  const introLine =
+    "Thanks for the details—here’s a preliminary quote based on the information we have so far.";
 
-  /* ---------- Specs block ---------- */
-
-  const dimsText =
-    s.L_in && s.W_in && s.H_in ? `${s.L_in} × ${s.W_in} × ${s.H_in} in` : "TBD";
-  const qtyText = s.qty ? s.qty.toLocaleString() : "TBD";
-  const densityText =
-    typeof s.density_pcf === "number" && isFinite(s.density_pcf)
-      ? `${s.density_pcf} pcf`
-      : "TBD";
-  const foamFamilyText = s.foam_family || "TBD";
-
-  const specsTable = `
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #c3d7ff;border-radius:6px;background:#f1f6ff;">
-    ${row("Outside size", dimsText)}
-    ${row("Quantity", qtyText)}
-    ${row("Density", densityText)}
-    ${row("Foam family", foamFamilyText)}
-  </table>
-  `;
-
-  /* ---------- Pricing + skiving logic ---------- */
-
-  const matBits: string[] = [];
-  if (m.name) matBits.push(String(m.name));
-  if (typeof m.density_lbft3 === "number" && isFinite(m.density_lbft3)) {
-    matBits.push(`${m.density_lbft3} pcf`);
-  }
-  const matLine = matBits.length ? matBits.join(" — ") : "TBD";
-
-  const kerfPct =
-    typeof m.kerf_pct === "number" && isFinite(m.kerf_pct) ? m.kerf_pct : 0;
-
-  const pieceCi =
-    typeof p.piece_ci === "number" && isFinite(p.piece_ci) ? p.piece_ci : 0;
-  const orderCi =
-    typeof p.order_ci === "number" && isFinite(p.order_ci) ? p.order_ci : 0;
-  const orderCiWaste =
-    typeof p.order_ci_with_waste === "number" &&
-    isFinite(p.order_ci_with_waste)
-      ? p.order_ci_with_waste
-      : orderCi;
-
-  const baseTotal =
-    typeof p.total === "number" && isFinite(p.total) ? p.total : 0;
-
-  // Grand total defaults to total if API doesn't provide a separate value.
-  let grandTotal =
-    typeof p.grand_total === "number" && isFinite(p.grand_total)
-      ? p.grand_total
-      : baseTotal;
-
-  let foamOnlyTotal =
-    typeof p.foam_only_total === "number" && isFinite(p.foam_only_total)
-      ? p.foam_only_total
-      : null;
-
-  let skiveSurcharge =
-    typeof p.skive_surcharge === "number" && isFinite(p.skive_surcharge)
-      ? p.skive_surcharge
-      : null;
-
-  let isSkived = !!p.is_skived;
-  const usedMinCharge = !!p.used_min_charge;
-
-  // If the API didn't give us a breakdown, derive it from thickness & a skive pct.
-  if (!foamOnlyTotal && !skiveSurcharge) {
-    const thickness =
-      typeof s.thickness_under_in === "number" && isFinite(s.thickness_under_in)
-        ? s.thickness_under_in
-        : s.H_in;
-
-    const thicknessIsFractional =
-      typeof thickness === "number" &&
-      isFinite(thickness) &&
-      Math.abs(thickness - Math.round(thickness)) > 1e-6;
-
-    const skivePct =
-      typeof p.skive_pct === "number" && p.skive_pct && p.skive_pct > 0
-        ? p.skive_pct
-        : 0.25; // default +25% upcharge
-
-    if (thicknessIsFractional && grandTotal > 0 && !usedMinCharge) {
-      const base = grandTotal / (1 + skivePct);
-      foamOnlyTotal = base;
-      skiveSurcharge = grandTotal - base;
-      isSkived = true;
-    }
-  }
-
-  const minCharge =
-    typeof m.min_charge === "number" && isFinite(m.min_charge)
-      ? m.min_charge
-      : 0;
-
-  const totalLabel = p.used_min_charge
-    ? "Order total (min charge applied)"
-    : "Order total";
-
-  const priceRows: string[] = [];
-  priceRows.push(row("Material", matLine));
-  priceRows.push(row("Material waste (kerf)", `${kerfPct}%`));
-  priceRows.push(row("Piece volume (CI)", `${pieceCi.toFixed(0)} in³`));
-  priceRows.push(
-    row("Order volume + waste (CI)", `${orderCiWaste.toFixed(0)} in³`),
-  );
-
-  if (p.raw != null && typeof p.raw === "number" && isFinite(p.raw)) {
-    priceRows.push(row("Computed price (before min charge)", usd(p.raw)));
-  }
-
-  if (isSkived && foamOnlyTotal != null && skiveSurcharge != null) {
-    // Full layout + skiving breakdown
-    priceRows.push(row("Total (foam only)", usd(foamOnlyTotal)));
-    priceRows.push(
-      row(
-        "Skiving surcharge (non-standard thickness)",
-        `<span style="color:#b91c1c;">${usd(skiveSurcharge)}</span>`,
-      ),
-    );
-    priceRows.push(row("Grand total", usd(grandTotal)));
-  } else {
-    // Non-skived path: classic layout
-    priceRows.push(
-      row(
-        "Minimum charge (if applied)",
-        p.used_min_charge && minCharge > 0 ? usd(minCharge) : usd(0),
-      ),
-    );
-    priceRows.push(row(totalLabel, usd(baseTotal)));
-  }
-
-  const priceTable = `
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #c3d7ff;border-radius:6px;background:#f1f6ff;">
-    ${priceRows.join("")}
-  </table>
-  `;
-
-  /* ---------- Price breaks ---------- */
-
-  const effectiveTotal =
-    isSkived && foamOnlyTotal != null && skiveSurcharge != null
-      ? grandTotal
-      : baseTotal;
-
-  const perPiece =
-    s.qty > 0 && effectiveTotal > 0
-      ? effectiveTotal / Math.max(1, s.qty)
-      : null;
-
-  let priceBreaksHtml = "";
-  if (perPiece && s.qty > 0) {
-    priceBreaksHtml = `
-    <h3 style="margin:10px 0 4px 0">Price breaks</h3>
-    <p style="margin:0 0 2px 0;">
-      At ${s.qty.toLocaleString()} pcs, this works out to about <strong>${usd(
-        perPiece,
-      )}</strong> per piece.
-    </p>
-    <p style="margin:2px 0 0 0;color:#555;">
-      If you'd like, I can add formal price breaks at higher quantities (for example 2×, 3×, 5×, and 10× this volume) — just reply with the ranges you'd like to see.
-    </p>
-    `;
-  }
-
-  /* ---------- Missing info / confirmation list ---------- */
-
-  const missingItems = (i.missing || []).filter(
-    (line) => !!line && line.trim().length,
-  );
-  const missingList = missingItems.length
-    ? `
-      <p style="margin:0 0 4px 0;">To finalize, please confirm:</p>
-      <ul style="margin:0 0 8px 18px;padding:0;color:#111;">
-        ${missingItems.map((m) => `<li>${m}</li>`).join("")}
-      </ul>
-    `
-    : `
-      <p style="margin:0 0 8px 0;">
-        Great — I have everything I need for a preliminary price based on these specs.
-      </p>
-    `;
-
-  const exampleBlock = EXAMPLE_INPUT_HTML
-    ? `<div style="margin-bottom:10px;">${EXAMPLE_INPUT_HTML}</div>`
-    : "";
-
-  const skiveFootnote =
-    isSkived && foamOnlyTotal != null && skiveSurcharge != null
-      ? `<p style="color:#b91c1c;margin:6px 0 0 0;font-size:12px;">
-        * Skiving required because thickness is not in 1&quot; increments. Pricing above includes skiving surcharge and any applicable setup.
-      </p>`
+  const missingList =
+    missing && missing.length
+      ? `<ul style="margin:4px 0 0 20px; padding:0; color:#374151; font-size:13px;">
+${missing
+  .map(
+    (m) =>
+      `<li style="margin:2px 0;">${htmlEscape(String(m))}</li>`
+  )
+  .join("\n")}
+</ul>`
       : "";
 
-  /* ---------- Bottom buttons ---------- */
+  const missingBlock =
+    missing && missing.length
+      ? `<p style="margin:0 0 4px 0; font-size:13px; color:#111827;">
+To finalize, please confirm:</p>
+${missingList}`
+      : "";
 
-  const buttonsHtml = `
-    <div style="margin-top:12px;">
-      <a href="${forwardHref}"
-         style="display:inline-block;margin:0 8px 4px 0;padding:6px 14px;border-radius:9999px;background:#2563eb;color:#fff;text-decoration:none;font-size:13px;">
-        Forward quote to sales
-      </a>
-      <a href="${printUrl}"
-         style="display:inline-block;margin:0 0 4px 0;padding:6px 14px;border-radius:9999px;background:#e5edff;color:#1d4ed8;text-decoration:none;font-size:13px;border:1px solid #c3d7ff;">
-        View printable quote
-      </a>
+  const orderTotal = pricing.total ?? null;
+
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charSet="utf-8" />
+    <title>Foam quote${quoteNo ? " " + quoteNo : ""}</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#f3f4f6;">
+    <div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; padding:16px; background-color:#f3f4f6;">
+      <div style="max-width:720px; margin:0 auto; background-color:#ffffff; border-radius:16px; padding:20px 24px 24px 24px; box-shadow:0 10px 30px rgba(15,23,42,0.08);">
+
+        ${
+          exampleInput
+            ? `<div style="font-size:12px; background:#f9fafb; border-radius:10px; padding:10px 12px; border:1px solid #e5e7eb; margin-bottom:12px;">
+  <div style="font-weight:500; color:#4b5563; margin-bottom:4px;">Example input:</div>
+  <div style="color:#374151; white-space:pre-wrap;">${htmlEscape(
+    String(exampleInput)
+  )}</div>
+</div>`
+            : ""
+        }
+
+        ${
+          quoteNo
+            ? `<div style="margin-bottom:8px; font-size:13px; color:#111827;">
+  <span style="font-weight:600;">Quote # ${htmlEscape(quoteNo)}</span>
+</div>`
+            : ""
+        }
+
+        <p style="margin:0 0 8px 0; font-size:13px; color:#111827;">
+          ${htmlEscape(introLine)}
+        </p>
+
+        ${missingBlock}
+
+        <h3 style="margin:16px 0 4px 0; font-size:13px; color:#111827;">Specs</h3>
+        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:8px;">
+          <tbody>
+            <tr style="background:#f9fafb;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; width:35%; color:#6b7280;">Outside size</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${outsideSize || "—"}</td>
+            </tr>
+            <tr style="background:#ffffff;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Quantity</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${qty || "—"}</td>
+            </tr>
+            <tr style="background:#f9fafb;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Density</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${density || "TBD"}</td>
+            </tr>
+            <tr style="background:#ffffff;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Foam family</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${foamFamily || "TBD"}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin:12px 0 4px 0; font-size:13px; color:#111827;">Pricing</h3>
+        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:12px;">
+          <tbody>
+            <tr style="background:#f9fafb;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; width:35%; color:#6b7280;">Material</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${density || "—"}</td>
+            </tr>
+            <tr style="background:#ffffff;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Material waste (kerf)</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+                material.kerf_pct != null ? `${material.kerf_pct}%` : "0%"
+              }</td>
+            </tr>
+            <tr style="background:#f9fafb;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Piece volume (CI)</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+                pricing.piece_ci != null ? pricing.piece_ci : "0 in³"
+              }</td>
+            </tr>
+            <tr style="background:#ffffff;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Order volume + waste (CI)</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+                pricing.order_ci_with_waste != null
+                  ? pricing.order_ci_with_waste
+                  : pricing.order_ci != null
+                  ? pricing.order_ci
+                  : "0 in³"
+              }</td>
+            </tr>
+            <tr style="background:#f9fafb;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Minimum charge (if applied)</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+                pricing.used_min_charge && material.min_charge != null
+                  ? fmtMoney(material.min_charge)
+                  : fmtMoney(0)
+              }</td>
+            </tr>
+            <tr style="background:#ffffff;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Order total</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827; font-weight:600;">${
+                orderTotal != null ? fmtMoney(orderTotal) : fmtMoney(0)
+              }</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:8px;">
+          <a
+            href="${forwardHref}"
+            style="
+              display:inline-block;
+              padding:8px 14px;
+              border-radius:999px;
+              background:#1d4ed8;
+              color:#ffffff;
+              font-size:12px;
+              font-weight:500;
+              text-decoration:none;
+              border:1px solid #1d4ed8;
+            "
+          >
+            Forward quote to sales
+          </a>
+
+          ${
+            printUrl
+              ? `<a
+            href="${printUrl}"
+            style="
+              display:inline-block;
+              padding:8px 14px;
+              border-radius:999px;
+              background:#eef2ff;
+              color:#1d4ed8;
+              font-size:12px;
+              font-weight:500;
+              text-decoration:none;
+              border:1px solid #c7d2fe;
+            "
+          >
+            View printable quote
+          </a>`
+              : ""
+          }
+
+          <a
+            href="${scheduleUrl}"
+            style="
+              display:inline-block;
+              padding:8px 14px;
+              border-radius:999px;
+              background:#ecfdf3;
+              color:#15803d;
+              font-size:12px;
+              font-weight:500;
+              text-decoration:none;
+              border:1px solid #bbf7d0;
+            "
+          >
+            Schedule a call
+          </a>
+        </div>
+
+        <p style="margin:16px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
+          This is a preliminary price based on the information we have so far. We&apos;ll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
+        </p>
+
+        <p style="margin:4px 0 0 0; font-size:11px; color:#4b5563; line-height:1.5;">
+          To continue, you can forward this quote to sales, schedule a call, or reply directly to this email with any revisions.
+        </p>
+
+        <p style="margin:16px 0 0 0; font-size:11px; color:#6b7280;">
+          — Alex-IO Estimator
+        </p>
+      </div>
     </div>
-  `;
-
-  return `
-  <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.4;color:#111;">
-    ${exampleBlock}
-    ${quoteNumberBlock}
-    <p style="margin:0 0 8px 0;">
-      ${
-        i.customerLine ||
-        "Thanks for sharing the details; I'll confirm a couple of specs and get back to you with a quote shortly."
-      }
-    </p>
-    ${missingList}
-    <h3 style="margin:10px 0 4px 0">Specs</h3>
-    ${specsTable}
-    <h3 style="margin:10px 0 4px 0">Pricing</h3>
-    ${priceTable}
-    ${skiveFootnote}
-    ${priceBreaksHtml}
-    ${buttonsHtml}
-    <p style="color:#666;margin-top:10px">
-      This is a preliminary price based on the information we have so far. We'll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
-    </p>
-    <p>— Alex-IO Estimator</p>
-  </div>
-  `.trim();
+  </body>
+</html>`;
 }
