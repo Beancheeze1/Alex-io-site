@@ -91,18 +91,6 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   const facts = input.facts || {};
 
   const quoteNo = input.quoteNumber ? String(input.quoteNumber) : "";
-  const exampleInputRaw =
-    (facts && (facts.exampleInput || facts.rawText || facts.originalEmail)) || "";
-
-  // Flatten and normalize example input: single line, no diameter symbol
-  const exampleLine = String(exampleInputRaw)
-    .replace(/Ø/gi, "dia ")
-    .replace(/\s+/g, " ")
-    .trim();
-  let exampleShort = exampleLine;
-  if (exampleShort.length > 120) {
-    exampleShort = exampleShort.slice(0, 117) + "...";
-  }
 
   const outsideSize = fmtDims(specs.L_in, specs.W_in, specs.H_in);
   const qty = fmtQty(specs.qty);
@@ -115,6 +103,33 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
     specs.foam_family && specs.foam_family.trim()
       ? specs.foam_family.trim()
       : material?.name || "TBD";
+
+  // Example input: prefer real text, otherwise fall back to a synthetic summary line.
+  const exampleSourceRaw =
+    (facts as any).exampleInput ||
+    (facts as any).rawText ||
+    (facts as any).originalEmail ||
+    (facts as any).lastInbound ||
+    (facts as any).last_inbound ||
+    "";
+
+  const baseFallbackParts: string[] = [];
+  if (outsideSize) baseFallbackParts.push(`Size ${outsideSize}`);
+  if (qty) baseFallbackParts.push(`Qty ${qty}`);
+  if (foamFamily && density) baseFallbackParts.push(`${foamFamily} ${density}`);
+  else if (foamFamily) baseFallbackParts.push(foamFamily);
+  else if (density) baseFallbackParts.push(density);
+  const fallbackExample = baseFallbackParts.join(" • ");
+
+  const exampleLineRaw = String(exampleSourceRaw || fallbackExample || "")
+    .replace(/Ø/gi, "dia ") // no diameter symbol in examples
+    .replace(/\s+/g, " ")
+    .trim();
+
+  let exampleShort = exampleLineRaw;
+  if (exampleShort.length > 120) {
+    exampleShort = exampleShort.slice(0, 117) + "...";
+  }
 
   // Thickness under the part (for skived pads)
   const thicknessVal =
@@ -411,7 +426,7 @@ ${missingList}`
           If you&apos;d like, I can add formal price breaks at higher quantities (for example 2×, 3×, 5×, and 10× this volume) — just reply with the ranges you&apos;d like to see.
         </p>
         <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
-          For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best — I&apos;ll keep that separate from the overall outside size.
+          For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best.
         </p>
 
         <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
