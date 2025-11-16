@@ -18,9 +18,7 @@ import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/* ============================================================
-   Types & small helpers
-   ============================================================ */
+/* ===================== Types & helpers ===================== */
 
 type In = {
   mode?: string;
@@ -31,7 +29,6 @@ type In = {
   threadMsgs?: any[];
   dryRun?: boolean;
 };
-
 type Mem = Record<string, any>;
 
 function ok(extra: Record<string, any> = {}) {
@@ -44,88 +41,112 @@ function err(error: string, detail?: any) {
 
 function compact<T extends Record<string, any>>(obj: T): T {
   const out: Record<string, any> = {};
-  for (const [k, v] of Object.entries(obj || {})) {
-    if (v === undefined || v === null) continue;
-    if (typeof v === "string" && v.trim() === "") continue;
+  for (const [k, v] of Object.entries(obj)) {
+    if (
+      v === undefined ||
+      v === null ||
+      (typeof v === "number" && !Number.isFinite(v))
+    ) {
+      continue;
+    }
     out[k] = v;
   }
   return out as T;
 }
 
-function mergeFacts(a: Mem, b: Mem): Mem {
-  return { ...(a || {}), ...compact(b || {}) };
+function parseDims(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  return s.replace(/[xX]/g, "x");
 }
 
-function pickThreadContext(threadMsgs: any[] = []): string {
-  const take = threadMsgs.slice(-3);
-  const snippets = take
-    .map((m) => {
-      const from = m?.from?.email || m?.from?.name || "Customer";
-      const txt = (m?.text || "").trim();
-      if (!txt) return "";
-      return `${from}: ${txt}`;
-    })
-    .filter(Boolean);
-  return snippets.join("\n\n");
+function parseDimsNums(dims: string | null | undefined) {
+  if (!dims) return { L: null as number | null, W: null as number | null, H: null as number | null };
+  const m = dims.match(
+    /([0-9]*\.?[0-9]+)\s*[xX]\s*([0-9]*\.?[0-9]+)\s*[xX]\s*([0-9]*\.?[0-9]+)/
+  );
+  if (!m) return { L: null, W: null, H: null };
+  return {
+    L: parseFloat(m[1]),
+    W: parseFloat(m[2]),
+    H: parseFloat(m[3])
+  };
 }
 
-/* ============================================================
-   Cavity normalization
-   ============================================================ */
+function parseQty(raw: any): number | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
 
-function normalizeCavity(raw: string): string {
-  if (!raw) return "";
-  let s = raw.trim();
+/** Normalize DIA cavity notation and keep durability. */
+function normalizeCavity(cavity: string): string {
+  if (!cavity) return "";
+  let s = cavity.trim();
+  s = s.replace(/\b(dia|diameter)\b/gi, "DIA");
+  s = s.replace(/ø/gi, "DIA ");
+  s = s.replace(/[^0-9a-zA-Z.\s"]/g, " ");
+  s = s.replace(/\s+/g, " ");
+  return s.trim();
+}
 
-  // DIA -> Ø
-  s = s.replace(/\bdia\b/gi, "Ø").replace(/diameter/gi, "Ø");
+/** Apply cavity normalization to merged facts. */
+function applyCavityNormalization(f: Mem): Mem {
+  if (!f) return f;
+  if (Array.isArray(f.cavityDims)) {
+    f.cavityDims = f.cavityDims.map((c: any) =>
+      typeof c === "string" ? normalizeCavity(c) : c
+    );
+  }
+  if (typeof f.cavitySummary === "string") {
+    f.cavitySummary = normalizeCavity(f.cavitySummary);
+  }
+  return f;
+}
 
-  // Kill quotes, collapse spaces
-  s = s.replace(/"/g, "").replace(/\s+/g, " ").trim();
+/* ===================== DB helpers ===================== */
 
-  // Pattern: Ø6 x 1  -> Ø6x1
-  const mCircle = s.match(/Ø\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
-  if (mCircle) {
-    return `Ø${mCircle[1]}x${mCircle[2]}`;
+async function enrichMaterial(
+  f: Mem
+): Promise<{
+  material_id: number | null;
+  material_name: string | null;
+  density_lb_ft3: number | null;
+  kerf_pct: number | null;
+  min_charge: number | null;
+}> {
+  const materialName =
+    f.material_name || f.material || f.foam_family || f.foam || "";
+  const density =
+    f.density_pcf != null ? Number(f.density_pcf) : f.density != null ? Number(f.density) : null;
+
+  if (!materialName && !density) {
+    return {
+      material_id: f.material_id || null,
+      material_name: f.material_name || null,
+      density_lb_ft3: f.density_pcf || null,
+      kerf_pct: f.kerf_pct || null,
+      min_charge: f.min_charge || null
+    };
   }
 
-  // Generic rectangle: 3 x 2 x 1 -> 3x2x1
-  const rect = s
-    .toLowerCase()
-    .replace(/×/g, "x")
-    .replace(/[^0-9.xØ]/g, "")
-    .replace(/x+/g, "x");
-  return rect || raw.trim();
-}
+  const like = `%${materialName}%`;
 
-function applyCavityNormalization(facts: Mem): Mem {
-  if (!facts) return facts;
-  if (!Array.isArray(facts.cavityDims)) return facts;
-  facts.cavityDims = facts.cavityDims
-    .map((c: string) => normalizeCavity(c))
-    .filter((x: string) => x && x.trim());
-  return facts;
-}
+  const densNum =
+    density != null && Number.isFinite(density) ? density : 0;
 
-/* ============================================================
-   DB enrichment
-   ============================================================ */
-
-async function enrichFromDB(f: Mem): Promise<Mem> {
   try {
-    if (!f.material) return f;
-
-    const like = `%${String(f.material).toLowerCase()}%`;
-    const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
-
-    const row = await one<any>(
+    const row = await one<{
+      id: number;
+      name: string;
+      density_lb_ft3: number | null;
+      kerf_waste_pct: number | null;
+      min_charge_usd: number | null;
+    }>(
       `
-      SELECT
-        id,
-        name,
-        density_lb_ft3,
-        kerf_waste_pct AS kerf_pct,
-        min_charge_usd AS min_charge
+      SELECT id, name, density_lb_ft3, kerf_waste_pct, min_charge_usd
       FROM materials
       WHERE active = true
         AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
@@ -138,69 +159,47 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     if (row) {
       if (!f.material_id) f.material_id = row.id;
       if (!f.material_name) f.material_name = row.name;
-      if (!f.density && row.density_lb_ft3 != null) {
-        f.density = `${row.density_lb_ft3}lb`;
+      if (!f.density_pcf && row.density_lb_ft3 != null) {
+        f.density_pcf = row.density_lb_ft3;
       }
-      if (f.kerf_pct == null && row.kerf_pct != null) f.kerf_pct = row.kerf_pct;
-      if (f.min_charge == null && row.min_charge != null) f.min_charge = row.min_charge;
+      if (!f.kerf_pct && row.kerf_waste_pct != null) {
+        f.kerf_pct = row.kerf_waste_pct;
+      }
+      if (!f.min_charge && row.min_charge_usd != null) {
+        f.min_charge = row.min_charge_usd;
+      }
+
+      return {
+        material_id: row.id,
+        material_name: row.name,
+        density_lb_ft3: row.density_lb_ft3,
+        kerf_pct: row.kerf_waste_pct,
+        min_charge: row.min_charge_usd
+      };
     }
-
-    return f;
-  } catch {
-    return f;
+  } catch (err) {
+    console.error("enrichMaterial query error", err);
   }
-}
 
-/* ============================================================
-   Dimension / density helpers
-   ============================================================ */
-
-const NUM = "\\d{1,4}(?:\\.\\d+)?";
-
-function normDims(raw: string | undefined | null): string | undefined {
-  if (!raw) return undefined;
-  const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
-  const m = t.match(
-    new RegExp(
-      `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
-      "i"
-    )
-  );
-  if (!m) return undefined;
-  return `${m[1]}x${m[2]}x${m[3]}`;
-}
-
-function parseDimsNums(dims: string | null | undefined) {
-  const d = (dims || "").split("x").map(Number);
   return {
-    L: d[0] || 0,
-    W: d[1] || 0,
-    H: d[2] || 0
+    material_id: f.material_id || null,
+    material_name: f.material_name || null,
+    density_lb_ft3:
+      f.density_pcf != null && Number.isFinite(Number(f.density_pcf))
+        ? Number(f.density_pcf)
+        : null,
+    kerf_pct: f.kerf_pct || null,
+    min_charge: f.min_charge || null
   };
 }
 
-function densityToPcf(density: string | null | undefined) {
-  const m = String(density || "").match(/(\d+(\.\d+)?)/);
-  return m ? Number(m[1]) : null;
-}
+/* ===================== Quotes calc proxy ===================== */
 
-function specsCompleteForQuote(s: {
-  dims: string | null;
-  qty: number | string | null;
-  material_id: number | null;
-}) {
-  return !!(s.dims && s.qty && s.material_id);
-}
-
-/* ============================================================
-   Quote calc via internal API
-   ============================================================ */
-
-async function fetchCalcQuote(opts: {
+async function callCalcAPI(opts: {
   dims: string;
   qty: number;
   material_id: number;
-  cavities: string[];
+  cavities?: string[] | null;
   round_to_bf: boolean;
 }) {
   const { L, W, H } = parseDimsNums(opts.dims);
@@ -215,363 +214,126 @@ async function fetchCalcQuote(opts: {
       height_in: H,
       material_id: opts.material_id,
       qty: opts.qty,
-      cavities: opts.cavities,
+      cavities: opts.cavities || null,
       round_to_bf: opts.round_to_bf
     })
   });
 
-  const j = await r.json().catch(() => ({} as any));
-  if (!r.ok || !j.ok) return null;
-  return j.result;
-}
-
-/* ============================================================
-   Regex-based parsing helpers
-   ============================================================ */
-
-function grabDims(raw: string): string | undefined {
-  const text = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
-  const m =
-    text.match(
-      new RegExp(
-        `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
-        "i"
-      )
-    ) ||
-    text.match(
-      new RegExp(
-        `\\b(?:size|dimensions?|dims?)\\s*[:\\-]?\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\b`,
-        "i"
-      )
+  const json = await r.json().catch(() => ({} as any));
+  if (!r.ok || !json?.ok) {
+    throw new Error(
+      `calc_api_failed: ${r.status} ${(json && json.error) || ""}`.trim()
     );
-
-  if (!m) return undefined;
-  return `${m[1]}x${m[2]}x${m[3]}`;
-}
-
-function grabQty(raw: string): number | undefined {
-  const t = raw.toLowerCase();
-
-  let m =
-    t.match(/\bqty\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
-    t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
-    t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
-    t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
-    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
-
-  if (m) return Number(m[1]);
-
-  const norm = t.replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/g, "$1 ");
-  m = norm.match(
-    new RegExp(
-      `\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?))?\\b`,
-      "i"
-    )
-  );
-  if (m) return Number(m[1]);
-
-  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?)?\b/);
-  if (m) return Number(m[1]);
-
-  return undefined;
-}
-
-function grabDensity(raw: string): string | undefined {
-  const t = raw.toLowerCase();
-  const m =
-    t.match(/(\d+(\.\d+)?)\s*(?:pcf|lb\/?ft3?|pound(?:s)?\s*per\s*cubic\s*foot)/) ||
-    t.match(/(\d+(\.\d+)?)\s*#\s*(?:foam)?\b/);
-  if (!m) return undefined;
-  return `${m[1]}#`;
-}
-
-function grabMaterial(raw: string): string | undefined {
-  const t = raw.toLowerCase();
-  const materials = [
-    "polyethylene",
-    "pe",
-    "epe",
-    "xlpe",
-    "polyurethane",
-    "urethane",
-    "pu",
-    "kaizen",
-    "pp",
-    "polystyrene",
-    "eps"
-  ];
-
-  for (const name of materials) {
-    if (t.includes(name)) return name;
   }
-  return undefined;
+  return json.result;
 }
 
-function extractCavities(raw: string): { cavityCount?: number; cavityDims?: string[] } {
-  const t = raw.toLowerCase();
-  const lines = raw.split(/\r?\n/);
-  const cavityDims: string[] = [];
-  let cavityCount: number | undefined;
-
-  const mCount =
-    t.match(/\b(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/) ||
-    t.match(/\btotal\s+of\s+(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/);
-  if (mCount) {
-    cavityCount = Number(mCount[1]);
-  }
-
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (!/\bcavity|cavities|cutout|pocket\b/.test(lower)) continue;
-
-    const tokens = line.split(/[;,]/);
-    for (const tok of tokens) {
-      const dd = grabDims(tok);
-      if (dd) {
-        cavityDims.push(dd);
-        continue;
-      }
-      const mPair = tok.trim().match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`));
-      if (mPair) cavityDims.push(`${mPair[1]}x${mPair[2]}`);
-    }
-  }
-
-  return { cavityCount, cavityDims: cavityDims.length ? cavityDims : undefined };
-}
-
-/* ============================================================
-   Initial fact extraction from subject + body
-   ============================================================ */
-
-function extractAllFromTextAndSubject(body: string, subject: string): Mem {
-  const text = `${subject}\n\n${body || ""}`;
-  const facts: Mem = {};
-
-  const dims = grabDims(text);
-  if (dims) facts.dims = normDims(dims) || dims;
-
-  const qty = grabQty(text);
-  if (qty) facts.qty = qty;
-
-  const density = grabDensity(text);
-  if (density) facts.density = density;
-
-  const material = grabMaterial(text);
-  if (material) facts.material = material;
-
-  const { cavityCount, cavityDims } = extractCavities(text);
-  if (cavityCount != null) facts.cavityCount = cavityCount;
-  if (cavityDims && cavityDims.length) facts.cavityDims = cavityDims;
-
-  const mEmail = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-  if (mEmail) facts.customerEmail = mEmail[0];
-
-  return compact(facts);
-}
-
-/* ============================================================
-   LLM helpers (facts + opener)
-   ============================================================ */
-
-async function aiParseFacts(
-  model: string,
-  body: string,
-  subject: string
-): Promise<Mem> {
-  const key = process.env.OPENAI_API_KEY?.trim();
-  if (!key) return {};
-  if (!body && !subject) return {};
-
-  try {
-    const prompt = `
-Extract foam quote facts.
-Return JSON only.
-
-Valid keys:
-- dims: string like "12x10x2"
-- qty: integer
-- material: string
-- density: string like "1.7#"
-- cavityCount: integer
-- cavityDims: array of strings
-
-Subject:
-${subject}
-
-Body:
-${body}
-    `.trim();
-
-    const r = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`
-      },
-      body: JSON.stringify({
-        model,
-        input: prompt,
-        max_output_tokens: 256,
-        temperature: 0.1
-      })
-    });
-
-    const raw = await r.text();
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start === -1 || end === -1) return {};
-
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    const out: Mem = {};
-
-    if (parsed.dims) out.dims = normDims(parsed.dims) || parsed.dims;
-    if (parsed.qty) out.qty = parsed.qty;
-    if (parsed.material) out.material = parsed.material;
-    if (parsed.density) out.density = parsed.density;
-    if (parsed.cavityCount != null) out.cavityCount = parsed.cavityCount;
-    if (Array.isArray(parsed.cavityDims)) {
-      out.cavityDims = parsed.cavityDims.map((x: string) =>
-        normalizeCavity(normDims(x) || x)
-      );
-    }
-
-    return compact(out);
-  } catch {
-    return {};
-  }
-}
-
-/* ============================================================
-   LLM opener
-   ============================================================ */
-
-const HUMAN_OPENERS = [
-  "Appreciate the details—once we lock a few specs I’ll price this out.",
-  "Thanks for sending this—happy to quote it as soon as I confirm a couple items.",
-  "Got it—let me confirm a few specs and I’ll run pricing.",
-  "Thanks for the info—if I can fill a couple gaps I’ll send numbers right away."
-];
-
-function chooseOpener(seed: string) {
-  if (!seed) return HUMAN_OPENERS[0];
-  let h = 2166136261 >>> 0;
-  for (const c of seed) {
-    h ^= c.charCodeAt(0);
-    h = Math.imul(h, 16777619);
-  }
-  return HUMAN_OPENERS[h % HUMAN_OPENERS.length];
-}
-
-async function aiOpener(
-  model: string,
-  lastInbound: string,
-  context: string
-): Promise<string | null> {
-  const key = process.env.OPENAI_API_KEY?.trim();
-  if (!key) return null;
-
-  try {
-    const prompt = `
-Write ONE friendly sentence acknowledging the message and saying you'll price it after confirming a couple specs.
-No bullets.
-
-Context:
-${context}
-
-Last inbound:
-${lastInbound}
-    `.trim();
-
-    const r = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`
-      },
-      body: JSON.stringify({
-        model,
-        input: prompt,
-        max_output_tokens: 80,
-        temperature: 0.4
-      })
-    });
-
-    const j = await r.json().catch(() => ({} as any));
-    const txt: string =
-      j.output?.[0]?.content?.[0]?.text ??
-      j.output_text ??
-      j.choices?.[0]?.message?.content ??
-      "";
-    const clean = String(txt || "").replace(/\s+/g, " ").trim();
-    return clean || null;
-  } catch {
-    return null;
-  }
-}
-
-/* ============================================================
-   MAIN HANDLER
-   ============================================================ */
+/* ===================== Main handler ===================== */
 
 export async function POST(req: NextRequest) {
   try {
     const p = (await req.json().catch(() => ({}))) as In;
-    const mode = String(p.mode || "ai");
 
-    if (mode !== "ai") {
-      return err("unsupported_mode", { mode });
-    }
+    const dryRun = !!p.dryRun;
+    const mode = p.mode || "ai";
 
-    const lastText = String(p.text || "");
-    const subject = String(p.subject || "");
-    const providedThreadId = String(p.threadId || "").trim();
+    const bodyText =
+      p.text && typeof p.text === "string" ? p.text : "";
 
     const threadKey =
-      providedThreadId ||
-      (subject ? `sub:${subject.toLowerCase().replace(/\s+/g, " ")}` : "");
-
-    const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
-    const dryRun = !!p.dryRun;
-
-    /* ------------------- Parse new turn ------------------- */
-
-    let newly = extractAllFromTextAndSubject(lastText, subject);
-
-    const needsLLM =
-      !newly.dims ||
-      !newly.qty ||
-      !newly.material ||
-      !newly.density ||
-      (newly.cavityCount && (!newly.cavityDims || newly.cavityDims.length === 0));
-
-    if (needsLLM) {
-      const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
-      newly = mergeFacts(newly, llmFacts);
-    }
-
-    /* ------------------- Merge with memory ------------------- */
+      p.threadId != null
+        ? `thread:${String(p.threadId)}`
+        : p.threadMsgs && p.threadMsgs.length
+        ? `thread:${LAST_STORE}`
+        : null;
 
     let loaded: Mem = {};
-    if (threadKey) loaded = await loadFacts(threadKey);
+    if (threadKey) {
+      const stored = await loadFacts(threadKey);
+      loaded = stored || {};
+    }
 
-    // Don't let cavity dims overwrite main dims
-    if (loaded.dims && newly.dims && loaded.dims !== newly.dims) {
-      const lower = lastText.toLowerCase();
-      const isCavityContext = /\bcavity|cutout|pocket\b/.test(lower);
-      if (isCavityContext) {
-        const cavs = Array.isArray(loaded.cavityDims) ? [...loaded.cavityDims] : [];
-        if (!cavs.includes(newly.dims)) cavs.push(newly.dims);
-        newly.cavityDims = cavs;
-        delete newly.dims;
+    const newly: Mem = {};
+    newly.rawText = bodyText;
+
+    const emailLower = bodyText.toLowerCase();
+
+    const dimsMatch =
+      bodyText.match(
+        /([0-9]*\.?[0-9]+)\s*[xX]\s*([0-9]*\.?[0-9]+)\s*[xX]\s*([0-9]*\.?[0-9]+)/
+      ) || null;
+    if (dimsMatch) {
+      newly.dims = `${dimsMatch[1]}x${dimsMatch[2]}x${dimsMatch[3]}`;
+    }
+
+    const qtyMatch =
+      bodyText.match(
+        /\b(?:qty|quantity|pieces?|pcs?)[:\s]*([0-9]{1,6})\b/i
+      ) || bodyText.match(/\b([0-9]{1,6})\s*(?:pcs?|pieces?)\b/i);
+    if (qtyMatch) {
+      newly.qty = Number(qtyMatch[1]);
+    }
+
+    const densMatch =
+      bodyText.match(
+        /\b([0-9]{1,2}(?:\.[0-9])?)\s*(?:pcf|lb\/?ft3?|lb per cubic foot)\b/i
+      ) || bodyText.match(/\b([0-9]{1,2}(?:\.[0-9])?)\s*#\b/);
+    if (densMatch) {
+      newly.density_pcf = Number(densMatch[1]);
+    }
+
+    if (/polyethylene|pe foam|pe\s+foam/i.test(emailLower)) {
+      newly.foam_family = "PE";
+    } else if (/polyurethane|urethane|pu foam|pu\s+foam/i.test(emailLower)) {
+      newly.foam_family = "Polyurethane";
+    }
+
+    const nameMatch =
+      bodyText.match(/(?:hello|hi|hey)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/) ||
+      bodyText.match(/(?:this is|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
+    if (nameMatch) {
+      newly.customerName = nameMatch[1];
+    }
+
+    const emailMatch = bodyText.match(
+      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i
+    );
+    if (emailMatch) {
+      newly.email = emailMatch[0];
+    }
+
+    const cavities: string[] = [];
+    const cavityRegex =
+      /\b(?:cavity|cavities|pockets?)\b[^.\n]*\b([0-9]{1,3}(?:\.[0-9])?)\s*[xX]\s*([0-9]{1,3}(?:\.[0-9])?)\s*[xX]\s*([0-9]{1,3}(?:\.[0-9])?)\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = cavityRegex.exec(bodyText)) != null) {
+      const c = `${m[1]}x${m[2]}x${m[3]}`;
+      cavities.push(normalizeCavity(c));
+    }
+
+    const diaRegex =
+      /\b(?:cavity|cavities|pockets?)\b[^.\n]*\b(?:ø|DIA|dia|diameter)\s*([0-9]{1,3}(?:\.[0-9])?)\s*[xX]\s*([0-9]{1,3}(?:\.[0-9])?)\b/g;
+    while ((m = diaRegex.exec(bodyText)) != null) {
+      const c = `DIA ${m[1]}x${m[2]}`;
+      cavities.push(normalizeCavity(c));
+    }
+
+    if (cavities.length) {
+      newly.cavityDims = cavities;
+      newly.cavityCount = cavities.length;
+    }
+
+    if (threadKey && p.threadMsgs && p.threadMsgs.length) {
+      const lastMsg = p.threadMsgs[p.threadMsgs.length - 1];
+      if (lastMsg && lastMsg.internetMessageId) {
+        newly.__lastInternetMessageId = lastMsg.internetMessageId;
       }
     }
 
-    let merged = mergeFacts(loaded, newly);
-
+    let merged: Mem = { ...loaded, ...newly };
     merged = applyCavityNormalization(merged);
     merged.__turnCount = (merged.__turnCount || 0) + 1;
 
-    // Stable quote number per thread
     if (!merged.quoteNumber && !merged.quote_no) {
       const now = new Date();
       const yyyy = now.getUTCFullYear();
@@ -587,55 +349,78 @@ export async function POST(req: NextRequest) {
       merged.quoteNumber = merged.quote_no;
     }
 
-    /* ------------------- DB enrichment ------------------- */
-
-    merged = await enrichFromDB(merged);
-    if (threadKey) await saveFacts(threadKey, merged);
-
-    /* ------------------- LLM opener ------------------- */
-
-    const context = pickThreadContext(threadMsgs);
-    const opener =
-      (await aiOpener("gpt-4.1-mini", lastText, context)) ||
-      chooseOpener(threadKey || subject || "default");
-
-    /* ------------------- Specs for template ------------------- */
-
-    const specs = {
-      dims: merged.dims || null,
-      qty: merged.qty || null,
-      material: merged.material || null,
-      density: merged.density || null,
-      cavityCount: merged.cavityCount ?? null,
-      cavityDims: merged.cavityDims || [],
-      material_id: merged.material_id || null
-    };
-
-    /* ------------------- Pricing & persistence ------------------- */
-
-    const canCalc = specsCompleteForQuote({
-      dims: specs.dims,
-      qty: specs.qty,
-      material_id: specs.material_id
-    });
-
-    let calc: any = null;
-    if (canCalc) {
-      calc = await fetchCalcQuote({
-        dims: specs.dims!,
-        qty: Number(specs.qty),
-        material_id: Number(specs.material_id),
-        cavities: specs.cavityDims,
-        round_to_bf: false
-      });
+    if (!merged.status) {
+      merged.status = "draft";
     }
 
-    const hasDimsQty = !!(specs.dims && specs.qty);
+    const dims = parseDims(merged.dims);
+    const dimsNums = parseDimsNums(dims || "");
+    const qty = parseQty(merged.qty);
+
+    const { material_id, material_name, density_lb_ft3, kerf_pct, min_charge } =
+      await enrichMaterial(merged);
+
+    merged.material_id = material_id;
+    merged.material_name = material_name;
+    merged.density_pcf =
+      merged.density_pcf ??
+      (density_lb_ft3 != null ? density_lb_ft3 : merged.density_pcf);
+    merged.kerf_pct = merged.kerf_pct ?? kerf_pct;
+    merged.min_charge = merged.min_charge ?? min_charge;
+
+    if (threadKey) {
+      await saveFacts(threadKey, merged);
+    }
+
+    const dimsStr = dims || merged.dims || "";
+    const specs = {
+      dims: dimsStr,
+      qty: qty ?? merged.qty ?? null,
+      material: merged.material_name || merged.foam_family || merged.material,
+      density_pcf:
+        merged.density_pcf != null && Number.isFinite(Number(merged.density_pcf))
+          ? Number(merged.density_pcf)
+          : null
+    };
+
+    if (mode === "facts") {
+      return ok({ mode, facts: merged, specs });
+    }
+
+    let calc: any = null;
+    if (dimsStr && qty && material_id) {
+      try {
+        const roundToBf = !!merged.round_to_bf;
+        const cavDims = Array.isArray(merged.cavityDims)
+          ? (merged.cavityDims as string[])
+          : null;
+        calc = await callCalcAPI({
+          dims: dimsStr,
+          qty,
+          material_id,
+          cavities: cavDims,
+          round_to_bf: roundToBf
+        });
+      } catch (e: any) {
+        console.error("callCalcAPI failed", e);
+      }
+    }
+
+    const opener =
+      merged.customerName || merged.name
+        ? `Hi ${merged.customerName || merged.name},`
+        : "Hi there,";
+
     const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
-    // Header: store whenever we have dims + qty + quoteNumber
-    let quoteId = merged.quote_id;
-    if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
+    const hasDimsQty = !!(specs.dims && specs.qty);
+
+    let quoteId = merged.quote_id || null;
+    if (!quoteId && merged.quote_id != null) {
+      quoteId = merged.quote_id;
+    }
+
+    if (merged.quoteNumber && hasDimsQty && !quoteId) {
       try {
         const customerName =
           merged.customerName ||
@@ -669,62 +454,63 @@ export async function POST(req: NextRequest) {
           if (threadKey) await saveFacts(threadKey, merged);
         }
       } catch (err) {
-        console.error("quote header store error:", err);
+        console.error("quote header store error", err);
       }
     }
 
-    // Primary item: only when we have material_id, and only once
-    if (
-      !dryRun &&
-      quoteId &&
-      canCalc &&
-      specs.material_id &&
-      !merged.__primary_item_created
-    ) {
+    if (quoteId && calc && calc.id && !calc.quote_id) {
       try {
-        const { L, W, H } = parseDimsNums(specs.dims);
-        const itemBody: any = {
-          length_in: L,
-          width_in: W,
-          height_in: H,
-          material_id: Number(specs.material_id),
-          qty: Number(specs.qty)
-        };
-
         await fetch(`${base}/api/quotes/${quoteId}/items`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(itemBody)
+          body: JSON.stringify({
+            length_in: calc.length_in,
+            width_in: calc.width_in,
+            height_in: calc.height_in,
+            qty: calc.qty,
+            material_id: calc.material_id,
+            cavities: calc.cavities || null,
+            round_to_bf: !!merged.round_to_bf,
+            raw: calc
+          })
         });
-
-        merged.__primary_item_created = true;
-        if (threadKey) await saveFacts(threadKey, merged);
       } catch (err) {
-        console.error("quote item store error:", err);
+        console.error("quote items store error", err);
       }
     }
 
-    /* ------------------- Build email template ------------------- */
-
-    const dimsNums = parseDimsNums(specs.dims);
-    const densityPcf = densityToPcf(specs.density);
+    if (mode === "calc") {
+      return ok({
+        mode,
+        specs,
+        calc,
+        facts: merged
+      });
+    }
 
     const templateInput = {
       customerLine: opener,
       quoteNumber: merged.quoteNumber || merged.quote_no,
+      status: merged.status || "draft",
       specs: {
         L_in: dimsNums.L,
         W_in: dimsNums.W,
         H_in: dimsNums.H,
         qty: specs.qty,
-        density_pcf: densityPcf,
+        density_pcf:
+          merged.density_pcf != null && Number.isFinite(Number(merged.density_pcf))
+            ? Number(merged.density_pcf)
+            : null,
         foam_family: specs.material,
         thickness_under_in: merged.thickness_under_in,
         color: merged.color
       },
       material: {
         name: merged.material_name,
-        density_lbft3: densityPcf,
+        density_lbft3:
+          merged.density_pcf != null && Number.isFinite(Number(merged.density_pcf))
+            ? Number(merged.density_pcf)
+            : null,
         kerf_pct: merged.kerf_pct,
         min_charge: merged.min_charge
       },
@@ -790,7 +576,7 @@ export async function POST(req: NextRequest) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         toEmail,
-        subject: subject || "Foam quote",
+        subject: p.subject || "Foam quote",
         html: htmlBody,
         inReplyTo
       })
@@ -799,10 +585,52 @@ export async function POST(req: NextRequest) {
     const sent = await r.json().catch(() => ({} as any));
 
     if (threadKey && (sent.messageId || sent.internetMessageId)) {
-      merged.__lastGraphMessageId = sent.messageId || merged.__lastGraphMessageId;
+      merged.__lastGraphMessageId =
+        sent.messageId || merged.__lastGraphMessageId;
       merged.__lastInternetMessageId =
         sent.internetMessageId || merged.__lastInternetMessageId;
       await saveFacts(threadKey, merged);
+    }
+
+    // After a successful real send, bump quote status to "sent" and persist.
+    // This keeps the /quote print view and admin lists in sync with reality.
+    if (merged.quoteNumber || merged.quote_no) {
+      const quote_no = String(merged.quoteNumber || merged.quote_no);
+      const customerName =
+        merged.customerName ||
+        merged.customer_name ||
+        merged.name ||
+        "Customer";
+      const customerEmail =
+        merged.customerEmail ||
+        merged.email ||
+        null;
+      const phone = merged.phone || null;
+
+      try {
+        const res = await fetch(`${base}/api/quotes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            quote_no,
+            customer_name: String(customerName),
+            email: customerEmail,
+            phone,
+            status: "sent"
+          })
+        });
+        const js = await res.json().catch(() => ({} as any));
+        if (res.ok && js?.ok && js.quote?.status) {
+          merged.status = js.quote.status;
+        } else {
+          merged.status = "sent";
+        }
+        if (threadKey) {
+          await saveFacts(threadKey, merged);
+        }
+      } catch (err) {
+        console.error("quote status update error", err);
+      }
     }
 
     return ok({
