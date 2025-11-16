@@ -1,6 +1,8 @@
 // app/sketch-upload/page.tsx
 import React from "react";
 
+export const dynamic = "force-dynamic";
+
 type Props = {
   searchParams: { [key: string]: string | string[] | undefined };
 };
