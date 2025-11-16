@@ -1,4 +1,6 @@
 // app/sketch-upload/page.tsx
+"use client";
+
 import React from "react";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +10,25 @@ type Props = {
 };
 
 export default function SketchUploadPage({ searchParams }: Props) {
+  // Try to get an initial value from server-side searchParams
   const raw = searchParams?.quote_no;
-  const quoteNo = Array.isArray(raw) ? raw[0] : raw || "";
+  const initialFromServer = Array.isArray(raw) ? raw[0] : raw || "";
+
+  const [quoteNo, setQuoteNo] = React.useState(initialFromServer);
+
+  // On the client, also read from window.location in case anything was missed
+  React.useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const fromUrl = params.get("quote_no");
+      if (fromUrl && fromUrl !== quoteNo) {
+        setQuoteNo(fromUrl);
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <main
@@ -62,7 +81,7 @@ export default function SketchUploadPage({ searchParams }: Props) {
           encType="multipart/form-data"
           style={{ marginTop: 8 }}
         >
-          {/* Quote number field (required, prefilled from URL if present) */}
+          {/* Quote number field (required, auto-filled from URL, but editable) */}
           <div style={{ marginBottom: 12 }}>
             <label
               htmlFor="quote_no"
@@ -80,7 +99,8 @@ export default function SketchUploadPage({ searchParams }: Props) {
               id="quote_no"
               name="quote_no"
               type="text"
-              defaultValue={quoteNo}
+              value={quoteNo}
+              onChange={(e) => setQuoteNo(e.target.value)}
               required
               placeholder="e.g. Q-AI-20251116-223023"
               style={{
