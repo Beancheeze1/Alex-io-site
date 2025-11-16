@@ -1,32 +1,6 @@
 // app/api/sketch/parse/route.ts
 //
 // Vision parser for uploaded sketch files.
-//
-// Usage (POST JSON):
-//   { "quote_no": "Q-AI-20251116-223023" }
-//      -> parses the most recent attachment for that quote
-//
-//   { "attachmentId": 4 }
-//      -> parses that specific attachment
-//
-// Output:
-//   {
-//     ok: true,
-//     attachmentId: 4,
-//     quoteId: 31,
-//     quoteNo: "Q-AI-...",
-//     parsed: {
-//       dims: "10x10x3",
-//       qty: 250,
-//       material: "EPE",
-//       density: "1.7#",
-//       cavityCount: 2,
-//       cavityDims: ["6x0.5", "1x1x0.5"],
-//       notes: "optional clarification text"
-//     }
-//   }
-//
-// Also stores the parsed JSON into quote_attachments.notes.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
@@ -171,9 +145,7 @@ Return STRICT JSON ONLY in this shape:
               },
               {
                 type: "input_image",
-                image_url: {
-                  url: dataUrl,
-                },
+                image_url: dataUrl, // NOTE: direct string, not { url: ... }
               },
             ],
           },
@@ -183,21 +155,48 @@ Return STRICT JSON ONLY in this shape:
       }),
     });
 
-    const raw = await resp.text();
     if (!resp.ok) {
-      return err("openai_error", { status: resp.status, body: raw }, 500);
+      const errorBody = await resp.text().catch(() => "");
+      console.error("OpenAI vision error:", resp.status, errorBody);
+      return err("openai_error", { status: resp.status, body: errorBody }, 500);
     }
 
-    // 4) Extract the JSON blob from the response text
+    const responseJson: any = await resp.json().catch(() => ({} as any));
+
+    // 4) Extract the JSON text from the Responses API output
     let parsed: ParsedSketch = {};
     try {
-      const start = raw.indexOf("{");
-      const end = raw.lastIndexOf("}");
-      if (start !== -1 && end !== -1 && end > start) {
-        parsed = JSON.parse(raw.slice(start, end + 1));
+      let textOut = "";
+
+      const firstOutput = responseJson.output?.[0];
+      if (
+        firstOutput &&
+        Array.isArray(firstOutput.content)
+      ) {
+        const textChunk = firstOutput.content.find(
+          (c: any) => c.type === "output_text" && typeof c.text === "string"
+        );
+        if (textChunk) {
+          textOut = textChunk.text;
+        }
+      }
+
+      const trimmed = String(textOut || "").trim();
+
+      if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        parsed = JSON.parse(trimmed);
+      } else {
+        // fallback: try to slice between first/last brace just in case
+        const start = trimmed.indexOf("{");
+        const end = trimmed.lastIndexOf("}");
+        if (start !== -1 && end !== -1 && end > start) {
+          parsed = JSON.parse(trimmed.slice(start, end + 1));
+        } else {
+          parsed = {};
+        }
       }
     } catch (e) {
-      // fall back to empty parsed object if JSON parse fails
+      console.error("Failed to parse vision JSON:", e);
       parsed = {};
     }
 
@@ -218,7 +217,6 @@ Return STRICT JSON ONLY in this shape:
         [attachment.id, JSON.stringify(parsed)]
       );
     } catch (e) {
-      // Don't fail the whole request just because the update failed
       console.error("Failed to store parsed sketch notes:", e);
     }
 
@@ -236,10 +234,6 @@ Return STRICT JSON ONLY in this shape:
     );
   } catch (e: any) {
     console.error("sketch/parse exception:", e);
-    return err(
-      "sketch_parse_exception",
-      String(e?.message || e),
-      500
-    );
+    return err("sketch_parse_exception", String(e?.message || e), 500);
   }
 }
