@@ -43,18 +43,6 @@ export default function SketchUploadPage({ searchParams }: Props) {
         >
           Upload sketch or file
         </h1>
-        {quoteNo && (
-          <p
-            style={{
-              margin: "0 0 12px 0",
-              fontSize: 13,
-              color: "#4b5563",
-            }}
-          >
-            For quote{" "}
-            <span style={{ fontWeight: 600 }}>#{quoteNo}</span>
-          </p>
-        )}
 
         <p
           style={{
@@ -74,12 +62,55 @@ export default function SketchUploadPage({ searchParams }: Props) {
           encType="multipart/form-data"
           style={{ marginTop: 8 }}
         >
-          {quoteNo && (
-            <input type="hidden" name="quote_no" value={quoteNo} />
-          )}
+          {/* Quote number field (required, prefilled from URL if present) */}
+          <div style={{ marginBottom: 12 }}>
+            <label
+              htmlFor="quote_no"
+              style={{
+                display: "block",
+                marginBottom: 4,
+                fontSize: 12,
+                color: "#4b5563",
+                fontWeight: 500,
+              }}
+            >
+              Quote number
+            </label>
+            <input
+              id="quote_no"
+              name="quote_no"
+              type="text"
+              defaultValue={quoteNo}
+              required
+              placeholder="e.g. Q-AI-20251116-223023"
+              style={{
+                display: "block",
+                width: "100%",
+                borderRadius: 8,
+                border: "1px solid #d1d5db",
+                fontSize: 13,
+                padding: "6px 10px",
+                color: "#111827",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
 
           <div style={{ marginBottom: 12 }}>
+            <label
+              htmlFor="file"
+              style={{
+                display: "block",
+                marginBottom: 4,
+                fontSize: 12,
+                color: "#4b5563",
+                fontWeight: 500,
+              }}
+            >
+              Sketch / file
+            </label>
             <input
+              id="file"
               type="file"
               name="file"
               accept="image/*,application/pdf"
