@@ -1,18 +1,43 @@
 // app/api/sketch-upload/route.ts
+//
+// Stores uploaded sketch/file into quote_attachments,
+// then calls the Vision parser to extract dims/cavities/etc.
+//
+// Response shape (success):
+// {
+//   ok: true,
+//   attachmentId: 4,
+//   quoteId: 31,
+//   quoteNo: "Q-AI-20251116-223023",
+//   filename: "20251116_162905.jpg",
+//   size: 1837540,
+//   type: "image/jpeg",
+//   parsed: {
+//     dims: "...",
+//     qty: ...,
+//     material: "...",
+//     density: "...",
+//     cavityCount: ...,
+//     cavityDims: [...],
+//     notes: "..."
+//   }
+// }
+
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function err(error: string, detail?: any, status = 400) {
+  return NextResponse.json({ ok: false, error, detail }, { status });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get("content-type") || "";
     if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
-      return NextResponse.json(
-        { ok: false, error: "expected_multipart_formdata" },
-        { status: 400 }
-      );
+      return err("expected_multipart_formdata");
     }
 
     const formData = await req.formData();
@@ -21,10 +46,7 @@ export async function POST(req: NextRequest) {
     const quoteNo = quoteNoRaw ? String(quoteNoRaw).trim() : null;
 
     if (!fileAny || typeof (fileAny as any).arrayBuffer !== "function") {
-      return NextResponse.json(
-        { ok: false, error: "missing_or_invalid_file" },
-        { status: 400 }
-      );
+      return err("missing_or_invalid_file");
     }
 
     const file = fileAny as File;
@@ -37,7 +59,7 @@ export async function POST(req: NextRequest) {
     let quoteId: number | null = null;
     if (quoteNo) {
       const row = await one<{ id: number }>(
-        "SELECT id FROM quotes WHERE quote_no = $1 LIMIT 1",
+        "SELECT id FROM quotes WHERE quote_no = $1 LIMIT 1;",
         [quoteNo]
       );
       if (row) quoteId = row.id;
@@ -62,8 +84,10 @@ export async function POST(req: NextRequest) {
       ]
     );
 
+    const attachmentId = inserted?.id;
+
     console.log("Stored sketch upload", {
-      attachmentId: inserted?.id,
+      attachmentId,
       quoteId,
       quoteNo,
       filename: file.name,
@@ -71,15 +95,43 @@ export async function POST(req: NextRequest) {
       type: file.type,
     });
 
+    // === Call Vision parser for this attachment (best-effort) ===
+    let parsed: any = null;
+    try {
+      const base =
+        process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") ||
+        "https://api.alex-io.com";
+
+      const parseResp = await fetch(`${base}/api/sketch/parse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ attachmentId }),
+      });
+
+      const parseJson = await parseResp.json().catch(() => ({} as any));
+
+      if (parseResp.ok && parseJson?.ok) {
+        parsed = parseJson.parsed ?? null;
+      } else {
+        console.warn("Vision parse call did not return ok:", {
+          status: parseResp.status,
+          body: parseJson,
+        });
+      }
+    } catch (e) {
+      console.error("Vision parse call failed:", e);
+    }
+
     return NextResponse.json(
       {
         ok: true,
-        attachmentId: inserted?.id,
+        attachmentId,
         quoteId,
         quoteNo,
         filename: file.name,
         size: file.size,
         type: file.type,
+        parsed,
       },
       { status: 200 }
     );
