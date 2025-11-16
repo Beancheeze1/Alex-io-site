@@ -1,10 +1,14 @@
 // app/api/ai/orchestrate/route.ts
 //
 // PATH-A SAFE VERSION
-// — cavity durability improved
-// — DIA conversion
-// — template always guaranteed
-// — no changes to threading, memory, LLM selection, or msgraph calls
+// - Hybrid regex + LLM parser
+// - Cavity durability + DIA normalization
+// - DB enrichment for material
+// - Quote calc via /api/quotes/calc
+// - Quote template rendering with missing-specs list
+// - Stable quoteNumber per thread
+// - NEW: Always store quote header when we have dims + qty + quoteNumber,
+//   and only store line items once material_id is known.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
@@ -15,7 +19,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /* ============================================================
-   Utility helpers
+   Types & small helpers
    ============================================================ */
 
 type In = {
@@ -180,7 +184,11 @@ function densityToPcf(density: string | null | undefined) {
   return m ? Number(m[1]) : null;
 }
 
-function specsCompleteForQuote(s: any) {
+function specsCompleteForQuote(s: {
+  dims: string | null;
+  qty: number | string | null;
+  material_id: number | null;
+}) {
   return !!(s.dims && s.qty && s.material_id);
 }
 
@@ -305,7 +313,6 @@ function extractCavities(raw: string): { cavityCount?: number; cavityDims?: stri
   const cavityDims: string[] = [];
   let cavityCount: number | undefined;
 
-  // Count mentions like "4 cavities" or "4 pockets"
   const mCount =
     t.match(/\b(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/) ||
     t.match(/\btotal\s+of\s+(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/);
@@ -313,7 +320,6 @@ function extractCavities(raw: string): { cavityCount?: number; cavityDims?: stri
     cavityCount = Number(mCount[1]);
   }
 
-  // Scan for dimension-like tokens on cavity lines
   for (const line of lines) {
     const lower = line.toLowerCase();
     if (!/\bcavity|cavities|cutout|pocket\b/.test(lower)) continue;
@@ -357,7 +363,6 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   if (cavityCount != null) facts.cavityCount = cavityCount;
   if (cavityDims && cavityDims.length) facts.cavityDims = cavityDims;
 
-  // Try to grab a customer email if present
   const mEmail = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   if (mEmail) facts.customerEmail = mEmail[0];
 
@@ -549,14 +554,12 @@ export async function POST(req: NextRequest) {
     let loaded: Mem = {};
     if (threadKey) loaded = await loadFacts(threadKey);
 
-    // Do not let a later dims overwrite base dims when the context is clearly cavity-related
+    // Don't let cavity dims overwrite main dims
     if (loaded.dims && newly.dims && loaded.dims !== newly.dims) {
       const lower = lastText.toLowerCase();
       const isCavityContext = /\bcavity|cutout|pocket\b/.test(lower);
       if (isCavityContext) {
-        const cavs = Array.isArray(loaded.cavityDims)
-          ? [...loaded.cavityDims]
-          : [];
+        const cavs = Array.isArray(loaded.cavityDims) ? [...loaded.cavityDims] : [];
         if (!cavs.includes(newly.dims)) cavs.push(newly.dims);
         newly.cavityDims = cavs;
         delete newly.dims;
@@ -565,12 +568,10 @@ export async function POST(req: NextRequest) {
 
     let merged = mergeFacts(loaded, newly);
 
-    // Required for template: correct DIA formatting
     merged = applyCavityNormalization(merged);
-
     merged.__turnCount = (merged.__turnCount || 0) + 1;
 
-    // Ensure a stable quote number per thread for template & storage
+    // Stable quote number per thread
     if (!merged.quoteNumber && !merged.quote_no) {
       const now = new Date();
       const yyyy = now.getUTCFullYear();
@@ -587,8 +588,8 @@ export async function POST(req: NextRequest) {
     }
 
     /* ------------------- DB enrichment ------------------- */
-    merged = await enrichFromDB(merged);
 
+    merged = await enrichFromDB(merged);
     if (threadKey) await saveFacts(threadKey, merged);
 
     /* ------------------- LLM opener ------------------- */
@@ -610,10 +611,16 @@ export async function POST(req: NextRequest) {
       material_id: merged.material_id || null
     };
 
-    /* ------------------- Pricing ------------------- */
+    /* ------------------- Pricing & persistence ------------------- */
+
+    const canCalc = specsCompleteForQuote({
+      dims: specs.dims,
+      qty: specs.qty,
+      material_id: specs.material_id
+    });
 
     let calc: any = null;
-    if (specsCompleteForQuote(specs)) {
+    if (canCalc) {
       calc = await fetchCalcQuote({
         dims: specs.dims!,
         qty: Number(specs.qty),
@@ -623,11 +630,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // NEW: optional quote persistence (one-time per thread when we have enough data)
+    const hasDimsQty = !!(specs.dims && specs.qty);
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+
+    // Header: store whenever we have dims + qty + quoteNumber
     let quoteId = merged.quote_id;
-    if (!dryRun && !quoteId && specsCompleteForQuote(specs) && merged.quoteNumber) {
+    if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
       try {
-        const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
         const customerName =
           merged.customerName ||
           merged.customer_name ||
@@ -651,36 +660,51 @@ export async function POST(req: NextRequest) {
             status
           })
         });
+
         const headerJson = await headerRes.json().catch(() => ({} as any));
         if (headerRes.ok && headerJson?.ok && headerJson.quote?.id) {
           quoteId = headerJson.quote.id;
           merged.quote_id = quoteId;
           merged.status = headerJson.quote.status || merged.status;
           if (threadKey) await saveFacts(threadKey, merged);
-
-          const { L, W, H } = parseDimsNums(specs.dims);
-          const itemBody: any = {
-            length_in: L,
-            width_in: W,
-            height_in: H,
-            material_id: Number(specs.material_id),
-            qty: Number(specs.qty)
-          };
-
-          try {
-            await fetch(`${base}/api/quotes/${quoteId}/items`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(itemBody)
-            });
-          } catch (err) {
-            console.error("quote items store error:", err);
-          }
         }
       } catch (err) {
-        console.error("quote store error:", err);
+        console.error("quote header store error:", err);
       }
     }
+
+    // Primary item: only when we have material_id, and only once
+    if (
+      !dryRun &&
+      quoteId &&
+      canCalc &&
+      specs.material_id &&
+      !merged.__primary_item_created
+    ) {
+      try {
+        const { L, W, H } = parseDimsNums(specs.dims);
+        const itemBody: any = {
+          length_in: L,
+          width_in: W,
+          height_in: H,
+          material_id: Number(specs.material_id),
+          qty: Number(specs.qty)
+        };
+
+        await fetch(`${base}/api/quotes/${quoteId}/items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(itemBody)
+        });
+
+        merged.__primary_item_created = true;
+        if (threadKey) await saveFacts(threadKey, merged);
+      } catch (err) {
+        console.error("quote item store error:", err);
+      }
+    }
+
+    /* ------------------- Build email template ------------------- */
 
     const dimsNums = parseDimsNums(specs.dims);
     const densityPcf = densityToPcf(specs.density);
@@ -732,7 +756,6 @@ export async function POST(req: NextRequest) {
     try {
       htmlBody = renderQuoteEmail(templateInput);
     } catch {
-      // Fallback if template ever explodes
       htmlBody = `<p>${opener}</p>`;
     }
 
@@ -760,7 +783,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
     const sendUrl = `${base}/api/msgraph/send`;
 
     const r = await fetch(sendUrl, {
