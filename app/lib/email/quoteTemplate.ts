@@ -2,7 +2,8 @@
 //
 // Unified HTML template for Alex-IO foam quotes.
 //
-// Inputs come from app/api/ai/orchestrate/route.ts via renderQuoteEmail(input).
+// Inputs come from app/api/ai/orchestrate/route.ts or app/api/ai/quote/route.ts
+// via renderQuoteEmail(input).
 // This version:
 // - Shows Quote # at the top
 // - Renders specs + pricing blocks
@@ -46,7 +47,8 @@ export type QuoteRenderInput = {
   material: QuoteMaterial;
   pricing: QuotePricing;
   missing: string[];
-  facts: Record<string, any>;
+  // OPTIONAL so older callers (like app/api/ai/quote/route.ts) still compile
+  facts?: Record<string, any>;
 };
 
 function fmtDims(L: number | null, W: number | null, H: number | null) {
@@ -87,7 +89,8 @@ function htmlEscape(s: string) {
 }
 
 export function renderQuoteEmail(input: QuoteRenderInput): string {
-  const { specs, material, pricing, missing, facts } = input;
+  const { specs, material, pricing, missing } = input;
+  const facts = input.facts || {};
   const quoteNo = input.quoteNumber ? String(input.quoteNumber) : "";
   const exampleInput =
     (facts && (facts.exampleInput || facts.rawText || facts.originalEmail)) || "";
