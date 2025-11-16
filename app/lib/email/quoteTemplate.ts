@@ -19,7 +19,7 @@ function usd(value: number | null | undefined): string {
 }
 
 const EXAMPLE_INPUT_HTML = `
-<div style="margin:6px 0 10px 0;padding:8px 10px;border-radius:8px;background:#f4f4f8;border:1px solid #ddd;">
+<div style="margin:4px 0 8px 0;padding:6px 8px;border-radius:6px;background:#f3f2f1;border:1px solid #d2d0ce;">
   <div style="font-weight:600;margin-bottom:2px;">Example input:</div>
   <div style="font-family:Consolas,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.2;margin:0;">
     250 pcs — 10×10×3 in, 1.7 lb black PE, 2 cavities (Ø6×0.5 in and 1×1×0.5 in).
@@ -67,8 +67,8 @@ type QuoteRenderInput = {
 
 function row(label: string, value: string) {
   return `<tr>
-    <td style="padding:6px 8px;color:#555;font-size:13px;">${label}</td>
-    <td style="padding:6px 8px;text-align:right;color:#111;font-size:13px;"><strong>${value}</strong></td>
+    <td style="padding:3px 8px;color:#555;font-size:13px;border-bottom:1px solid #e1dfdd;">${label}</td>
+    <td style="padding:3px 8px;text-align:right;color:#111;font-size:13px;border-bottom:1px solid #e1dfdd;"><strong>${value}</strong></td>
   </tr>`;
 }
 
@@ -89,7 +89,7 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
   const foamFamilyText = s.foam_family || "TBD";
 
   const specsTable = `
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #d2d0ce;border-radius:6px;background:#f3f2f1;">
     ${row("Outside size", dimsText)}
     ${row("Quantity", qtyText)}
     ${row("Density", densityText)}
@@ -122,7 +122,7 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
   const baseTotal =
     typeof p.total === "number" && isFinite(p.total) ? p.total : 0;
 
-  // Start with whatever "grand_total" the API gives, otherwise use total as grand total.
+  // Grand total defaults to total if API doesn't provide a separate value.
   let grandTotal =
     typeof p.grand_total === "number" && isFinite(p.grand_total)
       ? p.grand_total
@@ -139,12 +139,10 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
       : null;
 
   let isSkived = !!p.is_skived;
-
   const usedMinCharge = !!p.used_min_charge;
 
   // If the API didn't give us a breakdown, derive it from thickness & a skive pct.
   if (!foamOnlyTotal && !skiveSurcharge) {
-    // Thickness to check: prefer "thickness_under_in", fall back to H_in
     const thickness =
       typeof s.thickness_under_in === "number" && isFinite(s.thickness_under_in)
         ? s.thickness_under_in
@@ -158,7 +156,7 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
     const skivePct =
       typeof p.skive_pct === "number" && p.skive_pct && p.skive_pct > 0
         ? p.skive_pct
-        : 0.25; // default +25% upcharge, matches DB default skive_upcharge_pct
+        : 0.25; // default +25% upcharge
 
     if (thicknessIsFractional && grandTotal > 0 && !usedMinCharge) {
       const base = grandTotal / (1 + skivePct);
@@ -190,7 +188,7 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
   }
 
   if (isSkived && foamOnlyTotal != null && skiveSurcharge != null) {
-    // Option C: full layout + skiving breakdown
+    // Full layout + skiving breakdown
     priceRows.push(row("Total (foam only)", usd(foamOnlyTotal)));
     priceRows.push(
       row(
@@ -211,7 +209,7 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
   }
 
   const priceTable = `
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #eee;border-radius:8px;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #d2d0ce;border-radius:6px;background:#f3f2f1;">
     ${priceRows.join("")}
   </table>
   `;
@@ -231,13 +229,13 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
   let priceBreaksHtml = "";
   if (perPiece && s.qty > 0) {
     priceBreaksHtml = `
-    <h3 style="margin:18px 0 8px 0">Price breaks</h3>
-    <p style="margin:0 0 4px 0;">
+    <h3 style="margin:10px 0 4px 0">Price breaks</h3>
+    <p style="margin:0 0 2px 0;">
       At ${s.qty.toLocaleString()} pcs, this works out to about <strong>${usd(
         perPiece,
       )}</strong> per piece.
     </p>
-    <p style="margin:4px 0 0 0;color:#555;">
+    <p style="margin:2px 0 0 0;color:#555;">
       If you'd like, I can add formal price breaks at higher quantities (for example 2×, 3×, 5×, and 10× this volume) — just reply with the ranges you'd like to see.
     </p>
     `;
@@ -250,47 +248,45 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
   );
   const missingList = missingItems.length
     ? `
-      <p style="margin:0 0 8px 0;">To finalize, please confirm:</p>
-      <ul style="margin:0 0 14px 18px;padding:0;color:#111;">
+      <p style="margin:0 0 4px 0;">To finalize, please confirm:</p>
+      <ul style="margin:0 0 8px 18px;padding:0;color:#111;">
         ${missingItems.map((m) => `<li>${m}</li>`).join("")}
       </ul>
     `
     : `
-      <p style="margin:0 0 12px 0;">
+      <p style="margin:0 0 8px 0;">
         Great — I have everything I need for a preliminary price based on these specs.
       </p>
     `;
 
   const exampleBlock = EXAMPLE_INPUT_HTML
-    ? `<div style="margin-bottom:14px;">${EXAMPLE_INPUT_HTML}</div>`
+    ? `<div style="margin-bottom:10px;">${EXAMPLE_INPUT_HTML}</div>`
     : "";
-
-  /* ---------- Final HTML ---------- */
 
   const skiveFootnote =
     isSkived && foamOnlyTotal != null && skiveSurcharge != null
-      ? `<p style="color:#b91c1c;margin:8px 0 0 0;font-size:12px;">
+      ? `<p style="color:#b91c1c;margin:6px 0 0 0;font-size:12px;">
         * Skiving required because thickness is not in 1&quot; increments. Pricing above includes skiving surcharge and any applicable setup.
       </p>`
       : "";
 
   return `
-  <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#111;">
+  <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.4;color:#111;">
     ${exampleBlock}
-    <p style="margin:0 0 12px 0;">
+    <p style="margin:0 0 8px 0;">
       ${
         i.customerLine ||
-        "Thanks for sharing the details; I'll review a couple of specifications and get back to you with a quote shortly."
+        "Thanks for sharing the details; I'll confirm a couple of specs and get back to you with a quote shortly."
       }
     </p>
     ${missingList}
-    <h3 style="margin:14px 0 8px 0">Specs</h3>
+    <h3 style="margin:10px 0 4px 0">Specs</h3>
     ${specsTable}
-    <h3 style="margin:18px 0 8px 0">Pricing</h3>
+    <h3 style="margin:10px 0 4px 0">Pricing</h3>
     ${priceTable}
     ${skiveFootnote}
     ${priceBreaksHtml}
-    <p style="color:#666;margin-top:12px">
+    <p style="color:#666;margin-top:10px">
       This is a preliminary price based on the information we have so far. We'll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
     </p>
     <p>— Alex-IO Estimator</p>
