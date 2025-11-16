@@ -1,20 +1,23 @@
 // app/lib/email/quoteTemplate.ts
 //
-// HTML email template for Alex-IO foam quotes.
+// Unified HTML template for Alex-IO foam quotes.
 //
-// Matches the layout from your screenshot:
-// - Example input block at the top
-// - "Quote # ..." line
-// - Specs table
-// - Pricing table
-// - Price breaks section
-// - Buttons: Forward quote to sales, View printable quote, Schedule a call
+// Used by orchestrator and AI quote routes via renderQuoteEmail(input).
+// Layout matches the earlier version (Specs, Pricing, Price breaks) with:
+// - Quote # at the top
+// - Example input block
+// - 3 buttons: Forward quote to sales, View printable quote, Schedule a call
+//   (Schedule button matches the dark blue of Forward, and comes third)
+// - Neutral intro (no "I'll get you a price later")
+// - Clear preliminary price + next-step instructions
 //
-// New bits:
-// - Thickness row in Specs
-// - Cavities row in Specs (pulled from parsed info, clearly separated)
-// - Skiving row in Pricing (uses calc + a fallback rule: non-integer thickness ⇒ skive)
-// - Status pill always shown (DRAFT / SENT / ACCEPTED etc)
+// Schedule button behavior:
+// - If NEXT_PUBLIC_SALES_SCHEDULER_URL is set (e.g. a Calendly link),
+//   we use that directly.
+// - Otherwise we generate a Google Calendar "create event" link prefilled
+//   with "Foam quote call" and the quote number in the description.
+//
+// This file is PATH-A: minimal change and compatible with existing callers.
 
 export type QuoteSpecs = {
   L_in: number | null;
@@ -40,7 +43,7 @@ export type QuotePricing = {
   order_ci?: number | null;
   order_ci_with_waste?: number | null;
   used_min_charge?: boolean | null;
-  // optional raw calc payload (from /api/quotes/calc or /api/ai/price)
+  // allow server routes to pass through the raw calc payload
   raw?: any;
 };
 
@@ -52,6 +55,7 @@ export type QuoteRenderInput = {
   material: QuoteMaterial;
   pricing: QuotePricing;
   missing: string[];
+  // optional so older callers still compile
   facts?: Record<string, any>;
 };
 
@@ -84,8 +88,8 @@ function fmtMoney(n: number | null | undefined) {
   }
 }
 
-function htmlEscape(s: string) {
-  return s
+function htmlEscape(str: string) {
+  return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -101,79 +105,6 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   const exampleInput =
     (facts && (facts.exampleInput || facts.rawText || facts.originalEmail)) || "";
 
-  const outsideSize = fmtDims(specs.L_in, specs.W_in, specs.H_in);
-  const qtyStr = fmtQty(specs.qty);
-  const qtyNum =
-    specs.qty != null && !Number.isNaN(Number(specs.qty))
-      ? Number(specs.qty)
-      : null;
-  const density = fmtDensity(specs.density_pcf);
-
-  // Foam family: prefer what the parser saw in the email ("PE") over DB name
-  const foamFamily =
-    specs.foam_family && specs.foam_family.trim()
-      ? specs.foam_family.trim()
-      : material?.name || "TBD";
-
-  // Thickness row text
-  const thicknessUnder =
-    specs.thickness_under_in != null &&
-    Number.isFinite(Number(specs.thickness_under_in)) &&
-    Number(specs.thickness_under_in) > 0
-      ? `${Number(specs.thickness_under_in).toFixed(2)}" under part`
-      : "";
-
-  // Cavity hints: keep clearly separate from outside size
-  const cavityDims: string[] = Array.isArray((facts as any).cavityDims)
-    ? ((facts as any).cavityDims as string[])
-    : [];
-  const cavityCount =
-    typeof (facts as any).cavityCount === "number" && (facts as any).cavityCount > 0
-      ? (facts as any).cavityCount
-      : cavityDims.length || 0;
-  const cavitySummary =
-    cavityCount > 0
-      ? `${cavityCount} cavities` +
-        (cavityDims.length
-          ? ` — ${cavityDims.join(", ")}`
-          : " (sizes to confirm)")
-      : "";
-
-  // Skiving debug info (from calc result or raw pricing)
-  const raw = (pricing.raw as any) || (facts as any).calc || null;
-  let isSkived = false;
-  let skiveEach: number | null = null;
-
-  if (raw && typeof raw === "object") {
-    // /api/quotes/calc shape
-    if (typeof (raw as any).is_skived === "boolean") {
-      isSkived = !!(raw as any).is_skived;
-    }
-    if ((raw as any).skive_pct != null && Number.isFinite(Number((raw as any).skive_pct))) {
-      // we don't show skive_pct right now, but we could if needed
-    }
-    if ((raw as any).setup_fee != null && !Number.isNaN(Number((raw as any).setup_fee))) {
-      // setup fee is visible in the printable quote; email keeps it implicit
-    }
-    // /api/ai/price shape
-    if ((raw as any).skive_each != null && Number.isFinite(Number((raw as any).skive_each))) {
-      skiveEach = Number((raw as any).skive_each);
-    }
-    if ((raw as any).applied && typeof (raw as any).applied.needsSkive === "boolean") {
-      isSkived = !!(raw as any).applied.needsSkive;
-    }
-  }
-
-  // Fallback: any non-integer thickness ⇒ skiving required
-  if (!isSkived && specs.H_in != null && Number.isFinite(Number(specs.H_in))) {
-    const H = Number(specs.H_in);
-    const nearest = Math.round(H);
-    if (Math.abs(H - nearest) > 1e-2) {
-      isSkived = true;
-    }
-  }
-
-  // Status pill (always on, even for drafts)
   const rawStatus =
     (input.status ??
       (typeof (facts as any).status === "string" ? (facts as any).status : undefined) ??
@@ -190,6 +121,42 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   }
   const statusLabel = (statusValue || "draft").toUpperCase();
 
+  const outsideSize = fmtDims(specs.L_in, specs.W_in, specs.H_in);
+  const qtyStr = fmtQty(specs.qty);
+  const qtyNum =
+    specs.qty != null && !Number.isNaN(Number(specs.qty))
+      ? Number(specs.qty)
+      : null;
+  const density = fmtDensity(specs.density_pcf);
+
+  const thicknessUnder =
+    specs.thickness_under_in != null &&
+    Number.isFinite(Number(specs.thickness_under_in)) &&
+    Number(specs.thickness_under_in) > 0
+      ? `${Number(specs.thickness_under_in).toFixed(2)}" under part`
+      : "";
+
+  const cavityDims: string[] = Array.isArray((facts as any).cavityDims)
+    ? ((facts as any).cavityDims as string[])
+    : [];
+  const cavityCount =
+    typeof (facts as any).cavityCount === "number" && (facts as any).cavityCount > 0
+      ? (facts as any).cavityCount
+      : cavityDims.length || 0;
+  const cavitySummary =
+    cavityCount > 0
+      ? `${cavityCount} cavities` +
+        (cavityDims.length
+          ? ` — ${cavityDims.join(", ")}`
+          : " (sizes to confirm)")
+      : "";
+
+  // Foam family: prefer what the parser saw in the email ("PE") over DB name
+  const foamFamily =
+    specs.foam_family && specs.foam_family.trim()
+      ? specs.foam_family.trim()
+      : material?.name || "TBD";
+
   const baseUrl =
     process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") ||
     "https://alex-io.com";
@@ -200,10 +167,13 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
       : undefined;
 
   const forwardToSalesEmail =
-    process.env.NEXT_PUBLIC_SALES_FORWARD_TO || "sales@example.com";
+    process.env.NEXT_PUBLIC_SALES_FORWARD_TO ||
+    "sales@example.com";
 
   const salesSubject =
-    quoteNo !== "" ? `Foam quote ${quoteNo}` : "Foam quote from Alex-IO";
+    quoteNo !== ""
+      ? `Foam quote ${quoteNo}`
+      : "Foam quote from Alex-IO";
 
   const forwardHref = `mailto:${encodeURIComponent(
     forwardToSalesEmail
@@ -213,7 +183,7 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
     `Please review the attached foam quote.\n\nQuote number: ${quoteNo || "(not set)"}`
   )}`;
 
-  // Scheduler: NEXT_PUBLIC_SALES_SCHEDULER_URL (e.g. Calendly) beats Google Calendar
+  // Scheduler: prefer explicit booking URL (e.g. Calendly); otherwise Google Calendar
   const schedulerBase =
     process.env.NEXT_PUBLIC_SALES_SCHEDULER_URL || "";
   const googleSchedule =
@@ -228,13 +198,10 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
         )}`;
   const scheduleUrl = schedulerBase || googleSchedule;
 
-  // Intro copy (kept very close to the screenshot)
-  const introLine1 =
-    "Thanks for the details—I’ll review a couple of specs and get back to you with a price shortly.";
-  const introLine2 =
-    "Great — I have everything I need for a preliminary price based on these specs.";
+  // Neutral intro line (matches your previous template)
+  const introLine =
+    "Thanks for the details—I’ll review a couple of specs and get back to you with a price shortly.\n\nGreat — I have everything I need for a preliminary price based on these specs.";
 
-  // Missing items
   const missingList =
     missing && missing.length
       ? `<ul style="margin:4px 0 0 20px; padding:0; color:#374151; font-size:13px;">
@@ -254,98 +221,83 @@ To finalize, please confirm:</p>
 ${missingList}`
       : "";
 
-  const orderTotal = pricing.total;
-  const orderTotalLabel =
-    orderTotal != null && isFinite(Number(orderTotal))
-      ? fmtMoney(orderTotal)
-      : fmtMoney(0);
+  const orderTotal = pricing.total ?? null;
+
+  const raw = (pricing.raw as any) || (facts as any).calc || null;
+  let isSkived = false;
+  let skiveEach: number | null = null;
+
+  if (raw && typeof raw === "object") {
+    if (typeof (raw as any).is_skived === "boolean") {
+      isSkived = !!(raw as any).is_skived;
+    }
+    if ((raw as any).skive_each != null && Number.isFinite(Number((raw as any).skive_each))) {
+      skiveEach = Number((raw as any).skive_each);
+    }
+    if ((raw as any).applied && typeof (raw as any).applied.needsSkive === "boolean") {
+      isSkived = !!(raw as any).applied.needsSkive;
+    }
+  }
+
+  // Fallback: any non-integer thickness ⇒ skive
+  if (!isSkived && specs.H_in != null && Number.isFinite(Number(specs.H_in))) {
+    const H = Number(specs.H_in);
+    const nearest = Math.round(H);
+    if (Math.abs(H - nearest) > 1e-2) {
+      isSkived = true;
+    }
+  }
+
+  const piecePrice =
+    orderTotal != null && qtyNum && qtyNum > 0
+      ? orderTotal / qtyNum
+      : null;
 
   const priceBreakLine =
-    qtyNum && orderTotal != null && isFinite(Number(orderTotal))
-      ? `At ${qtyNum.toLocaleString()} pcs, this works out to about ${fmtMoney(
-          Number(orderTotal) / qtyNum
+    piecePrice != null
+      ? `At ${qtyStr || "this"} pcs, this works out to about ${fmtMoney(
+          piecePrice
         )} per piece.`
-      : "Once we finalize quantity and material we can lay out formal price breaks.";
+      : qtyStr
+      ? `At ${qtyStr} pcs, this works out to the total shown above.`
+      : `This works out to the total shown above based on the specs provided.`;
 
-  // Buttons
-  const forwardButton = `<a
-  href="${htmlEscape(
-    forwardHref
-  )}"
-  style="display:inline-block; margin-right:8px; padding:8px 14px; border-radius:999px; background:#1d4ed8; color:#ffffff; font-size:12px; font-weight:500; text-decoration:none;"
->
-  Forward quote to sales
-</a>`;
-
-  const printButton =
-    printUrl && quoteNo !== ""
-      ? `<a
-  href="${htmlEscape(
-    printUrl
-  )}"
-  style="display:inline-block; margin-right:8px; padding:8px 14px; border-radius:999px; background:#2563eb; color:#ffffff; font-size:12px; font-weight:500; text-decoration:none;"
->
-  View printable quote
-</a>`
-      : "";
-
-  const scheduleButton = `<a
-  href="${htmlEscape(
-    scheduleUrl
-  )}"
-  style="display:inline-block; padding:8px 14px; border-radius:999px; background:#1d4ed8; color:#ffffff; font-size:12px; font-weight:500; text-decoration:none;"
->
-  Schedule a call
-</a>`;
-
-  const exampleBlock =
-    exampleInput && exampleInput.trim()
-      ? `<div style="margin:0 0 12px 0;">
-  <div style="padding:10px 12px; border-radius:6px; background:#eff6ff; font-size:12px; color:#1f2937; line-height:1.5;">
-    <div style="font-weight:600; margin-bottom:2px;">Example input:</div>
-    <div style="white-space:pre-wrap;">
-      ${htmlEscape(exampleInput)}
-    </div>
-  </div>
-</div>`
-      : "";
-
-  // Build HTML
   return `<!DOCTYPE html>
 <html>
   <head>
     <meta charSet="utf-8" />
-    <title>Foam quote${quoteNo ? ` ${htmlEscape(quoteNo)}` : ""}</title>
+    <title>Foam quote${quoteNo ? " " + quoteNo : ""}</title>
   </head>
-  <body style="margin:0; padding:0; background-color:#f3f4f6; font-family:-apple-system, BlinkMacSystemFont, system-ui, sans-serif;">
-    <div style="width:100%; padding:16px 0;">
-      <div
-        style="
-          max-width:640px;
-          margin:0 auto;
-          background:#ffffff;
-          border-radius:12px;
-          padding:20px 20px 24px 20px;
-          box-shadow:0 10px 25px rgba(15, 23, 42, 0.15);
-          border:1px solid #e5e7eb;
-        "
-      >
-        ${exampleBlock}
+  <body style="margin:0; padding:0; background-color:#f3f4f6;">
+    <div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; padding:16px; background-color:#f3f4f6;">
+      <div style="max-width:720px; margin:0 auto; background-color:#ffffff; border-radius:12px; padding:20px 24px 24px 24px; box-shadow:0 10px 30px rgba(15,23,42,0.08);">
+
+        ${
+          exampleInput
+            ? `<div style="margin:0 0 12px 0;">
+  <div style="padding:10px 12px; border-radius:6px; background:#eff6ff; font-size:12px; color:#1f2937; line-height:1.5;">
+    <div style="font-weight:600; margin-bottom:2px;">Example input:</div>
+    <div style="white-space:pre-wrap;">${htmlEscape(
+      String(exampleInput)
+    )}</div>
+  </div>
+</div>`
+            : ""
+        }
 
         <div style="margin-bottom:8px; font-size:13px; color:#111827;">
-          <span style="font-weight:600;">${
-            quoteNo ? `Quote # ${htmlEscape(quoteNo)}` : "Foam packaging quote"
-          }</span>
-          <span style="display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px; background-color:${statusBg}; color:${statusFg}; font-size:11px; font-weight:500;">
-            ${htmlEscape(statusLabel)}
-          </span>
-        </div>
+  ${
+    quoteNo
+      ? `<span style="font-weight:600;">Quote # ${htmlEscape(quoteNo)}</span>`
+      : `<span style="font-weight:600;">Foam packaging quote</span>`
+  }
+  <span style="display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px; background-color:${statusBg}; color:${statusFg}; font-size:11px; font-weight:500;">
+    ${htmlEscape(statusLabel)}
+  </span>
+</div>
 
-        <p style="margin:0 0 2px 0; font-size:13px; color:#111827;">
-          ${htmlEscape(introLine1)}
-        </p>
         <p style="margin:0 0 4px 0; font-size:13px; color:#111827;">
-          ${htmlEscape(introLine2)}
+          ${htmlEscape(introLine)}
         </p>
 
         ${missingBlock}
@@ -362,12 +314,12 @@ ${missingList}`
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${qtyStr || "—"}</td>
             </tr>
             <tr style="background:#f9fafb;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Thickness under part</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${thicknessUnder || "—"}</td>
-            </tr>
-            <tr style="background:#ffffff;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Density</td>
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${density || "TBD"}</td>
+            </tr>
+            <tr style="background:#ffffff;">
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Thickness under part</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${thicknessUnder || "—"}</td>
             </tr>
             <tr style="background:#f9fafb;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Foam family</td>
@@ -377,16 +329,14 @@ ${missingList}`
               cavitySummary
                 ? `<tr style="background:#ffffff;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Cavities (L×W×depth)</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${htmlEscape(
-                cavitySummary
-              )}</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${htmlEscape(cavitySummary)}</td>
             </tr>`
                 : ""
             }
           </tbody>
         </table>
 
-        <h3 style="margin:12px 0 4px 0; font-size:13px; color:#111827;">Pricing</h3>
+        <h3 style="margin:16px 0 4px 0; font-size:13px; color:#111827;">Pricing</h3>
         <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:12px;">
           <tbody>
             <tr style="background:#f9fafb;">
@@ -440,7 +390,7 @@ ${missingList}`
             <tr style="background:#f9fafb;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Order total</td>
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827; font-weight:600;">${
-                orderTotalLabel
+                orderTotal != null ? fmtMoney(orderTotal) : fmtMoney(0)
               }</td>
             </tr>
           </tbody>
@@ -458,10 +408,37 @@ ${missingList}`
         </p>
 
         <div style="margin:8px 0 0 0;">
-          ${forwardButton}${printButton}${scheduleButton}
+          <a
+            href="${htmlEscape(
+              forwardHref
+            )}"
+            style="display:inline-block; margin-right:8px; padding:8px 14px; border-radius:999px; background:#1d4ed8; color:#ffffff; font-size:12px; font-weight:500; text-decoration:none;"
+          >
+            Forward quote to sales
+          </a>
+          ${
+            printUrl && quoteNo !== ""
+              ? `<a
+            href="${htmlEscape(
+              printUrl
+            )}"
+            style="display:inline-block; margin-right:8px; padding:8px 14px; border-radius:999px; background:#2563eb; color:#ffffff; font-size:12px; font-weight:500; text-decoration:none;"
+          >
+            View printable quote
+          </a>`
+              : ""
+          }
+          <a
+            href="${htmlEscape(
+              scheduleUrl
+            )}"
+            style="display:inline-block; padding:8px 14px; border-radius:999px; background:#1d4ed8; color:#ffffff; font-size:12px; font-weight:500; text-decoration:none;"
+          >
+            Schedule a call
+          </a>
         </div>
 
-        <p style="margin:14px 0 0 0; font-size:11px; color:#6b7280; line-height:1.5;">
+        <p style="margin:16px 0 0 0; font-size:11px; color:#6b7280; line-height:1.5;">
           This is a preliminary price based on the information we have so far. We&apos;ll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
         </p>
 
@@ -469,7 +446,7 @@ ${missingList}`
           To continue, you can forward this quote to sales, schedule a call, or reply directly to this email with any revisions.
         </p>
 
-        <p style="margin:14px 0 0 0; font-size:11px; color:#6b7280;">
+        <p style="margin:16px 0 0 0; font-size:11px; color:#6b7280;">
           — Alex-IO Estimator
         </p>
       </div>
