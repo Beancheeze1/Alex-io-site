@@ -19,7 +19,7 @@ function usd(value: number | null | undefined): string {
 }
 
 const EXAMPLE_INPUT_HTML = `
-<div style="margin:4px 0 8px 0;padding:6px 8px;border-radius:6px;background:#f3f2f1;border:1px solid #d2d0ce;">
+<div style="margin:4px 0 8px 0;padding:6px 8px;border-radius:6px;background:#e8f2ff;border:1px solid #c3d7ff;">
   <div style="font-weight:600;margin-bottom:2px;">Example input:</div>
   <div style="font-family:Consolas,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.2;margin:0;">
     250 pcs — 10×10×3 in, 1.7 lb black PE, 2 cavities (Ø6×0.5 in and 1×1×0.5 in).
@@ -29,6 +29,10 @@ const EXAMPLE_INPUT_HTML = `
 
 type QuoteRenderInput = {
   customerLine?: string;
+
+  // NEW: optional quote number for display & buttons
+  quoteNumber?: string | number;
+
   specs: {
     L_in: number;
     W_in: number;
@@ -67,8 +71,8 @@ type QuoteRenderInput = {
 
 function row(label: string, value: string) {
   return `<tr>
-    <td style="padding:3px 8px;color:#555;font-size:13px;border-bottom:1px solid #e1dfdd;">${label}</td>
-    <td style="padding:3px 8px;text-align:right;color:#111;font-size:13px;border-bottom:1px solid #e1dfdd;"><strong>${value}</strong></td>
+    <td style="padding:3px 8px;color:#555;font-size:13px;border-bottom:1px solid #d7e3ff;">${label}</td>
+    <td style="padding:3px 8px;text-align:right;color:#111;font-size:13px;border-bottom:1px solid #d7e3ff;"><strong>${value}</strong></td>
   </tr>`;
 }
 
@@ -76,6 +80,40 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
   const s = i.specs || ({} as QuoteRenderInput["specs"]);
   const p = i.pricing || ({} as QuoteRenderInput["pricing"]);
   const m = i.material || ({} as NonNullable<QuoteRenderInput["material"]>);
+
+  /* ---------- Quote info / URLs ---------- */
+
+  const quoteNumber =
+    typeof i.quoteNumber === "number" || typeof i.quoteNumber === "string"
+      ? String(i.quoteNumber)
+      : "";
+
+  const quoteLabel = quoteNumber ? `Quote ${quoteNumber}` : "Foam quote";
+
+  // Base site URL for "printable" link
+  const rawBase =
+    process.env.NEXT_PUBLIC_BASE_URL && process.env.NEXT_PUBLIC_BASE_URL.trim()
+      ? process.env.NEXT_PUBLIC_BASE_URL.trim()
+      : "https://alex-io.com";
+
+  const baseUrl = rawBase.replace(/\/+$/, "");
+  const printUrl = quoteNumber
+    ? `${baseUrl}/quote/${encodeURIComponent(quoteNumber)}`
+    : baseUrl;
+
+  const salesEmail = "sales@example.com"; // TODO: replace with real sales address later
+
+  const forwardHref = `mailto:${encodeURIComponent(
+    salesEmail,
+  )}?subject=${encodeURIComponent(
+    quoteLabel,
+  )}&body=${encodeURIComponent(
+    `Please review ${quoteLabel}.\n\n(Forwarded from Alex-IO bot.)`,
+  )}`;
+
+  const quoteNumberBlock = quoteNumber
+    ? `<p style="margin:0 0 4px 0;font-size:13px;color:#555;">Quote # <strong>${quoteNumber}</strong></p>`
+    : "";
 
   /* ---------- Specs block ---------- */
 
@@ -89,7 +127,7 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
   const foamFamilyText = s.foam_family || "TBD";
 
   const specsTable = `
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #d2d0ce;border-radius:6px;background:#f3f2f1;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #c3d7ff;border-radius:6px;background:#f1f6ff;">
     ${row("Outside size", dimsText)}
     ${row("Quantity", qtyText)}
     ${row("Density", densityText)}
@@ -209,7 +247,7 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
   }
 
   const priceTable = `
-  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #d2d0ce;border-radius:6px;background:#f3f2f1;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;border:1px solid #c3d7ff;border-radius:6px;background:#f1f6ff;">
     ${priceRows.join("")}
   </table>
   `;
@@ -270,9 +308,25 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
       </p>`
       : "";
 
+  /* ---------- Bottom buttons ---------- */
+
+  const buttonsHtml = `
+    <div style="margin-top:12px;">
+      <a href="${forwardHref}"
+         style="display:inline-block;margin:0 8px 4px 0;padding:6px 14px;border-radius:9999px;background:#2563eb;color:#fff;text-decoration:none;font-size:13px;">
+        Forward quote to sales
+      </a>
+      <a href="${printUrl}"
+         style="display:inline-block;margin:0 0 4px 0;padding:6px 14px;border-radius:9999px;background:#e5edff;color:#1d4ed8;text-decoration:none;font-size:13px;border:1px solid #c3d7ff;">
+        View printable quote
+      </a>
+    </div>
+  `;
+
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.4;color:#111;">
     ${exampleBlock}
+    ${quoteNumberBlock}
     <p style="margin:0 0 8px 0;">
       ${
         i.customerLine ||
@@ -286,6 +340,7 @@ export function renderQuoteEmail(i: QuoteRenderInput): string {
     ${priceTable}
     ${skiveFootnote}
     ${priceBreaksHtml}
+    ${buttonsHtml}
     <p style="color:#666;margin-top:10px">
       This is a preliminary price based on the information we have so far. We'll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
     </p>
