@@ -2,15 +2,20 @@
 //
 // Unified HTML template for Alex-IO foam quotes.
 //
-// Inputs come from app/api/ai/orchestrate/route.ts or app/api/ai/quote/route.ts
-// via renderQuoteEmail(input).
-// This version:
-// - Shows Quote # at the top
-// - Renders specs + pricing blocks
-// - Adds buttons: Forward to sales, View printable quote, Schedule a call
-// - Uses /quote?quote_no=... for the print view
-// - Uses a neutral intro line (no "I'll price it later")
-// - Adds a clear "preliminary price" + next-step instructions
+// Used by orchestrator and AI quote routes via renderQuoteEmail(input).
+// Layout matches the earlier version (Specs, Pricing, Price breaks) with:
+// - Quote # at the top
+// - Example input block
+// - 3 buttons: Forward quote to sales, View printable quote, Schedule a call
+//   (Schedule button matches the dark blue of Forward, and comes third)
+// - Neutral intro (no "I'll get you a price later")
+// - Clear preliminary price + next-step instructions
+//
+// Schedule button behavior:
+// - If NEXT_PUBLIC_SALES_SCHEDULER_URL is set (e.g. a Calendly link),
+//   we use that directly.
+// - Otherwise we fall back to a Google Calendar "create event" link that
+//   includes the quote number in the title/details.
 
 export type QuoteSpecs = {
   L_in: number | null;
@@ -36,18 +41,18 @@ export type QuotePricing = {
   order_ci?: number | null;
   order_ci_with_waste?: number | null;
   used_min_charge?: boolean | null;
-  // allow the server to pass through the raw calc payload without TS error
+  // allow server routes to pass through the raw calc payload
   raw?: any;
 };
 
 export type QuoteRenderInput = {
-  customerLine?: string | null; // still passed, but we don't echo the "I'll price later" text
+  customerLine?: string | null;
   quoteNumber?: string | number | null;
   specs: QuoteSpecs;
   material: QuoteMaterial;
   pricing: QuotePricing;
   missing: string[];
-  // OPTIONAL so older callers (like app/api/ai/quote/route.ts) still compile
+  // optional so older callers still compile
   facts?: Record<string, any>;
 };
 
@@ -92,12 +97,19 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   const { specs, material, pricing, missing } = input;
   const facts = input.facts || {};
   const quoteNo = input.quoteNumber ? String(input.quoteNumber) : "";
+
   const exampleInput =
     (facts && (facts.exampleInput || facts.rawText || facts.originalEmail)) || "";
 
   const outsideSize = fmtDims(specs.L_in, specs.W_in, specs.H_in);
-  const qty = fmtQty(specs.qty);
+  const qtyStr = fmtQty(specs.qty);
+  const qtyNum =
+    specs.qty != null && !Number.isNaN(Number(specs.qty))
+      ? Number(specs.qty)
+      : null;
   const density = fmtDensity(specs.density_pcf);
+
+  // Foam family: prefer what the parser saw in the email ("PE") over DB name
   const foamFamily =
     specs.foam_family && specs.foam_family.trim()
       ? specs.foam_family.trim()
@@ -121,7 +133,18 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
       ? `Foam quote ${quoteNo}`
       : "Foam quote from Alex-IO";
 
-  const scheduleUrl =
+  const forwardHref = `mailto:${encodeURIComponent(
+    forwardToSalesEmail
+  )}?subject=${encodeURIComponent(
+    salesSubject
+  )}&body=${encodeURIComponent(
+    `Please review the attached foam quote.\n\nQuote number: ${quoteNo || "(not set)"}`
+  )}`;
+
+  // Scheduler: prefer explicit booking URL (e.g. Calendly); otherwise Google Calendar
+  const schedulerBase =
+    process.env.NEXT_PUBLIC_SALES_SCHEDULER_URL || "";
+  const googleSchedule =
     quoteNo !== ""
       ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
           `Call about foam quote ${quoteNo}`
@@ -131,17 +154,11 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
       : `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
           "Foam quote call"
         )}`;
+  const scheduleUrl = schedulerBase || googleSchedule;
 
-  const forwardHref = `mailto:${encodeURIComponent(
-    forwardToSalesEmail
-  )}?subject=${encodeURIComponent(
-    salesSubject
-  )}&body=${encodeURIComponent(
-    `Please review the attached foam quote.\n\nQuote number: ${quoteNo || "(not set)"}`
-  )}`;
-
+  // Neutral intro line (no "I'll get you a price later")
   const introLine =
-    "Thanks for the details—here’s a preliminary quote based on the information we have so far.";
+    "Thanks for the details—here’s a preliminary quote based on these specs.";
 
   const missingList =
     missing && missing.length
@@ -157,12 +174,25 @@ ${missing
 
   const missingBlock =
     missing && missing.length
-      ? `<p style="margin:0 0 4px 0; font-size:13px; color:#111827;">
+      ? `<p style="margin:8px 0 4px 0; font-size:13px; color:#111827;">
 To finalize, please confirm:</p>
 ${missingList}`
       : "";
 
   const orderTotal = pricing.total ?? null;
+  const piecePrice =
+    orderTotal != null && qtyNum && qtyNum > 0
+      ? orderTotal / qtyNum
+      : null;
+
+  const priceBreakLine =
+    piecePrice != null
+      ? `At ${qtyStr || "this"} pcs, this works out to about ${fmtMoney(
+          piecePrice
+        )} per piece.`
+      : qtyStr
+      ? `At ${qtyStr} pcs, this works out to the total shown above.`
+      : `This works out to the total shown above based on the specs provided.`;
 
   return `<!DOCTYPE html>
 <html>
@@ -193,7 +223,7 @@ ${missingList}`
             : ""
         }
 
-        <p style="margin:0 0 8px 0; font-size:13px; color:#111827;">
+        <p style="margin:0 0 4px 0; font-size:13px; color:#111827;">
           ${htmlEscape(introLine)}
         </p>
 
@@ -208,7 +238,7 @@ ${missingList}`
             </tr>
             <tr style="background:#ffffff;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Quantity</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${qty || "—"}</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${qtyStr || "—"}</td>
             </tr>
             <tr style="background:#f9fafb;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Density</td>
@@ -226,7 +256,9 @@ ${missingList}`
           <tbody>
             <tr style="background:#f9fafb;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; width:35%; color:#6b7280;">Material</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${density || "—"}</td>
+              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+                foamFamily ? `${foamFamily}${density ? " — " + density : ""}` : density || "—"
+              }</td>
             </tr>
             <tr style="background:#ffffff;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Material waste (kerf)</td>
@@ -237,16 +269,16 @@ ${missingList}`
             <tr style="background:#f9fafb;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Piece volume (CI)</td>
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
-                pricing.piece_ci != null ? pricing.piece_ci : "0 in³"
+                pricing.piece_ci != null ? `${pricing.piece_ci} in³` : "0 in³"
               }</td>
             </tr>
             <tr style="background:#ffffff;">
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Order volume + waste (CI)</td>
               <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
                 pricing.order_ci_with_waste != null
-                  ? pricing.order_ci_with_waste
+                  ? `${pricing.order_ci_with_waste} in³`
                   : pricing.order_ci != null
-                  ? pricing.order_ci
+                  ? `${pricing.order_ci} in³`
                   : "0 in³"
               }</td>
             </tr>
@@ -267,7 +299,16 @@ ${missingList}`
           </tbody>
         </table>
 
+        <h3 style="margin:12px 0 4px 0; font-size:13px; color:#111827;">Price breaks</h3>
+        <p style="margin:0 0 4px 0; font-size:12px; color:#111827;">
+          ${htmlEscape(priceBreakLine)}
+        </p>
+        <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
+          If you&apos;d like, I can add formal price breaks at higher quantities (for example 2×, 3×, 5×, and 10× this volume) — just reply with the ranges you&apos;d like to see.
+        </p>
+
         <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:8px;">
+          <!-- Forward: dark blue -->
           <a
             href="${forwardHref}"
             style="
@@ -285,6 +326,7 @@ ${missingList}`
             Forward quote to sales
           </a>
 
+          <!-- View printable: light blue -->
           ${
             printUrl
               ? `<a
@@ -306,18 +348,19 @@ ${missingList}`
               : ""
           }
 
+          <!-- Schedule: same dark blue as Forward -->
           <a
             href="${scheduleUrl}"
             style="
               display:inline-block;
               padding:8px 14px;
               border-radius:999px;
-              background:#ecfdf3;
-              color:#15803d;
+              background:#1d4ed8;
+              color:#ffffff;
               font-size:12px;
               font-weight:500;
               text-decoration:none;
-              border:1px solid #bbf7d0;
+              border:1px solid #1d4ed8;
             "
           >
             Schedule a call
