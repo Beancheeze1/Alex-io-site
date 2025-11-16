@@ -43,6 +43,8 @@ type QuotePricing = {
   order_ci?: number | null;
   order_ci_with_waste?: number | null;
   used_min_charge?: boolean | null;
+  // allow server routes to pass through the raw calc payload
+  raw?: any;
 };
 
 export type QuoteRenderInput = {
@@ -302,8 +304,8 @@ ${specsRows.join("\n")}
       `<tr>
   <td style="padding:2px 0; color:#4b5563;">CI per piece</td>
   <td style="padding:2px 0; text-align:right; color:#111827;">${pieceCi.toFixed(
-    0
-  )}</td>
+        0
+      )}</td>
 </tr>`
     );
   }
@@ -312,8 +314,8 @@ ${specsRows.join("\n")}
       `<tr>
   <td style="padding:2px 0; color:#4b5563;">Total CI (no waste)</td>
   <td style="padding:2px 0; text-align:right; color:#111827;">${orderCi.toFixed(
-    0
-  )}</td>
+        0
+      )}</td>
 </tr>`
     );
   }
@@ -322,8 +324,8 @@ ${specsRows.join("\n")}
       `<tr>
   <td style="padding:2px 0; color:#4b5563;">Total CI (with kerf)</td>
   <td style="padding:2px 0; text-align:right; color:#111827;">${orderCiWaste.toFixed(
-    0
-  )}</td>
+        0
+      )}</td>
 </tr>`
     );
   }
