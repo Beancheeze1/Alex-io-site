@@ -5,12 +5,12 @@
 // Inputs come from app/api/ai/orchestrate/route.ts via renderQuoteEmail(input).
 // This version:
 // - Shows Quote # at the top with a status pill (DRAFT / SENT / ACCEPTED, etc.)
-// - Renders specs + pricing blocks
+// - Renders specs + pricing blocks in compact light-blue tables
 // - Adds buttons: Forward to sales, View printable quote, Schedule a call
 // - Uses /quote?quote_no=... for the print view
 // - Uses a neutral intro line (no "I'll price it later")
 // - Adds a clear "preliminary price" + next-step instructions
-// - Shows a Price breaks section with price per piece
+// - Shows a Price breaks section with bold price-per-piece
 // - Shows skiving info and thickness under part
 
 export type QuoteSpecs = {
@@ -188,15 +188,6 @@ ${missingList}`
       ? orderTotal / qtyNum
       : null;
 
-  const priceBreakLine =
-    piecePrice != null
-      ? `At ${qty || "this"} pcs, this works out to about ${fmtMoney(
-          piecePrice
-        )} per piece.`
-      : qty
-      ? `At ${qty} pcs, this works out to the total shown above.`
-      : `This works out to the total shown above based on the specs provided.`;
-
   // Status pill (always show, default draft)
   const rawStatus =
     (input.status ??
@@ -230,6 +221,30 @@ ${missingList}`
     }
   }
 
+  // Price-break line with bold per-piece price when available
+  let priceBreakHtml: string;
+  if (piecePrice != null) {
+    const qtyLabel = qty || "this";
+    priceBreakHtml = `At ${htmlEscape(
+      String(qtyLabel)
+    )} pcs, this works out to about <span style="font-weight:600;">${fmtMoney(
+      piecePrice
+    )}</span> per piece.`;
+  } else if (qty) {
+    priceBreakHtml = htmlEscape(
+      `At ${qty} pcs, this works out to the total shown above.`
+    );
+  } else {
+    priceBreakHtml = htmlEscape(
+      "This works out to the total shown above based on the specs provided."
+    );
+  }
+
+  // Shared colors
+  const lightBlueBg = "#eef2ff";
+  const lightBlueBorder = "#c7d2fe";
+  const darkBlue = "#1d4ed8";
+
   return `<!DOCTYPE html>
 <html>
   <head>
@@ -242,8 +257,8 @@ ${missingList}`
 
         ${
           exampleInput
-            ? `<div style="font-size:12px; background:#f9fafb; border-radius:10px; padding:10px 12px; border:1px solid #e5e7eb; margin-bottom:12px;">
-  <div style="font-weight:500; color:#4b5563; margin-bottom:4px;">Example input:</div>
+            ? `<div style="font-size:12px; background:${lightBlueBg}; border-radius:10px; padding:8px 10px; border:1px solid ${lightBlueBorder}; margin-bottom:10px;">
+  <div style="font-weight:500; color:${darkBlue}; margin-bottom:2px;">Example input:</div>
   <div style="color:#374151; white-space:pre-wrap;">${htmlEscape(
     String(exampleInput)
   )}</div>
@@ -264,62 +279,62 @@ ${missingList}`
           </span>
         </div>
 
-        <p style="margin:0 0 8px 0; font-size:13px; color:#111827;">
+        <p style="margin:0 0 6px 0; font-size:13px; color:#111827;">
           ${htmlEscape(introLine)}
         </p>
 
         ${missingBlock}
 
-        <h3 style="margin:16px 0 4px 0; font-size:13px; color:#111827;">Specs</h3>
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:8px;">
+        <h3 style="margin:14px 0 3px 0; font-size:13px; color:${darkBlue};">Specs</h3>
+        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:6px;">
           <tbody>
-            <tr style="background:#f9fafb;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; width:35%; color:#6b7280;">Outside size</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${outsideSize || "—"}</td>
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; width:35%; color:#6b7280;">Outside size</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${outsideSize || "—"}</td>
             </tr>
-            <tr style="background:#ffffff;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Quantity</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${qty || "—"}</td>
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Quantity</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${qty || "—"}</td>
             </tr>
-            <tr style="background:#f9fafb;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Density</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${density || "TBD"}</td>
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Density</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${density || "TBD"}</td>
             </tr>
-            <tr style="background:#ffffff;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Thickness under part</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${thicknessLabel || "—"}</td>
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Thickness under part</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${thicknessLabel || "—"}</td>
             </tr>
-            <tr style="background:#f9fafb;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Foam family</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${foamFamily || "TBD"}</td>
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Foam family</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${foamFamily || "TBD"}</td>
             </tr>
           </tbody>
         </table>
 
-        <h3 style="margin:12px 0 4px 0; font-size:13px; color:#111827;">Pricing</h3>
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:12px;">
+        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Pricing</h3>
+        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:8px;">
           <tbody>
-            <tr style="background:#f9fafb;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; width:35%; color:#6b7280;">Material</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; width:35%; color:#6b7280;">Material</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
                 foamFamily ? `${foamFamily}${density ? " — " + density : ""}` : density || "—"
               }</td>
             </tr>
-            <tr style="background:#ffffff;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Material waste (kerf)</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Material waste (kerf)</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
                 material.kerf_pct != null ? `${material.kerf_pct}%` : "0%"
               }</td>
             </tr>
-            <tr style="background:#f9fafb;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Piece volume (CI)</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Piece volume (CI)</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
                 pricing.piece_ci != null ? `${pricing.piece_ci} in³` : "0 in³"
               }</td>
             </tr>
-            <tr style="background:#ffffff;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Order volume + waste (CI)</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Order volume + waste (CI)</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
                 pricing.order_ci_with_waste != null
                   ? `${pricing.order_ci_with_waste} in³`
                   : pricing.order_ci != null
@@ -327,30 +342,30 @@ ${missingList}`
                   : "0 in³"
               }</td>
             </tr>
-            <tr style="background:#f9fafb;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Skiving</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${skivingText}</td>
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Skiving</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${skivingText}</td>
             </tr>
-            <tr style="background:#ffffff;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Minimum charge (if applied)</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827;">${
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Minimum charge (if applied)</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
                 pricing.used_min_charge && material.min_charge != null
                   ? fmtMoney(material.min_charge)
                   : fmtMoney(0)
               }</td>
             </tr>
-            <tr style="background:#f9fafb;">
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#6b7280;">Order total</td>
-              <td style="padding:6px 8px; border:1px solid #e5e7eb; color:#111827; font-weight:600;">${
+            <tr style="background:${lightBlueBg};">
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Order total</td>
+              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827; font-weight:600;">${
                 orderTotal != null ? fmtMoney(orderTotal) : fmtMoney(0)
               }</td>
             </tr>
           </tbody>
         </table>
 
-        <h3 style="margin:12px 0 4px 0; font-size:13px; color:#111827;">Price breaks</h3>
+        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Price breaks</h3>
         <p style="margin:0 0 4px 0; font-size:12px; color:#111827;">
-          ${htmlEscape(priceBreakLine)}
+          ${priceBreakHtml}
         </p>
         <p style="margin:0 0 6px 0; font-size:12px; color:#4b5563;">
           If you&apos;d like, I can add formal price breaks at higher quantities (for example 2×, 3×, 5×, and 10× this volume) — just reply with the ranges you&apos;d like to see.
@@ -359,7 +374,7 @@ ${missingList}`
           For cavities, replying with a short list like “2×3×1 qty 4; Ø6×1 qty 2” works best — I&apos;ll keep that separate from the overall outside size.
         </p>
 
-        <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:8px;">
+        <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
           <a
             href="${forwardHref}"
             style="
@@ -385,12 +400,12 @@ ${missingList}`
               display:inline-block;
               padding:8px 14px;
               border-radius:999px;
-              background:#eef2ff;
-              color:#1d4ed8;
+              background:${lightBlueBg};
+              color:${darkBlue};
               font-size:12px;
               font-weight:500;
               text-decoration:none;
-              border:1px solid #c7d2fe;
+              border:1px solid ${lightBlueBorder};
             "
           >
             View printable quote
@@ -416,7 +431,7 @@ ${missingList}`
           </a>
         </div>
 
-        <p style="margin:16px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
+        <p style="margin:14px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
           This is a preliminary price based on the information we have so far. We&apos;ll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
         </p>
 
@@ -424,7 +439,7 @@ ${missingList}`
           To continue, you can forward this quote to sales, schedule a call, or reply directly to this email with any revisions.
         </p>
 
-        <p style="margin:16px 0 0 0; font-size:11px; color:#6b7280;">
+        <p style="margin:14px 0 0 0; font-size:11px; color:#6b7280;">
           — Alex-IO Estimator
         </p>
       </div>
