@@ -4,12 +4,12 @@
 //
 // Inputs come from app/api/ai/orchestrate/route.ts via renderQuoteEmail(input).
 // This version:
-// - Shows Quote # + status pill, with a one-line example-input pill beside it
+// - Shows Quote # + status pill
 // - Compact light-blue Specs / Pricing tables
 // - Cavities row in Specs
 // - Skiving row in Pricing + red callout note if skiving is needed
 // - Bold per-piece price in Price breaks
-// - Buttons: Forward to sales, View printable quote, Schedule a call
+// - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file
 
 export type QuoteSpecs = {
   L_in: number | null;
@@ -104,33 +104,6 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
       ? specs.foam_family.trim()
       : material?.name || "TBD";
 
-  // Example input: prefer real text, otherwise fall back to a synthetic summary line.
-  const exampleSourceRaw =
-    (facts as any).exampleInput ||
-    (facts as any).rawText ||
-    (facts as any).originalEmail ||
-    (facts as any).lastInbound ||
-    (facts as any).last_inbound ||
-    "";
-
-  const baseFallbackParts: string[] = [];
-  if (outsideSize) baseFallbackParts.push(`Size ${outsideSize}`);
-  if (qty) baseFallbackParts.push(`Qty ${qty}`);
-  if (foamFamily && density) baseFallbackParts.push(`${foamFamily} ${density}`);
-  else if (foamFamily) baseFallbackParts.push(foamFamily);
-  else if (density) baseFallbackParts.push(density);
-  const fallbackExample = baseFallbackParts.join(" • ");
-
-  const exampleLineRaw = String(exampleSourceRaw || fallbackExample || "")
-    .replace(/Ø/gi, "dia ") // no diameter symbol in examples
-    .replace(/\s+/g, " ")
-    .trim();
-
-  let exampleShort = exampleLineRaw;
-  if (exampleShort.length > 120) {
-    exampleShort = exampleShort.slice(0, 117) + "...";
-  }
-
   // Thickness under the part (for skived pads)
   const thicknessVal =
     specs.thickness_under_in != null &&
@@ -148,6 +121,11 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
     quoteNo !== ""
       ? `${baseUrl}/quote?quote_no=${encodeURIComponent(quoteNo)}`
       : undefined;
+
+  const sketchUrl =
+    quoteNo !== ""
+      ? `${baseUrl}/sketch-upload?quote_no=${encodeURIComponent(quoteNo)}`
+      : `${baseUrl}/sketch-upload`;
 
   const forwardToSalesEmail =
     process.env.NEXT_PUBLIC_SALES_FORWARD_TO ||
@@ -311,13 +289,6 @@ ${missingList}`
           <span style="display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px; background-color:${statusBg}; color:${statusFg}; font-size:11px; font-weight:500;">
             ${htmlEscape(statusLabel)}
           </span>
-          ${
-            exampleShort
-              ? `<span style="display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px; background-color:${darkBlue}; color:#ffffff; font-size:11px; max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-              ${htmlEscape(exampleShort)}
-            </span>`
-              : ""
-          }
         </div>
 
         <p style="margin:0 0 6px 0; font-size:13px; color:#111827;">
@@ -430,6 +401,7 @@ ${missingList}`
         </p>
 
         <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
+          <!-- Forward: dark blue -->
           <a
             href="${forwardHref}"
             style="
@@ -447,6 +419,7 @@ ${missingList}`
             Forward quote to sales
           </a>
 
+          <!-- View printable: light blue -->
           ${
             printUrl
               ? `<a
@@ -468,6 +441,7 @@ ${missingList}`
               : ""
           }
 
+          <!-- Schedule: dark blue -->
           <a
             href="${scheduleUrl}"
             style="
@@ -484,6 +458,24 @@ ${missingList}`
           >
             Schedule a call
           </a>
+
+          <!-- Upload sketch: light blue -->
+          <a
+            href="${sketchUrl}"
+            style="
+              display:inline-block;
+              padding:8px 14px;
+              border-radius:999px;
+              background:${lightBlueBg};
+              color:${darkBlue};
+              font-size:12px;
+              font-weight:500;
+              text-decoration:none;
+              border:1px solid ${lightBlueBorder};
+            "
+          >
+            Upload sketch / file
+          </a>
         </div>
 
         <p style="margin:14px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
@@ -491,7 +483,7 @@ ${missingList}`
         </p>
 
         <p style="margin:4px 0 0 0; font-size:11px; color:#4b5563; line-height:1.5;">
-          To continue, you can forward this quote to sales, schedule a call, or reply directly to this email with any revisions.
+          To continue, you can forward this quote to sales, upload a sketch, schedule a call, or reply directly to this email with any revisions.
         </p>
 
         <p style="margin:14px 0 0 0; font-size:11px; color:#6b7280;">
