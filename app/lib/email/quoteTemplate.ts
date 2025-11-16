@@ -35,6 +35,8 @@ export type QuotePricing = {
   order_ci?: number | null;
   order_ci_with_waste?: number | null;
   used_min_charge?: boolean | null;
+  // allow the server to pass through the raw calc payload without TS error
+  raw?: any;
 };
 
 export type QuoteRenderInput = {
