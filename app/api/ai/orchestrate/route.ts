@@ -514,13 +514,15 @@ export async function POST(req: NextRequest) {
         kerf_pct: merged.kerf_pct,
         min_charge: merged.min_charge
       },
-      pricing: {
+          pricing: {
         total: calc?.price_total ?? calc?.total ?? 0,
         piece_ci: calc?.piece_ci,
         order_ci: calc?.order_ci,
         order_ci_with_waste: calc?.order_ci_with_waste,
-        used_min_charge: calc?.min_charge_applied
+        used_min_charge: calc?.used_min_charge ?? calc?.min_charge_applied,
+        raw: calc, // <- NEW: pass full calc payload through for skiving rows
       },
+
       missing: (() => {
         const miss: string[] = [];
         if (!merged.dims) miss.push("Dimensions");
