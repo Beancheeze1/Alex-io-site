@@ -2,9 +2,8 @@
 //
 // Upload page for sketches / drawings.
 // - Reads quote_no from the URL (?quote_no=...)
-// - Shows it in a pill
-// - Posts quote_no as a hidden field so /api/sketch-upload can link attachments
-// - Lets the user add their email + choose a file (styled blue area)
+// - Shows it in a pill-style read-only input (name="quote_no")
+// - Lets the user add their email + choose a file (blue clickable area)
 
 export const dynamic = "force-dynamic";
 
@@ -70,18 +69,22 @@ export default function SketchUploadPage({ searchParams }: PageProps) {
             }}
           >
             Quote #{" "}
-            <span
+            <input
+              name="quote_no"
+              readOnly
+              value={quoteNo}
               style={{
-                fontWeight: 600,
+                marginLeft: 4,
                 padding: "2px 8px",
                 borderRadius: 999,
                 background: "#eff6ff",
                 color: "#1d4ed8",
                 border: "1px solid #bfdbfe",
+                fontSize: 13,
+                fontWeight: 600,
+                outline: "none",
               }}
-            >
-              {quoteNo}
-            </span>
+            />
           </div>
         )}
 
@@ -91,10 +94,7 @@ export default function SketchUploadPage({ searchParams }: PageProps) {
           encType="multipart/form-data"
           style={{ marginTop: 8 }}
         >
-          {/* Hidden quote_no so the API can always link the attachment */}
-          {quoteNo && (
-            <input type="hidden" name="quote_no" value={quoteNo} />
-          )}
+          {/* NOTE: no hidden quote_no now – the pill input above carries it */}
 
           {/* Email field */}
           <label
