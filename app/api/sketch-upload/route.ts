@@ -1,25 +1,23 @@
 // app/api/sketch-upload/route.ts
 //
-// Stores uploaded sketch/file into quote_attachments,
-// then calls the Vision parser to extract dims/cavities/etc.
+// Handle "Upload file" from /sketch-upload page.
+// - Saves the file into quote_attachments (with quote_id + quote_no when possible)
+// - Calls /api/sketch/parse to run vision
+// - Calls /api/sketch/apply to send an updated quote email (Option A)
 //
-// Response shape (success):
+// Returns JSON:
 // {
 //   ok: true,
-//   attachmentId: 4,
-//   quoteId: 31,
-//   quoteNo: "Q-AI-20251116-223023",
-//   filename: "20251116_162905.jpg",
-//   size: 1837540,
-//   type: "image/jpeg",
-//   parsed: {
-//     dims: "...",
-//     qty: ...,
-//     material: "...",
-//     density: "...",
-//     cavityCount: ...,
-//     cavityDims: [...],
-//     notes: "..."
+//   attachmentId,
+//   quoteId,
+//   quoteNo,
+//   filename,
+//   size,
+//   type,
+//   parsed,        // vision JSON (dims, cavityDims, ...)
+//   autoQuote: {   // response from /api/sketch/apply
+//     ok: true,
+//     ...
 //   }
 // }
 
@@ -33,117 +31,138 @@ function err(error: string, detail?: any, status = 400) {
   return NextResponse.json({ ok: false, error, detail }, { status });
 }
 
+type AttachRow = {
+  id: number;
+  quote_id: number | null;
+  quote_no: string | null;
+  filename: string;
+  content_type: string | null;
+  size_bytes: number | null;
+};
+
 export async function POST(req: NextRequest) {
   try {
-    const contentType = req.headers.get("content-type") || "";
-    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
-      return err("expected_multipart_formdata");
+    const form = await req.formData().catch(() => null);
+    if (!form) {
+      return err("invalid_form", "Expected multipart/form-data");
     }
 
-    const formData = await req.formData();
-    const fileAny = formData.get("file");
-    const quoteNoRaw = formData.get("quote_no");
-    const quoteNo = quoteNoRaw ? String(quoteNoRaw).trim() : null;
-
-    if (!fileAny || typeof (fileAny as any).arrayBuffer !== "function") {
-      return err("missing_or_invalid_file");
+    const file = form.get("file");
+    if (!(file instanceof File)) {
+      return err("missing_file", "file is required");
     }
 
-    const file = fileAny as File;
+    const quoteNoRaw =
+      (form.get("quote_no") as string | null) ||
+      (form.get("quoteNo") as string | null) ||
+      "";
+    const quoteNo = quoteNoRaw.trim() || null;
 
-    // Convert file to Buffer for Postgres bytea
     const arrayBuf = await file.arrayBuffer();
     const buf = Buffer.from(arrayBuf);
+    const size = buf.length;
+    const contentType = file.type || "application/octet-stream";
+    const filename =
+      file.name || `upload-${Date.now().toString().slice(-6)}.bin`;
 
-    // Try to look up the quote by quote_no (if provided)
+    // Resolve quote_id if we have quote_no
     let quoteId: number | null = null;
     if (quoteNo) {
       const row = await one<{ id: number }>(
-        "SELECT id FROM quotes WHERE quote_no = $1 LIMIT 1;",
+        `
+        SELECT id
+        FROM quotes
+        WHERE quote_no = $1
+        LIMIT 1;
+        `,
         [quoteNo]
       );
       if (row) quoteId = row.id;
     }
 
-    // Insert into quote_attachments
-    const inserted = await one<{ id: number }>(
+    // Store in quote_attachments
+    const inserted = (await one<AttachRow>(
       `
       INSERT INTO quote_attachments
         (quote_id, quote_no, filename, content_type, size_bytes, data)
-      VALUES
-        ($1, $2, $3, $4, $5, $6)
-      RETURNING id;
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, quote_id, quote_no, filename, content_type, size_bytes;
       `,
-      [
-        quoteId,
-        quoteNo,
-        file.name,
-        file.type || null,
-        file.size ?? null,
-        buf,
-      ]
-    );
+      [quoteId, quoteNo, filename, contentType, size, buf]
+    )) as AttachRow | null;
 
-    const attachmentId = inserted?.id;
+    if (!inserted) {
+      return err("insert_failed", "Could not create quote_attachments row", 500);
+    }
 
-    console.log("Stored sketch upload", {
-      attachmentId,
-      quoteId,
-      quoteNo,
-      filename: file.name,
-      size: file.size,
-      type: file.type,
-    });
+    const attachmentId = inserted.id;
+    const storedQuoteId = inserted.quote_id;
+    const storedQuoteNo = inserted.quote_no;
 
-    // === Call Vision parser for this attachment (best-effort) ===
+    const base =
+      process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+
+    // 1) Call /api/sketch/parse to run vision on the image/PDF
     let parsed: any = null;
     try {
-      const base =
-        process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") ||
-        "https://api.alex-io.com";
-
       const parseResp = await fetch(`${base}/api/sketch/parse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attachmentId }),
+        body: JSON.stringify({
+          quote_no: storedQuoteNo,
+          attachmentId,
+        }),
       });
 
       const parseJson = await parseResp.json().catch(() => ({} as any));
-
-      if (parseResp.ok && parseJson?.ok) {
-        parsed = parseJson.parsed ?? null;
-      } else {
-        console.warn("Vision parse call did not return ok:", {
-          status: parseResp.status,
-          body: parseJson,
-        });
+      if (parseResp.ok && parseJson && parseJson.ok) {
+        parsed = parseJson.parsed || null;
       }
     } catch (e) {
-      console.error("Vision parse call failed:", e);
+      console.error("sketch-upload: parse call failed:", e);
+    }
+
+    // 2) Option A: automatically apply the parsed sketch to re-quote + send email
+    let autoQuote: any = null;
+    try {
+      if (storedQuoteNo && parsed) {
+        const applyResp = await fetch(`${base}/api/sketch/apply`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            quote_no: storedQuoteNo,
+            attachmentId,
+            parsed,
+          }),
+        });
+
+        const applyJson = await applyResp.json().catch(() => ({} as any));
+        autoQuote = applyJson;
+      }
+    } catch (e) {
+      console.error("sketch-upload: apply call failed:", e);
     }
 
     return NextResponse.json(
       {
         ok: true,
         attachmentId,
-        quoteId,
-        quoteNo,
-        filename: file.name,
-        size: file.size,
-        type: file.type,
+        quoteId: storedQuoteId,
+        quoteNo: storedQuoteNo,
+        filename: inserted.filename,
+        size: inserted.size_bytes,
+        type: inserted.content_type,
         parsed,
+        autoQuote,
       },
       { status: 200 }
     );
-  } catch (err: any) {
-    console.error("sketch-upload error:", err);
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "sketch_upload_exception",
-        detail: String(err?.message || err),
-      },
-      { status: 500 }
+  } catch (e: any) {
+    console.error("sketch-upload exception:", e);
+    return err(
+      "sketch_upload_exception",
+      String(e?.message || e),
+      500
     );
   }
 }
