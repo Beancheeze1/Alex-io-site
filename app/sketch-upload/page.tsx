@@ -1,13 +1,15 @@
-// app/sketch-upload/page.tsx
+"use client";
+
 import React from "react";
+import { useSearchParams } from "next/navigation";
 
-type Props = {
-  searchParams: { [key: string]: string | string[] | undefined };
-};
+export const dynamic = "force-dynamic";
 
-export default function SketchUploadPage({ searchParams }: Props) {
-  const raw = searchParams?.quote_no;
-  const quoteNo = Array.isArray(raw) ? raw[0] : raw || "";
+export default function SketchUploadPage() {
+  const searchParams = useSearchParams();
+  const quoteNoFromUrl =
+    searchParams.get("quote_no") || searchParams.get("quoteNo") || "";
+  const quoteNo = quoteNoFromUrl ?? "";
 
   return (
     <main
@@ -60,39 +62,38 @@ export default function SketchUploadPage({ searchParams }: Props) {
           encType="multipart/form-data"
           style={{ marginTop: 8 }}
         >
-          {/* Quote number — this is the important part */}
-          {quoteNo && (
-            <div style={{ marginBottom: 12 }}>
-              <label
-                htmlFor="upload-quote-no"
-                style={{
-                  display: "block",
-                  fontSize: 13,
-                  color: "#374151",
-                  marginBottom: 4,
-                  fontWeight: 500,
-                }}
-              >
-                Quote number
-              </label>
-              <input
-                id="upload-quote-no"
-                type="text"
-                name="quote_no"
-                value={quoteNo}
-                readOnly
-                style={{
-                  width: "100%",
-                  fontSize: 13,
-                  padding: "7px 10px",
-                  borderRadius: 999,
-                  border: "1px solid #d1d5db",
-                  background: "#f9fafb",
-                  color: "#111827",
-                }}
-              />
-            </div>
-          )}
+          {/* Quote number – always visible, auto-filled from URL when present */}
+          <div style={{ marginBottom: 12 }}>
+            <label
+              htmlFor="upload-quote-no"
+              style={{
+                display: "block",
+                fontSize: 13,
+                color: "#374151",
+                marginBottom: 4,
+                fontWeight: 500,
+              }}
+            >
+              Quote number
+            </label>
+            <input
+              id="upload-quote-no"
+              type="text"
+              name="quote_no"
+              value={quoteNo}
+              readOnly={!!quoteNo}
+              placeholder="Q-AI-20251117-112226"
+              style={{
+                width: "100%",
+                fontSize: 13,
+                padding: "7px 10px",
+                borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: quoteNo ? "#f9fafb" : "#ffffff",
+                color: "#111827",
+              }}
+            />
+          </div>
 
           {/* Email field */}
           <div style={{ marginBottom: 12 }}>
@@ -193,9 +194,9 @@ export default function SketchUploadPage({ searchParams }: Props) {
               lineHeight: 1.4,
             }}
           >
-            By uploading, you confirm that you have the right to share this
-            file and that it doesn&apos;t contain sensitive information you
-            don&apos;t want on a quote.
+            By uploading, you confirm that you have the right to share this file
+            and that it doesn&apos;t contain sensitive information you don&apos;t
+            want on a quote.
           </p>
         </form>
       </div>
