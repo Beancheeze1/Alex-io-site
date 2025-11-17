@@ -90,6 +90,14 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   const { specs, material, pricing, missing } = input;
   const facts = input.facts || {};
 
+  const fromSketch = (facts as any).from === "sketch-auto-quote";
+  const sketchLine = fromSketch
+    ? `<p style="margin:8px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
+          Dimensions and cavities interpreted from your uploaded sketch.
+       </p>`
+    : "";
+
+
   const quoteNo = input.quoteNumber ? String(input.quoteNumber) : "";
 
   const outsideSize = fmtDims(specs.L_in, specs.W_in, specs.H_in);
@@ -477,6 +485,9 @@ ${missingList}`
             Upload sketch / file
           </a>
         </div>
+
+${sketchLine}
+        
 
         <p style="margin:14px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
           This is a preliminary price based on the information we have so far. We&apos;ll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
