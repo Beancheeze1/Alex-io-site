@@ -211,21 +211,25 @@ export async function POST(req: NextRequest) {
     if (!item) {
       // --- Fallback path: no item yet; create one using parsed dims/qty and 1.7# PE ---
       const fallbackDims =
-        parsed.dims && parsed.dims.trim() ? parsed.dims.trim() : null;
-      const fallbackQty =
-        parsed.qty && parsed.qty > 0 ? parsed.qty : null;
+  parsed.dims && parsed.dims.trim() ? parsed.dims.trim() : null;
 
-      if (!fallbackDims || !fallbackQty) {
-        // We don't have enough info to safely create an item
-        return err(
-          "quote_item_not_found",
-          {
-            quoteId: quote.id,
-            reason: "no_item_and_missing_parsed_dims_or_qty",
-          },
-          404
-        );
-      }
+// If qty is missing but we have dims, fall back to 1 piece so we can still quote.
+// (We can revisit this default later if you want something else.)
+let fallbackQty =
+  parsed.qty && parsed.qty > 0 ? parsed.qty : 1;
+
+if (!fallbackDims) {
+  // We truly don't have enough info to safely create an item
+  return err(
+    "quote_item_not_found",
+    {
+      quoteId: quote.id,
+      reason: "no_item_and_missing_parsed_dims",
+    },
+    404
+  );
+}
+
 
       // Find a fallback material ≈ 1.7# PE
       const fallbackMaterial = await one<MaterialRow>(
