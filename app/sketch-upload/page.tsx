@@ -1,25 +1,22 @@
 // app/sketch-upload/page.tsx
 //
-// Sketch / file upload page.
-// - Reads quote_no from the URL query (?quote_no=Q-AI-2025...)
-// - Always shows a "Quote number" field in the form, auto-filled if present
-// - Posts quote_no, email, and file to /api/sketch-upload
-//
-// This version is a server component (no hooks) and is marked force-dynamic
-// so it works correctly with per-request searchParams.
+// Upload page for sketches / drawings.
+// - Reads quote_no from the URL (?quote_no=...)
+// - Shows it on the page
+// - Posts quote_no as a hidden field so /api/sketch-upload can link attachments
+// - Lets the user add their email + choose a file (styled "button" area)
 
 export const dynamic = "force-dynamic";
+
+import React from "react";
 
 type Props = {
   searchParams: { [key: string]: string | string[] | undefined };
 };
 
 export default function SketchUploadPage({ searchParams }: Props) {
-  const raw =
-    searchParams?.quote_no ??
-    searchParams?.quoteNo ??
-    "";
-  const quoteNo = Array.isArray(raw) ? raw[0] : raw || "";
+  const raw = searchParams?.quote_no ?? searchParams?.quoteNo;
+  const quoteNo = Array.isArray(raw) ? raw[0] : (raw || "");
 
   return (
     <main
@@ -36,17 +33,17 @@ export default function SketchUploadPage({ searchParams }: Props) {
       <div
         style={{
           width: "100%",
-          maxWidth: 480,
+          maxWidth: 520,
           background: "#ffffff",
           borderRadius: 16,
-          padding: "24px 24px 20px 24px",
+          padding: "24px 24px 24px 24px",
           boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
         }}
       >
         <h1
           style={{
             margin: "0 0 8px 0",
-            fontSize: 18,
+            fontSize: 20,
             color: "#111827",
             fontWeight: 600,
           }}
@@ -66,116 +63,124 @@ export default function SketchUploadPage({ searchParams }: Props) {
           dimensions and cavity details and send an updated quote.
         </p>
 
+        {quoteNo && (
+          <div
+            style={{
+              margin: "0 0 14px 0",
+              fontSize: 13,
+              color: "#111827",
+            }}
+          >
+            Quote #{" "}
+            <span
+              style={{
+                fontWeight: 600,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "#eff6ff",
+                color: "#1d4ed8",
+                border: "1px solid #bfdbfe",
+              }}
+            >
+              {quoteNo}
+            </span>
+          </div>
+        )}
+
         <form
           action="/api/sketch-upload"
           method="POST"
           encType="multipart/form-data"
           style={{ marginTop: 8 }}
         >
-          {/* Quote number – always visible, auto-filled from URL when present */}
-          <div style={{ marginBottom: 12 }}>
-            <label
-              htmlFor="upload-quote-no"
-              style={{
-                display: "block",
-                fontSize: 13,
-                color: "#374151",
-                marginBottom: 4,
-                fontWeight: 500,
-              }}
-            >
-              Quote number
-            </label>
-            <input
-              id="upload-quote-no"
-              type="text"
-              name="quote_no"
-              value={quoteNo}
-              placeholder="Q-AI-20251117-112226"
-              readOnly={!!quoteNo}
-              style={{
-                width: "100%",
-                fontSize: 13,
-                padding: "7px 10px",
-                borderRadius: 999,
-                border: "1px solid #d1d5db",
-                background: quoteNo ? "#f9fafb" : "#ffffff",
-                color: "#111827",
-              }}
-            />
-          </div>
+          {/* Hidden quote_no so the API can always link the attachment */}
+          {quoteNo && (
+            <input type="hidden" name="quote_no" value={quoteNo} />
+          )}
 
-          {/* Email field */}
-          <div style={{ marginBottom: 12 }}>
-            <label
-              htmlFor="upload-email"
-              style={{
-                display: "block",
-                fontSize: 13,
-                color: "#374151",
-                marginBottom: 4,
-                fontWeight: 500,
-              }}
-            >
-              Your email address
-            </label>
-            <input
-              id="upload-email"
-              type="email"
-              name="email"
-              placeholder="you@example.com"
-              required
-              style={{
-                width: "100%",
-                fontSize: 13,
-                padding: "7px 10px",
-                borderRadius: 999,
-                border: "1px solid #d1d5db",
-                outline: "none",
-              }}
-            />
-          </div>
+          {/* Email field (optional but recommended) */}
+          <label
+            style={{
+              display: "block",
+              marginBottom: 4,
+              fontSize: 13,
+              color: "#111827",
+              fontWeight: 500,
+            }}
+          >
+            Your email address
+          </label>
+          <input
+            type="email"
+            name="email"
+            placeholder="you@example.com"
+            style={{
+              width: "100%",
+              padding: "8px 10px",
+              borderRadius: 999,
+              border: "1px solid #d1d5db",
+              fontSize: 13,
+              marginBottom: 14,
+            }}
+          />
 
-          {/* File picker – styled like a button */}
-          <div style={{ marginBottom: 12 }}>
-            <label
-              htmlFor="upload-file"
+          {/* File chooser styled as a button/area */}
+          <label
+            style={{
+              display: "block",
+              marginBottom: 4,
+              fontSize: 13,
+              color: "#111827",
+              fontWeight: 500,
+            }}
+          >
+            Sketch or drawing file
+          </label>
+
+          <div
+            style={{
+              position: "relative",
+              marginBottom: 10,
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "2px dashed #bfdbfe",
+              background: "#eff6ff",
+              cursor: "pointer",
+            }}
+          >
+            <span
               style={{
-                display: "block",
                 fontSize: 13,
-                color: "#374151",
-                marginBottom: 4,
+                color: "#1d4ed8",
                 fontWeight: 500,
               }}
             >
-              Sketch or drawing file
-            </label>
+              Tap or click here to choose a file
+            </span>
+            <span
+              style={{
+                display: "block",
+                fontSize: 11,
+                color: "#4b5563",
+                marginTop: 4,
+              }}
+            >
+              JPG, PNG, or PDF — clear photos of sketches work great.
+            </span>
+
+            {/* The real file input is invisible but covers the blue box */}
             <input
-              id="upload-file"
               type="file"
               name="file"
               accept="image/*,application/pdf"
               required
               style={{
-                display: "block",
-                width: "100%",
-                fontSize: 13,
-                padding: "8px 10px",
-                borderRadius: 999,
-                border: "1px dashed #93c5fd",
-                background: "#eff6ff",
+                position: "absolute",
+                inset: 0,
+                opacity: 0,
                 cursor: "pointer",
               }}
             />
-            <p
-              style={{
-                margin: "6px 0 0 0",
-                fontSize: 11,
-                color: "#6b7280",
-              }}
-            >
-              Tap or click the blue bar above to choose a file.
-            </p>
           </div>
 
           <button
@@ -183,7 +188,7 @@ export default function SketchUploadPage({ searchParams }: Props) {
             style={{
               marginTop: 4,
               display: "inline-block",
-              padding: "8px 14px",
+              padding: "8px 18px",
               borderRadius: 999,
               background: "#1d4ed8",
               color: "#ffffff",
@@ -204,9 +209,9 @@ export default function SketchUploadPage({ searchParams }: Props) {
               lineHeight: 1.4,
             }}
           >
-            By uploading, you confirm that you have the right to share this file
-            and that it doesn&apos;t contain sensitive information you don&apos;t
-            want on a quote.
+            By uploading, you confirm that you have the right to share this
+            file and that it doesn&apos;t contain sensitive information you
+            don&apos;t want on a quote.
           </p>
         </form>
       </div>
