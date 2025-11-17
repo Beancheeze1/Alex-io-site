@@ -12,8 +12,7 @@
 //
 // Behaviour:
 //   - Looks up the quote header + first quote item
-//   - If no quote item exists, OPTION A: try to auto-create a primary item
-//     from the parsed sketch (dims + qty + material/density).
+//   - If no quote item exists, creates one using a fallback material (1.7# PE)
 //   - Merges in dims / cavities from `parsed` (vision)
 //   - Calls /api/quotes/calc to get pricing
 //   - Uses renderQuoteEmail to build an updated email
@@ -130,117 +129,11 @@ async function calcQuoteCI(opts: {
   return j.result;
 }
 
-/**
- * OPTION A helper:
- * If a quote has no primary item yet, try to create one based on the parsed sketch.
- * - Requires dims + qty from parsed.
- * - Tries to pick a material row based on parsed.material / parsed.density.
- * Returns the created QuoteItemRow, or null if we can't safely create one.
- */
-async function ensurePrimaryItemForQuote(
-  quote: QuoteRow,
-  parsed: ParsedSketch
-): Promise<QuoteItemRow | null> {
-  // 1) We can’t do anything without dims + qty.
-  const dimsClean = parsed.dims?.trim();
-  const qtyVal = parsed.qty ?? null;
-
-  if (!dimsClean || !qtyVal || qtyVal <= 0) {
-    return null;
-  }
-
-  // 2) Try to identify a material.
-  //    Prefer name from parsed.material; use density as a tie-breaker if present.
-  const matName = (parsed.material || "").toString().trim();
-  const densNum = densityToPcf(parsed.density);
-
-  if (!matName && densNum == null) {
-    // No material hint at all -> better to bail than guess wrong pricing.
-    return null;
-  }
-
-  let material: MaterialRow | null = null;
-
-  try {
-    if (matName) {
-      // Try to match by name first, order by density closeness if we have it.
-      material = await one<MaterialRow>(
-        `
-        SELECT
-          id,
-          name,
-          density_lb_ft3,
-          kerf_waste_pct AS kerf_pct,
-          min_charge_usd AS min_charge
-        FROM materials
-        WHERE active = true
-          AND name ILIKE $1
-        ORDER BY
-          CASE
-            WHEN $2::numeric IS NULL THEN 0
-            ELSE ABS(COALESCE(density_lb_ft3, 0) - $2::numeric)
-          END
-        LIMIT 1;
-        `,
-        [`%${matName.toLowerCase()}%`, densNum]
-      );
-    }
-
-    // If we still didn't get anything but we *do* have density, try any active material
-    // ordered by density closeness.
-    if (!material && densNum != null) {
-      material = await one<MaterialRow>(
-        `
-        SELECT
-          id,
-          name,
-          density_lb_ft3,
-          kerf_waste_pct AS kerf_pct,
-          min_charge_usd AS min_charge
-        FROM materials
-        WHERE active = true
-        ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $1::numeric)
-        LIMIT 1;
-        `,
-        [densNum]
-      );
-    }
-  } catch (e) {
-    console.error("ensurePrimaryItemForQuote: material lookup failed:", e);
-  }
-
-  if (!material) {
-    // Still nothing – give up rather than invent a material.
-    return null;
-  }
-
-  // 3) Parse dims into L/W/H.
-  const { L, W, H } = parseDims(dimsClean);
-
-  // 4) Insert a primary quote item.
-  try {
-    const inserted = await one<QuoteItemRow>(
-      `
-      INSERT INTO quote_items
-        (quote_id, length_in, width_in, height_in, material_id, qty)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING length_in, width_in, height_in, material_id, qty;
-      `,
-      [quote.id, L, W, H, material.id, qtyVal]
-    );
-
-    return inserted || null;
-  } catch (e) {
-    console.error("ensurePrimaryItemForQuote: insert failed:", e);
-    return null;
-  }
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => ({}))) as ApplyInput;
     const quoteNo = (body.quote_no || "").trim();
-    const parsed: ParsedSketch = body.parsed || {};
+    const parsed = body.parsed || {};
     const attachmentId = body.attachmentId || null;
 
     if (!quoteNo) {
@@ -279,8 +172,8 @@ export async function POST(req: NextRequest) {
       toEmail = fallbackSales;
     }
 
-    // 2) Load primary quote item
-    let item = await one<QuoteItemRow>(
+    // 2) Load primary quote item (or create one with 1.7# PE fallback)
+    let item: QuoteItemRow | null = await one<QuoteItemRow>(
       `
       SELECT length_in, width_in, height_in, material_id, qty
       FROM quote_items
@@ -291,43 +184,117 @@ export async function POST(req: NextRequest) {
       [quote.id]
     );
 
-    // OPTION A: if no item exists yet, try to auto-create one from the parsed sketch.
-    if (!item) {
-      item = await ensurePrimaryItemForQuote(quote, parsed);
-    }
+    let material: MaterialRow | null = null;
 
     if (!item) {
-      // Still nothing – same error as before, but now we’ve at least tried to help.
-      return err("quote_item_not_found", { quoteId: quote.id }, 404);
+      // --- Fallback path: no item yet; create one using parsed dims/qty and 1.7# PE ---
+      const fallbackDims =
+        parsed.dims && parsed.dims.trim() ? parsed.dims.trim() : null;
+      const fallbackQty =
+        parsed.qty && parsed.qty > 0 ? parsed.qty : null;
+
+      if (!fallbackDims || !fallbackQty) {
+        // We don't have enough info to safely create an item
+        return err(
+          "quote_item_not_found",
+          {
+            quoteId: quote.id,
+            reason: "no_item_and_missing_parsed_dims_or_qty",
+          },
+          404
+        );
+      }
+
+      // Find a fallback material ≈ 1.7# PE
+      const fallbackMaterial = await one<MaterialRow>(
+        `
+        SELECT
+          id,
+          name,
+          density_lb_ft3,
+          kerf_waste_pct AS kerf_pct,
+          min_charge_usd AS min_charge
+        FROM materials
+        WHERE active = true
+          AND (name ILIKE '%pe%' OR category ILIKE '%pe%' OR subcategory ILIKE '%pe%')
+        ORDER BY ABS(COALESCE(density_lb_ft3, 0) - 1.7)
+        LIMIT 1;
+        `,
+        []
+      );
+
+      if (!fallbackMaterial) {
+        return err(
+          "material_not_found",
+          {
+            quoteId: quote.id,
+            reason: "no_fallback_1_7_pe",
+          },
+          404
+        );
+      }
+
+      const { L, W, H } = parseDims(fallbackDims);
+
+      const insertedItem = await one<QuoteItemRow>(
+        `
+        INSERT INTO quote_items
+          (quote_id, length_in, width_in, height_in, material_id, qty)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING length_in, width_in, height_in, material_id, qty;
+        `,
+        [quote.id, L, W, H, fallbackMaterial.id, fallbackQty]
+      );
+
+      item = insertedItem;
+      material = fallbackMaterial;
     }
 
-    // 3) Load material info
-    const material = await one<MaterialRow>(
-      `
-      SELECT
-        id,
-        name,
-        density_lb_ft3,
-        kerf_waste_pct AS kerf_pct,
-        min_charge_usd AS min_charge
-      FROM materials
-      WHERE id = $1
-      LIMIT 1;
-      `,
-      [item.material_id]
-    );
+    // 3) Load material info (normal path or confirm fallback)
+    if (!material && item) {
+      material = await one<MaterialRow>(
+        `
+        SELECT
+          id,
+          name,
+          density_lb_ft3,
+          kerf_waste_pct AS kerf_pct,
+          min_charge_usd AS min_charge
+        FROM materials
+        WHERE id = $1
+        LIMIT 1;
+        `,
+        [item.material_id]
+      );
+    }
+
+    // Hard guards so TS knows both are non-null below
+    if (!item) {
+      return err(
+        "quote_item_not_found",
+        { quoteId: quote.id, reason: "no_item_after_fallback" },
+        404
+      );
+    }
 
     if (!material) {
-      return err("material_not_found", { material_id: item.material_id }, 404);
+      return err(
+        "material_not_found",
+        { material_id: item.material_id, reason: "no_material_after_fallback" },
+        404
+      );
     }
 
+    const safeItem = item;
+    const safeMaterial = material;
+
     // 4) Merge dims / qty / cavities from parsed sketch + existing item
-    const baseDims = `${item.length_in}x${item.width_in}x${item.height_in}`;
+    const baseDims = `${safeItem.length_in}x${safeItem.width_in}x${safeItem.height_in}`;
     const mergedDims =
       parsed.dims && parsed.dims.trim() ? parsed.dims.trim() : baseDims;
 
     const mergedQty =
-      parsed.qty && parsed.qty > 0 ? parsed.qty : item.qty;
+      parsed.qty && parsed.qty > 0 ? parsed.qty : safeItem.qty;
 
     const cavities =
       Array.isArray(parsed.cavityDims) && parsed.cavityDims.length > 0
@@ -338,7 +305,7 @@ export async function POST(req: NextRequest) {
     const calc = await calcQuoteCI({
       dims: mergedDims,
       qty: mergedQty,
-      material_id: item.material_id,
+      material_id: safeMaterial.id,
       cavities,
     });
 
@@ -351,7 +318,7 @@ export async function POST(req: NextRequest) {
     const densityPcf =
       parsed.density != null
         ? densityToPcf(parsed.density)
-        : material.density_lb_ft3;
+        : safeMaterial.density_lb_ft3;
 
     const templateInput = {
       customerLine:
@@ -363,15 +330,15 @@ export async function POST(req: NextRequest) {
         H_in: H,
         qty: mergedQty,
         density_pcf: densityPcf ?? null,
-        foam_family: material.name,
+        foam_family: safeMaterial.name,
         thickness_under_in: null,
         color: null,
       },
       material: {
-        name: material.name,
-        density_lbft3: material.density_lb_ft3,
-        kerf_pct: material.kerf_pct,
-        min_charge: material.min_charge,
+        name: safeMaterial.name,
+        density_lbft3: safeMaterial.density_lb_ft3,
+        kerf_pct: safeMaterial.kerf_pct,
+        min_charge: safeMaterial.min_charge,
       },
       pricing: {
         total:
