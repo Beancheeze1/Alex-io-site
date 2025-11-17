@@ -1,34 +1,13 @@
 // app/sketch-upload/page.tsx
-"use client";
-
 import React from "react";
-
-export const dynamic = "force-dynamic";
 
 type Props = {
   searchParams: { [key: string]: string | string[] | undefined };
 };
 
 export default function SketchUploadPage({ searchParams }: Props) {
-  // Try to get an initial value from server-side searchParams
   const raw = searchParams?.quote_no;
-  const initialFromServer = Array.isArray(raw) ? raw[0] : raw || "";
-
-  const [quoteNo, setQuoteNo] = React.useState(initialFromServer);
-
-  // On the client, also read from window.location in case anything was missed
-  React.useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const fromUrl = params.get("quote_no");
-      if (fromUrl && fromUrl !== quoteNo) {
-        setQuoteNo(fromUrl);
-      }
-    } catch {
-      // ignore
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const quoteNo = Array.isArray(raw) ? raw[0] : raw || "";
 
   return (
     <main
@@ -62,6 +41,18 @@ export default function SketchUploadPage({ searchParams }: Props) {
         >
           Upload sketch or file
         </h1>
+        {quoteNo && (
+          <p
+            style={{
+              margin: "0 0 12px 0",
+              fontSize: 13,
+              color: "#4b5563",
+            }}
+          >
+            For quote{" "}
+            <span style={{ fontWeight: 600 }}>#{quoteNo}</span>
+          </p>
+        )}
 
         <p
           style={{
@@ -72,7 +63,7 @@ export default function SketchUploadPage({ searchParams }: Props) {
         >
           You can upload a clear photo of your hand sketch, a PDF drawing, or
           screenshots of your layout. We&apos;ll use this to help dial in the
-          dimensions and cavity details.
+          dimensions and cavity details and send an updated quote.
         </p>
 
         <form
@@ -81,67 +72,81 @@ export default function SketchUploadPage({ searchParams }: Props) {
           encType="multipart/form-data"
           style={{ marginTop: 8 }}
         >
-          {/* Quote number field (required, auto-filled from URL, but editable) */}
+          {quoteNo && (
+            <input type="hidden" name="quote_no" value={quoteNo} />
+          )}
+
+          {/* Email field */}
           <div style={{ marginBottom: 12 }}>
             <label
-              htmlFor="quote_no"
+              htmlFor="upload-email"
               style={{
                 display: "block",
+                fontSize: 13,
+                color: "#374151",
                 marginBottom: 4,
-                fontSize: 12,
-                color: "#4b5563",
                 fontWeight: 500,
               }}
             >
-              Quote number
+              Your email address
             </label>
             <input
-              id="quote_no"
-              name="quote_no"
-              type="text"
-              value={quoteNo}
-              onChange={(e) => setQuoteNo(e.target.value)}
+              id="upload-email"
+              type="email"
+              name="email"
+              placeholder="you@example.com"
               required
-              placeholder="e.g. Q-AI-20251116-223023"
               style={{
-                display: "block",
                 width: "100%",
-                borderRadius: 8,
-                border: "1px solid #d1d5db",
                 fontSize: 13,
-                padding: "6px 10px",
-                color: "#111827",
-                boxSizing: "border-box",
+                padding: "7px 10px",
+                borderRadius: 999,
+                border: "1px solid #d1d5db",
+                outline: "none",
               }}
             />
           </div>
 
+          {/* File picker – styled like a button */}
           <div style={{ marginBottom: 12 }}>
             <label
-              htmlFor="file"
+              htmlFor="upload-file"
               style={{
                 display: "block",
+                fontSize: 13,
+                color: "#374151",
                 marginBottom: 4,
-                fontSize: 12,
-                color: "#4b5563",
                 fontWeight: 500,
               }}
             >
-              Sketch / file
+              Sketch or drawing file
             </label>
             <input
-              id="file"
+              id="upload-file"
               type="file"
               name="file"
               accept="image/*,application/pdf"
+              required
               style={{
                 display: "block",
                 width: "100%",
                 fontSize: 13,
-                padding: "6px 0",
+                padding: "8px 10px",
+                borderRadius: 999,
+                border: "1px dashed #93c5fd",
+                background: "#eff6ff",
+                cursor: "pointer",
               }}
-              required
             />
+            <p
+              style={{
+                margin: "6px 0 0 0",
+                fontSize: 11,
+                color: "#6b7280",
+              }}
+            >
+              Tap or click the blue bar above to choose a file.
+            </p>
           </div>
 
           <button

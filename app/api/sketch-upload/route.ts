@@ -2,6 +2,7 @@
 //
 // Handle "Upload file" from /sketch-upload page.
 // - Saves the file into quote_attachments (with quote_id + quote_no when possible)
+// - If the client provided an email, stores it on the quote header (if missing)
 // - Calls /api/sketch/parse to run vision
 // - Calls /api/sketch/apply to send an updated quote email (Option A)
 //
@@ -58,6 +59,10 @@ export async function POST(req: NextRequest) {
       "";
     const quoteNo = quoteNoRaw.trim() || null;
 
+    const emailRaw = form.get("email") as string | null;
+    const email =
+      (emailRaw && emailRaw.toString().trim()) || null;
+
     const arrayBuf = await file.arrayBuffer();
     const buf = Buffer.from(arrayBuf);
     const size = buf.length;
@@ -65,19 +70,39 @@ export async function POST(req: NextRequest) {
     const filename =
       file.name || `upload-${Date.now().toString().slice(-6)}.bin`;
 
-    // Resolve quote_id if we have quote_no
+    // Resolve quote_id and, if needed, store email onto the quote header
     let quoteId: number | null = null;
+
     if (quoteNo) {
-      const row = await one<{ id: number }>(
+      const row = await one<{ id: number; email: string | null }>(
         `
-        SELECT id
+        SELECT id, email
         FROM quotes
         WHERE quote_no = $1
         LIMIT 1;
         `,
         [quoteNo]
       );
-      if (row) quoteId = row.id;
+
+      if (row) {
+        quoteId = row.id;
+
+        // If user provided an email and the quote doesn't have one yet, store it
+        if (email && !row.email) {
+          const updated = await one<{ id: number; email: string | null }>(
+            `
+            UPDATE quotes
+            SET email = $2
+            WHERE id = $1
+            RETURNING id, email;
+            `,
+            [row.id, email]
+          );
+          if (updated) {
+            quoteId = updated.id;
+          }
+        }
+      }
     }
 
     // Store in quote_attachments
@@ -122,10 +147,10 @@ export async function POST(req: NextRequest) {
       console.error("sketch-upload: parse call failed:", e);
     }
 
-    // 2) Option A: automatically apply the parsed sketch to re-quote + send email
+    // 2) Auto-apply the parsed sketch to re-quote + send email
     let autoQuote: any = null;
     try {
-      if (storedQuoteNo && parsed) {
+      if (storedQuoteNo) {
         const applyResp = await fetch(`${base}/api/sketch/apply`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
