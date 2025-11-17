@@ -15,10 +15,10 @@
 //   - Merges in dims / cavities from `parsed` (vision)
 //   - Calls /api/quotes/calc to get pricing
 //   - Uses renderQuoteEmail to build an updated email
-//   - Sends email to the quote.email via /api/msgraph/send
+//   - Sends email via /api/msgraph/send
 //
-// This does *not* touch HubSpot or the main orchestrator memory;
-// it's a side-channel "auto refresh" based purely on DB + sketch.
+// If the quote row has no email, we fall back to NEXT_PUBLIC_SALES_FORWARD_TO
+// (your sales inbox) instead of throwing an error.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
@@ -84,7 +84,7 @@ function parseDims(dims: string | null | undefined) {
   return {
     L: parts[0] || 0,
     W: parts[1] || 0,
-    H: parts[2] || 0,
+    H: parts[2] || 0
   };
 }
 
@@ -119,8 +119,8 @@ async function calcQuoteCI(opts: {
       material_id: opts.material_id,
       qty: opts.qty,
       cavities: opts.cavities || [],
-      round_to_bf: false,
-    }),
+      round_to_bf: false
+    })
   });
 
   const j = await r.json().catch(() => ({} as any));
@@ -154,11 +154,24 @@ export async function POST(req: NextRequest) {
       return err("quote_not_found", { quoteNo }, 404);
     }
 
-    if (!quote.email) {
-      return err("quote_missing_email", { quoteNo }, 500);
+    // Decide where to send the auto-quote email.
+    // Prefer the quote's email; fall back to sales inbox if missing.
+    let toEmail: string | null = quote.email;
+    if (!toEmail) {
+      const fallbackSales =
+        process.env.NEXT_PUBLIC_SALES_FORWARD_TO ||
+        process.env.NEXT_PUBLIC_FALLBACK_QUOTE_EMAIL ||
+        "";
+
+      if (!fallbackSales) {
+        // No customer email AND no configured fallback -> we can't send.
+        return err("quote_missing_email", { quoteNo }, 500);
+      }
+
+      toEmail = fallbackSales;
     }
 
-    // 2) Load primary quote item (we'll recalc based on this)
+    // 2) Load primary quote item
     const item = await one<QuoteItemRow>(
       `
       SELECT length_in, width_in, height_in, material_id, qty
@@ -212,7 +225,7 @@ export async function POST(req: NextRequest) {
       dims: mergedDims,
       qty: mergedQty,
       material_id: item.material_id,
-      cavities,
+      cavities
     });
 
     if (!calc) {
@@ -238,13 +251,13 @@ export async function POST(req: NextRequest) {
         density_pcf: densityPcf ?? null,
         foam_family: material.name,
         thickness_under_in: null,
-        color: null,
+        color: null
       },
       material: {
         name: material.name,
         density_lbft3: material.density_lb_ft3,
         kerf_pct: material.kerf_pct,
-        min_charge: material.min_charge,
+        min_charge: material.min_charge
       },
       pricing: {
         total:
@@ -255,7 +268,7 @@ export async function POST(req: NextRequest) {
         piece_ci: calc.piece_ci ?? null,
         order_ci: calc.order_ci ?? null,
         order_ci_with_waste: calc.order_ci_with_waste ?? null,
-        used_min_charge: calc.min_charge_applied ?? null,
+        used_min_charge: calc.min_charge_applied ?? null
       },
       missing: [] as string[],
       facts: {
@@ -263,8 +276,8 @@ export async function POST(req: NextRequest) {
         quote_no: quote.quote_no,
         from: "sketch-auto-quote",
         attachmentId,
-        sketchParsed: parsed,
-      },
+        sketchParsed: parsed
+      }
     };
 
     let htmlBody = "";
@@ -285,11 +298,11 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        toEmail: quote.email,
+        toEmail,
         subject: `Updated foam quote ${quote.quote_no} (from sketch)`,
         html: htmlBody,
-        inReplyTo: null,
-      }),
+        inReplyTo: null
+      })
     });
 
     const sent = await sendResp.json().catch(() => ({} as any));
@@ -300,13 +313,13 @@ export async function POST(req: NextRequest) {
         quoteId: quote.id,
         quoteNo: quote.quote_no,
         attachmentId,
-        email: quote.email,
+        toEmail,
         sent,
         calc,
         mergedDims,
         mergedQty,
         cavities,
-        parsed,
+        parsed
       },
       { status: 200 }
     );
