@@ -41,18 +41,6 @@ export default function SketchUploadPage({ searchParams }: Props) {
         >
           Upload sketch or file
         </h1>
-        {quoteNo && (
-          <p
-            style={{
-              margin: "0 0 12px 0",
-              fontSize: 13,
-              color: "#4b5563",
-            }}
-          >
-            For quote{" "}
-            <span style={{ fontWeight: 600 }}>#{quoteNo}</span>
-          </p>
-        )}
 
         <p
           style={{
@@ -72,8 +60,38 @@ export default function SketchUploadPage({ searchParams }: Props) {
           encType="multipart/form-data"
           style={{ marginTop: 8 }}
         >
+          {/* Quote number — this is the important part */}
           {quoteNo && (
-            <input type="hidden" name="quote_no" value={quoteNo} />
+            <div style={{ marginBottom: 12 }}>
+              <label
+                htmlFor="upload-quote-no"
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  color: "#374151",
+                  marginBottom: 4,
+                  fontWeight: 500,
+                }}
+              >
+                Quote number
+              </label>
+              <input
+                id="upload-quote-no"
+                type="text"
+                name="quote_no"
+                value={quoteNo}
+                readOnly
+                style={{
+                  width: "100%",
+                  fontSize: 13,
+                  padding: "7px 10px",
+                  borderRadius: 999,
+                  border: "1px solid #d1d5db",
+                  background: "#f9fafb",
+                  color: "#111827",
+                }}
+              />
+            </div>
           )}
 
           {/* Email field */}
