@@ -2,21 +2,19 @@
 //
 // Upload page for sketches / drawings.
 // - Reads quote_no from the URL (?quote_no=...)
-// - Shows it on the page
+// - Shows it in a pill
 // - Posts quote_no as a hidden field so /api/sketch-upload can link attachments
-// - Lets the user add their email + choose a file (styled "button" area)
+// - Lets the user add their email + choose a file (styled blue area)
 
 export const dynamic = "force-dynamic";
 
-import React from "react";
-
-type Props = {
-  searchParams: { [key: string]: string | string[] | undefined };
+type PageProps = {
+  searchParams?: { [key: string]: string | string[] | undefined };
 };
 
-export default function SketchUploadPage({ searchParams }: Props) {
+export default function SketchUploadPage({ searchParams }: PageProps) {
   const raw = searchParams?.quote_no ?? searchParams?.quoteNo;
-  const quoteNo = Array.isArray(raw) ? raw[0] : (raw || "");
+  const quoteNo = Array.isArray(raw) ? raw[0] : raw || "";
 
   return (
     <main
@@ -98,7 +96,7 @@ export default function SketchUploadPage({ searchParams }: Props) {
             <input type="hidden" name="quote_no" value={quoteNo} />
           )}
 
-          {/* Email field (optional but recommended) */}
+          {/* Email field */}
           <label
             style={{
               display: "block",
@@ -124,7 +122,7 @@ export default function SketchUploadPage({ searchParams }: Props) {
             }}
           />
 
-          {/* File chooser styled as a button/area */}
+          {/* File chooser styled as a big blue clickable area */}
           <label
             style={{
               display: "block",
@@ -168,7 +166,7 @@ export default function SketchUploadPage({ searchParams }: Props) {
               JPG, PNG, or PDF — clear photos of sketches work great.
             </span>
 
-            {/* The real file input is invisible but covers the blue box */}
+            {/* Invisible real file input covering the blue area */}
             <input
               type="file"
               name="file"
@@ -209,9 +207,9 @@ export default function SketchUploadPage({ searchParams }: Props) {
               lineHeight: 1.4,
             }}
           >
-            By uploading, you confirm that you have the right to share this
-            file and that it doesn&apos;t contain sensitive information you
-            don&apos;t want on a quote.
+            By uploading, you confirm that you have the right to share this file
+            and that it doesn&apos;t contain sensitive information you don&apos;t
+            want on a quote.
           </p>
         </form>
       </div>
