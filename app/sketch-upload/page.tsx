@@ -1,15 +1,25 @@
-"use client";
-
-import React from "react";
-import { useSearchParams } from "next/navigation";
+// app/sketch-upload/page.tsx
+//
+// Sketch / file upload page.
+// - Reads quote_no from the URL query (?quote_no=Q-AI-2025...)
+// - Always shows a "Quote number" field in the form, auto-filled if present
+// - Posts quote_no, email, and file to /api/sketch-upload
+//
+// This version is a server component (no hooks) and is marked force-dynamic
+// so it works correctly with per-request searchParams.
 
 export const dynamic = "force-dynamic";
 
-export default function SketchUploadPage() {
-  const searchParams = useSearchParams();
-  const quoteNoFromUrl =
-    searchParams.get("quote_no") || searchParams.get("quoteNo") || "";
-  const quoteNo = quoteNoFromUrl ?? "";
+type Props = {
+  searchParams: { [key: string]: string | string[] | undefined };
+};
+
+export default function SketchUploadPage({ searchParams }: Props) {
+  const raw =
+    searchParams?.quote_no ??
+    searchParams?.quoteNo ??
+    "";
+  const quoteNo = Array.isArray(raw) ? raw[0] : raw || "";
 
   return (
     <main
@@ -81,8 +91,8 @@ export default function SketchUploadPage() {
               type="text"
               name="quote_no"
               value={quoteNo}
-              readOnly={!!quoteNo}
               placeholder="Q-AI-20251117-112226"
+              readOnly={!!quoteNo}
               style={{
                 width: "100%",
                 fontSize: 13,
