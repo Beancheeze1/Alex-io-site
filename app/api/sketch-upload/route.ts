@@ -53,10 +53,17 @@ export async function POST(req: NextRequest) {
       return err("missing_file", "file is required");
     }
 
+    // NEW: also read quote_no from query string (same fix as last time)
+    const url = new URL(req.url);
+    const qpQuoteNo =
+      url.searchParams.get("quote_no") || url.searchParams.get("quoteNo");
+
     const quoteNoRaw =
       (form.get("quote_no") as string | null) ||
       (form.get("quoteNo") as string | null) ||
+      qpQuoteNo ||
       "";
+
     const quoteNo = quoteNoRaw.trim() || null;
 
     const emailRaw = form.get("email") as string | null;
