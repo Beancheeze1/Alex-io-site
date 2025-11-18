@@ -12,6 +12,7 @@
 // - Dynamic price-break table when provided
 // - Design optimization ideas pulled from facts.opt_suggestions,
 //   with sensible fallback suggestions when AI returns nothing
+// - Visual layout preview (auto-generated SVG) from dims + cavities
 // - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file
 
 export type QuoteSpecs = {
@@ -95,6 +96,102 @@ function htmlEscape(s: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/**
+ * Visual layout preview:
+ * Simple top-view block + cavity layout rendered as inline SVG.
+ * Uses outer dims + cavities from facts. If dims are missing, returns "".
+ */
+function buildVisualPreview(specs: QuoteSpecs, facts: Record<string, any>): string {
+  const L = specs.L_in || 0;
+  const W = specs.W_in || 0;
+
+  if (!L || !W) {
+    return "";
+  }
+
+  const cavitiesRaw = Array.isArray((facts as any).cavityDims)
+    ? ((facts as any).cavityDims as string[])
+    : [];
+  const cavityCount =
+    typeof (facts as any).cavityCount === "number"
+      ? (facts as any).cavityCount
+      : cavitiesRaw.length || null;
+
+  const labelDims = `Block: ${L} × ${W}${
+    specs.H_in ? ` × ${specs.H_in}` : ""
+  } in`;
+  const labelCav =
+    cavityCount && cavityCount > 0
+      ? `${cavityCount} cavit${cavityCount === 1 ? "y" : "ies"}`
+      : "No cavities noted";
+
+  const outerWidth = 220;
+  const outerHeight = 120;
+  const pad = 10;
+  const blockX = pad;
+  const blockY = pad + 6;
+  const blockW = outerWidth - pad * 2;
+  const blockH = outerHeight - pad * 2;
+
+  const showCavities = cavitiesRaw.length > 0;
+  let cavityRects = "";
+
+  if (showCavities) {
+    const maxShown = Math.min(cavitiesRaw.length, 6);
+    const cols = maxShown <= 3 ? maxShown : 3;
+    const rows = Math.ceil(maxShown / cols);
+    const gapX = 4;
+    const gapY = 4;
+    const cavW = (blockW - gapX * (cols + 1)) / cols;
+    const cavH = (blockH - gapY * (rows + 1)) / rows;
+
+    for (let i = 0; i < maxShown; i++) {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const cx = blockX + gapX * (col + 1) + cavW * col;
+      const cy = blockY + gapY * (row + 1) + cavH * row;
+      const dimsLabel = cavitiesRaw[i];
+
+      cavityRects += `
+        <g>
+          <rect x="${cx.toFixed(1)}" y="${cy.toFixed(
+        1
+      )}" width="${cavW.toFixed(1)}" height="${cavH.toFixed(
+        1
+      )}" rx="3" ry="3" fill="#eef2ff" stroke="#1d4ed8" stroke-width="0.8" />
+          <text x="${(cx + cavW / 2).toFixed(
+            1
+          )}" y="${(cy + cavH / 2).toFixed(
+        1
+      )}" text-anchor="middle" alignment-baseline="middle" font-size="8" fill="#1f2937">
+            ${htmlEscape(dimsLabel)}
+          </text>
+        </g>`;
+    }
+  }
+
+  const svg = `
+<div style="margin:6px 0 8px 0;">
+  <svg width="${outerWidth}" height="${outerHeight}" viewBox="0 0 ${outerWidth} ${outerHeight}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Foam layout preview">
+    <rect x="${blockX}" y="${blockY}" width="${blockW}" height="${blockH}" rx="6" ry="6" fill="#ffffff" stroke="#1d4ed8" stroke-width="1.2" />
+    ${cavityRects || ""}
+    <text x="${pad}" y="12" font-size="9" fill="#111827">${htmlEscape(
+      labelDims
+    )}</text>
+    <text x="${pad}" y="${outerHeight - 6}" font-size="9" fill="#4b5563">${htmlEscape(
+      labelCav
+    )}</text>
+  </svg>
+</div>
+<p style="margin:0 0 10px 0; font-size:11px; color:#6b7280;">
+  Not to scale — this is a simple top-view layout to help visualize the block and cavity arrangement.
+</p>`;
+
+  return `
+<h3 style="margin:10px 0 3px 0; font-size:13px; color:#1d4ed8;">Visual layout preview (auto-generated)</h3>
+${svg}`;
 }
 
 export function renderQuoteEmail(input: QuoteRenderInput): string {
@@ -332,7 +429,8 @@ ${missingList}`
 
   // Price-break HTML:
   // - If price_breaks are provided, show a compact table.
-  // - Otherwise, fall back to a simple sentence.
+  // - Otherwise, we now leave this blank (no extra one-line summary) since
+  //   your orchestrator is generating breaks for real quotes.
   let priceBreakHtml: string;
   if (priceBreaks && priceBreaks.length > 0) {
     const rows = priceBreaks
@@ -370,21 +468,9 @@ ${missingList}`
     } else {
       priceBreakHtml = "";
     }
-  } else if (piecePrice != null) {
-    const qtyLabel = qty || "this";
-    priceBreakHtml = `At ${htmlEscape(
-      String(qtyLabel)
-    )} pcs, this works out to about <span style="font-weight:600;">${fmtMoney(
-      piecePrice
-    )}</span> per piece.`;
-  } else if (qty) {
-    priceBreakHtml = htmlEscape(
-      `At ${qty} pcs, this works out to the total shown above.`
-    );
   } else {
-    priceBreakHtml = htmlEscape(
-      "This works out to the total shown above based on the specs provided."
-    );
+    // No table: leave blank (no "At X pcs..." line)
+    priceBreakHtml = "";
   }
 
   // Design optimization block (now always has content because of fallback)
@@ -406,6 +492,9 @@ ${missingList}`
           These are optional tweaks based on typical foam applications. If one looks interesting, reply with which option you want to explore and any drop-height or fragility details you can share.
         </p>`;
   }
+
+  // Visual layout preview HTML (may be empty if dims missing)
+  const visualPreviewHtml = buildVisualPreview(specs, facts);
 
   return `<!DOCTYPE html>
 <html>
@@ -538,6 +627,8 @@ ${missingList}`
         <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
           For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best.
         </p>
+
+        ${visualPreviewHtml}
 
         ${designBlock}
 
