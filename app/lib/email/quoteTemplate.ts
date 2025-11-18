@@ -12,9 +12,9 @@
 // - Dynamic price-break table when provided
 // - Design optimization ideas pulled from facts.opt_suggestions,
 //   with sensible fallback suggestions when AI returns nothing
-// - Visual layout preview section with a "View layout diagram" button
-//   that links to a web-based SVG diagram
-// - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file
+// - Visual layout preview link that points to NEXT_PUBLIC_BASE_URL
+//   (defaulting to https://api.alex-io.com)
+// - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file, View layout
 
 export type QuoteSpecs = {
   L_in: number | null;
@@ -137,9 +137,10 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   const thicknessLabel =
     thicknessVal != null ? `${thicknessVal}" under part` : "";
 
-  const baseUrl =
-    process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") ||
-    "https://alex-io.com";
+  // IMPORTANT: default to api.alex-io.com so we avoid root-domain issues.
+  const baseUrl = (
+    process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com"
+  ).replace(/\/+$/, "");
 
   const printUrl =
     quoteNo !== ""
@@ -389,37 +390,6 @@ ${missingList}`
     );
   }
 
-  // --- Visual layout link construction ---
-  const dimsParam =
-    specs.L_in && specs.W_in && specs.H_in
-      ? `${specs.L_in}x${specs.W_in}x${specs.H_in}`
-      : "";
-  const cavityDimsParam =
-    cavityDims.length > 0 ? cavityDims.join("|") : "";
-
-  const layoutQueryParts: string[] = [];
-  if (quoteNo) {
-    layoutQueryParts.push(`quote_no=${encodeURIComponent(quoteNo)}`);
-  }
-  if (dimsParam) {
-    layoutQueryParts.push(`dims=${encodeURIComponent(dimsParam)}`);
-  }
-  if (qty) {
-    layoutQueryParts.push(
-      `qty=${encodeURIComponent(String(qty))}`
-    );
-  }
-  if (cavityDimsParam) {
-    layoutQueryParts.push(
-      `cavityDims=${encodeURIComponent(cavityDimsParam)}`
-    );
-  }
-
-  const layoutUrl =
-    layoutQueryParts.length > 0
-      ? `${baseUrl}/quote/layout?${layoutQueryParts.join("&")}`
-      : undefined;
-
   // Design optimization block (now always has content because of fallback)
   let designBlock = "";
   if (optSuggestions.length > 0) {
@@ -439,6 +409,20 @@ ${missingList}`
           These are optional tweaks based on typical foam applications. If one looks interesting, reply with which option you want to explore and any drop-height or fragility details you can share.
         </p>`;
   }
+
+  // Layout URL: use baseUrl (which is now rooted on api.alex-io.com).
+  const layoutUrl = (() => {
+    if (!quoteNo || !specs.L_in || !specs.W_in || !specs.H_in) return undefined;
+    const dims = `${specs.L_in}x${specs.W_in}x${specs.H_in}`;
+    const cavStr = cavityDims.length ? cavityDims.join(";") : "";
+    let url = `${baseUrl}/quote/layout?quote_no=${encodeURIComponent(
+      quoteNo
+    )}&dims=${encodeURIComponent(dims)}`;
+    if (cavStr) {
+      url += `&cavities=${encodeURIComponent(cavStr)}`;
+    }
+    return url;
+  })();
 
   return `<!DOCTYPE html>
 <html>
@@ -568,42 +552,20 @@ ${missingList}`
           ${priceBreakHtml}
         </div>
 
-        <!-- New: Visual layout preview section -->
-        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Visual layout preview (auto-generated)</h3>
-        <p style="margin:0 0 4px 0; font-size:12px; color:#111827;">
-          Block: ${outsideSize || "—"}<br />
-          Cavities: ${htmlEscape(cavityLabel)}
-        </p>
-        ${
-          layoutUrl
-            ? `<a
-            href="${layoutUrl}"
-            style="
-              display:inline-block;
-              padding:6px 12px;
-              border-radius:999px;
-              background:${lightBlueBg};
-              color:${darkBlue};
-              font-size:12px;
-              font-weight:500;
-              text-decoration:none;
-              border:1px solid ${lightBlueBorder};
-              margin:0 0 4px 0;
-            "
-          >
-            View layout diagram
-          </a>`
-            : ""
-        }
-        <p style="margin:0 0 10px 0; font-size:11px; color:#6b7280;">
-          Not to scale — this is a simple top-view style summary to help visualize the block and cavity arrangement.
-        </p>
-
         <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
           For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best.
         </p>
 
         ${designBlock}
+
+        ${
+          layoutUrl
+            ? `<h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Visual layout preview (auto-generated)</h3>
+        <p style="margin:0 0 6px 0; font-size:12px; color:#4b5563;">
+          Open a simple top-view layout showing the block and cavity arrangement.
+        </p>`
+            : ""
+        }
 
         <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
           <!-- Forward: dark blue -->
@@ -681,6 +643,27 @@ ${missingList}`
           >
             Upload sketch / file
           </a>
+
+          ${
+            layoutUrl
+              ? `<a
+            href="${layoutUrl}"
+            style="
+              display:inline-block;
+              padding:8px 14px;
+              border-radius:999px;
+              background:${lightBlueBg};
+              color:${darkBlue};
+              font-size:12px;
+              font-weight:500;
+              text-decoration:none;
+              border:1px solid ${lightBlueBorder};
+            "
+          >
+            Open layout preview
+          </a>`
+              : ""
+          }
         </div>
 
 ${sketchLine}
