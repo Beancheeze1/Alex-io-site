@@ -10,6 +10,7 @@
 // - Skiving row in Pricing + red callout note if skiving is needed
 // - Bold per-piece price in Price breaks
 // - Dynamic price-break table when provided
+// - Design optimization ideas pulled from facts.opt_suggestions
 // - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file
 
 export type QuoteSpecs = {
@@ -44,7 +45,7 @@ export type QuotePricing = {
   order_ci_with_waste?: number | null;
   used_min_charge?: boolean | null;
   raw?: any; // raw calc payload (optional)
-  price_breaks?: PriceBreakRow[] | null; // NEW: dynamic price breaks
+  price_breaks?: PriceBreakRow[] | null; // dynamic price breaks
 };
 
 export type QuoteRenderInput = {
@@ -216,10 +217,10 @@ ${missingList}`
 
   // Status pill (always show, default draft)
   const rawStatus =
-    (input.status ?? 
+    (input.status ??
       (typeof (facts as any).status === "string"
         ? (facts as any).status
-        : undefined) ?? 
+        : undefined) ??
       "") || "draft";
   const statusValue = rawStatus.trim().toLowerCase();
   let statusBg = "#e5e7eb";
@@ -270,6 +271,15 @@ ${missingList}`
   } else {
     cavityLabel = "None noted";
   }
+
+  // Design optimization ideas from facts.opt_suggestions
+  const optSuggestionsRaw = Array.isArray((facts as any).opt_suggestions)
+    ? ((facts as any).opt_suggestions as any[])
+    : [];
+  const optSuggestions = optSuggestionsRaw
+    .map((s) => (typeof s === "string" ? s.trim() : ""))
+    .filter((s) => s.length > 0)
+    .slice(0, 5);
 
   // Shared colors (used by tables + price breaks)
   const lightBlueBg = "#eef2ff";
@@ -332,6 +342,26 @@ ${missingList}`
     priceBreakHtml = htmlEscape(
       "This works out to the total shown above based on the specs provided."
     );
+  }
+
+  // Design optimization block
+  let designBlock = "";
+  if (optSuggestions.length > 0) {
+    const items = optSuggestions
+      .map(
+        (s) =>
+          `<li style="margin:2px 0;">${htmlEscape(s)}</li>`
+      )
+      .join("\n");
+
+    designBlock = `
+        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Design optimization ideas</h3>
+        <ul style="margin:0 0 6px 18px; padding:0; font-size:12px; color:#111827; list-style:disc;">
+          ${items}
+        </ul>
+        <p style="margin:0 0 10px 0; font-size:11px; color:#4b5563;">
+          These are optional tweaks based on typical foam applications. If one looks interesting, reply with which option you want to explore and any drop-height or fragility details you can share.
+        </p>`;
   }
 
   return `<!DOCTYPE html>
@@ -465,6 +495,8 @@ ${missingList}`
         <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
           For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best.
         </p>
+
+        ${designBlock}
 
         <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
           <!-- Forward: dark blue -->

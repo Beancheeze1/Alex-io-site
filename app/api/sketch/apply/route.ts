@@ -17,7 +17,8 @@
 //   - Calls /api/quotes/calc to get pricing
 //   - Uses renderQuoteEmail to build an updated email
 //   - Sends email via /api/msgraph/send
-//   - Stores sketch-derived dims/qty/cavities/material into memory under quote_no
+//   - Stores sketch-derived dims/qty/cavities/material (and optimizer ideas)
+//     into memory under quote_no
 //
 // If the quote row has no email, we fall back to NEXT_PUBLIC_SALES_FORWARD_TO
 // (your sales inbox) instead of throwing an error.
@@ -129,6 +130,99 @@ async function calcQuoteCI(opts: {
   const j = await r.json().catch(() => ({} as any));
   if (!r.ok || !j.ok) return null;
   return j.result;
+}
+
+// AI Design Optimizer for sketch flows.
+// Mirrors the orchestrator version at a high level but uses a simpler facts shape.
+async function aiDesignSuggestionsFromSketch(
+  model: string,
+  facts: {
+    dims: string | null;
+    qty: number | null;
+    material: string | null;
+    density: string | null;
+    cavityCount: number | null;
+    cavityDims: string[];
+  },
+  calc: any
+): Promise<string[] | null> {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) return null;
+
+  try {
+    const payload = {
+      ...facts,
+      piece_ci: calc?.piece_ci ?? null,
+      order_ci: calc?.order_ci_with_waste ?? calc?.order_ci ?? null,
+      total:
+        calc?.price_total ?? calc?.total ?? calc?.order_total ?? null,
+    };
+
+    const prompt = `
+You are a foam packaging estimator.
+
+You will be given JSON for a sketch-based foam quote:
+- dims: outside size string like "12x10x2"
+- qty: pieces
+- material + density
+- cavityCount / cavityDims
+- piece_ci / order_ci / total
+
+Suggest a few practical, realistic ways to optimize cost OR performance.
+
+Guidelines:
+- Focus on knobs foam buyers actually adjust (material family, density, thickness, cavity layout, or quantity).
+- Assume normal drop heights (under ~36") unless clearly extreme.
+- Avoid generic statements like "talk to your vendor".
+- Keep each idea to one short sentence.
+- Do not contradict the current design; just suggest variations or options.
+
+Return ONLY JSON:
+{
+  "suggestions": [
+    "short bullet...",
+    "short bullet..."
+  ]
+}
+
+Aim for 2–4 ideas max.
+
+Sketch quote data (JSON):
+${JSON.stringify(payload, null, 2)}
+    `.trim();
+
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: prompt,
+        max_output_tokens: 220,
+        temperature: 0.3,
+      }),
+    });
+
+    const raw = await r.text();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end === -1) return null;
+
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    if (!Array.isArray(parsed.suggestions)) return null;
+
+    const cleaned = parsed.suggestions
+      .map((s: any) => (typeof s === "string" ? s.trim() : ""))
+      .filter((s: string) => s.length > 0)
+      .slice(0, 4);
+
+    return cleaned.length ? cleaned : null;
+  } catch (e) {
+    console.error("aiDesignSuggestionsFromSketch failed:", e);
+    return null;
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -315,7 +409,7 @@ export async function POST(req: NextRequest) {
       return err("calc_failed", { quoteId: quote.id }, 500);
     }
 
-    // 5.5) Store sketch facts in memory keyed by quote_no
+    // 5.5) AI Design Optimizer from sketch context
     const cavityCount =
       parsed.cavityCount != null
         ? parsed.cavityCount
@@ -323,6 +417,29 @@ export async function POST(req: NextRequest) {
         ? cavities.length
         : null;
 
+    let optSuggestions: string[] | null = null;
+    try {
+      optSuggestions = await aiDesignSuggestionsFromSketch(
+        "gpt-4.1-mini",
+        {
+          dims: mergedDims || null,
+          qty: mergedQty || null,
+          material: safeMaterial.name || null,
+          density:
+            parsed.density ??
+            (safeMaterial.density_lb_ft3 != null
+              ? `${safeMaterial.density_lb_ft3}lb`
+              : null),
+          cavityCount,
+          cavityDims: cavities || [],
+        },
+        calc
+      );
+    } catch (e) {
+      console.error("aiDesignSuggestionsFromSketch (apply) failed:", e);
+    }
+
+    // 5.6) Store sketch facts in memory keyed by quote_no
     const sketchFacts = {
       fromSketch: true,
       quote_id: quote.id,
@@ -344,6 +461,8 @@ export async function POST(req: NextRequest) {
           : null,
       kerf_pct: safeMaterial.kerf_pct,
       min_charge: safeMaterial.min_charge,
+      // NEW: design optimization ideas from sketch
+      opt_suggestions: optSuggestions || undefined,
     };
 
     try {
@@ -411,6 +530,8 @@ export async function POST(req: NextRequest) {
             : null,
         kerf_pct: safeMaterial.kerf_pct,
         min_charge: safeMaterial.min_charge,
+        // NEW: pass optimizer ideas into template facts
+        opt_suggestions: optSuggestions || undefined,
       },
     };
 

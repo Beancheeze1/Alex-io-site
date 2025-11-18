@@ -11,7 +11,8 @@
 //   and only store line items once material_id is known.
 // - Also load + save facts under quote_no so sketch auto-quote
 //   data (dims/qty/cavities/material) is available on follow-up emails.
-// - NEW: Dynamic price-break generation for multiple quantities.
+// - Dynamic price-break generation for multiple quantities.
+// - NEW: AI Design Optimizer suggestions stored as facts.opt_suggestions.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
@@ -236,7 +237,7 @@ async function fetchCalcQuote(opts: {
   return j.result;
 }
 
-// NEW: build dynamic price breaks around the current quantity.
+// Dynamic price breaks around the current quantity.
 // Uses the same /api/quotes/calc route for each quantity.
 type PriceBreak = {
   qty: number;
@@ -258,7 +259,6 @@ async function buildPriceBreaks(
   const baseQty = base.qty;
   if (!baseQty || baseQty <= 0) return null;
 
-  // You can tweak these factors if you want different break steps.
   const factors = [1, 2, 3, 5, 10];
   const seen = new Set<number>();
   const out: PriceBreak[] = [];
@@ -282,15 +282,13 @@ async function buildPriceBreaks(
         calc.total ??
         calc.order_total ??
         0) as number;
-    const piece =
-      total && q > 0 ? total / q : null;
+    const piece = total && q > 0 ? total / q : null;
 
     out.push({
       qty: q,
       total,
       piece,
-      used_min_charge:
-        (calc.min_charge_applied ?? null) as boolean | null
+      used_min_charge: (calc.min_charge_applied ?? null) as boolean | null
     });
   }
 
@@ -445,7 +443,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 }
 
 /* ============================================================
-   LLM helpers (facts + opener)
+   LLM helpers (facts + opener + optimizer)
    ============================================================ */
 
 async function aiParseFacts(
@@ -516,10 +514,6 @@ ${body}
   }
 }
 
-/* ============================================================
-   LLM opener
-   ============================================================ */
-
 const HUMAN_OPENERS = [
   "Appreciate the details—once we lock a few specs I’ll price this out.",
   "Thanks for sending this—happy to quote it as soon as I confirm a couple items.",
@@ -580,6 +574,100 @@ ${lastInbound}
     const clean = String(txt || "").replace(/\s+/g, " ").trim();
     return clean || null;
   } catch {
+    return null;
+  }
+}
+
+// NEW: AI Design Optimizer.
+// Given facts + calc, suggest a few practical tweaks (material / thickness / qty / layout).
+async function aiDesignSuggestions(
+  model: string,
+  facts: Mem,
+  calc: any
+): Promise<string[] | null> {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) return null;
+
+  try {
+    const dims = facts.dims || null;
+    const qty = facts.qty || null;
+    const material = facts.material_name || facts.material || null;
+    const density = facts.density || null;
+    const cavityCount = facts.cavityCount ?? null;
+    const cavityDims = Array.isArray(facts.cavityDims) ? facts.cavityDims : [];
+    const pieceCi = calc?.piece_ci ?? null;
+    const orderCi = calc?.order_ci_with_waste ?? calc?.order_ci ?? null;
+    const total =
+      calc?.price_total ?? calc?.total ?? calc?.order_total ?? null;
+
+    const payload = {
+      dims,
+      qty,
+      material,
+      density,
+      cavityCount,
+      cavityDims,
+      piece_ci: pieceCi,
+      order_ci: orderCi,
+      total
+    };
+
+    const prompt = `
+You are a foam packaging estimator.
+
+You will be given a JSON blob of the current quote specs and volume/price info.
+Think like a senior packaging engineer: suggest a few practical, realistic ways to
+optimize cost OR performance (but not both at once per bullet).
+
+- Focus on things foam buyers actually tweak: material family, density, thickness, cavity layout, or quantity.
+- Assume normal drop heights (under ~36") unless the user says otherwise.
+- Avoid generic fluff like "shop around" or "talk to sales".
+- Do NOT change the basic size/footprint unless clearly implied by the data.
+
+Return ONLY valid JSON:
+{
+  "suggestions": [
+    "short bullet sentence...",
+    "another short bullet..."
+  ]
+}
+
+Aim for 2–4 suggestions max.
+
+Current quote (JSON):
+${JSON.stringify(payload, null, 2)}
+    `.trim();
+
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`
+      },
+      body: JSON.stringify({
+        model,
+        input: prompt,
+        max_output_tokens: 220,
+        temperature: 0.3
+      })
+    });
+
+    const raw = await r.text();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end === -1) return null;
+
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    if (!Array.isArray(parsed.suggestions)) return null;
+
+    const cleaned = parsed.suggestions
+      .map((s: any) => (typeof s === "string" ? s.trim() : ""))
+      .filter((s: string) => s.length > 0)
+      .slice(0, 4);
+
+    return cleaned.length ? cleaned : null;
+  } catch (e) {
+    console.error("aiDesignSuggestions failed:", e);
     return null;
   }
 }
@@ -713,6 +801,8 @@ export async function POST(req: NextRequest) {
 
     let calc: any = null;
     let priceBreaks: PriceBreak[] | null = null;
+    let optSuggestions: string[] | null = null;
+
     const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
     if (canCalc) {
@@ -724,8 +814,8 @@ export async function POST(req: NextRequest) {
         round_to_bf: false
       });
 
-      // Build price breaks only if we have a base calc and we're not in dryRun
       if (calc && !dryRun) {
+        // 1) Price breaks
         priceBreaks = await buildPriceBreaks(
           {
             dims: specs.dims as string,
@@ -736,6 +826,14 @@ export async function POST(req: NextRequest) {
           },
           calc
         );
+
+        // 2) AI Design Optimizer suggestions
+        optSuggestions = await aiDesignSuggestions("gpt-4.1-mini", merged, calc);
+        if (optSuggestions && optSuggestions.length) {
+          merged.opt_suggestions = optSuggestions;
+          if (threadKey) await saveFacts(threadKey, merged);
+          if (merged.quote_no) await saveFacts(merged.quote_no, merged);
+        }
       }
     }
 
@@ -849,7 +947,7 @@ export async function POST(req: NextRequest) {
         used_min_charge: calc?.min_charge_applied,
         // raw calc object so the template can surface skiving, etc.
         raw: calc,
-        // NEW: pass computed price breaks through to the template
+        // pass computed price breaks through to the template
         price_breaks: priceBreaks || undefined
       },
       missing: (() => {
