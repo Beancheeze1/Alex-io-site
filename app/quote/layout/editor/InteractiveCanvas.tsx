@@ -1,10 +1,9 @@
 // app/quote/layout/editor/InteractiveCanvas.tsx
 //
 // SVG-based canvas that can render the block + cavities
-// and supports simple click-to-select and drag-to-move.
+// and supports click-to-select, drag-to-move, and drag-to-resize.
 //
-// This does NOT hook into any page yet — next step is to
-// import it into app/quote/layout/page.tsx and feed it a LayoutModel.
+// This is wired by the parent via LayoutModel + callbacks.
 
 "use client";
 
@@ -16,14 +15,30 @@ type Props = {
   selectedId: string | null;
   // renamed to avoid Next.js "on*" Server Action warning
   selectAction: (id: string | null) => void;
+  /**
+   * Multi-purpose:
+   *  - move:   moveAction("cav-1", xNorm, yNorm)
+   *  - resize: moveAction("resize:cav-1", lengthNorm, widthNorm)
+   */
   moveAction: (id: string, xNorm: number, yNorm: number) => void;
 };
 
-type DragState = {
-  id: string;
-  offsetX: number;
-  offsetY: number;
-} | null;
+type DragState =
+  | {
+      kind: "move";
+      id: string;
+      offsetX: number;
+      offsetY: number;
+    }
+  | {
+      kind: "resize";
+      id: string;
+      startMouseX: number;
+      startMouseY: number;
+      startLengthIn: number;
+      startWidthIn: number;
+    }
+  | null;
 
 export default function InteractiveCanvas({
   layout,
@@ -46,6 +61,7 @@ export default function InteractiveCanvas({
     canvasHeight
   );
 
+  // Block pixel dimensions (directly from inches × scale)
   const blockPx = {
     width: block.lengthIn * scale,
     height: block.widthIn * scale,
@@ -56,7 +72,10 @@ export default function InteractiveCanvas({
     y: (canvasHeight - blockPx.height) / 2,
   };
 
-  const handleMouseDown = (e: MouseEvent<SVGRectElement>, cavity: Cavity) => {
+  const handleCavityMouseDown = (
+    e: MouseEvent<SVGRectElement>,
+    cavity: Cavity
+  ) => {
     e.stopPropagation();
     if (!svgRef.current) return;
 
@@ -68,9 +87,29 @@ export default function InteractiveCanvas({
     const cavY = blockOffset.y + cavity.y * blockPx.height;
 
     setDrag({
+      kind: "move",
       id: cavity.id,
       offsetX: ptX - cavX,
       offsetY: ptY - cavY,
+    });
+    selectAction(cavity.id);
+  };
+
+  const handleResizeMouseDown = (e: MouseEvent<SVGRectElement>, cavity: Cavity) => {
+    e.stopPropagation();
+    if (!svgRef.current) return;
+
+    const svgRect = svgRef.current.getBoundingClientRect();
+    const ptX = e.clientX - svgRect.left;
+    const ptY = e.clientY - svgRect.top;
+
+    setDrag({
+      kind: "resize",
+      id: cavity.id,
+      startMouseX: ptX,
+      startMouseY: ptY,
+      startLengthIn: cavity.lengthIn,
+      startWidthIn: cavity.widthIn,
     });
     selectAction(cavity.id);
   };
@@ -81,13 +120,34 @@ export default function InteractiveCanvas({
     const ptX = e.clientX - svgRect.left;
     const ptY = e.clientY - svgRect.top;
 
-    const cavX = ptX - drag.offsetX;
-    const cavY = ptY - drag.offsetY;
+    if (drag.kind === "move") {
+      const cavX = ptX - drag.offsetX;
+      const cavY = ptY - drag.offsetY;
 
-    const xNorm = (cavX - blockOffset.x) / blockPx.width;
-    const yNorm = (cavY - blockOffset.y) / blockPx.height;
+      const xNorm = (cavX - blockOffset.x) / blockPx.width;
+      const yNorm = (cavY - blockOffset.y) / blockPx.height;
 
-    moveAction(drag.id, xNorm, yNorm);
+      moveAction(drag.id, xNorm, yNorm);
+      return;
+    }
+
+    // Resize mode: convert mouse delta to inches using the same scale.
+    if (drag.kind === "resize") {
+      const deltaXpx = ptX - drag.startMouseX;
+      const deltaYpx = ptY - drag.startMouseY;
+
+      const deltaLIn = deltaXpx / scale;
+      const deltaWIn = deltaYpx / scale;
+
+      const newLength = Math.max(0.25, drag.startLengthIn + deltaLIn);
+      const newWidth = Math.max(0.25, drag.startWidthIn + deltaWIn);
+
+      const lengthNorm = newLength / (block.lengthIn || 1);
+      const widthNorm = newWidth / (block.widthIn || 1);
+
+      moveAction(`resize:${drag.id}`, lengthNorm, widthNorm);
+      return;
+    }
   };
 
   const handleMouseUp = () => {
@@ -101,8 +161,9 @@ export default function InteractiveCanvas({
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
       <div className="mb-2 text-xs font-medium text-slate-600">
-        Drag the cavities to adjust the layout. This is not to scale in absolute
-        inches, but each cavity is proportional to the block.
+        Drag cavities to adjust placement, or drag the small handle at the
+        corner to resize. The drawing is a top view, scaled to the block’s
+        length and width in inches.
       </div>
 
       <div className="overflow-hidden rounded-xl bg-white">
@@ -139,15 +200,19 @@ export default function InteractiveCanvas({
 
           {/* Cavities */}
           {layout.cavities.map((cavity) => {
-            const cavWidth =
-              (cavity.lengthIn / block.lengthIn) * blockPx.width;
-            const cavHeight =
-              (cavity.widthIn / block.widthIn) * blockPx.height;
+            // Physical to pixel using scale (true proportional to inches).
+            const cavWidth = cavity.lengthIn * scale;
+            const cavHeight = cavity.widthIn * scale;
 
             const cavX = blockOffset.x + cavity.x * blockPx.width;
             const cavY = blockOffset.y + cavity.y * blockPx.height;
 
             const isSelected = cavity.id === selectedId;
+
+            // Resize handle (bottom-right corner)
+            const handleSize = 10;
+            const handleX = cavX + cavWidth - handleSize / 2;
+            const handleY = cavY + cavHeight - handleSize / 2;
 
             return (
               <g key={cavity.id}>
@@ -161,8 +226,9 @@ export default function InteractiveCanvas({
                   fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
                   stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
                   strokeWidth={isSelected ? 2 : 1}
-                  onMouseDown={(e) => handleMouseDown(e, cavity)}
+                  onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
                 />
+                {/* Label inside cavity */}
                 <text
                   x={cavX + cavWidth / 2}
                   y={cavY + cavHeight / 2}
@@ -172,6 +238,22 @@ export default function InteractiveCanvas({
                 >
                   {cavity.lengthIn}×{cavity.widthIn}×{cavity.depthIn}"
                 </text>
+
+                {/* Resize handle (only show when selected to keep it clean) */}
+                {isSelected && (
+                  <rect
+                    x={handleX}
+                    y={handleY}
+                    width={handleSize}
+                    height={handleSize}
+                    rx={3}
+                    ry={3}
+                    fill="#1d4ed8"
+                    stroke="#ffffff"
+                    strokeWidth={1}
+                    onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
+                  />
+                )}
               </g>
             );
           })}
@@ -179,8 +261,9 @@ export default function InteractiveCanvas({
       </div>
 
       <div className="mt-2 text-[10px] text-slate-500">
-        Not to scale — this is a proportional top-view layout to help visualize
-        block and cavity placement.
+        Proportional top-view layout — block and cavities are scaled to each
+        other based on their inch dimensions. Great for quick visual checks
+        before going to full CAD.
       </div>
     </div>
   );

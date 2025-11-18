@@ -11,13 +11,13 @@ export type BlockDims = {
 
 export type Cavity = {
   id: string;
-  label: string;       // e.g. "3×2×1 in"
+  label: string; // e.g. "3×2×1 in"
   lengthIn: number;
   widthIn: number;
   depthIn: number;
-  // Normalized 0–1 coordinates inside the block footprint:
-  x: number;           // left
-  y: number;           // top
+  // Normalized 0–1 coordinates inside the block footprint (top-left origin):
+  x: number; // left
+  y: number; // top
 };
 
 export type LayoutModel = {
@@ -51,10 +51,7 @@ export function parseBlockDims(dims: string): BlockDims | null {
  *   "3x2x1" or '3x2x1:deep'
  * into Cavity objects. `index` is used to stagger them.
  */
-export function parseCavity(
-  spec: string,
-  index: number
-): Cavity | null {
+export function parseCavity(spec: string, index: number): Cavity | null {
   if (!spec) return null;
 
   const [dimsPart, labelPart] = spec.split(":");

@@ -40,6 +40,12 @@ function formatCavityLegendLabel(
   return { chip, text, footprint };
 }
 
+type SizeOverride = {
+  lengthIn: number;
+  widthIn: number;
+  depthIn: number;
+};
+
 export default function LayoutPage({
   searchParams,
 }: {
@@ -82,17 +88,95 @@ export default function LayoutPage({
       : "Q-AI-EXAMPLE";
 
   const block = layout.block;
-  const cavities = layout.cavities;
 
-  // === NEW: drag handler passed to InteractiveCanvas ===
+  // === NEW: per-cavity size overrides (for visual editor only) ===
+  const [sizeOverrides, setSizeOverrides] = React.useState<
+    Record<string, SizeOverride>
+  >({});
+
+  const effectiveLayout = React.useMemo(
+    () => ({
+      block: layout.block,
+      cavities: layout.cavities.map((c) => {
+        const o = sizeOverrides[c.id];
+        return o ? { ...c, ...o } : c;
+      }),
+    }),
+    [layout, sizeOverrides]
+  );
+
+  const cavities = effectiveLayout.cavities;
+
+  const selectedCavity =
+    selectedId != null
+      ? cavities.find((c) => c.id === selectedId) ?? null
+      : null;
+
+  // Move handler for drag (kept same behaviour, just wrapped)
   const moveCavity = React.useCallback(
     (id: string, xNorm: number, yNorm: number) => {
-      // keep the cavity inside the block [0,1] in both directions
       const clamp = (v: number) => Math.max(0, Math.min(1, v));
       updateCavityPosition(id, clamp(xNorm), clamp(yNorm));
     },
     [updateCavityPosition]
   );
+
+  // Size change helpers (visual only, doesn’t touch DB/pricing)
+  const handleSizeInputChange = (
+    base: { id: string; lengthIn: number; widthIn: number; depthIn: number },
+    field: keyof SizeOverride,
+    raw: string
+  ) => {
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0) return;
+
+    setSizeOverrides((prev) => {
+      const existing =
+        prev[base.id] ?? {
+          lengthIn: base.lengthIn,
+          widthIn: base.widthIn,
+          depthIn: base.depthIn,
+        };
+      return {
+        ...prev,
+        [base.id]: {
+          ...existing,
+          [field]: v,
+        },
+      };
+    });
+  };
+
+  const applyPresetToSelected = (
+    base: { id: string; lengthIn: number; widthIn: number; depthIn: number },
+    preset: SizeOverride
+  ) => {
+    setSizeOverrides((prev) => ({
+      ...prev,
+      [base.id]: {
+        lengthIn: preset.lengthIn,
+        widthIn: preset.widthIn,
+        depthIn: preset.depthIn,
+      },
+    }));
+  };
+
+  const resetSelectedSize = (
+    base: { id: string; lengthIn: number; widthIn: number; depthIn: number }
+  ) => {
+    setSizeOverrides((prev) => {
+      const next = { ...prev };
+      delete next[base.id];
+      return next;
+    });
+  };
+
+  const presets: SizeOverride[] = [
+    { lengthIn: 1, widthIn: 1, depthIn: 1 },
+    { lengthIn: 2, widthIn: 2, depthIn: 1 },
+    { lengthIn: 3, widthIn: 2, depthIn: 1 },
+    { lengthIn: 4, widthIn: 4, depthIn: 2 },
+  ];
 
   return (
     <main className="min-h-screen bg-slate-100 flex items-center justify-center px-4 py-10">
@@ -116,9 +200,8 @@ export default function LayoutPage({
             </div>
           </div>
           <div className="text-xs text-slate-500">
-            Drag the cavities in the preview to experiment with spacing and
-            placement. The drawing is proportional to the block, not to exact
-            scale in inches.
+            Cavities are drawn to scale relative to the block (length × width).
+            Drag them around to experiment with spacing and placement.
           </div>
         </div>
 
@@ -134,7 +217,7 @@ export default function LayoutPage({
             </div>
 
             <InteractiveCanvas
-              layout={layout}
+              layout={effectiveLayout}
               selectedId={selectedId}
               selectAction={selectCavity}
               moveAction={moveCavity}
@@ -143,11 +226,11 @@ export default function LayoutPage({
             <p className="mt-3 text-[11px] text-slate-500 leading-snug">
               Cavities are sized by their length and width relative to the block
               and can be dragged around inside the footprint. Depth is shown in
-              the legend on the right.
+              the legend and size controls on the right.
             </p>
           </div>
 
-          {/* Legend / details */}
+          {/* Legend / details + tools */}
           <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 flex flex-col gap-4">
             <div>
               <div className="text-xs font-semibold text-slate-700 mb-1">
@@ -227,6 +310,95 @@ export default function LayoutPage({
                 </ul>
               )}
             </div>
+
+            {/* NEW: size controls + preset palette for selected cavity */}
+            {selectedCavity && (
+              <div className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-3">
+                <div className="text-[11px] font-semibold text-slate-700 mb-2">
+                  Adjust selected cavity ({selectedCavity.lengthIn}×
+                  {selectedCavity.widthIn}×{selectedCavity.depthIn}")
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-[11px]">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-slate-500">Length</span>
+                    <input
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      className="w-full rounded-md border border-slate-300 px-1.5 py-1 text-[11px] text-slate-800"
+                      value={selectedCavity.lengthIn}
+                      onChange={(e) =>
+                        handleSizeInputChange(
+                          selectedCavity,
+                          "lengthIn",
+                          e.target.value
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-slate-500">Width</span>
+                    <input
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      className="w-full rounded-md border border-slate-300 px-1.5 py-1 text-[11px] text-slate-800"
+                      value={selectedCavity.widthIn}
+                      onChange={(e) =>
+                        handleSizeInputChange(
+                          selectedCavity,
+                          "widthIn",
+                          e.target.value
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-slate-500">Depth</span>
+                    <input
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      className="w-full rounded-md border border-slate-300 px-1.5 py-1 text-[11px] text-slate-800"
+                      value={selectedCavity.depthIn}
+                      onChange={(e) =>
+                        handleSizeInputChange(
+                          selectedCavity,
+                          "depthIn",
+                          e.target.value
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3 text-[11px] text-slate-500">
+                  Presets (apply to selected cavity)
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {presets.map((p, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() =>
+                        applyPresetToSelected(selectedCavity, p)
+                      }
+                      className="px-2 py-1 rounded-full border border-indigo-200 bg-indigo-50 text-[11px] text-indigo-700 font-medium hover:bg-indigo-100"
+                    >
+                      {p.lengthIn}×{p.widthIn}×{p.depthIn}"
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => resetSelectedSize(selectedCavity)}
+                    className="px-2 py-1 rounded-full border border-slate-200 bg-slate-50 text-[11px] text-slate-600 hover:bg-slate-100"
+                  >
+                    Reset to original
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="mt-2 border-t border-slate-200 pt-3">
               <div className="text-[11px] text-slate-500 leading-snug">
