@@ -17,7 +17,7 @@
 //   - Calls /api/quotes/calc to get pricing
 //   - Uses renderQuoteEmail to build an updated email
 //   - Sends email via /api/msgraph/send
-//   - Stores sketch-derived dims/qty/cavities into memory under quote_no
+//   - Stores sketch-derived dims/qty/cavities/material into memory under quote_no
 //
 // If the quote row has no email, we fall back to NEXT_PUBLIC_SALES_FORWARD_TO
 // (your sales inbox) instead of throwing an error.
@@ -327,12 +327,23 @@ export async function POST(req: NextRequest) {
       fromSketch: true,
       quote_id: quote.id,
       quote_no: quote.quote_no,
+      // dims / qty / cavities
       dims: mergedDims,
       qty: mergedQty,
       cavityDims: cavities,
       cavityCount,
       sketchNotes: parsed.notes || null,
       sketchAttachmentId: attachmentId,
+      // material context so orchestrator can reuse it later
+      material_id: safeMaterial.id,
+      material_name: safeMaterial.name,
+      material: safeMaterial.name,
+      density:
+        safeMaterial.density_lb_ft3 != null
+          ? `${safeMaterial.density_lb_ft3}lb`
+          : null,
+      kerf_pct: safeMaterial.kerf_pct,
+      min_charge: safeMaterial.min_charge,
     };
 
     try {
@@ -390,6 +401,16 @@ export async function POST(req: NextRequest) {
         sketchFactsKey: quote.quote_no,
         cavityCount,
         cavityDims: cavities,
+        // mirror key material context into template facts too
+        material_id: safeMaterial.id,
+        material_name: safeMaterial.name,
+        material: safeMaterial.name,
+        density:
+          safeMaterial.density_lb_ft3 != null
+            ? `${safeMaterial.density_lb_ft3}lb`
+            : null,
+        kerf_pct: safeMaterial.kerf_pct,
+        min_charge: safeMaterial.min_charge,
       },
     };
 

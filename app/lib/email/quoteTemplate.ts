@@ -90,6 +90,7 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   const { specs, material, pricing, missing } = input;
   const facts = input.facts || {};
 
+  // New: treat either a string flag or boolean flag as "from sketch"
   const fromSketch =
     (facts as any).from === "sketch-auto-quote" ||
     (facts as any).fromSketch === true;
@@ -169,8 +170,11 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
     `Please review the attached foam quote.\n\nQuote number: ${quoteNo || "(not set)"}`
   )}`;
 
+  // New: prefer caller's customerLine (from orchestrator / sketch) if provided
   const introLine =
-    "Thanks for the details—here’s a preliminary quote based on the information we have so far.";
+    input.customerLine && input.customerLine.trim().length > 0
+      ? input.customerLine.trim()
+      : "Thanks for the details—here’s a preliminary quote based on the information we have so far.";
 
   const missingList =
     missing && missing.length
@@ -199,10 +203,10 @@ ${missingList}`
 
   // Status pill (always show, default draft)
   const rawStatus =
-    (input.status ??
+    (input.status ?? 
       (typeof (facts as any).status === "string"
         ? (facts as any).status
-        : undefined) ??
+        : undefined) ?? 
       "") || "draft";
   const statusValue = rawStatus.trim().toLowerCase();
   let statusBg = "#e5e7eb";

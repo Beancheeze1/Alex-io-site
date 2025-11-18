@@ -7,10 +7,10 @@
 // - Quote calc via /api/quotes/calc
 // - Quote template rendering with missing-specs list
 // - Stable quoteNumber per thread
-// - NEW: Always store quote header when we have dims + qty + quoteNumber,
+// - Always store quote header when we have dims + qty + quoteNumber,
 //   and only store line items once material_id is known.
-// - NEW (Bundle 3): also load + save facts under quote_no so sketch auto-quote
-//   data (dims/qty/cavities) is available on follow-up emails.
+// - Also load + save facts under quote_no so sketch auto-quote
+//   data (dims/qty/cavities/material) is available on follow-up emails.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
@@ -71,7 +71,7 @@ function pickThreadContext(threadMsgs: any[] = []): string {
   return snippets.join("\n\n");
 }
 
-// NEW: detect Q-AI-* style quote numbers in subject/body so we can
+// Detect Q-AI-* style quote numbers in subject/body so we can
 // pull sketch facts that were stored under quote_no.
 function extractQuoteNo(text: string): string | null {
   if (!text) return null;
@@ -546,7 +546,7 @@ export async function POST(req: NextRequest) {
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
     const dryRun = !!p.dryRun;
 
-    // NEW: see if we can detect a quote_no in the subject so we can
+    // See if we can detect a quote_no in the subject so we can
     // pull sketch facts stored under that key.
     const subjectQuoteNo = extractQuoteNo(subject);
 
@@ -584,6 +584,12 @@ export async function POST(req: NextRequest) {
 
     merged = applyCavityNormalization(merged);
     merged.__turnCount = (merged.__turnCount || 0) + 1;
+
+    // If sketch facts indicated fromSketch, normalize to a string flag
+    // so the template can show the "from sketch" note.
+    if (merged.fromSketch && !merged.from) {
+      merged.from = "sketch-auto-quote";
+    }
 
     // Stable quote number per thread
     if (!merged.quoteNumber && !merged.quote_no) {
