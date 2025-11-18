@@ -14,25 +14,18 @@
 //   - Looks up the quote header + first quote item
 //   - If no quote item exists, creates one using a fallback material (1.7# PE)
 //   - Merges in dims / cavities from `parsed` (vision)
-//   - Updates the quote item dims/qty (and cavities when present)
 //   - Calls /api/quotes/calc to get pricing
 //   - Uses renderQuoteEmail to build an updated email
 //   - Sends email via /api/msgraph/send
+//   - NEW: stores sketch-derived dims/qty/cavities into memory under quote_no
 //
 // If the quote row has no email, we fall back to NEXT_PUBLIC_SALES_FORWARD_TO
 // (your sales inbox) instead of throwing an error.
-//
-// NEW:
-//   - Respects SKETCH_AUTO_QUOTE_ENABLED (if explicitly set to "false", only
-//     emails the sales inbox instead of the customer).
-//   - Persists merged dims/qty into quote_items so /quote printable + future
-//     replies see the updated geometry.
-//   - When cavityDims are present, stores them in quote_item_cavities using
-//     normalized numeric dimensions compatible with /api/quotes/calc.
 
 import { NextRequest, NextResponse } from "next/server";
-import { one, q } from "@/lib/db";
+import { one } from "@/lib/db";
 import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
+import { saveFacts } from "@/app/lib/memory";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -63,7 +56,6 @@ type QuoteRow = {
 };
 
 type QuoteItemRow = {
-  id: number;
   length_in: number;
   width_in: number;
   height_in: number;
@@ -167,37 +159,25 @@ export async function POST(req: NextRequest) {
 
     // Decide where to send the auto-quote email.
     // Prefer the quote's email; fall back to sales inbox if missing.
-    const salesInbox =
-      process.env.NEXT_PUBLIC_SALES_FORWARD_TO ||
-      process.env.NEXT_PUBLIC_FALLBACK_QUOTE_EMAIL ||
-      "";
-
-    const sketchAutoEnabled =
-      String(process.env.SKETCH_AUTO_QUOTE_ENABLED || "true")
-        .toLowerCase() !== "false";
-
-    let emailMode: "customer" | "sales_only" = "customer";
-    let toEmail: string | null = null;
-
-    if (sketchAutoEnabled && quote.email) {
-      // Normal path: send to customer (and they may CC/forward to sales as needed)
-      toEmail = quote.email;
-    } else {
-      // Safety rails: when disabled, or when quote email is missing,
-      // we send to sales inbox only.
-      emailMode = "sales_only";
-      toEmail = salesInbox || quote.email || null;
-    }
-
+    let toEmail: string | null = quote.email;
     if (!toEmail) {
-      // No customer email AND no configured fallback -> we can't send.
-      return err("quote_missing_email", { quoteNo }, 500);
+      const fallbackSales =
+        process.env.NEXT_PUBLIC_SALES_FORWARD_TO ||
+        process.env.NEXT_PUBLIC_FALLBACK_QUOTE_EMAIL ||
+        "";
+
+      if (!fallbackSales) {
+        // No customer email AND no configured fallback -> we can't send.
+        return err("quote_missing_email", { quoteNo }, 500);
+      }
+
+      toEmail = fallbackSales;
     }
 
     // 2) Load primary quote item (or create one with 1.7# PE fallback)
-    let item = await one<QuoteItemRow>(
+    let item: QuoteItemRow | null = await one<QuoteItemRow>(
       `
-      SELECT id, length_in, width_in, height_in, material_id, qty
+      SELECT length_in, width_in, height_in, material_id, qty
       FROM quote_items
       WHERE quote_id = $1
       ORDER BY id ASC
@@ -211,25 +191,21 @@ export async function POST(req: NextRequest) {
     if (!item) {
       // --- Fallback path: no item yet; create one using parsed dims/qty and 1.7# PE ---
       const fallbackDims =
-  parsed.dims && parsed.dims.trim() ? parsed.dims.trim() : null;
+        parsed.dims && parsed.dims.trim() ? parsed.dims.trim() : null;
+      const fallbackQty =
+        parsed.qty && parsed.qty > 0 ? parsed.qty : null;
 
-// If qty is missing but we have dims, fall back to 1 piece so we can still quote.
-// (We can revisit this default later if you want something else.)
-let fallbackQty =
-  parsed.qty && parsed.qty > 0 ? parsed.qty : 1;
-
-if (!fallbackDims) {
-  // We truly don't have enough info to safely create an item
-  return err(
-    "quote_item_not_found",
-    {
-      quoteId: quote.id,
-      reason: "no_item_and_missing_parsed_dims",
-    },
-    404
-  );
-}
-
+      if (!fallbackDims || !fallbackQty) {
+        // We don't have enough info to safely create an item
+        return err(
+          "quote_item_not_found",
+          {
+            quoteId: quote.id,
+            reason: "no_item_and_missing_parsed_dims_or_qty",
+          },
+          404
+        );
+      }
 
       // Find a fallback material ≈ 1.7# PE
       const fallbackMaterial = await one<MaterialRow>(
@@ -267,7 +243,7 @@ if (!fallbackDims) {
         INSERT INTO quote_items
           (quote_id, length_in, width_in, height_in, material_id, qty)
         VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, length_in, width_in, height_in, material_id, qty;
+        RETURNING length_in, width_in, height_in, material_id, qty;
         `,
         [quote.id, L, W, H, fallbackMaterial.id, fallbackQty]
       );
@@ -327,82 +303,6 @@ if (!fallbackDims) {
         ? parsed.cavityDims
         : [];
 
-    // Persist the merged dims/qty into quote_items so /quote + future replies
-    // see the geometry we actually priced.
-    try {
-      const dimsNums = parseDims(mergedDims);
-      await one(
-        `
-        UPDATE quote_items
-        SET length_in = $1,
-            width_in = $2,
-            height_in = $3,
-            qty = $4,
-            updated_at = now()
-        WHERE id = $5;
-        `,
-        [dimsNums.L, dimsNums.W, dimsNums.H, mergedQty, safeItem.id]
-      );
-    } catch (e) {
-      console.error("Failed to update quote_items from sketch:", e);
-    }
-
-    // When we have cavities from the sketch, mirror them into quote_item_cavities.
-    if (cavities.length > 0) {
-      try {
-        await q(
-          `DELETE FROM quote_item_cavities WHERE quote_item_id = $1;`,
-          [safeItem.id]
-        );
-
-        let idx = 0;
-        const totalCount =
-          parsed.cavityCount && parsed.cavityCount > 0
-            ? parsed.cavityCount
-            : 1;
-
-        for (const raw of cavities) {
-          const rawStr = String(raw || "").trim();
-          if (!rawStr) continue;
-
-          const isRound = /Ø|ø|\bdia\b|diameter/i.test(rawStr);
-          const cleaned = rawStr
-            .replace(/[Øø]/g, "")
-            .replace(/\bdia\b/gi, "")
-            .replace(/diameter/gi, "");
-
-          const cavNums = parseDims(cleaned);
-          const cavL = cavNums.L || 0;
-          let cavW = cavNums.W || 0;
-          const cavD = cavNums.H || 0;
-
-          if (!cavL || !cavD) {
-            continue;
-          }
-
-          if (isRound && !cavW) {
-            // For round cavities we treat diameter as L and W
-            cavW = cavL;
-          }
-
-          idx += 1;
-          const label = `C${idx}`;
-          const count = cavities.length === 1 ? totalCount : 1;
-
-          await q(
-            `
-            INSERT INTO quote_item_cavities
-              (quote_item_id, label, count, cav_length_in, cav_width_in, cav_depth_in)
-            VALUES ($1, $2, $3, $4, $5, $6);
-            `,
-            [safeItem.id, label, count, cavL, cavW, cavD]
-          );
-        }
-      } catch (e) {
-        console.error("Failed to update quote_item_cavities from sketch:", e);
-      }
-    }
-
     // 5) Re-run calc using merged dims / qty / cavities
     const calc = await calcQuoteCI({
       dims: mergedDims,
@@ -413,6 +313,32 @@ if (!fallbackDims) {
 
     if (!calc) {
       return err("calc_failed", { quoteId: quote.id }, 500);
+    }
+
+    // 5.5) NEW: store sketch facts in memory keyed by quote_no
+    const cavityCount =
+      parsed.cavityCount != null
+        ? parsed.cavityCount
+        : cavities.length > 0
+        ? cavities.length
+        : null;
+
+    const sketchFacts = {
+      fromSketch: true,
+      quote_id: quote.id,
+      quote_no: quote.quote_no,
+      dims: mergedDims,
+      qty: mergedQty,
+      cavityDims: cavities,
+      cavityCount,
+      sketchNotes: parsed.notes || null,
+      sketchAttachmentId: attachmentId,
+    };
+
+    try {
+      await saveFacts(quote.quote_no, sketchFacts);
+    } catch (e) {
+      console.error("saveFacts (sketch/apply) failed:", e);
     }
 
     // 6) Build email using the main template
@@ -444,14 +370,14 @@ if (!fallbackDims) {
       },
       pricing: {
         total:
-          (calc as any).price_total ??
-          (calc as any).total ??
-          (calc as any).order_total ??
+          calc.price_total ??
+          calc.total ??
+          calc.order_total ??
           0,
-        piece_ci: (calc as any).piece_ci ?? null,
-        order_ci: (calc as any).order_ci ?? null,
-        order_ci_with_waste: (calc as any).order_ci_with_waste ?? null,
-        used_min_charge: (calc as any).min_charge_applied ?? null,
+        piece_ci: calc.piece_ci ?? null,
+        order_ci: calc.order_ci ?? null,
+        order_ci_with_waste: calc.order_ci_with_waste ?? null,
+        used_min_charge: calc.min_charge_applied ?? null,
       },
       missing: [] as string[],
       facts: {
@@ -460,8 +386,7 @@ if (!fallbackDims) {
         from: "sketch-auto-quote",
         attachmentId,
         sketchParsed: parsed,
-        sketchAutoEnabled,
-        emailMode,
+        sketchFactsKey: quote.quote_no,
       },
     };
 
@@ -499,8 +424,6 @@ if (!fallbackDims) {
         quoteNo: quote.quote_no,
         attachmentId,
         toEmail,
-        emailMode,
-        sketchAutoEnabled,
         sent,
         calc,
         mergedDims,
