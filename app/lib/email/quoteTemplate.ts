@@ -10,7 +10,8 @@
 // - Skiving row in Pricing + red callout note if skiving is needed
 // - Bold per-piece price in Price breaks
 // - Dynamic price-break table when provided
-// - Design optimization ideas pulled from facts.opt_suggestions
+// - Design optimization ideas pulled from facts.opt_suggestions,
+//   with sensible fallback suggestions when AI returns nothing
 // - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file
 
 export type QuoteSpecs = {
@@ -26,7 +27,7 @@ export type QuoteSpecs = {
 
 export type QuoteMaterial = {
   name?: string | null;
-  density_lbft3?: number | null;
+  density_lb_ft3?: number | null;
   kerf_pct?: number | null;
   min_charge?: number | null;
 };
@@ -80,7 +81,7 @@ function fmtMoney(n: number | null | undefined) {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-      maximumFractionDigits: 2
+      maximumFractionDigits: 2,
     }).format(Number(n));
   } catch {
     return `$${Number(n).toFixed(2)}`;
@@ -149,8 +150,7 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
       : `${baseUrl}/sketch-upload`;
 
   const forwardToSalesEmail =
-    process.env.NEXT_PUBLIC_SALES_FORWARD_TO ||
-    "sales@example.com";
+    process.env.NEXT_PUBLIC_SALES_FORWARD_TO || "sales@example.com";
 
   const salesSubject =
     quoteNo !== ""
@@ -177,7 +177,9 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   )}?subject=${encodeURIComponent(
     salesSubject
   )}&body=${encodeURIComponent(
-    `Please review the attached foam quote.\n\nQuote number: ${quoteNo || "(not set)"}`
+    `Please review the attached foam quote.\n\nQuote number: ${
+      quoteNo || "(not set)"
+    }`
   )}`;
 
   // Prefer caller's customerLine (from orchestrator / sketch) if provided
@@ -276,10 +278,52 @@ ${missingList}`
   const optSuggestionsRaw = Array.isArray((facts as any).opt_suggestions)
     ? ((facts as any).opt_suggestions as any[])
     : [];
-  const optSuggestions = optSuggestionsRaw
+  let optSuggestions = optSuggestionsRaw
     .map((s) => (typeof s === "string" ? s.trim() : ""))
     .filter((s) => s.length > 0)
     .slice(0, 5);
+
+  // Fallback: if AI didn't give any suggestions, synthesize a couple
+  // simple, honest ideas from the actual specs so the block still appears.
+  if (optSuggestions.length === 0) {
+    const fallback: string[] = [];
+
+    // Quantity-based idea
+    if (qtyNum && qtyNum > 0) {
+      const q2 = qtyNum * 2;
+      const q3 = qtyNum * 3;
+      fallback.push(
+        `If your usage can support it, we can also check pricing at about ${q2}–${q3} pcs to see if a higher volume drops the per-piece price.`
+      );
+    }
+
+    // Density/material-based idea
+    if (specs.density_pcf && specs.density_pcf > 0) {
+      const d = specs.density_pcf;
+      if (d >= 1.7 && d <= 2.2) {
+        fallback.push(
+          `If the part isn’t extremely fragile, a nearby density in the ${(
+            d - 0.2
+          ).toFixed(1)}–${(d - 0.4).toFixed(
+            1
+          )} pcf range might reduce cost while still handling normal drops—we can run that as an alternate.`
+        );
+      } else if (d > 2.2) {
+        fallback.push(
+          `This is a relatively firm foam; if you’re mainly protecting against moderate handling, we can try a slightly lower density option to balance cost and cushion.`
+        );
+      }
+    }
+
+    // Cavity layout idea
+    if (cavityDims.length > 0 && (cavityCount || cavityDims.length) >= 4) {
+      fallback.push(
+        `We can also look at grouping similar cavity sizes together to improve sheet yield and reduce scrap on the nesting layout.`
+      );
+    }
+
+    optSuggestions = fallback.slice(0, 4);
+  }
 
   // Shared colors (used by tables + price breaks)
   const lightBlueBg = "#eef2ff";
@@ -288,7 +332,7 @@ ${missingList}`
 
   // Price-break HTML:
   // - If price_breaks are provided, show a compact table.
-  // - Otherwise, fall back to the original sentence-style explanation.
+  // - Otherwise, fall back to a simple sentence.
   let priceBreakHtml: string;
   if (priceBreaks && priceBreaks.length > 0) {
     const rows = priceBreaks
@@ -298,8 +342,7 @@ ${missingList}`
         const totalLabel = fmtMoney(b.total);
         const pieceLabel =
           b.piece != null ? fmtMoney(b.piece) : "";
-        const minLabel =
-          b.used_min_charge ? "Yes" : "No";
+        const minLabel = b.used_min_charge ? "Yes" : "No";
         return `<tr>
   <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right;">${qtyLabel}</td>
   <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right;">${totalLabel}</td>
@@ -344,7 +387,7 @@ ${missingList}`
     );
   }
 
-  // Design optimization block
+  // Design optimization block (now always has content because of fallback)
   let designBlock = "";
   if (optSuggestions.length > 0) {
     const items = optSuggestions
@@ -431,7 +474,9 @@ ${missingList}`
             <tr style="background:${lightBlueBg};">
               <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; width:35%; color:#6b7280;">Material</td>
               <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
-                foamFamily ? `${foamFamily}${density ? " — " + density : ""}` : density || "—"
+                foamFamily
+                  ? `${foamFamily}${density ? " — " + density : ""}`
+                  : density || "—"
               }</td>
             </tr>
             <tr style="background:${lightBlueBg};">
@@ -486,12 +531,10 @@ ${missingList}`
         }
 
         <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Price breaks</h3>
-        <div style="margin:0 0 4px 0; font-size:12px; color:#111827;">
+        <div style="margin:0 0 6px 0; font-size:12px; color:#111827;">
           ${priceBreakHtml}
         </div>
-        <p style="margin:0 0 6px 0; font-size:12px; color:#4b5563;">
-          If you&apos;d like, I can add additional formal price breaks at other volumes (for example 2×, 3×, 5×, and 10× this volume) — just reply with the ranges you&apos;d like to see.
-        </p>
+
         <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
           For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best.
         </p>
@@ -577,7 +620,6 @@ ${missingList}`
         </div>
 
 ${sketchLine}
-        
 
         <p style="margin:14px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
           This is a preliminary price based on the information we have so far. We&apos;ll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
