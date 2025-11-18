@@ -9,6 +9,7 @@
 // - Cavities row in Specs
 // - Skiving row in Pricing + red callout note if skiving is needed
 // - Bold per-piece price in Price breaks
+// - Dynamic price-break table when provided
 // - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file
 
 export type QuoteSpecs = {
@@ -29,6 +30,13 @@ export type QuoteMaterial = {
   min_charge?: number | null;
 };
 
+export type PriceBreakRow = {
+  qty: number;
+  total: number;
+  piece: number | null;
+  used_min_charge?: boolean | null;
+};
+
 export type QuotePricing = {
   total: number | null;
   piece_ci?: number | null;
@@ -36,6 +44,7 @@ export type QuotePricing = {
   order_ci_with_waste?: number | null;
   used_min_charge?: boolean | null;
   raw?: any; // raw calc payload (optional)
+  price_breaks?: PriceBreakRow[] | null; // NEW: dynamic price breaks
 };
 
 export type QuoteRenderInput = {
@@ -90,7 +99,7 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   const { specs, material, pricing, missing } = input;
   const facts = input.facts || {};
 
-  // New: treat either a string flag or boolean flag as "from sketch"
+  // Treat either a string flag or boolean flag as "from sketch"
   const fromSketch =
     (facts as any).from === "sketch-auto-quote" ||
     (facts as any).fromSketch === true;
@@ -170,7 +179,7 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
     `Please review the attached foam quote.\n\nQuote number: ${quoteNo || "(not set)"}`
   )}`;
 
-  // New: prefer caller's customerLine (from orchestrator / sketch) if provided
+  // Prefer caller's customerLine (from orchestrator / sketch) if provided
   const introLine =
     input.customerLine && input.customerLine.trim().length > 0
       ? input.customerLine.trim()
@@ -200,6 +209,10 @@ ${missingList}`
     orderTotal != null && qtyNum && qtyNum > 0
       ? orderTotal / qtyNum
       : null;
+
+  const priceBreaks = Array.isArray(pricing.price_breaks)
+    ? pricing.price_breaks
+    : null;
 
   // Status pill (always show, default draft)
   const rawStatus =
@@ -236,25 +249,6 @@ ${missingList}`
     }
   }
 
-  // Price-break HTML with bold per-piece price when available
-  let priceBreakHtml: string;
-  if (piecePrice != null) {
-    const qtyLabel = qty || "this";
-    priceBreakHtml = `At ${htmlEscape(
-      String(qtyLabel)
-    )} pcs, this works out to about <span style="font-weight:600;">${fmtMoney(
-      piecePrice
-    )}</span> per piece.`;
-  } else if (qty) {
-    priceBreakHtml = htmlEscape(
-      `At ${qty} pcs, this works out to the total shown above.`
-    );
-  } else {
-    priceBreakHtml = htmlEscape(
-      "This works out to the total shown above based on the specs provided."
-    );
-  }
-
   // Cavity info from facts
   const cavityCount =
     typeof (facts as any).cavityCount === "number"
@@ -277,10 +271,68 @@ ${missingList}`
     cavityLabel = "None noted";
   }
 
-  // Shared colors
+  // Shared colors (used by tables + price breaks)
   const lightBlueBg = "#eef2ff";
   const lightBlueBorder = "#c7d2fe";
   const darkBlue = "#1d4ed8";
+
+  // Price-break HTML:
+  // - If price_breaks are provided, show a compact table.
+  // - Otherwise, fall back to the original sentence-style explanation.
+  let priceBreakHtml: string;
+  if (priceBreaks && priceBreaks.length > 0) {
+    const rows = priceBreaks
+      .filter((b) => b && typeof b.qty === "number" && b.qty > 0)
+      .map((b) => {
+        const qtyLabel = htmlEscape(String(b.qty));
+        const totalLabel = fmtMoney(b.total);
+        const pieceLabel =
+          b.piece != null ? fmtMoney(b.piece) : "";
+        const minLabel =
+          b.used_min_charge ? "Yes" : "No";
+        return `<tr>
+  <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right;">${qtyLabel}</td>
+  <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right;">${totalLabel}</td>
+  <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:600;">${pieceLabel}</td>
+  <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:center;">${minLabel}</td>
+</tr>`;
+      })
+      .join("");
+
+    if (rows) {
+      priceBreakHtml = `
+<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px;">
+  <thead>
+    <tr style="background:${lightBlueBg};">
+      <th style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Qty</th>
+      <th style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Order total</th>
+      <th style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Est. per piece</th>
+      <th style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:center; font-weight:500; color:#374151;">Min charge?</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rows}
+  </tbody>
+</table>`;
+    } else {
+      priceBreakHtml = "";
+    }
+  } else if (piecePrice != null) {
+    const qtyLabel = qty || "this";
+    priceBreakHtml = `At ${htmlEscape(
+      String(qtyLabel)
+    )} pcs, this works out to about <span style="font-weight:600;">${fmtMoney(
+      piecePrice
+    )}</span> per piece.`;
+  } else if (qty) {
+    priceBreakHtml = htmlEscape(
+      `At ${qty} pcs, this works out to the total shown above.`
+    );
+  } else {
+    priceBreakHtml = htmlEscape(
+      "This works out to the total shown above based on the specs provided."
+    );
+  }
 
   return `<!DOCTYPE html>
 <html>
@@ -404,11 +456,11 @@ ${missingList}`
         }
 
         <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Price breaks</h3>
-        <p style="margin:0 0 4px 0; font-size:12px; color:#111827;">
+        <div style="margin:0 0 4px 0; font-size:12px; color:#111827;">
           ${priceBreakHtml}
-        </p>
+        </div>
         <p style="margin:0 0 6px 0; font-size:12px; color:#4b5563;">
-          If you&apos;d like, I can add formal price breaks at higher quantities (for example 2×, 3×, 5×, and 10× this volume) — just reply with the ranges you&apos;d like to see.
+          If you&apos;d like, I can add additional formal price breaks at other volumes (for example 2×, 3×, 5×, and 10× this volume) — just reply with the ranges you&apos;d like to see.
         </p>
         <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
           For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best.

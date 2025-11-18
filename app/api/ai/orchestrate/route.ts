@@ -11,6 +11,7 @@
 //   and only store line items once material_id is known.
 // - Also load + save facts under quote_no so sketch auto-quote
 //   data (dims/qty/cavities/material) is available on follow-up emails.
+// - NEW: Dynamic price-break generation for multiple quantities.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
@@ -233,6 +234,67 @@ async function fetchCalcQuote(opts: {
   const j = await r.json().catch(() => ({} as any));
   if (!r.ok || !j.ok) return null;
   return j.result;
+}
+
+// NEW: build dynamic price breaks around the current quantity.
+// Uses the same /api/quotes/calc route for each quantity.
+type PriceBreak = {
+  qty: number;
+  total: number;
+  piece: number | null;
+  used_min_charge?: boolean | null;
+};
+
+async function buildPriceBreaks(
+  base: {
+    dims: string;
+    qty: number;
+    material_id: number;
+    cavities: string[];
+    round_to_bf: boolean;
+  },
+  baseCalc: any
+): Promise<PriceBreak[] | null> {
+  const baseQty = base.qty;
+  if (!baseQty || baseQty <= 0) return null;
+
+  // You can tweak these factors if you want different break steps.
+  const factors = [1, 2, 3, 5, 10];
+  const seen = new Set<number>();
+  const out: PriceBreak[] = [];
+
+  for (const f of factors) {
+    const q = Math.round(baseQty * f);
+    if (!q || q <= 0 || seen.has(q)) continue;
+    seen.add(q);
+
+    let calc = baseCalc;
+    if (f !== 1) {
+      calc = await fetchCalcQuote({
+        ...base,
+        qty: q
+      });
+      if (!calc) continue;
+    }
+
+    const total =
+      (calc.price_total ??
+        calc.total ??
+        calc.order_total ??
+        0) as number;
+    const piece =
+      total && q > 0 ? total / q : null;
+
+    out.push({
+      qty: q,
+      total,
+      piece,
+      used_min_charge:
+        (calc.min_charge_applied ?? null) as boolean | null
+    });
+  }
+
+  return out.length ? out : null;
 }
 
 /* ============================================================
@@ -650,16 +712,31 @@ export async function POST(req: NextRequest) {
     });
 
     let calc: any = null;
+    let priceBreaks: PriceBreak[] | null = null;
     const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
     if (canCalc) {
       calc = await fetchCalcQuote({
-        dims: specs.dims!,
+        dims: specs.dims as string,
         qty: Number(specs.qty),
         material_id: Number(specs.material_id),
         cavities: specs.cavityDims,
         round_to_bf: false
       });
+
+      // Build price breaks only if we have a base calc and we're not in dryRun
+      if (calc && !dryRun) {
+        priceBreaks = await buildPriceBreaks(
+          {
+            dims: specs.dims as string,
+            qty: Number(specs.qty),
+            material_id: Number(specs.material_id),
+            cavities: specs.cavityDims,
+            round_to_bf: false
+          },
+          calc
+        );
+      }
     }
 
     const hasDimsQty = !!(specs.dims && specs.qty);
@@ -771,7 +848,9 @@ export async function POST(req: NextRequest) {
         order_ci_with_waste: calc?.order_ci_with_waste,
         used_min_charge: calc?.min_charge_applied,
         // raw calc object so the template can surface skiving, etc.
-        raw: calc
+        raw: calc,
+        // NEW: pass computed price breaks through to the template
+        price_breaks: priceBreaks || undefined
       },
       missing: (() => {
         const miss: string[] = [];
