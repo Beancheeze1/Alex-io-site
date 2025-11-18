@@ -1,76 +1,43 @@
+// app/quote/layout/page.tsx
 "use client";
 
 import * as React from "react";
+
+import { buildLayoutFromStrings } from "./editor/layoutTypes";
+import { useLayoutModel } from "./editor/useLayoutModel";
+import InteractiveCanvas from "./editor/InteractiveCanvas";
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
 };
 
-type ParsedDims = {
-  L: number;
-  W: number;
-  H: number;
-};
-
-type Cavity = {
-  id: string;
-  label: string; // "C1"
-  dimsRaw: string; // "3x2x1"
-  L: number;
-  W: number;
-  H: number;
-};
-
-function parseDims(str: string | null | undefined): ParsedDims | null {
-  if (!str) return null;
-  const cleaned = str.toLowerCase().replace(/"/g, "").replace(/×/g, "x");
-  const parts = cleaned.split("x").map((s) => Number(s.trim()));
-  if (parts.length < 2 || parts.some((n) => Number.isNaN(n) || n <= 0)) {
-    return null;
-  }
-  return {
-    L: parts[0] || 0,
-    W: parts[1] || 0,
-    H: parts[2] || 0,
-  };
+function normalizeDimsParam(raw: string | undefined): string {
+  if (!raw || !raw.trim()) return "10x10x2";
+  return raw.trim();
 }
 
-function parseCavities(raw: string | null | undefined): Cavity[] {
-  if (!raw) return [];
-  const sep = raw.replace(/\|/g, ";").replace(/,/g, ";");
-  const tokens = sep.split(";").map((s) => s.trim()).filter(Boolean);
-
-  const out: Cavity[] = [];
-  tokens.forEach((tok, idx) => {
-    const cleaned = tok.toLowerCase().replace(/"/g, "").replace(/×/g, "x");
-    const parts = cleaned.split("x").map((s) => Number(s.trim()));
-    if (parts.length < 2 || parts.some((n) => Number.isNaN(n) || n <= 0)) {
-      return;
-    }
-    const L = parts[0] || 0;
-    const W = parts[1] || 0;
-    const H = parts[2] || 0;
-    out.push({
-      id: `cav-${idx}`,
-      label: `C${idx + 1}`,
-      dimsRaw: tok,
-      L,
-      W,
-      H,
-    });
-  });
-
-  return out;
+function normalizeCavitiesParam(raw: string | undefined): string {
+  if (!raw || !raw.trim()) return "3x2x1; 2x2x1; 1x1x1";
+  return raw.trim();
 }
 
-function formatDimsLabel(d: ParsedDims | null): string {
-  if (!d) return "—";
-  return `${d.L} × ${d.W} × ${d.H || 0}" block`;
+function formatBlockLabel(block: {
+  lengthIn: number;
+  widthIn: number;
+  thicknessIn: number;
+}): string {
+  const { lengthIn, widthIn, thicknessIn } = block;
+  return `${lengthIn} × ${widthIn} × ${thicknessIn || 0}" block`;
 }
 
-function formatCavityLabel(c: Cavity): string {
-  const parts = c.dimsRaw.replace(/"/g, "").trim();
-  return `${c.label} – ${parts}"`;
+function formatCavityLegendLabel(
+  cav: { label: string; lengthIn: number; widthIn: number; depthIn: number },
+  index: number
+): { chip: string; text: string; footprint: string } {
+  const chip = `C${index + 1}`;
+  const text = cav.label || `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn}"`;
+  const footprint = `${cav.lengthIn}" × ${cav.widthIn}" footprint`;
+  return { chip, text, footprint };
 }
 
 export default function LayoutPage({
@@ -90,90 +57,42 @@ export default function LayoutPage({
     searchParams?.cavity ??
     "") as string | undefined;
 
-  // Fallback demo values if nothing is passed
-  const dims =
-    parseDims(dimsParam) ?? parseDims("10x10x2") ?? { L: 10, W: 10, H: 2 };
-  const cavities = (() => {
-    const parsed = parseCavities(cavitiesParam);
-    if (parsed.length > 0) return parsed;
-    return parseCavities("3x2x1; 2x2x1; 1x1x1");
-  })();
+  const blockStr = normalizeDimsParam(dimsParam);
+  const cavityStr = normalizeCavitiesParam(cavitiesParam);
 
-  const quoteNo = quoteNoParam && quoteNoParam.trim().length > 0
-    ? quoteNoParam.trim()
-    : "Q-AI-EXAMPLE";
+  // Build base layout model from query params (with safe fallback)
+  const baseLayout = React.useMemo(() => {
+    const fromQuery = buildLayoutFromStrings(blockStr, cavityStr);
+    if (fromQuery) return fromQuery;
+    // Hard fallback if parsing fails
+    return (
+      buildLayoutFromStrings("10x10x2", "3x2x1;2x2x1;1x1x1") || {
+        block: { lengthIn: 10, widthIn: 10, thicknessIn: 2 },
+        cavities: [],
+      }
+    );
+  }, [blockStr, cavityStr]);
 
-  // SVG layout constants
-  const VIEW_W = 480;
-  const VIEW_H = 320;
-  const PADDING = 32;
+  const { layout, selectedId, selectCavity, updateCavityPosition } =
+    useLayoutModel(baseLayout);
 
-  // Determine block aspect ratio using L (X) and W (Y)
-  const innerW = VIEW_W - PADDING * 2;
-  const innerH = VIEW_H - PADDING * 2;
+  const quoteNo =
+    quoteNoParam && quoteNoParam.trim().length > 0
+      ? quoteNoParam.trim()
+      : "Q-AI-EXAMPLE";
 
-  const blockAspect = dims.L / (dims.W || 1);
-  let blockPixelW = innerW;
-  let blockPixelH = innerH;
+  const block = layout.block;
+  const cavities = layout.cavities;
 
-  if (blockAspect >= 1) {
-    blockPixelW = innerW;
-    blockPixelH = innerW / blockAspect;
-    if (blockPixelH > innerH) {
-      blockPixelH = innerH;
-      blockPixelW = innerH * blockAspect;
-    }
-  } else {
-    blockPixelH = innerH;
-    blockPixelW = innerH * blockAspect;
-    if (blockPixelW > innerW) {
-      blockPixelW = innerW;
-      blockPixelH = innerW / blockAspect;
-    }
-  }
-
-  const blockX = (VIEW_W - blockPixelW) / 2;
-  const blockY = (VIEW_H - blockPixelH) / 2;
-
-  // Scale factors: physical inches -> pixels
-  const scaleX = blockPixelW / (dims.L || 1);
-  const scaleY = blockPixelH / (dims.W || 1);
-
-  // Lay cavities out in a simple grid with equal spacing
-  const cavitiesWithLayout = React.useMemo(() => {
-    if (cavities.length === 0) return [];
-
-    const n = cavities.length;
-    const cols = Math.ceil(Math.sqrt(n));
-    const rows = Math.ceil(n / cols);
-
-    const cellW = blockPixelW / cols;
-    const cellH = blockPixelH / rows;
-
-    return cavities.map((cav, idx) => {
-      const row = Math.floor(idx / cols);
-      const col = idx % cols;
-
-      // Desired physical size in pixels
-      const cavPxW = Math.min(cav.L * scaleX, cellW * 0.8);
-      const cavPxH = Math.min(cav.W * scaleY, cellH * 0.8);
-
-      // Center in the grid cell
-      const cellCenterX = blockX + col * cellW + cellW / 2;
-      const cellCenterY = blockY + row * cellH + cellH / 2;
-
-      const x = cellCenterX - cavPxW / 2;
-      const y = cellCenterY - cavPxH / 2;
-
-      return {
-        ...cav,
-        x,
-        y,
-        pixelW: cavPxW,
-        pixelH: cavPxH,
-      };
-    });
-  }, [cavities, blockPixelW, blockPixelH, blockX, blockY, scaleX, scaleY]);
+  // === NEW: drag handler passed to InteractiveCanvas ===
+  const moveCavity = React.useCallback(
+    (id: string, xNorm: number, yNorm: number) => {
+      // keep the cavity inside the block [0,1] in both directions
+      const clamp = (v: number) => Math.max(0, Math.min(1, v));
+      updateCavityPosition(id, clamp(xNorm), clamp(yNorm));
+    },
+    [updateCavityPosition]
+  );
 
   return (
     <main className="min-h-screen bg-slate-100 flex items-center justify-center px-4 py-10">
@@ -182,9 +101,7 @@ export default function LayoutPage({
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-6">
           <div>
             <div className="flex items-center gap-2 text-sm text-slate-900">
-              <span className="font-semibold">
-                Foam layout preview
-              </span>
+              <span className="font-semibold">Foam layout preview</span>
               <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-medium">
                 BETA – interactive layout
               </span>
@@ -195,86 +112,38 @@ export default function LayoutPage({
                 {quoteNo}
               </span>
               {" • "}
-              Block {formatDimsLabel(dims)}
+              Block {formatBlockLabel(block)}
             </div>
           </div>
           <div className="text-xs text-slate-500">
-            Drag is coming soon — for now this keeps cavities centered and evenly spaced
-            based on their sizes.
+            Drag the cavities in the preview to experiment with spacing and
+            placement. The drawing is proportional to the block, not to exact
+            scale in inches.
           </div>
         </div>
 
         <div className="grid gap-6 md:grid-cols-[minmax(0,2fr),minmax(0,1.2fr)] items-start">
-          {/* SVG preview */}
+          {/* Interactive preview */}
           <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4">
             <div className="text-xs text-slate-600 mb-2 flex items-center justify-between">
               <span>Top view (scaled to block L × W)</span>
               <span className="font-mono text-[11px] text-slate-500">
-                {dims.L}" × {dims.W}" • {dims.H || 0}" thick
+                {block.lengthIn}" × {block.widthIn}" •{" "}
+                {block.thicknessIn || 0}" thick
               </span>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex items-center justify-center">
-              <svg
-                viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-                className="w-full h-[260px] md:h-[300px]"
-              >
-                {/* Block */}
-                <rect
-                  x={blockX}
-                  y={blockY}
-                  width={blockPixelW}
-                  height={blockPixelH}
-                  rx={12}
-                  ry={12}
-                  fill="#e0edff"
-                  stroke="#2563eb"
-                  strokeWidth={1.5}
-                />
-                {/* Block label */}
-                <text
-                  x={blockX + blockPixelW / 2}
-                  y={blockY + 16}
-                  textAnchor="middle"
-                  fill="#1f2933"
-                  fontSize={11}
-                  fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-                >
-                  Block {dims.L} × {dims.W} × {dims.H || 0}"
-                </text>
 
-                {/* Cavities */}
-                {cavitiesWithLayout.map((c) => (
-                  <g key={c.id}>
-                    <rect
-                      x={c.x}
-                      y={c.y}
-                      width={c.pixelW}
-                      height={c.pixelH}
-                      rx={6}
-                      ry={6}
-                      fill="#ffffff"
-                      stroke="#1f2937"
-                      strokeWidth={1.2}
-                    />
-                    {/* cavity label inside */}
-                    <text
-                      x={c.x + c.pixelW / 2}
-                      y={c.y + c.pixelH / 2 + 4}
-                      textAnchor="middle"
-                      fill="#111827"
-                      fontSize={10}
-                      fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-                    >
-                      {c.label}
-                    </text>
-                  </g>
-                ))}
-              </svg>
-            </div>
+            <InteractiveCanvas
+              layout={layout}
+              selectedId={selectedId}
+              selectAction={selectCavity}
+              moveAction={moveCavity}
+            />
+
             <p className="mt-3 text-[11px] text-slate-500 leading-snug">
-              Cavities are scaled by their length and width relative to the block and
-              laid out in a simple grid so they stay centered and nicely spaced.
-              Depth is shown in the legend on the right.
+              Cavities are sized by their length and width relative to the block
+              and can be dragged around inside the footprint. Depth is shown in
+              the legend on the right.
             </p>
           </div>
 
@@ -285,10 +154,11 @@ export default function LayoutPage({
                 Block
               </div>
               <div className="text-xs text-slate-600">
-                {formatDimsLabel(dims)}{" "}
-                {dims.H ? (
+                {formatBlockLabel(block)}{" "}
+                {block.thicknessIn ? (
                   <span className="text-slate-500">
-                    (approximate thickness for depth, not used in top-view scale)
+                    (thickness is used for depth context, not in top-view
+                    scaling)
                   </span>
                 ) : null}
               </div>
@@ -298,7 +168,7 @@ export default function LayoutPage({
               <div className="text-xs font-semibold text-slate-700 mb-1">
                 Cavities
               </div>
-              {cavitiesWithLayout.length === 0 ? (
+              {cavities.length === 0 ? (
                 <div className="text-xs text-slate-500">
                   No cavity data was passed in. If you include{" "}
                   <code className="font-mono text-[11px] bg-slate-200/70 px-1 py-0.5 rounded">
@@ -308,34 +178,62 @@ export default function LayoutPage({
                 </div>
               ) : (
                 <ul className="space-y-1.5">
-                  {cavitiesWithLayout.map((c) => (
-                    <li
-                      key={c.id}
-                      className="flex items-start justify-between gap-2 text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-semibold">
-                          {c.label}
+                  {cavities.map((cav, idx) => {
+                    const { chip, text, footprint } =
+                      formatCavityLegendLabel(cav, idx);
+
+                    const isSelected = cav.id === selectedId;
+
+                    return (
+                      <li
+                        key={cav.id}
+                        className="flex items-start justify-between gap-2 text-xs"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            isSelected
+                              ? selectCavity(null)
+                              : selectCavity(cav.id)
+                          }
+                          className="flex items-center gap-2"
+                        >
+                          <span
+                            className={[
+                              "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold",
+                              isSelected
+                                ? "bg-indigo-600 text-white"
+                                : "bg-indigo-100 text-indigo-700",
+                            ].join(" ")}
+                          >
+                            {chip}
+                          </span>
+                          <span
+                            className={
+                              isSelected
+                                ? "text-slate-900 font-medium"
+                                : "text-slate-700"
+                            }
+                          >
+                            {text}
+                          </span>
+                        </button>
+                        <span className="text-[11px] text-slate-500">
+                          {footprint}
                         </span>
-                        <span className="text-slate-700">
-                          {formatCavityLabel(c)}
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-slate-500">
-                        {c.L}" × {c.W}" footprint
-                      </span>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
 
             <div className="mt-2 border-t border-slate-200 pt-3">
               <div className="text-[11px] text-slate-500 leading-snug">
-                This preview is a simplified layout meant for quick visualization.
-                Your CNC / tooling layout may adjust exact spacing and orientation,
-                but this gives the customer a clear, easy-to-understand picture of
-                how their parts sit in the foam.
+                This preview is a simplified layout meant for quick
+                visualization. Your CNC / tooling layout may adjust exact
+                spacing and orientation, but this gives the customer a clear,
+                easy-to-understand picture of how their parts sit in the foam.
               </div>
             </div>
           </div>
