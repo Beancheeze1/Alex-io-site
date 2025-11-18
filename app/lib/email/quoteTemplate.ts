@@ -12,7 +12,8 @@
 // - Dynamic price-break table when provided
 // - Design optimization ideas pulled from facts.opt_suggestions,
 //   with sensible fallback suggestions when AI returns nothing
-// - Visual layout preview using simple HTML (no SVG) from dims + cavities
+// - Visual layout preview section with a "View layout diagram" button
+//   that links to a web-based SVG diagram
 // - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file
 
 export type QuoteSpecs = {
@@ -96,142 +97,6 @@ function htmlEscape(s: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-/**
- * Visual layout preview:
- * Pure HTML (no SVG) so Outlook/Gmail/etc all render it.
- * Shows block dims and cavity "boxes" arranged in a pseudo top-view layout.
- */
-function buildVisualPreview(specs: QuoteSpecs, facts: Record<string, any>): string {
-  const L = specs.L_in || 0;
-  const W = specs.W_in || 0;
-  const H = specs.H_in || 0;
-
-  if (!L || !W) {
-    return "";
-  }
-
-  const cavitiesRaw = Array.isArray((facts as any).cavityDims)
-    ? ((facts as any).cavityDims as string[])
-    : [];
-  const cavityCount =
-    typeof (facts as any).cavityCount === "number"
-      ? (facts as any).cavityCount
-      : cavitiesRaw.length || null;
-
-  const labelDims =
-    H && H > 0
-      ? `Block: ${L} × ${W} × ${H} in`
-      : `Block: ${L} × ${W} in`;
-  const labelCav =
-    cavityCount && cavityCount > 0
-      ? `${cavityCount} cavit${cavityCount === 1 ? "y" : "ies"}`
-      : "No cavities noted";
-
-  // How many cavity boxes to draw visually
-  const numBoxes =
-    cavitiesRaw.length > 0
-      ? cavitiesRaw.length
-      : cavityCount && cavityCount > 0
-      ? cavityCount
-      : 0;
-
-  // If no cavities at all, just show the block summary
-  if (!numBoxes) {
-    return `
-<h3 style="margin:10px 0 3px 0; font-size:13px; color:#1d4ed8;">Visual layout preview (auto-generated)</h3>
-<div style="
-  border-radius:12px;
-  border:1px solid #c7d2fe;
-  background:#f9fafb;
-  padding:8px 10px;
-  font-size:11px;
-  color:#111827;
-  max-width:360px;
-">
-  <div style="margin-bottom:4px; font-weight:500;">
-    ${htmlEscape(labelDims)}
-  </div>
-  <div style="margin-bottom:4px; color:#4b5563;">
-    ${htmlEscape(labelCav)}
-  </div>
-</div>
-<p style="margin:4px 0 10px 0; font-size:11px; color:#6b7280;">
-  Not to scale — this is a simple top-view style summary to help visualize the block.
-</p>`;
-  }
-
-  // Build visual cavity boxes that wrap inside a "block" container
-  const maxDisplay = Math.min(numBoxes, 12); // cap to keep layout tidy
-  const cols = Math.min(maxDisplay, 4); // up to 4 boxes per row visually
-  const boxWidthPct = 100 / cols - 4; // leave a bit of gap
-
-  const boxes: string[] = [];
-  for (let i = 0; i < maxDisplay; i++) {
-    const label =
-      cavitiesRaw[i] && typeof cavitiesRaw[i] === "string"
-        ? cavitiesRaw[i]
-        : `Cavity ${i + 1}`;
-    boxes.push(`
-      <div style="
-        display:inline-block;
-        width:${boxWidthPct}%;
-        min-width:44px;
-        height:26px;
-        margin:3px 2px;
-        border-radius:6px;
-        border:1px solid #1d4ed8;
-        background:#eef2ff;
-        font-size:10px;
-        color:#1f2937;
-        text-align:center;
-        line-height:24px;
-        box-sizing:border-box;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      ">
-        ${htmlEscape(label)}
-      </div>`);
-  }
-
-  const extraNote =
-    numBoxes > maxDisplay
-      ? `<div style="margin-top:2px; font-size:10px; color:#6b7280;">+${numBoxes - maxDisplay} more cavity type(s) not shown.</div>`
-      : "";
-
-  return `
-<h3 style="margin:10px 0 3px 0; font-size:13px; color:#1d4ed8;">Visual layout preview (auto-generated)</h3>
-<div style="
-  border-radius:12px;
-  border:1px solid #c7d2fe;
-  background:#f9fafb;
-  padding:8px 10px 10px 10px;
-  font-size:11px;
-  color:#111827;
-  max-width:420px;
-">
-  <div style="margin-bottom:4px; font-weight:500;">
-    ${htmlEscape(labelDims)}
-  </div>
-  <div style="margin-bottom:6px; color:#4b5563;">
-    ${htmlEscape(labelCav)} (top view, not to scale)
-  </div>
-  <div style="
-    border-radius:10px;
-    border:1px dashed #93c5fd;
-    background:#eff6ff;
-    padding:6px 4px 4px 4px;
-    text-align:center;
-  ">
-    ${boxes.join("")}
-    ${extraNote}
-  </div>
-</div>
-<p style="margin:4px 0 10px 0; font-size:11px; color:#6b7280;">
-  Not to scale — this is a simple top-view style layout to help visualize the block and cavity grouping.
-</p>`;
 }
 
 export function renderQuoteEmail(input: QuoteRenderInput): string {
@@ -439,9 +304,9 @@ ${missingList}`
       const d = specs.density_pcf;
       if (d >= 1.7 && d <= 2.2) {
         fallback.push(
-          `If the part isn’t extremely fragile, a nearby density in the ${(d - 0.2).toFixed(
-            1
-          )}–${(d - 0.4).toFixed(
+          `If the part isn’t extremely fragile, a nearby density in the ${(
+            d - 0.2
+          ).toFixed(1)}–${(d - 0.4).toFixed(
             1
           )} pcf range might reduce cost while still handling normal drops—we can run that as an alternate.`
         );
@@ -469,7 +334,7 @@ ${missingList}`
 
   // Price-break HTML:
   // - If price_breaks are provided, show a compact table.
-  // - Otherwise, leave blank (no one-liner).
+  // - Otherwise, fall back to a simple sentence.
   let priceBreakHtml: string;
   if (priceBreaks && priceBreaks.length > 0) {
     const rows = priceBreaks
@@ -507,11 +372,55 @@ ${missingList}`
     } else {
       priceBreakHtml = "";
     }
+  } else if (piecePrice != null) {
+    const qtyLabel = qty || "this";
+    priceBreakHtml = `At ${htmlEscape(
+      String(qtyLabel)
+    )} pcs, this works out to about <span style="font-weight:600;">${fmtMoney(
+      piecePrice
+    )}</span> per piece.`;
+  } else if (qty) {
+    priceBreakHtml = htmlEscape(
+      `At ${qty} pcs, this works out to the total shown above.`
+    );
   } else {
-    priceBreakHtml = "";
+    priceBreakHtml = htmlEscape(
+      "This works out to the total shown above based on the specs provided."
+    );
   }
 
-  // Design optimization block
+  // --- Visual layout link construction ---
+  const dimsParam =
+    specs.L_in && specs.W_in && specs.H_in
+      ? `${specs.L_in}x${specs.W_in}x${specs.H_in}`
+      : "";
+  const cavityDimsParam =
+    cavityDims.length > 0 ? cavityDims.join("|") : "";
+
+  const layoutQueryParts: string[] = [];
+  if (quoteNo) {
+    layoutQueryParts.push(`quote_no=${encodeURIComponent(quoteNo)}`);
+  }
+  if (dimsParam) {
+    layoutQueryParts.push(`dims=${encodeURIComponent(dimsParam)}`);
+  }
+  if (qty) {
+    layoutQueryParts.push(
+      `qty=${encodeURIComponent(String(qty))}`
+    );
+  }
+  if (cavityDimsParam) {
+    layoutQueryParts.push(
+      `cavityDims=${encodeURIComponent(cavityDimsParam)}`
+    );
+  }
+
+  const layoutUrl =
+    layoutQueryParts.length > 0
+      ? `${baseUrl}/quote/layout?${layoutQueryParts.join("&")}`
+      : undefined;
+
+  // Design optimization block (now always has content because of fallback)
   let designBlock = "";
   if (optSuggestions.length > 0) {
     const items = optSuggestions
@@ -530,9 +439,6 @@ ${missingList}`
           These are optional tweaks based on typical foam applications. If one looks interesting, reply with which option you want to explore and any drop-height or fragility details you can share.
         </p>`;
   }
-
-  // Visual layout preview HTML (may be empty if dims missing)
-  const visualPreviewHtml = buildVisualPreview(specs, facts);
 
   return `<!DOCTYPE html>
 <html>
@@ -662,11 +568,40 @@ ${missingList}`
           ${priceBreakHtml}
         </div>
 
+        <!-- New: Visual layout preview section -->
+        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Visual layout preview (auto-generated)</h3>
+        <p style="margin:0 0 4px 0; font-size:12px; color:#111827;">
+          Block: ${outsideSize || "—"}<br />
+          Cavities: ${htmlEscape(cavityLabel)}
+        </p>
+        ${
+          layoutUrl
+            ? `<a
+            href="${layoutUrl}"
+            style="
+              display:inline-block;
+              padding:6px 12px;
+              border-radius:999px;
+              background:${lightBlueBg};
+              color:${darkBlue};
+              font-size:12px;
+              font-weight:500;
+              text-decoration:none;
+              border:1px solid ${lightBlueBorder};
+              margin:0 0 4px 0;
+            "
+          >
+            View layout diagram
+          </a>`
+            : ""
+        }
+        <p style="margin:0 0 10px 0; font-size:11px; color:#6b7280;">
+          Not to scale — this is a simple top-view style summary to help visualize the block and cavity arrangement.
+        </p>
+
         <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
           For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best.
         </p>
-
-        ${visualPreviewHtml}
 
         ${designBlock}
 
