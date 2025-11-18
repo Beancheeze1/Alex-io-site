@@ -11,8 +11,7 @@
 //   and only store line items once material_id is known.
 // - Also load + save facts under quote_no so sketch auto-quote
 //   data (dims/qty/cavities/material) is available on follow-up emails.
-// - Dynamic price-break generation for multiple quantities.
-// - NEW: Quote status intent (accepted / on-hold) from customer wording.
+// - Dynamic price-break generation for multiple quantities (and stored into facts).
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
@@ -187,7 +186,7 @@ function parseDimsNums(dims: string | null | undefined) {
   return {
     L: d[0] || 0,
     W: d[1] || 0,
-    H: d[2] || 0
+    H: d[2] || 0,
   };
 }
 
@@ -228,8 +227,8 @@ async function fetchCalcQuote(opts: {
       material_id: opts.material_id,
       qty: opts.qty,
       cavities: opts.cavities,
-      round_to_bf: opts.round_to_bf
-    })
+      round_to_bf: opts.round_to_bf,
+    }),
   });
 
   const j = await r.json().catch(() => ({} as any));
@@ -246,7 +245,7 @@ type PriceBreak = {
 };
 
 async function buildPriceBreaks(
-  base: {
+  baseOpts: {
     dims: string;
     qty: number;
     material_id: number;
@@ -255,7 +254,7 @@ async function buildPriceBreaks(
   },
   baseCalc: any
 ): Promise<PriceBreak[] | null> {
-  const baseQty = base.qty;
+  const baseQty = baseOpts.qty;
   if (!baseQty || baseQty <= 0) return null;
 
   const factors = [1, 2, 3, 5, 10];
@@ -270,8 +269,8 @@ async function buildPriceBreaks(
     let calc = baseCalc;
     if (f !== 1) {
       calc = await fetchCalcQuote({
-        ...base,
-        qty: q
+        ...baseOpts,
+        qty: q,
       });
       if (!calc) continue;
     }
@@ -281,15 +280,13 @@ async function buildPriceBreaks(
         calc.total ??
         calc.order_total ??
         0) as number;
-    const piece =
-      total && q > 0 ? total / q : null;
+    const piece = total && q > 0 ? total / q : null;
 
     out.push({
       qty: q,
       total,
       piece,
-      used_min_charge:
-        (calc.min_charge_applied ?? null) as boolean | null
+      used_min_charge: (calc.min_charge_applied ?? null) as boolean | null,
     });
   }
 
@@ -369,7 +366,7 @@ function grabMaterial(raw: string): string | undefined {
     "kaizen",
     "pp",
     "polystyrene",
-    "eps"
+    "eps",
   ];
 
   for (const name of materials) {
@@ -480,14 +477,14 @@ ${body}
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`
+        Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
         model,
         input: prompt,
         max_output_tokens: 256,
-        temperature: 0.1
-      })
+        temperature: 0.1,
+      }),
     });
 
     const raw = await r.text();
@@ -523,7 +520,7 @@ const HUMAN_OPENERS = [
   "Appreciate the details—once we lock a few specs I’ll price this out.",
   "Thanks for sending this—happy to quote it as soon as I confirm a couple items.",
   "Got it—let me confirm a few specs and I’ll run pricing.",
-  "Thanks for the info—if I can fill a couple gaps I’ll send numbers right away."
+  "Thanks for the info—if I can fill a couple gaps I’ll send numbers right away.",
 ];
 
 function chooseOpener(seed: string) {
@@ -560,14 +557,14 @@ ${lastInbound}
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`
+        Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
         model,
         input: prompt,
         max_output_tokens: 80,
-        temperature: 0.4
-      })
+        temperature: 0.4,
+      }),
     });
 
     const j = await r.json().catch(() => ({} as any));
@@ -581,36 +578,6 @@ ${lastInbound}
   } catch {
     return null;
   }
-}
-
-/* ============================================================
-   Quote status intent helper
-   ============================================================ */
-
-type StatusIntent = "accepted" | "on_hold" | null;
-
-function detectStatusIntent(text: string): StatusIntent {
-  const t = (text || "").toLowerCase();
-
-  // Strong acceptance phrases
-  if (
-    /\b(go ahead|go ahead with|please proceed|proceed with|we'?ll take it|we will take it|we will take these|we will take this|we'?ll take these|place (the )?order|place this order|issue (a )?po|issue our po|you can run with this|let's move forward|move forward with this|looks good,? go ahead|good to go)\b/.test(
-      t
-    )
-  ) {
-    return "accepted";
-  }
-
-  // Simple "on hold" phrases
-  if (
-    /\b(hold off|on hold|pause this|please hold|wait on this|do not proceed yet|don'?t proceed yet)\b/.test(
-      t
-    )
-  ) {
-    return "on_hold";
-  }
-
-  return null;
 }
 
 /* ============================================================
@@ -682,14 +649,6 @@ export async function POST(req: NextRequest) {
       merged.from = "sketch-auto-quote";
     }
 
-    // NEW: infer quote status intent (accepted / on_hold) from the latest email.
-    const statusIntent = detectStatusIntent(`${subject}\n\n${lastText}`);
-    if (statusIntent === "accepted") {
-      merged.status = "accepted";
-    } else if (statusIntent === "on_hold") {
-      merged.status = merged.status || "on_hold";
-    }
-
     // Stable quote number per thread
     if (!merged.quoteNumber && !merged.quote_no) {
       const now = new Date();
@@ -717,7 +676,7 @@ export async function POST(req: NextRequest) {
 
     merged = await enrichFromDB(merged);
 
-    // Save facts under both keys so future turns can load from either
+    // Save early baseline facts (pre-pricing) under keys
     if (threadKey) await saveFacts(threadKey, merged);
     if (merged.quote_no) await saveFacts(merged.quote_no, merged);
 
@@ -737,15 +696,15 @@ export async function POST(req: NextRequest) {
       density: merged.density || null,
       cavityCount: merged.cavityCount ?? null,
       cavityDims: merged.cavityDims || [],
-      material_id: merged.material_id || null
+      material_id: merged.material_id || null,
     };
 
-    /* ------------------- Pricing & persistence ------------------- */
+    /* ------------------- Pricing & price breaks ------------------- */
 
     const canCalc = specsCompleteForQuote({
       dims: specs.dims,
       qty: specs.qty,
-      material_id: specs.material_id
+      material_id: specs.material_id,
     });
 
     let calc: any = null;
@@ -758,10 +717,9 @@ export async function POST(req: NextRequest) {
         qty: Number(specs.qty),
         material_id: Number(specs.material_id),
         cavities: specs.cavityDims,
-        round_to_bf: false
+        round_to_bf: false,
       });
 
-      // Build price breaks only if we have a base calc and we're not in dryRun
       if (calc && !dryRun) {
         priceBreaks = await buildPriceBreaks(
           {
@@ -769,11 +727,16 @@ export async function POST(req: NextRequest) {
             qty: Number(specs.qty),
             material_id: Number(specs.material_id),
             cavities: specs.cavityDims,
-            round_to_bf: false
+            round_to_bf: false,
           },
           calc
         );
       }
+    }
+
+    // Store price_breaks into facts so future turns see the same structure
+    if (priceBreaks && priceBreaks.length) {
+      merged.price_breaks = priceBreaks;
     }
 
     const hasDimsQty = !!(specs.dims && specs.qty);
@@ -802,8 +765,8 @@ export async function POST(req: NextRequest) {
             customer_name: String(customerName),
             email: customerEmail,
             phone,
-            status
-          })
+            status,
+          }),
         });
 
         const headerJson = await headerRes.json().catch(() => ({} as any));
@@ -835,13 +798,13 @@ export async function POST(req: NextRequest) {
           width_in: W,
           height_in: H,
           material_id: Number(specs.material_id),
-          qty: Number(specs.qty)
+          qty: Number(specs.qty),
         };
 
         await fetch(`${base}/api/quotes/${quoteId}/items`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(itemBody)
+          body: JSON.stringify(itemBody),
         });
 
         merged.__primary_item_created = true;
@@ -860,7 +823,6 @@ export async function POST(req: NextRequest) {
     const templateInput = {
       customerLine: opener,
       quoteNumber: merged.quoteNumber || merged.quote_no,
-      // pass status through explicitly so the template can show the pill
       status: merged.status || "draft",
       specs: {
         L_in: dimsNums.L,
@@ -870,13 +832,13 @@ export async function POST(req: NextRequest) {
         density_pcf: densityPcf,
         foam_family: specs.material,
         thickness_under_in: merged.thickness_under_in,
-        color: merged.color
+        color: merged.color,
       },
       material: {
         name: merged.material_name,
         density_lbft3: densityPcf,
         kerf_pct: merged.kerf_pct,
-        min_charge: merged.min_charge
+        min_charge: merged.min_charge,
       },
       pricing: {
         total: calc?.price_total ?? calc?.total ?? 0,
@@ -885,7 +847,7 @@ export async function POST(req: NextRequest) {
         order_ci_with_waste: calc?.order_ci_with_waste,
         used_min_charge: calc?.min_charge_applied,
         raw: calc,
-        price_breaks: priceBreaks || undefined
+        price_breaks: priceBreaks || undefined,
       },
       missing: (() => {
         const miss: string[] = [];
@@ -901,7 +863,7 @@ export async function POST(req: NextRequest) {
         }
         return miss;
       })(),
-      facts: merged
+      facts: merged,
     };
 
     let htmlBody = "";
@@ -919,7 +881,7 @@ export async function POST(req: NextRequest) {
         htmlPreview: htmlBody,
         specs,
         calc,
-        facts: merged
+        facts: merged,
       });
     }
 
@@ -931,7 +893,7 @@ export async function POST(req: NextRequest) {
         htmlPreview: htmlBody,
         specs,
         calc,
-        facts: merged
+        facts: merged,
       });
     }
 
@@ -944,14 +906,15 @@ export async function POST(req: NextRequest) {
         toEmail,
         subject: subject || "Foam quote",
         html: htmlBody,
-        inReplyTo
-      })
+        inReplyTo,
+      }),
     });
 
     const sent = await r.json().catch(() => ({} as any));
 
     if (threadKey && (sent.messageId || sent.internetMessageId)) {
-      merged.__lastGraphMessageId = sent.messageId || merged.__lastGraphMessageId;
+      merged.__lastGraphMessageId =
+        sent.messageId || merged.__lastGraphMessageId;
       merged.__lastInternetMessageId =
         sent.internetMessageId || merged.__lastInternetMessageId;
       await saveFacts(threadKey, merged);
@@ -965,7 +928,7 @@ export async function POST(req: NextRequest) {
       internetMessageId: sent.internetMessageId,
       specs,
       calc,
-      facts: merged
+      facts: merged,
     });
   } catch (e: any) {
     return err("orchestrate_exception", String(e?.message || e));

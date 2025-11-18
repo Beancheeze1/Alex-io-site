@@ -101,7 +101,7 @@ function htmlEscape(s: string) {
 /**
  * Visual layout preview:
  * Pure HTML (no SVG) so Outlook/Gmail/etc all render it.
- * Shows block dims and cavity "chips" inside a bordered box.
+ * Shows block dims and cavity "boxes" arranged in a pseudo top-view layout.
  */
 function buildVisualPreview(specs: QuoteSpecs, facts: Record<string, any>): string {
   const L = specs.L_in || 0;
@@ -129,30 +129,17 @@ function buildVisualPreview(specs: QuoteSpecs, facts: Record<string, any>): stri
       ? `${cavityCount} cavit${cavityCount === 1 ? "y" : "ies"}`
       : "No cavities noted";
 
-  const chips = cavitiesRaw.slice(0, 12); // cap to keep layout tight
+  // How many cavity boxes to draw visually
+  const numBoxes =
+    cavitiesRaw.length > 0
+      ? cavitiesRaw.length
+      : cavityCount && cavityCount > 0
+      ? cavityCount
+      : 0;
 
-  const chipsHtml = chips.length
-    ? chips
-        .map(
-          (d) => `
-            <span style="
-              display:inline-block;
-              margin:2px 4px 2px 0;
-              padding:3px 8px;
-              border-radius:999px;
-              border:1px solid #1d4ed8;
-              background:#eef2ff;
-              font-size:10px;
-              color:#1f2937;
-              white-space:nowrap;
-            ">
-              ${htmlEscape(d)}
-            </span>`
-        )
-        .join("")
-    : `<span style="font-size:11px; color:#6b7280;">(No individual cavity sizes noted yet.)</span>`;
-
-  return `
+  // If no cavities at all, just show the block summary
+  if (!numBoxes) {
+    return `
 <h3 style="margin:10px 0 3px 0; font-size:13px; color:#1d4ed8;">Visual layout preview (auto-generated)</h3>
 <div style="
   border-radius:12px;
@@ -169,12 +156,81 @@ function buildVisualPreview(specs: QuoteSpecs, facts: Record<string, any>): stri
   <div style="margin-bottom:4px; color:#4b5563;">
     ${htmlEscape(labelCav)}
   </div>
-  <div style="margin-top:2px;">
-    ${chipsHtml}
+</div>
+<p style="margin:4px 0 10px 0; font-size:11px; color:#6b7280;">
+  Not to scale — this is a simple top-view style summary to help visualize the block.
+</p>`;
+  }
+
+  // Build visual cavity boxes that wrap inside a "block" container
+  const maxDisplay = Math.min(numBoxes, 12); // cap to keep layout tidy
+  const cols = Math.min(maxDisplay, 4); // up to 4 boxes per row visually
+  const boxWidthPct = 100 / cols - 4; // leave a bit of gap
+
+  const boxes: string[] = [];
+  for (let i = 0; i < maxDisplay; i++) {
+    const label =
+      cavitiesRaw[i] && typeof cavitiesRaw[i] === "string"
+        ? cavitiesRaw[i]
+        : `Cavity ${i + 1}`;
+    boxes.push(`
+      <div style="
+        display:inline-block;
+        width:${boxWidthPct}%;
+        min-width:44px;
+        height:26px;
+        margin:3px 2px;
+        border-radius:6px;
+        border:1px solid #1d4ed8;
+        background:#eef2ff;
+        font-size:10px;
+        color:#1f2937;
+        text-align:center;
+        line-height:24px;
+        box-sizing:border-box;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      ">
+        ${htmlEscape(label)}
+      </div>`);
+  }
+
+  const extraNote =
+    numBoxes > maxDisplay
+      ? `<div style="margin-top:2px; font-size:10px; color:#6b7280;">+${numBoxes - maxDisplay} more cavity type(s) not shown.</div>`
+      : "";
+
+  return `
+<h3 style="margin:10px 0 3px 0; font-size:13px; color:#1d4ed8;">Visual layout preview (auto-generated)</h3>
+<div style="
+  border-radius:12px;
+  border:1px solid #c7d2fe;
+  background:#f9fafb;
+  padding:8px 10px 10px 10px;
+  font-size:11px;
+  color:#111827;
+  max-width:420px;
+">
+  <div style="margin-bottom:4px; font-weight:500;">
+    ${htmlEscape(labelDims)}
+  </div>
+  <div style="margin-bottom:6px; color:#4b5563;">
+    ${htmlEscape(labelCav)} (top view, not to scale)
+  </div>
+  <div style="
+    border-radius:10px;
+    border:1px dashed #93c5fd;
+    background:#eff6ff;
+    padding:6px 4px 4px 4px;
+    text-align:center;
+  ">
+    ${boxes.join("")}
+    ${extraNote}
   </div>
 </div>
 <p style="margin:4px 0 10px 0; font-size:11px; color:#6b7280;">
-  Not to scale — this is a simple top-view style summary to help visualize the block and cavity arrangement.
+  Not to scale — this is a simple top-view style layout to help visualize the block and cavity grouping.
 </p>`;
 }
 
@@ -383,9 +439,9 @@ ${missingList}`
       const d = specs.density_pcf;
       if (d >= 1.7 && d <= 2.2) {
         fallback.push(
-          `If the part isn’t extremely fragile, a nearby density in the ${(
-            d - 0.2
-          ).toFixed(1)}–${(d - 0.4).toFixed(
+          `If the part isn’t extremely fragile, a nearby density in the ${(d - 0.2).toFixed(
+            1
+          )}–${(d - 0.4).toFixed(
             1
           )} pcf range might reduce cost while still handling normal drops—we can run that as an alternate.`
         );
@@ -413,7 +469,7 @@ ${missingList}`
 
   // Price-break HTML:
   // - If price_breaks are provided, show a compact table.
-  // - Otherwise, we now leave this blank (no "At X pcs..." one-liner)
+  // - Otherwise, leave blank (no one-liner).
   let priceBreakHtml: string;
   if (priceBreaks && priceBreaks.length > 0) {
     const rows = priceBreaks
