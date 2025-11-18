@@ -12,7 +12,7 @@
 // - Also load + save facts under quote_no so sketch auto-quote
 //   data (dims/qty/cavities/material) is available on follow-up emails.
 // - Dynamic price-break generation for multiple quantities.
-// - NEW: AI Design Optimizer suggestions stored as facts.opt_suggestions.
+// - NEW: Quote status intent (accepted / on-hold) from customer wording.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
@@ -237,8 +237,7 @@ async function fetchCalcQuote(opts: {
   return j.result;
 }
 
-// Dynamic price breaks around the current quantity.
-// Uses the same /api/quotes/calc route for each quantity.
+// Dynamic price breaks
 type PriceBreak = {
   qty: number;
   total: number;
@@ -282,13 +281,15 @@ async function buildPriceBreaks(
         calc.total ??
         calc.order_total ??
         0) as number;
-    const piece = total && q > 0 ? total / q : null;
+    const piece =
+      total && q > 0 ? total / q : null;
 
     out.push({
       qty: q,
       total,
       piece,
-      used_min_charge: (calc.min_charge_applied ?? null) as boolean | null
+      used_min_charge:
+        (calc.min_charge_applied ?? null) as boolean | null
     });
   }
 
@@ -443,7 +444,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 }
 
 /* ============================================================
-   LLM helpers (facts + opener + optimizer)
+   LLM helpers (facts + opener)
    ============================================================ */
 
 async function aiParseFacts(
@@ -514,6 +515,10 @@ ${body}
   }
 }
 
+/* ============================================================
+   LLM opener
+   ============================================================ */
+
 const HUMAN_OPENERS = [
   "Appreciate the details—once we lock a few specs I’ll price this out.",
   "Thanks for sending this—happy to quote it as soon as I confirm a couple items.",
@@ -578,98 +583,34 @@ ${lastInbound}
   }
 }
 
-// NEW: AI Design Optimizer.
-// Given facts + calc, suggest a few practical tweaks (material / thickness / qty / layout).
-async function aiDesignSuggestions(
-  model: string,
-  facts: Mem,
-  calc: any
-): Promise<string[] | null> {
-  const key = process.env.OPENAI_API_KEY?.trim();
-  if (!key) return null;
+/* ============================================================
+   Quote status intent helper
+   ============================================================ */
 
-  try {
-    const dims = facts.dims || null;
-    const qty = facts.qty || null;
-    const material = facts.material_name || facts.material || null;
-    const density = facts.density || null;
-    const cavityCount = facts.cavityCount ?? null;
-    const cavityDims = Array.isArray(facts.cavityDims) ? facts.cavityDims : [];
-    const pieceCi = calc?.piece_ci ?? null;
-    const orderCi = calc?.order_ci_with_waste ?? calc?.order_ci ?? null;
-    const total =
-      calc?.price_total ?? calc?.total ?? calc?.order_total ?? null;
+type StatusIntent = "accepted" | "on_hold" | null;
 
-    const payload = {
-      dims,
-      qty,
-      material,
-      density,
-      cavityCount,
-      cavityDims,
-      piece_ci: pieceCi,
-      order_ci: orderCi,
-      total
-    };
+function detectStatusIntent(text: string): StatusIntent {
+  const t = (text || "").toLowerCase();
 
-    const prompt = `
-You are a foam packaging estimator.
-
-You will be given a JSON blob of the current quote specs and volume/price info.
-Think like a senior packaging engineer: suggest a few practical, realistic ways to
-optimize cost OR performance (but not both at once per bullet).
-
-- Focus on things foam buyers actually tweak: material family, density, thickness, cavity layout, or quantity.
-- Assume normal drop heights (under ~36") unless the user says otherwise.
-- Avoid generic fluff like "shop around" or "talk to sales".
-- Do NOT change the basic size/footprint unless clearly implied by the data.
-
-Return ONLY valid JSON:
-{
-  "suggestions": [
-    "short bullet sentence...",
-    "another short bullet..."
-  ]
-}
-
-Aim for 2–4 suggestions max.
-
-Current quote (JSON):
-${JSON.stringify(payload, null, 2)}
-    `.trim();
-
-    const r = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`
-      },
-      body: JSON.stringify({
-        model,
-        input: prompt,
-        max_output_tokens: 220,
-        temperature: 0.3
-      })
-    });
-
-    const raw = await r.text();
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start === -1 || end === -1) return null;
-
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    if (!Array.isArray(parsed.suggestions)) return null;
-
-    const cleaned = parsed.suggestions
-      .map((s: any) => (typeof s === "string" ? s.trim() : ""))
-      .filter((s: string) => s.length > 0)
-      .slice(0, 4);
-
-    return cleaned.length ? cleaned : null;
-  } catch (e) {
-    console.error("aiDesignSuggestions failed:", e);
-    return null;
+  // Strong acceptance phrases
+  if (
+    /\b(go ahead|go ahead with|please proceed|proceed with|we'?ll take it|we will take it|we will take these|we will take this|we'?ll take these|place (the )?order|place this order|issue (a )?po|issue our po|you can run with this|let's move forward|move forward with this|looks good,? go ahead|good to go)\b/.test(
+      t
+    )
+  ) {
+    return "accepted";
   }
+
+  // Simple "on hold" phrases
+  if (
+    /\b(hold off|on hold|pause this|please hold|wait on this|do not proceed yet|don'?t proceed yet)\b/.test(
+      t
+    )
+  ) {
+    return "on_hold";
+  }
+
+  return null;
 }
 
 /* ============================================================
@@ -741,6 +682,14 @@ export async function POST(req: NextRequest) {
       merged.from = "sketch-auto-quote";
     }
 
+    // NEW: infer quote status intent (accepted / on_hold) from the latest email.
+    const statusIntent = detectStatusIntent(`${subject}\n\n${lastText}`);
+    if (statusIntent === "accepted") {
+      merged.status = "accepted";
+    } else if (statusIntent === "on_hold") {
+      merged.status = merged.status || "on_hold";
+    }
+
     // Stable quote number per thread
     if (!merged.quoteNumber && !merged.quote_no) {
       const now = new Date();
@@ -801,8 +750,6 @@ export async function POST(req: NextRequest) {
 
     let calc: any = null;
     let priceBreaks: PriceBreak[] | null = null;
-    let optSuggestions: string[] | null = null;
-
     const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
     if (canCalc) {
@@ -814,8 +761,8 @@ export async function POST(req: NextRequest) {
         round_to_bf: false
       });
 
+      // Build price breaks only if we have a base calc and we're not in dryRun
       if (calc && !dryRun) {
-        // 1) Price breaks
         priceBreaks = await buildPriceBreaks(
           {
             dims: specs.dims as string,
@@ -826,14 +773,6 @@ export async function POST(req: NextRequest) {
           },
           calc
         );
-
-        // 2) AI Design Optimizer suggestions
-        optSuggestions = await aiDesignSuggestions("gpt-4.1-mini", merged, calc);
-        if (optSuggestions && optSuggestions.length) {
-          merged.opt_suggestions = optSuggestions;
-          if (threadKey) await saveFacts(threadKey, merged);
-          if (merged.quote_no) await saveFacts(merged.quote_no, merged);
-        }
       }
     }
 
@@ -945,9 +884,7 @@ export async function POST(req: NextRequest) {
         order_ci: calc?.order_ci,
         order_ci_with_waste: calc?.order_ci_with_waste,
         used_min_charge: calc?.min_charge_applied,
-        // raw calc object so the template can surface skiving, etc.
         raw: calc,
-        // pass computed price breaks through to the template
         price_breaks: priceBreaks || undefined
       },
       missing: (() => {
