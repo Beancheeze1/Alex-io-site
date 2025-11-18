@@ -14,28 +14,33 @@ type QuoteRow = {
 type ItemRow = {
   id: number;
   quote_id: number;
-  length_in: string;
-  width_in: string;
-  height_in: string;
-  qty: number;
+  length_in: number;
+  width_in: number;
+  height_in: number;
   material_id: number;
+  qty: number;
   material_name: string | null;
 };
 
 type CavityRow = {
   quote_item_id: number;
-  label: string;
-  count: number;
-  cav_length_in: string;
-  cav_width_in: string;
-  cav_depth_in: string;
+  label: string | null;
+  count: number | null;
+  cav_length_in: string | null;
+  cav_width_in: string | null;
+  cav_depth_in: string | null;
 };
 
-function usd(value: number | null | undefined): string {
-  const n =
-    typeof value === "number" && isFinite(value)
-      ? value
-      : 0;
+type CalcResult = {
+  price_total?: number | null;
+  total?: number | null;
+  piece_ci?: number | null;
+  order_ci?: number | null;
+  order_ci_with_waste?: number | null;
+  min_charge_applied?: boolean | null;
+};
+
+function usd(n: number): string {
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -56,15 +61,21 @@ export default async function QuotePrintPage(props: { params: { quote_no: string
     select id, quote_no, customer_name, email, phone, status, created_at
     from quotes
     where quote_no = $1
+    limit 1;
     `,
     [quoteNo]
   );
 
   if (!quote) {
     return (
-      <div style={{ padding: "40px", fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif" }}>
-        <h1 style={{ fontSize: "20px", marginBottom: "8px" }}>Quote not found</h1>
-        <p style={{ color: "#555" }}>We couldn&apos;t find a quote with number <code>{quoteNo}</code>.</p>
+      <div
+        style={{
+          fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+          padding: "40px",
+        }}
+      >
+        <h1 style={{ fontSize: "20px", fontWeight: 600, marginBottom: "8px" }}>Quote not found</h1>
+        <p style={{ color: "#6b7280" }}>We couldn&apos;t find a quote with number {quoteNo}.</p>
       </div>
     );
   }
@@ -74,16 +85,16 @@ export default async function QuotePrintPage(props: { params: { quote_no: string
     select
       qi.id,
       qi.quote_id,
-      qi.length_in::text,
-      qi.width_in::text,
-      qi.height_in::text,
-      qi.qty,
+      qi.length_in,
+      qi.width_in,
+      qi.height_in,
       qi.material_id,
+      qi.qty,
       m.name as material_name
     from quote_items qi
     left join materials m on m.id = qi.material_id
     where qi.quote_id = $1
-    order by qi.id asc
+    order by qi.id asc;
     `,
     [quote.id]
   );
@@ -103,15 +114,15 @@ export default async function QuotePrintPage(props: { params: { quote_no: string
         cav_depth_in::text
       from quote_item_cavities
       where quote_item_id = any($1::int[])
-      order by quote_item_id, id
+      order by quote_item_id, label;
       `,
       [itemIds]
     );
 
-    for (const c of cavities) {
-      const list = cavityMap.get(c.quote_item_id) ?? [];
-      list.push(c);
-      cavityMap.set(c.quote_item_id, list);
+    for (const cav of cavities) {
+      const arr = cavityMap.get(cav.quote_item_id) || [];
+      arr.push(cav);
+      cavityMap.set(cav.quote_item_id, arr);
     }
   }
 
@@ -119,12 +130,18 @@ export default async function QuotePrintPage(props: { params: { quote_no: string
 
   const priced = await Promise.all(
     items.map(async (item) => {
-      const cavities = cavityMap.get(item.id) ?? [];
-      const cavStrings = cavities.map(
-        (c) => `${c.cav_length_in}x${c.cav_width_in}x${c.cav_depth_in}`
-      );
+      const cavs = cavityMap.get(item.id) || [];
+      const cavStrings = cavs
+        .map((c) => {
+          const L = c.cav_length_in || "";
+          const W = c.cav_width_in || "";
+          const H = c.cav_depth_in || "";
+          if (!L || !W || !H) return null;
+          return `${L}x${W}x${H}`;
+        })
+        .filter((x): x is string => !!x);
 
-      let calc: any = null;
+      let calc: CalcResult | null = null;
       try {
         const res = await fetch(`${base}/api/quotes/calc`, {
           method: "POST",
@@ -144,10 +161,10 @@ export default async function QuotePrintPage(props: { params: { quote_no: string
           calc = data.result;
         }
       } catch {
-        // swallow; we still show non-priced view
+        // ignore pricing errors in print view
       }
 
-      return { item, cavities, calc };
+      return { item, calc };
     })
   );
 
@@ -178,131 +195,227 @@ export default async function QuotePrintPage(props: { params: { quote_no: string
           boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            marginBottom: "24px",
+          }}
+        >
           <div>
-            <h1 style={{ margin: 0, fontSize: "22px" }}>Quote #{quote.quote_no}</h1>
-            <p style={{ margin: "4px 0 0 0", color: "#4b5563" }}>
-              {quote.customer_name}
-              {quote.email ? <> &middot; {quote.email}</> : null}
-              {quote.phone ? <> &middot; {quote.phone}</> : null}
-            </p>
-            <p style={{ margin: "4px 0 0 0", color: "#6b7280", fontSize: "12px" }}>
-              Created: {new Date(quote.created_at).toLocaleString()}
-            </p>
+            <div style={{ fontSize: "12px", textTransform: "uppercase", color: "#6b7280" }}>
+              Quote
+            </div>
+            <div style={{ fontSize: "22px", fontWeight: 700 }}>{quote.quote_no}</div>
+            <div style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>
+              Created {new Date(quote.created_at).toLocaleString()}
+            </div>
           </div>
-          <div style={{ textAlign: "right", fontSize: "12px", color: "#6b7280" }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: "14px", fontWeight: 600 }}>{quote.customer_name}</div>
+            {quote.email && (
+              <div style={{ fontSize: "13px", color: "#6b7280" }}>{quote.email}</div>
+            )}
+            {quote.phone && (
+              <div style={{ fontSize: "13px", color: "#6b7280" }}>{quote.phone}</div>
+            )}
             <div
               style={{
-                display: "inline-block",
+                display: "inline-flex",
+                alignItems: "center",
                 padding: "4px 10px",
                 borderRadius: "999px",
+                fontSize: "11px",
+                fontWeight: 500,
+                marginTop: "8px",
                 background:
                   quote.status === "sent"
-                    ? "#d1fae5"
+                    ? "rgba(59,130,246,0.08)"
                     : quote.status === "accepted"
-                    ? "#bfdbfe"
-                    : "#e5e7eb",
+                    ? "rgba(34,197,94,0.08)"
+                    : quote.status === "lost"
+                    ? "rgba(248,113,113,0.08)"
+                    : "rgba(148,163,184,0.12)",
                 color:
                   quote.status === "sent"
-                    ? "#065f46"
-                    : quote.status === "accepted"
                     ? "#1d4ed8"
-                    : "#374151",
+                    : quote.status === "accepted"
+                    ? "#15803d"
+                    : quote.status === "lost"
+                    ? "#b91c1c"
+                    : "#475569",
               }}
             >
-              {quote.status.toUpperCase()}
-            </div>
-            <div style={{ marginTop: "8px" }}>
-              <span style={{ color: "#9ca3af" }}>
-                Use your browser&apos;s <strong>Print</strong> command to print this page.
-              </span>
+              {quote.status || "draft"}
             </div>
           </div>
         </div>
 
-        <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "16px 0" }} />
+        <div
+          style={{
+            marginBottom: "16px",
+            padding: "12px 14px",
+            borderRadius: "12px",
+            background: "#eff6ff",
+            border: "1px solid #dbeafe",
+            fontSize: "13px",
+            color: "#1d4ed8",
+          }}
+        >
+          This printable view is for internal use and for sharing with customers who prefer a PDF
+          style summary. Prices are based on the specs below.
+        </div>
 
-        <h2 style={{ fontSize: "16px", marginBottom: "8px" }}>Line items</h2>
-        {priced.length === 0 ? (
-          <p style={{ color: "#6b7280" }}>No line items stored for this quote yet.</p>
-        ) : (
-          <table
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            marginTop: "8px",
+            fontSize: "13px",
+          }}
+        >
+          <thead>
+            <tr>
+              <th
+                style={{
+                  textAlign: "left",
+                  padding: "8px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontWeight: 600,
+                  color: "#374151",
+                }}
+              >
+                Line
+              </th>
+              <th
+                style={{
+                  textAlign: "left",
+                  padding: "8px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontWeight: 600,
+                  color: "#374151",
+                }}
+              >
+                Dimensions
+              </th>
+              <th
+                style={{
+                  textAlign: "right",
+                  padding: "8px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontWeight: 600,
+                  color: "#374151",
+                }}
+              >
+                Qty
+              </th>
+              <th
+                style={{
+                  textAlign: "right",
+                  padding: "8px",
+                  borderBottom: "1px solid #e5e7eb",
+                  fontWeight: 600,
+                  color: "#374151",
+                }}
+              >
+                Est. Total
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {priced.map(({ item, calc }, idx) => {
+              const label = item.material_name || `Material #${item.material_id}`;
+              const dims = `${item.length_in} × ${item.width_in} × ${item.height_in}`;
+              const total =
+                calc?.price_total ??
+                calc?.total ??
+                null;
+              const cavs = cavityMap.get(item.id) || [];
+              return (
+                <tr key={item.id}>
+                  <td style={{ padding: "8px", borderBottom: "1px solid #f3f4f6" }}>
+                    <div style={{ fontWeight: 500 }}>Line {idx + 1}</div>
+                    <div style={{ color: "#6b7280" }}>{label}</div>
+                    {cavs.length > 0 && (
+                      <div style={{ marginTop: "4px", fontSize: "11px", color: "#4b5563" }}>
+                        Cavities:{" "}
+                        {cavs
+                          .map((c) => {
+                            const L = c.cav_length_in || "";
+                            const W = c.cav_width_in || "";
+                            const H = c.cav_depth_in || "";
+                            const count = c.count ?? 1;
+                            if (!L || !W || !H) return null;
+                            const base = `${L}x${W}x${H}`;
+                            return count > 1 ? `${count}× ${base}` : base;
+                          })
+                          .filter(Boolean)
+                          .join(", ")}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ padding: "8px", borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
+                  <td
+                    style={{
+                      padding: "8px",
+                      borderBottom: "1px solid #f3f4f6",
+                      textAlign: "right",
+                    }}
+                  >
+                    {item.qty}
+                  </td>
+                  <td
+                    style={{
+                      padding: "8px",
+                      borderBottom: "1px solid #f3f4f6",
+                      textAlign: "right",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {total != null ? usd(total) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        <div
+          style={{
+            marginTop: "18px",
+            paddingTop: "12px",
+            borderTop: "1px solid #e5e7eb",
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            gap: "12px",
+          }}
+        >
+          <div style={{ fontSize: "13px", color: "#6b7280" }}>Estimated order total</div>
+          <div style={{ fontSize: "20px", fontWeight: 600 }}>
+            {overallTotal ? usd(overallTotal) : usd(0)}
+          </div>
+        </div>
+
+        {/* NEW: sketch note when we have any cavities */}
+        {cavityMap.size > 0 && (
+          <p
             style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: "13px",
-              marginBottom: "16px",
+              marginTop: "8px",
+              fontSize: "11px",
+              color: "#4b5563",
+              lineHeight: 1.5,
             }}
           >
-            <thead>
-              <tr style={{ background: "#eff6ff" }}>
-                <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e5e7eb" }}>
-                  Item
-                </th>
-                <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e5e7eb" }}>
-                  Dimensions (L × W × H)
-                </th>
-                <th style={{ textAlign: "right", padding: "8px", borderBottom: "1px solid #e5e7eb" }}>
-                  Qty
-                </th>
-                <th style={{ textAlign: "right", padding: "8px", borderBottom: "1px solid #e5e7eb" }}>
-                  Est. total
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {priced.map(({ item, calc }, idx) => {
-                const label = item.material_name || `Material #${item.material_id}`;
-                const dims = `${item.length_in} × ${item.width_in} × ${item.height_in}`;
-                const total =
-                  calc?.price_total ??
-                  calc?.total ??
-                  null;
-                return (
-                  <tr key={item.id}>
-                    <td style={{ padding: "8px", borderBottom: "1px solid #f3f4f6" }}>
-                      <div style={{ fontWeight: 500 }}>Line {idx + 1}</div>
-                      <div style={{ color: "#6b7280" }}>{label}</div>
-                    </td>
-                    <td style={{ padding: "8px", borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
-                    <td
-                      style={{
-                        padding: "8px",
-                        borderBottom: "1px solid #f3f4f6",
-                        textAlign: "right",
-                      }}
-                    >
-                      {item.qty}
-                    </td>
-                    <td
-                      style={{
-                        padding: "8px",
-                        borderBottom: "1px solid #f3f4f6",
-                        textAlign: "right",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {total != null ? usd(Number(total)) : <span style={{ color: "#9ca3af" }}>N/A</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+            Dimensions and cavities interpreted from your uploaded sketch.
+          </p>
         )}
-
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: "12px", color: "#6b7280" }}>Estimated total</div>
-            <div style={{ fontSize: "20px", fontWeight: 600 }}>
-              {overallTotal ? usd(overallTotal) : usd(0)}
-            </div>
-          </div>
-        </div>
 
         <p style={{ marginTop: "24px", fontSize: "12px", color: "#6b7280", lineHeight: 1.5 }}>
           This print view shows the same core specs and estimated pricing as your emailed quote.
-          Actual charges may differ if specs or quantities change or if additional services are requested.
+          Actual charges may differ if specs or quantities change or if additional services are
+          requested.
         </p>
       </div>
     </div>

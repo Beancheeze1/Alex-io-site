@@ -1,20 +1,48 @@
 // app/api/admin/mem/route.ts
-import { NextResponse } from "next/server";
-import { memSelfTest, LAST_STORE, REDIS_LAST_ERROR } from "@/app/lib/memory";
+//
+// Simple memory/debug endpoint.
+// - GET /api/admin/mem          -> shows memSelfTest + store info
+// - GET /api/admin/mem?key=XYZ  -> same plus the facts for that key
+//
+// USE ONLY FOR INTERNAL DEBUG (no auth yet).
+
+import { NextRequest, NextResponse } from "next/server";
+import { loadFacts, memSelfTest, LAST_STORE, REDIS_LAST_ERROR } from "@/app/lib/memory";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const probe = await memSelfTest();
+    const url = new URL(req.url);
+    const key = url.searchParams.get("key") || url.searchParams.get("id") || null;
+
+    const test = await memSelfTest();
+
+    if (!key) {
+      return NextResponse.json(
+        {
+          ok: true,
+          mode: "summary",
+          test,
+          lastStore: LAST_STORE,
+          redisError: REDIS_LAST_ERROR,
+        },
+        { status: 200 }
+      );
+    }
+
+    const facts = await loadFacts(key);
+
     return NextResponse.json(
       {
-        ok: probe.ok,
-        env: probe.env,            // { url: boolean, token: boolean }
-        store: probe.store,        // "redis" | "memory"
-        redis_error: REDIS_LAST_ERROR,
-        note: "Upstash set/get round-trip (no secrets returned).",
+        ok: true,
+        mode: "by-key",
+        key,
+        test,
+        lastStore: LAST_STORE,
+        redisError: REDIS_LAST_ERROR,
+        facts,
       },
       { status: 200 }
     );
@@ -22,11 +50,10 @@ export async function GET() {
     return NextResponse.json(
       {
         ok: false,
-        error: String(e?.message || e),
-        store: LAST_STORE,
-        redis_error: REDIS_LAST_ERROR,
+        error: "admin_mem_exception",
+        detail: String(e?.message || e),
       },
-      { status: 200 }
+      { status: 500 }
     );
   }
 }

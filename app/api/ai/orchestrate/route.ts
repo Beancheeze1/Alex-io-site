@@ -9,6 +9,8 @@
 // - Stable quoteNumber per thread
 // - NEW: Always store quote header when we have dims + qty + quoteNumber,
 //   and only store line items once material_id is known.
+// - NEW (Bundle 3): also load + save facts under quote_no so sketch auto-quote
+//   data (dims/qty/cavities) is available on follow-up emails.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
@@ -67,6 +69,14 @@ function pickThreadContext(threadMsgs: any[] = []): string {
     })
     .filter(Boolean);
   return snippets.join("\n\n");
+}
+
+// NEW: detect Q-AI-* style quote numbers in subject/body so we can
+// pull sketch facts that were stored under quote_no.
+function extractQuoteNo(text: string): string | null {
+  if (!text) return null;
+  const m = text.match(/Q-[A-Z]+-\d{8}-\d{6}/i);
+  return m ? m[0] : null;
 }
 
 /* ============================================================
@@ -307,7 +317,10 @@ function grabMaterial(raw: string): string | undefined {
   return undefined;
 }
 
-function extractCavities(raw: string): { cavityCount?: number; cavityDims?: string[] } {
+function extractCavities(raw: string): {
+  cavityCount?: number;
+  cavityDims?: string[];
+} {
   const t = raw.toLowerCase();
   const lines = raw.split(/\r?\n/);
   const cavityDims: string[] = [];
@@ -533,6 +546,10 @@ export async function POST(req: NextRequest) {
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
     const dryRun = !!p.dryRun;
 
+    // NEW: see if we can detect a quote_no in the subject so we can
+    // pull sketch facts stored under that key.
+    const subjectQuoteNo = extractQuoteNo(subject);
+
     /* ------------------- Parse new turn ------------------- */
 
     let newly = extractAllFromTextAndSubject(lastText, subject);
@@ -551,22 +568,19 @@ export async function POST(req: NextRequest) {
 
     /* ------------------- Merge with memory ------------------- */
 
-    let loaded: Mem = {};
-    if (threadKey) loaded = await loadFacts(threadKey);
+    let loadedThread: Mem = {};
+    let loadedQuote: Mem = {};
 
-    // Don't let cavity dims overwrite main dims
-    if (loaded.dims && newly.dims && loaded.dims !== newly.dims) {
-      const lower = lastText.toLowerCase();
-      const isCavityContext = /\bcavity|cutout|pocket\b/.test(lower);
-      if (isCavityContext) {
-        const cavs = Array.isArray(loaded.cavityDims) ? [...loaded.cavityDims] : [];
-        if (!cavs.includes(newly.dims)) cavs.push(newly.dims);
-        newly.cavityDims = cavs;
-        delete newly.dims;
-      }
+    if (threadKey) {
+      loadedThread = await loadFacts(threadKey);
+    }
+    if (subjectQuoteNo) {
+      loadedQuote = await loadFacts(subjectQuoteNo);
     }
 
-    let merged = mergeFacts(loaded, newly);
+    // Merge order: sketch / quote-level facts first, then thread-level,
+    // then the newest email facts overwrite.
+    let merged = mergeFacts(mergeFacts(loadedQuote, loadedThread), newly);
 
     merged = applyCavityNormalization(merged);
     merged.__turnCount = (merged.__turnCount || 0) + 1;
@@ -587,10 +601,20 @@ export async function POST(req: NextRequest) {
       merged.quoteNumber = merged.quote_no;
     }
 
+    // If subject contained a quote number and merged doesn't have one yet,
+    // adopt it so we stay aligned with sketch/apply.
+    if (subjectQuoteNo && !merged.quote_no) {
+      merged.quote_no = subjectQuoteNo;
+      merged.quoteNumber = subjectQuoteNo;
+    }
+
     /* ------------------- DB enrichment ------------------- */
 
     merged = await enrichFromDB(merged);
+
+    // Save facts under both keys so future turns can load from either
     if (threadKey) await saveFacts(threadKey, merged);
+    if (merged.quote_no) await saveFacts(merged.quote_no, merged);
 
     /* ------------------- LLM opener ------------------- */
 
@@ -620,6 +644,8 @@ export async function POST(req: NextRequest) {
     });
 
     let calc: any = null;
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+
     if (canCalc) {
       calc = await fetchCalcQuote({
         dims: specs.dims!,
@@ -631,7 +657,6 @@ export async function POST(req: NextRequest) {
     }
 
     const hasDimsQty = !!(specs.dims && specs.qty);
-    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
     // Header: store whenever we have dims + qty + quoteNumber
     let quoteId = merged.quote_id;
@@ -666,7 +691,9 @@ export async function POST(req: NextRequest) {
           quoteId = headerJson.quote.id;
           merged.quote_id = quoteId;
           merged.status = headerJson.quote.status || merged.status;
+
           if (threadKey) await saveFacts(threadKey, merged);
+          if (merged.quote_no) await saveFacts(merged.quote_no, merged);
         }
       } catch (err) {
         console.error("quote header store error:", err);
@@ -699,6 +726,7 @@ export async function POST(req: NextRequest) {
 
         merged.__primary_item_created = true;
         if (threadKey) await saveFacts(threadKey, merged);
+        if (merged.quote_no) await saveFacts(merged.quote_no, merged);
       } catch (err) {
         console.error("quote item store error:", err);
       }
@@ -712,7 +740,7 @@ export async function POST(req: NextRequest) {
     const templateInput = {
       customerLine: opener,
       quoteNumber: merged.quoteNumber || merged.quote_no,
-      // NEW: pass status through explicitly so the template can show the pill
+      // pass status through explicitly so the template can show the pill
       status: merged.status || "draft",
       specs: {
         L_in: dimsNums.L,
@@ -736,7 +764,7 @@ export async function POST(req: NextRequest) {
         order_ci: calc?.order_ci,
         order_ci_with_waste: calc?.order_ci_with_waste,
         used_min_charge: calc?.min_charge_applied,
-        // NEW: pass the raw calc object so the template can surface skiving, etc.
+        // raw calc object so the template can surface skiving, etc.
         raw: calc
       },
       missing: (() => {
@@ -807,6 +835,7 @@ export async function POST(req: NextRequest) {
       merged.__lastInternetMessageId =
         sent.internetMessageId || merged.__lastInternetMessageId;
       await saveFacts(threadKey, merged);
+      if (merged.quote_no) await saveFacts(merged.quote_no, merged);
     }
 
     return ok({
