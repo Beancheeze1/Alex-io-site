@@ -90,13 +90,15 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   const { specs, material, pricing, missing } = input;
   const facts = input.facts || {};
 
-  const fromSketch = (facts as any).from === "sketch-auto-quote";
+  const fromSketch =
+    (facts as any).from === "sketch-auto-quote" ||
+    (facts as any).fromSketch === true;
+
   const sketchLine = fromSketch
     ? `<p style="margin:8px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
           Dimensions and cavities interpreted from your uploaded sketch.
        </p>`
     : "";
-
 
   const quoteNo = input.quoteNumber ? String(input.quoteNumber) : "";
 

@@ -17,7 +17,7 @@
 //   - Calls /api/quotes/calc to get pricing
 //   - Uses renderQuoteEmail to build an updated email
 //   - Sends email via /api/msgraph/send
-//   - NEW: stores sketch-derived dims/qty/cavities into memory under quote_no
+//   - Stores sketch-derived dims/qty/cavities into memory under quote_no
 //
 // If the quote row has no email, we fall back to NEXT_PUBLIC_SALES_FORWARD_TO
 // (your sales inbox) instead of throwing an error.
@@ -315,7 +315,7 @@ export async function POST(req: NextRequest) {
       return err("calc_failed", { quoteId: quote.id }, 500);
     }
 
-    // 5.5) NEW: store sketch facts in memory keyed by quote_no
+    // 5.5) Store sketch facts in memory keyed by quote_no
     const cavityCount =
       parsed.cavityCount != null
         ? parsed.cavityCount
@@ -384,9 +384,12 @@ export async function POST(req: NextRequest) {
         quoteId: quote.id,
         quote_no: quote.quote_no,
         from: "sketch-auto-quote",
+        fromSketch: true,
         attachmentId,
         sketchParsed: parsed,
         sketchFactsKey: quote.quote_no,
+        cavityCount,
+        cavityDims: cavities,
       },
     };
 
