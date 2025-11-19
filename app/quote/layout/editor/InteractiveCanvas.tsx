@@ -1,59 +1,49 @@
 // app/quote/layout/editor/InteractiveCanvas.tsx
 //
 // SVG-based canvas that can render the block + cavities
-// and supports click-to-select, drag-to-move, and drag-to-resize.
+// with simple click-to-select, drag-to-move, and resize handle.
 //
-// This is wired by the parent via LayoutModel + callbacks.
+// This is used by app/quote/layout/page.tsx and expects a LayoutModel.
 
 "use client";
 
 import { useRef, useState, MouseEvent } from "react";
 import type { LayoutModel, Cavity } from "./layoutTypes";
+import { WALL_MARGIN_IN } from "./layoutTypes";
 
 type Props = {
   layout: LayoutModel;
   selectedId: string | null;
-  // renamed to avoid Next.js "on*" Server Action warning
+  // Named without "on*" to avoid Next.js Server Action warnings.
   selectAction: (id: string | null) => void;
-  /**
-   * Multi-purpose:
-   *  - move:   moveAction("cav-1", xNorm, yNorm)
-   *  - resize: moveAction("resize:cav-1", lengthNorm, widthNorm)
-   */
   moveAction: (id: string, xNorm: number, yNorm: number) => void;
+  resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
 };
+
+type DragMode = "move" | "resize";
 
 type DragState =
   | {
-      kind: "move";
       id: string;
+      mode: DragMode;
       offsetX: number;
       offsetY: number;
     }
-  | {
-      kind: "resize";
-      id: string;
-      startMouseX: number;
-      startMouseY: number;
-      startLengthIn: number;
-      startWidthIn: number;
-    }
   | null;
-
-const WALL_MARGIN_IN = 0.5;
 
 export default function InteractiveCanvas({
   layout,
   selectedId,
   selectAction,
   moveAction,
+  resizeAction,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
 
   // Fixed canvas size in px; we scale model into this.
-  const canvasWidth = 480;
-  const canvasHeight = 300;
+  const canvasWidth = 640;
+  const canvasHeight = 420;
 
   const { block } = layout;
   const scale = calcScale(
@@ -63,7 +53,6 @@ export default function InteractiveCanvas({
     canvasHeight
   );
 
-  // Block pixel dimensions (true proportional to inches).
   const blockPx = {
     width: block.lengthIn * scale,
     height: block.widthIn * scale,
@@ -74,16 +63,66 @@ export default function InteractiveCanvas({
     y: (canvasHeight - blockPx.height) / 2,
   };
 
-  // Inner keep-out rectangle (0.5" wall all around)
-  const innerWidthIn = Math.max(0, block.lengthIn - 2 * WALL_MARGIN_IN);
-  const innerHeightIn = Math.max(0, block.widthIn - 2 * WALL_MARGIN_IN);
-  const innerWidthPx = innerWidthIn * scale;
-  const innerHeightPx = innerHeightIn * scale;
-  const innerX = blockOffset.x + WALL_MARGIN_IN * scale;
-  const innerY = blockOffset.y + WALL_MARGIN_IN * scale;
+  const wallMarginPx = WALL_MARGIN_IN * scale;
 
-  const handleCavityMouseDown = (
-    e: MouseEvent<SVGRectElement>,
+  const innerBlock = {
+    x: blockOffset.x + wallMarginPx,
+    y: blockOffset.y + wallMarginPx,
+    width: Math.max(0, blockPx.width - wallMarginPx * 2),
+    height: Math.max(0, blockPx.height - wallMarginPx * 2),
+  };
+
+  const gridSpacingIn = 0.5; // 1/2" grid
+  const gridSpacingPx = gridSpacingIn * scale;
+
+  const handleCanvasMouseMove = (e: MouseEvent<SVGSVGElement>) => {
+    if (!drag || !svgRef.current) return;
+
+    const svgRect = svgRef.current.getBoundingClientRect();
+    const ptX = e.clientX - svgRect.left;
+    const ptY = e.clientY - svgRect.top;
+
+    if (drag.mode === "move") {
+      const cav = layout.cavities.find((c) => c.id === drag.id);
+      if (!cav) return;
+
+      const cavX = ptX - drag.offsetX;
+      const cavY = ptY - drag.offsetY;
+
+      const xNorm = (cavX - blockOffset.x) / blockPx.width;
+      const yNorm = (cavY - blockOffset.y) / blockPx.height;
+
+      moveAction(drag.id, xNorm, yNorm);
+    } else if (drag.mode === "resize") {
+      const cav = layout.cavities.find((c) => c.id === drag.id);
+      if (!cav) return;
+
+      const leftPx = blockOffset.x + cav.x * blockPx.width;
+      const topPx = blockOffset.y + cav.y * blockPx.height;
+
+      const widthPx = ptX - leftPx;
+      const heightPx = ptY - topPx;
+
+      // Convert to inches
+      const newLengthIn = widthPx / scale;
+      const newWidthIn = heightPx / scale;
+
+      resizeAction(drag.id, newLengthIn, newWidthIn);
+    }
+  };
+
+  const handleCanvasMouseUp = () => {
+    setDrag(null);
+  };
+
+  const handleBackgroundClick = () => {
+    setDrag(null);
+    selectAction(null);
+  };
+
+  // 🔧 WIDENED THIS TYPE: SVGElement instead of SVGRectElement
+  const handleBodyMouseDown = (
+    e: MouseEvent<SVGElement>,
     cavity: Cavity
   ) => {
     e.stopPropagation();
@@ -97,83 +136,34 @@ export default function InteractiveCanvas({
     const cavY = blockOffset.y + cavity.y * blockPx.height;
 
     setDrag({
-      kind: "move",
       id: cavity.id,
+      mode: "move",
       offsetX: ptX - cavX,
       offsetY: ptY - cavY,
     });
     selectAction(cavity.id);
   };
 
-  const handleResizeMouseDown = (e: MouseEvent<SVGRectElement>, cavity: Cavity) => {
+  const handleHandleMouseDown = (
+    e: MouseEvent<SVGRectElement>,
+    cavity: Cavity
+  ) => {
     e.stopPropagation();
-    if (!svgRef.current) return;
-
-    const svgRect = svgRef.current.getBoundingClientRect();
-    const ptX = e.clientX - svgRect.left;
-    const ptY = e.clientY - svgRect.top;
-
     setDrag({
-      kind: "resize",
       id: cavity.id,
-      startMouseX: ptX,
-      startMouseY: ptY,
-      startLengthIn: cavity.lengthIn,
-      startWidthIn: cavity.widthIn,
+      mode: "resize",
+      offsetX: 0,
+      offsetY: 0,
     });
     selectAction(cavity.id);
-  };
-
-  const handleMouseMove = (e: MouseEvent<SVGSVGElement>) => {
-    if (!drag || !svgRef.current) return;
-    const svgRect = svgRef.current.getBoundingClientRect();
-    const ptX = e.clientX - svgRect.left;
-    const ptY = e.clientY - svgRect.top;
-
-    if (drag.kind === "move") {
-      const cavX = ptX - drag.offsetX;
-      const cavY = ptY - drag.offsetY;
-
-      const xNorm = (cavX - blockOffset.x) / blockPx.width;
-      const yNorm = (cavY - blockOffset.y) / blockPx.height;
-
-      moveAction(drag.id, xNorm, yNorm);
-      return;
-    }
-
-    if (drag.kind === "resize") {
-      // Resize mode: convert mouse delta to inches using the same scale.
-      const deltaXpx = ptX - drag.startMouseX;
-      const deltaYpx = ptY - drag.startMouseY;
-
-      const deltaLIn = deltaXpx / scale;
-      const deltaWIn = deltaYpx / scale;
-
-      const newLength = Math.max(0.25, drag.startLengthIn + deltaLIn);
-      const newWidth = Math.max(0.25, drag.startWidthIn + deltaWIn);
-
-      const lengthNorm = newLength / (block.lengthIn || 1);
-      const widthNorm = newWidth / (block.widthIn || 1);
-
-      moveAction(`resize:${drag.id}`, lengthNorm, widthNorm);
-      return;
-    }
-  };
-
-  const handleMouseUp = () => {
-    setDrag(null);
-  };
-
-  const handleBackgroundClick = () => {
-    selectAction(null);
   };
 
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
       <div className="mb-2 text-xs font-medium text-slate-600">
         Drag cavities to adjust placement. Use the square handle at the
-        bottom-right of each cavity to resize. Block and cavities are scaled
-        in inches; a 0.5" wall is kept clear on all sides.
+        bottom-right of each cavity to resize. Block and cavities are scaled in
+        inches; a 0.5&quot; wall is kept clear on all sides.
       </div>
 
       <div className="overflow-hidden rounded-xl bg-white">
@@ -182,12 +172,31 @@ export default function InteractiveCanvas({
           width={canvasWidth}
           height={canvasHeight}
           className="block w-full max-w-full"
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseUp}
           onClick={handleBackgroundClick}
         >
-          {/* Block outline (square corners) */}
+          {/* Grid inside the block footprint */}
+          <defs>
+            <pattern
+              id="foam-grid-pattern"
+              x="0"
+              y="0"
+              width={gridSpacingPx}
+              height={gridSpacingPx}
+              patternUnits="userSpaceOnUse"
+            >
+              <path
+                d={`M ${gridSpacingPx} 0 L 0 0 0 ${gridSpacingPx}`}
+                fill="none"
+                stroke="#e5e7eb"
+                strokeWidth="0.5"
+              />
+            </pattern>
+          </defs>
+
+          {/* Block outline */}
           <rect
             x={blockOffset.x}
             y={blockOffset.y}
@@ -195,124 +204,143 @@ export default function InteractiveCanvas({
             height={blockPx.height}
             rx={0}
             ry={0}
-            fill="#eef2ff"
+            fill="#f3f4ff"
             stroke="#c7d2fe"
             strokeWidth={2}
           />
+
+          {/* Inner wall margin (0.5" keep-out) */}
+          <rect
+            x={innerBlock.x}
+            y={innerBlock.y}
+            width={innerBlock.width}
+            height={innerBlock.height}
+            rx={0}
+            ry={0}
+            fill="url(#foam-grid-pattern)"
+            stroke="#9ca3af"
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+
+          {/* Block label */}
           <text
             x={blockOffset.x + blockPx.width / 2}
-            y={blockOffset.y - 8}
+            y={blockOffset.y - 10}
             textAnchor="middle"
-            className="fill-slate-600 text-[10px]"
+            fill="#4b5563"
+            fontSize={11}
+            fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
           >
-            Block: {block.lengthIn}×{block.widthIn}×{block.thicknessIn}" thick
+            Block: {block.lengthIn}×{block.widthIn}×{block.thicknessIn}"
+            {" thick"}
           </text>
-
-          {/* Inner keep-out area for wall margin */}
-          {innerWidthIn > 0 && innerHeightIn > 0 && (
-            <rect
-              x={innerX}
-              y={innerY}
-              width={innerWidthPx}
-              height={innerHeightPx}
-              rx={0}
-              ry={0}
-              fill="none"
-              stroke="#9ca3af"
-              strokeWidth={1}
-              strokeDasharray="4 4"
-            />
-          )}
 
           {/* Cavities */}
           {layout.cavities.map((cavity) => {
-            const isSelected = cavity.id === selectedId;
-
-            // Size in px based on inches
-            const cavWidth = cavity.lengthIn * scale;
-            const cavHeight = cavity.widthIn * scale;
+            const cavWidthPx =
+              (cavity.lengthIn / block.lengthIn) * blockPx.width;
+            const cavHeightPx =
+              (cavity.widthIn / block.widthIn) * blockPx.height;
 
             const cavX = blockOffset.x + cavity.x * blockPx.width;
             const cavY = blockOffset.y + cavity.y * blockPx.height;
 
-            const handleSize = 12;
-            const handleX = cavX + cavWidth - handleSize / 2;
-            const handleY = cavY + cavHeight - handleSize / 2;
+            const isSelected = cavity.id === selectedId;
 
-            // Circle uses min(width, height) as diameter
-            const isCircle = cavity.shape === "circle";
-            const isRoundRect = cavity.shape === "roundRect";
+            const handleSize = 10;
+            const handleX = cavX + cavWidthPx - handleSize;
+            const handleY = cavY + cavHeightPx - handleSize;
 
-            const radiusPx =
-              isCircle ? Math.min(cavWidth, cavHeight) / 2 : 0;
-            const centerX = cavX + cavWidth / 2;
-            const centerY = cavY + cavHeight / 2;
+            const label =
+              cavity.label ||
+              `${cavity.lengthIn}×${cavity.widthIn}×${cavity.depthIn}"`;
 
-            const cornerRadiusPx =
-              isRoundRect && cavity.cornerRadiusIn != null
-                ? Math.min(
-                    cavity.cornerRadiusIn * scale,
-                    cavWidth / 2,
-                    cavHeight / 2
-                  )
-                : 0;
+            const commonStroke = isSelected ? "#1d4ed8" : "#4b5563";
+            const commonFill = isSelected ? "#bfdbfe" : "#e5e7eb";
+
+            const radiusPx = Math.min(
+              (cavity.cornerRadiusIn || 0) * scale,
+              cavWidthPx / 2,
+              cavHeightPx / 2
+            );
 
             return (
               <g key={cavity.id}>
-                {isCircle ? (
-                  <circle
-                    cx={centerX}
-                    cy={centerY}
-                    r={radiusPx}
-                    fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
-                    stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
-                    strokeWidth={isSelected ? 2 : 1}
-                    onMouseDown={(e) =>
-                      handleCavityMouseDown(
-                        // circle still uses rect area for dragging reference
-                        e as unknown as MouseEvent<SVGRectElement>,
-                        cavity
-                      )
-                    }
-                  />
+                {cavity.shape === "circle" ? (
+                  <>
+                    {(() => {
+                      const diameterPx = Math.min(cavWidthPx, cavHeightPx);
+                      const cx = cavX + diameterPx / 2;
+                      const cy = cavY + diameterPx / 2;
+                      return (
+                        <>
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r={diameterPx / 2}
+                            fill={commonFill}
+                            stroke={commonStroke}
+                            strokeWidth={isSelected ? 2 : 1}
+                            onMouseDown={(e) =>
+                              handleBodyMouseDown(e, cavity)
+                            }
+                          />
+                          <text
+                            x={cx}
+                            y={cy}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fill="#111827"
+                            fontSize={10}
+                            fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+                          >
+                            {label}
+                          </text>
+                        </>
+                      );
+                    })()}
+                  </>
                 ) : (
-                  <rect
-                    x={cavX}
-                    y={cavY}
-                    width={cavWidth}
-                    height={cavHeight}
-                    rx={cornerRadiusPx}
-                    ry={cornerRadiusPx}
-                    fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
-                    stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
-                    strokeWidth={isSelected ? 2 : 1}
-                    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
-                  />
+                  <>
+                    <rect
+                      x={cavX}
+                      y={cavY}
+                      width={cavWidthPx}
+                      height={cavHeightPx}
+                      rx={cavity.shape === "roundRect" ? radiusPx : 2}
+                      ry={cavity.shape === "roundRect" ? radiusPx : 2}
+                      fill={commonFill}
+                      stroke={commonStroke}
+                      strokeWidth={isSelected ? 2 : 1}
+                      onMouseDown={(e) => handleBodyMouseDown(e, cavity)}
+                    />
+                    <text
+                      x={cavX + cavWidthPx / 2}
+                      y={cavY + cavHeightPx / 2}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="#111827"
+                      fontSize={10}
+                      fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+                    >
+                      {label}
+                    </text>
+                  </>
                 )}
 
-                {/* Label inside cavity */}
-                <text
-                  x={centerX}
-                  y={centerY}
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  className="fill-slate-700 text-[9px]"
-                >
-                  {cavity.lengthIn}×{cavity.widthIn}×{cavity.depthIn}"
-                </text>
-
-                {/* Resize handle – ALWAYS visible */}
+                {/* Resize handle — always visible */}
                 <rect
                   x={handleX}
                   y={handleY}
                   width={handleSize}
                   height={handleSize}
-                  rx={3}
-                  ry={3}
-                  fill={isSelected ? "#1d4ed8" : "#bfdbfe"}
-                  stroke={isSelected ? "#ffffff" : "#2563eb"}
+                  rx={2}
+                  ry={2}
+                  fill={isSelected ? "#1d4ed8" : "#ffffff"}
+                  stroke={isSelected ? "#1d4ed8" : "#4b5563"}
                   strokeWidth={1}
-                  onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
+                  onMouseDown={(e) => handleHandleMouseDown(e, cavity)}
                 />
               </g>
             );
@@ -322,9 +350,9 @@ export default function InteractiveCanvas({
 
       <div className="mt-2 text-[10px] text-slate-500">
         Proportional top-view layout — block and cavities are scaled to each
-        other based on inch dimensions. A 0.5" wall is reserved around the
+        other based on inch dimensions. A 0.5&quot; wall is reserved around the
         block so cavities don&apos;t get too close to the edges. Resizing snaps
-        length and width to 0.125" increments.
+        length and width to 0.125&quot; increments.
       </div>
     </div>
   );
@@ -337,7 +365,7 @@ function calcScale(
   canvasHeight: number
 ): number {
   if (!lenIn || !widthIn) return 1;
-  const padding = 40;
+  const padding = 60;
   const availableW = canvasWidth - padding * 2;
   const availableH = canvasHeight - padding * 2;
 
