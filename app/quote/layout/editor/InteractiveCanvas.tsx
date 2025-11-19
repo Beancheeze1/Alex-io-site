@@ -40,6 +40,8 @@ type DragState =
     }
   | null;
 
+const WALL_MARGIN_IN = 0.5;
+
 export default function InteractiveCanvas({
   layout,
   selectedId,
@@ -61,7 +63,7 @@ export default function InteractiveCanvas({
     canvasHeight
   );
 
-  // Block pixel dimensions (directly from inches × scale)
+  // Block pixel dimensions (true proportional to inches).
   const blockPx = {
     width: block.lengthIn * scale,
     height: block.widthIn * scale,
@@ -71,6 +73,14 @@ export default function InteractiveCanvas({
     x: (canvasWidth - blockPx.width) / 2,
     y: (canvasHeight - blockPx.height) / 2,
   };
+
+  // Inner keep-out rectangle (0.5" wall all around)
+  const innerWidthIn = Math.max(0, block.lengthIn - 2 * WALL_MARGIN_IN);
+  const innerHeightIn = Math.max(0, block.widthIn - 2 * WALL_MARGIN_IN);
+  const innerWidthPx = innerWidthIn * scale;
+  const innerHeightPx = innerHeightIn * scale;
+  const innerX = blockOffset.x + WALL_MARGIN_IN * scale;
+  const innerY = blockOffset.y + WALL_MARGIN_IN * scale;
 
   const handleCavityMouseDown = (
     e: MouseEvent<SVGRectElement>,
@@ -161,9 +171,9 @@ export default function InteractiveCanvas({
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
       <div className="mb-2 text-xs font-medium text-slate-600">
-        Drag cavities to adjust placement. Use the small square handle at the
-        bottom-right of each cavity to resize. Drawing is a top view, scaled to
-        the block’s length and width in inches. Cavity sizes snap to 1/8" steps.
+        Drag cavities to adjust placement. Use the square handle at the
+        bottom-right of each cavity to resize. Block and cavities are scaled
+        in inches; a 0.5" wall is kept clear on all sides.
       </div>
 
       <div className="overflow-hidden rounded-xl bg-white">
@@ -177,14 +187,14 @@ export default function InteractiveCanvas({
           onMouseLeave={handleMouseUp}
           onClick={handleBackgroundClick}
         >
-          {/* Block outline */}
+          {/* Block outline (square corners) */}
           <rect
             x={blockOffset.x}
             y={blockOffset.y}
             width={blockPx.width}
             height={blockPx.height}
-            rx={12}
-            ry={12}
+            rx={0}
+            ry={0}
             fill="#eef2ff"
             stroke="#c7d2fe"
             strokeWidth={2}
@@ -198,40 +208,92 @@ export default function InteractiveCanvas({
             Block: {block.lengthIn}×{block.widthIn}×{block.thicknessIn}" thick
           </text>
 
+          {/* Inner keep-out area for wall margin */}
+          {innerWidthIn > 0 && innerHeightIn > 0 && (
+            <rect
+              x={innerX}
+              y={innerY}
+              width={innerWidthPx}
+              height={innerHeightPx}
+              rx={0}
+              ry={0}
+              fill="none"
+              stroke="#9ca3af"
+              strokeWidth={1}
+              strokeDasharray="4 4"
+            />
+          )}
+
           {/* Cavities */}
           {layout.cavities.map((cavity) => {
-            // Physical to pixel using scale (true proportional to inches).
+            const isSelected = cavity.id === selectedId;
+
+            // Size in px based on inches
             const cavWidth = cavity.lengthIn * scale;
             const cavHeight = cavity.widthIn * scale;
 
             const cavX = blockOffset.x + cavity.x * blockPx.width;
             const cavY = blockOffset.y + cavity.y * blockPx.height;
 
-            const isSelected = cavity.id === selectedId;
-
-            // Resize handle (bottom-right corner)
             const handleSize = 12;
             const handleX = cavX + cavWidth - handleSize / 2;
             const handleY = cavY + cavHeight - handleSize / 2;
 
+            // Circle uses min(width, height) as diameter
+            const isCircle = cavity.shape === "circle";
+            const isRoundRect = cavity.shape === "roundRect";
+
+            const radiusPx =
+              isCircle ? Math.min(cavWidth, cavHeight) / 2 : 0;
+            const centerX = cavX + cavWidth / 2;
+            const centerY = cavY + cavHeight / 2;
+
+            const cornerRadiusPx =
+              isRoundRect && cavity.cornerRadiusIn != null
+                ? Math.min(
+                    cavity.cornerRadiusIn * scale,
+                    cavWidth / 2,
+                    cavHeight / 2
+                  )
+                : 0;
+
             return (
               <g key={cavity.id}>
-                <rect
-                  x={cavX}
-                  y={cavY}
-                  width={cavWidth}
-                  height={cavHeight}
-                  rx={8}
-                  ry={8}
-                  fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
-                  stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
-                  strokeWidth={isSelected ? 2 : 1}
-                  onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
-                />
+                {isCircle ? (
+                  <circle
+                    cx={centerX}
+                    cy={centerY}
+                    r={radiusPx}
+                    fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
+                    stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
+                    strokeWidth={isSelected ? 2 : 1}
+                    onMouseDown={(e) =>
+                      handleCavityMouseDown(
+                        // circle still uses rect area for dragging reference
+                        e as unknown as MouseEvent<SVGRectElement>,
+                        cavity
+                      )
+                    }
+                  />
+                ) : (
+                  <rect
+                    x={cavX}
+                    y={cavY}
+                    width={cavWidth}
+                    height={cavHeight}
+                    rx={cornerRadiusPx}
+                    ry={cornerRadiusPx}
+                    fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
+                    stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
+                    strokeWidth={isSelected ? 2 : 1}
+                    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+                  />
+                )}
+
                 {/* Label inside cavity */}
                 <text
-                  x={cavX + cavWidth / 2}
-                  y={cavY + cavHeight / 2}
+                  x={centerX}
+                  y={centerY}
                   textAnchor="middle"
                   dominantBaseline="central"
                   className="fill-slate-700 text-[9px]"
@@ -239,7 +301,7 @@ export default function InteractiveCanvas({
                   {cavity.lengthIn}×{cavity.widthIn}×{cavity.depthIn}"
                 </text>
 
-                {/* Resize handle – ALWAYS visible now */}
+                {/* Resize handle – ALWAYS visible */}
                 <rect
                   x={handleX}
                   y={handleY}
@@ -260,8 +322,9 @@ export default function InteractiveCanvas({
 
       <div className="mt-2 text-[10px] text-slate-500">
         Proportional top-view layout — block and cavities are scaled to each
-        other based on inch dimensions. Resizing snaps length and width to
-        0.125" increments for clean, repeatable setups.
+        other based on inch dimensions. A 0.5" wall is reserved around the
+        block so cavities don&apos;t get too close to the edges. Resizing snaps
+        length and width to 0.125" increments.
       </div>
     </div>
   );

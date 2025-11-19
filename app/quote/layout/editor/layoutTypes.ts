@@ -9,12 +9,17 @@ export type BlockDims = {
   thicknessIn: number;
 };
 
+export type CavityShape = "rect" | "roundRect" | "circle";
+
 export type Cavity = {
   id: string;
   label: string;       // e.g. "3×2×1 in"
   lengthIn: number;
   widthIn: number;
   depthIn: number;
+  // Visual shape information
+  shape: CavityShape;
+  cornerRadiusIn?: number; // for roundRect / rounded square
   // Normalized 0–1 coordinates inside the block footprint (top-left origin):
   x: number;           // left
   y: number;           // top
@@ -85,6 +90,8 @@ export function parseCavity(
     lengthIn: l,
     widthIn: w,
     depthIn: d,
+    shape: "rect",
+    cornerRadiusIn: 0,
     x,
     y,
   };
