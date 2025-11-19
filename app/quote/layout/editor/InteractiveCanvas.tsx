@@ -131,8 +131,8 @@ export default function InteractiveCanvas({
       return;
     }
 
-    // Resize mode: convert mouse delta to inches using the same scale.
     if (drag.kind === "resize") {
+      // Resize mode: convert mouse delta to inches using the same scale.
       const deltaXpx = ptX - drag.startMouseX;
       const deltaYpx = ptY - drag.startMouseY;
 
@@ -161,9 +161,9 @@ export default function InteractiveCanvas({
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
       <div className="mb-2 text-xs font-medium text-slate-600">
-        Drag cavities to adjust placement, or drag the small handle at the
-        corner to resize. The drawing is a top view, scaled to the block’s
-        length and width in inches.
+        Drag cavities to adjust placement. Use the small square handle at the
+        bottom-right of each cavity to resize. Drawing is a top view, scaled to
+        the block’s length and width in inches. Cavity sizes snap to 1/8" steps.
       </div>
 
       <div className="overflow-hidden rounded-xl bg-white">
@@ -210,7 +210,7 @@ export default function InteractiveCanvas({
             const isSelected = cavity.id === selectedId;
 
             // Resize handle (bottom-right corner)
-            const handleSize = 10;
+            const handleSize = 12;
             const handleX = cavX + cavWidth - handleSize / 2;
             const handleY = cavY + cavHeight - handleSize / 2;
 
@@ -239,21 +239,19 @@ export default function InteractiveCanvas({
                   {cavity.lengthIn}×{cavity.widthIn}×{cavity.depthIn}"
                 </text>
 
-                {/* Resize handle (only show when selected to keep it clean) */}
-                {isSelected && (
-                  <rect
-                    x={handleX}
-                    y={handleY}
-                    width={handleSize}
-                    height={handleSize}
-                    rx={3}
-                    ry={3}
-                    fill="#1d4ed8"
-                    stroke="#ffffff"
-                    strokeWidth={1}
-                    onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
-                  />
-                )}
+                {/* Resize handle – ALWAYS visible now */}
+                <rect
+                  x={handleX}
+                  y={handleY}
+                  width={handleSize}
+                  height={handleSize}
+                  rx={3}
+                  ry={3}
+                  fill={isSelected ? "#1d4ed8" : "#bfdbfe"}
+                  stroke={isSelected ? "#ffffff" : "#2563eb"}
+                  strokeWidth={1}
+                  onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
+                />
               </g>
             );
           })}
@@ -262,8 +260,8 @@ export default function InteractiveCanvas({
 
       <div className="mt-2 text-[10px] text-slate-500">
         Proportional top-view layout — block and cavities are scaled to each
-        other based on their inch dimensions. Great for quick visual checks
-        before going to full CAD.
+        other based on inch dimensions. Resizing snaps length and width to
+        0.125" increments for clean, repeatable setups.
       </div>
     </div>
   );
