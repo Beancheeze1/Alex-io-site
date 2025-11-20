@@ -4,15 +4,21 @@
 // and supports:
 //   - drag-to-move inside a 0.5" wall
 //   - drag handle at bottom-right to resize
-//   - 0.125" snap for length/width
+//   - 0.125" snap for length/width AND position
+//   - drop-from-palette to create new cavities at a point
 //
 // Props are kept very simple so page.tsx can just forward
 // to useLayoutModel’s helpers.
 
 "use client";
 
-import { useRef, useState, MouseEvent } from "react";
-import type { LayoutModel, Cavity } from "./layoutTypes";
+import React, {
+  useRef,
+  useState,
+  MouseEvent,
+  DragEvent,
+} from "react";
+import type { LayoutModel, Cavity, CavityShape } from "./layoutTypes";
 
 type Props = {
   layout: LayoutModel;
@@ -21,6 +27,20 @@ type Props = {
   moveAction: (id: string, xNorm: number, yNorm: number) => void;
   // IMPORTANT: id + length + width, nothing fancy.
   resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
+
+  // Optional: used for drag-from-palette drops.
+  // Named *Action to satisfy Next's "props must be serializable" rule.
+  addCavityAtAction?: (
+    shape: CavityShape,
+    size: {
+      lengthIn: number;
+      widthIn: number;
+      depthIn: number;
+      cornerRadiusIn?: number;
+    },
+    xNorm: number,
+    yNorm: number
+  ) => void;
 };
 
 type DragState =
@@ -36,8 +56,9 @@ type DragState =
     }
   | null;
 
-const CANVAS_WIDTH = 480;
-const CANVAS_HEIGHT = 320;
+// Bigger canvas for easier manipulation.
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 520;
 const PADDING = 32;
 const WALL_IN = 0.5; // inner wall (inches)
 const SNAP_IN = 0.125; // snap grid (inches)
@@ -48,6 +69,7 @@ export default function InteractiveCanvas({
   selectAction,
   moveAction,
   resizeAction,
+  addCavityAtAction,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
@@ -138,19 +160,35 @@ export default function InteractiveCanvas({
       const minYIn = WALL_IN;
       const maxYIn = block.widthIn - WALL_IN - wid;
 
-      const xIn = clamp(
-        xNorm * block.lengthIn,
+      // raw inches from normalized coords
+      const rawXIn = xNorm * block.lengthIn;
+      const rawYIn = yNorm * block.widthIn;
+
+      // clamp, then snap to 1/8", then clamp again to respect wall
+      const clampedXIn = clamp(
+        rawXIn,
         Math.min(minXIn, maxXIn),
         Math.max(minXIn, maxXIn)
       );
-      const yIn = clamp(
-        yNorm * block.widthIn,
+      const clampedYIn = clamp(
+        rawYIn,
         Math.min(minYIn, maxYIn),
         Math.max(minYIn, maxYIn)
       );
 
-      xNorm = xIn / block.lengthIn;
-      yNorm = yIn / block.widthIn;
+      const snappedXIn = clamp(
+        snapInches(clampedXIn),
+        Math.min(minXIn, maxXIn),
+        Math.max(minXIn, maxXIn)
+      );
+      const snappedYIn = clamp(
+        snapInches(clampedYIn),
+        Math.min(minYIn, maxYIn),
+        Math.max(minYIn, maxYIn)
+      );
+
+      xNorm = snappedXIn / block.lengthIn;
+      yNorm = snappedYIn / block.widthIn;
 
       moveAction(drag.id, xNorm, yNorm);
     } else if (drag.mode === "resize") {
@@ -192,15 +230,126 @@ export default function InteractiveCanvas({
   };
 
   const handleBackgroundClick = () => {
+    setDrag(null);
     selectAction(null);
   };
+
+  const handleDragOver = (e: DragEvent<SVGSVGElement>) => {
+    // Allow drop from palette.
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: DragEvent<SVGSVGElement>) => {
+    if (!addCavityAtAction || !svgRef.current) return;
+
+    e.preventDefault();
+
+    const svgRect = svgRef.current.getBoundingClientRect();
+    const ptX = e.clientX - svgRect.left;
+    const ptY = e.clientY - svgRect.top;
+
+    // Compute normalized position inside the block footprint.
+    const xNormRaw = (ptX - blockOffset.x) / blockPx.width;
+    const yNormRaw = (ptY - blockOffset.y) / blockPx.height;
+
+    if (xNormRaw < 0 || xNormRaw > 1 || yNormRaw < 0 || yNormRaw > 1) {
+      // Dropped outside the block; ignore.
+      return;
+    }
+
+    const xNorm = clamp01(xNormRaw);
+    const yNorm = clamp01(yNormRaw);
+
+    // Read palette payload, if provided.
+    // Expect JSON like:
+    // { "shape": "rect", "lengthIn": 4, "widthIn": 2, "depthIn": 2, "cornerRadiusIn": 0.5 }
+    let shape: CavityShape = "rect";
+    let size: {
+      lengthIn: number;
+      widthIn: number;
+      depthIn: number;
+      cornerRadiusIn?: number;
+    } = {
+      lengthIn: 4,
+      widthIn: 2,
+      depthIn: 2,
+      cornerRadiusIn: 0.25,
+    };
+
+    const payload = e.dataTransfer?.getData("application/x-cavity");
+    if (payload) {
+      try {
+        const parsed = JSON.parse(payload);
+        if (
+          parsed.shape === "circle" ||
+          parsed.shape === "roundedRect" ||
+          parsed.shape === "rect"
+        ) {
+          shape = parsed.shape;
+        }
+        size = {
+          lengthIn: Number(parsed.lengthIn ?? size.lengthIn),
+          widthIn: Number(parsed.widthIn ?? size.widthIn),
+          depthIn: Number(parsed.depthIn ?? size.depthIn),
+          cornerRadiusIn:
+            parsed.cornerRadiusIn != null
+              ? Number(parsed.cornerRadiusIn)
+              : size.cornerRadiusIn,
+        };
+      } catch {
+        // If parsing fails, fall back to defaults.
+      }
+    }
+
+    addCavityAtAction(shape, size, xNorm, yNorm);
+  };
+
+  // Build inch-based grid lines INSIDE the block (within the 0.5" wall).
+  const gridLines: React.ReactNode[] = [];
+  const gridSpacingIn = 0.5; // 1/2" visual grid; movement still snaps to 1/8"
+
+  const innerStartXIn = WALL_IN;
+  const innerEndXIn = Math.max(WALL_IN, block.lengthIn - WALL_IN);
+  const innerStartYIn = WALL_IN;
+  const innerEndYIn = Math.max(WALL_IN, block.widthIn - WALL_IN);
+
+  for (let xIn = innerStartXIn; xIn <= innerEndXIn + 1e-6; xIn += gridSpacingIn) {
+    const xPx = blockOffset.x + xIn * scale;
+    gridLines.push(
+      <line
+        key={`v-${xIn.toFixed(3)}`}
+        x1={xPx}
+        y1={blockOffset.y + innerStartYIn * scale}
+        y2={blockOffset.y + innerEndYIn * scale}
+        stroke="#e5e7eb"
+        strokeWidth={0.75}
+      />
+    );
+  }
+
+  for (let yIn = innerStartYIn; yIn <= innerEndYIn + 1e-6; yIn += gridSpacingIn) {
+    const yPx = blockOffset.y + yIn * scale;
+    gridLines.push(
+      <line
+        key={`h-${yIn.toFixed(3)}`}
+        x1={blockOffset.x + innerStartXIn * scale}
+        x2={blockOffset.x + innerEndXIn * scale}
+        y1={yPx}
+        y2={yPx}
+        stroke="#e5e7eb"
+        strokeWidth={0.75}
+      />
+    );
+  }
 
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
       <div className="mb-2 text-xs font-medium text-slate-600">
         Drag cavities to adjust placement. Use the square handle at the
         bottom-right of each cavity to resize. Block and cavities are scaled in
-        inches; a 0.5" wall is kept clear on all sides.
+        inches; a 0.5&quot; wall is kept clear on all sides. Movement and
+        resizing snap to 0.125&quot; increments. You can also drag shapes
+        from the palette into the block.
       </div>
 
       <div className="overflow-hidden rounded-xl bg-white">
@@ -213,8 +362,10 @@ export default function InteractiveCanvas({
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
           onClick={handleBackgroundClick}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
         >
-          {/* faint grid */}
+          {/* faint global grid in the background */}
           <defs>
             <pattern
               id="grid-8"
@@ -253,14 +404,19 @@ export default function InteractiveCanvas({
             strokeWidth={2}
           />
 
+          {/* Inch-based grid lines inside the usable wall area */}
+          <g>{gridLines}</g>
+
           {/* Inner 0.5" wall (dashed) */}
           <rect
-            x={blockOffset.x + (WALL_IN / block.lengthIn) * blockPx.width}
-            y={blockOffset.y + (WALL_IN / block.widthIn) * blockPx.height}
+            x={blockOffset.x + (WALL_IN / (block.lengthIn || 1)) * blockPx.width}
+            y={blockOffset.y + (WALL_IN / (block.widthIn || 1)) * blockPx.height}
             width={
               blockPx.width * (1 - (2 * WALL_IN) / (block.lengthIn || 1))
             }
-            height={blockPx.height * (1 - (2 * WALL_IN) / (block.widthIn || 1))}
+            height={
+              blockPx.height * (1 - (2 * WALL_IN) / (block.widthIn || 1))
+            }
             fill="none"
             stroke="#94a3b8"
             strokeDasharray="4 3"
@@ -293,6 +449,13 @@ export default function InteractiveCanvas({
             const handleX = cavX + cavWidthPx - handleSize / 2;
             const handleY = cavY + cavHeightPx - handleSize / 2;
 
+            const shapeTag =
+              cavity.shape === "circle"
+                ? "Ø"
+                : cavity.shape === "roundedRect"
+                ? "R"
+                : "□";
+
             return (
               <g key={cavity.id}>
                 {/* main cavity body */}
@@ -308,7 +471,18 @@ export default function InteractiveCanvas({
                   strokeWidth={isSelected ? 2 : 1}
                   onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
                 />
-                {/* label */}
+
+                {/* small shape tag in top-left of cavity */}
+                <text
+                  x={cavX + 4}
+                  y={cavY + 10}
+                  textAnchor="start"
+                  className="fill-slate-500 text-[8px]"
+                >
+                  {shapeTag}
+                </text>
+
+                {/* main label (human-readable, from cavity.label) */}
                 <text
                   x={cavX + cavWidthPx / 2}
                   y={cavY + cavHeightPx / 2}
@@ -316,8 +490,9 @@ export default function InteractiveCanvas({
                   dominantBaseline="central"
                   className="fill-slate-700 text-[9px]"
                 >
-                  {cavity.lengthIn}×{cavity.widthIn}×{cavity.depthIn}"
+                  {cavity.label}
                 </text>
+
                 {/* resize handle — always visible */}
                 <rect
                   x={handleX}
@@ -339,9 +514,13 @@ export default function InteractiveCanvas({
 
       <div className="mt-2 text-[10px] text-slate-500">
         Proportional top-view layout — block and cavities are scaled to each
-        other based on inch dimensions. A 0.5" wall is reserved around the
-        block so cavities don&apos;t get too close to the edges. Resizing snaps
-        length and width to 0.125" increments.
+        other based on inch dimensions. A 0.5&quot; wall is reserved around the
+        block so cavities don&apos;t get too close to the edges. Movement and
+        resizing both snap to 0.125&quot; increments; grid lines inside the
+        block are spaced at 0.5&quot;. Labels come from each cavity&apos;s
+        human-readable <code>label</code> field, and shape tags show Rect (□),
+        Circle (Ø), or Rounded (R). You can also drag shapes from the palette
+        and drop them inside the block.
       </div>
     </div>
   );
@@ -356,5 +535,12 @@ function clamp(v: number, min: number, max: number): number {
   if (!Number.isFinite(v)) return min;
   if (v < min) return min;
   if (v > max) return max;
+  return v;
+}
+
+function clamp01(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
   return v;
 }

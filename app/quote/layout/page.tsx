@@ -74,6 +74,7 @@ export default function LayoutPage({
     updateBlockDims,
     updateCavityDims,
     addCavity,
+    addCavityAt, // NEW: used for drag-from-palette
     deleteCavity,
   } = useLayoutModel(baseLayout);
 
@@ -105,6 +106,29 @@ export default function LayoutPage({
     }
   };
 
+  // Shared dragStart helper for palette buttons
+  const handlePaletteDragStart = (
+    e: React.DragEvent<HTMLButtonElement>,
+    payload: {
+      shape: CavityShape;
+      lengthIn: number;
+      widthIn: number;
+      depthIn: number;
+      cornerRadiusIn?: number;
+    }
+  ) => {
+    try {
+      e.dataTransfer.setData(
+        "application/x-cavity",
+        JSON.stringify(payload)
+      );
+      // Make sure the drop works across browsers
+      e.dataTransfer.effectAllowed = "copyMove";
+    } catch {
+      // If something goes wrong, we still have click-to-add as fallback
+    }
+  };
+
   /* ---------- Export as SVG ---------- */
 
   const handleExportSvg = () => {
@@ -130,49 +154,89 @@ export default function LayoutPage({
               Cavity palette
             </div>
             <p className="text-[11px] text-slate-500 mb-2">
-              Click a style to add a new pocket. Then drag and resize it in the
-              layout.
+              Click a style to add a new pocket, or drag it directly into the
+              block and drop it where you want it.
             </p>
           </div>
 
+          {/* Rectangle preset */}
           <button
             type="button"
             onClick={() => handleAddPreset("rect")}
-            className="w-full text-left rounded-xl border border-slate-200 px-3 py-2 text-xs hover:border-indigo-400 hover:bg-indigo-50/50 transition"
+            draggable
+            onDragStart={(e) =>
+              handlePaletteDragStart(e, {
+                shape: "rect",
+                lengthIn: 4,
+                widthIn: 2,
+                depthIn: 2,
+              })
+            }
+            className="w-full text-left rounded-xl border border-slate-200 px-3 py-2 text-xs hover:border-indigo-400 hover:bg-indigo-50/50 transition cursor-move"
           >
             <div className="font-semibold text-slate-800">Rectangle</div>
             <div className="text-[11px] text-slate-500">
-              Rectangular pocket (4" × 2")
+              Rectangular pocket (4&quot; × 2&quot;)
+            </div>
+            <div className="mt-0.5 text-[10px] text-slate-400">
+              Drag into block or click to add
             </div>
           </button>
 
+          {/* Circle preset */}
           <button
             type="button"
             onClick={() => handleAddPreset("circle")}
-            className="w-full text-left rounded-xl border border-slate-200 px-3 py-2 text-xs hover:border-indigo-400 hover:bg-indigo-50/50 transition"
+            draggable
+            onDragStart={(e) =>
+              handlePaletteDragStart(e, {
+                shape: "circle",
+                lengthIn: 3,
+                widthIn: 3,
+                depthIn: 2,
+              })
+            }
+            className="w-full text-left rounded-xl border border-slate-200 px-3 py-2 text-xs hover:border-indigo-400 hover:bg-indigo-50/50 transition cursor-move"
           >
             <div className="font-semibold text-slate-800">Circle</div>
             <div className="text-[11px] text-slate-500">
-              Round pocket (3" Ø)
+              Round pocket (3&quot; Ø)
+            </div>
+            <div className="mt-0.5 text-[10px] text-slate-400">
+              Drag into block or click to add
             </div>
           </button>
 
+          {/* Rounded rectangle preset */}
           <button
             type="button"
             onClick={() => handleAddPreset("roundedRect")}
-            className="w-full text-left rounded-xl border border-slate-200 px-3 py-2 text-xs hover:border-indigo-400 hover:bg-indigo-50/50 transition"
+            draggable
+            onDragStart={(e) =>
+              handlePaletteDragStart(e, {
+                shape: "roundedRect",
+                lengthIn: 4,
+                widthIn: 3,
+                depthIn: 2,
+                cornerRadiusIn: 0.5,
+              })
+            }
+            className="w-full text-left rounded-xl border border-slate-200 px-3 py-2 text-xs hover:border-indigo-400 hover:bg-indigo-50/50 transition cursor-move"
           >
             <div className="font-semibold text-slate-800">
               Rounded rectangle
             </div>
             <div className="text-[11px] text-slate-500">
-              Rounded corners (4" × 3", 0.5" R)
+              Rounded corners (4&quot; × 3&quot;, 0.5&quot; R)
+            </div>
+            <div className="mt-0.5 text-[10px] text-slate-400">
+              Drag into block or click to add
             </div>
           </button>
 
           <div className="mt-3 border-t border-slate-200 pt-2 text-[11px] text-slate-500">
-            Future: drag shapes from here directly onto the block. For now,
-            click to add and then adjust in the center view.
+            Drag any preset into the block to place it roughly where you want
+            it, then fine-tune size and location in the center and on the right.
           </div>
         </aside>
 
@@ -243,10 +307,12 @@ export default function LayoutPage({
                   selectedId={selectedId}
                   selectAction={selectCavity}
                   moveAction={updateCavityPosition}
-                  /* KEY FIX: wrap updateCavityDims to match resizeAction signature */
+                  // Wrap updateCavityDims to match resizeAction signature
                   resizeAction={(id, lengthIn, widthIn) =>
                     updateCavityDims(id, { lengthIn, widthIn })
                   }
+                  // NEW: enable drag-from-palette
+                  addCavityAtAction={addCavityAt}
                 />
               </div>
             </div>
@@ -254,9 +320,10 @@ export default function LayoutPage({
             <p className="mt-3 text-[11px] text-slate-500 leading-snug">
               Cavities are sized by their length and width relative to the block
               and can be dragged around inside the footprint. Depth and corner
-              radius are shown and editable on the right. A 0.5" wall is kept
-              clear around the block so pockets don&apos;t get too close to the
-              edge.
+              radius are shown and editable on the right. A 0.5&quot; wall is
+              kept clear around the block so pockets don&apos;t get too close to
+              the edge. You can add new cavities either by clicking a preset or
+              dragging it from the palette into the block.
             </p>
           </div>
         </section>
@@ -269,7 +336,7 @@ export default function LayoutPage({
               Block
             </div>
             <div className="text-[11px] text-slate-500 mb-2">
-              Edit the foam blank size. Values snap to 0.125" increments.
+              Edit the foam blank size. Values snap to 0.125&quot; increments.
             </div>
             <div className="grid grid-cols-3 gap-2 text-xs">
               <label className="flex flex-col gap-1">

@@ -16,11 +16,32 @@ export type UseLayoutModelResult = {
   updateBlockDims: (patch: Partial<BlockDims>) => void;
   updateCavityDims: (
     id: string,
-    patch: Partial<Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">>
+    patch: Partial<
+      Pick<
+        Cavity,
+        "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label"
+      >
+    >
   ) => void;
   addCavity: (
     shape: CavityShape,
-    size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
+    size: {
+      lengthIn: number;
+      widthIn: number;
+      depthIn: number;
+      cornerRadiusIn?: number;
+    }
+  ) => void;
+  addCavityAt: (
+    shape: CavityShape,
+    size: {
+      lengthIn: number;
+      widthIn: number;
+      depthIn: number;
+      cornerRadiusIn?: number;
+    },
+    xNorm: number,
+    yNorm: number
   ) => void;
   deleteCavity: (id: string) => void;
 };
@@ -65,7 +86,10 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
     (
       id: string,
       patch: Partial<
-        Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
+        Pick<
+          Cavity,
+          "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label"
+        >
       >
     ) => {
       setLayout((prev) => ({
@@ -86,7 +110,12 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   const addCavity = useCallback(
     (
       shape: CavityShape,
-      size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
+      size: {
+        lengthIn: number;
+        widthIn: number;
+        depthIn: number;
+        cornerRadiusIn?: number;
+      }
     ) => {
       setLayout((prev) => {
         const idx = prev.cavities.length;
@@ -98,7 +127,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         const cornerRadiusIn =
           shape === "roundedRect" ? safeInch(size.cornerRadiusIn ?? 0.25, 0) : 0;
 
-        // Drop new cavities roughly centered
+        // Drop new cavities roughly centered (legacy click-to-add behavior)
         const x = 0.3 + (idx % 2) * 0.2;
         const y = 0.25 + Math.floor(idx / 2) * 0.2;
 
@@ -114,6 +143,51 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           depthIn,
           x: clamp01(x),
           y: clamp01(y),
+        };
+
+        return {
+          ...prev,
+          cavities: [...prev.cavities, newCavity],
+        };
+      });
+    },
+    []
+  );
+
+  const addCavityAt = useCallback(
+    (
+      shape: CavityShape,
+      size: {
+        lengthIn: number;
+        widthIn: number;
+        depthIn: number;
+        cornerRadiusIn?: number;
+      },
+      xNorm: number,
+      yNorm: number
+    ) => {
+      setLayout((prev) => {
+        const idx = prev.cavities.length;
+        const id = `cav-${idx + 1}`;
+
+        const lengthIn = safeInch(size.lengthIn, 0.5);
+        const widthIn = safeInch(size.widthIn, 0.5);
+        const depthIn = safeInch(size.depthIn, 0.5);
+        const cornerRadiusIn =
+          shape === "roundedRect" ? safeInch(size.cornerRadiusIn ?? 0.25, 0) : 0;
+
+        const label = `${lengthIn}×${widthIn}×${depthIn} in`;
+
+        const newCavity: Cavity = {
+          id,
+          label,
+          shape,
+          cornerRadiusIn,
+          lengthIn,
+          widthIn,
+          depthIn,
+          x: clamp01(xNorm),
+          y: clamp01(yNorm),
         };
 
         return {
@@ -141,6 +215,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
     updateBlockDims,
     updateCavityDims,
     addCavity,
+    addCavityAt,
     deleteCavity,
   };
 }
