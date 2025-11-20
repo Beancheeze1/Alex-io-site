@@ -1,18 +1,11 @@
 // app/quote/layout/page.tsx
-//
-// Foam layout preview + interactive editor.
-// Left: cavity palette
-// Center: interactive canvas
-// Right: cavity inspector / numeric inputs.
-
 "use client";
 
 import * as React from "react";
 
 import {
   buildLayoutFromStrings,
-  Cavity,
-  NewCavityInput,
+  type CavityShape,
 } from "./editor/layoutTypes";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
@@ -41,67 +34,42 @@ function formatBlockLabel(block: {
 }
 
 function formatCavityLegendLabel(
-  cav: Cavity,
+  cav: {
+    id: string;
+    label: string;
+    lengthIn: number;
+    widthIn: number;
+    depthIn: number;
+  },
   index: number
 ): { chip: string; text: string; footprint: string } {
   const chip = `C${index + 1}`;
-  const dimsText = `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn}"`;
-  const text = cav.label || dimsText;
+  const text =
+    cav.label ||
+    `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn}"`;
   const footprint = `${cav.lengthIn}" × ${cav.widthIn}" footprint`;
   return { chip, text, footprint };
 }
 
-// Palette presets on the LEFT
-const CAVITY_PRESETS: {
-  id: string;
-  name: string;
+const PALETTE: {
+  shape: CavityShape;
+  label: string;
   description: string;
-  preset: NewCavityInput;
 }[] = [
   {
-    id: "square",
-    name: "Square",
-    description: 'Square pocket (3" × 3" × 1")',
-    preset: {
-      lengthIn: 3,
-      widthIn: 3,
-      depthIn: 1,
-      shape: "rect",
-    },
+    shape: "rect",
+    label: "Rectangle",
+    description: 'Rectangular pocket (e.g. 4" × 2")',
   },
   {
-    id: "rect",
-    name: "Rectangle",
-    description: 'Rectangular pocket (4" × 2" × 1")',
-    preset: {
-      lengthIn: 4,
-      widthIn: 2,
-      depthIn: 1,
-      shape: "rect",
-    },
+    shape: "circle",
+    label: "Circle",
+    description: 'Round pocket (e.g. 3" Ø)',
   },
   {
-    id: "rounded-rect",
-    name: "Rounded rectangle",
-    description: 'Rounded corners (4" × 3", 0.5" R)',
-    preset: {
-      lengthIn: 4,
-      widthIn: 3,
-      depthIn: 1,
-      shape: "roundRect",
-      cornerRadiusIn: 0.5,
-    },
-  },
-  {
-    id: "circle",
-    name: "Circle",
-    description: 'Round pocket (3" Ø × 1")',
-    preset: {
-      lengthIn: 3,
-      widthIn: 3,
-      depthIn: 1,
-      shape: "circle",
-    },
+    shape: "roundRect",
+    label: "Rounded rectangle",
+    description: 'Rounded corners (e.g. 4" × 3", 0.5" R)',
   },
 ];
 
@@ -144,10 +112,8 @@ export default function LayoutPage({
     selectCavity,
     updateCavityPosition,
     updateCavitySize,
-    updateCavityDepth,
-    updateCavityCornerRadius,
-    updateCavityLabel,
-    updateCavityShape,
+    updateCavityMeta,
+    updateBlockSize,
     addCavity,
     deleteCavity,
   } = useLayoutModel(baseLayout);
@@ -161,21 +127,43 @@ export default function LayoutPage({
   const cavities = layout.cavities;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
 
-  const handleNumericChange =
-    (cav: Cavity, field: "length" | "width" | "depth" | "corner") =>
+  // Handlers
+  const handleBlockInputChange =
+    (field: "lengthIn" | "widthIn" | "thicknessIn") =>
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = parseFloat(e.target.value);
-      if (!Number.isFinite(value)) return;
+      const value = Number(e.target.value);
+      const lengthIn =
+        field === "lengthIn" ? value : block.lengthIn;
+      const widthIn =
+        field === "widthIn" ? value : block.widthIn;
+      const thicknessIn =
+        field === "thicknessIn" ? value : block.thicknessIn;
+      updateBlockSize(lengthIn, widthIn, thicknessIn);
+    };
 
-      if (field === "length") {
-        updateCavitySize(cav.id, value, cav.widthIn);
-      } else if (field === "width") {
-        updateCavitySize(cav.id, cav.lengthIn, value);
-      } else if (field === "depth") {
-        updateCavityDepth(cav.id, value);
-      } else if (field === "corner") {
-        updateCavityCornerRadius(cav.id, value);
-      }
+  const handleCavitySizeChange =
+    (id: string, field: "lengthIn" | "widthIn") =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = Number(e.target.value);
+      const cav = cavities.find((c) => c.id === id);
+      if (!cav) return;
+      const lengthIn =
+        field === "lengthIn" ? value : cav.lengthIn;
+      const widthIn =
+        field === "widthIn" ? value : cav.widthIn;
+      updateCavitySize(id, lengthIn, widthIn);
+    };
+
+  const handleCavityDepthChange =
+    (id: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = Number(e.target.value);
+      updateCavityMeta(id, { depthIn: value });
+    };
+
+  const handleCavityRadiusChange =
+    (id: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = Number(e.target.value);
+      updateCavityMeta(id, { cornerRadiusIn: value });
     };
 
   return (
@@ -199,109 +187,138 @@ export default function LayoutPage({
               Block {formatBlockLabel(block)}
             </div>
           </div>
-          <div className="text-xs text-slate-500 md:text-right">
-            Drag cavities in the center panel, use the handles to resize, or
-            tweak exact inches on the right. The left palette lets you drop new
-            cavities into the foam.
+          <div className="text-xs text-slate-500 max-w-xs">
+            Left: choose cavity shapes. Center: drag & resize cavities
+            with snap-to-grid and 0.5&quot; wall. Right: fine-tune sizes,
+            depth and corner radius.
           </div>
         </div>
 
-        {/* Main 3-column layout */}
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr),minmax(0,2.2fr),minmax(0,1.2fr)] items-start">
-          {/* LEFT: Palette */}
-          <div className="space-y-3">
-            <div className="text-xs font-semibold text-slate-700 mb-1">
-              Cavity palette
-            </div>
-            <div className="space-y-2">
-              {CAVITY_PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => addCavity(p.preset)}
-                  className="w-full text-left rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 hover:border-indigo-400 hover:bg-indigo-50/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[13px] font-medium text-slate-800">
-                        {p.name}
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        {p.description}
-                      </div>
-                    </div>
-                    <span className="inline-flex items-center justify-center text-[11px] font-semibold px-2 py-1 rounded-full bg-indigo-600 text-white">
-                      + Add
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 text-[11px] text-slate-500 leading-snug">
-              Future step: this same layout data can be exported as a simple DXF
-              (polylines for block + cavities) so engineering can pull it into
-              CAD as a starting point for tooling and nesting.
-            </p>
-          </div>
-
-          {/* CENTER: Interactive canvas */}
-          <div>
-            <div className="text-xs text-slate-600 mb-1 flex items-center justify-between">
-              <span>Top view (scaled to block L × W)</span>
-              <span className="font-mono text-[11px] text-slate-500">
-                {block.lengthIn}" × {block.widthIn}" •{" "}
-                {block.thicknessIn || 0}" thick
-              </span>
-            </div>
-            <InteractiveCanvas
-              layout={layout}
-              selectedId={selectedId}
-              selectAction={selectCavity}
-              moveAction={updateCavityPosition}
-              resizeAction={updateCavitySize}
-            />
-            <p className="mt-3 text-[11px] text-slate-500 leading-snug">
-              Cavities are sized by their length and width relative to the block
-              and can be dragged around inside the footprint. Depth is shown in
-              the inspector on the right. All sizes snap to 0.125" increments.
-            </p>
-          </div>
-
-          {/* RIGHT: Inspector / details */}
+        {/* 3-panel layout: palette | canvas | editor */}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr),minmax(0,2.1fr),minmax(0,1.2fr)] items-start">
+          {/* LEFT: Palette + block size */}
           <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 flex flex-col gap-4">
             <div>
-              <div className="text-xs font-semibold text-slate-700 mb-1">
-                Block
+              <div className="text-xs font-semibold text-slate-700 mb-2">
+                Cavity palette
               </div>
-              <div className="text-xs text-slate-600">
-                {formatBlockLabel(block)}{" "}
-                {block.thicknessIn ? (
-                  <span className="text-slate-500">
-                    (thickness is used for depth context, not in top-view
-                    scaling)
-                  </span>
-                ) : null}
+              <div className="space-y-2">
+                {PALETTE.map((item) => (
+                  <button
+                    key={item.shape}
+                    type="button"
+                    onClick={() => addCavity(item.shape)}
+                    className="w-full text-left rounded-xl border border-slate-200 bg-white px-3 py-2.5 hover:border-indigo-400 hover:shadow-sm transition text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-slate-800">
+                        {item.label}
+                      </span>
+                      <span className="text-[10px] text-indigo-600 font-semibold">
+                        + Add
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-slate-500">
+                      {item.description}
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
 
+            <div className="border-t border-slate-200 pt-3">
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                Block size (editable)
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-500">
+                    Length (L, in)
+                  </span>
+                  <input
+                    type="number"
+                    step="0.125"
+                    value={block.lengthIn}
+                    onChange={handleBlockInputChange("lengthIn")}
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-500">
+                    Width (W, in)
+                  </span>
+                  <input
+                    type="number"
+                    step="0.125"
+                    value={block.widthIn}
+                    onChange={handleBlockInputChange("widthIn")}
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] text-slate-500">
+                    Thick (T, in)
+                  </span>
+                  <input
+                    type="number"
+                    step="0.125"
+                    value={block.thicknessIn}
+                    onChange={handleBlockInputChange("thicknessIn")}
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </label>
+              </div>
+              <p className="mt-2 text-[10px] text-slate-500 leading-snug">
+                Changing the block size keeps a 0.5&quot; wall and
+                re-clamps existing cavities so they stay inside.
+              </p>
+            </div>
+          </div>
+
+          {/* CENTER: Interactive preview */}
+          <div>
+            <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4">
+              <div className="text-xs text-slate-600 mb-2 flex items-center justify-between">
+                <span>Top view (scaled to block L × W)</span>
+                <span className="font-mono text-[11px] text-slate-500">
+                  {block.lengthIn}" × {block.widthIn}" •{" "}
+                  {block.thicknessIn || 0}" thick
+                </span>
+              </div>
+
+              <InteractiveCanvas
+                layout={layout}
+                selectedId={selectedId}
+                selectAction={selectCavity}
+                moveAction={updateCavityPosition}
+                resizeAction={updateCavitySize}
+              />
+
+              <p className="mt-3 text-[11px] text-slate-500 leading-snug">
+                Cavities are sized by their length and width relative to the
+                block and can be dragged around inside the footprint. Depth is
+                shown in the editor on the right.
+              </p>
+            </div>
+          </div>
+
+          {/* RIGHT: Cavity list + editor */}
+          <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 flex flex-col gap-4">
             <div>
               <div className="text-xs font-semibold text-slate-700 mb-1">
                 Cavities
               </div>
               {cavities.length === 0 ? (
                 <div className="text-xs text-slate-500">
-                  No cavity data yet. Use the palette on the left or include{" "}
-                  <code className="font-mono text-[11px] bg-slate-200/70 px-1 py-0.5 rounded">
-                    &cavities=3x2x1;2x2x1
-                  </code>{" "}
-                  in the URL to seed from the email.
+                  No cavities yet. Use the palette on the left to add a
+                  rectangle, circle, or rounded rectangle, then drag and
+                  resize it in the preview.
                 </div>
               ) : (
-                <ul className="space-y-1.5 max-h-40 overflow-auto pr-1">
+                <ul className="space-y-1.5">
                   {cavities.map((cav, idx) => {
                     const { chip, text, footprint } =
                       formatCavityLegendLabel(cav, idx);
-
                     const isSelected = cav.id === selectedId;
 
                     return (
@@ -338,9 +355,18 @@ export default function LayoutPage({
                             {text}
                           </span>
                         </button>
-                        <span className="text-[11px] text-slate-500 whitespace-nowrap">
-                          {footprint}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-slate-500">
+                            {footprint}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => deleteCavity(cav.id)}
+                            className="text-[10px] text-rose-500 hover:text-rose-600"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </li>
                     );
                   })}
@@ -348,140 +374,82 @@ export default function LayoutPage({
               )}
             </div>
 
-            {/* Inspector for selected cavity */}
-            <div className="mt-2 border-t border-slate-200 pt-3">
-              <div className="text-xs font-semibold text-slate-700 mb-2">
-                Cavity details
-              </div>
-              {!selectedCavity ? (
-                <p className="text-[11px] text-slate-500">
-                  Select a cavity from the list above or by clicking it in the
-                  preview to edit its exact dimensions.
-                </p>
-              ) : (
-                <>
-                  <div className="space-y-2">
-                    <div>
-                      <label className="block text-[11px] text-slate-600 mb-0.5">
-                        Label
-                      </label>
-                      <input
-                        type="text"
-                        defaultValue={selectedCavity.label}
-                        onBlur={(e) =>
-                          updateCavityLabel(
-                            selectedCavity.id,
-                            e.target.value || selectedCavity.label
-                          )
-                        }
-                        className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="block text-[11px] text-slate-600 mb-0.5">
-                          Length (L)
-                        </label>
-                        <input
-                          type="number"
-                          step={0.125}
-                          value={selectedCavity.lengthIn}
-                          onChange={handleNumericChange(
-                            selectedCavity,
-                            "length"
-                          )}
-                          className="w-full rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] text-slate-600 mb-0.5">
-                          Width (W)
-                        </label>
-                        <input
-                          type="number"
-                          step={0.125}
-                          value={selectedCavity.widthIn}
-                          onChange={handleNumericChange(
-                            selectedCavity,
-                            "width"
-                          )}
-                          className="w-full rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] text-slate-600 mb-0.5">
-                          Depth
-                        </label>
-                        <input
-                          type="number"
-                          step={0.125}
-                          value={selectedCavity.depthIn}
-                          onChange={handleNumericChange(
-                            selectedCavity,
-                            "depth"
-                          )}
-                          className="w-full rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-[minmax(0,1.4fr),minmax(0,1fr)] gap-2 items-end">
-                      <div>
-                        <label className="block text-[11px] text-slate-600 mb-0.5">
-                          Shape
-                        </label>
-                        <select
-                          value={selectedCavity.shape}
-                          onChange={(e) =>
-                            updateCavityShape(
-                              selectedCavity.id,
-                              e.target.value as any
-                            )
-                          }
-                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                        >
-                          <option value="rect">Rectangle / square</option>
-                          <option value="roundRect">
-                            Rounded rectangle / square
-                          </option>
-                          <option value="circle">Circle</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] text-slate-600 mb-0.5">
-                          Corner radius
-                        </label>
-                        <input
-                          type="number"
-                          step={0.125}
-                          value={selectedCavity.cornerRadiusIn}
-                          onChange={handleNumericChange(
-                            selectedCavity,
-                            "corner"
-                          )}
-                          className="w-full rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between mt-2">
-                      <span className="text-[11px] text-slate-500">
-                        This cavity obeys the 0.5" wall margin and snaps to
-                        0.125" increments for length, width, and depth.
+            {/* Selected cavity editor */}
+            {selectedCavity && (
+              <div className="border-t border-slate-200 pt-3">
+                <div className="text-xs font-semibold text-slate-700 mb-2">
+                  Edit selected cavity
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] text-slate-500">
+                      Length (L, in)
+                    </span>
+                    <input
+                      type="number"
+                      step="0.125"
+                      value={selectedCavity.lengthIn}
+                      onChange={handleCavitySizeChange(
+                        selectedCavity.id,
+                        "lengthIn"
+                      )}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] text-slate-500">
+                      Width (W, in)
+                    </span>
+                    <input
+                      type="number"
+                      step="0.125"
+                      value={selectedCavity.widthIn}
+                      onChange={handleCavitySizeChange(
+                        selectedCavity.id,
+                        "widthIn"
+                      )}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] text-slate-500">
+                      Depth (D, in)
+                    </span>
+                    <input
+                      type="number"
+                      step="0.125"
+                      value={selectedCavity.depthIn}
+                      onChange={handleCavityDepthChange(
+                        selectedCavity.id
+                      )}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </label>
+                  {selectedCavity.shape === "roundRect" && (
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] text-slate-500">
+                        Corner radius (R, in)
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => deleteCavity(selectedCavity.id)}
-                        className="ml-2 inline-flex items-center px-2 py-1 rounded-full border border-rose-300 text-[11px] font-medium text-rose-700 bg-rose-50 hover:bg-rose-100"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+                      <input
+                        type="number"
+                        step="0.125"
+                        value={selectedCavity.cornerRadiusIn ?? 0.5}
+                        onChange={handleCavityRadiusChange(
+                          selectedCavity.id
+                        )}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </label>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 leading-snug">
+                  Length and width snap to 0.125&quot; increments and
+                  are clamped so the cavity stays inside the 0.5&quot;
+                  wall. Depth and radius are for quoting / CAD notes
+                  and don&apos;t change the top-view outline.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

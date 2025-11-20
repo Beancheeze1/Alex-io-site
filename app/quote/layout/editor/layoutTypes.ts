@@ -3,28 +3,25 @@
 // Core types + helpers for the quote layout editor.
 // Safe, standalone module — no React imports.
 
-export const WALL_MARGIN_IN = 0.5;   // keep 0.5" wall all around
-export const SNAP_IN = 0.125;        // 1/8" snapping for sizes
-
 export type BlockDims = {
   lengthIn: number;
   widthIn: number;
   thicknessIn: number;
 };
 
-export type CavityShape = "rect" | "roundRect" | "circle";
+export type CavityShape = "rect" | "circle" | "roundRect";
 
 export type Cavity = {
   id: string;
-  label: string;          // e.g. "3×2×1 in"
-  lengthIn: number;       // L in inches
-  widthIn: number;        // W in inches
-  depthIn: number;        // depth in inches (not drawn, but editable)
+  label: string; // e.g. "3×2×1 in"
   shape: CavityShape;
-  cornerRadiusIn: number; // in inches; used for roundRect. 0 for rect/circle.
-  // Normalized 0–1 coordinates for TOP-LEFT of the cavity inside the block footprint
-  x: number;
-  y: number;
+  lengthIn: number;
+  widthIn: number;
+  depthIn: number;
+  cornerRadiusIn?: number;
+  // Normalized 0–1 coordinates inside the block footprint:
+  x: number; // left
+  y: number; // top
 };
 
 export type LayoutModel = {
@@ -32,21 +29,20 @@ export type LayoutModel = {
   cavities: Cavity[];
 };
 
-// For creating new cavities from presets / palette
-export type NewCavityInput = {
-  label?: string;
-  lengthIn: number;
-  widthIn: number;
-  depthIn: number;
-  shape?: CavityShape;
-  cornerRadiusIn?: number;
-};
+// Global layout rules
+export const SNAP_IN = 0.125; // 1/8"
+export const WALL_MARGIN_IN = 0.5; // keep-out wall all around
 
-/** Snap a value to 1/8" increments with a sensible minimum. */
-export function snapInches(value: number): number {
-  if (!Number.isFinite(value)) return SNAP_IN;
-  const snapped = Math.round(value / SNAP_IN) * SNAP_IN;
-  return Math.max(SNAP_IN, parseFloat(snapped.toFixed(3)));
+function clamp(v: number, min: number, max: number): number {
+  if (Number.isNaN(v)) return min;
+  if (v < min) return min;
+  if (v > max) return max;
+  return v;
+}
+
+export function snapInches(v: number): number {
+  if (!Number.isFinite(v)) return SNAP_IN;
+  return Math.max(SNAP_IN, Math.round(v / SNAP_IN) * SNAP_IN);
 }
 
 /**
@@ -72,15 +68,13 @@ export function parseBlockDims(dims: string): BlockDims | null {
 
 /**
  * Parse cavity strings like:
- *   "3x2x1"
- *   "3x2x1:deep pocket"
- *   "3x2x1:round"
- *   "3x2x1:circle"
+ *   "3x2x1" or '3x2x1:deep'
+ * into Cavity objects. `index` is used to stagger them.
  */
 export function parseCavity(spec: string, index: number): Cavity | null {
   if (!spec) return null;
 
-  const [dimsPart, labelPartRaw] = spec.split(":");
+  const [dimsPart, labelPart] = spec.split(":");
   const parts = dimsPart
     .toLowerCase()
     .replace(/["\s]/g, "")
@@ -91,22 +85,9 @@ export function parseCavity(spec: string, index: number): Cavity | null {
   const [l, w, d] = parts.map((p) => Number(p));
   if (!l || !w || !d) return null;
 
-  let shape: CavityShape = "rect";
-  let cornerRadiusIn = 0;
-
-  const labelPart = labelPartRaw ? labelPartRaw.trim() : "";
-  if (labelPart) {
-    const lower = labelPart.toLowerCase();
-    if (lower.includes("circle")) {
-      shape = "circle";
-    } else if (lower.includes("round")) {
-      shape = "roundRect";
-      cornerRadiusIn = 0.5;
-    }
-  }
-
-  const baseLabel = `${l}×${w}×${d} in`;
-  const prettyLabel = labelPart ? `${baseLabel} (${labelPart})` : baseLabel;
+  const lengthIn = snapInches(l);
+  const widthIn = snapInches(w);
+  const depthIn = snapInches(d);
 
   // Simple staggered positions to avoid overlap (0–1 space).
   const col = index % 3;
@@ -114,14 +95,19 @@ export function parseCavity(spec: string, index: number): Cavity | null {
   const x = 0.1 + col * 0.25;
   const y = 0.1 + row * 0.25;
 
+  const baseLabel = `${lengthIn}×${widthIn}×${depthIn} in`;
+  const prettyLabel = labelPart
+    ? `${baseLabel} (${labelPart.trim()})`
+    : baseLabel;
+
   return {
     id: `cav-${index}`,
     label: prettyLabel,
-    lengthIn: l,
-    widthIn: w,
-    depthIn: d,
-    shape,
-    cornerRadiusIn,
+    shape: "rect",
+    lengthIn,
+    widthIn,
+    depthIn,
+    cornerRadiusIn: 0.25,
     x,
     y,
   };
@@ -155,45 +141,53 @@ export function buildLayoutFromStrings(
 }
 
 /**
- * Ensure a cavity stays inside the block and respects the 0.5" wall margin.
+ * Clamp a cavity's x/y so it stays inside the inner wall margin.
+ * Inputs and outputs are normalized 0–1.
  */
-export function clampCavityToBlock(block: BlockDims, cav: Cavity): Cavity {
-  const margin = WALL_MARGIN_IN;
+export function clampCavityPosition(
+  cav: Cavity,
+  block: BlockDims,
+  xNorm: number,
+  yNorm: number
+): { x: number; y: number } {
+  const { lengthIn, widthIn } = cav;
+  const { lengthIn: BL, widthIn: BW } = block;
 
-  // Cap cavity size so it can't be larger than the interior.
-  const maxLength = Math.max(0, block.lengthIn - margin * 2);
-  const maxWidth = Math.max(0, block.widthIn - margin * 2);
+  if (!BL || !BW) return { x: 0, y: 0 };
 
-  let lengthIn = Math.min(snapInches(cav.lengthIn), maxLength);
-  let widthIn = Math.min(snapInches(cav.widthIn), maxWidth);
+  const cavLenNorm = lengthIn / BL;
+  const cavWidNorm = widthIn / BW;
 
-  if (lengthIn < SNAP_IN) lengthIn = SNAP_IN;
-  if (widthIn < SNAP_IN) widthIn = SNAP_IN;
-
-  // Convert normalized x,y -> absolute inches.
-  let xAbs = cav.x * block.lengthIn;
-  let yAbs = cav.y * block.widthIn;
-
-  // Keep inside walls.
-  if (xAbs < margin) xAbs = margin;
-  if (yAbs < margin) yAbs = margin;
-
-  if (xAbs + lengthIn > block.lengthIn - margin) {
-    xAbs = block.lengthIn - margin - lengthIn;
-  }
-  if (yAbs + widthIn > block.widthIn - margin) {
-    yAbs = block.widthIn - margin - widthIn;
-  }
-
-  // Back to normalized.
-  const xNorm = block.lengthIn > 0 ? xAbs / block.lengthIn : 0;
-  const yNorm = block.widthIn > 0 ? yAbs / block.widthIn : 0;
+  const minX = WALL_MARGIN_IN / BL;
+  const minY = WALL_MARGIN_IN / BW;
+  const maxX = 1 - WALL_MARGIN_IN / BL - cavLenNorm;
+  const maxY = 1 - WALL_MARGIN_IN / BW - cavWidNorm;
 
   return {
-    ...cav,
-    lengthIn,
-    widthIn,
-    x: xNorm,
-    y: yNorm,
+    x: clamp(xNorm, minX, maxX),
+    y: clamp(yNorm, minY, maxY),
   };
+}
+
+/**
+ * Clamp a cavity's size so it fits inside the inner wall.
+ */
+export function clampCavitySize(
+  cav: Cavity,
+  block: BlockDims,
+  newLengthIn: number,
+  newWidthIn: number
+): { lengthIn: number; widthIn: number } {
+  const { lengthIn: BL, widthIn: BW } = block;
+
+  let L = snapInches(newLengthIn);
+  let W = snapInches(newWidthIn);
+
+  const maxL = Math.max(SNAP_IN, BL - 2 * WALL_MARGIN_IN);
+  const maxW = Math.max(SNAP_IN, BW - 2 * WALL_MARGIN_IN);
+
+  L = clamp(L, SNAP_IN, maxL);
+  W = clamp(W, SNAP_IN, maxW);
+
+  return { lengthIn: L, widthIn: W };
 }
