@@ -6,6 +6,8 @@
 //   - drag handle at bottom-right to resize
 //   - 0.125" snap for length/width AND position
 //   - drop-from-palette to create new cavities at a point
+//   - circular cavities rendered as circles
+//   - simple spacing dimension between selected cavity and nearest neighbor
 //
 // Props are kept very simple so page.tsx can just forward
 // to useLayoutModel’s helpers.
@@ -56,8 +58,8 @@ type DragState =
     }
   | null;
 
-// Bigger canvas for easier manipulation.
-const CANVAS_WIDTH = 800;
+// Square canvas so the foam block feels big and balanced.
+const CANVAS_WIDTH = 520;
 const CANVAS_HEIGHT = 520;
 const PADDING = 32;
 const WALL_IN = 0.5; // inner wall (inches)
@@ -206,6 +208,13 @@ export default function InteractiveCanvas({
       newLenIn = snapInches(newLenIn);
       newWidIn = snapInches(newWidIn);
 
+      // for circles, enforce equal L/W (diameter)
+      if (cav.shape === "circle") {
+        const dia = Math.max(newLenIn, newWidIn);
+        newLenIn = dia;
+        newWidIn = dia;
+      }
+
       // enforce minimum size
       const minSize = SNAP_IN * 2;
       newLenIn = Math.max(minSize, newLenIn);
@@ -342,6 +351,160 @@ export default function InteractiveCanvas({
     );
   }
 
+  // Simple spacing dimension between selected cavity and nearest neighbor
+  let spacingOverlay: React.ReactNode = null;
+  if (selectedId) {
+    const selected = cavities.find((c) => c.id === selectedId);
+    const others = cavities.filter((c) => c.id !== selectedId);
+    if (selected && others.length > 0) {
+      // compute center positions in inches
+      const selLeftIn = selected.x * block.lengthIn;
+      const selTopIn = selected.y * block.widthIn;
+      const selRightIn = selLeftIn + selected.lengthIn;
+      const selBottomIn = selTopIn + selected.widthIn;
+      const selCxIn = (selLeftIn + selRightIn) / 2;
+      const selCyIn = (selTopIn + selBottomIn) / 2;
+
+      let bestGapIn = Infinity;
+      let best: {
+        x1Px: number;
+        y1Px: number;
+        x2Px: number;
+        y2Px: number;
+        label: string;
+      } | null = null;
+
+      for (const other of others) {
+        const othLeftIn = other.x * block.lengthIn;
+        const othTopIn = other.y * block.widthIn;
+        const othRightIn = othLeftIn + other.lengthIn;
+        const othBottomIn = othTopIn + other.widthIn;
+        const othCxIn = (othLeftIn + othRightIn) / 2;
+        const othCyIn = (othTopIn + othBottomIn) / 2;
+
+        // Horizontal gap if they overlap vertically
+        if (
+          selBottomIn > othTopIn &&
+          selTopIn < othBottomIn
+        ) {
+          const gapIn =
+            selCxIn < othCxIn ? othLeftIn - selRightIn : selLeftIn - othRightIn;
+          if (gapIn > 0 && gapIn < bestGapIn) {
+            bestGapIn = gapIn;
+            const midYIn =
+              Math.max(selTopIn, othTopIn) +
+              (Math.min(selBottomIn, othBottomIn) -
+                Math.max(selTopIn, othTopIn)) /
+                2;
+            const yPx = blockOffset.y + midYIn * scale;
+            const x1Px =
+              blockOffset.x +
+              (selCxIn < othCxIn ? selRightIn * scale : othRightIn * scale);
+            const x2Px =
+              blockOffset.x +
+              (selCxIn < othCxIn ? othLeftIn * scale : selLeftIn * scale);
+            best = {
+              x1Px,
+              y1Px: yPx,
+              x2Px,
+              y2Px: yPx,
+              label: `${gapIn.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}"`,
+            };
+          }
+        }
+
+        // Vertical gap if they overlap horizontally
+        if (
+          selRightIn > othLeftIn &&
+          selLeftIn < othRightIn
+        ) {
+          const gapIn =
+            selCyIn < othCyIn ? othTopIn - selBottomIn : selTopIn - othBottomIn;
+          if (gapIn > 0 && gapIn < bestGapIn) {
+            bestGapIn = gapIn;
+            const midXIn =
+              Math.max(selLeftIn, othLeftIn) +
+              (Math.min(selRightIn, othRightIn) -
+                Math.max(selLeftIn, othLeftIn)) /
+                2;
+            const xPx = blockOffset.x + midXIn * scale;
+            const y1Px =
+              blockOffset.y +
+              (selCyIn < othCyIn ? selBottomIn * scale : othBottomIn * scale);
+            const y2Px =
+              blockOffset.y +
+              (selCyIn < othCyIn ? othTopIn * scale : selTopIn * scale);
+            best = {
+              x1Px: xPx,
+              y1Px,
+              x2Px: xPx,
+              y2Px,
+              label: `${gapIn.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}"`,
+            };
+          }
+        }
+      }
+
+      if (best && bestGapIn < Infinity) {
+        const { x1Px, y1Px, x2Px, y2Px, label } = best;
+        const midX = (x1Px + x2Px) / 2;
+        const midY = (y1Px + y2Px) / 2;
+
+        spacingOverlay = (
+          <g>
+            {/* main dimension line */}
+            <line
+              x1={x1Px}
+              y1={y1Px}
+              x2={x2Px}
+              y2={y2Px}
+              stroke="#0f172a"
+              strokeWidth={1}
+            />
+            {/* end ticks */}
+            <line
+              x1={x1Px}
+              y1={y1Px - 4}
+              x2={x1Px}
+              y2={y1Px + 4}
+              stroke="#0f172a"
+              strokeWidth={1}
+            />
+            <line
+              x1={x2Px}
+              y1={y2Px - 4}
+              x2={x2Px}
+              y2={y2Px + 4}
+              stroke="#0f172a"
+              strokeWidth={1}
+            />
+            {/* label */}
+            <rect
+              x={midX - 14}
+              y={midY - 9}
+              width={28}
+              height={14}
+              rx={3}
+              ry={3}
+              fill="white"
+              stroke="#cbd5f5"
+              strokeWidth={0.5}
+            />
+            <text
+              x={midX}
+              y={midY}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-slate-700 text-[8px]"
+            >
+              {label}
+            </text>
+          </g>
+        );
+      }
+    }
+  }
+
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
       <div className="mb-2 text-xs font-medium text-slate-600">
@@ -349,7 +512,8 @@ export default function InteractiveCanvas({
         bottom-right of each cavity to resize. Block and cavities are scaled in
         inches; a 0.5&quot; wall is kept clear on all sides. Movement and
         resizing snap to 0.125&quot; increments. You can also drag shapes
-        from the palette into the block.
+        from the palette into the block. When a cavity is selected, the
+        nearest gap to another cavity is dimensioned.
       </div>
 
       <div className="overflow-hidden rounded-xl bg-white">
@@ -365,30 +529,13 @@ export default function InteractiveCanvas({
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
-          {/* faint global grid in the background */}
-          <defs>
-            <pattern
-              id="grid-8"
-              x="0"
-              y="0"
-              width="8"
-              height="8"
-              patternUnits="userSpaceOnUse"
-            >
-              <path
-                d="M 8 0 L 0 0 0 8"
-                fill="none"
-                stroke="#e5e7eb"
-                strokeWidth="0.5"
-              />
-            </pattern>
-          </defs>
+          {/* clean background (no global grid) */}
           <rect
             x={0}
             y={0}
             width={CANVAS_WIDTH}
             height={CANVAS_HEIGHT}
-            fill="url(#grid-8)"
+            fill="#f9fafb"
           />
 
           {/* Block outline */}
@@ -456,21 +603,35 @@ export default function InteractiveCanvas({
                 ? "R"
                 : "□";
 
+            const labelText = cavity.label;
+
             return (
               <g key={cavity.id}>
-                {/* main cavity body */}
-                <rect
-                  x={cavX}
-                  y={cavY}
-                  width={cavWidthPx}
-                  height={cavHeightPx}
-                  rx={(cavity.cornerRadiusIn || 0) * scale}
-                  ry={(cavity.cornerRadiusIn || 0) * scale}
-                  fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
-                  stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
-                  strokeWidth={isSelected ? 2 : 1}
-                  onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
-                />
+                {/* main cavity body: circle vs rect/roundedRect */}
+                {cavity.shape === "circle" ? (
+                  <circle
+                    cx={cavX + cavWidthPx / 2}
+                    cy={cavY + cavHeightPx / 2}
+                    r={Math.min(cavWidthPx, cavHeightPx) / 2}
+                    fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
+                    stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
+                    strokeWidth={isSelected ? 2 : 1}
+                    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+                  />
+                ) : (
+                  <rect
+                    x={cavX}
+                    y={cavY}
+                    width={cavWidthPx}
+                    height={cavHeightPx}
+                    rx={(cavity.cornerRadiusIn || 0) * scale}
+                    ry={(cavity.cornerRadiusIn || 0) * scale}
+                    fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
+                    stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
+                    strokeWidth={isSelected ? 2 : 1}
+                    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+                  />
+                )}
 
                 {/* small shape tag in top-left of cavity */}
                 <text
@@ -490,7 +651,7 @@ export default function InteractiveCanvas({
                   dominantBaseline="central"
                   className="fill-slate-700 text-[9px]"
                 >
-                  {cavity.label}
+                  {labelText}
                 </text>
 
                 {/* resize handle — always visible */}
@@ -509,6 +670,9 @@ export default function InteractiveCanvas({
               </g>
             );
           })}
+
+          {/* spacing dimension overlay */}
+          {spacingOverlay}
         </svg>
       </div>
 
@@ -519,8 +683,8 @@ export default function InteractiveCanvas({
         resizing both snap to 0.125&quot; increments; grid lines inside the
         block are spaced at 0.5&quot;. Labels come from each cavity&apos;s
         human-readable <code>label</code> field, and shape tags show Rect (□),
-        Circle (Ø), or Rounded (R). You can also drag shapes from the palette
-        and drop them inside the block.
+        Circle (Ø), or Rounded (R). When you select a cavity, the nearest gap
+        to another cavity is dimensioned on-screen.
       </div>
     </div>
   );

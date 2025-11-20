@@ -74,7 +74,7 @@ export default function LayoutPage({
     updateBlockDims,
     updateCavityDims,
     addCavity,
-    addCavityAt, // NEW: used for drag-from-palette
+    addCavityAt, // for drag-from-palette
     deleteCavity,
   } = useLayoutModel(baseLayout);
 
@@ -122,10 +122,9 @@ export default function LayoutPage({
         "application/x-cavity",
         JSON.stringify(payload)
       );
-      // Make sure the drop works across browsers
       e.dataTransfer.effectAllowed = "copyMove";
     } catch {
-      // If something goes wrong, we still have click-to-add as fallback
+      // Fallback: click-to-add still works
     }
   };
 
@@ -298,7 +297,7 @@ export default function LayoutPage({
               <div
                 style={{
                   transform: `scale(${zoom})`,
-                  transformOrigin: "top center",
+                  transformOrigin: "center center", // zoom from the center of the block
                 }}
                 className="transition-transform"
               >
@@ -311,19 +310,20 @@ export default function LayoutPage({
                   resizeAction={(id, lengthIn, widthIn) =>
                     updateCavityDims(id, { lengthIn, widthIn })
                   }
-                  // NEW: enable drag-from-palette
+                  // enable drag-from-palette
                   addCavityAtAction={addCavityAt}
                 />
               </div>
             </div>
 
             <p className="mt-3 text-[11px] text-slate-500 leading-snug">
-              Cavities are sized by their length and width relative to the block
-              and can be dragged around inside the footprint. Depth and corner
-              radius are shown and editable on the right. A 0.5&quot; wall is
-              kept clear around the block so pockets don&apos;t get too close to
-              the edge. You can add new cavities either by clicking a preset or
-              dragging it from the palette into the block.
+              Cavities are sized by their length and width (or diameter for
+              circles) relative to the block and can be dragged around inside
+              the footprint. Depth and corner radius are shown and editable on
+              the right. A 0.5&quot; wall is kept clear around the block so
+              pockets don&apos;t get too close to the edge. You can add new
+              cavities either by clicking a preset or dragging it from the
+              palette into the block.
             </p>
           </div>
         </section>
@@ -443,8 +443,9 @@ export default function LayoutPage({
                 <span>
                   Editing{" "}
                   <strong>
-                    {selectedCavity.lengthIn}×{selectedCavity.widthIn}×
-                    {selectedCavity.depthIn}"
+                    {selectedCavity.shape === "circle"
+                      ? `Ø${selectedCavity.lengthIn}×${selectedCavity.depthIn}"`
+                      : `${selectedCavity.lengthIn}×${selectedCavity.widthIn}×${selectedCavity.depthIn}"`}
                   </strong>
                 </span>
               ) : (
@@ -453,66 +454,119 @@ export default function LayoutPage({
             </div>
 
             {selectedCavity && (
-              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">Length (in)</span>
-                  <input
-                    type="number"
-                    step={0.125}
-                    value={selectedCavity.lengthIn}
-                    onChange={(e) =>
-                      updateCavityDims(selectedCavity.id, {
-                        lengthIn: Number(e.target.value),
-                      })
-                    }
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">Width (in)</span>
-                  <input
-                    type="number"
-                    step={0.125}
-                    value={selectedCavity.widthIn}
-                    onChange={(e) =>
-                      updateCavityDims(selectedCavity.id, {
-                        widthIn: Number(e.target.value),
-                      })
-                    }
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">Depth (in)</span>
-                  <input
-                    type="number"
-                    step={0.125}
-                    value={selectedCavity.depthIn}
-                    onChange={(e) =>
-                      updateCavityDims(selectedCavity.id, {
-                        depthIn: Number(e.target.value),
-                      })
-                    }
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">
-                    Corner radius (in)
-                  </span>
-                  <input
-                    type="number"
-                    step={0.125}
-                    value={selectedCavity.cornerRadiusIn}
-                    onChange={(e) =>
-                      updateCavityDims(selectedCavity.id, {
-                        cornerRadiusIn: Number(e.target.value),
-                      })
-                    }
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                  />
-                </label>
-              </div>
+              <>
+                {selectedCavity.shape === "circle" ? (
+                  // Circle editor: diameter + depth
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <label className="flex flex-col gap-1 col-span-2">
+                      <span className="text-[11px] text-slate-500">
+                        Diameter (in)
+                      </span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={selectedCavity.lengthIn}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (!Number.isNaN(v)) {
+                            updateCavityDims(selectedCavity.id, {
+                              lengthIn: v,
+                              widthIn: v,
+                            });
+                          }
+                        }}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 col-span-2">
+                      <span className="text-[11px] text-slate-500">
+                        Depth (in)
+                      </span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={selectedCavity.depthIn}
+                        onChange={(e) =>
+                          updateCavityDims(selectedCavity.id, {
+                            depthIn: Number(e.target.value),
+                          })
+                        }
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  // Rect / roundedRect editor: length, width, depth, (optional radius)
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-500">
+                        Length (in)
+                      </span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={selectedCavity.lengthIn}
+                        onChange={(e) =>
+                          updateCavityDims(selectedCavity.id, {
+                            lengthIn: Number(e.target.value),
+                          })
+                        }
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-500">
+                        Width (in)
+                      </span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={selectedCavity.widthIn}
+                        onChange={(e) =>
+                          updateCavityDims(selectedCavity.id, {
+                            widthIn: Number(e.target.value),
+                          })
+                        }
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-500">
+                        Depth (in)
+                      </span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={selectedCavity.depthIn}
+                        onChange={(e) =>
+                          updateCavityDims(selectedCavity.id, {
+                            depthIn: Number(e.target.value),
+                          })
+                        }
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                    {selectedCavity.shape === "roundedRect" && (
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[11px] text-slate-500">
+                          Corner radius (in)
+                        </span>
+                        <input
+                          type="number"
+                          step={0.125}
+                          value={selectedCavity.cornerRadiusIn}
+                          onChange={(e) =>
+                            updateCavityDims(selectedCavity.id, {
+                              cornerRadiusIn: Number(e.target.value),
+                            })
+                          }
+                          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                        />
+                      </label>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </aside>
