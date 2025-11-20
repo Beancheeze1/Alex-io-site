@@ -31,7 +31,6 @@ type Props = {
   resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
 
   // Optional: used for drag-from-palette drops.
-  // Named *Action to satisfy Next's "props must be serializable" rule.
   addCavityAtAction?: (
     shape: CavityShape,
     size: {
@@ -238,7 +237,12 @@ export default function InteractiveCanvas({
     setDrag(null);
   };
 
-  const handleBackgroundClick = () => {
+  // IMPORTANT: only clear selection when the actual SVG background is clicked,
+  // not when a cavity is clicked. This fixes the "select then immediately unselect"
+  // behavior you saw.
+  const handleBackgroundClick = (e: MouseEvent<SVGSVGElement>) => {
+    if (!svgRef.current) return;
+    if (e.target !== svgRef.current) return;
     setDrag(null);
     selectAction(null);
   };
@@ -270,8 +274,6 @@ export default function InteractiveCanvas({
     const yNorm = clamp01(yNormRaw);
 
     // Read palette payload, if provided.
-    // Expect JSON like:
-    // { "shape": "rect", "lengthIn": 4, "widthIn": 2, "depthIn": 2, "cornerRadiusIn": 0.5 }
     let shape: CavityShape = "rect";
     let size: {
       lengthIn: number;
@@ -314,8 +316,9 @@ export default function InteractiveCanvas({
   };
 
   // Build inch-based grid lines INSIDE the block (within the 0.5" wall).
+  // Slightly coarser (1") for a cleaner, less "wonky" look.
   const gridLines: React.ReactNode[] = [];
-  const gridSpacingIn = 0.5; // 1/2" visual grid; movement still snaps to 1/8"
+  const gridSpacingIn = 1;
 
   const innerStartXIn = WALL_IN;
   const innerEndXIn = Math.max(WALL_IN, block.lengthIn - WALL_IN);
@@ -776,7 +779,7 @@ export default function InteractiveCanvas({
         other based on inch dimensions. A 0.5&quot; wall is reserved around the
         block so cavities don&apos;t get too close to the edges. Movement and
         resizing both snap to 0.125&quot; increments; grid lines inside the
-        block are spaced at 0.5&quot;. Labels come from each cavity&apos;s
+        block are spaced at 1&quot;. Labels come from each cavity&apos;s
         human-readable <code>label</code> field, and shape tags show Rect (□),
         Circle (Ø), or Rounded (R). When you select a cavity, the nearest left,
         right, above, and below gaps to other cavities are dimensioned.

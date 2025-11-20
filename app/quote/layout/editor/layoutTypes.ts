@@ -27,6 +27,8 @@ export type Cavity = {
 export type LayoutModel = {
   block: BlockDims;
   cavities: Cavity[];
+  // Optional free-form notes that can be attached to the quote.
+  notes?: string;
 };
 
 /**
@@ -124,5 +126,5 @@ export function buildLayoutFromStrings(
     });
   }
 
-  return { block, cavities };
+  return { block, cavities, notes: "" };
 }

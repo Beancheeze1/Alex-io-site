@@ -79,7 +79,9 @@ export default function LayoutPage({
   } = useLayoutModel(baseLayout);
 
   const [zoom, setZoom] = React.useState(1);
-  const [applyStatus, setApplyStatus] = React.useState<"idle" | "saving" | "done" | "error">("idle");
+  const [applyStatus, setApplyStatus] = React.useState<
+    "idle" | "saving" | "done" | "error"
+  >("idle");
 
   const quoteNo =
     quoteNoParam && quoteNoParam.trim().length > 0
