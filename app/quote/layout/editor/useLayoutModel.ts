@@ -6,26 +6,22 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import {
-  LayoutModel,
-  Cavity,
-  CavityShape,
-  WALL_MARGIN_IN,
-  SNAP_IN,
-  snapInches,
-  clampCavityPosition,
-  clampCavitySize,
-} from "./layoutTypes";
+import type { BlockDims, LayoutModel, Cavity, CavityShape } from "./layoutTypes";
 
 export type UseLayoutModelResult = {
   layout: LayoutModel;
   selectedId: string | null;
   selectCavity: (id: string | null) => void;
   updateCavityPosition: (id: string, x: number, y: number) => void;
-  updateCavitySize: (id: string, lengthIn: number, widthIn: number) => void;
-  updateCavityMeta: (id: string, patch: Partial<Cavity>) => void;
-  updateBlockSize: (lengthIn: number, widthIn: number, thicknessIn: number) => void;
-  addCavity: (shape: CavityShape) => void;
+  updateBlockDims: (patch: Partial<BlockDims>) => void;
+  updateCavityDims: (
+    id: string,
+    patch: Partial<Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">>
+  ) => void;
+  addCavity: (
+    shape: CavityShape,
+    size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
+  ) => void;
   deleteCavity: (id: string) => void;
 };
 
@@ -38,151 +34,103 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   }, []);
 
   const updateCavityPosition = useCallback(
-    (id: string, xNorm: number, yNorm: number) => {
-      setLayout((prev) => {
-        const { block } = prev;
-        return {
-          ...prev,
-          cavities: prev.cavities.map((c) => {
-            if (c.id !== id) return c;
-            const { x, y } = clampCavityPosition(c, block, xNorm, yNorm);
-            return { ...c, x, y };
-          }),
-        };
-      });
-    },
-    []
-  );
-
-  const updateCavitySize = useCallback(
-    (id: string, lengthIn: number, widthIn: number) => {
-      setLayout((prev) => {
-        const { block } = prev;
-        return {
-          ...prev,
-          cavities: prev.cavities.map((c) => {
-            if (c.id !== id) return c;
-
-            const size = clampCavitySize(c, block, lengthIn, widthIn);
-            const { x, y } = clampCavityPosition(
-              { ...c, ...size },
-              block,
-              c.x,
-              c.y
-            );
-
-            return {
-              ...c,
-              ...size,
-              x,
-              y,
-            };
-          }),
-        };
-      });
-    },
-    []
-  );
-
-  const updateCavityMeta = useCallback(
-    (id: string, patch: Partial<Cavity>) => {
+    (id: string, x: number, y: number) => {
       setLayout((prev) => ({
         ...prev,
         cavities: prev.cavities.map((c) =>
-          c.id === id ? { ...c, ...patch } : c
+          c.id === id
+            ? {
+                ...c,
+                x: clamp01(x),
+                y: clamp01(y),
+              }
+            : c
         ),
       }));
     },
     []
   );
 
-  const updateBlockSize = useCallback(
-    (lengthIn: number, widthIn: number, thicknessIn: number) => {
-      setLayout((prev) => {
-        let L = snapInches(lengthIn);
-        let W = snapInches(widthIn);
-        let T = snapInches(thicknessIn || prev.block.thicknessIn || 2);
+  const updateBlockDims = useCallback((patch: Partial<BlockDims>) => {
+    setLayout((prev) => ({
+      ...prev,
+      block: {
+        ...prev.block,
+        ...normalizeBlockPatch(patch),
+      },
+    }));
+  }, []);
 
-        const minL = 2 * WALL_MARGIN_IN + SNAP_IN;
-        const minW = 2 * WALL_MARGIN_IN + SNAP_IN;
-
-        if (L < minL) L = minL;
-        if (W < minW) W = minW;
-
-        const block = { lengthIn: L, widthIn: W, thicknessIn: T };
-
-        const cavities = prev.cavities.map((c) => {
-          // Make sure size still fits new block
-          const size = clampCavitySize(c, block, c.lengthIn, c.widthIn);
-          const { x, y } = clampCavityPosition(
-            { ...c, ...size },
-            block,
-            c.x,
-            c.y
-          );
-          return { ...c, ...size, x, y };
-        });
-
-        return { block, cavities };
-      });
+  const updateCavityDims = useCallback(
+    (
+      id: string,
+      patch: Partial<
+        Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
+      >
+    ) => {
+      setLayout((prev) => ({
+        ...prev,
+        cavities: prev.cavities.map((c) =>
+          c.id === id
+            ? {
+                ...c,
+                ...normalizeCavityPatch(patch),
+              }
+            : c
+        ),
+      }));
     },
     []
   );
 
-  const addCavity = useCallback((shape: CavityShape) => {
-    setLayout((prev) => {
-      const { block } = prev;
-      const baseLength = 3;
-      const baseWidth = 2;
+  const addCavity = useCallback(
+    (
+      shape: CavityShape,
+      size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
+    ) => {
+      setLayout((prev) => {
+        const idx = prev.cavities.length;
+        const id = `cav-${idx + 1}`;
 
-      const lengthIn = snapInches(
-        Math.min(baseLength, block.lengthIn - 2 * WALL_MARGIN_IN)
-      );
-      const widthIn = snapInches(
-        Math.min(baseWidth, block.widthIn - 2 * WALL_MARGIN_IN)
-      );
+        const lengthIn = safeInch(size.lengthIn, 0.5);
+        const widthIn = safeInch(size.widthIn, 0.5);
+        const depthIn = safeInch(size.depthIn, 0.5);
+        const cornerRadiusIn =
+          shape === "roundedRect" ? safeInch(size.cornerRadiusIn ?? 0.25, 0) : 0;
 
-      const id = `cav-${Date.now()}`;
-      const depthIn = snapInches(block.thicknessIn / 2 || 1);
-      const cornerRadiusIn = shape === "roundRect" ? 0.5 : 0;
+        // Drop new cavities roughly centered
+        const x = 0.3 + (idx % 2) * 0.2;
+        const y = 0.25 + Math.floor(idx / 2) * 0.2;
 
-      // Start roughly centered inside the inner block
-      const cavLenNorm = lengthIn / block.lengthIn;
-      const cavWidNorm = widthIn / block.widthIn;
+        const label = `${lengthIn}×${widthIn}×${depthIn} in`;
 
-      const innerXNorm = WALL_MARGIN_IN / block.lengthIn;
-      const innerYNorm = WALL_MARGIN_IN / block.widthIn;
-      const maxXNorm = 1 - WALL_MARGIN_IN / block.lengthIn - cavLenNorm;
-      const maxYNorm = 1 - WALL_MARGIN_IN / block.widthIn - cavWidNorm;
+        const newCavity: Cavity = {
+          id,
+          label,
+          shape,
+          cornerRadiusIn,
+          lengthIn,
+          widthIn,
+          depthIn,
+          x: clamp01(x),
+          y: clamp01(y),
+        };
 
-      const x = (innerXNorm + maxXNorm) / 2;
-      const y = (innerYNorm + maxYNorm) / 2;
-
-      const newCavity: Cavity = {
-        id,
-        label: `${lengthIn}×${widthIn}×${depthIn}"`,
-        shape,
-        lengthIn,
-        widthIn,
-        depthIn,
-        cornerRadiusIn,
-        x,
-        y,
-      };
-
-      return {
-        ...prev,
-        cavities: [...prev.cavities, newCavity],
-      };
-    });
-  }, []);
+        return {
+          ...prev,
+          cavities: [...prev.cavities, newCavity],
+        };
+      });
+    },
+    []
+  );
 
   const deleteCavity = useCallback((id: string) => {
     setLayout((prev) => ({
       ...prev,
       cavities: prev.cavities.filter((c) => c.id !== id),
     }));
-    setSelectedId((prevId) => (prevId === id ? null : prevId));
+    setSelectedId((prev) => (prev === id ? null : prev));
   }, []);
 
   return {
@@ -190,10 +138,50 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
     selectedId,
     selectCavity,
     updateCavityPosition,
-    updateCavitySize,
-    updateCavityMeta,
-    updateBlockSize,
+    updateBlockDims,
+    updateCavityDims,
     addCavity,
     deleteCavity,
   };
+}
+
+/* Helpers */
+
+function clamp01(v: number): number {
+  if (Number.isNaN(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
+function safeInch(v: number | undefined, min: number): number {
+  if (v == null || Number.isNaN(Number(v))) return min;
+  const n = Number(v);
+  return n < min ? min : roundToEighth(n);
+}
+
+function roundToEighth(v: number): number {
+  return Math.round(v * 8) / 8;
+}
+
+function normalizeBlockPatch(patch: Partial<BlockDims>): Partial<BlockDims> {
+  const out: Partial<BlockDims> = {};
+  if (patch.lengthIn != null) out.lengthIn = safeInch(patch.lengthIn, 1);
+  if (patch.widthIn != null) out.widthIn = safeInch(patch.widthIn, 1);
+  if (patch.thicknessIn != null) out.thicknessIn = safeInch(patch.thicknessIn, 0.5);
+  return out;
+}
+
+function normalizeCavityPatch(
+  patch: Partial<
+    Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
+  >
+): Partial<Cavity> {
+  const out: Partial<Cavity> = {};
+  if (patch.lengthIn != null) out.lengthIn = safeInch(patch.lengthIn, 0.25);
+  if (patch.widthIn != null) out.widthIn = safeInch(patch.widthIn, 0.25);
+  if (patch.depthIn != null) out.depthIn = safeInch(patch.depthIn, 0.25);
+  if (patch.cornerRadiusIn != null) out.cornerRadiusIn = safeInch(patch.cornerRadiusIn, 0);
+  if (patch.label != null) out.label = patch.label;
+  return out;
 }
