@@ -8,7 +8,7 @@
 //   - Editable block size (L/W/T)
 //   - Editable cavity dims & depth
 //   - Zoom slider for the center canvas
-//   - "Export SVG" button (simple top-view SVG built from layout data)
+//   - "Apply to quote" button (sends layout to API)
 
 "use client";
 
@@ -79,6 +79,7 @@ export default function LayoutPage({
   } = useLayoutModel(baseLayout);
 
   const [zoom, setZoom] = React.useState(1);
+  const [applyStatus, setApplyStatus] = React.useState<"idle" | "saving" | "done" | "error">("idle");
 
   const quoteNo =
     quoteNoParam && quoteNoParam.trim().length > 0
@@ -128,24 +129,35 @@ export default function LayoutPage({
     }
   };
 
-  /* ---------- Export as SVG ---------- */
+  /* ---------- Apply to quote (instead of direct SVG download) ---------- */
 
-  const handleExportSvg = () => {
-    const svg = buildSvgFromLayout(layout);
-    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `foam-layout-${quoteNo}.svg`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+  const handleApplyToQuote = async () => {
+    try {
+      setApplyStatus("saving");
+      const res = await fetch("/api/quote/layout/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quoteNo,
+          layout,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      setApplyStatus("done");
+      setTimeout(() => setApplyStatus("idle"), 2000);
+    } catch (err) {
+      console.error("Apply-to-quote failed", err);
+      setApplyStatus("error");
+      setTimeout(() => setApplyStatus("idle"), 3000);
+    }
   };
 
   return (
     <main className="min-h-screen bg-slate-100 flex items-stretch px-4 py-6">
-      <div className="w-full max-w-6xl mx-auto bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-row gap-4 p-4">
+      {/* wider card: no max-w-6xl so canvas can breathe */}
+      <div className="w-full mx-auto bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-row gap-4 p-4">
         {/* ---------- LEFT: cavity palette ---------- */}
         <aside className="w-52 shrink-0 flex flex-col gap-3 border-r border-slate-200 pr-3">
           <div>
@@ -276,10 +288,17 @@ export default function LayoutPage({
               </div>
               <button
                 type="button"
-                onClick={handleExportSvg}
-                className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-indigo-400 hover:bg-indigo-50 transition"
+                onClick={handleApplyToQuote}
+                className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-indigo-400 hover:bg-indigo-50 transition disabled:opacity-60"
+                disabled={applyStatus === "saving"}
               >
-                Export SVG
+                {applyStatus === "saving"
+                  ? "Applying…"
+                  : applyStatus === "done"
+                  ? "Applied!"
+                  : applyStatus === "error"
+                  ? "Error – retry"
+                  : "Apply to quote"}
               </button>
             </div>
           </div>
@@ -297,7 +316,7 @@ export default function LayoutPage({
               <div
                 style={{
                   transform: `scale(${zoom})`,
-                  transformOrigin: "center center", // zoom from the center of the block
+                  transformOrigin: "center center", // zoom from the center of the foam area
                 }}
                 className="transition-transform"
               >
@@ -323,7 +342,8 @@ export default function LayoutPage({
               the right. A 0.5&quot; wall is kept clear around the block so
               pockets don&apos;t get too close to the edge. You can add new
               cavities either by clicking a preset or dragging it from the
-              palette into the block.
+              palette into the block. When a cavity is selected, nearest
+              horizontal and vertical gaps are dimensioned.
             </p>
           </div>
         </section>
@@ -575,7 +595,7 @@ export default function LayoutPage({
   );
 }
 
-/* ---------- SVG export helper ---------- */
+/* ---------- SVG export helper (still used by backend if needed) ---------- */
 
 function buildSvgFromLayout(
   layout: ReturnType<typeof buildLayoutFromStrings> extends infer T

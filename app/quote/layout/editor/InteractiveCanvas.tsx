@@ -7,7 +7,7 @@
 //   - 0.125" snap for length/width AND position
 //   - drop-from-palette to create new cavities at a point
 //   - circular cavities rendered as circles
-//   - simple spacing dimension between selected cavity and nearest neighbor
+//   - spacing dimensions: nearest left/right & above/below gaps
 //
 // Props are kept very simple so page.tsx can just forward
 // to useLayoutModel’s helpers.
@@ -351,138 +351,196 @@ export default function InteractiveCanvas({
     );
   }
 
-  // Simple spacing dimension between selected cavity and nearest neighbor
-  let spacingOverlay: React.ReactNode = null;
+  // Spacing dimensions: nearest left/right & above/below gaps
+  const spacingOverlays: React.ReactNode[] = [];
   if (selectedId) {
     const selected = cavities.find((c) => c.id === selectedId);
     const others = cavities.filter((c) => c.id !== selectedId);
     if (selected && others.length > 0) {
-      // compute center positions in inches
       const selLeftIn = selected.x * block.lengthIn;
       const selTopIn = selected.y * block.widthIn;
       const selRightIn = selLeftIn + selected.lengthIn;
       const selBottomIn = selTopIn + selected.widthIn;
-      const selCxIn = (selLeftIn + selRightIn) / 2;
-      const selCyIn = (selTopIn + selBottomIn) / 2;
 
-      let bestGapIn = Infinity;
-      let best: {
-        x1Px: number;
-        y1Px: number;
-        x2Px: number;
-        y2Px: number;
-        label: string;
-      } | null = null;
+      let bestLeft: any = null;
+      let bestRight: any = null;
+      let bestUp: any = null;
+      let bestDown: any = null;
 
       for (const other of others) {
         const othLeftIn = other.x * block.lengthIn;
         const othTopIn = other.y * block.widthIn;
         const othRightIn = othLeftIn + other.lengthIn;
         const othBottomIn = othTopIn + other.widthIn;
-        const othCxIn = (othLeftIn + othRightIn) / 2;
-        const othCyIn = (othTopIn + othBottomIn) / 2;
 
-        // Horizontal gap if they overlap vertically
-        if (
-          selBottomIn > othTopIn &&
-          selTopIn < othBottomIn
-        ) {
-          const gapIn =
-            selCxIn < othCxIn ? othLeftIn - selRightIn : selLeftIn - othRightIn;
-          if (gapIn > 0 && gapIn < bestGapIn) {
-            bestGapIn = gapIn;
-            const midYIn =
-              Math.max(selTopIn, othTopIn) +
-              (Math.min(selBottomIn, othBottomIn) -
-                Math.max(selTopIn, othTopIn)) /
-                2;
-            const yPx = blockOffset.y + midYIn * scale;
-            const x1Px =
-              blockOffset.x +
-              (selCxIn < othCxIn ? selRightIn * scale : othRightIn * scale);
-            const x2Px =
-              blockOffset.x +
-              (selCxIn < othCxIn ? othLeftIn * scale : selLeftIn * scale);
-            best = {
-              x1Px,
-              y1Px: yPx,
-              x2Px,
-              y2Px: yPx,
-              label: `${gapIn.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}"`,
-            };
+        // Overlap checks
+        const overlapVert =
+          Math.min(selBottomIn, othBottomIn) > Math.max(selTopIn, othTopIn);
+        const overlapHoriz =
+          Math.min(selRightIn, othRightIn) > Math.max(selLeftIn, othLeftIn);
+
+        // Horizontal gaps (left/right)
+        if (overlapVert) {
+          // other to the right
+          if (othLeftIn >= selRightIn) {
+            const gapIn = othLeftIn - selRightIn;
+            if (gapIn > 0 && (!bestRight || gapIn < bestRight.gapIn)) {
+              const overlapTopIn = Math.max(selTopIn, othTopIn);
+              const overlapBottomIn = Math.min(selBottomIn, othBottomIn);
+              const midYIn = (overlapTopIn + overlapBottomIn) / 2;
+              bestRight = {
+                gapIn,
+                x1In: selRightIn,
+                x2In: othLeftIn,
+                yIn: midYIn,
+              };
+            }
+          }
+          // other to the left
+          if (selLeftIn >= othRightIn) {
+            const gapIn = selLeftIn - othRightIn;
+            if (gapIn > 0 && (!bestLeft || gapIn < bestLeft.gapIn)) {
+              const overlapTopIn = Math.max(selTopIn, othTopIn);
+              const overlapBottomIn = Math.min(selBottomIn, othBottomIn);
+              const midYIn = (overlapTopIn + overlapBottomIn) / 2;
+              bestLeft = {
+                gapIn,
+                x1In: othRightIn,
+                x2In: selLeftIn,
+                yIn: midYIn,
+              };
+            }
           }
         }
 
-        // Vertical gap if they overlap horizontally
-        if (
-          selRightIn > othLeftIn &&
-          selLeftIn < othRightIn
-        ) {
-          const gapIn =
-            selCyIn < othCyIn ? othTopIn - selBottomIn : selTopIn - othBottomIn;
-          if (gapIn > 0 && gapIn < bestGapIn) {
-            bestGapIn = gapIn;
-            const midXIn =
-              Math.max(selLeftIn, othLeftIn) +
-              (Math.min(selRightIn, othRightIn) -
-                Math.max(selLeftIn, othLeftIn)) /
-                2;
-            const xPx = blockOffset.x + midXIn * scale;
-            const y1Px =
-              blockOffset.y +
-              (selCyIn < othCyIn ? selBottomIn * scale : othBottomIn * scale);
-            const y2Px =
-              blockOffset.y +
-              (selCyIn < othCyIn ? othTopIn * scale : selTopIn * scale);
-            best = {
-              x1Px: xPx,
-              y1Px,
-              x2Px: xPx,
-              y2Px,
-              label: `${gapIn.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}"`,
-            };
+        // Vertical gaps (up/down)
+        if (overlapHoriz) {
+          // other below
+          if (othTopIn >= selBottomIn) {
+            const gapIn = othTopIn - selBottomIn;
+            if (gapIn > 0 && (!bestDown || gapIn < bestDown.gapIn)) {
+              const overlapLeftIn = Math.max(selLeftIn, othLeftIn);
+              const overlapRightIn = Math.min(selRightIn, othRightIn);
+              const midXIn = (overlapLeftIn + overlapRightIn) / 2;
+              bestDown = {
+                gapIn,
+                y1In: selBottomIn,
+                y2In: othTopIn,
+                xIn: midXIn,
+              };
+            }
+          }
+          // other above
+          if (selTopIn >= othBottomIn) {
+            const gapIn = selTopIn - othBottomIn;
+            if (gapIn > 0 && (!bestUp || gapIn < bestUp.gapIn)) {
+              const overlapLeftIn = Math.max(selLeftIn, othLeftIn);
+              const overlapRightIn = Math.min(selRightIn, othRightIn);
+              const midXIn = (overlapLeftIn + overlapRightIn) / 2;
+              bestUp = {
+                gapIn,
+                y1In: othBottomIn,
+                y2In: selTopIn,
+                xIn: midXIn,
+              };
+            }
           }
         }
       }
 
-      if (best && bestGapIn < Infinity) {
-        const { x1Px, y1Px, x2Px, y2Px, label } = best;
+      const fmt = (g: number) =>
+        `${g.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}"`;
+
+      // Convert each best gap into a <g> overlay
+      if (bestLeft) {
+        const { x1In, x2In, yIn, gapIn } = bestLeft;
+        const x1Px = blockOffset.x + x1In * scale;
+        const x2Px = blockOffset.x + x2In * scale;
+        const yPx = blockOffset.y + yIn * scale;
         const midX = (x1Px + x2Px) / 2;
+        const midY = yPx;
+
+        spacingOverlays.push(
+          <g key="gap-left">
+            <line x1={x1Px} y1={yPx} x2={x2Px} y2={yPx} stroke="#0f172a" strokeWidth={1} />
+            <line x1={x1Px} y1={yPx - 4} x2={x1Px} y2={yPx + 4} stroke="#0f172a" strokeWidth={1} />
+            <line x1={x2Px} y1={yPx - 4} x2={x2Px} y2={yPx + 4} stroke="#0f172a" strokeWidth={1} />
+            <rect
+              x={midX - 16}
+              y={midY - 12}
+              width={32}
+              height={14}
+              rx={3}
+              ry={3}
+              fill="white"
+              stroke="#cbd5f5"
+              strokeWidth={0.5}
+            />
+            <text
+              x={midX}
+              y={midY - 5}
+              textAnchor="middle"
+              className="fill-slate-700 text-[8px]"
+            >
+              {fmt(gapIn)}
+            </text>
+          </g>
+        );
+      }
+
+      if (bestRight) {
+        const { x1In, x2In, yIn, gapIn } = bestRight;
+        const x1Px = blockOffset.x + x1In * scale;
+        const x2Px = blockOffset.x + x2In * scale;
+        const yPx = blockOffset.y + yIn * scale;
+        const midX = (x1Px + x2Px) / 2;
+        const midY = yPx;
+
+        spacingOverlays.push(
+          <g key="gap-right">
+            <line x1={x1Px} y1={yPx} x2={x2Px} y2={yPx} stroke="#0f172a" strokeWidth={1} />
+            <line x1={x1Px} y1={yPx - 4} x2={x1Px} y2={yPx + 4} stroke="#0f172a" strokeWidth={1} />
+            <line x1={x2Px} y1={yPx - 4} x2={x2Px} y2={yPx + 4} stroke="#0f172a" strokeWidth={1} />
+            <rect
+              x={midX - 16}
+              y={midY - 12}
+              width={32}
+              height={14}
+              rx={3}
+              ry={3}
+              fill="white"
+              stroke="#cbd5f5"
+              strokeWidth={0.5}
+            />
+            <text
+              x={midX}
+              y={midY - 5}
+              textAnchor="middle"
+              className="fill-slate-700 text-[8px]"
+            >
+              {fmt(gapIn)}
+            </text>
+          </g>
+        );
+      }
+
+      if (bestUp) {
+        const { xIn, y1In, y2In, gapIn } = bestUp;
+        const xPx = blockOffset.x + xIn * scale;
+        const y1Px = blockOffset.y + y1In * scale;
+        const y2Px = blockOffset.y + y2In * scale;
+        const midX = xPx;
         const midY = (y1Px + y2Px) / 2;
 
-        spacingOverlay = (
-          <g>
-            {/* main dimension line */}
-            <line
-              x1={x1Px}
-              y1={y1Px}
-              x2={x2Px}
-              y2={y2Px}
-              stroke="#0f172a"
-              strokeWidth={1}
-            />
-            {/* end ticks */}
-            <line
-              x1={x1Px}
-              y1={y1Px - 4}
-              x2={x1Px}
-              y2={y1Px + 4}
-              stroke="#0f172a"
-              strokeWidth={1}
-            />
-            <line
-              x1={x2Px}
-              y1={y2Px - 4}
-              x2={x2Px}
-              y2={y2Px + 4}
-              stroke="#0f172a"
-              strokeWidth={1}
-            />
-            {/* label */}
+        spacingOverlays.push(
+          <g key="gap-up">
+            <line x1={xPx} y1={y1Px} x2={xPx} y2={y2Px} stroke="#0f172a" strokeWidth={1} />
+            <line x1={xPx - 4} y1={y1Px} x2={xPx + 4} y2={y1Px} stroke="#0f172a" strokeWidth={1} />
+            <line x1={xPx - 4} y1={y2Px} x2={xPx + 4} y2={y2Px} stroke="#0f172a" strokeWidth={1} />
             <rect
-              x={midX - 14}
-              y={midY - 9}
-              width={28}
+              x={midX - 18}
+              y={midY - 7}
+              width={36}
               height={14}
               rx={3}
               ry={3}
@@ -497,7 +555,44 @@ export default function InteractiveCanvas({
               dominantBaseline="central"
               className="fill-slate-700 text-[8px]"
             >
-              {label}
+              {fmt(gapIn)}
+            </text>
+          </g>
+        );
+      }
+
+      if (bestDown) {
+        const { xIn, y1In, y2In, gapIn } = bestDown;
+        const xPx = blockOffset.x + xIn * scale;
+        const y1Px = blockOffset.y + y1In * scale;
+        const y2Px = blockOffset.y + y2In * scale;
+        const midX = xPx;
+        const midY = (y1Px + y2Px) / 2;
+
+        spacingOverlays.push(
+          <g key="gap-down">
+            <line x1={xPx} y1={y1Px} x2={xPx} y2={y2Px} stroke="#0f172a" strokeWidth={1} />
+            <line x1={xPx - 4} y1={y1Px} x2={xPx + 4} y2={y1Px} stroke="#0f172a" strokeWidth={1} />
+            <line x1={xPx - 4} y1={y2Px} x2={xPx + 4} y2={y2Px} stroke="#0f172a" strokeWidth={1} />
+            <rect
+              x={midX - 18}
+              y={midY - 7}
+              width={36}
+              height={14}
+              rx={3}
+              ry={3}
+              fill="white"
+              stroke="#cbd5f5"
+              strokeWidth={0.5}
+            />
+            <text
+              x={midX}
+              y={midY}
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="fill-slate-700 text-[8px]"
+            >
+              {fmt(gapIn)}
             </text>
           </g>
         );
@@ -513,7 +608,7 @@ export default function InteractiveCanvas({
         inches; a 0.5&quot; wall is kept clear on all sides. Movement and
         resizing snap to 0.125&quot; increments. You can also drag shapes
         from the palette into the block. When a cavity is selected, the
-        nearest gap to another cavity is dimensioned.
+        nearest horizontal and vertical gaps to other cavities are dimensioned.
       </div>
 
       <div className="overflow-hidden rounded-xl bg-white">
@@ -529,7 +624,7 @@ export default function InteractiveCanvas({
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
-          {/* clean background (no global grid) */}
+          {/* clean background */}
           <rect
             x={0}
             y={0}
@@ -671,8 +766,8 @@ export default function InteractiveCanvas({
             );
           })}
 
-          {/* spacing dimension overlay */}
-          {spacingOverlay}
+          {/* spacing dimension overlays */}
+          <g>{spacingOverlays}</g>
         </svg>
       </div>
 
@@ -683,8 +778,8 @@ export default function InteractiveCanvas({
         resizing both snap to 0.125&quot; increments; grid lines inside the
         block are spaced at 0.5&quot;. Labels come from each cavity&apos;s
         human-readable <code>label</code> field, and shape tags show Rect (□),
-        Circle (Ø), or Rounded (R). When you select a cavity, the nearest gap
-        to another cavity is dimensioned on-screen.
+        Circle (Ø), or Rounded (R). When you select a cavity, the nearest left,
+        right, above, and below gaps to other cavities are dimensioned.
       </div>
     </div>
   );
