@@ -6,12 +6,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type {
-  BlockDims,
-  LayoutModel,
-  Cavity,
-  CavityShape,
-} from "./layoutTypes";
+import type { BlockDims, LayoutModel, Cavity, CavityShape } from "./layoutTypes";
+import { formatCavityLabel } from "./layoutTypes";
 
 export type UseLayoutModelResult = {
   layout: LayoutModel;
@@ -21,40 +17,17 @@ export type UseLayoutModelResult = {
   updateBlockDims: (patch: Partial<BlockDims>) => void;
   updateCavityDims: (
     id: string,
-    patch: Partial<
-      Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
-    >
+    patch: Partial<Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">>
   ) => void;
   addCavity: (
     shape: CavityShape,
-    size: {
-      lengthIn: number;
-      widthIn: number;
-      depthIn: number;
-      cornerRadiusIn?: number;
-    }
-  ) => void;
-  // For drag-from-palette: drop at a normalized position in the block.
-  addCavityAt: (
-    shape: CavityShape,
-    size: {
-      lengthIn: number;
-      widthIn: number;
-      depthIn: number;
-      cornerRadiusIn?: number;
-    },
-    xNorm: number,
-    yNorm: number
+    size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
   ) => void;
   deleteCavity: (id: string) => void;
-  updateNotes: (notes: string) => void;
 };
 
 export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
-  const [layout, setLayout] = useState<LayoutModel>({
-    ...initial,
-    notes: initial.notes ?? "",
-  });
+  const [layout, setLayout] = useState<LayoutModel>(initial);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const selectCavity = useCallback((id: string | null) => {
@@ -98,14 +71,25 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
     ) => {
       setLayout((prev) => ({
         ...prev,
-        cavities: prev.cavities.map((c) =>
-          c.id === id
-            ? {
-                ...c,
-                ...normalizeCavityPatch(patch),
-              }
-            : c
-        ),
+        cavities: prev.cavities.map((c) => {
+          if (c.id !== id) return c;
+
+          const normalized = normalizeCavityPatch(patch);
+          const updated: Cavity = {
+            ...c,
+            ...normalized,
+          };
+
+          // Auto-update label whenever dimensions change
+          updated.label = formatCavityLabel({
+            shape: updated.shape,
+            lengthIn: updated.lengthIn,
+            widthIn: updated.widthIn,
+            depthIn: updated.depthIn,
+          });
+
+          return updated;
+        }),
       }));
     },
     []
@@ -114,12 +98,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   const addCavity = useCallback(
     (
       shape: CavityShape,
-      size: {
-        lengthIn: number;
-        widthIn: number;
-        depthIn: number;
-        cornerRadiusIn?: number;
-      }
+      size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
     ) => {
       setLayout((prev) => {
         const idx = prev.cavities.length;
@@ -135,7 +114,12 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         const x = 0.3 + (idx % 2) * 0.2;
         const y = 0.25 + Math.floor(idx / 2) * 0.2;
 
-        const label = `${lengthIn}×${widthIn}×${depthIn} in`;
+        const label = formatCavityLabel({
+          shape,
+          lengthIn,
+          widthIn,
+          depthIn,
+        });
 
         const newCavity: Cavity = {
           id,
@@ -158,70 +142,12 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
     []
   );
 
-  const addCavityAt = useCallback(
-    (
-      shape: CavityShape,
-      size: {
-        lengthIn: number;
-        widthIn: number;
-        depthIn: number;
-        cornerRadiusIn?: number;
-      },
-      xNorm: number,
-      yNorm: number
-    ) => {
-      setLayout((prev) => {
-        const idx = prev.cavities.length;
-        const id = `cav-${idx + 1}`;
-
-        const lengthIn = safeInch(size.lengthIn, 0.5);
-        const widthIn =
-          shape === "circle"
-            ? safeInch(size.lengthIn, 0.5)
-            : safeInch(size.widthIn, 0.5);
-        const depthIn = safeInch(size.depthIn, 0.5);
-        const cornerRadiusIn =
-          shape === "roundedRect" ? safeInch(size.cornerRadiusIn ?? 0.25, 0) : 0;
-
-        const label =
-          shape === "circle"
-            ? `Ø${lengthIn}×${depthIn} in`
-            : `${lengthIn}×${widthIn}×${depthIn} in`;
-
-        const newCavity: Cavity = {
-          id,
-          label,
-          shape,
-          cornerRadiusIn,
-          lengthIn,
-          widthIn,
-          depthIn,
-          x: clamp01(xNorm),
-          y: clamp01(yNorm),
-        };
-
-        return {
-          ...prev,
-          cavities: [...prev.cavities, newCavity],
-        };
-      });
-    },
-    []
-  );
-
   const deleteCavity = useCallback((id: string) => {
     setLayout((prev) => ({
       ...prev,
       cavities: prev.cavities.filter((c) => c.id !== id),
     }));
     setSelectedId((prev) => (prev === id ? null : prev));
-  }, []);
-
-  const updateNotes = useCallback((notes: string) => {
-    setLayout((prev) => ({
-      ...prev,
-      notes,
-    }));
   }, []);
 
   return {
@@ -232,9 +158,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
     updateBlockDims,
     updateCavityDims,
     addCavity,
-    addCavityAt,
     deleteCavity,
-    updateNotes,
   };
 }
 

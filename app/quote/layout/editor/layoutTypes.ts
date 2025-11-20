@@ -27,9 +27,17 @@ export type Cavity = {
 export type LayoutModel = {
   block: BlockDims;
   cavities: Cavity[];
-  // Optional free-form notes that can be attached to the quote.
-  notes?: string;
 };
+
+/**
+ * Format a label for a cavity, based on its dimensions + shape.
+ */
+export function formatCavityLabel(c: Pick<Cavity, "shape" | "lengthIn" | "widthIn" | "depthIn">): string {
+  if (c.shape === "circle") {
+    return `Ø${c.lengthIn}×${c.depthIn} in`;
+  }
+  return `${c.lengthIn}×${c.widthIn}×${c.depthIn} in`;
+}
 
 /**
  * Parse a "10x8x2" style string into BlockDims.
@@ -84,7 +92,13 @@ export function parseCavity(spec: string, index: number): Cavity | null {
   const x = 0.1 + col * 0.25;
   const y = 0.1 + row * 0.25;
 
-  const baseLabel = `${l}×${w}×${d} in`;
+  const baseLabel = formatCavityLabel({
+    shape: "rect",
+    lengthIn: l,
+    widthIn: w,
+    depthIn: d,
+  });
+
   const prettyLabel = labelPart
     ? `${baseLabel} (${labelPart.trim()})`
     : baseLabel;
@@ -126,5 +140,5 @@ export function buildLayoutFromStrings(
     });
   }
 
-  return { block, cavities, notes: "" };
+  return { block, cavities };
 }
