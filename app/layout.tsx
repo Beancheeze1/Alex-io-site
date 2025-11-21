@@ -18,8 +18,8 @@ export default function RootLayout({
     <html lang="en">
       <body className="min-h-screen bg-neutral-50 text-neutral-800">
         <BrandHeader />
-        {/* Full-width content, no LeftNav */}
-        <main className="mx-auto w-full max-w-7xl px-4 py-6">
+        {/* Full-width content */}
+        <main className="w-full px-4 py-6">
           {children}
         </main>
       </body>

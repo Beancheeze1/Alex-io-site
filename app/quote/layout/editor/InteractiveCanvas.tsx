@@ -230,7 +230,8 @@ export default function InteractiveCanvas({
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
-      <div className="overflow-hidden rounded-xl bg-white">
+      {/* Allow scrolling when zooming in so the whole block is always accessible */}
+      <div className="overflow-auto rounded-xl bg-white">
         <svg
           ref={svgRef}
           width={CANVAS_WIDTH}

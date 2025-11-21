@@ -32,6 +32,13 @@ function normalizeCavitiesParam(raw: string | undefined): string {
   return raw.trim();
 }
 
+// Ensure all dimension edits snap to 0.125"
+const SNAP_IN = 0.125;
+function snapInches(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value / SNAP_IN) * SNAP_IN;
+}
+
 export default function LayoutPage({
   searchParams,
 }: {
@@ -287,9 +294,10 @@ export default function LayoutPage({
                   type="number"
                   step={0.125}
                   value={block.lengthIn}
-                  onChange={(e) =>
-                    updateBlockDims({ lengthIn: Number(e.target.value) })
-                  }
+                  onChange={(e) => {
+                    const snapped = snapInches(Number(e.target.value));
+                    updateBlockDims({ lengthIn: snapped });
+                  }}
                   className="rounded-md border border-slate-300 px-2 py-1 text-xs"
                 />
               </label>
@@ -299,9 +307,10 @@ export default function LayoutPage({
                   type="number"
                   step={0.125}
                   value={block.widthIn}
-                  onChange={(e) =>
-                    updateBlockDims({ widthIn: Number(e.target.value) })
-                  }
+                  onChange={(e) => {
+                    const snapped = snapInches(Number(e.target.value));
+                    updateBlockDims({ widthIn: snapped });
+                  }}
                   className="rounded-md border border-slate-300 px-2 py-1 text-xs"
                 />
               </label>
@@ -311,9 +320,10 @@ export default function LayoutPage({
                   type="number"
                   step={0.125}
                   value={block.thicknessIn}
-                  onChange={(e) =>
-                    updateBlockDims({ thicknessIn: Number(e.target.value) })
-                  }
+                  onChange={(e) => {
+                    const snapped = snapInches(Number(e.target.value));
+                    updateBlockDims({ thicknessIn: snapped });
+                  }}
                   className="rounded-md border border-slate-300 px-2 py-1 text-xs"
                 />
               </label>
@@ -393,42 +403,48 @@ export default function LayoutPage({
             {selectedCavity && (
               <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">Length (in)</span>
+                  <span className="text-[11px] text-slate-500">
+                    Length (in)
+                  </span>
                   <input
                     type="number"
                     step={0.125}
                     value={selectedCavity.lengthIn}
                     onChange={(e) =>
                       updateCavityDims(selectedCavity.id, {
-                        lengthIn: Number(e.target.value),
+                        lengthIn: snapInches(Number(e.target.value)),
                       })
                     }
                     className="rounded-md border border-slate-300 px-2 py-1 text-xs"
                   />
                 </label>
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">Width (in)</span>
+                  <span className="text-[11px] text-slate-500">
+                    Width (in)
+                  </span>
                   <input
                     type="number"
                     step={0.125}
                     value={selectedCavity.widthIn}
                     onChange={(e) =>
                       updateCavityDims(selectedCavity.id, {
-                        widthIn: Number(e.target.value),
+                        widthIn: snapInches(Number(e.target.value)),
                       })
                     }
                     className="rounded-md border border-slate-300 px-2 py-1 text-xs"
                   />
                 </label>
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">Depth (in)</span>
+                  <span className="text-[11px] text-slate-500">
+                    Depth (in)
+                  </span>
                   <input
                     type="number"
                     step={0.125}
                     value={selectedCavity.depthIn}
                     onChange={(e) =>
                       updateCavityDims(selectedCavity.id, {
-                        depthIn: Number(e.target.value),
+                        depthIn: snapInches(Number(e.target.value)),
                       })
                     }
                     className="rounded-md border border-slate-300 px-2 py-1 text-xs"
@@ -444,7 +460,7 @@ export default function LayoutPage({
                     value={selectedCavity.cornerRadiusIn}
                     onChange={(e) =>
                       updateCavityDims(selectedCavity.id, {
-                        cornerRadiusIn: Number(e.target.value),
+                        cornerRadiusIn: snapInches(Number(e.target.value)),
                       })
                     }
                     className="rounded-md border border-slate-300 px-2 py-1 text-xs"
