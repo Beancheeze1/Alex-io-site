@@ -139,8 +139,8 @@ export default function LayoutPage({
   };
 
   return (
-    <main className="min-h-screen bg-slate-100 flex items-stretch px-6 py-6">
-      <div className="w-full max-w-[1700px] mx-auto bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-row gap-6 p-6">
+    <main className="min-h-screen bg-slate-100 flex items-stretch">
+      <div className="w-full mx-auto bg-white rounded-none shadow-none border-t border-slate-200 flex flex-row gap-6 p-6">
         {/* ---------- LEFT: Cavity palette ---------- */}
         <aside className="w-64 shrink-0 flex flex-col gap-3 border-r border-slate-200 pr-4">
           <div>
@@ -271,12 +271,7 @@ export default function LayoutPage({
         </section>
 
         {/* ---------- RIGHT: Inspector + notes ---------- */}
-        {/* (unchanged from previous drop) */}
-        {/* ... keep the rest of the right-side block + cavities + notes exactly as in your current file ... */}
-        {/* For brevity, I’m not repeating that section here since nothing changed there. */}
-        {/* You can keep the existing right-hand code in place below this comment. */}
-
-        <aside className="w-72 shrink-0 flex flex-col gap-3 border-l border-slate-200 pl-4">
+        <aside className="w-80 shrink-0 flex flex-col gap-3 border-l border-slate-200 pl-4">
           {/* Block editor */}
           <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3">
             <div className="text-xs font-semibold text-slate-700 mb-1">
@@ -285,7 +280,6 @@ export default function LayoutPage({
             <div className="text-[11px] text-slate-500 mb-2">
               Edit the foam blank size. Values snap to 0.125&quot; increments.
             </div>
-
             <div className="grid grid-cols-3 gap-2 text-xs">
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] text-slate-500">Length (in)</span>
@@ -299,7 +293,6 @@ export default function LayoutPage({
                   className="rounded-md border border-slate-300 px-2 py-1 text-xs"
                 />
               </label>
-
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] text-slate-500">Width (in)</span>
                 <input
@@ -312,7 +305,6 @@ export default function LayoutPage({
                   className="rounded-md border border-slate-300 px-2 py-1 text-xs"
                 />
               </label>
-
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] text-slate-500">Thickness</span>
                 <input
@@ -339,7 +331,7 @@ export default function LayoutPage({
                 No cavities yet. Use the palette on the left to add a pocket.
               </div>
             ) : (
-              <ul className="space-y-1.5 mb-3 max-h-36 overflow-auto">
+              <ul className="space-y-1.5 mb-3 max-h-40 overflow-auto">
                 {cavities.map((cav) => {
                   const isActive = cav.id === selectedId;
                   return (
@@ -374,7 +366,6 @@ export default function LayoutPage({
                           {cav.label}
                         </span>
                       </button>
-
                       <button
                         type="button"
                         onClick={() => deleteCavity(cav.id)}
@@ -389,107 +380,77 @@ export default function LayoutPage({
               </ul>
             )}
 
-            {selectedCavity && (
-              <>
-                <div className="mt-2 border-t border-slate-200 pt-2 text-[11px] text-slate-500">
-                  Editing{" "}
-                  <strong>{selectedCavity.label}</strong>
-                </div>
+            <div className="mt-2 border-t border-slate-200 pt-2 text-[11px] text-slate-500">
+              {selectedCavity ? (
+                <span>
+                  Editing <strong>{selectedCavity.label}</strong>
+                </span>
+              ) : (
+                <span>Select a cavity above to edit its size and depth.</span>
+              )}
+            </div>
 
-                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                  {selectedCavity.shape === "circle" ? (
-                    <>
-                      <label className="flex flex-col gap-1 col-span-2">
-                        <span className="text-[11px] text-slate-500">
-                          Diameter (in)
-                        </span>
-                        <input
-                          type="number"
-                          step={0.125}
-                          value={selectedCavity.lengthIn}
-                          onChange={(e) => {
-                            const v = Number(e.target.value);
-                            if (!Number.isNaN(v)) {
-                              updateCavityDims(selectedCavity.id, {
-                                lengthIn: v,
-                                widthIn: v,
-                              });
-                            }
-                          }}
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 col-span-2">
-                        <span className="text-[11px] text-slate-500">
-                          Depth (in)
-                        </span>
-                        <input
-                          type="number"
-                          step={0.125}
-                          value={selectedCavity.depthIn}
-                          onChange={(e) =>
-                            updateCavityDims(selectedCavity.id, {
-                              depthIn: Number(e.target.value),
-                            })
-                          }
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                        />
-                      </label>
-                    </>
-                  ) : (
-                    <>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-[11px] text-slate-500">
-                          Length (in)
-                        </span>
-                        <input
-                          type="number"
-                          step={0.125}
-                          value={selectedCavity.lengthIn}
-                          onChange={(e) =>
-                            updateCavityDims(selectedCavity.id, {
-                              lengthIn: Number(e.target.value),
-                            })
-                          }
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-[11px] text-slate-500">
-                          Width (in)
-                        </span>
-                        <input
-                          type="number"
-                          step={0.125}
-                          value={selectedCavity.widthIn}
-                          onChange={(e) =>
-                            updateCavityDims(selectedCavity.id, {
-                              widthIn: Number(e.target.value),
-                            })
-                          }
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 col-span-2">
-                        <span className="text-[11px] text-slate-500">
-                          Depth (in)
-                        </span>
-                        <input
-                          type="number"
-                          step={0.125}
-                          value={selectedCavity.depthIn}
-                          onChange={(e) =>
-                            updateCavityDims(selectedCavity.id, {
-                              depthIn: Number(e.target.value),
-                            })
-                          }
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                        />
-                      </label>
-                    </>
-                  )}
-                </div>
-              </>
+            {selectedCavity && (
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">Length (in)</span>
+                  <input
+                    type="number"
+                    step={0.125}
+                    value={selectedCavity.lengthIn}
+                    onChange={(e) =>
+                      updateCavityDims(selectedCavity.id, {
+                        lengthIn: Number(e.target.value),
+                      })
+                    }
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">Width (in)</span>
+                  <input
+                    type="number"
+                    step={0.125}
+                    value={selectedCavity.widthIn}
+                    onChange={(e) =>
+                      updateCavityDims(selectedCavity.id, {
+                        widthIn: Number(e.target.value),
+                      })
+                    }
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">Depth (in)</span>
+                  <input
+                    type="number"
+                    step={0.125}
+                    value={selectedCavity.depthIn}
+                    onChange={(e) =>
+                      updateCavityDims(selectedCavity.id, {
+                        depthIn: Number(e.target.value),
+                      })
+                    }
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">
+                    Corner radius (in)
+                  </span>
+                  <input
+                    type="number"
+                    step={0.125}
+                    value={selectedCavity.cornerRadiusIn}
+                    onChange={(e) =>
+                      updateCavityDims(selectedCavity.id, {
+                        cornerRadiusIn: Number(e.target.value),
+                      })
+                    }
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                  />
+                </label>
+              </div>
             )}
           </div>
 
@@ -499,9 +460,9 @@ export default function LayoutPage({
               Notes / special instructions
             </div>
             <div className="text-[11px] text-slate-500 mb-2">
-              Optional text for anything the foam layout needs to call out
-              (loose parts, labels, extra protection, etc.). This will be saved
-              with the quote when you apply.
+              Optional text for anything the foam layout needs to call out (loose
+              parts, labels, extra protection, etc.). This will be saved with the
+              quote when you apply.
             </div>
             <textarea
               value={notes}
@@ -516,15 +477,13 @@ export default function LayoutPage({
   );
 }
 
-/* ---------- SVG export helper (used for quote attachment) ---------- */
+/* ---------- SVG export helper ---------- */
 
 function buildSvgFromLayout(layout: LayoutModel): string {
-  const l = layout as any;
-  const block = l.block as { lengthIn: number; widthIn: number };
-  const cavities = (l.cavities as any[]) || [];
+  const { block, cavities } = layout;
 
-  const VIEW_W = 800;
-  const VIEW_H = 600;
+  const VIEW_W = 1000;
+  const VIEW_H = 700;
   const PADDING = 40;
 
   const scaleX = (VIEW_W - 2 * PADDING) / block.lengthIn;
@@ -537,13 +496,29 @@ function buildSvgFromLayout(layout: LayoutModel): string {
   const blockY = (VIEW_H - blockH) / 2;
 
   const cavRects = cavities
-    .map((c: any) => {
+    .map((c) => {
       const cavW = c.lengthIn * scale;
       const cavH = c.widthIn * scale;
       const x = blockX + c.x * blockW;
       const y = blockY + c.y * blockH;
 
       const label = c.label ?? `${c.lengthIn}×${c.widthIn}×${c.depthIn}"`;
+
+      if (c.shape === "circle") {
+        const r = Math.min(cavW, cavH) / 2;
+        const cx = x + cavW / 2;
+        const cy = y + cavH / 2;
+        return `
+  <g>
+    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
+          2
+        )}" fill="none" stroke="#111827" stroke-width="1" />
+    <text x="${cx.toFixed(2)}" y="${cy.toFixed(
+          2
+        )}" text-anchor="middle" dominant-baseline="middle"
+          font-size="10" fill="#111827">${label}</text>
+  </g>`;
+      }
 
       return `
   <g>

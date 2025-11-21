@@ -7,7 +7,6 @@
 
 import { useState, useCallback } from "react";
 import type { BlockDims, LayoutModel, Cavity, CavityShape } from "./layoutTypes";
-import { formatCavityLabel } from "./layoutTypes";
 
 export type UseLayoutModelResult = {
   layout: LayoutModel;
@@ -17,7 +16,9 @@ export type UseLayoutModelResult = {
   updateBlockDims: (patch: Partial<BlockDims>) => void;
   updateCavityDims: (
     id: string,
-    patch: Partial<Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">>
+    patch: Partial<
+      Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
+    >
   ) => void;
   addCavity: (
     shape: CavityShape,
@@ -74,21 +75,17 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         cavities: prev.cavities.map((c) => {
           if (c.id !== id) return c;
 
-          const normalized = normalizeCavityPatch(patch);
+          const norm = normalizeCavityPatch(patch);
           const updated: Cavity = {
             ...c,
-            ...normalized,
+            ...norm,
           };
 
-          // Auto-update label whenever dimensions change
-          updated.label = formatCavityLabel({
-            shape: updated.shape,
-            lengthIn: updated.lengthIn,
-            widthIn: updated.widthIn,
-            depthIn: updated.depthIn,
-          });
-
-          return updated;
+          // Always keep the label in sync with dims
+          return {
+            ...updated,
+            label: formatCavityLabel(updated),
+          };
         }),
       }));
     },
@@ -114,16 +111,9 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         const x = 0.3 + (idx % 2) * 0.2;
         const y = 0.25 + Math.floor(idx / 2) * 0.2;
 
-        const label = formatCavityLabel({
-          shape,
-          lengthIn,
-          widthIn,
-          depthIn,
-        });
-
-        const newCavity: Cavity = {
+        const base: Cavity = {
           id,
-          label,
+          label: "",
           shape,
           cornerRadiusIn,
           lengthIn,
@@ -131,6 +121,11 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           depthIn,
           x: clamp01(x),
           y: clamp01(y),
+        };
+
+        const newCavity: Cavity = {
+          ...base,
+          label: formatCavityLabel(base),
         };
 
         return {
@@ -201,4 +196,22 @@ function normalizeCavityPatch(
   if (patch.cornerRadiusIn != null) out.cornerRadiusIn = safeInch(patch.cornerRadiusIn, 0);
   if (patch.label != null) out.label = patch.label;
   return out;
+}
+
+/**
+ * Build a readable label based on shape + dims.
+ * Rect:  "L×W×D in"
+ * Circle: "ØD×Dpth in"
+ */
+function formatCavityLabel(c: Pick<Cavity, "shape" | "lengthIn" | "widthIn" | "depthIn">) {
+  const L = roundToEighth(c.lengthIn);
+  const W = roundToEighth(c.widthIn);
+  const D = roundToEighth(c.depthIn);
+
+  if (c.shape === "circle") {
+    // lengthIn == widthIn == diameter
+    return `Ø${L}×${D} in`;
+  }
+
+  return `${L}×${W}×${D} in`;
 }
