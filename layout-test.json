@@ -1,0 +1,9 @@
+﻿{
+  "quoteNo": "'"$quoteNo"'",
+  "layout": {
+    "block": { "lengthIn": 10, "widthIn": 10, "thicknessIn": 2 },
+    "cavities": []
+  },
+  "notes": "Test layout from curl",
+  "svg": "<svg><!-- test --></svg>"
+}

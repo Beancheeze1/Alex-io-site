@@ -5,6 +5,8 @@
 //
 // This is intentionally simple and tolerant: if items aren't stored yet,
 // it still shows the header and a friendly "no line items stored" message.
+// Now also shows the latest foam layout "package" (if any) saved via
+// /api/quote/layout/apply.
 
 import { q, one } from "@/lib/db";
 
@@ -29,6 +31,17 @@ type ItemRow = {
   material_name: string | null;
 };
 
+type LayoutPkgRow = {
+  id: number;
+  quote_id: number;
+  layout_json: any;
+  notes: string | null;
+  svg_text: string | null;
+  dxf_text: string | null;
+  step_text: string | null;
+  created_at: string;
+};
+
 function usd(value: number | null | undefined): string {
   if (value == null || !isFinite(Number(value))) return "$0.00";
   const n = Number(value);
@@ -36,7 +49,7 @@ function usd(value: number | null | undefined): string {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-      maximumFractionDigits: 2
+      maximumFractionDigits: 2,
     }).format(n);
   } catch {
     return `$${n.toFixed(2)}`;
@@ -44,7 +57,7 @@ function usd(value: number | null | undefined): string {
 }
 
 export default async function QuotePage({
-  searchParams
+  searchParams,
 }: {
   searchParams: { quote_no?: string };
 }) {
@@ -53,8 +66,16 @@ export default async function QuotePage({
 
   if (!quoteNo) {
     return (
-      <div style={{ padding: "40px", fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,sans-serif" }}>
-        <h1 style={{ fontSize: "20px", marginBottom: "8px" }}>Quote not found</h1>
+      <div
+        style={{
+          padding: "40px",
+          fontFamily:
+            "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
+        }}
+      >
+        <h1 style={{ fontSize: "20px", marginBottom: "8px" }}>
+          Quote not found
+        </h1>
         <p style={{ color: "#555" }}>
           We couldn&apos;t find a quote number in this link.
         </p>
@@ -68,15 +89,24 @@ export default async function QuotePage({
       from quotes
       where quote_no = $1
     `,
-    [quoteNo]
+    [quoteNo],
   );
 
   if (!quote) {
     return (
-      <div style={{ padding: "40px", fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,sans-serif" }}>
-        <h1 style={{ fontSize: "20px", marginBottom: "8px" }}>Quote not found</h1>
+      <div
+        style={{
+          padding: "40px",
+          fontFamily:
+            "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
+        }}
+      >
+        <h1 style={{ fontSize: "20px", marginBottom: "8px" }}>
+          Quote not found
+        </h1>
         <p style={{ color: "#555" }}>
-          We couldn&apos;t find a quote with number <code>{quoteNo}</code>.
+          We couldn&apos;t find a quote with number{" "}
+          <code>{quoteNo}</code>.
         </p>
       </div>
     );
@@ -98,19 +128,48 @@ export default async function QuotePage({
       where qi.quote_id = $1
       order by qi.id asc
     `,
-    [quote.id]
+    [quote.id],
+  );
+
+  // Latest foam layout package (if any) saved via /api/quote/layout/apply
+  const layoutPkg = await one<LayoutPkgRow>(
+    `
+      select
+        id,
+        quote_id,
+        layout_json,
+        notes,
+        svg_text,
+        dxf_text,
+        step_text,
+        created_at
+      from quote_layout_packages
+      where quote_id = $1
+      order by created_at desc
+      limit 1
+    `,
+    [quote.id],
   );
 
   // We don't recompute exact pricing here yet (we can hook into /api/quotes/calc later if you like)
   const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
 
+  // Helper: short preview of notes
+  const notesPreview =
+    layoutPkg?.notes && layoutPkg.notes.trim().length
+      ? layoutPkg.notes.trim().length > 140
+        ? layoutPkg.notes.trim().slice(0, 140) + "…"
+        : layoutPkg.notes.trim()
+      : null;
+
   return (
     <div
       style={{
-        fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
+        fontFamily:
+          "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
         background: "#f3f4f6",
         minHeight: "100vh",
-        padding: "24px"
+        padding: "24px",
       }}
     >
       <div
@@ -120,28 +179,42 @@ export default async function QuotePage({
           background: "#ffffff",
           borderRadius: "16px",
           padding: "24px 24px 32px 24px",
-          boxShadow: "0 10px 30px rgba(15,23,42,0.08)"
+          boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
         }}
       >
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
-            marginBottom: "16px"
+            marginBottom: "16px",
           }}
         >
           <div>
-            <h1 style={{ margin: 0, fontSize: "22px" }}>Quote #{quote.quote_no}</h1>
+            <h1 style={{ margin: 0, fontSize: "22px" }}>
+              Quote #{quote.quote_no}
+            </h1>
             <p style={{ margin: "4px 0 0 0", color: "#4b5563" }}>
               {quote.customer_name}
               {quote.email ? <> &middot; {quote.email}</> : null}
               {quote.phone ? <> &middot; {quote.phone}</> : null}
             </p>
-            <p style={{ margin: "4px 0 0 0", color: "#6b7280", fontSize: "12px" }}>
+            <p
+              style={{
+                margin: "4px 0 0 0",
+                color: "#6b7280",
+                fontSize: "12px",
+              }}
+            >
               Created: {new Date(quote.created_at).toLocaleString()}
             </p>
           </div>
-          <div style={{ textAlign: "right", fontSize: "12px", color: "#6b7280" }}>
+          <div
+            style={{
+              textAlign: "right",
+              fontSize: "12px",
+              color: "#6b7280",
+            }}
+          >
             <div
               style={{
                 display: "inline-block",
@@ -158,14 +231,15 @@ export default async function QuotePage({
                     ? "#065f46"
                     : quote.status === "accepted"
                     ? "#1d4ed8"
-                    : "#374151"
+                    : "#374151",
               }}
             >
               {quote.status.toUpperCase()}
             </div>
             <div style={{ marginTop: "8px" }}>
               <span style={{ color: "#9ca3af" }}>
-                Use your browser&apos;s <strong>Print</strong> command to print this page.
+                Use your browser&apos;s <strong>Print</strong> command to
+                print this page.
               </span>
             </div>
           </div>
@@ -175,16 +249,18 @@ export default async function QuotePage({
           style={{
             border: "none",
             borderTop: "1px solid #e5e7eb",
-            margin: "16px 0"
+            margin: "16px 0",
           }}
         />
 
-        <h2 style={{ fontSize: "16px", marginBottom: "8px" }}>Line items</h2>
+        <h2 style={{ fontSize: "16px", marginBottom: "8px" }}>
+          Line items
+        </h2>
 
         {items.length === 0 ? (
           <p style={{ color: "#6b7280" }}>
-            No line items stored for this quote yet. Once the material and details are
-            finalized, the primary line will appear here.
+            No line items stored for this quote yet. Once the material and
+            details are finalized, the primary line will appear here.
           </p>
         ) : (
           <table
@@ -192,7 +268,7 @@ export default async function QuotePage({
               width: "100%",
               borderCollapse: "collapse",
               fontSize: "13px",
-              marginBottom: "16px"
+              marginBottom: "16px",
             }}
           >
             <thead>
@@ -201,7 +277,7 @@ export default async function QuotePage({
                   style={{
                     textAlign: "left",
                     padding: "8px",
-                    borderBottom: "1px solid #e5e7eb"
+                    borderBottom: "1px solid #e5e7eb",
                   }}
                 >
                   Item
@@ -210,7 +286,7 @@ export default async function QuotePage({
                   style={{
                     textAlign: "left",
                     padding: "8px",
-                    borderBottom: "1px solid #e5e7eb"
+                    borderBottom: "1px solid #e5e7eb",
                   }}
                 >
                   Dimensions (L × W × H)
@@ -219,7 +295,7 @@ export default async function QuotePage({
                   style={{
                     textAlign: "right",
                     padding: "8px",
-                    borderBottom: "1px solid #e5e7eb"
+                    borderBottom: "1px solid #e5e7eb",
                   }}
                 >
                   Qty
@@ -229,22 +305,25 @@ export default async function QuotePage({
             <tbody>
               {items.map((item, idx) => {
                 const dims = `${item.length_in} × ${item.width_in} × ${item.height_in}`;
-                const label = item.material_name || `Material #${item.material_id}`;
+                const label =
+                  item.material_name || `Material #${item.material_id}`;
                 return (
                   <tr key={item.id}>
                     <td
                       style={{
                         padding: "8px",
-                        borderBottom: "1px solid #f3f4f6"
+                        borderBottom: "1px solid #f3f4f6",
                       }}
                     >
-                      <div style={{ fontWeight: 500 }}>Line {idx + 1}</div>
+                      <div style={{ fontWeight: 500 }}>
+                        Line {idx + 1}
+                      </div>
                       <div style={{ color: "#6b7280" }}>{label}</div>
                     </td>
                     <td
                       style={{
                         padding: "8px",
-                        borderBottom: "1px solid #f3f4f6"
+                        borderBottom: "1px solid #f3f4f6",
                       }}
                     >
                       {dims}
@@ -253,7 +332,7 @@ export default async function QuotePage({
                       style={{
                         padding: "8px",
                         borderBottom: "1px solid #f3f4f6",
-                        textAlign: "right"
+                        textAlign: "right",
                       }}
                     >
                       {item.qty}
@@ -265,23 +344,133 @@ export default async function QuotePage({
           </table>
         )}
 
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginTop: "8px",
+          }}
+        >
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: "12px", color: "#6b7280" }}>Total quantity</div>
-            <div style={{ fontSize: "18px", fontWeight: 600 }}>{overallQty}</div>
+            <div style={{ fontSize: "12px", color: "#6b7280" }}>
+              Total quantity
+            </div>
+            <div style={{ fontSize: "18px", fontWeight: 600 }}>
+              {overallQty}
+            </div>
           </div>
         </div>
+
+        {/* Foam layout package summary */}
+        <hr
+          style={{
+            border: "none",
+            borderTop: "1px solid #e5e7eb",
+            margin: "24px 0 16px 0",
+          }}
+        />
+        <h2 style={{ fontSize: "16px", marginBottom: "8px" }}>
+          Foam layout package
+        </h2>
+        {!layoutPkg ? (
+          <p style={{ color: "#6b7280", fontSize: "13px" }}>
+            No foam layout has been saved for this quote yet. Use the{" "}
+            <strong>Open layout preview</strong> button in the emailed
+            quote to arrange cavities, then click <strong>Apply to
+            quote</strong> to store the layout here.
+          </p>
+        ) : (
+          <div
+            style={{
+              borderRadius: "12px",
+              border: "1px solid #e5e7eb",
+              background: "#f9fafb",
+              padding: "12px 14px",
+              fontSize: "13px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: "4px",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    color: "#111827",
+                    marginBottom: "2px",
+                  }}
+                >
+                  Layout package #{layoutPkg.id}
+                </div>
+                <div style={{ color: "#6b7280", fontSize: "12px" }}>
+                  Saved:{" "}
+                  {new Date(
+                    layoutPkg.created_at,
+                  ).toLocaleString()}
+                </div>
+              </div>
+              <div style={{ textAlign: "right", fontSize: "12px" }}>
+                <a
+                  href={`/quote/layout?quote_no=${encodeURIComponent(
+                    quote.quote_no,
+                  )}`}
+                  style={{
+                    display: "inline-block",
+                    padding: "4px 10px",
+                    borderRadius: "999px",
+                    border: "1px solid #c7d2fe",
+                    background: "#eef2ff",
+                    color: "#1d4ed8",
+                    textDecoration: "none",
+                    fontWeight: 500,
+                  }}
+                >
+                  Open layout editor
+                </a>
+              </div>
+            </div>
+            {notesPreview && (
+              <div
+                style={{
+                  marginTop: "6px",
+                  color: "#4b5563",
+                  fontSize: "12px",
+                }}
+              >
+                <span style={{ fontWeight: 500 }}>Notes: </span>
+                {notesPreview}
+              </div>
+            )}
+            <div
+              style={{
+                marginTop: "6px",
+                color: "#6b7280",
+                fontSize: "12px",
+              }}
+            >
+              DXF export:{" "}
+              {layoutPkg.dxf_text ? "stored" : "not generated yet"}{" "}
+              · STEP export:{" "}
+              {layoutPkg.step_text ? "stored" : "not generated yet"}
+            </div>
+          </div>
+        )}
 
         <p
           style={{
             marginTop: "24px",
             fontSize: "12px",
             color: "#6b7280",
-            lineHeight: 1.5
+            lineHeight: 1.5,
           }}
         >
-          This print view mirrors the core specs of your emailed quote. Actual charges may
-          differ if specs or quantities change or if additional services are requested.
+          This print view mirrors the core specs of your emailed quote.
+          Actual charges may differ if specs or quantities change or if
+          additional services are requested.
         </p>
       </div>
     </div>
