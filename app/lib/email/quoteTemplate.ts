@@ -15,6 +15,7 @@
 // - Visual layout preview link that points to NEXT_PUBLIC_BASE_URL
 //   (defaulting to https://api.alex-io.com)
 // - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file, View layout
+// - NEW: Cushion curve snapshot when pricing.raw.cushion is present
 
 export type QuoteSpecs = {
   L_in: number | null;
@@ -167,22 +168,22 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
     schedulerBase ||
     (quoteNo !== ""
       ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
-          `Call about foam quote ${quoteNo}`
+          `Call about foam quote ${quoteNo}`,
         )}&details=${encodeURIComponent(
-          `Let's review your foam packaging quote ${quoteNo} and any questions you might have.`
+          `Let's review your foam packaging quote ${quoteNo} and any questions you might have.`,
         )}`
       : `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
-          "Foam quote call"
+          "Foam quote call",
         )}`);
 
   const forwardHref = `mailto:${encodeURIComponent(
-    forwardToSalesEmail
+    forwardToSalesEmail,
   )}?subject=${encodeURIComponent(
-    salesSubject
+    salesSubject,
   )}&body=${encodeURIComponent(
     `Please review the attached foam quote.\n\nQuote number: ${
       quoteNo || "(not set)"
-    }`
+    }`,
   )}`;
 
   // Prefer caller's customerLine (from orchestrator / sketch) if provided
@@ -197,7 +198,7 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
 ${missing
   .map(
     (m) =>
-      `<li style="margin:2px 0;">${htmlEscape(String(m))}</li>`
+      `<li style="margin:2px 0;">${htmlEscape(String(m))}</li>`,
   )
   .join("\n")}
 </ul>`
@@ -296,7 +297,7 @@ ${missingList}`
       const q2 = qtyNum * 2;
       const q3 = qtyNum * 3;
       fallback.push(
-        `If your usage can support it, we can also check pricing at about ${q2}–${q3} pcs to see if a higher volume drops the per-piece price.`
+        `If your usage can support it, we can also check pricing at about ${q2}–${q3} pcs to see if a higher volume drops the per-piece price.`,
       );
     }
 
@@ -308,12 +309,12 @@ ${missingList}`
           `If the part isn’t extremely fragile, a nearby density in the ${(
             d - 0.2
           ).toFixed(1)}–${(d - 0.4).toFixed(
-            1
-          )} pcf range might reduce cost while still handling normal drops—we can run that as an alternate.`
+            1,
+          )} pcf range might reduce cost while still handling normal drops—we can run that as an alternate.`,
         );
       } else if (d > 2.2) {
         fallback.push(
-          `This is a relatively firm foam; if you’re mainly protecting against moderate handling, we can try a slightly lower density option to balance cost and cushion.`
+          `This is a relatively firm foam; if you’re mainly protecting against moderate handling, we can try a slightly lower density option to balance cost and cushion.`,
         );
       }
     }
@@ -321,7 +322,7 @@ ${missingList}`
     // Cavity layout idea
     if (cavityDims.length > 0 && (cavityCount || cavityDims.length) >= 4) {
       fallback.push(
-        `We can also look at grouping similar cavity sizes together to improve sheet yield and reduce scrap on the nesting layout.`
+        `We can also look at grouping similar cavity sizes together to improve sheet yield and reduce scrap on the nesting layout.`,
       );
     }
 
@@ -376,18 +377,92 @@ ${missingList}`
   } else if (piecePrice != null) {
     const qtyLabel = qty || "this";
     priceBreakHtml = `At ${htmlEscape(
-      String(qtyLabel)
+      String(qtyLabel),
     )} pcs, this works out to about <span style="font-weight:600;">${fmtMoney(
-      piecePrice
+      piecePrice,
     )}</span> per piece.`;
   } else if (qty) {
     priceBreakHtml = htmlEscape(
-      `At ${qty} pcs, this works out to the total shown above.`
+      `At ${qty} pcs, this works out to the total shown above.`,
     );
   } else {
     priceBreakHtml = htmlEscape(
-      "This works out to the total shown above based on the specs provided."
+      "This works out to the total shown above based on the specs provided.",
     );
+  }
+
+  // Cushion curve snapshot block (if calc attached cushion summary)
+  let cushionBlock = "";
+  const rawCushion: any = (pricing.raw as any)?.cushion;
+  if (
+    rawCushion &&
+    rawCushion.has_data &&
+    Array.isArray(rawCushion.points) &&
+    rawCushion.points.length > 0
+  ) {
+    const pts = [...rawCushion.points]
+      .map((p: any) => ({
+        static_psi: Number(p.static_psi),
+        deflect_pct: Number(p.deflect_pct),
+        g_level: Number(p.g_level),
+        source: p.source ? String(p.source) : "",
+      }))
+      .filter(
+        (p) =>
+          Number.isFinite(p.static_psi) &&
+          Number.isFinite(p.deflect_pct) &&
+          Number.isFinite(p.g_level),
+      )
+      .sort((a, b) => a.g_level - b.g_level || a.static_psi - b.static_psi);
+
+    if (pts.length > 0) {
+      const best = pts[0];
+      const top = pts.slice(0, 3);
+      const rows = top
+        .map(
+          (p) => `<tr>
+  <td style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right;">${p.static_psi.toFixed(
+    2,
+  )}</td>
+  <td style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right;">${p.deflect_pct.toFixed(
+    1,
+  )}%</td>
+  <td style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right;">${p.g_level.toFixed(
+    1,
+  )}</td>
+</tr>`,
+        )
+        .join("");
+
+      const summaryLine = `Best-tested point is around ${best.static_psi.toFixed(
+        2,
+      )} psi at ${best.deflect_pct.toFixed(
+        1,
+      )}% deflection, with about ${best.g_level.toFixed(
+        1,
+      )} g transmitted.`;
+
+      cushionBlock = `
+        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Cushion curve snapshot</h3>
+        <p style="margin:0 0 4px 0; font-size:11px; color:#4b5563;">
+          Based on lab data for this material, the points below show typical static load / deflection / g-level combinations.
+        </p>
+        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:11px; margin:0 0 4px 0;">
+          <thead>
+            <tr style="background:${lightBlueBg};">
+              <th style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Static (psi)</th>
+              <th style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Deflection (%)</th>
+              <th style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">G-level</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+        <p style="margin:0 0 8px 0; font-size:11px; color:#4b5563;">
+          ${htmlEscape(summaryLine)} If you can share approximate part weight and drop height, we can double-check that this curve is a good match.
+        </p>`;
+    }
   }
 
   // Design optimization block (now always has content because of fallback)
@@ -396,7 +471,7 @@ ${missingList}`
     const items = optSuggestions
       .map(
         (s) =>
-          `<li style="margin:2px 0;">${htmlEscape(s)}</li>`
+          `<li style="margin:2px 0;">${htmlEscape(s)}</li>`,
       )
       .join("\n");
 
@@ -416,7 +491,7 @@ ${missingList}`
     const dims = `${specs.L_in}x${specs.W_in}x${specs.H_in}`;
     const cavStr = cavityDims.length ? cavityDims.join(";") : "";
     let url = `${baseUrl}/quote/layout?quote_no=${encodeURIComponent(
-      quoteNo
+      quoteNo,
     )}&dims=${encodeURIComponent(dims)}`;
     if (cavStr) {
       url += `&cavities=${encodeURIComponent(cavStr)}`;
@@ -438,7 +513,7 @@ ${missingList}`
           ${
             quoteNo
               ? `<span style="font-weight:600;">Quote # ${htmlEscape(
-                  quoteNo
+                  quoteNo,
                 )}</span>`
               : `<span style="font-weight:600;">Foam packaging quote</span>`
           }
@@ -475,7 +550,7 @@ ${missingList}`
             <tr style="background:${lightBlueBg};">
               <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Cavities</td>
               <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${htmlEscape(
-                cavityLabel
+                cavityLabel,
               )}</td>
             </tr>
             <tr style="background:${lightBlueBg};">
@@ -555,6 +630,8 @@ ${missingList}`
         <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
           For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best.
         </p>
+
+        ${cushionBlock}
 
         ${designBlock}
 

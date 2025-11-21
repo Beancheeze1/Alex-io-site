@@ -28,6 +28,13 @@ type MaterialRow = {
   thickness_in: number | null;
 };
 
+type CushionRow = {
+  static_psi: any;
+  deflect_pct: any;
+  g_level: any;
+  source: string | null;
+};
+
 function bad(msg: string, detail?: any, code = 400) {
   return NextResponse.json({ ok: false, error: msg, detail }, { status: code });
 }
@@ -131,6 +138,7 @@ export async function GET(req: NextRequest) {
  *
  * - Cavities subtract volume per piece.
  * - Returns a single row in `result` that orchestrate already knows how to read.
+ * - Also attaches a light-weight cushion summary when cushion_curves has data.
  */
 export async function POST(req: NextRequest) {
   let body: In;
@@ -248,6 +256,55 @@ export async function POST(req: NextRequest) {
       used_min_charge = true;
     }
 
+    // --- Cushion curve lookup (optional) ---
+    let cushion: any = {
+      has_data: false,
+      point_count: 0,
+    };
+
+    try {
+      const rows = await q<CushionRow>(
+        `
+        SELECT static_psi, deflect_pct, g_level, "source"
+        FROM cushion_curves
+        WHERE material_id = $1
+        ORDER BY g_level ASC, static_psi ASC
+        LIMIT 100;
+        `,
+        [material_id],
+      );
+
+      if (rows && rows.length > 0) {
+        const points = rows
+          .map((r) => ({
+            static_psi: Number(r.static_psi),
+            deflect_pct: Number(r.deflect_pct),
+            g_level: Number(r.g_level),
+            source: r.source || null,
+          }))
+          .filter(
+            (p) =>
+              Number.isFinite(p.static_psi) &&
+              Number.isFinite(p.deflect_pct) &&
+              Number.isFinite(p.g_level),
+          )
+          .sort((a, b) => a.g_level - b.g_level || a.static_psi - b.static_psi);
+
+        if (points.length > 0) {
+          const best = points[0];
+          cushion = {
+            has_data: true,
+            point_count: points.length,
+            best_point: best,
+            points: points.slice(0, 10), // keep it light
+          };
+        }
+      }
+    } catch (err) {
+      // Keep quote calc robust even if cushion table has issues
+      console.error("cushion curve lookup error:", err);
+    }
+
     const result = {
       piece_ci: round4(piece_ci),
       order_ci: round4(order_ci),
@@ -266,6 +323,9 @@ export async function POST(req: NextRequest) {
       cavities_ci: round4(cavities_ci),
       piece_ci_raw: round4(piece_ci_raw),
       material_name: mat.name,
+
+      // Cushion curve summary (if available)
+      cushion,
     };
 
     return ok({
