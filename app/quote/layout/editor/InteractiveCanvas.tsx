@@ -4,7 +4,7 @@
 // and supports:
 //   - drag-to-move inside a 0.5" wall
 //   - drag handle at bottom-right to resize
-//   - 0.125" snap for movement + size
+//   - 0.0625" snap for movement + size
 //   - 0.5" grid inside the block
 //   - dimensions from selected cavity to walls + nearest neighbor
 //   - minimum ~0.5" gap between cavities
@@ -41,7 +41,8 @@ const CANVAS_WIDTH = 1200;
 const CANVAS_HEIGHT = 620;
 const PADDING = 32;
 const WALL_IN = 0.5;
-const SNAP_IN = 0.125;
+// Snap for movement / resize = 1/16"
+const SNAP_IN = 0.0625;
 const MIN_GAP_IN = 0.5;
 
 export default function InteractiveCanvas({
@@ -522,7 +523,8 @@ function computeSpacing(
   const bottomIn = block.widthIn - WALL_IN - cavBottomIn;
 
   const cavLeftPx = blockOffset.x + (cavLeftIn / block.lengthIn) * blockPx.width;
-  const cavRightPx = blockOffset.x + (cavRightIn / block.lengthIn) * blockPx.width;
+  const cavRightPx =
+    blockOffset.x + (cavRightIn / block.lengthIn) * blockPx.width;
   const cavTopPx = blockOffset.y + (cavTopIn / block.widthIn) * blockPx.height;
   const cavBottomPx =
     blockOffset.y + (cavBottomIn / block.widthIn) * blockPx.height;

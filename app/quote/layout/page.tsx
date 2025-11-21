@@ -28,7 +28,8 @@ function normalizeDimsParam(raw: string | undefined): string {
 }
 
 function normalizeCavitiesParam(raw: string | undefined): string {
-  if (!raw || !raw.trim()) return "3x2x1; 2x2x1; 1x1x1";
+  // Default to a single sample cavity so the layout starts clean
+  if (!raw || !raw.trim()) return "3x2x1";
   return raw.trim();
 }
 
@@ -67,8 +68,9 @@ export default function LayoutPage({
     const fromQuery = buildLayoutFromStrings(blockStr, cavityStr);
     if (fromQuery) return fromQuery;
 
+    // Fallback: 10×10×2 block with ONE sample cavity 3×2×1
     return (
-      buildLayoutFromStrings("10x10x2", "3x2x1;2x2x1;1x1x1") || {
+      buildLayoutFromStrings("10x10x2", "3x2x1") || {
         block: { lengthIn: 10, widthIn: 10, thicknessIn: 2 },
         cavities: [],
       }
@@ -231,7 +233,7 @@ export default function LayoutPage({
             </div>
           </button>
 
-          {/* Notes / special instructions – moved here under palette */}
+          {/* Notes / special instructions */}
           <div className="mt-2 bg-slate-50 rounded-2xl border border-slate-200 p-3">
             <div className="text-xs font-semibold text-slate-700 mb-1">
               Notes / special instructions
