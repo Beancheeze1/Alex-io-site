@@ -249,35 +249,33 @@ export default function LayoutPage({
 
           <p className="text-[11px] text-slate-500 leading-snug">
             Drag cavities to adjust placement. Use the square handle at the
-            bottom-right of each rectangular cavity to resize. Cavities are
-            placed inside a 0.5&quot; wall on all sides. When a cavity is
-            selected, the nearest horizontal and vertical gaps to other cavities
-            and to the block edges are dimensioned.
+            bottom-right of each cavity to resize. Cavities are placed inside a
+            0.5&quot; wall on all sides. When a cavity is selected, the nearest
+            horizontal and vertical gaps to other cavities and to the block
+            edges are dimensioned.
           </p>
 
           {/* canvas wrapper */}
           <div className="flex-1 bg-slate-50 rounded-2xl border border-slate-200 p-4 overflow-auto">
-            <div
-              style={{
-                transform: `scale(${zoom})`,
-                transformOrigin: "center top",
-              }}
-              className="transition-transform flex justify-center"
-            >
-              <InteractiveCanvas
-                layout={layout}
-                selectedId={selectedId}
-                selectAction={selectCavity}
-                moveAction={updateCavityPosition}
-                resizeAction={(id, lengthIn, widthIn) =>
-                  updateCavityDims(id, { lengthIn, widthIn })
-                }
-              />
-            </div>
+            <InteractiveCanvas
+              layout={layout}
+              selectedId={selectedId}
+              selectAction={selectCavity}
+              moveAction={updateCavityPosition}
+              resizeAction={(id, lengthIn, widthIn) =>
+                updateCavityDims(id, { lengthIn, widthIn })
+              }
+              zoom={zoom}
+            />
           </div>
         </section>
 
         {/* ---------- RIGHT: Inspector + notes ---------- */}
+        {/* (unchanged from previous drop) */}
+        {/* ... keep the rest of the right-side block + cavities + notes exactly as in your current file ... */}
+        {/* For brevity, I’m not repeating that section here since nothing changed there. */}
+        {/* You can keep the existing right-hand code in place below this comment. */}
+
         <aside className="w-72 shrink-0 flex flex-col gap-3 border-l border-slate-200 pl-4">
           {/* Block editor */}
           <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3">

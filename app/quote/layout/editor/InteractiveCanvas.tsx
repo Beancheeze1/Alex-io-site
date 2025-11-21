@@ -5,9 +5,10 @@
 //   - drag-to-move inside a 0.5" wall
 //   - drag handle at bottom-right to resize
 //   - 0.125" snap for length/width
-//   - inch grid inside the block
+//   - 0.5" grid inside the block
 //   - dimensions from selected cavity to walls + nearest neighbor
 //   - minimum 0.5" gap between cavities
+//   - zoom handled via scale factor (not CSS transform)
 
 "use client";
 
@@ -21,6 +22,7 @@ type Props = {
   moveAction: (id: string, xNorm: number, yNorm: number) => void;
   // IMPORTANT: id + length + width, nothing fancy.
   resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
+  zoom: number; // new: zoom factor from page (0.7–1.4)
 };
 
 type DragState =
@@ -49,6 +51,7 @@ export default function InteractiveCanvas({
   selectAction,
   moveAction,
   resizeAction,
+  zoom,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
@@ -61,7 +64,8 @@ export default function InteractiveCanvas({
 
   const sx = innerW / (block.lengthIn || 1);
   const sy = innerH / (block.widthIn || 1);
-  const scale = Math.min(sx, sy);
+  const baseScale = Math.min(sx, sy);
+  const scale = baseScale * (zoom || 1); // apply zoom here so pointer math stays correct
 
   const blockPx = {
     width: block.lengthIn * scale,
@@ -199,6 +203,13 @@ export default function InteractiveCanvas({
       newLenIn = Math.max(minSize, newLenIn);
       newWidIn = Math.max(minSize, newWidIn);
 
+      // For circles, keep diameter (length=width) locked
+      if (cav.shape === "circle") {
+        const d = Math.max(newLenIn, newWidIn);
+        newLenIn = d;
+        newWidIn = d;
+      }
+
       // enforce 0.5" wall on far edges
       const maxLenIn = block.lengthIn - WALL_IN - startXIn;
       const maxWidIn = block.widthIn - WALL_IN - startYIn;
@@ -230,9 +241,11 @@ export default function InteractiveCanvas({
     setDrag(null);
   };
 
-  const handleBackgroundClick = () => {
-    selectAction(null);
-  };
+  // NOTE: we no longer clear selection on background click,
+  // so the cavity editor stays active until user clicks another cavity.
+  // const handleBackgroundClick = () => {
+  //   selectAction(null);
+  // };
 
   // Pre-compute spacing for selected cavity
   const spacing = selectedCavity
@@ -250,7 +263,6 @@ export default function InteractiveCanvas({
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          onClick={handleBackgroundClick}
         >
           {/* Background */}
           <rect
@@ -274,7 +286,7 @@ export default function InteractiveCanvas({
             strokeWidth={2}
           />
 
-          {/* Inch grid inside the block */}
+          {/* 0.5" grid inside the block */}
           {drawInchGrid(block, blockPx, blockOffset)}
 
           {/* Inner 0.5" wall (dashed) */}
@@ -357,21 +369,19 @@ export default function InteractiveCanvas({
                   {cavity.label}
                 </text>
 
-                {/* resize handle — only for non-circles (rect / rounded) */}
-                {!isCircle && (
-                  <rect
-                    x={handleX}
-                    y={handleY}
-                    width={handleSize}
-                    height={handleSize}
-                    rx={2}
-                    ry={2}
-                    fill={isSelected ? "#1d4ed8" : "#64748b"}
-                    stroke="#e5e7eb"
-                    strokeWidth={1}
-                    onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
-                  />
-                )}
+                {/* resize handle — now also for circles */}
+                <rect
+                  x={handleX}
+                  y={handleY}
+                  width={handleSize}
+                  height={handleSize}
+                  rx={2}
+                  ry={2}
+                  fill={isSelected ? "#1d4ed8" : "#64748b"}
+                  stroke="#e5e7eb"
+                  strokeWidth={1}
+                  onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
+                />
               </g>
             );
           })}
@@ -435,41 +445,42 @@ function violatesMinGap(
 
 /* ----- Grid + spacing helpers ----- */
 
+// Now uses 0.5" spacing instead of 1"
 function drawInchGrid(
   block: LayoutModel["block"],
   blockPx: { width: number; height: number },
   blockOffset: { x: number; y: number }
 ) {
   const vLines = [];
-  for (let i = 1; i < block.lengthIn; i++) {
+  for (let xIn = 0.5; xIn < block.lengthIn; xIn += 0.5) {
     const x =
-      blockOffset.x + (i / block.lengthIn) * blockPx.width;
+      blockOffset.x + (xIn / block.lengthIn) * blockPx.width;
     vLines.push(
       <line
-        key={`v-${i}`}
+        key={`v-${xIn.toFixed(1)}`}
         x1={x}
         y1={blockOffset.y}
         x2={x}
         y2={blockOffset.y + blockPx.height}
         stroke="#e5e7eb"
-        strokeWidth={0.75}
+        strokeWidth={0.5}
       />
     );
   }
 
   const hLines = [];
-  for (let j = 1; j < block.widthIn; j++) {
+  for (let yIn = 0.5; yIn < block.widthIn; yIn += 0.5) {
     const y =
-      blockOffset.y + (j / block.widthIn) * blockPx.height;
+      blockOffset.y + (yIn / block.widthIn) * blockPx.height;
     hLines.push(
       <line
-        key={`h-${j}`}
+        key={`h-${yIn.toFixed(1)}`}
         x1={blockOffset.x}
         y1={y}
         x2={blockOffset.x + blockPx.width}
         y2={y}
         stroke="#e5e7eb"
-        strokeWidth={0.75}
+        strokeWidth={0.5}
       />
     );
   }
