@@ -2,8 +2,8 @@
 //
 // Layout editor host page (wide).
 // - Left: palette
-// - Center: large canvas
-// - Right: block + cavity inspector + notes
+// - Center: large canvas + notes
+// - Right: block + cavity inspector
 // - Apply to quote posts layout + notes + SVG to /api/quote/layout/apply
 
 "use client";
@@ -34,6 +34,8 @@ function normalizeCavitiesParam(raw: string | undefined): string {
 
 // Ensure all dimension edits snap to 0.125"
 const SNAP_IN = 0.125;
+const WALL_IN = 0.5;
+
 function snapInches(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value / SNAP_IN) * SNAP_IN;
@@ -113,6 +115,40 @@ export default function LayoutPage({
     } else {
       addCavity("rect", { lengthIn: 4, widthIn: 2, depthIn: 2 });
     }
+  };
+
+  /* ---------- Center selected cavity in block ---------- */
+
+  const handleCenterSelectedCavity = () => {
+    if (!selectedCavity) return;
+
+    const len = selectedCavity.lengthIn;
+    const wid = selectedCavity.widthIn;
+
+    if (!block.lengthIn || !block.widthIn || !len || !wid) return;
+
+    // center so cavity center = block center, respect 0.5" wall + snap
+    let xIn = (block.lengthIn - len) / 2;
+    let yIn = (block.widthIn - wid) / 2;
+
+    xIn = snapInches(xIn);
+    yIn = snapInches(yIn);
+
+    const minXIn = WALL_IN;
+    const maxXIn = block.lengthIn - WALL_IN - len;
+    const minYIn = WALL_IN;
+    const maxYIn = block.widthIn - WALL_IN - wid;
+
+    const clamp = (v: number, min: number, max: number) =>
+      v < min ? min : v > max ? max : v;
+
+    xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+    yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+    const xNorm = xIn / block.lengthIn;
+    const yNorm = yIn / block.widthIn;
+
+    updateCavityPosition(selectedCavity.id, xNorm, yNorm);
   };
 
   /* ---------- Apply to quote ---------- */
@@ -201,7 +237,7 @@ export default function LayoutPage({
           </div>
         </aside>
 
-        {/* ---------- CENTER: Big visualizer ---------- */}
+        {/* ---------- CENTER: Big visualizer + notes ---------- */}
         <section className="flex-1 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -275,9 +311,27 @@ export default function LayoutPage({
               zoom={zoom}
             />
           </div>
+
+          {/* Notes / special instructions – moved under canvas, left side */}
+          <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3">
+            <div className="text-xs font-semibold text-slate-700 mb-1">
+              Notes / special instructions
+            </div>
+            <div className="text-[11px] text-slate-500 mb-2">
+              Optional text for anything the foam layout needs to call out (loose
+              parts, labels, extra protection, etc.). This will be saved with the
+              quote when you apply.
+            </div>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs resize-vertical"
+            />
+          </div>
         </section>
 
-        {/* ---------- RIGHT: Inspector + notes ---------- */}
+        {/* ---------- RIGHT: Inspector ---------- */}
         <aside className="w-80 shrink-0 flex flex-col gap-3 border-l border-slate-200 pl-4">
           {/* Block editor */}
           <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3">
@@ -401,91 +455,84 @@ export default function LayoutPage({
             </div>
 
             {selectedCavity && (
-              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">
-                    Length (in)
-                  </span>
-                  <input
-                    type="number"
-                    step={0.125}
-                    value={selectedCavity.lengthIn}
-                    onChange={(e) =>
-                      updateCavityDims(selectedCavity.id, {
-                        lengthIn: snapInches(Number(e.target.value)),
-                      })
-                    }
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">
-                    Width (in)
-                  </span>
-                  <input
-                    type="number"
-                    step={0.125}
-                    value={selectedCavity.widthIn}
-                    onChange={(e) =>
-                      updateCavityDims(selectedCavity.id, {
-                        widthIn: snapInches(Number(e.target.value)),
-                      })
-                    }
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">
-                    Depth (in)
-                  </span>
-                  <input
-                    type="number"
-                    step={0.125}
-                    value={selectedCavity.depthIn}
-                    onChange={(e) =>
-                      updateCavityDims(selectedCavity.id, {
-                        depthIn: snapInches(Number(e.target.value)),
-                      })
-                    }
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-500">
-                    Corner radius (in)
-                  </span>
-                  <input
-                    type="number"
-                    step={0.125}
-                    value={selectedCavity.cornerRadiusIn}
-                    onChange={(e) =>
-                      updateCavityDims(selectedCavity.id, {
-                        cornerRadiusIn: snapInches(Number(e.target.value)),
-                      })
-                    }
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                  />
-                </label>
-              </div>
-            )}
-          </div>
+              <>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-500">
+                      Length (in)
+                    </span>
+                    <input
+                      type="number"
+                      step={0.125}
+                      value={selectedCavity.lengthIn}
+                      onChange={(e) =>
+                        updateCavityDims(selectedCavity.id, {
+                          lengthIn: snapInches(Number(e.target.value)),
+                        })
+                      }
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-500">
+                      Width (in)
+                    </span>
+                    <input
+                      type="number"
+                      step={0.125}
+                      value={selectedCavity.widthIn}
+                      onChange={(e) =>
+                        updateCavityDims(selectedCavity.id, {
+                          widthIn: snapInches(Number(e.target.value)),
+                        })
+                      }
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-500">
+                      Depth (in)
+                    </span>
+                    <input
+                      type="number"
+                      step={0.125}
+                      value={selectedCavity.depthIn}
+                      onChange={(e) =>
+                        updateCavityDims(selectedCavity.id, {
+                          // depth: don't hard-snap every keystroke to avoid "0.25" stickiness
+                          depthIn: Number(e.target.value),
+                        })
+                      }
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-500">
+                      Corner radius (in)
+                    </span>
+                    <input
+                      type="number"
+                      step={0.125}
+                      value={selectedCavity.cornerRadiusIn}
+                      onChange={(e) =>
+                        updateCavityDims(selectedCavity.id, {
+                          cornerRadiusIn: snapInches(Number(e.target.value)),
+                        })
+                      }
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                    />
+                  </label>
+                </div>
 
-          {/* Notes / special instructions */}
-          <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3">
-            <div className="text-xs font-semibold text-slate-700 mb-1">
-              Notes / special instructions
-            </div>
-            <div className="text-[11px] text-slate-500 mb-2">
-              Optional text for anything the foam layout needs to call out (loose
-              parts, labels, extra protection, etc.). This will be saved with the
-              quote when you apply.
-            </div>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={4}
-              className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs resize-vertical"
-            />
+                <button
+                  type="button"
+                  onClick={handleCenterSelectedCavity}
+                  className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-300 px-3 py-1 text-[11px] font-medium text-slate-700 hover:border-indigo-400 hover:text-indigo-700 hover:bg-indigo-50/40 transition"
+                >
+                  Center this cavity in block
+                </button>
+              </>
+            )}
           </div>
         </aside>
       </div>

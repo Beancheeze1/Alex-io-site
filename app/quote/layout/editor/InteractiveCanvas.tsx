@@ -85,6 +85,7 @@ export default function InteractiveCanvas({
     cavity: Cavity
   ) => {
     e.stopPropagation();
+    e.preventDefault();
     if (!svgRef.current) return;
 
     const svgRect = svgRef.current.getBoundingClientRect();
@@ -109,6 +110,7 @@ export default function InteractiveCanvas({
     cavity: Cavity
   ) => {
     e.stopPropagation();
+    e.preventDefault();
     setDrag({
       mode: "resize",
       id: cavity.id,
@@ -349,6 +351,7 @@ export default function InteractiveCanvas({
                   textAnchor="middle"
                   dominantBaseline="central"
                   className="fill-slate-700 text-[9px]"
+                  onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
                 >
                   {cavity.label}
                 </text>
