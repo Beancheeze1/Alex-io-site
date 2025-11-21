@@ -1,109 +1,141 @@
 // app/api/quote/layout/apply/route.ts
 //
-// Save foam layout + exports for a quote.
-// Called from the layout editor "Apply to quote" button.
+// Save a foam layout "package" against a quote.
+// Called by the layout editor page (/quote/layout) when the user clicks
+// "Apply to quote".
 //
 // POST JSON:
 //   {
-//     "quoteNo": "Q-AI-20251116-223023",
-//     "layout": { block: {...}, cavities: [...] },
-//     "notes": "extra dunnage on corners",
-//     // svg is optional; server will regenerate from layout either way
-//     "svg": "<svg ...>...</svg>"
+//     "quoteNo": "Q-AI-20251121-123456",
+//     "layout": { ... LayoutModel ... },
+//     "notes": "Loose parts in this pocket",
+//     "svg": "<svg>...</svg>"
 //   }
 //
 // Behaviour:
-//   - Look up quote by quote_no (from main quotes table)
-//   - Build SVG + DXF + STEP stub from layout
-//   - Insert into quote_layout_packages as a "package"
-//   - Returns layoutPackageId for future use (downloads, UI, etc.)
+//   - Looks up quotes.id by quote_no
+//   - Inserts a row into quote_layout_packages with layout_json + notes + svg_text
+//   - Returns the new package id + timestamps
+//
+// GET (optional debug):
+//   - /api/quote/layout/apply?quote_no=Q-...   -> latest package for that quote
 
 import { NextRequest, NextResponse } from "next/server";
-import { one } from "@/lib/db";
-import { buildLayoutExports } from "@/app/lib/layout/exports";
+import { one, q } from "@/lib/db";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-type IncomingBody = {
+type LayoutApplyIn = {
   quoteNo?: string;
   layout?: any;
   notes?: string;
   svg?: string;
 };
 
-function badRequest(msg: string) {
-  return NextResponse.json({ ok: false, error: msg }, { status: 400 });
+function ok(extra: Record<string, any> = {}) {
+  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
 }
 
+function bad(error: string, detail?: any, status = 400) {
+  return NextResponse.json({ ok: false, error, detail }, { status });
+}
+
+/* ---------------------- GET: debug / latest package ---------------------- */
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const quoteNo = url.searchParams.get("quote_no") || url.searchParams.get("quote");
+
+  if (!quoteNo) {
+    return ok({
+      usage: "POST to save, GET ?quote_no=... to inspect latest layout package",
+    });
+  }
+
+  // Latest package for this quote_no
+  const row = await one<any>(
+    `
+    SELECT
+      p.id,
+      p.quote_id,
+      q.quote_no,
+      p.layout_json,
+      p.notes,
+      p.svg_text,
+      p.dxf_text,
+      p.step_text,
+      p.created_at
+    FROM quote_layout_packages p
+    JOIN quotes q ON q.id = p.quote_id
+    WHERE q.quote_no = $1
+    ORDER BY p.created_at DESC
+    LIMIT 1;
+    `,
+    [quoteNo],
+  );
+
+  if (!row) {
+    return bad("layout_package_not_found", { quoteNo }, 404);
+  }
+
+  return ok({ package: row });
+}
+
+/* -------------------------- POST: save package --------------------------- */
+
 export async function POST(req: NextRequest) {
-  let body: IncomingBody;
+  let body: LayoutApplyIn;
   try {
-    body = (await req.json()) as IncomingBody;
-  } catch (err) {
-    console.error("Invalid JSON in /api/quote/layout/apply", err);
-    return badRequest("Invalid JSON body");
+    body = (await req.json()) as LayoutApplyIn;
+  } catch {
+    return bad("invalid_json");
   }
 
-  const { quoteNo, layout, notes } = body || {};
-
-  if (!quoteNo || typeof quoteNo !== "string") {
-    return badRequest("Missing quoteNo");
+  const quoteNo = (body.quoteNo || "").trim();
+  if (!quoteNo) {
+    return bad("missing_quoteNo");
   }
-  if (!layout || typeof layout !== "object") {
-    return badRequest("Missing layout");
+
+  if (!body.layout) {
+    return bad("missing_layout");
   }
 
   try {
-    // 1) Look up the quote row by quote_no
-    const quoteRow = await one(
-      "select id from quotes where quote_no = $1",
-      [quoteNo]
+    // Look up the quote row
+    const quote = await one<{ id: number }>(
+      `SELECT id FROM quotes WHERE quote_no = $1`,
+      [quoteNo],
     );
 
-    if (!quoteRow || !quoteRow.id) {
-      return NextResponse.json(
-        { ok: false, error: "Quote not found" },
-        { status: 404 }
-      );
+    if (!quote) {
+      return bad("quote_not_found", { quoteNo }, 404);
     }
 
-    const quoteId = quoteRow.id as number;
+    const notes = body.notes && body.notes.trim().length ? body.notes.trim() : null;
+    const svgText = body.svg && body.svg.trim().length ? body.svg : null;
 
-    // 2) Build exports (SVG + DXF + STEP stub) from the layout JSON
-    const exportsBundle = buildLayoutExports(layout);
-
-    // 3) Insert into quote_layout_packages
-    const inserted = await one(
+    // Insert a new layout package row. We allow multiple versions per quote;
+    // consumer code should use ORDER BY created_at DESC LIMIT 1 when reading.
+    const inserted = await one<{
+      id: number;
+      quote_id: number;
+      created_at: string;
+    }>(
       `
-      insert into quote_layout_packages
-        (quote_id, layout_json, notes, svg_text, dxf_text, step_text)
-      values
-        ($1, $2, $3, $4, $5, $6)
-      returning id
+      INSERT INTO quote_layout_packages
+        (quote_id, layout_json, notes, svg_text)
+      VALUES
+        ($1, $2::jsonb, $3, $4)
+      RETURNING id, quote_id, created_at;
       `,
-      [
-        quoteId,
-        JSON.stringify(layout),
-        notes ?? null,
-        exportsBundle.svg,
-        exportsBundle.dxf,
-        exportsBundle.step,
-      ]
+      [quote.id, JSON.stringify(body.layout), notes, svgText],
     );
 
-    return NextResponse.json(
-      {
-        ok: true,
-        layoutPackageId: inserted?.id ?? null,
-      },
-      { status: 200 }
-    );
-  } catch (err) {
-    console.error("Error in /api/quote/layout/apply", err);
-    return NextResponse.json(
-      { ok: false, error: "Server error saving layout" },
-      { status: 500 }
-    );
+    return ok({
+      package: inserted,
+    });
+  } catch (e: any) {
+    return bad("layout_apply_exception", { message: String(e?.message || e) }, 500);
   }
 }
