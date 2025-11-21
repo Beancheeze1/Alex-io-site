@@ -1,55 +1,123 @@
-import { NextResponse } from "next/server";
-import { Pool } from "pg";
+// app/api/cushion/curves/export/route.ts
+//
+// Cushion curve export API
+// - GET /api/cushion/curves/export?material_id=123
+// - Returns CSV of public.cushion_curves
+//
+// Shares the same JSON-agg pattern as /api/cushion/curves so we only need `one`.
 
-export const runtime = "nodejs";
+import { NextRequest, NextResponse } from "next/server";
+import { one } from "@/lib/db";
+
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-let _pool: Pool | null = null;
-function pool() {
-  if (!_pool) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error("Missing env: DATABASE_URL");
-    _pool = new Pool({ connectionString: url, max: 5, ssl: { rejectUnauthorized: false } });
-  }
-  return _pool!;
-}
+type CushionCurveRow = {
+  id: number;
+  material_id: number;
+  static_psi: string;
+  deflect_pct: string;
+  g_level: string;
+  source: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const mid = url.searchParams.get("material_id");
-    const q = `
-      SELECT m.name AS material_name, cc.material_id, cc.static_psi, cc.deflect_pct, cc.g_level, COALESCE(cc.source,'') AS source
-      FROM public.cushion_curves cc
-      JOIN public.materials m ON m.id = cc.material_id
-      ${mid ? "WHERE cc.material_id = $1" : ""}
-      ORDER BY cc.material_id, cc.static_psi, cc.deflect_pct
-    `;
-    const { rows } = await pool().query(q, mid ? [Number(mid)] : []);
-    const header = "material_name,material_id,static_psi,deflect_pct,g_level,source";
-    const csv = [
-      header,
-      ...rows.map(r =>
-        [
-          JSON.stringify(r.material_name),      // quote-safe
-          r.material_id,
-          Number(r.static_psi),
-          Number(r.deflect_pct),
-          Number(r.g_level),
-          JSON.stringify(r.source ?? "")
-        ].join(",")
-      ),
-    ].join("\r\n");
+    const materialIdParam = url.searchParams.get("material_id");
+
+    let materialId: number | null = null;
+    if (materialIdParam != null && materialIdParam.trim() !== "") {
+      const n = Number(materialIdParam);
+      if (!Number.isFinite(n)) {
+        return new NextResponse(
+          `invalid material_id: ${materialIdParam}`,
+          { status: 400 }
+        );
+      }
+      materialId = n;
+    }
+
+    const row = await one<{ items: CushionCurveRow[] }>(
+      `
+      SELECT COALESCE(
+        json_agg(
+          json_build_object(
+            'id', id,
+            'material_id', material_id,
+            'static_psi', static_psi,
+            'deflect_pct', deflect_pct,
+            'g_level', g_level,
+            'source', "source",
+            'created_at', created_at,
+            'updated_at', updated_at
+          )
+          ORDER BY material_id, static_psi, deflect_pct
+        ),
+        '[]'::json
+      ) AS items
+      FROM cushion_curves
+      WHERE ($1::int IS NULL OR material_id = $1::int);
+      `,
+      [materialId]
+    );
+
+    const curves: CushionCurveRow[] = (row?.items as any) ?? [];
+
+    const headerCols = [
+      "id",
+      "material_id",
+      "static_psi",
+      "deflect_pct",
+      "g_level",
+      "source",
+      "created_at",
+      "updated_at",
+    ];
+
+    const headerLine = headerCols.join(",");
+
+    const lines = curves.map((c) => {
+      const cells = [
+        c.id,
+        c.material_id,
+        c.static_psi,
+        c.deflect_pct,
+        c.g_level,
+        c.source ?? "",
+        c.created_at,
+        c.updated_at,
+      ].map((v) => {
+        const s = String(v ?? "");
+        // Basic CSV escaping: wrap in quotes if we see comma/quote/newline
+        if (/[",\n]/.test(s)) {
+          return `"${s.replace(/"/g, '""')}"`;
+        }
+        return s;
+      });
+
+      return cells.join(",");
+    });
+
+    const csv = [headerLine, ...lines].join("\r\n");
 
     return new NextResponse(csv, {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Cache-Control": "no-store",
-        "Content-Disposition": `attachment; filename="cushion_curves${mid ? "_mat"+mid : ""}.csv"`,
+        // Name includes material_id if provided for easier downloads
+        "Content-Disposition": `attachment; filename="cushion_curves${
+          materialId != null ? `_material_${materialId}` : ""
+        }.csv"`,
       },
     });
-  } catch (e:any) {
-    return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
+  } catch (e: any) {
+    console.error("cushion/curves/export GET error:", e);
+    return new NextResponse(
+      `cushion_curves_export_exception: ${String(e?.message || e)}`,
+      { status: 500 }
+    );
   }
 }

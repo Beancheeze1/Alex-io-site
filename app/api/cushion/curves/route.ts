@@ -1,70 +1,80 @@
 // app/api/cushion/curves/route.ts
-import { NextResponse } from "next/server";
-import { Pool } from "pg";
+//
+// Cushion curve lookup API
+// - GET /api/cushion/curves?material_id=123
+// - Returns rows from public.cushion_curves as JSON
+//
+// Uses only `one` from "@/lib/db" and wraps the rows in a JSON aggregate
+// so we don't depend on a separate `many` helper.
 
-export const runtime = "nodejs";
+import { NextRequest, NextResponse } from "next/server";
+import { one } from "@/lib/db";
+
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-let _pool: Pool | null = null;
-function pool() {
-  if (!_pool) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error("Missing env: DATABASE_URL");
-    _pool = new Pool({ connectionString: url, max: 5, ssl: { rejectUnauthorized: false } });
-  }
-  return _pool!;
+type CushionCurveRow = {
+  id: number;
+  material_id: number;
+  static_psi: string;
+  deflect_pct: string;
+  g_level: string;
+  source: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function ok(extra: Record<string, any> = {}) {
+  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
 }
 
-export async function GET(req: Request) {
+function err(error: string, detail?: any) {
+  return NextResponse.json({ ok: false, error, detail }, { status: 200 });
+}
+
+export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const mid = url.searchParams.get("material_id");
-    const q = `
-      SELECT cc.*, m.name AS material_name
-      FROM public.cushion_curves cc
-      JOIN public.materials m ON m.id = cc.material_id
-      ${mid ? "WHERE cc.material_id = $1" : ""}
-      ORDER BY cc.material_id, cc.static_psi, cc.deflect_pct
-    `;
-    const { rows } = await pool().query(q, mid ? [Number(mid)] : []);
-    return NextResponse.json(rows, { status: 200, headers: { "Cache-Control": "no-store" } });
-  } catch (e:any) {
-    return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
-  }
-}
+    const materialIdParam = url.searchParams.get("material_id");
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const items = Array.isArray(body?.items) ? body.items : [];
-    if (!items.length) return NextResponse.json({ error: "items[]" }, { status: 400 });
+    let materialId: number | null = null;
+    if (materialIdParam != null && materialIdParam.trim() !== "") {
+      const n = Number(materialIdParam);
+      if (!Number.isFinite(n)) {
+        return err("invalid_material_id", { material_id: materialIdParam });
+      }
+      materialId = n;
+    }
 
-    const values: any[] = [];
-    const chunks: string[] = [];
-    items.forEach((it: any, i: number) => {
-      const base = i*5;
-      chunks.push(`($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5})`);
-      values.push(
-        Number(it.material_id),
-        Number(it.static_psi),
-        Number(it.deflect_pct),
-        Number(it.g_level),
-        it.source ?? null
-      );
-    });
+    // Use JSON aggregation so we can still call through `one`.
+    const row = await one<{ items: CushionCurveRow[] }>(
+      `
+      SELECT COALESCE(
+        json_agg(
+          json_build_object(
+            'id', id,
+            'material_id', material_id,
+            'static_psi', static_psi,
+            'deflect_pct', deflect_pct,
+            'g_level', g_level,
+            'source', "source",
+            'created_at', created_at,
+            'updated_at', updated_at
+          )
+          ORDER BY material_id, static_psi, deflect_pct
+        ),
+        '[]'::json
+      ) AS items
+      FROM cushion_curves
+      WHERE ($1::int IS NULL OR material_id = $1::int);
+      `,
+      [materialId]
+    );
 
-    const q = `
-      INSERT INTO public.cushion_curves (material_id, static_psi, deflect_pct, g_level, source)
-      VALUES ${chunks.join(",")}
-      ON CONFLICT (material_id, static_psi, deflect_pct)
-      DO UPDATE SET g_level = EXCLUDED.g_level,
-                    source  = COALESCE(EXCLUDED.source, public.cushion_curves.source),
-                    updated_at = now()
-      RETURNING *;
-    `;
-    const { rows } = await pool().query(q, values);
-    return NextResponse.json({ upserted: rows.length }, { status: 201, headers: { "Cache-Control": "no-store" } });
-  } catch (e:any) {
-    return NextResponse.json({ error: e?.message || "failed" }, { status: 500 });
+    const curves: CushionCurveRow[] = (row?.items as any) ?? [];
+    return ok({ curves });
+  } catch (e: any) {
+    console.error("cushion/curves GET error:", e);
+    return err("cushion_curves_exception", String(e?.message || e));
   }
 }
