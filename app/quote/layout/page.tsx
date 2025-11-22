@@ -9,7 +9,6 @@
 "use client";
 
 import * as React from "react";
-import { useSearchParams } from "next/navigation";
 
 import {
   buildLayoutFromStrings,
@@ -18,6 +17,9 @@ import {
 } from "./editor/layoutTypes";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
+
+// 👇 NEW: tell Next not to statically prerender /quote/layout
+export const dynamic = "force-dynamic";
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
@@ -43,21 +45,25 @@ function snapInches(value: number): number {
   return Math.round(value / SNAP_IN) * SNAP_IN;
 }
 
-export default function LayoutPage() {
-  const searchParams = useSearchParams();
+export default function LayoutPage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
+  const quoteNoParam = (searchParams?.quote_no ??
+    searchParams?.quote ??
+    "") as string | undefined;
 
-  // Read from real URL query string on the client
-  const quoteNoParam =
-    searchParams?.get("quote_no") || searchParams?.get("quote") || "";
+  const dimsParam = (searchParams?.dims ??
+    searchParams?.block ??
+    "") as string | undefined;
 
-  const dimsParam =
-    searchParams?.get("dims") || searchParams?.get("block") || "";
+  const cavitiesParam = (searchParams?.cavities ??
+    searchParams?.cavity ??
+    "") as string | undefined;
 
-  const cavitiesParam =
-    searchParams?.get("cavities") || searchParams?.get("cavity") || "";
-
-  const blockStr = normalizeDimsParam(dimsParam || undefined);
-  const cavityStr = normalizeCavitiesParam(cavitiesParam || undefined);
+  const blockStr = normalizeDimsParam(dimsParam);
+  const cavityStr = normalizeCavitiesParam(cavitiesParam);
 
   /* ---------- Build base model ---------- */
 
@@ -95,8 +101,6 @@ export default function LayoutPage() {
     quoteNoParam && quoteNoParam.trim().length > 0
       ? quoteNoParam.trim()
       : "Q-AI-EXAMPLE";
-
-  const isLinkedToQuote = quoteNo !== "Q-AI-EXAMPLE";
 
   const { block, cavities } = layout;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
@@ -172,15 +176,21 @@ export default function LayoutPage() {
       });
 
       if (!res.ok) {
-        const errJson = await res.json().catch(() => null);
-        console.error("Apply-to-quote failed", res.status, errJson);
+        // read server error to aid debugging
+        let detail: any = null;
+        try {
+          detail = await res.json();
+        } catch {
+          /* ignore */
+        }
+        console.error("Apply-to-quote HTTP error", res.status, detail);
         throw new Error(`HTTP ${res.status}`);
       }
 
       setApplyStatus("done");
       setTimeout(() => setApplyStatus("idle"), 2000);
     } catch (err) {
-      console.error("Apply-to-quote error", err);
+      console.error("Apply-to-quote failed", err);
       setApplyStatus("error");
       setTimeout(() => setApplyStatus("idle"), 3000);
     }
@@ -255,14 +265,8 @@ export default function LayoutPage() {
           </div>
 
           <div className="mt-1 border-t border-slate-200 pt-2 text-[11px] text-slate-500">
-            {isLinkedToQuote ? (
-              <>Linked to quote {quoteNo}.</>
-            ) : (
-              <>
-                No quote linked — open this page from an emailed quote or
-                /quote print view to apply layouts.
-              </>
-            )}
+            Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block
+            edges and between pockets.
           </div>
         </aside>
 
@@ -305,12 +309,10 @@ export default function LayoutPage() {
               <button
                 type="button"
                 onClick={handleApplyToQuote}
-                disabled={applyStatus === "saving" || !isLinkedToQuote}
+                disabled={applyStatus === "saving"}
                 className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60"
               >
-                {!isLinkedToQuote
-                  ? "Link to a quote first"
-                  : applyStatus === "saving"
+                {applyStatus === "saving"
                   ? "Applying…"
                   : applyStatus === "done"
                   ? "Applied!"
@@ -567,9 +569,7 @@ export default function LayoutPage() {
                         value={selectedCavity.cornerRadiusIn}
                         onChange={(e) =>
                           updateCavityDims(selectedCavity.id, {
-                            cornerRadiusIn: snapInches(
-                              Number(e.target.value),
-                            ),
+                            cornerRadiusIn: snapInches(Number(e.target.value)),
                           })
                         }
                         className="rounded-md border border-slate-300 px-2 py-1 text-xs"
@@ -627,11 +627,11 @@ function buildSvgFromLayout(layout: LayoutModel): string {
         const cy = y + cavH / 2;
         return `
   <g>
-    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
-          2,
-        )}" fill="none" stroke="#111827" stroke-width="1" />
+    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(
+          2
+        )}" r="${r.toFixed(2)}" fill="none" stroke="#111827" stroke-width="1" />
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-          2,
+          2
         )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
@@ -640,27 +640,28 @@ function buildSvgFromLayout(layout: LayoutModel): string {
       return `
   <g>
     <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
-          width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
+          width="${cavW.toFixed(2)}" height="${cavH.toFixed(
+        2
+      )}"
           rx="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
           ry="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
           fill="none" stroke="#111827" stroke-width="1" />
     <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
-        2,
+        2
       )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
     })
     .join("\n");
 
-  const blockWStr = blockW.toFixed(2);
-  const blockHStr = blockH.toFixed(2);
-  const blockXStr = blockX.toFixed(2);
-  const blockYStr = blockY.toFixed(2);
-
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="${blockXStr}" y="${blockYStr}"
-        width="${blockWStr}" height="${blockHStr}"
+  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(
+    2
+  )}"
+        width="${blockW.toFixed(2)}" height="${blockH.toFixed(
+    2
+  )}"
         fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />
 ${cavRects}
 </svg>`;
