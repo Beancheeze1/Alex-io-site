@@ -1,5 +1,5 @@
 ﻿{
-  "quoteNo": "Q-AI-TEST-123456",
+  "quoteNo": "Q-AI-20251121-192602",
   "layout": {
     "block": {
       "lengthIn": 10,
@@ -11,3 +11,4 @@
   "notes": "test from PowerShell",
   "svg": "<svg />"
 }
+

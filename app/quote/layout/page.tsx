@@ -94,10 +94,14 @@ export default function LayoutPage({
     "idle" | "saving" | "done" | "error"
   >("idle");
 
+  // REAL quote number: only set when present in the URL
   const quoteNo =
     quoteNoParam && quoteNoParam.trim().length > 0
       ? quoteNoParam.trim()
-      : "Q-AI-EXAMPLE";
+      : "";
+
+  // DISPLAY quote number: show a friendly example if we don't have a real one
+  const displayQuoteNo = quoteNo || "Q-AI-EXAMPLE";
 
   const { block, cavities } = layout;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
@@ -156,6 +160,16 @@ export default function LayoutPage({
   /* ---------- Apply to quote ---------- */
 
   const handleApplyToQuote = async () => {
+    // DO NOT hit the API if we don't have a real quote number wired in
+    if (!quoteNo) {
+      console.warn(
+        "Apply-to-quote blocked: no real quoteNo in URL (open this from a quote email link).",
+      );
+      setApplyStatus("error");
+      setTimeout(() => setApplyStatus("idle"), 3000);
+      return;
+    }
+
     try {
       setApplyStatus("saving");
 
@@ -270,7 +284,7 @@ export default function LayoutPage({
               <div className="text-xs text-slate-500 mt-1">
                 Quote{" "}
                 <span className="font-mono font-semibold text-slate-800">
-                  {quoteNo}
+                  {displayQuoteNo}
                 </span>
                 {" • "}
                 {block.lengthIn}" × {block.widthIn}" ×{" "}
@@ -556,7 +570,9 @@ export default function LayoutPage({
                         value={selectedCavity.cornerRadiusIn}
                         onChange={(e) =>
                           updateCavityDims(selectedCavity.id, {
-                            cornerRadiusIn: snapInches(Number(e.target.value)),
+                            cornerRadiusIn: snapInches(
+                              Number(e.target.value),
+                            ),
                           })
                         }
                         className="rounded-md border border-slate-300 px-2 py-1 text-xs"
@@ -615,10 +631,10 @@ function buildSvgFromLayout(layout: LayoutModel): string {
         return `
   <g>
     <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
-          2
+          2,
         )}" fill="none" stroke="#111827" stroke-width="1" />
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-          2
+          2,
         )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
@@ -632,7 +648,7 @@ function buildSvgFromLayout(layout: LayoutModel): string {
           ry="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
           fill="none" stroke="#111827" stroke-width="1" />
     <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
-        2
+        2,
       )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
@@ -641,8 +657,12 @@ function buildSvgFromLayout(layout: LayoutModel): string {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
-        width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
+  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(
+    2,
+  )}"
+        width="${blockW.toFixed(2)}" height="${blockH.toFixed(
+    2,
+  )}"
         fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />
 ${cavRects}
 </svg>`;
