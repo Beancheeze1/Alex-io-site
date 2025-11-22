@@ -5,14 +5,12 @@
 // - Center: large canvas
 // - Right: block + cavity inspector
 // - Apply to quote posts layout + notes + SVG to /api/quote/layout/apply
-//
-// NOTE: This is a client component, so we must read query params via
-// useSearchParams (Next.js does not pass searchParams props to client pages).
 
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import * as React from "react";
-import { useSearchParams } from "next/navigation";
 
 import {
   buildLayoutFromStrings,
@@ -22,42 +20,57 @@ import {
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
 
-// Ensure all dimension edits snap to 0.125"
-const SNAP_IN = 0.125;
-const WALL_IN = 0.5;
+type SearchParams = {
+  [key: string]: string | string[] | undefined;
+};
 
-function normalizeDimsParam(raw: string | null): string {
+function normalizeDimsParam(raw: string | undefined): string {
   if (!raw || !raw.trim()) return "10x10x2";
   return raw.trim();
 }
 
-function normalizeCavitiesParam(raw: string | null): string {
+function normalizeCavitiesParam(raw: string | undefined): string {
   // Default to a single sample cavity so the layout starts clean
   if (!raw || !raw.trim()) return "3x2x1";
   return raw.trim();
 }
+
+// Ensure all dimension edits snap to 0.125"
+const SNAP_IN = 0.125;
+const WALL_IN = 0.5;
 
 function snapInches(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value / SNAP_IN) * SNAP_IN;
 }
 
-export default function LayoutPage() {
-  const searchParams = useSearchParams();
+export default function LayoutPage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
+  const quoteNoParam = (searchParams?.quote_no ??
+    searchParams?.quote ??
+    "") as string | undefined;
 
-  // IMPORTANT: because this is a client component, we must read from
-  // useSearchParams instead of relying on props.
-  const quoteNoParam =
-    (searchParams?.get("quote_no") ?? searchParams?.get("quote") ?? "") || "";
+  const dimsParam = (searchParams?.dims ??
+    searchParams?.block ??
+    "") as string | undefined;
 
-  const dimsParam =
-    (searchParams?.get("dims") ?? searchParams?.get("block") ?? "") || "";
-
-  const cavitiesParam =
-    (searchParams?.get("cavities") ?? searchParams?.get("cavity") ?? "") || "";
+  const cavitiesParam = (searchParams?.cavities ??
+    searchParams?.cavity ??
+    "") as string | undefined;
 
   const blockStr = normalizeDimsParam(dimsParam);
   const cavityStr = normalizeCavitiesParam(cavitiesParam);
+
+  // Do we actually have a real quote number in the URL?
+  const hasRealQuoteParam =
+    !!quoteNoParam && quoteNoParam.trim().length > 0;
+
+  const quoteNo = hasRealQuoteParam
+    ? quoteNoParam!.trim()
+    : "Q-AI-EXAMPLE";
 
   /* ---------- Build base model ---------- */
 
@@ -90,9 +103,6 @@ export default function LayoutPage() {
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
   >("idle");
-
-  // Real quote number from URL (or empty string if not linked)
-  const quoteNo = quoteNoParam.trim();
 
   const { block, cavities } = layout;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
@@ -151,15 +161,17 @@ export default function LayoutPage() {
   /* ---------- Apply to quote ---------- */
 
   const handleApplyToQuote = async () => {
-    try {
-      // If we somehow ended up here without a quote number, fail fast
-      if (!quoteNo) {
-        console.warn("Apply-to-quote clicked with no quoteNo in URL.");
-        setApplyStatus("error");
-        setTimeout(() => setApplyStatus("idle"), 2500);
-        return;
-      }
+    // If there's no real quote in the URL, don't even try the API.
+    if (!hasRealQuoteParam) {
+      console.warn(
+        "[layout] Apply clicked without a real quote_no in the URL. " +
+          "Open this page from an emailed quote or /quote print view."
+      );
+      setApplyStatus("error");
+      return;
+    }
 
+    try {
       setApplyStatus("saving");
 
       const svg = buildSvgFromLayout(layout);
@@ -175,15 +187,22 @@ export default function LayoutPage() {
         }),
       });
 
-      if (!res.ok) {
-        console.error("Apply-to-quote HTTP error:", res.status);
-        throw new Error(`HTTP ${res.status}`);
+      let payload: any = null;
+      try {
+        payload = await res.json();
+      } catch {
+        // ignore parse issues; we'll still treat non-OK as error
       }
 
-      const data = await res.json().catch(() => null);
-      if (!data || data.ok !== true) {
-        console.error("Apply-to-quote JSON error:", data);
-        throw new Error("layout_apply_failed");
+      if (!res.ok || !payload?.ok) {
+        console.error(
+          "[layout] apply failed",
+          res.status,
+          payload || "(no JSON payload)"
+        );
+        throw new Error(
+          `layout_apply_failed status=${res.status} error=${payload?.error || "unknown"}`
+        );
       }
 
       setApplyStatus("done");
@@ -195,9 +214,7 @@ export default function LayoutPage() {
     }
   };
 
-  const applyDisabled = applyStatus === "saving" || !quoteNo;
-
-  const applyLabel = !quoteNo
+  const buttonLabel = !hasRealQuoteParam
     ? "Link to a quote first"
     : applyStatus === "saving"
     ? "Applying…"
@@ -206,6 +223,13 @@ export default function LayoutPage() {
     : applyStatus === "error"
     ? "Error – retry"
     : "Apply to quote";
+
+  const buttonDisabled =
+    !hasRealQuoteParam || applyStatus === "saving";
+
+  const helperLine = hasRealQuoteParam
+    ? `Linked to quote ${quoteNo}. Cavities and notes will be saved back to that quote when you apply.`
+    : "No quote linked — open this page from an emailed quote or the /quote print view to save layouts back to a quote.";
 
   return (
     <main className="min-h-screen bg-slate-100 flex items-stretch">
@@ -294,18 +318,15 @@ export default function LayoutPage() {
               <div className="text-xs text-slate-500 mt-1">
                 Quote{" "}
                 <span className="font-mono font-semibold text-slate-800">
-                  {quoteNo || "— not linked —"}
+                  {quoteNo}
                 </span>
                 {" • "}
                 {block.lengthIn}" × {block.widthIn}" ×{" "}
                 {block.thicknessIn || 0}" block
               </div>
-              {!quoteNo && (
-                <div className="text-[11px] text-amber-700 mt-1">
-                  No quote linked – open this page from an emailed quote or the
-                  /quote print view to apply layouts.
-                </div>
-              )}
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                {helperLine}
+              </div>
             </div>
 
             {/* zoom + apply button */}
@@ -326,10 +347,10 @@ export default function LayoutPage() {
               <button
                 type="button"
                 onClick={handleApplyToQuote}
-                disabled={applyDisabled}
-                className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60"
+                disabled={buttonDisabled}
+                className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {applyLabel}
+                {buttonLabel}
               </button>
             </div>
           </div>
@@ -652,9 +673,7 @@ function buildSvgFromLayout(layout: LayoutModel): string {
 
       return `
   <g>
-    <rect x="${x.toFixed(2)}" y="${y.toFixed(
-        2
-      )}"
+    <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
           width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
           rx="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
           ry="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
@@ -669,9 +688,7 @@ function buildSvgFromLayout(layout: LayoutModel): string {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(
-    2
-  )}"
+  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
         width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
         fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />
 ${cavRects}
