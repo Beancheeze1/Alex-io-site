@@ -6,7 +6,7 @@
 // This is intentionally simple and tolerant: if items aren't stored yet,
 // it still shows the header and a friendly "no line items stored" message.
 // Now also shows the latest foam layout "package" (if any) saved via
-// /api/quote/layout/apply.
+// /api/quote/layout/apply, including SVG preview + download links.
 
 import { q, one } from "@/lib/db";
 
@@ -151,7 +151,6 @@ export default async function QuotePage({
     [quote.id],
   );
 
-  // We don't recompute exact pricing here yet (we can hook into /api/quotes/calc later if you like)
   const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
 
   // Helper: short preview of notes
@@ -160,6 +159,28 @@ export default async function QuotePage({
       ? layoutPkg.notes.trim().length > 140
         ? layoutPkg.notes.trim().slice(0, 140) + "…"
         : layoutPkg.notes.trim()
+      : null;
+
+  // Download links for stored layout artifacts
+  const svgDownloadHref =
+    layoutPkg?.svg_text && layoutPkg.svg_text.trim().length
+      ? `data:image/svg+xml;utf8,${encodeURIComponent(
+          layoutPkg.svg_text,
+        )}`
+      : null;
+
+  const dxfDownloadHref =
+    layoutPkg?.dxf_text && layoutPkg.dxf_text.trim().length
+      ? `data:application/dxf;charset=utf-8,${encodeURIComponent(
+          layoutPkg.dxf_text,
+        )}`
+      : null;
+
+  const stepDownloadHref =
+    layoutPkg?.step_text && layoutPkg.step_text.trim().length
+      ? `data:application/step;charset=utf-8,${encodeURIComponent(
+          layoutPkg.step_text,
+        )}`
       : null;
 
   return (
@@ -433,6 +454,7 @@ export default async function QuotePage({
                 </a>
               </div>
             </div>
+
             {notesPreview && (
               <div
                 style={{
@@ -445,6 +467,7 @@ export default async function QuotePage({
                 {notesPreview}
               </div>
             )}
+
             <div
               style={{
                 marginTop: "6px",
@@ -457,6 +480,91 @@ export default async function QuotePage({
               · STEP export:{" "}
               {layoutPkg.step_text ? "stored" : "not generated yet"}
             </div>
+
+            {/* Downloads row */}
+            <div
+              style={{
+                marginTop: "8px",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "6px",
+                fontSize: "12px",
+              }}
+            >
+              {svgDownloadHref && (
+                <a
+                  href={svgDownloadHref}
+                  download={`quote-${quote.quote_no}-layout.svg`}
+                  style={{
+                    display: "inline-block",
+                    padding: "4px 10px",
+                    borderRadius: "999px",
+                    border: "1px solid #d1d5db",
+                    background: "#ffffff",
+                    color: "#1f2937",
+                    textDecoration: "none",
+                  }}
+                >
+                  Download SVG layout
+                </a>
+              )}
+
+              {dxfDownloadHref && (
+                <a
+                  href={dxfDownloadHref}
+                  download={`quote-${quote.quote_no}-layout.dxf`}
+                  style={{
+                    display: "inline-block",
+                    padding: "4px 10px",
+                    borderRadius: "999px",
+                    border: "1px solid #d1d5db",
+                    background: "#ffffff",
+                    color: "#1f2937",
+                    textDecoration: "none",
+                  }}
+                >
+                  Download DXF
+                </a>
+              )}
+
+              {stepDownloadHref && (
+                <a
+                  href={stepDownloadHref}
+                  download={`quote-${quote.quote_no}-layout.step`}
+                  style={{
+                    display: "inline-block",
+                    padding: "4px 10px",
+                    borderRadius: "999px",
+                    border: "1px solid #d1d5db",
+                    background: "#ffffff",
+                    color: "#1f2937",
+                    textDecoration: "none",
+                  }}
+                >
+                  Download STEP
+                </a>
+              )}
+            </div>
+
+            {/* Inline SVG preview (if available) */}
+            {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
+              <div
+                style={{
+                  marginTop: "10px",
+                  padding: "8px",
+                  borderRadius: "8px",
+                  border: "1px solid #e5e7eb",
+                  background: "#ffffff",
+                  maxHeight: "360px",
+                  overflow: "auto",
+                }}
+              >
+                <div
+                  // Print view: simple inline SVG preview
+                  dangerouslySetInnerHTML={{ __html: layoutPkg.svg_text }}
+                />
+              </div>
+            )}
           </div>
         )}
 
