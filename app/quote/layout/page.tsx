@@ -5,10 +5,14 @@
 // - Center: large canvas
 // - Right: block + cavity inspector
 // - Apply to quote posts layout + notes + SVG to /api/quote/layout/apply
+//
+// NOTE: This is a client component, so we must read query params via
+// useSearchParams (Next.js does not pass searchParams props to client pages).
 
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 
 import {
   buildLayoutFromStrings,
@@ -18,46 +22,39 @@ import {
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
 
-type SearchParams = {
-  [key: string]: string | string[] | undefined;
-};
+// Ensure all dimension edits snap to 0.125"
+const SNAP_IN = 0.125;
+const WALL_IN = 0.5;
 
-function normalizeDimsParam(raw: string | undefined): string {
+function normalizeDimsParam(raw: string | null): string {
   if (!raw || !raw.trim()) return "10x10x2";
   return raw.trim();
 }
 
-function normalizeCavitiesParam(raw: string | undefined): string {
+function normalizeCavitiesParam(raw: string | null): string {
   // Default to a single sample cavity so the layout starts clean
   if (!raw || !raw.trim()) return "3x2x1";
   return raw.trim();
 }
-
-// Ensure all dimension edits snap to 0.125"
-const SNAP_IN = 0.125;
-const WALL_IN = 0.5;
 
 function snapInches(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value / SNAP_IN) * SNAP_IN;
 }
 
-export default function LayoutPage({
-  searchParams,
-}: {
-  searchParams?: SearchParams;
-}) {
-  const quoteNoParam = (searchParams?.quote_no ??
-    searchParams?.quote ??
-    "") as string | undefined;
+export default function LayoutPage() {
+  const searchParams = useSearchParams();
 
-  const dimsParam = (searchParams?.dims ??
-    searchParams?.block ??
-    "") as string | undefined;
+  // IMPORTANT: because this is a client component, we must read from
+  // useSearchParams instead of relying on props.
+  const quoteNoParam =
+    (searchParams?.get("quote_no") ?? searchParams?.get("quote") ?? "") || "";
 
-  const cavitiesParam = (searchParams?.cavities ??
-    searchParams?.cavity ??
-    "") as string | undefined;
+  const dimsParam =
+    (searchParams?.get("dims") ?? searchParams?.get("block") ?? "") || "";
+
+  const cavitiesParam =
+    (searchParams?.get("cavities") ?? searchParams?.get("cavity") ?? "") || "";
 
   const blockStr = normalizeDimsParam(dimsParam);
   const cavityStr = normalizeCavitiesParam(cavitiesParam);
@@ -94,13 +91,8 @@ export default function LayoutPage({
     "idle" | "saving" | "done" | "error"
   >("idle");
 
-  // IMPORTANT: do NOT default to a fake quote number.
-  // If this page is opened without ?quote_no=..., we treat it as "unlinked"
-  // and disable the Apply button so we don't spam the API with a 404.
-  const quoteNo =
-    quoteNoParam && quoteNoParam.trim().length > 0
-      ? quoteNoParam.trim()
-      : "";
+  // Real quote number from URL (or empty string if not linked)
+  const quoteNo = quoteNoParam.trim();
 
   const { block, cavities } = layout;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
@@ -159,16 +151,15 @@ export default function LayoutPage({
   /* ---------- Apply to quote ---------- */
 
   const handleApplyToQuote = async () => {
-    // Guard: you *must* open this from a real quote link so we have quote_no.
-    if (!quoteNo) {
-      console.error(
-        "[layout] Apply-to-quote called without a real quote_no in the URL",
-      );
-      setApplyStatus("error");
-      return;
-    }
-
     try {
+      // If we somehow ended up here without a quote number, fail fast
+      if (!quoteNo) {
+        console.warn("Apply-to-quote clicked with no quoteNo in URL.");
+        setApplyStatus("error");
+        setTimeout(() => setApplyStatus("idle"), 2500);
+        return;
+      }
+
       setApplyStatus("saving");
 
       const svg = buildSvgFromLayout(layout);
@@ -184,21 +175,15 @@ export default function LayoutPage({
         }),
       });
 
-      let data: any = null;
-      try {
-        data = await res.json();
-      } catch {
-        // if we can't parse JSON, treat as error
+      if (!res.ok) {
+        console.error("Apply-to-quote HTTP error:", res.status);
+        throw new Error(`HTTP ${res.status}`);
       }
 
-      if (!res.ok || !data?.ok) {
-        console.error("Apply-to-quote API error", {
-          status: res.status,
-          data,
-        });
-        setApplyStatus("error");
-        setTimeout(() => setApplyStatus("idle"), 3000);
-        return;
+      const data = await res.json().catch(() => null);
+      if (!data || data.ok !== true) {
+        console.error("Apply-to-quote JSON error:", data);
+        throw new Error("layout_apply_failed");
       }
 
       setApplyStatus("done");
@@ -212,7 +197,15 @@ export default function LayoutPage({
 
   const applyDisabled = applyStatus === "saving" || !quoteNo;
 
-  const noQuoteLinked = !quoteNo;
+  const applyLabel = !quoteNo
+    ? "Link to a quote first"
+    : applyStatus === "saving"
+    ? "Applying…"
+    : applyStatus === "done"
+    ? "Applied!"
+    : applyStatus === "error"
+    ? "Error – retry"
+    : "Apply to quote";
 
   return (
     <main className="min-h-screen bg-slate-100 flex items-stretch">
@@ -299,28 +292,20 @@ export default function LayoutPage({
                 </span>
               </div>
               <div className="text-xs text-slate-500 mt-1">
-                {quoteNo ? (
-                  <>
-                    Quote{" "}
-                    <span className="font-mono font-semibold text-slate-800">
-                      {quoteNo}
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-amber-700">
-                    No quote linked – open this page from an emailed quote or
-                    /quote print view to apply layouts.
-                  </span>
-                )}
-                {block.lengthIn && block.widthIn && (
-                  <>
-                    {" "}
-                    {" • "}
-                    {block.lengthIn}" × {block.widthIn}" ×{" "}
-                    {block.thicknessIn || 0}" block
-                  </>
-                )}
+                Quote{" "}
+                <span className="font-mono font-semibold text-slate-800">
+                  {quoteNo || "— not linked —"}
+                </span>
+                {" • "}
+                {block.lengthIn}" × {block.widthIn}" ×{" "}
+                {block.thicknessIn || 0}" block
               </div>
+              {!quoteNo && (
+                <div className="text-[11px] text-amber-700 mt-1">
+                  No quote linked – open this page from an emailed quote or the
+                  /quote print view to apply layouts.
+                </div>
+              )}
             </div>
 
             {/* zoom + apply button */}
@@ -342,17 +327,9 @@ export default function LayoutPage({
                 type="button"
                 onClick={handleApplyToQuote}
                 disabled={applyDisabled}
-                className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60"
               >
-                {noQuoteLinked
-                  ? "Link to a quote first"
-                  : applyStatus === "saving"
-                  ? "Applying…"
-                  : applyStatus === "done"
-                  ? "Applied!"
-                  : applyStatus === "error"
-                  ? "Error – retry"
-                  : "Apply to quote"}
+                {applyLabel}
               </button>
             </div>
           </div>
@@ -604,7 +581,7 @@ export default function LayoutPage({
                         onChange={(e) =>
                           updateCavityDims(selectedCavity.id, {
                             cornerRadiusIn: snapInches(
-                              Number(e.target.value),
+                              Number(e.target.value)
                             ),
                           })
                         }
@@ -664,10 +641,10 @@ function buildSvgFromLayout(layout: LayoutModel): string {
         return `
   <g>
     <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
-          2,
+          2
         )}" fill="none" stroke="#111827" stroke-width="1" />
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-          2,
+          2
         )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
@@ -675,13 +652,15 @@ function buildSvgFromLayout(layout: LayoutModel): string {
 
       return `
   <g>
-    <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
+    <rect x="${x.toFixed(2)}" y="${y.toFixed(
+        2
+      )}"
           width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
           rx="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
           ry="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
           fill="none" stroke="#111827" stroke-width="1" />
     <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
-        2,
+        2
       )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
@@ -690,10 +669,10 @@ function buildSvgFromLayout(layout: LayoutModel): string {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
-        width="${blockW.toFixed(2)}" height="${blockH.toFixed(
-    2,
+  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(
+    2
   )}"
+        width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
         fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />
 ${cavRects}
 </svg>`;
