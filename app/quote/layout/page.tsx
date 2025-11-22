@@ -94,14 +94,13 @@ export default function LayoutPage({
     "idle" | "saving" | "done" | "error"
   >("idle");
 
-  // REAL quote number: only set when present in the URL
+  // IMPORTANT: do NOT default to a fake quote number.
+  // If this page is opened without ?quote_no=..., we treat it as "unlinked"
+  // and disable the Apply button so we don't spam the API with a 404.
   const quoteNo =
     quoteNoParam && quoteNoParam.trim().length > 0
       ? quoteNoParam.trim()
       : "";
-
-  // DISPLAY quote number: show a friendly example if we don't have a real one
-  const displayQuoteNo = quoteNo || "Q-AI-EXAMPLE";
 
   const { block, cavities } = layout;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
@@ -160,13 +159,12 @@ export default function LayoutPage({
   /* ---------- Apply to quote ---------- */
 
   const handleApplyToQuote = async () => {
-    // DO NOT hit the API if we don't have a real quote number wired in
+    // Guard: you *must* open this from a real quote link so we have quote_no.
     if (!quoteNo) {
-      console.warn(
-        "Apply-to-quote blocked: no real quoteNo in URL (open this from a quote email link).",
+      console.error(
+        "[layout] Apply-to-quote called without a real quote_no in the URL",
       );
       setApplyStatus("error");
-      setTimeout(() => setApplyStatus("idle"), 3000);
       return;
     }
 
@@ -186,7 +184,22 @@ export default function LayoutPage({
         }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        // if we can't parse JSON, treat as error
+      }
+
+      if (!res.ok || !data?.ok) {
+        console.error("Apply-to-quote API error", {
+          status: res.status,
+          data,
+        });
+        setApplyStatus("error");
+        setTimeout(() => setApplyStatus("idle"), 3000);
+        return;
+      }
 
       setApplyStatus("done");
       setTimeout(() => setApplyStatus("idle"), 2000);
@@ -196,6 +209,10 @@ export default function LayoutPage({
       setTimeout(() => setApplyStatus("idle"), 3000);
     }
   };
+
+  const applyDisabled = applyStatus === "saving" || !quoteNo;
+
+  const noQuoteLinked = !quoteNo;
 
   return (
     <main className="min-h-screen bg-slate-100 flex items-stretch">
@@ -282,13 +299,27 @@ export default function LayoutPage({
                 </span>
               </div>
               <div className="text-xs text-slate-500 mt-1">
-                Quote{" "}
-                <span className="font-mono font-semibold text-slate-800">
-                  {displayQuoteNo}
-                </span>
-                {" • "}
-                {block.lengthIn}" × {block.widthIn}" ×{" "}
-                {block.thicknessIn || 0}" block
+                {quoteNo ? (
+                  <>
+                    Quote{" "}
+                    <span className="font-mono font-semibold text-slate-800">
+                      {quoteNo}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-amber-700">
+                    No quote linked – open this page from an emailed quote or
+                    /quote print view to apply layouts.
+                  </span>
+                )}
+                {block.lengthIn && block.widthIn && (
+                  <>
+                    {" "}
+                    {" • "}
+                    {block.lengthIn}" × {block.widthIn}" ×{" "}
+                    {block.thicknessIn || 0}" block
+                  </>
+                )}
               </div>
             </div>
 
@@ -310,10 +341,12 @@ export default function LayoutPage({
               <button
                 type="button"
                 onClick={handleApplyToQuote}
-                disabled={applyStatus === "saving"}
-                className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60"
+                disabled={applyDisabled}
+                className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {applyStatus === "saving"
+                {noQuoteLinked
+                  ? "Link to a quote first"
+                  : applyStatus === "saving"
                   ? "Applying…"
                   : applyStatus === "done"
                   ? "Applied!"
@@ -657,9 +690,7 @@ function buildSvgFromLayout(layout: LayoutModel): string {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(
-    2,
-  )}"
+  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
         width="${blockW.toFixed(2)}" height="${blockH.toFixed(
     2,
   )}"
