@@ -9,15 +9,12 @@
 //     "quoteNo": "Q-AI-20251121-123456",
 //     "layout": { ... LayoutModel ... },
 //     "notes": "Loose parts in this pocket",
-//     "svg": "<svg>...</svg>",
-//     "dxf": "DXF text (optional, future)",
-//     "step": "STEP text (optional, future)"
+//     "svg": "<svg>...</svg>"
 //   }
 //
 // Behaviour:
 //   - Looks up quotes.id by quote_no
 //   - Inserts a row into quote_layout_packages with layout_json + notes + svg_text
-//     (and optional dxf_text / step_text)
 //   - Returns the new package id + timestamps
 //
 // GET (optional debug):
@@ -34,8 +31,6 @@ type LayoutApplyIn = {
   layout?: any;
   notes?: string;
   svg?: string;
-  dxf?: string;
-  step?: string;
 };
 
 function ok(extra: Record<string, any> = {}) {
@@ -90,41 +85,30 @@ export async function GET(req: NextRequest) {
 /* -------------------------- POST: save package --------------------------- */
 
 export async function POST(req: NextRequest) {
-  let body: LayoutApplyIn = {};
-  let raw: string;
+  let raw = "";
+  let body: LayoutApplyIn;
 
-  // Read raw body once (more robust than req.json when things get weird)
   try {
+    // Read the raw body text once and parse manually so we can see
+    // exactly what arrived from the browser if parsing fails.
     raw = await req.text();
-  } catch {
-    return bad("invalid_json", { message: "unable_to_read_body" });
-  }
 
-  if (!raw || !raw.trim()) {
-    return bad("invalid_json", { message: "empty_body" });
-  }
-
-  // First attempt: treat as JSON
-  try {
-    body = JSON.parse(raw) as LayoutApplyIn;
-  } catch {
-    // Fallback: try URL-encoded form body
-    try {
-      const params = new URLSearchParams(raw);
-      const layoutStr = params.get("layout");
-      body = {
-        quoteNo: params.get("quoteNo") || undefined,
-        notes: params.get("notes") || undefined,
-        svg: params.get("svg") || undefined,
-        dxf: params.get("dxf") || undefined,
-        step: params.get("step") || undefined,
-        ...(layoutStr ? { layout: JSON.parse(layoutStr) } : {}),
-      };
-    } catch {
-      return bad("invalid_json", {
-        message: "unparseable_body",
-      });
+    if (!raw || !raw.trim()) {
+      return bad("empty_body", { rawSnippet: "" });
     }
+
+    const parsed = JSON.parse(raw);
+    body = parsed as LayoutApplyIn;
+  } catch (e: any) {
+    return bad(
+      "invalid_json",
+      {
+        message: String(e?.message || e),
+        // Trim so we don't blast logs / responses with megabytes of SVG
+        rawSnippet: raw ? raw.slice(0, 1000) : "",
+      },
+      400,
+    );
   }
 
   const quoteNo = (body.quoteNo || "").trim();
@@ -151,10 +135,6 @@ export async function POST(req: NextRequest) {
       body.notes && body.notes.trim().length ? body.notes.trim() : null;
     const svgText =
       body.svg && body.svg.trim().length ? body.svg : null;
-    const dxfText =
-      body.dxf && body.dxf.trim().length ? body.dxf : null;
-    const stepText =
-      body.step && body.step.trim().length ? body.step : null;
 
     // Insert a new layout package row. We allow multiple versions per quote;
     // consumer code should use ORDER BY created_at DESC LIMIT 1 when reading.
@@ -165,18 +145,22 @@ export async function POST(req: NextRequest) {
     }>(
       `
       INSERT INTO quote_layout_packages
-        (quote_id, layout_json, notes, svg_text, dxf_text, step_text)
+        (quote_id, layout_json, notes, svg_text)
       VALUES
-        ($1, $2::jsonb, $3, $4, $5, $6)
+        ($1, $2::jsonb, $3, $4)
       RETURNING id, quote_id, created_at;
       `,
-      [quote.id, JSON.stringify(body.layout), notes, svgText, dxfText, stepText],
+      [quote.id, JSON.stringify(body.layout), notes, svgText],
     );
 
     return ok({
       package: inserted,
     });
   } catch (e: any) {
-    return bad("layout_apply_exception", { message: String(e?.message || e) }, 500);
+    return bad(
+      "layout_apply_exception",
+      { message: String(e?.message || e) },
+      500,
+    );
   }
 }
