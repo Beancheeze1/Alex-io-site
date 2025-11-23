@@ -3,7 +3,20 @@
 // Client component that:
 //  - Reads quote_no from the URL
 //  - Calls /api/quote/print to fetch data
-//  - Renders the full print view
+//  - Renders the full print view for the client:
+//
+// Header:
+//   - Quote number, customer info, status
+//   - Print, Forward to sales, Schedule a call buttons
+//
+// Body:
+//   - Quote overview (specs from primary line item)
+//   - Line items table
+//   - Foam layout package summary + inline SVG preview
+//
+// Important:
+//   - No SVG/DXF/STEP download links here (client shouldn’t be able to download CAD files).
+//   - Layout file downloads can be added later on an internal/admin-only page.
 
 "use client";
 
@@ -242,6 +255,8 @@ export default function QuotePrintClient() {
     }
   }, [layoutPkg]);
 
+  const primaryItem = items[0] || null;
+
   // ===================== RENDER =====================
   return (
     <div
@@ -317,6 +332,7 @@ export default function QuotePrintClient() {
         {/* Happy path */}
         {!loading && quote && (
           <>
+            {/* HEADER: quote info + actions */}
             <div
               style={{
                 display: "flex",
@@ -382,7 +398,6 @@ export default function QuotePrintClient() {
                     gap: 8,
                     marginTop: 8,
                     justifyContent: "flex-end",
-                    flexWrap: "wrap",
                   }}
                 >
                   <button
@@ -445,6 +460,89 @@ export default function QuotePrintClient() {
               }}
             />
 
+            {/* QUOTE OVERVIEW (specs from primary line) */}
+            {primaryItem && (
+              <div
+                style={{
+                  marginBottom: 16,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #e5e7eb",
+                  background: "#f9fafb",
+                  fontSize: 13,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#111827",
+                    marginBottom: 4,
+                  }}
+                >
+                  Quote overview
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 16,
+                    color: "#374151",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                        color: "#6b7280",
+                        marginBottom: 2,
+                      }}
+                    >
+                      Dimensions
+                    </div>
+                    <div>
+                      {primaryItem.length_in} × {primaryItem.width_in} ×{" "}
+                      {primaryItem.height_in} in
+                    </div>
+                  </div>
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                        color: "#6b7280",
+                        marginBottom: 2,
+                      }}
+                    >
+                      Quantity
+                    </div>
+                    <div>{primaryItem.qty.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                        color: "#6b7280",
+                        marginBottom: 2,
+                      }}
+                    >
+                      Material
+                    </div>
+                    <div>
+                      {primaryItem.material_name ||
+                        `Material #${primaryItem.material_id}`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* LINE ITEMS */}
             <h2 style={{ fontSize: 16, marginBottom: 8 }}>Line items</h2>
 
             {items.length === 0 ? (
@@ -692,19 +790,6 @@ export default function QuotePrintClient() {
                       />
                     </div>
                   )}
-
-                <div
-                  style={{
-                    marginTop: 6,
-                    color: "#6b7280",
-                    fontSize: 12,
-                  }}
-                >
-                  DXF export:{" "}
-                  {layoutPkg.dxf_text ? "stored" : "not generated yet"} · STEP
-                  export:{" "}
-                  {layoutPkg.step_text ? "stored" : "not generated yet"}
-                </div>
               </div>
             )}
 
