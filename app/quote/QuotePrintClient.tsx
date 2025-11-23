@@ -74,6 +74,9 @@ export default function QuotePrintClient() {
     null,
   );
 
+  // Ref to the SVG preview container so we can scale/center the inner <svg>
+  const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
+
   // Print handler for the button
   const handlePrint = React.useCallback(() => {
     if (typeof window !== "undefined") {
@@ -193,6 +196,34 @@ export default function QuotePrintClient() {
       ? "data:application/step;charset=utf-8," +
         encodeURIComponent(layoutPkg.step_text)
       : null;
+
+  // After the SVG is injected, scale and center it inside the preview box
+  React.useEffect(() => {
+    if (!layoutPkg) return;
+    if (!svgContainerRef.current) return;
+
+    const svgEl = svgContainerRef.current.querySelector("svg") as
+      | SVGSVGElement
+      | null;
+
+    if (!svgEl) return;
+
+    try {
+      // Remove hard-coded width/height so viewBox controls scaling
+      svgEl.removeAttribute("width");
+      svgEl.removeAttribute("height");
+
+      // Make it fill the preview area but keep aspect ratio
+      svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+      svgEl.style.width = "100%";
+      svgEl.style.height = "100%";
+      svgEl.style.display = "block";
+      svgEl.style.margin = "0 auto";
+    } catch (e) {
+      console.warn("Could not normalize SVG preview:", e);
+    }
+  }, [layoutPkg]);
 
   // ===================== RENDER =====================
   return (
@@ -586,13 +617,17 @@ export default function QuotePrintClient() {
                         Layout preview
                       </div>
                       <div
+                        ref={svgContainerRef}
                         style={{
                           width: "100%",
-                          maxHeight: 480, // was 260; give more room
-                          overflow: "auto", // allow scroll instead of clipping
+                          height: 480, // fixed preview height
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           borderRadius: 8,
                           border: "1px solid #e5e7eb",
                           background: "#f3f4f6",
+                          overflow: "hidden", // no scrollbars; SVG scales to fit
                         }}
                         dangerouslySetInnerHTML={{
                           __html: layoutPkg.svg_text,
