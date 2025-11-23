@@ -11,6 +11,7 @@
 import { q, one } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 type QuoteRow = {
   id: number;
@@ -44,6 +45,10 @@ type LayoutPkgRow = {
   created_at: string;
 };
 
+type QuotePageSearchParams = {
+  [key: string]: string | string[] | undefined;
+};
+
 function usd(value: number | null | undefined): string {
   if (value == null || !isFinite(Number(value))) return "$0.00";
   const n = Number(value);
@@ -61,9 +66,17 @@ function usd(value: number | null | undefined): string {
 export default async function QuotePage({
   searchParams,
 }: {
-  searchParams: { quote_no?: string };
+  searchParams?: QuotePageSearchParams;
 }) {
-  const raw = searchParams?.quote_no || "";
+  // ---- Robust quote number extraction (same pattern as layout page) ----
+  const qp = searchParams ?? {};
+
+  const rawParam =
+    qp.quote_no ?? qp.quoteNo ?? qp.quote ?? qp.q ?? "";
+
+  const raw =
+    Array.isArray(rawParam) ? rawParam[0] ?? "" : rawParam ?? "";
+
   const quoteNo = raw ? decodeURIComponent(raw) : "";
 
   if (!quoteNo) {
