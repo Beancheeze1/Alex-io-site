@@ -214,30 +214,6 @@ export default function QuotePrintClient() {
         : layoutPkg.notes.trim()
       : null;
 
-  const svgDownloadHref =
-    layoutPkg &&
-    layoutPkg.svg_text &&
-    layoutPkg.svg_text.trim().length > 0
-      ? "data:image/svg+xml;charset=utf-8," +
-        encodeURIComponent(layoutPkg.svg_text)
-      : null;
-
-  const dxfDownloadHref =
-    layoutPkg &&
-    layoutPkg.dxf_text &&
-    layoutPkg.dxf_text.trim().length > 0
-      ? "data:application/dxf;charset=utf-8," +
-        encodeURIComponent(layoutPkg.dxf_text)
-      : null;
-
-  const stepDownloadHref =
-    layoutPkg &&
-    layoutPkg.step_text &&
-    layoutPkg.step_text.trim().length > 0
-      ? "data:application/step;charset=utf-8," +
-        encodeURIComponent(layoutPkg.step_text)
-      : null;
-
   // After the SVG is injected, scale and center it inside the preview box
   React.useEffect(() => {
     if (!layoutPkg) return;
@@ -716,77 +692,6 @@ export default function QuotePrintClient() {
                       />
                     </div>
                   )}
-
-                <div
-                  style={{
-                    marginTop: 10,
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 8,
-                    fontSize: 12,
-                  }}
-                >
-                  {svgDownloadHref && (
-                    <a
-                      href={svgDownloadHref}
-                      download={
-                        "quote-" + quote.quote_no + "-layout.svg"
-                      }
-                      style={{
-                        display: "inline-block",
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                        border: "1px solid #c7d2fe",
-                        background: "#eef2ff",
-                        color: "#1d4ed8",
-                        textDecoration: "none",
-                        fontWeight: 500,
-                      }}
-                    >
-                      Download SVG
-                    </a>
-                  )}
-                  {dxfDownloadHref && (
-                    <a
-                      href={dxfDownloadHref}
-                      download={
-                        "quote-" + quote.quote_no + "-layout.dxf"
-                      }
-                      style={{
-                        display: "inline-block",
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                        border: "1px solid #d1d5db",
-                        background: "#f9fafb",
-                        color: "#374151",
-                        textDecoration: "none",
-                        fontWeight: 500,
-                      }}
-                    >
-                      Download DXF
-                    </a>
-                  )}
-                  {stepDownloadHref && (
-                    <a
-                      href={stepDownloadHref}
-                      download={
-                        "quote-" + quote.quote_no + "-layout.step"
-                      }
-                      style={{
-                        display: "inline-block",
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                        border: "1px solid #d1d5db",
-                        background: "#f9fafb",
-                        color: "#374151",
-                        textDecoration: "none",
-                        fontWeight: 500,
-                      }}
-                    >
-                      Download STEP
-                    </a>
-                  )}
-                </div>
 
                 <div
                   style={{
