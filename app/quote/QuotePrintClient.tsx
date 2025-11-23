@@ -1,899 +1,944 @@
-// app/quote/QuotePrintClient.tsx
+// app/api/ai/orchestrate/route.ts
 //
-// Client component that:
-//  - Reads quote_no from the URL
-//  - Calls /api/quote/print to fetch data
-//  - Renders the full print view for the client:
-//
-// Header:
-//   - Quote number, customer info, status
-//   - Print, Forward to sales, Schedule a call buttons
-//
-// Body:
-//   - Quote overview (specs from primary line item)
-//   - Line items table
-//   - Foam layout package summary + inline SVG preview
-//
-// Important:
-//   - No SVG/DXF/STEP download links here (client shouldn’t be able to download CAD files).
-//   - Layout file downloads can be added later on an internal/admin-only page.
+// PATH-A SAFE VERSION
+// - Hybrid regex + LLM parser
+// - Cavity durability + DIA normalization
+// - DB enrichment for material
+// - Quote calc via /api/quotes/calc
+// - Quote template rendering with missing-specs list
+// - Stable quoteNumber per thread
+// - Always store quote header when we have dims + qty + quoteNumber,
+//   and only store line items once material_id is known.
+// - Also load + save facts under quote_no so sketch auto-quote
+//   data (dims/qty/cavities/material) is available on follow-up emails.
+// - Dynamic price-break generation for multiple quantities (and stored into facts).
 
-"use client";
+import { NextRequest, NextResponse } from "next/server";
+import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
+import { one } from "@/lib/db";
+import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 
-import * as React from "react";
-import { useSearchParams } from "next/navigation";
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-type QuoteRow = {
-  id: number;
-  quote_no: string;
-  customer_name: string;
-  email: string | null;
-  phone: string | null;
-  status: string;
-  created_at: string;
+/* ============================================================
+   Types & small helpers
+   ============================================================ */
+
+type In = {
+  mode?: string;
+  toEmail?: string;
+  subject?: string;
+  text?: string;
+  threadId?: string | number;
+  threadMsgs?: any[];
+  dryRun?: boolean;
 };
 
-type ItemRow = {
-  id: number;
-  quote_id: number;
-  length_in: string;
-  width_in: string;
-  height_in: string;
-  qty: number;
-  material_id: number;
-  material_name: string | null;
-  price_unit_usd: string | null;
-  price_total_usd: string | null;
-};
+type Mem = Record<string, any>;
 
-type LayoutPkgRow = {
-  id: number;
-  quote_id: number;
-  layout_json: any;
-  notes: string | null;
-  svg_text: string | null;
-  dxf_text: string | null;
-  step_text: string | null;
-  created_at: string;
-};
-
-type ApiOk = {
-  ok: true;
-  quote: QuoteRow;
-  items: ItemRow[];
-  layoutPkg: LayoutPkgRow | null;
-};
-
-type ApiErr = {
-  ok: false;
-  error: string;
-  message: string;
-};
-
-type ApiResponse = ApiOk | ApiErr;
-
-function parsePriceField(
-  raw: string | number | null | undefined,
-): number | null {
-  if (raw == null) return null;
-  const n = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(n)) return null;
-  return n;
+function ok(extra: Record<string, any> = {}) {
+  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
 }
 
-function formatUsd(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
+function err(error: string, detail?: any) {
+  return NextResponse.json({ ok: false, error, detail }, { status: 200 });
+}
+
+function compact<T extends Record<string, any>>(obj: T): T {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v === undefined || v === null) continue;
+    if (typeof v === "string" && v.trim() === "") continue;
+    out[k] = v;
+  }
+  return out as T;
+}
+
+function mergeFacts(a: Mem, b: Mem): Mem {
+  return { ...(a || {}), ...compact(b || {}) };
+}
+
+function pickThreadContext(threadMsgs: any[] = []): string {
+  const take = threadMsgs.slice(-3);
+  const snippets = take
+    .map((m) => {
+      const from = m?.from?.email || m?.from?.name || "Customer";
+      const txt = (m?.text || "").trim();
+      if (!txt) return "";
+      return `${from}: ${txt}`;
+    })
+    .filter(Boolean);
+  return snippets.join("\n\n");
+}
+
+// Detect Q-AI-* style quote numbers in subject/body so we can
+// pull sketch facts that were stored under quote_no.
+function extractQuoteNo(text: string): string | null {
+  if (!text) return null;
+  const m = text.match(/Q-[A-Z]+-\d{8}-\d{6}/i);
+  return m ? m[0] : null;
+}
+
+/* ============================================================
+   Cavity normalization
+   ============================================================ */
+
+function normalizeCavity(raw: string): string {
+  if (!raw) return "";
+  let s = raw.trim();
+
+  // DIA -> Ø
+  s = s.replace(/\bdia\b/gi, "Ø").replace(/diameter/gi, "Ø");
+
+  // Kill quotes, collapse spaces
+  s = s.replace(/"/g, "").replace(/\s+/g, " ").trim();
+
+  // Pattern: Ø6 x 1  -> Ø6x1
+  const mCircle = s.match(/Ø\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
+  if (mCircle) {
+    return `Ø${mCircle[1]}x${mCircle[2]}`;
+  }
+
+  // Generic rectangle: 3 x 2 x 1 -> 3x2x1
+  const rect = s
+    .toLowerCase()
+    .replace(/×/g, "x")
+    .replace(/[^0-9.xØ]/g, "")
+    .replace(/x+/g, "x");
+  return rect || raw.trim();
+}
+
+function applyCavityNormalization(facts: Mem): Mem {
+  if (!facts) return facts;
+  if (!Array.isArray(facts.cavityDims)) return facts;
+  facts.cavityDims = facts.cavityDims
+    .map((c: string) => normalizeCavity(c))
+    .filter((x: string) => x && x.trim());
+  return facts;
+}
+
+/* ============================================================
+   DB enrichment
+   ============================================================ */
+
+async function enrichFromDB(f: Mem): Promise<Mem> {
   try {
-    return value.toLocaleString("en-US", {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    if (!f.material) return f;
+
+    const like = `%${String(f.material).toLowerCase()}%`;
+    const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
+
+    const row = await one<any>(
+      `
+      SELECT
+        id,
+        name,
+        density_lb_ft3,
+        kerf_waste_pct AS kerf_pct,
+        min_charge_usd AS min_charge
+      FROM materials
+      WHERE active = true
+        AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
+      ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $2)
+      LIMIT 1;
+      `,
+      [like, densNum]
+    );
+
+    if (row) {
+      if (!f.material_id) f.material_id = row.id;
+      if (!f.material_name) f.material_name = row.name;
+      if (!f.density && row.density_lb_ft3 != null) {
+        f.density = `${row.density_lb_ft3}lb`;
+      }
+      if (f.kerf_pct == null && row.kerf_pct != null) f.kerf_pct = row.kerf_pct;
+      if (f.min_charge == null && row.min_charge != null) f.min_charge = row.min_charge;
+    }
+
+    return f;
   } catch {
-    return `$${value.toFixed(2)}`;
+    return f;
   }
 }
 
-export default function QuotePrintClient() {
-  const searchParams = useSearchParams();
+/* ============================================================
+   Dimension / density helpers
+   ============================================================ */
 
-  const initialQuoteNo = searchParams?.get("quote_no") || "";
-  const [quoteNo, setQuoteNo] = React.useState<string>(initialQuoteNo);
+const NUM = "\\d{1,4}(?:\\.\\d+)?";
 
-  const [loading, setLoading] = React.useState<boolean>(
-    !!(initialQuoteNo || quoteNo),
+function normDims(raw: string | undefined | null): string | undefined {
+  if (!raw) return undefined;
+  const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
+  const m = t.match(
+    new RegExp(
+      `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
+      "i"
+    )
   );
-  const [error, setError] = React.useState<string | null>(null);
-  const [notFound, setNotFound] = React.useState<string | null>(null);
-  const [quote, setQuote] = React.useState<QuoteRow | null>(null);
-  const [items, setItems] = React.useState<ItemRow[]>([]);
-  const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(
-    null,
+  if (!m) return undefined;
+  return `${m[1]}x${m[2]}x${m[3]}`;
+}
+
+function parseDimsNums(dims: string | null | undefined) {
+  const d = (dims || "").split("x").map(Number);
+  return {
+    L: d[0] || 0,
+    W: d[1] || 0,
+    H: d[2] || 0,
+  };
+}
+
+function densityToPcf(density: string | null | undefined) {
+  const m = String(density || "").match(/(\d+(\.\d+)?)/);
+  return m ? Number(m[1]) : null;
+}
+
+function specsCompleteForQuote(s: {
+  dims: string | null;
+  qty: number | string | null;
+  material_id: number | null;
+}) {
+  return !!(s.dims && s.qty && s.material_id);
+}
+
+/* ============================================================
+   Quote calc via internal API
+   ============================================================ */
+
+async function fetchCalcQuote(opts: {
+  dims: string;
+  qty: number;
+  material_id: number;
+  cavities: string[];
+  round_to_bf: boolean;
+}) {
+  const { L, W, H } = parseDimsNums(opts.dims);
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+
+  const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      length_in: L,
+      width_in: W,
+      height_in: H,
+      material_id: opts.material_id,
+      qty: opts.qty,
+      cavities: opts.cavities,
+      round_to_bf: opts.round_to_bf,
+    }),
+  });
+
+  const j = await r.json().catch(() => ({} as any));
+  if (!r.ok || !j.ok) return null;
+  return j.result;
+}
+
+// Dynamic price breaks
+type PriceBreak = {
+  qty: number;
+  total: number;
+  piece: number | null;
+  used_min_charge?: boolean | null;
+};
+
+async function buildPriceBreaks(
+  baseOpts: {
+    dims: string;
+    qty: number;
+    material_id: number;
+    cavities: string[];
+    round_to_bf: boolean;
+  },
+  baseCalc: any
+): Promise<PriceBreak[] | null> {
+  const baseQty = baseOpts.qty;
+  if (!baseQty || baseQty <= 0) return null;
+
+  const factors = [1, 2, 3, 5, 10];
+  const seen = new Set<number>();
+  const out: PriceBreak[] = [];
+
+  for (const f of factors) {
+    const q = Math.round(baseQty * f);
+    if (!q || q <= 0 || seen.has(q)) continue;
+    seen.add(q);
+
+    let calc = baseCalc;
+    if (f !== 1) {
+      calc = await fetchCalcQuote({
+        ...baseOpts,
+        qty: q,
+      });
+      if (!calc) continue;
+    }
+
+    const total =
+      (calc.price_total ??
+        calc.total ??
+        calc.order_total ??
+        0) as number;
+    const piece = total && q > 0 ? total / q : null;
+
+    out.push({
+      qty: q,
+      total,
+      piece,
+      used_min_charge: (calc.min_charge_applied ?? null) as boolean | null,
+    });
+  }
+
+  return out.length ? out : null;
+}
+
+/* ============================================================
+   Regex-based parsing helpers
+   ============================================================ */
+
+function grabDims(raw: string): string | undefined {
+  const text = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
+  const m =
+    text.match(
+      new RegExp(
+        `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
+        "i"
+      )
+    ) ||
+    text.match(
+      new RegExp(
+        `\\b(?:size|dimensions?|dims?)\\s*[:\\-]?\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\b`,
+        "i"
+      )
+    );
+
+  if (!m) return undefined;
+  return `${m[1]}x${m[2]}x${m[3]}`;
+}
+
+function grabQty(raw: string): number | undefined {
+  const t = raw.toLowerCase();
+
+  let m =
+    t.match(/\bqty\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
+    t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
+    t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
+    t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
+
+  if (m) return Number(m[1]);
+
+  const norm = t.replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/g, "$1 ");
+  m = norm.match(
+    new RegExp(
+      `\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?))?\\b`,
+      "i"
+    )
   );
+  if (m) return Number(m[1]);
 
-  // Ref to the SVG preview container so we can scale/center the inner <svg>
-  const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
+  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?)?\b/);
+  if (m) return Number(m[1]);
 
-  // Print handler for the button
-  const handlePrint = React.useCallback(() => {
-    if (typeof window !== "undefined") {
-      window.print();
+  return undefined;
+}
+
+function grabDensity(raw: string): string | undefined {
+  const t = raw.toLowerCase();
+  const m =
+    t.match(/(\d+(\.\d+)?)\s*(?:pcf|lb\/?ft3?|pound(?:s)?\s*per\s*cubic\s*foot)/) ||
+    t.match(/(\d+(\.\d+)?)\s*#\s*(?:foam)?\b/);
+  if (!m) return undefined;
+  return `${m[1]}#`;
+}
+
+function grabMaterial(raw: string): string | undefined {
+  const t = raw.toLowerCase();
+  const materials = [
+    "polyethylene",
+    "pe",
+    "epe",
+    "xlpe",
+    "polyurethane",
+    "urethane",
+    "pu",
+    "kaizen",
+    "pp",
+    "polystyrene",
+    "eps",
+  ];
+
+  for (const name of materials) {
+    if (t.includes(name)) return name;
+  }
+  return undefined;
+}
+
+function extractCavities(raw: string): {
+  cavityCount?: number;
+  cavityDims?: string[];
+} {
+  const t = raw.toLowerCase();
+  const lines = raw.split(/\r?\n/);
+  const cavityDims: string[] = [];
+  let cavityCount: number | undefined;
+
+  const mCount =
+    t.match(/\b(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/) ||
+    t.match(/\btotal\s+of\s+(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/);
+  if (mCount) {
+    cavityCount = Number(mCount[1]);
+  }
+
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    if (!/\bcavity|cavities|cutout|pocket\b/.test(lower)) continue;
+
+    const tokens = line.split(/[;,]/);
+    for (const tok of tokens) {
+      const dd = grabDims(tok);
+      if (dd) {
+        cavityDims.push(dd);
+        continue;
+      }
+      const mPair = tok.trim().match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`));
+      if (mPair) cavityDims.push(`${mPair[1]}x${mPair[2]}`);
     }
-  }, []);
+  }
 
-  // Forward-to-sales handler (mailto with quote number + link)
-  const handleForwardToSales = React.useCallback(() => {
-    if (typeof window === "undefined" || !quoteNo) return;
+  return { cavityCount, cavityDims: cavityDims.length ? cavityDims : undefined };
+}
 
-    const salesEmail =
-      (process.env.NEXT_PUBLIC_SALES_FORWARD_TO as string | undefined) ||
-      "sales@example.com";
+/* ============================================================
+   Initial fact extraction from subject + body
+   ============================================================ */
 
-    const subject = "Quote " + quoteNo;
-    const bodyLines = [
-      "Quote number: " + quoteNo,
-      "",
-      "View this quote:",
-      window.location.href,
-      "",
-    ];
-    const body = encodeURIComponent(bodyLines.join("\n"));
+function extractAllFromTextAndSubject(body: string, subject: string): Mem {
+  const text = `${subject}\n\n${body || ""}`;
+  const facts: Mem = {};
 
-    const mailto =
-      "mailto:" +
-      encodeURIComponent(salesEmail) +
-      "?subject=" +
-      encodeURIComponent(subject) +
-      "&body=" +
-      body;
+  const dims = grabDims(text);
+  if (dims) facts.dims = normDims(dims) || dims;
 
-    window.location.href = mailto;
-  }, [quoteNo]);
+  const qty = grabQty(text);
+  if (qty) facts.qty = qty;
 
-  // Schedule call handler (opens Calendly or similar)
-  const handleScheduleCall = React.useCallback(() => {
-    if (typeof window === "undefined") return;
+  const density = grabDensity(text);
+  if (density) facts.density = density;
 
-    // TODO: replace this with your real Calendly link
-    const url =
-      (process.env.NEXT_PUBLIC_SCHEDULE_CALL_URL as string | undefined) ||
-      "https://calendly.com/your-company/30min";
+  const material = grabMaterial(text);
+  if (material) facts.material = material;
 
-    window.open(url, "_blank", "noopener,noreferrer");
-  }, []);
+  const { cavityCount, cavityDims } = extractCavities(text);
+  if (cavityCount != null) facts.cavityCount = cavityCount;
+  if (cavityDims && cavityDims.length) facts.cavityDims = cavityDims;
 
-  // Rescue: if we still do not have quoteNo from router, read window.location
-  React.useEffect(() => {
-    if (quoteNo) return;
-    if (typeof window === "undefined") return;
+  const mEmail = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  if (mEmail) facts.customerEmail = mEmail[0];
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const fromWindow = urlParams.get("quote_no") || "";
+  return compact(facts);
+}
 
-    if (fromWindow) {
-      setQuoteNo(fromWindow);
-    } else {
-      setLoading(false);
+/* ============================================================
+   LLM helpers (facts + opener)
+   ============================================================ */
+
+async function aiParseFacts(
+  model: string,
+  body: string,
+  subject: string
+): Promise<Mem> {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) return {};
+  if (!body && !subject) return {};
+  try {
+    const prompt = `
+Extract foam quote facts.
+Return JSON only.
+
+Valid keys:
+- dims: string like "12x10x2"
+- qty: integer
+- material: string
+- density: string like "1.7#"
+- cavityCount: integer
+- cavityDims: array of strings
+
+Subject:
+${subject}
+
+Body:
+${body}
+    `.trim();
+
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: prompt,
+        max_output_tokens: 256,
+        temperature: 0.1,
+      }),
+    });
+
+    const raw = await r.text();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end === -1) return {};
+
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    const out: Mem = {};
+
+    if (parsed.dims) out.dims = normDims(parsed.dims) || parsed.dims;
+    if (parsed.qty) out.qty = parsed.qty;
+    if (parsed.material) out.material = parsed.material;
+    if (parsed.density) out.density = parsed.density;
+    if (parsed.cavityCount != null) out.cavityCount = parsed.cavityCount;
+    if (Array.isArray(parsed.cavityDims)) {
+      out.cavityDims = parsed.cavityDims.map((x: string) =>
+        normalizeCavity(normDims(x) || x)
+      );
     }
-  }, [quoteNo]);
 
-  // Fetch quote data when quoteNo is known
-  React.useEffect(() => {
-    if (!quoteNo) return;
+    return compact(out);
+  } catch {
+    return {};
+  }
+}
 
-    let cancelled = false;
+/* ============================================================
+   LLM opener
+   ============================================================ */
 
-    async function load() {
-      setLoading(true);
-      setError(null);
-      setNotFound(null);
-      setQuote(null);
-      setItems([]);
-      setLayoutPkg(null);
+const HUMAN_OPENERS = [
+  "Appreciate the details—once we lock a few specs I’ll price this out.",
+  "Thanks for sending this—happy to quote it as soon as I confirm a couple items.",
+  "Got it—let me confirm a few specs and I’ll run pricing.",
+  "Thanks for the info—if I can fill a couple gaps I’ll send numbers right away.",
+];
 
-      try {
-        const res = await fetch(
-          "/api/quote/print?quote_no=" + encodeURIComponent(quoteNo),
-          { cache: "no-store" },
+function chooseOpener(seed: string) {
+  if (!seed) return HUMAN_OPENERS[0];
+  let h = 2166136261 >>> 0;
+  for (const c of seed) {
+    h ^= c.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  return HUMAN_OPENERS[h % HUMAN_OPENERS.length];
+}
+
+async function aiOpener(
+  model: string,
+  lastInbound: string,
+  context: string
+): Promise<string | null> {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) return null;
+  try {
+    const prompt = `
+Write ONE friendly sentence acknowledging the message and saying you'll price it after confirming a couple specs.
+No bullets.
+
+Context:
+${context}
+
+Last inbound:
+${lastInbound}
+    `.trim();
+
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: prompt,
+        max_output_tokens: 80,
+        temperature: 0.4,
+      }),
+    });
+
+    const j = await r.json().catch(() => ({} as any));
+    const txt: string =
+      j.output?.[0]?.content?.[0]?.text ??
+      j.output_text ??
+      j.choices?.[0]?.message?.content ??
+      "";
+    const clean = String(txt || "").replace(/\s+/g, " ").trim();
+    return clean || null;
+  } catch {
+    return null;
+  }
+}
+
+/* ============================================================
+   MAIN HANDLER
+   ============================================================ */
+
+export async function POST(req: NextRequest) {
+  try {
+    const p = (await req.json().catch(() => ({}))) as In;
+    const mode = String(p.mode || "ai");
+
+    if (mode !== "ai") {
+      return err("unsupported_mode", { mode });
+    }
+
+    const lastText = String(p.text || "");
+    const subject = String(p.subject || "");
+    const providedThreadId = String(p.threadId || "").trim();
+
+    const threadKey =
+      providedThreadId ||
+      (subject ? `sub:${subject.toLowerCase().replace(/\s+/g, " ")}` : "");
+
+    const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
+    const dryRun = !!p.dryRun;
+
+    // See if we can detect a quote_no in the subject so we can
+    // pull sketch facts stored under that key.
+    const subjectQuoteNo = extractQuoteNo(subject);
+
+    /* ------------------- Parse new turn ------------------- */
+
+    let newly = extractAllFromTextAndSubject(lastText, subject);
+
+    const needsLLM =
+      !newly.dims ||
+      !newly.qty ||
+      !newly.material ||
+      !newly.density ||
+      (newly.cavityCount && (!newly.cavityDims || newly.cavityDims.length === 0));
+
+    if (needsLLM) {
+      const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
+      newly = mergeFacts(newly, llmFacts);
+    }
+
+    /* ------------------- Merge with memory ------------------- */
+
+    let loadedThread: Mem = {};
+    let loadedQuote: Mem = {};
+
+    if (threadKey) {
+      loadedThread = await loadFacts(threadKey);
+    }
+    if (subjectQuoteNo) {
+      loadedQuote = await loadFacts(subjectQuoteNo);
+    }
+
+    // Merge order: sketch / quote-level facts first, then thread-level,
+    // then the newest email facts overwrite.
+    let merged = mergeFacts(mergeFacts(loadedQuote, loadedThread), newly);
+
+    merged = applyCavityNormalization(merged);
+    merged.__turnCount = (merged.__turnCount || 0) + 1;
+
+    // If sketch facts indicated fromSketch, normalize to a string flag
+    // so the template can show the "from sketch" note.
+    if (merged.fromSketch && !merged.from) {
+      merged.from = "sketch-auto-quote";
+    }
+
+    // Stable quote number per thread
+    if (!merged.quoteNumber && !merged.quote_no) {
+      const now = new Date();
+      const yyyy = now.getUTCFullYear();
+      const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(now.getUTCDate()).padStart(2, "0");
+      const hh = String(now.getUTCHours()).padStart(2, "0");
+      const mi = String(now.getUTCMinutes()).padStart(2, "0");
+      const ss = String(now.getUTCSeconds()).padStart(2, "0");
+      const autoNo = `Q-AI-${yyyy}${mm}${dd}-${hh}${mi}${ss}`;
+      merged.quoteNumber = autoNo;
+      merged.quote_no = autoNo;
+    } else if (!merged.quoteNumber && merged.quote_no) {
+      merged.quoteNumber = merged.quote_no;
+    }
+
+    // If subject contained a quote number and merged doesn't have one yet,
+    // adopt it so we stay aligned with sketch/apply.
+    if (subjectQuoteNo && !merged.quote_no) {
+      merged.quote_no = subjectQuoteNo;
+      merged.quoteNumber = subjectQuoteNo;
+    }
+
+    /* ------------------- DB enrichment ------------------- */
+
+    merged = await enrichFromDB(merged);
+
+    // Save early baseline facts (pre-pricing) under keys
+    if (threadKey) await saveFacts(threadKey, merged);
+    if (merged.quote_no) await saveFacts(merged.quote_no, merged);
+
+    /* ------------------- LLM opener ------------------- */
+
+    const context = pickThreadContext(threadMsgs);
+    const opener =
+      (await aiOpener("gpt-4.1-mini", lastText, context)) ||
+      chooseOpener(threadKey || subject || "default");
+
+    /* ------------------- Specs for template ------------------- */
+
+    const specs = {
+      dims: merged.dims || null,
+      qty: merged.qty || null,
+      material: merged.material || null,
+      density: merged.density || null,
+      cavityCount: merged.cavityCount ?? null,
+      cavityDims: merged.cavityDims || [],
+      material_id: merged.material_id || null,
+    };
+
+    /* ------------------- Pricing & price breaks ------------------- */
+
+    const canCalc = specsCompleteForQuote({
+      dims: specs.dims,
+      qty: specs.qty,
+      material_id: specs.material_id,
+    });
+
+    let calc: any = null;
+    let priceBreaks: PriceBreak[] | null = null;
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+
+    if (canCalc) {
+      calc = await fetchCalcQuote({
+        dims: specs.dims as string,
+        qty: Number(specs.qty),
+        material_id: Number(specs.material_id),
+        cavities: specs.cavityDims,
+        round_to_bf: false,
+      });
+
+      if (calc && !dryRun) {
+        priceBreaks = await buildPriceBreaks(
+          {
+            dims: specs.dims as string,
+            qty: Number(specs.qty),
+            material_id: Number(specs.material_id),
+            cavities: specs.cavityDims,
+            round_to_bf: false,
+          },
+          calc
         );
-
-        const json = (await res.json()) as ApiResponse;
-
-        if (!res.ok) {
-          if (!cancelled) {
-            if (!json.ok && json.error === "NOT_FOUND") {
-              setNotFound(json.message || "Quote not found.");
-            } else if (!json.ok) {
-              setError(json.message || "There was a problem loading this quote.");
-            } else {
-              setError("There was a problem loading this quote.");
-            }
-          }
-          return;
-        }
-
-        if (!cancelled) {
-          if (json.ok) {
-            setQuote(json.quote);
-            setItems(json.items || []);
-            setLayoutPkg(json.layoutPkg || null);
-          } else {
-            setError("Unexpected response from quote API.");
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching /api/quote/print:", err);
-        if (!cancelled) {
-          setError(
-            "There was an unexpected problem loading this quote. Please try again.",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
       }
     }
 
-    load();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [quoteNo]);
-
-  const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
-
-  const subtotal = items.reduce((sum, i) => {
-    const lineTotal = parsePriceField(i.price_total_usd) ?? 0;
-    return sum + lineTotal;
-  }, 0);
-
-  const anyPricing = subtotal > 0;
-
-  const notesPreview =
-    layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
-      ? layoutPkg.notes.trim().length > 140
-        ? layoutPkg.notes.trim().slice(0, 140) + "..."
-        : layoutPkg.notes.trim()
-      : null;
-
-  // After the SVG is injected, scale and center it inside the preview box
-  React.useEffect(() => {
-    if (!layoutPkg) return;
-    if (!svgContainerRef.current) return;
-
-    const svgEl = svgContainerRef.current.querySelector("svg") as
-      | SVGSVGElement
-      | null;
-
-    if (!svgEl) return;
-
-    try {
-      // Remove hard-coded width/height so viewBox controls scaling
-      svgEl.removeAttribute("width");
-      svgEl.removeAttribute("height");
-
-      // Make it fill the preview area but keep aspect ratio
-      svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
-
-      svgEl.style.width = "100%";
-      svgEl.style.height = "100%";
-      svgEl.style.display = "block";
-      svgEl.style.margin = "0 auto";
-    } catch (e) {
-      console.warn("Could not normalize SVG preview:", e);
+    // Store price_breaks into facts so future turns see the same structure
+    if (priceBreaks && priceBreaks.length) {
+      merged.price_breaks = priceBreaks;
     }
-  }, [layoutPkg]);
 
-  const primaryItem = items[0] || null;
+    const hasDimsQty = !!(specs.dims && specs.qty);
 
-  // ===================== RENDER =====================
-  return (
-    <div
-      style={{
-        fontFamily:
-          "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        background: "#f3f4f6",
-        minHeight: "100vh",
-        padding: "24px",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: "800px",
-          margin: "0 auto",
-          background: "#ffffff",
-          borderRadius: "16px",
-          padding: "24px 24px 32px 24px",
-          boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
-        }}
-      >
-        {/* No quote number at all */}
-        {!quoteNo && !loading && (
-          <>
-            <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
-            <p style={{ color: "#555" }}>
-              We could not find a quote number in this link. Please double-check
-              the URL or open the quote directly from your inbox.
-            </p>
-          </>
-        )}
+    // Header: store whenever we have dims + qty + quoteNumber
+    let quoteId = merged.quote_id;
+    if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
+      try {
+        const customerName =
+          merged.customerName ||
+          merged.customer_name ||
+          merged.name ||
+          "Customer";
+        const customerEmail =
+          merged.customerEmail ||
+          merged.email ||
+          null;
+        const phone = merged.phone || null;
+        const status = merged.status || "draft";
 
-        {/* Loading */}
-        {loading && (
-          <>
-            <h1 style={{ fontSize: 20, marginBottom: 8 }}>Loading quote...</h1>
-            <p style={{ color: "#6b7280", fontSize: 13 }}>
-              Please wait while we load the latest version of this quote.
-            </p>
-          </>
-        )}
+        const headerRes = await fetch(`${base}/api/quotes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            quote_no: String(merged.quoteNumber),
+            customer_name: String(customerName),
+            email: customerEmail,
+            phone,
+            status,
+          }),
+        });
 
-        {/* Not found from API */}
-        {!loading && notFound && (
-          <>
-            <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
-            <p style={{ color: "#555" }}>
-              {notFound}{" "}
-              {quoteNo ? (
-                <>
-                  (quote number: <code>{quoteNo}</code>)
-                </>
-              ) : null}
-            </p>
-          </>
-        )}
+        const headerJson = await headerRes.json().catch(() => ({} as any));
+        if (headerRes.ok && headerJson?.ok && headerJson.quote?.id) {
+          quoteId = headerJson.quote.id;
+          merged.quote_id = quoteId;
+          merged.status = headerJson.quote.status || merged.status;
 
-        {/* Hard error */}
-        {!loading && error && !quote && (
-          <>
-            <h1 style={{ fontSize: 20, marginBottom: 8 }}>
-              Problem loading quote
-            </h1>
-            {quoteNo && (
-              <p style={{ color: "#555", marginBottom: 6 }}>
-                Quote number: <code>{quoteNo}</code>
-              </p>
-            )}
-            <p style={{ color: "#6b7280", fontSize: 13 }}>{error}</p>
-          </>
-        )}
+          if (threadKey) await saveFacts(threadKey, merged);
+          if (merged.quote_no) await saveFacts(merged.quote_no, merged);
+        }
+      } catch (err) {
+        console.error("quote header store error:", err);
+      }
+    }
 
-        {/* Happy path */}
-        {!loading && quote && (
-          <>
-            {/* HEADER: quote info + actions */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginBottom: 16,
-              }}
-            >
-              <div>
-                <h1 style={{ margin: 0, fontSize: 22 }}>
-                  Quote #{quote.quote_no}
-                </h1>
-                <p
-                  style={{
-                    margin: "4px 0 0 0",
-                    color: "#4b5563",
-                  }}
-                >
-                  {quote.customer_name}
-                  {quote.email ? <> • {quote.email}</> : null}
-                  {quote.phone ? <> • {quote.phone}</> : null}
-                </p>
-                <p
-                  style={{
-                    margin: "4px 0 0 0",
-                    color: "#6b7280",
-                    fontSize: 12,
-                  }}
-                >
-                  Created: {new Date(quote.created_at).toLocaleString()}
-                </p>
-              </div>
-              <div
-                style={{
-                  textAlign: "right",
-                  fontSize: 12,
-                  color: "#6b7280",
-                }}
-              >
-                <div
-                  style={{
-                    display: "inline-block",
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    background:
-                      quote.status === "sent"
-                        ? "#d1fae5"
-                        : quote.status === "accepted"
-                        ? "#bfdbfe"
-                        : "#e5e7eb",
-                    color:
-                      quote.status === "sent"
-                        ? "#065f46"
-                        : quote.status === "accepted"
-                        ? "#1d4ed8"
-                        : "#374151",
-                  }}
-                >
-                  {quote.status.toUpperCase()}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    marginTop: 8,
-                    justifyContent: "flex-end",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={handlePrint}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      border: "1px solid #d1d5db",
-                      background: "#f9fafb",
-                      color: "#111827",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Print this quote
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleForwardToSales}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      border: "1px solid #bfdbfe",
-                      background: "#eff6ff",
-                      color: "#1d4ed8",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Forward to sales
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleScheduleCall}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      border: "1px solid #1d4ed8",
-                      background: "#1d4ed8",
-                      color: "#ffffff",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Schedule a call
-                  </button>
-                </div>
-              </div>
-            </div>
+    // Primary item: only when we have material_id, and only once.
+    // NEW: also store price_total_usd + price_unit_usd from calc
+    if (
+      !dryRun &&
+      quoteId &&
+      canCalc &&
+      specs.material_id &&
+      !merged.__primary_item_created
+    ) {
+      try {
+        const { L, W, H } = parseDimsNums(specs.dims);
+        const qtyNumForItem = Number(specs.qty) || 0;
+        const totalFromCalc =
+          typeof calc?.total === "number" ? calc.total : 0;
+        const unitFromCalc =
+          qtyNumForItem > 0 ? totalFromCalc / qtyNumForItem : 0;
 
-            <hr
-              style={{
-                border: "none",
-                borderTop: "1px solid #e5e7eb",
-                margin: "16px 0",
-              }}
-            />
+        const itemBody: any = {
+          length_in: L,
+          width_in: W,
+          height_in: H,
+          material_id: Number(specs.material_id),
+          qty: qtyNumForItem,
+          // pricing fields for /quote page
+          price_total_usd: totalFromCalc,
+          price_unit_usd: unitFromCalc,
+        };
 
-            {/* QUOTE OVERVIEW (specs from primary line) */}
-            {primaryItem && (
-              <div
-                style={{
-                  marginBottom: 16,
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #e5e7eb",
-                  background: "#f9fafb",
-                  fontSize: 13,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#111827",
-                    marginBottom: 4,
-                  }}
-                >
-                  Quote overview
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 16,
-                    color: "#374151",
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.04em",
-                        color: "#6b7280",
-                        marginBottom: 2,
-                      }}
-                    >
-                      Dimensions
-                    </div>
-                    <div>
-                      {primaryItem.length_in} × {primaryItem.width_in} ×{" "}
-                      {primaryItem.height_in} in
-                    </div>
-                  </div>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.04em",
-                        color: "#6b7280",
-                        marginBottom: 2,
-                      }}
-                    >
-                      Quantity
-                    </div>
-                    <div>{primaryItem.qty.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.04em",
-                        color: "#6b7280",
-                        marginBottom: 2,
-                      }}
-                    >
-                      Material
-                    </div>
-                    <div>
-                      {primaryItem.material_name ||
-                        `Material #${primaryItem.material_id}`}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+        await fetch(`${base}/api/quotes/${quoteId}/items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(itemBody),
+        });
 
-            {/* LINE ITEMS */}
-            <h2 style={{ fontSize: 16, marginBottom: 8 }}>Line items</h2>
+        merged.__primary_item_created = true;
+        if (threadKey) await saveFacts(threadKey, merged);
+        if (merged.quote_no) await saveFacts(merged.quote_no, merged);
+      } catch (err) {
+        console.error("quote item store error:", err);
+      }
+    }
 
-            {items.length === 0 ? (
-              <p style={{ color: "#6b7280" }}>
-                No line items stored for this quote yet. Once the material and
-                details are finalized, the primary line will appear here.
-              </p>
-            ) : (
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: 13,
-                  marginBottom: 16,
-                }}
-              >
-                <thead>
-                  <tr style={{ background: "#eff6ff" }}>
-                    <th
-                      style={{
-                        textAlign: "left",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Item
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "left",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Dimensions (L × W × H)
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Qty
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Unit price
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Line total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item, idx) => {
-                    const dims =
-                      item.length_in +
-                      " × " +
-                      item.width_in +
-                      " × " +
-                      item.height_in;
-                    const label =
-                      item.material_name || "Material #" + item.material_id;
-                    const unit = parsePriceField(item.price_unit_usd);
-                    const total = parsePriceField(item.price_total_usd);
-                    return (
-                      <tr key={item.id}>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                          }}
-                        >
-                          <div style={{ fontWeight: 500 }}>
-                            Line {idx + 1}
-                          </div>
-                          <div style={{ color: "#6b7280" }}>{label}</div>
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                          }}
-                        >
-                          {dims}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                            textAlign: "right",
-                          }}
-                        >
-                          {item.qty}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                            textAlign: "right",
-                          }}
-                        >
-                          {formatUsd(unit)}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                            textAlign: "right",
-                          }}
-                        >
-                          {formatUsd(total)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
+    /* ------------------- Build email template ------------------- */
 
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                marginTop: 8,
-              }}
-            >
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  Total quantity
-                </div>
-                <div style={{ fontSize: 18, fontWeight: 600 }}>
-                  {overallQty}
-                </div>
-                {anyPricing && (
-                  <>
-                    <div
-                      style={{
-                        marginTop: 4,
-                        fontSize: 12,
-                        color: "#6b7280",
-                      }}
-                    >
-                      Estimated subtotal
-                    </div>
-                    <div style={{ fontSize: 16, fontWeight: 600 }}>
-                      {formatUsd(subtotal)}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
+    const dimsNums = parseDimsNums(specs.dims);
+    const densityPcf = densityToPcf(specs.density);
 
-            {/* Foam layout package */}
-            <hr
-              style={{
-                border: "none",
-                borderTop: "1px solid #e5e7eb",
-                margin: "24px 0 16px 0",
-              }}
-            />
-            <h2 style={{ fontSize: 16, marginBottom: 8 }}>
-              Foam layout package
-            </h2>
+    const templateInput = {
+      customerLine: opener,
+      quoteNumber: merged.quoteNumber || merged.quote_no,
+      status: merged.status || "draft",
+      specs: {
+        L_in: dimsNums.L,
+        W_in: dimsNums.W,
+        H_in: dimsNums.H,
+        qty: specs.qty,
+        density_pcf: densityPcf,
+        foam_family: specs.material,
+        thickness_under_in: merged.thickness_under_in,
+        color: merged.color,
+      },
+      material: {
+        name: merged.material_name,
+        density_lbft3: densityPcf,
+        kerf_pct: merged.kerf_pct,
+        min_charge: merged.min_charge,
+      },
+      pricing: {
+        total: calc?.price_total ?? calc?.total ?? 0,
+        piece_ci: calc?.piece_ci,
+        order_ci: calc?.order_ci,
+        order_ci_with_waste: calc?.order_ci_with_waste,
+        used_min_charge: calc?.min_charge_applied,
+        raw: calc,
+        price_breaks: priceBreaks || undefined,
+      },
+      missing: (() => {
+        const miss: string[] = [];
+        if (!merged.dims) miss.push("Dimensions");
+        if (!merged.qty) miss.push("Quantity");
+        if (!merged.material) miss.push("Material");
+        if (!merged.density) miss.push("Density");
+        if (
+          merged.cavityCount > 0 &&
+          (!merged.cavityDims || merged.cavityDims.length === 0)
+        ) {
+          miss.push("Cavity sizes");
+        }
+        return miss;
+      })(),
+      facts: merged,
+    };
 
-            {!layoutPkg ? (
-              <p style={{ color: "#6b7280", fontSize: 13 }}>
-                No foam layout has been saved for this quote yet. Use the{" "}
-                <strong>Open layout preview</strong> button in the emailed
-                quote to arrange cavities, then click{" "}
-                <strong>Apply to quote</strong> to store the layout here.
-              </p>
-            ) : (
-              <div
-                style={{
-                  borderRadius: 12,
-                  border: "1px solid #e5e7eb",
-                  background: "#f9fafb",
-                  padding: "12px 14px",
-                  fontSize: 13,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: 4,
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontWeight: 600,
-                        color: "#111827",
-                        marginBottom: 2,
-                      }}
-                    >
-                      Layout package #{layoutPkg.id}
-                    </div>
-                    <div
-                      style={{
-                        color: "#6b7280",
-                        fontSize: 12,
-                      }}
-                    >
-                      Saved:{" "}
-                      {new Date(layoutPkg.created_at).toLocaleString()}
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      textAlign: "right",
-                      fontSize: 12,
-                    }}
-                  >
-                    <a
-                      href={
-                        "/quote/layout?quote_no=" +
-                        encodeURIComponent(quote.quote_no)
-                      }
-                      style={{
-                        display: "inline-block",
-                        padding: "4px 10px",
-                        borderRadius: 999,
-                        border: "1px solid #c7d2fe",
-                        background: "#eef2ff",
-                        color: "#1d4ed8",
-                        textDecoration: "none",
-                        fontWeight: 500,
-                      }}
-                    >
-                      Open layout editor
-                    </a>
-                  </div>
-                </div>
+    let htmlBody = "";
+    try {
+      htmlBody = renderQuoteEmail(templateInput);
+    } catch {
+      htmlBody = `<p>${opener}</p>`;
+    }
 
-                {notesPreview && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      color: "#4b5563",
-                      fontSize: 12,
-                    }}
-                  >
-                    <span style={{ fontWeight: 500 }}>Notes: </span>
-                    {notesPreview}
-                  </div>
-                )}
+    const toEmail = p.toEmail || merged.email || merged.customerEmail;
+    if (!toEmail) {
+      return ok({
+        dryRun: true,
+        reason: "missing_toEmail",
+        htmlPreview: htmlBody,
+        specs,
+        calc,
+        facts: merged,
+      });
+    }
 
-                {layoutPkg.svg_text &&
-                  layoutPkg.svg_text.trim().length > 0 && (
-                    <div
-                      style={{
-                        marginTop: 10,
-                        padding: 8,
-                        borderRadius: 10,
-                        border: "1px solid #e5e7eb",
-                        background: "#ffffff",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 500,
-                          color: "#374151",
-                          marginBottom: 6,
-                        }}
-                      >
-                        Layout preview
-                      </div>
-                      <div
-                        ref={svgContainerRef}
-                        style={{
-                          width: "100%",
-                          height: 480, // fixed preview height
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          borderRadius: 8,
-                          border: "1px solid #e5e7eb",
-                          background: "#f3f4f6",
-                          overflow: "hidden", // SVG scales to fit
-                        }}
-                        dangerouslySetInnerHTML={{
-                          __html: layoutPkg.svg_text,
-                        }}
-                      />
-                    </div>
-                  )}
-              </div>
-            )}
+    const inReplyTo = merged.__lastInternetMessageId || undefined;
 
-            <p
-              style={{
-                marginTop: 24,
-                fontSize: 12,
-                color: "#6b7280",
-                lineHeight: 1.5,
-              }}
-            >
-              This print view mirrors the core specs of your emailed quote.
-              Actual charges may differ if specs or quantities change or if
-              additional services are requested.
-            </p>
-          </>
-        )}
-      </div>
-    </div>
-  );
+    if (dryRun) {
+      return ok({
+        mode: "dryrun",
+        htmlPreview: htmlBody,
+        specs,
+        calc,
+        facts: merged,
+      });
+    }
+
+    const sendUrl = `${base}/api/msgraph/send`;
+
+    const r = await fetch(sendUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        toEmail,
+        subject: subject || "Foam quote",
+        html: htmlBody,
+        inReplyTo,
+      }),
+    });
+
+    const sent = await r.json().catch(() => ({} as any));
+
+    if (threadKey && (sent.messageId || sent.internetMessageId)) {
+      merged.__lastGraphMessageId =
+        sent.messageId || merged.__lastGraphMessageId;
+      merged.__lastInternetMessageId =
+        sent.internetMessageId || merged.__lastInternetMessageId;
+      await saveFacts(threadKey, merged);
+      if (merged.quote_no) await saveFacts(merged.quote_no, merged);
+    }
+
+    return ok({
+      sent: true,
+      toEmail,
+      messageId: sent.messageId,
+      internetMessageId: sent.internetMessageId,
+      specs,
+      calc,
+      facts: merged,
+    });
+  } catch (e: any) {
+    return err("orchestrate_exception", String(e?.message || e));
+  }
 }
