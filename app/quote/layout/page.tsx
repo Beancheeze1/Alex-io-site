@@ -11,8 +11,6 @@
 //   from /api/quote/print and uses layout_json + notes as the starting point.
 // - If no saved layout exists, it falls back to the old default layout
 //   (dims/cavities from query string, then 10x10x2 + 3x2x1).
-// - Shows a "View printable quote" button next to "Apply to quote" when
-//   a real quote_no is present.
 // - After a successful "Apply to quote", automatically navigates to
 //   /quote?quote_no=... so the user sees the updated printable quote.
 
@@ -362,7 +360,7 @@ function LayoutEditorHost(props: {
         return;
       }
 
-      // Fallback (shouldn’t really hit in browser)
+      // Fallback (non-browser)
       setApplyStatus("done");
       setTimeout(() => setApplyStatus("idle"), 2000);
     } catch (err) {
@@ -479,7 +477,7 @@ function LayoutEditorHost(props: {
               )}
             </div>
 
-            {/* zoom + apply + view quote buttons */}
+            {/* zoom + apply button (no more "view printable quote") */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1 text-[11px] text-slate-500">
                 <span>Zoom</span>
@@ -510,15 +508,6 @@ function LayoutEditorHost(props: {
                   ? "Error – retry"
                   : "Apply to quote"}
               </button>
-
-              {hasRealQuoteNo && (
-                <a
-                  href={`/quote?quote_no=${encodeURIComponent(quoteNo)}`}
-                  className="inline-flex items-center rounded-full border border-slate-300 bg-white px-4 py-1.5 text-xs font-medium text-indigo-700 hover:border-indigo-400 hover:bg-indigo-50 transition"
-                >
-                  View printable quote
-                </a>
-              )}
             </div>
           </div>
 
