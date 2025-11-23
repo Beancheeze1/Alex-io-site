@@ -14,7 +14,7 @@
 // - Dynamic price-break generation for multiple quantities (and stored into facts).
 
 import { NextRequest, NextResponse } from "next/server";
-import { loadFacts, saveFacts, LAST_STORE } from "@/app/lib/memory";
+import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { one } from "@/lib/db";
 import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 
@@ -143,7 +143,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $2)
       LIMIT 1;
       `,
-      [like, densNum]
+      [like, densNum],
     );
 
     if (row) {
@@ -152,8 +152,10 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       if (!f.density && row.density_lb_ft3 != null) {
         f.density = `${row.density_lb_ft3}lb`;
       }
-      if (f.kerf_pct == null && row.kerf_pct != null) f.kerf_pct = row.kerf_pct;
-      if (f.min_charge == null && row.min_charge != null) f.min_charge = row.min_charge;
+      if (f.kerf_pct == null && row.kerf_pct != null)
+        f.kerf_pct = row.kerf_pct;
+      if (f.min_charge == null && row.min_charge != null)
+        f.min_charge = row.min_charge;
     }
 
     return f;
@@ -174,8 +176,8 @@ function normDims(raw: string | undefined | null): string | undefined {
   const m = t.match(
     new RegExp(
       `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
-      "i"
-    )
+      "i",
+    ),
   );
   if (!m) return undefined;
   return `${m[1]}x${m[2]}x${m[3]}`;
@@ -252,7 +254,7 @@ async function buildPriceBreaks(
     cavities: string[];
     round_to_bf: boolean;
   },
-  baseCalc: any
+  baseCalc: any,
 ): Promise<PriceBreak[] | null> {
   const baseQty = baseOpts.qty;
   if (!baseQty || baseQty <= 0) return null;
@@ -275,11 +277,9 @@ async function buildPriceBreaks(
       if (!calc) continue;
     }
 
-    const total =
-      (calc.price_total ??
-        calc.total ??
-        calc.order_total ??
-        0) as number;
+    const total = (calc.price_total ?? calc.total ?? calc.order_total ?? 0) as
+      | number
+      | 0;
     const piece = total && q > 0 ? total / q : null;
 
     out.push({
@@ -303,14 +303,14 @@ function grabDims(raw: string): string | undefined {
     text.match(
       new RegExp(
         `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
-        "i"
-      )
+        "i",
+      ),
     ) ||
     text.match(
       new RegExp(
         `\\b(?:size|dimensions?|dims?)\\s*[:\\-]?\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\b`,
-        "i"
-      )
+        "i",
+      ),
     );
 
   if (!m) return undefined;
@@ -333,8 +333,8 @@ function grabQty(raw: string): number | undefined {
   m = norm.match(
     new RegExp(
       `\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?))?\\b`,
-      "i"
-    )
+      "i",
+    ),
   );
   if (m) return Number(m[1]);
 
@@ -347,8 +347,9 @@ function grabQty(raw: string): number | undefined {
 function grabDensity(raw: string): string | undefined {
   const t = raw.toLowerCase();
   const m =
-    t.match(/(\d+(\.\d+)?)\s*(?:pcf|lb\/?ft3?|pound(?:s)?\s*per\s*cubic\s*foot)/) ||
-    t.match(/(\d+(\.\d+)?)\s*#\s*(?:foam)?\b/);
+    t.match(
+      /(\d+(\.\d+)?)\s*(?:pcf|lb\/?ft3?|pound(?:s)?\s*per\s*cubic\s*foot)/,
+    ) || t.match(/(\d+(\.\d+)?)\s*#\s*(?:foam)?\b/);
   if (!m) return undefined;
   return `${m[1]}#`;
 }
@@ -386,7 +387,9 @@ function extractCavities(raw: string): {
 
   const mCount =
     t.match(/\b(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/) ||
-    t.match(/\btotal\s+of\s+(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/);
+    t.match(
+      /\btotal\s+of\s+(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/,
+    );
   if (mCount) {
     cavityCount = Number(mCount[1]);
   }
@@ -407,7 +410,10 @@ function extractCavities(raw: string): {
     }
   }
 
-  return { cavityCount, cavityDims: cavityDims.length ? cavityDims : undefined };
+  return {
+    cavityCount,
+    cavityDims: cavityDims.length ? cavityDims : undefined,
+  };
 }
 
 /* ============================================================
@@ -421,8 +427,8 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const dims = grabDims(text);
   if (dims) facts.dims = normDims(dims) || dims;
 
-  const qty = grabQty(text);
-  if (qty) facts.qty = qty;
+  const qtyVal = grabQty(text);
+  if (qtyVal) facts.qty = qtyVal;
 
   const density = grabDensity(text);
   if (density) facts.density = density;
@@ -447,7 +453,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 async function aiParseFacts(
   model: string,
   body: string,
-  subject: string
+  subject: string,
 ): Promise<Mem> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return {};
@@ -502,7 +508,7 @@ ${body}
     if (parsed.cavityCount != null) out.cavityCount = parsed.cavityCount;
     if (Array.isArray(parsed.cavityDims)) {
       out.cavityDims = parsed.cavityDims.map((x: string) =>
-        normalizeCavity(normDims(x) || x)
+        normalizeCavity(normDims(x) || x),
       );
     }
 
@@ -536,7 +542,7 @@ function chooseOpener(seed: string) {
 async function aiOpener(
   model: string,
   lastInbound: string,
-  context: string
+  context: string,
 ): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
@@ -617,7 +623,8 @@ export async function POST(req: NextRequest) {
       !newly.qty ||
       !newly.material ||
       !newly.density ||
-      (newly.cavityCount && (!newly.cavityDims || newly.cavityDims.length === 0));
+      (newly.cavityCount &&
+        (!newly.cavityDims || newly.cavityDims.length === 0));
 
     if (needsLLM) {
       const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
@@ -729,7 +736,7 @@ export async function POST(req: NextRequest) {
             cavities: specs.cavityDims,
             round_to_bf: false,
           },
-          calc
+          calc,
         );
       }
     }
@@ -751,9 +758,7 @@ export async function POST(req: NextRequest) {
           merged.name ||
           "Customer";
         const customerEmail =
-          merged.customerEmail ||
-          merged.email ||
-          null;
+          merged.customerEmail || merged.email || null;
         const phone = merged.phone || null;
         const status = merged.status || "draft";
 
