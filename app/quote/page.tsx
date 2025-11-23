@@ -10,6 +10,7 @@
 // Also shows the latest foam layout "package" (if any) saved via
 // /api/quote/layout/apply, including inline SVG preview and download links.
 
+import Script from "next/script";
 import { q, one } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +66,6 @@ function usd(value: number | null | undefined): string {
   }
 }
 
-// The span we'll update on the client with the quote_no from the URL
 const QUOTE_NO_SPAN_ID = "quote-no-display";
 
 export default async function QuotePage({
@@ -75,7 +75,7 @@ export default async function QuotePage({
 }) {
   const qp = searchParams ?? {};
 
-  // Try several param names: quote_no, quoteNo, quote, q
+  // Try several possible query param names
   const rawParam =
     qp.quote_no ?? qp.quoteNo ?? qp.quote ?? qp.q ?? "";
 
@@ -83,13 +83,13 @@ export default async function QuotePage({
     Array.isArray(rawParam) ? rawParam[0] ?? "" : rawParam ?? "";
 
   const quoteNoFromParams = raw ? decodeURIComponent(raw) : "";
+  const hasQuoteNo = !!quoteNoFromParams;
 
   let quote: QuoteRow | null = null;
   let items: ItemRow[] = [];
   let layoutPkg: LayoutPkgRow | null = null;
 
-  // Only hit the DB if we have a candidate quote # from the URL
-  if (quoteNoFromParams) {
+  if (hasQuoteNo) {
     quote = await one<QuoteRow>(
       `
         select id, quote_no, customer_name, email, phone, status, created_at
@@ -170,12 +170,12 @@ export default async function QuotePage({
         )}`
       : null;
 
-  // What we show in the "Quote # ..." line on first render
+  // What we show initially in the "Quote # ..." line
   const displayQuoteNo =
     quote?.quote_no || quoteNoFromParams || "Q-AI-EXAMPLE";
 
-  // Tiny client-side helper: once in the browser, read quote_no from URL
-  // and patch the visible quote number span so it ALWAYS matches the URL.
+  // Client helper: once in the browser, read quote_no from URL
+  // and patch the span so it always matches the address bar
   const clientQuoteScript = `
     (function () {
       try {
@@ -199,11 +199,15 @@ export default async function QuotePage({
   `;
 
   return (
-    <html>
-      <head>
-        <title>Quote {displayQuoteNo} - Alex-IO</title>
-      </head>
-      <body
+    <>
+      {/* Sync visible Quote # with URL in the browser */}
+      <Script
+        id="quote-no-sync"
+        strategy="afterInteractive"
+        dangerouslySetInnerHTML={{ __html: clientQuoteScript }}
+      />
+
+      <div
         style={{
           fontFamily:
             "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
@@ -241,7 +245,35 @@ export default async function QuotePage({
                 </span>
               </h1>
 
-              {quote ? (
+              {!hasQuoteNo && (
+                <p
+                  style={{
+                    margin: "6px 0 0 0",
+                    color: "#9ca3af",
+                    fontSize: "12px",
+                  }}
+                >
+                  We couldn&apos;t detect a quote number in this link.
+                  The visible quote number will update if <code>quote_no</code>{" "}
+                  is present in the URL.
+                </p>
+              )}
+
+              {hasQuoteNo && !quote && (
+                <p
+                  style={{
+                    margin: "6px 0 0 0",
+                    color: "#9ca3af",
+                    fontSize: "12px",
+                  }}
+                >
+                  We couldn&apos;t find a quote header in the database for this
+                  number. This print view is still usable for layout reference
+                  and sharing.
+                </p>
+              )}
+
+              {quote && (
                 <>
                   <p
                     style={{
@@ -264,18 +296,6 @@ export default async function QuotePage({
                     {new Date(quote.created_at).toLocaleString()}
                   </p>
                 </>
-              ) : (
-                <p
-                  style={{
-                    margin: "6px 0 0 0",
-                    color: "#9ca3af",
-                    fontSize: "12px",
-                  }}
-                >
-                  Quote header wasn&apos;t found in the database for this
-                  number. This print view is still usable for layout
-                  reference and sharing.
-                </p>
               )}
             </div>
 
@@ -335,9 +355,9 @@ export default async function QuotePage({
 
           {!quote ? (
             <p style={{ color: "#6b7280" }}>
-              Because the quote header wasn&apos;t found, there are no
-              stored line items to show. Once this quote is created in the
-              system, its material line will appear here.
+              Because the quote header wasn&apos;t found, there are no stored
+              line items to show. Once this quote is created in the system, its
+              material line will appear here.
             </p>
           ) : items.length === 0 ? (
             <p style={{ color: "#6b7280" }}>
@@ -466,18 +486,19 @@ export default async function QuotePage({
           <h2 style={{ fontSize: "16px", marginBottom: "8px" }}>
             Foam layout package
           </h2>
+
           {!quote ? (
             <p style={{ color: "#6b7280", fontSize: "13px" }}>
               Once this quote exists in the system and a foam layout is
-              applied, the latest layout package will be shown here
-              (including SVG preview and downloads).
+              applied, the latest layout package will be shown here (including
+              SVG preview and downloads).
             </p>
           ) : !layoutPkg ? (
             <p style={{ color: "#6b7280", fontSize: "13px" }}>
               No foam layout has been saved for this quote yet. Use the{" "}
               <strong>Open layout preview</strong> button in the emailed
-              quote to arrange cavities, then click <strong>Apply to
-              quote</strong> to store the layout here.
+              quote to arrange cavities, then click <strong>Apply to quote</strong>{" "}
+              to store the layout here.
             </p>
           ) : (
             <div
@@ -557,42 +578,42 @@ export default async function QuotePage({
                 </div>
               )}
 
-              {layoutPkg.svg_text &&
-                layoutPkg.svg_text.trim().length > 0 && (
-                  <div
-                    style={{
-                      marginTop: "10px",
-                      padding: "8px",
-                      borderRadius: "10px",
-                      border: "1px solid #e5e7eb",
-                      background: "#ffffff",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: 500,
-                        color: "#374151",
-                        marginBottom: "6px",
-                      }}
-                    >
-                      Layout preview
-                    </div>
-                    <div
-                      style={{
-                        width: "100%",
-                        maxHeight: "260px",
-                        overflow: "hidden",
-                        borderRadius: "8px",
-                        border: "1px solid #e5e7eb",
-                        background: "#f3f4f6",
-                      }}
-                      dangerouslySetInnerHTML={{
-                        __html: layoutPkg.svg_text,
-                      }}
-                    />
-                  </div>
-                )}
+              {layoutPkg?.svg_text && layoutPkg.svg_text.trim().length > 0 && (
+  <div
+    style={{
+      marginTop: "10px",
+      padding: "8px",
+      borderRadius: "10px",
+      border: "1px solid #e5e7eb",
+      background: "#ffffff",
+    }}
+  >
+    <div
+      style={{
+        fontSize: "12px",
+        fontWeight: 500,
+        color: "#374151",
+        marginBottom: "6px",
+      }}
+    >
+      Layout preview
+    </div>
+
+    {/* IMPORTANT: these parentheses avoid template literal issues */}
+    <div
+      style={{
+        width: "100%",
+        maxHeight: "260px",
+        overflow: "hidden",
+        borderRadius: "8px",
+        border: "1px solid #e5e7eb",
+        background: "#f3f4f6",
+      }}
+      dangerouslySetInnerHTML={{ __html: layoutPkg.svg_text }}
+    />
+  </div>
+)}
+
 
               <div
                 style={{
@@ -687,12 +708,7 @@ export default async function QuotePage({
             additional services are requested.
           </p>
         </div>
-
-        {/* Client-side helper to sync visible quote # with URL param */}
-        <script
-          dangerouslySetInnerHTML={{ __html: clientQuoteScript }}
-        />
-      </body>
-    </html>
+      </div>
+    </>
   );
 }
