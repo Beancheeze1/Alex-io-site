@@ -84,6 +84,47 @@ export default function QuotePrintClient() {
     }
   }, []);
 
+  // Forward-to-sales handler (mailto with quote number + link)
+  const handleForwardToSales = React.useCallback(() => {
+    if (typeof window === "undefined" || !quoteNo) return;
+
+    const salesEmail =
+      (process.env.NEXT_PUBLIC_SALES_FORWARD_TO as string | undefined) ||
+      "sales@example.com";
+
+    const subject = "Quote " + quoteNo;
+    const bodyLines = [
+      "Quote number: " + quoteNo,
+      "",
+      "View this quote:",
+      window.location.href,
+      "",
+    ];
+    const body = encodeURIComponent(bodyLines.join("\n"));
+
+    const mailto =
+      "mailto:" +
+      encodeURIComponent(salesEmail) +
+      "?subject=" +
+      encodeURIComponent(subject) +
+      "&body=" +
+      body;
+
+    window.location.href = mailto;
+  }, [quoteNo]);
+
+  // Schedule call handler (opens Calendly or similar)
+  const handleScheduleCall = React.useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    // TODO: replace this with your real Calendly link
+    const url =
+      (process.env.NEXT_PUBLIC_SCHEDULE_CALL_URL as string | undefined) ||
+      "https://calendly.com/your-company/30min";
+
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
+
   // Rescue: if we still do not have quoteNo from router, read window.location
   React.useEffect(() => {
     if (quoteNo) return;
@@ -359,7 +400,14 @@ export default function QuotePrintClient() {
                 >
                   {quote.status.toUpperCase()}
                 </div>
-                <div style={{ marginTop: 8 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 8,
+                    justifyContent: "flex-end",
+                  }}
+                >
                   <button
                     type="button"
                     onClick={handlePrint}
@@ -375,6 +423,22 @@ export default function QuotePrintClient() {
                     }}
                   >
                     Print this quote
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleForwardToSales}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      border: "1px solid #bfdbfe",
+                      background: "#eff6ff",
+                      color: "#1d4ed8",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Forward to sales
                   </button>
                 </div>
               </div>
@@ -627,7 +691,7 @@ export default function QuotePrintClient() {
                           borderRadius: 8,
                           border: "1px solid #e5e7eb",
                           background: "#f3f4f6",
-                          overflow: "hidden", // no scrollbars; SVG scales to fit
+                          overflow: "hidden", // SVG scales to fit
                         }}
                         dangerouslySetInnerHTML={{
                           __html: layoutPkg.svg_text,
@@ -734,6 +798,34 @@ export default function QuotePrintClient() {
               Actual charges may differ if specs or quantities change or if
               additional services are requested.
             </p>
+
+            {/* Footer action bar */}
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                type="button"
+                onClick={handleScheduleCall}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 999,
+                  border: "1px solid #1d4ed8",
+                  background: "#1d4ed8",
+                  color: "#ffffff",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                Schedule a call
+              </button>
+            </div>
           </>
         )}
       </div>
