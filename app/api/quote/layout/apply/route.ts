@@ -1,6 +1,7 @@
 // app/api/quote/layout/apply/route.ts
 //
-// Save a foam layout "package" against a quote.
+// Save a foam layout "package" against a quote AND update the primary
+// quote item dimensions from the block in the layout.
 // Called by the layout editor page (/quote/layout) when the user clicks
 // "Apply to quote".
 //
@@ -15,13 +16,15 @@
 // Behaviour:
 //   - Looks up quotes.id by quote_no
 //   - Inserts a row into quote_layout_packages with layout_json + notes + svg_text
-//   - Returns the new package id + timestamps
+//   - NEW: Updates the primary quote_items row for this quote so that
+//     length_in / width_in / height_in match the block in the layout.
+//   - Returns the new package id + timestamps (+ optional updated item)
 //
 // GET (optional debug):
 //   - /api/quote/layout/apply?quote_no=Q-...   -> latest package for that quote
 
 import { NextRequest, NextResponse } from "next/server";
-import { one, q } from "@/lib/db";
+import { one } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -45,11 +48,13 @@ function bad(error: string, detail?: any, status = 400) {
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const quoteNo = url.searchParams.get("quote_no") || url.searchParams.get("quote");
+  const quoteNo =
+    url.searchParams.get("quote_no") || url.searchParams.get("quote");
 
   if (!quoteNo) {
     return ok({
-      usage: "POST to save, GET ?quote_no=... to inspect latest layout package",
+      usage:
+        "POST to save, GET ?quote_no=... to inspect latest layout package",
     });
   }
 
@@ -133,8 +138,57 @@ export async function POST(req: NextRequest) {
 
     const notes =
       body.notes && body.notes.trim().length ? body.notes.trim() : null;
-    const svgText =
-      body.svg && body.svg.trim().length ? body.svg : null;
+    const svgText = body.svg && body.svg.trim().length ? body.svg : null;
+
+    // ---------- NEW: Update primary quote_item dims from layout.block ----------
+    //
+    // We treat the "primary" item as the first quote_items row for this quote.
+    // The block in the layout is the foam blank dims (L/W/T), so we map:
+    //   block.lengthIn  -> quote_items.length_in
+    //   block.widthIn   -> quote_items.width_in
+    //   block.thicknessIn -> quote_items.height_in
+
+    let updatedItem: any = null;
+    try {
+      const block = (body.layout as any)?.block;
+
+      if (block) {
+        const L = Number(block.lengthIn);
+        const W = Number(block.widthIn);
+        const H = Number(block.thicknessIn ?? block.heightIn);
+
+        const allFinite =
+          [L, W, H].every((n) => Number.isFinite(n) && n > 0);
+
+        if (allFinite) {
+          updatedItem = await one<any>(
+            `
+            UPDATE quote_items
+            SET
+              length_in  = $2,
+              width_in   = $3,
+              height_in  = $4,
+              updated_at = now()
+            WHERE id = (
+              SELECT id
+              FROM quote_items
+              WHERE quote_id = $1
+              ORDER BY id ASC
+              LIMIT 1
+            )
+            RETURNING id, quote_id, length_in, width_in, height_in, qty, material_id;
+            `,
+            [quote.id, L, W, H],
+          );
+        }
+      }
+    } catch (updateErr) {
+      // Don't fail the whole request if the item update has an issue.
+      console.error(
+        "layout/apply: quote_items update failed:",
+        updateErr,
+      );
+    }
 
     // Insert a new layout package row. We allow multiple versions per quote;
     // consumer code should use ORDER BY created_at DESC LIMIT 1 when reading.
@@ -155,6 +209,7 @@ export async function POST(req: NextRequest) {
 
     return ok({
       package: inserted,
+      updatedItem: updatedItem || null,
     });
   } catch (e: any) {
     return bad(
