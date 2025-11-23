@@ -30,6 +30,9 @@ type ItemRow = {
   qty: number;
   material_id: number;
   material_name: string | null;
+  // NEW: pricing fields, already filled by calc_foam_quote via reprice
+  price_unit_usd: string | number | null;
+  price_total_usd: string | number | null;
 };
 
 type LayoutPkgRow = {
@@ -89,7 +92,9 @@ export async function GET(req: NextRequest) {
           qi.height_in::text,
           qi.qty,
           qi.material_id,
-          m.name as material_name
+          m.name as material_name,
+          qi.price_unit_usd::text,
+          qi.price_total_usd::text
         from quote_items qi
         left join materials m on m.id = qi.material_id
         where qi.quote_id = $1
