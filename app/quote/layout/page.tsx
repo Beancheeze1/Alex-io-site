@@ -47,16 +47,40 @@ export default function LayoutPage({
 }: {
   searchParams?: SearchParams;
 }) {
-  // Read the real quote number from the URL query string
-  const rawQuoteNo = (searchParams?.quote_no ??
+  /* ---------- Read quote number (URL → state) ---------- */
+
+  // Initial guess from Next.js-provided searchParams
+  const initialQuoteNoParam = (searchParams?.quote_no ??
     searchParams?.quote ??
     "") as string | undefined;
 
-  // Trim it and normalize to empty string if missing
-  const quoteNo = (rawQuoteNo ?? "").trim();
+  // State that ultimately owns the quote number the page believes in
+  const [quoteNoFromUrl, setQuoteNoFromUrl] = React.useState<string>(
+    initialQuoteNoParam?.trim() || ""
+  );
 
-  // Do we actually have a real quote number?
-  const hasRealQuoteNo = quoteNo.length > 0;
+  // On the client, re-parse the real address bar so we always match
+  React.useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      const q =
+        url.searchParams.get("quote_no") ||
+        url.searchParams.get("quote") ||
+        "";
+
+      if (q && q !== quoteNoFromUrl) {
+        setQuoteNoFromUrl(q);
+      }
+    } catch {
+      // If anything goes wrong, just stick with the initial value
+    }
+    // We intentionally don't include quoteNoFromUrl here so this only
+    // runs once on mount with the current address bar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ---------- Other URL params (dims, cavities) ---------- */
 
   const dimsParam = (searchParams?.dims ??
     searchParams?.block ??
@@ -69,6 +93,14 @@ export default function LayoutPage({
   const blockStr = normalizeDimsParam(dimsParam);
   const cavityStr = normalizeCavitiesParam(cavitiesParam);
 
+  // Is this page actually linked to a real quote header?
+  const hasRealQuoteNo =
+    !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
+
+  // If not linked, fall back to demo quote number just for display.
+  const quoteNo = hasRealQuoteNo
+    ? quoteNoFromUrl.trim()
+    : "Q-AI-EXAMPLE";
 
   /* ---------- Build base model ---------- */
 
@@ -158,32 +190,30 @@ export default function LayoutPage({
 
   /* ---------- Apply to quote ---------- */
 
-const handleApplyToQuote = async () => {
-  // If there's no real quote_no in the URL, don't call the API
-  if (!hasRealQuoteNo) {
-    alert(
-      "This layout preview isn’t linked to a quote yet.\n\n" +
-        "Open this page from an emailed quote or from the /quote print view " +
-        "so Alex-IO knows which quote to save it against."
-    );
-    return;
-  }
+  const handleApplyToQuote = async () => {
+    // Guard: must be linked to a real quote number
+    if (!hasRealQuoteNo) {
+      alert(
+        "This layout preview isn’t linked to a quote yet.\n\nOpen this page from an emailed quote or from the /quote print view so Alex-IO knows which quote to save it against."
+      );
+      return;
+    }
 
-  try {
-    setApplyStatus("saving");
+    try {
+      setApplyStatus("saving");
 
-    const svg = buildSvgFromLayout(layout);
+      const svg = buildSvgFromLayout(layout);
 
-    const res = await fetch("/api/quote/layout/apply", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        quoteNo,   // 👈 SAME value that’s displayed above the canvas
-        layout,
-        notes,
-        svg,
-      }),
-    });
+      const res = await fetch("/api/quote/layout/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quoteNo,
+          layout,
+          notes,
+          svg,
+        }),
+      });
 
       if (!res.ok) {
         // try to read error payload for future debugging
@@ -297,45 +327,27 @@ const handleApplyToQuote = async () => {
         <section className="flex-1 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div>
-  <div className="flex items-center gap-2 text-sm text-slate-900">
-    <span className="font-semibold">Foam layout preview</span>
-    <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-medium">
-      BETA – interactive layout
-    </span>
-  </div>
-
-  <div className="text-xs text-slate-500 mt-1">
-    {hasRealQuoteNo ? (
-      <>
-        Quote{" "}
-        <span className="font-mono font-semibold text-slate-800">
-          {quoteNo}
-        </span>
-        {" • "}
-        {block.lengthIn}" × {block.widthIn}" ×{" "}
-        {block.thicknessIn || 0}" block
-      </>
-    ) : (
-      <>
-        <span className="font-semibold text-amber-700">
-          No quote linked
-        </span>
-        {" • "}
-        {block.lengthIn}" × {block.widthIn}" ×{" "}
-        {block.thicknessIn || 0}" block
-      </>
-    )}
-  </div>
-
-  {!hasRealQuoteNo && (
-    <div className="text-[11px] text-amber-700 mt-0.5">
-      Open this layout from an emailed quote or from the /quote print
-      view to save changes back to a quote.
-    </div>
-  )}
-</div>
-
+              <div className="flex items-center gap-2 text-sm text-slate-900">
+                <span className="font-semibold">Foam layout preview</span>
+                <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-medium">
+                  BETA – interactive layout
+                </span>
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                Quote{" "}
+                <span className="font-mono font-semibold text-slate-800">
+                  {quoteNo}
+                </span>
+                {" • "}
+                {block.lengthIn}" × {block.widthIn}" ×{" "}
+                {block.thicknessIn || 0}" block
+              </div>
+              {!hasRealQuoteNo && (
+                <div className="text-[11px] text-amber-700 mt-0.5">
+                  Demo only – link from a real quote email to apply layouts.
+                </div>
+              )}
+            </div>
 
             {/* zoom + apply button */}
             <div className="flex items-center gap-3">
@@ -352,22 +364,22 @@ const handleApplyToQuote = async () => {
                 />
               </div>
 
-             <button
-  type="button"
-  onClick={handleApplyToQuote}
-  disabled={!hasRealQuoteNo || applyStatus === "saving"}
-  className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60"
->
-  {!hasRealQuoteNo
-    ? "Link to a quote first"
-    : applyStatus === "saving"
-    ? "Applying…"
-    : applyStatus === "done"
-    ? "Applied!"
-    : applyStatus === "error"
-    ? "Error – retry"
-    : "Apply to quote"}
-</button>
+              <button
+                type="button"
+                onClick={handleApplyToQuote}
+                disabled={!hasRealQuoteNo || applyStatus === "saving"}
+                className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60"
+              >
+                {!hasRealQuoteNo
+                  ? "Link to a quote first"
+                  : applyStatus === "saving"
+                  ? "Applying…"
+                  : applyStatus === "done"
+                  ? "Applied!"
+                  : applyStatus === "error"
+                  ? "Error – retry"
+                  : "Apply to quote"}
+              </button>
             </div>
           </div>
 
