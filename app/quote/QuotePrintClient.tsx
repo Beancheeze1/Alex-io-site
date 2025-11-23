@@ -74,6 +74,13 @@ export default function QuotePrintClient() {
     null,
   );
 
+  // Print handler for the button
+  const handlePrint = React.useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.print();
+    }
+  }, []);
+
   // Rescue: if we still do not have quoteNo from router, read window.location
   React.useEffect(() => {
     if (quoteNo) return;
@@ -322,10 +329,22 @@ export default function QuotePrintClient() {
                   {quote.status.toUpperCase()}
                 </div>
                 <div style={{ marginTop: 8 }}>
-                  <span style={{ color: "#9ca3af" }}>
-                    Use your browser&apos;s <strong>Print</strong> command to
-                    print this page.
-                  </span>
+                  <button
+                    type="button"
+                    onClick={handlePrint}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      border: "1px solid #d1d5db",
+                      background: "#f9fafb",
+                      color: "#111827",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Print this quote
+                  </button>
                 </div>
               </div>
             </div>
@@ -569,8 +588,8 @@ export default function QuotePrintClient() {
                       <div
                         style={{
                           width: "100%",
-                          maxHeight: 260,
-                          overflow: "hidden",
+                          maxHeight: 480, // was 260; give more room
+                          overflow: "auto", // allow scroll instead of clipping
                           borderRadius: 8,
                           border: "1px solid #e5e7eb",
                           background: "#f3f4f6",
