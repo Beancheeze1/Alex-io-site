@@ -8,10 +8,9 @@
 // Now also shows the latest foam layout "package" (if any) saved via
 // /api/quote/layout/apply, including inline SVG preview and download links.
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
 import { q, one } from "@/lib/db";
+
+export const dynamic = "force-dynamic";
 
 type QuoteRow = {
   id: number;
