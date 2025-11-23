@@ -30,9 +30,8 @@ type ItemRow = {
   qty: number;
   material_id: number;
   material_name: string | null;
-  // NEW: pricing fields, already filled by calc_foam_quote via reprice
-  price_unit_usd: string | number | null;
-  price_total_usd: string | number | null;
+  price_unit_usd: string | null;
+  price_total_usd: string | null;
 };
 
 type LayoutPkgRow = {
