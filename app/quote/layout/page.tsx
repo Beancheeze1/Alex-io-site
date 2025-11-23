@@ -5,6 +5,12 @@
 // - Center: large canvas
 // - Right: block + cavity inspector
 // - Apply to quote posts layout + notes + SVG to /api/quote/layout/apply
+//
+// Now also:
+// - If opened with a real quote_no, it fetches the latest saved layout
+//   from /api/quote/print and uses layout_json + notes as the starting point.
+// - If no saved layout exists, it falls back to the old default layout
+//   (dims/cavities from query string, then 10x10x2 + 3x2x1).
 
 "use client";
 
@@ -54,9 +60,8 @@ export default function LayoutPage({
     searchParams?.quote ??
     "") as string | undefined;
 
-  // State that ultimately owns the quote number the page believes in
   const [quoteNoFromUrl, setQuoteNoFromUrl] = React.useState<string>(
-    initialQuoteNoParam?.trim() || ""
+    initialQuoteNoParam?.trim() || "",
   );
 
   // On the client, re-parse the real address bar so we always match
@@ -75,8 +80,6 @@ export default function LayoutPage({
     } catch {
       // If anything goes wrong, just stick with the initial value
     }
-    // We intentionally don't include quoteNoFromUrl here so this only
-    // runs once on mount with the current address bar.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -93,18 +96,23 @@ export default function LayoutPage({
   const blockStr = normalizeDimsParam(dimsParam);
   const cavityStr = normalizeCavitiesParam(cavitiesParam);
 
-  // Is this page actually linked to a real quote header?
   const hasRealQuoteNo =
     !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
 
-  // If not linked, fall back to demo quote number just for display.
   const quoteNo = hasRealQuoteNo
     ? quoteNoFromUrl.trim()
     : "Q-AI-EXAMPLE";
 
-  /* ---------- Build base model ---------- */
+  /* ---------- Build initial layout (from DB if available) ---------- */
 
-  const baseLayout = React.useMemo(() => {
+  const [initialLayout, setInitialLayout] = React.useState<
+    LayoutModel | null
+  >(null);
+  const [initialNotes, setInitialNotes] = React.useState<string>("");
+  const [loadingLayout, setLoadingLayout] = React.useState<boolean>(true);
+
+  // Helper: fallback layout builder
+  const buildFallbackLayout = React.useCallback((): LayoutModel => {
     const fromQuery = buildLayoutFromStrings(blockStr, cavityStr);
     if (fromQuery) return fromQuery;
 
@@ -117,6 +125,118 @@ export default function LayoutPage({
     );
   }, [blockStr, cavityStr]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoadingLayout(true);
+
+      try {
+        // If we don't have a real quote number, just use fallback layout
+        if (!hasRealQuoteNo) {
+          const fallback = buildFallbackLayout();
+          if (!cancelled) {
+            setInitialLayout(fallback);
+            setInitialNotes("");
+            setLoadingLayout(false);
+          }
+          return;
+        }
+
+        // Try to fetch the latest layout package via /api/quote/print
+        const res = await fetch(
+          "/api/quote/print?quote_no=" +
+            encodeURIComponent(quoteNoFromUrl.trim()),
+          { cache: "no-store" },
+        );
+
+        if (!res.ok) {
+          // If the quote isn't found or API fails, fall back to local defaults
+          const fallback = buildFallbackLayout();
+          if (!cancelled) {
+            setInitialLayout(fallback);
+            setInitialNotes("");
+            setLoadingLayout(false);
+          }
+          return;
+        }
+
+        const json = await res.json();
+
+        // If we have a saved layout package with layout_json, prefer that
+        if (
+          json &&
+          json.ok &&
+          json.layoutPkg &&
+          json.layoutPkg.layout_json
+        ) {
+          const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
+          const notesFromDb =
+            (json.layoutPkg.notes as string | null) ?? "";
+
+          if (!cancelled) {
+            setInitialLayout(layoutFromDb);
+            setInitialNotes(notesFromDb);
+            setLoadingLayout(false);
+          }
+          return;
+        }
+
+        // Otherwise, still fall back to default layout
+        const fallback = buildFallbackLayout();
+        if (!cancelled) {
+          setInitialLayout(fallback);
+          setInitialNotes("");
+          setLoadingLayout(false);
+        }
+      } catch (err) {
+        console.error("Error loading layout for /quote/layout:", err);
+        const fallback = buildFallbackLayout();
+        if (!cancelled) {
+          setInitialLayout(fallback);
+          setInitialNotes("");
+          setLoadingLayout(false);
+        }
+      }
+    }
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasRealQuoteNo, quoteNoFromUrl, buildFallbackLayout]);
+
+  if (loadingLayout || !initialLayout) {
+    return (
+      <main className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-sm text-slate-600">
+          Loading layout preview&hellip;
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <LayoutEditorHost
+      quoteNo={quoteNo}
+      hasRealQuoteNo={hasRealQuoteNo}
+      initialLayout={initialLayout}
+      initialNotes={initialNotes}
+    />
+  );
+}
+
+/* ---------- Layout editor host (was main body) ---------- */
+
+function LayoutEditorHost(props: {
+  quoteNo: string;
+  hasRealQuoteNo: boolean;
+  initialLayout: LayoutModel;
+  initialNotes: string;
+}) {
+  const { quoteNo, hasRealQuoteNo, initialLayout, initialNotes } = props;
+
   const {
     layout,
     selectedId,
@@ -126,10 +246,10 @@ export default function LayoutPage({
     updateCavityDims,
     addCavity,
     deleteCavity,
-  } = useLayoutModel(baseLayout);
+  } = useLayoutModel(initialLayout);
 
   const [zoom, setZoom] = React.useState(1);
-  const [notes, setNotes] = React.useState("");
+  const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
   >("idle");
@@ -194,7 +314,7 @@ export default function LayoutPage({
     // Guard: must be linked to a real quote number
     if (!hasRealQuoteNo) {
       alert(
-        "This layout preview isn’t linked to a quote yet.\n\nOpen this page from an emailed quote or from the /quote print view so Alex-IO knows which quote to save it against."
+        "This layout preview isn’t linked to a quote yet.\n\nOpen this page from an emailed quote or from the /quote print view so Alex-IO knows which quote to save it against.",
       );
       return;
     }
@@ -216,15 +336,13 @@ export default function LayoutPage({
       });
 
       if (!res.ok) {
-        // try to read error payload for future debugging
         let payload: any = null;
         try {
           payload = await res.json();
-          // Special-case: friendly copy when quote header is missing
           if (payload?.error === "quote_not_found") {
             console.error("layout apply quote_not_found", payload);
             alert(
-              `Couldn’t find a quote header for ${quoteNo}.\n\nMake sure this layout link came from a real quote email or print view so the header exists in the database.`
+              `Couldn’t find a quote header for ${quoteNo}.\n\nMake sure this layout link came from a real quote email or print view so the header exists in the database.`,
             );
           }
         } catch {
@@ -630,7 +748,7 @@ export default function LayoutPage({
                         onChange={(e) =>
                           updateCavityDims(selectedCavity.id, {
                             cornerRadiusIn: snapInches(
-                              Number(e.target.value)
+                              Number(e.target.value),
                             ),
                           })
                         }
@@ -690,10 +808,10 @@ function buildSvgFromLayout(layout: LayoutModel): string {
         return `
   <g>
     <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(
-          2
+          2,
         )}" r="${r.toFixed(2)}" fill="none" stroke="#111827" stroke-width="1" />
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-          2
+          2,
         )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
@@ -707,20 +825,23 @@ function buildSvgFromLayout(layout: LayoutModel): string {
           ry="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
           fill="none" stroke="#111827" stroke-width="1" />
     <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
-        2
+        2,
       )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
     })
     .join("\n");
 
+  const VIEW_W_STR = VIEW_W.toString();
+  const VIEW_H_STR = VIEW_H.toString();
+
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg">
+<svg width="${VIEW_W_STR}" height="${VIEW_H_STR}" viewBox="0 0 ${VIEW_W_STR} ${VIEW_H_STR}" xmlns="http://www.w3.org/2000/svg">
   <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(
-    2
+    2,
   )}"
         width="${blockW.toFixed(2)}" height="${blockH.toFixed(
-    2
+    2,
   )}"
         fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />
 ${cavRects}

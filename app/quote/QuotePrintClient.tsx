@@ -406,6 +406,7 @@ export default function QuotePrintClient() {
                     gap: 8,
                     marginTop: 8,
                     justifyContent: "flex-end",
+                    flexWrap: "wrap",
                   }}
                 >
                   <button
@@ -439,6 +440,22 @@ export default function QuotePrintClient() {
                     }}
                   >
                     Forward to sales
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleScheduleCall}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      border: "1px solid #1d4ed8",
+                      background: "#1d4ed8",
+                      color: "#ffffff",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Schedule a call
                   </button>
                 </div>
               </div>
@@ -798,34 +815,6 @@ export default function QuotePrintClient() {
               Actual charges may differ if specs or quantities change or if
               additional services are requested.
             </p>
-
-            {/* Footer action bar */}
-            <div
-              style={{
-                marginTop: 12,
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                justifyContent: "flex-end",
-              }}
-            >
-              <button
-                type="button"
-                onClick={handleScheduleCall}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: 999,
-                  border: "1px solid #1d4ed8",
-                  background: "#1d4ed8",
-                  color: "#ffffff",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                }}
-              >
-                Schedule a call
-              </button>
-            </div>
           </>
         )}
       </div>
