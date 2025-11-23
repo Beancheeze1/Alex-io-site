@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
+import { loadFacts } from "@/app/lib/memory";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -68,17 +69,12 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
     const qty = Number(item.qty);
     const materialId = Number(item.material_id);
 
-    if (
-      ![L, W, H, qty, materialId].every(
-        (n) => Number.isFinite(n) && n > 0,
-      )
-    ) {
+    if (![L, W, H, qty, materialId].every((n) => Number.isFinite(n) && n > 0)) {
       // Keep original item if we can't safely calc.
       return item;
     }
 
-    const base =
-      process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
     const resp = await fetch(`${base}/api/quotes/calc`, {
       method: "POST",
@@ -94,23 +90,21 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       }),
     });
 
-    const json = await resp.json().catch(() => null as any);
+    const json = (await resp.json().catch(() => null as any)) as any;
     if (!resp.ok || !json || !json.ok || !json.result) {
       // If calc fails for any reason, just return the bare item.
       return item;
     }
 
-    const rawTotal = Number(json.result.total ?? 0);
+    const rawTotal = Number(json.result.total ?? json.result.price_total ?? 0);
     const total =
       Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : 0;
-    const piece =
-      qty > 0 && Number.isFinite(total) ? total / qty : null;
+    const piece = qty > 0 && Number.isFinite(total) ? total / qty : null;
 
     return {
       ...item,
       price_total_usd: Number.isFinite(total) ? total : null,
-      price_unit_usd:
-        piece != null && Number.isFinite(piece) ? piece : null,
+      price_unit_usd: piece != null && Number.isFinite(piece) ? piece : null,
     };
   } catch (err) {
     console.error("attachPricingToItem error:", err);
@@ -173,11 +167,56 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // Attach pricing via the volumetric calc route.
-    // This is best-effort: if calc fails, items stay as-is.
-    const items: ItemRow[] = await Promise.all(
-      itemsRaw.map((it) => attachPricingToItem(it)),
-    );
+    let items: ItemRow[] = [];
+
+    if (itemsRaw.length > 0) {
+      // Normal path: we have stored items in the DB, attach pricing to each.
+      items = await Promise.all(itemsRaw.map((it) => attachPricingToItem(it)));
+    } else {
+      // FALLBACK: no items stored yet. Pull facts from memory (same source as email)
+      // and synthesize a primary line item so the print page still shows numbers.
+      try {
+        const facts = await loadFacts(quote.quote_no);
+
+        const dims = String(facts?.dims || "");
+        const [Lraw, Wraw, Hraw] = dims.split("x");
+        const L = Number(Lraw);
+        const W = Number(Wraw);
+        const H = Number(Hraw);
+        const qtyFact = Number(facts?.qty ?? 0);
+        const matId = Number(facts?.material_id ?? 0);
+
+        if (
+          [L, W, H, qtyFact, matId].every(
+            (n) => Number.isFinite(n) && n > 0,
+          )
+        ) {
+          const synthetic: ItemRow = {
+            id: 0,
+            quote_id: quote.id,
+            length_in: L.toString(),
+            width_in: W.toString(),
+            height_in: H.toString(),
+            qty: qtyFact,
+            material_id: matId,
+            material_name: facts.material_name || null,
+            price_total_usd: null,
+            price_unit_usd: null,
+          };
+
+          const withPricing = await attachPricingToItem(synthetic);
+          items = [withPricing];
+        } else {
+          console.warn(
+            "quote/print: no DB items and incomplete facts for quote_no",
+            quote.quote_no,
+            { dims, qtyFact, matId },
+          );
+        }
+      } catch (err) {
+        console.error("quote/print: fallback from memory failed:", err);
+      }
+    }
 
     const layoutPkg = await one<LayoutPkgRow>(
       `
