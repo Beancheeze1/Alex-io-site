@@ -18,9 +18,6 @@ import {
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
 
-// 👇 NEW: tell Next not to statically prerender /quote/layout
-export const dynamic = "force-dynamic";
-
 type SearchParams = {
   [key: string]: string | string[] | undefined;
 };
@@ -65,6 +62,15 @@ export default function LayoutPage({
   const blockStr = normalizeDimsParam(dimsParam);
   const cavityStr = normalizeCavitiesParam(cavitiesParam);
 
+  // Is this page actually linked to a real quote header?
+  const hasRealQuoteNo =
+    !!quoteNoParam && quoteNoParam.trim().length > 0;
+
+  // If not linked, fall back to demo quote number just for display.
+  const quoteNo = hasRealQuoteNo
+    ? quoteNoParam!.trim()
+    : "Q-AI-EXAMPLE";
+
   /* ---------- Build base model ---------- */
 
   const baseLayout = React.useMemo(() => {
@@ -96,11 +102,6 @@ export default function LayoutPage({
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
   >("idle");
-
-  const quoteNo =
-    quoteNoParam && quoteNoParam.trim().length > 0
-      ? quoteNoParam.trim()
-      : "Q-AI-EXAMPLE";
 
   const { block, cavities } = layout;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
@@ -159,6 +160,15 @@ export default function LayoutPage({
   /* ---------- Apply to quote ---------- */
 
   const handleApplyToQuote = async () => {
+    // 🔁 SAME GUARD WE USED LAST TIME:
+    // If there's no real quote_no, don't even call the API.
+    if (!hasRealQuoteNo) {
+      alert(
+        "This layout preview isn’t linked to a quote yet.\n\nOpen this page from an emailed quote or from the /quote print view so Alex-IO knows which quote to save it against."
+      );
+      return;
+    }
+
     try {
       setApplyStatus("saving");
 
@@ -176,14 +186,20 @@ export default function LayoutPage({
       });
 
       if (!res.ok) {
-        // read server error to aid debugging
-        let detail: any = null;
+        // try to read error payload for future debugging
+        let payload: any = null;
         try {
-          detail = await res.json();
+          payload = await res.json();
+          // Special-case: friendly copy when quote header is missing
+          if (payload?.error === "quote_not_found") {
+            console.error("layout apply quote_not_found", payload);
+            alert(
+              `Couldn’t find a quote header for ${quoteNo}.\n\nMake sure this layout link came from a real quote email or print view so the header exists in the database.`
+            );
+          }
         } catch {
-          /* ignore */
+          // ignore
         }
-        console.error("Apply-to-quote HTTP error", res.status, detail);
         throw new Error(`HTTP ${res.status}`);
       }
 
@@ -268,6 +284,13 @@ export default function LayoutPage({
             Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block
             edges and between pockets.
           </div>
+
+          {!hasRealQuoteNo && (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+              No quote is linked yet. Open this page from an emailed quote or
+              the /quote print view to save layouts back to a real quote.
+            </div>
+          )}
         </aside>
 
         {/* ---------- CENTER: Big visualizer ---------- */}
@@ -289,6 +312,11 @@ export default function LayoutPage({
                 {block.lengthIn}" × {block.widthIn}" ×{" "}
                 {block.thicknessIn || 0}" block
               </div>
+              {!hasRealQuoteNo && (
+                <div className="text-[11px] text-amber-700 mt-0.5">
+                  Demo only – link from a real quote email to apply layouts.
+                </div>
+              )}
             </div>
 
             {/* zoom + apply button */}
@@ -309,10 +337,12 @@ export default function LayoutPage({
               <button
                 type="button"
                 onClick={handleApplyToQuote}
-                disabled={applyStatus === "saving"}
+                disabled={!hasRealQuoteNo || applyStatus === "saving"}
                 className="inline-flex items-center rounded-full border border-slate-200 bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition disabled:opacity-60"
               >
-                {applyStatus === "saving"
+                {!hasRealQuoteNo
+                  ? "Link to a quote first"
+                  : applyStatus === "saving"
                   ? "Applying…"
                   : applyStatus === "done"
                   ? "Applied!"
@@ -569,7 +599,9 @@ export default function LayoutPage({
                         value={selectedCavity.cornerRadiusIn}
                         onChange={(e) =>
                           updateCavityDims(selectedCavity.id, {
-                            cornerRadiusIn: snapInches(Number(e.target.value)),
+                            cornerRadiusIn: snapInches(
+                              Number(e.target.value)
+                            ),
                           })
                         }
                         className="rounded-md border border-slate-300 px-2 py-1 text-xs"
@@ -640,9 +672,7 @@ function buildSvgFromLayout(layout: LayoutModel): string {
       return `
   <g>
     <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
-          width="${cavW.toFixed(2)}" height="${cavH.toFixed(
-        2
-      )}"
+          width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
           rx="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
           ry="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
           fill="none" stroke="#111827" stroke-width="1" />
