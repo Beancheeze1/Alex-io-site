@@ -3,9 +3,11 @@
 // Print-friendly view of a quote by quote_no.
 // URL pattern: /quote?quote_no=Q-AI-20251116-115613
 //
-// This is intentionally simple and tolerant: if items aren't stored yet,
-// it still shows the header and a friendly "no line items stored" message.
-// Now also shows the latest foam layout "package" (if any) saved via
+// This is intentionally tolerant: even if we can't find a quote header
+// in the DB, we still render the page and show the quote number pulled
+// from the URL, plus a friendly notice.
+//
+// Also shows the latest foam layout "package" (if any) saved via
 // /api/quote/layout/apply, including inline SVG preview and download links.
 
 import { q, one } from "@/lib/db";
@@ -63,113 +65,83 @@ function usd(value: number | null | undefined): string {
   }
 }
 
+// The span we'll update on the client with the quote_no from the URL
+const QUOTE_NO_SPAN_ID = "quote-no-display";
+
 export default async function QuotePage({
   searchParams,
 }: {
   searchParams?: QuotePageSearchParams;
 }) {
-  // ---- Robust quote number extraction (same pattern as layout page) ----
   const qp = searchParams ?? {};
 
+  // Try several param names: quote_no, quoteNo, quote, q
   const rawParam =
     qp.quote_no ?? qp.quoteNo ?? qp.quote ?? qp.q ?? "";
 
   const raw =
     Array.isArray(rawParam) ? rawParam[0] ?? "" : rawParam ?? "";
 
-  const quoteNo = raw ? decodeURIComponent(raw) : "";
+  const quoteNoFromParams = raw ? decodeURIComponent(raw) : "";
 
-  if (!quoteNo) {
-    return (
-      <div
-        style={{
-          padding: "40px",
-          fontFamily:
-            "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        }}
-      >
-        <h1 style={{ fontSize: "20px", marginBottom: "8px" }}>
-          Quote not found
-        </h1>
-        <p style={{ color: "#555" }}>
-          We couldn&apos;t find a quote number in this link.
-        </p>
-      </div>
+  let quote: QuoteRow | null = null;
+  let items: ItemRow[] = [];
+  let layoutPkg: LayoutPkgRow | null = null;
+
+  // Only hit the DB if we have a candidate quote # from the URL
+  if (quoteNoFromParams) {
+    quote = await one<QuoteRow>(
+      `
+        select id, quote_no, customer_name, email, phone, status, created_at
+        from quotes
+        where quote_no = $1
+      `,
+      [quoteNoFromParams],
     );
+
+    if (quote) {
+      items = await q<ItemRow>(
+        `
+          select
+            qi.id,
+            qi.quote_id,
+            qi.length_in::text,
+            qi.width_in::text,
+            qi.height_in::text,
+            qi.qty,
+            qi.material_id,
+            m.name as material_name
+          from quote_items qi
+          left join materials m on m.id = qi.material_id
+          where qi.quote_id = $1
+          order by qi.id asc
+        `,
+        [quote.id],
+      );
+
+      layoutPkg = await one<LayoutPkgRow>(
+        `
+          select
+            id,
+            quote_id,
+            layout_json,
+            notes,
+            svg_text,
+            dxf_text,
+            step_text,
+            created_at
+          from quote_layout_packages
+          where quote_id = $1
+          order by created_at desc
+          limit 1
+        `,
+        [quote.id],
+      );
+    }
   }
 
-  const quote = await one<QuoteRow>(
-    `
-      select id, quote_no, customer_name, email, phone, status, created_at
-      from quotes
-      where quote_no = $1
-    `,
-    [quoteNo],
-  );
-
-  if (!quote) {
-    return (
-      <div
-        style={{
-          padding: "40px",
-          fontFamily:
-            "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        }}
-      >
-        <h1 style={{ fontSize: "20px", marginBottom: "8px" }}>
-          Quote not found
-        </h1>
-        <p style={{ color: "#555" }}>
-          We couldn&apos;t find a quote with number{" "}
-          <code>{quoteNo}</code>.
-        </p>
-      </div>
-    );
-  }
-
-  const items = await q<ItemRow>(
-    `
-      select
-        qi.id,
-        qi.quote_id,
-        qi.length_in::text,
-        qi.width_in::text,
-        qi.height_in::text,
-        qi.qty,
-        qi.material_id,
-        m.name as material_name
-      from quote_items qi
-      left join materials m on m.id = qi.material_id
-      where qi.quote_id = $1
-      order by qi.id asc
-    `,
-    [quote.id],
-  );
-
-  // Latest foam layout package (if any) saved via /api/quote/layout/apply
-  const layoutPkg = await one<LayoutPkgRow>(
-    `
-      select
-        id,
-        quote_id,
-        layout_json,
-        notes,
-        svg_text,
-        dxf_text,
-        step_text,
-        created_at
-      from quote_layout_packages
-      where quote_id = $1
-      order by created_at desc
-      limit 1
-    `,
-    [quote.id],
-  );
-
-  // We don't recompute exact pricing here yet (we can hook into /api/quotes/calc later if you like)
   const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
 
-  // Helper: short preview of notes
   const notesPreview =
     layoutPkg?.notes && layoutPkg.notes.trim().length
       ? layoutPkg.notes.trim().length > 140
@@ -177,7 +149,6 @@ export default async function QuotePage({
         : layoutPkg.notes.trim()
       : null;
 
-  // Data-URL download helpers for layout assets
   const svgDownloadHref =
     layoutPkg?.svg_text && layoutPkg.svg_text.trim().length
       ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
@@ -199,424 +170,529 @@ export default async function QuotePage({
         )}`
       : null;
 
+  // What we show in the "Quote # ..." line on first render
+  const displayQuoteNo =
+    quote?.quote_no || quoteNoFromParams || "Q-AI-EXAMPLE";
+
+  // Tiny client-side helper: once in the browser, read quote_no from URL
+  // and patch the visible quote number span so it ALWAYS matches the URL.
+  const clientQuoteScript = `
+    (function () {
+      try {
+        var el = document.getElementById(${JSON.stringify(
+          QUOTE_NO_SPAN_ID,
+        )});
+        if (!el) return;
+        var url = new URL(window.location.href);
+        var q =
+          url.searchParams.get("quote_no") ||
+          url.searchParams.get("quote") ||
+          url.searchParams.get("quoteNo") ||
+          url.searchParams.get("q");
+        if (q && typeof q === "string" && q.trim()) {
+          el.textContent = q.trim();
+        }
+      } catch (e) {
+        console.error("quote_no client helper failed", e);
+      }
+    })();
+  `;
+
   return (
-    <div
-      style={{
-        fontFamily:
-          "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        background: "#f3f4f6",
-        minHeight: "100vh",
-        padding: "24px",
-      }}
-    >
-      <div
+    <html>
+      <head>
+        <title>Quote {displayQuoteNo} - Alex-IO</title>
+      </head>
+      <body
         style={{
-          maxWidth: "800px",
-          margin: "0 auto",
-          background: "#ffffff",
-          borderRadius: "16px",
-          padding: "24px 24px 32px 24px",
-          boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
+          fontFamily:
+            "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
+          background: "#f3f4f6",
+          minHeight: "100vh",
+          padding: "24px",
         }}
       >
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            marginBottom: "16px",
+            maxWidth: "800px",
+            margin: "0 auto",
+            background: "#ffffff",
+            borderRadius: "16px",
+            padding: "24px 24px 32px 24px",
+            boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
           }}
         >
-          <div>
-            <h1 style={{ margin: 0, fontSize: "22px" }}>
-              Quote #{quote.quote_no}
-            </h1>
-            <p style={{ margin: "4px 0 0 0", color: "#4b5563" }}>
-              {quote.customer_name}
-              {quote.email ? <> &middot; {quote.email}</> : null}
-              {quote.phone ? <> &middot; {quote.phone}</> : null}
-            </p>
-            <p
-              style={{
-                margin: "4px 0 0 0",
-                color: "#6b7280",
-                fontSize: "12px",
-              }}
-            >
-              Created: {new Date(quote.created_at).toLocaleString()}
-            </p>
-          </div>
+          {/* ---------- Header ---------- */}
           <div
             style={{
-              textAlign: "right",
-              fontSize: "12px",
-              color: "#6b7280",
-            }}
-          >
-            <div
-              style={{
-                display: "inline-block",
-                padding: "4px 10px",
-                borderRadius: "999px",
-                background:
-                  quote.status === "sent"
-                    ? "#d1fae5"
-                    : quote.status === "accepted"
-                    ? "#bfdbfe"
-                    : "#e5e7eb",
-                color:
-                  quote.status === "sent"
-                    ? "#065f46"
-                    : quote.status === "accepted"
-                    ? "#1d4ed8"
-                    : "#374151",
-              }}
-            >
-              {quote.status.toUpperCase()}
-            </div>
-            <div style={{ marginTop: "8px" }}>
-              <span style={{ color: "#9ca3af" }}>
-                Use your browser&apos;s <strong>Print</strong> command to
-                print this page.
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <hr
-          style={{
-            border: "none",
-            borderTop: "1px solid #e5e7eb",
-            margin: "16px 0",
-          }}
-        />
-
-        <h2 style={{ fontSize: "16px", marginBottom: "8px" }}>
-          Line items
-        </h2>
-
-        {items.length === 0 ? (
-          <p style={{ color: "#6b7280" }}>
-            No line items stored for this quote yet. Once the material and
-            details are finalized, the primary line will appear here.
-          </p>
-        ) : (
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: "13px",
+              display: "flex",
+              justifyContent: "space-between",
               marginBottom: "16px",
             }}
           >
-            <thead>
-              <tr style={{ background: "#eff6ff" }}>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "8px",
-                    borderBottom: "1px solid #e5e7eb",
-                  }}
+            <div>
+              <h1 style={{ margin: 0, fontSize: "22px" }}>
+                Quote #
+                <span
+                  id={QUOTE_NO_SPAN_ID}
+                  style={{ marginLeft: "4px" }}
                 >
-                  Item
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "8px",
-                    borderBottom: "1px solid #e5e7eb",
-                  }}
-                >
-                  Dimensions (L × W × H)
-                </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "8px",
-                    borderBottom: "1px solid #e5e7eb",
-                  }}
-                >
-                  Qty
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item, idx) => {
-                const dims = `${item.length_in} × ${item.width_in} × ${item.height_in}`;
-                const label =
-                  item.material_name || `Material #${item.material_id}`;
-                return (
-                  <tr key={item.id}>
-                    <td
-                      style={{
-                        padding: "8px",
-                        borderBottom: "1px solid #f3f4f6",
-                      }}
-                    >
-                      <div style={{ fontWeight: 500 }}>
-                        Line {idx + 1}
-                      </div>
-                      <div style={{ color: "#6b7280" }}>{label}</div>
-                    </td>
-                    <td
-                      style={{
-                        padding: "8px",
-                        borderBottom: "1px solid #f3f4f6",
-                      }}
-                    >
-                      {dims}
-                    </td>
-                    <td
-                      style={{
-                        padding: "8px",
-                        borderBottom: "1px solid #f3f4f6",
-                        textAlign: "right",
-                      }}
-                    >
-                      {item.qty}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+                  {displayQuoteNo}
+                </span>
+              </h1>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            marginTop: "8px",
-          }}
-        >
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: "12px", color: "#6b7280" }}>
-              Total quantity
+              {quote ? (
+                <>
+                  <p
+                    style={{
+                      margin: "4px 0 0 0",
+                      color: "#4b5563",
+                    }}
+                  >
+                    {quote.customer_name}
+                    {quote.email ? <> &middot; {quote.email}</> : null}
+                    {quote.phone ? <> &middot; {quote.phone}</> : null}
+                  </p>
+                  <p
+                    style={{
+                      margin: "4px 0 0 0",
+                      color: "#6b7280",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Created:{" "}
+                    {new Date(quote.created_at).toLocaleString()}
+                  </p>
+                </>
+              ) : (
+                <p
+                  style={{
+                    margin: "6px 0 0 0",
+                    color: "#9ca3af",
+                    fontSize: "12px",
+                  }}
+                >
+                  Quote header wasn&apos;t found in the database for this
+                  number. This print view is still usable for layout
+                  reference and sharing.
+                </p>
+              )}
             </div>
-            <div style={{ fontSize: "18px", fontWeight: 600 }}>
-              {overallQty}
+
+            <div
+              style={{
+                textAlign: "right",
+                fontSize: "12px",
+                color: "#6b7280",
+              }}
+            >
+              <div
+                style={{
+                  display: "inline-block",
+                  padding: "4px 10px",
+                  borderRadius: "999px",
+                  background: quote
+                    ? quote.status === "sent"
+                      ? "#d1fae5"
+                      : quote.status === "accepted"
+                      ? "#bfdbfe"
+                      : "#e5e7eb"
+                    : "#e5e7eb",
+                  color: quote
+                    ? quote.status === "sent"
+                      ? "#065f46"
+                      : quote.status === "accepted"
+                      ? "#1d4ed8"
+                      : "#374151"
+                    : "#374151",
+                }}
+              >
+                {quote
+                  ? quote.status.toUpperCase()
+                  : "STATUS UNKNOWN"}
+              </div>
+              <div style={{ marginTop: "8px" }}>
+                <span style={{ color: "#9ca3af" }}>
+                  Use your browser&apos;s <strong>Print</strong> command to
+                  print this page.
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Foam layout package summary + preview + downloads */}
-        <hr
-          style={{
-            border: "none",
-            borderTop: "1px solid #e5e7eb",
-            margin: "24px 0 16px 0",
-          }}
-        />
-        <h2 style={{ fontSize: "16px", marginBottom: "8px" }}>
-          Foam layout package
-        </h2>
-        {!layoutPkg ? (
-          <p style={{ color: "#6b7280", fontSize: "13px" }}>
-            No foam layout has been saved for this quote yet. Use the{" "}
-            <strong>Open layout preview</strong> button in the emailed
-            quote to arrange cavities, then click <strong>Apply to
-            quote</strong> to store the layout here.
-          </p>
-        ) : (
-          <div
+          <hr
             style={{
-              borderRadius: "12px",
-              border: "1px solid #e5e7eb",
-              background: "#f9fafb",
-              padding: "12px 14px",
-              fontSize: "13px",
+              border: "none",
+              borderTop: "1px solid #e5e7eb",
+              margin: "16px 0",
             }}
-          >
+          />
+
+          {/* ---------- Line items ---------- */}
+          <h2 style={{ fontSize: "16px", marginBottom: "8px" }}>
+            Line items
+          </h2>
+
+          {!quote ? (
+            <p style={{ color: "#6b7280" }}>
+              Because the quote header wasn&apos;t found, there are no
+              stored line items to show. Once this quote is created in the
+              system, its material line will appear here.
+            </p>
+          ) : items.length === 0 ? (
+            <p style={{ color: "#6b7280" }}>
+              No line items stored for this quote yet. Once the material and
+              details are finalized, the primary line will appear here.
+            </p>
+          ) : (
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: "13px",
+                marginBottom: "16px",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#eff6ff" }}>
+                  <th
+                    style={{
+                      textAlign: "left",
+                      padding: "8px",
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
+                    Item
+                  </th>
+                  <th
+                    style={{
+                      textAlign: "left",
+                      padding: "8px",
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
+                    Dimensions (L × W × H)
+                  </th>
+                  <th
+                    style={{
+                      textAlign: "right",
+                      padding: "8px",
+                      borderBottom: "1px solid #e5e7eb",
+                    }}
+                  >
+                    Qty
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, idx) => {
+                  const dims = `${item.length_in} × ${item.width_in} × ${item.height_in}`;
+                  const label =
+                    item.material_name || `Material #${item.material_id}`;
+                  return (
+                    <tr key={item.id}>
+                      <td
+                        style={{
+                          padding: "8px",
+                          borderBottom: "1px solid #f3f4f6",
+                        }}
+                      >
+                        <div style={{ fontWeight: 500 }}>
+                          Line {idx + 1}
+                        </div>
+                        <div style={{ color: "#6b7280" }}>{label}</div>
+                      </td>
+                      <td
+                        style={{
+                          padding: "8px",
+                          borderBottom: "1px solid #f3f4f6",
+                        }}
+                      >
+                        {dims}
+                      </td>
+                      <td
+                        style={{
+                          padding: "8px",
+                          borderBottom: "1px solid #f3f4f6",
+                          textAlign: "right",
+                        }}
+                      >
+                        {item.qty}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          {quote && (
             <div
               style={{
                 display: "flex",
-                justifyContent: "space-between",
-                marginBottom: "4px",
+                justifyContent: "flex-end",
+                marginTop: "8px",
               }}
             >
-              <div>
-                <div
-                  style={{
-                    fontWeight: 600,
-                    color: "#111827",
-                    marginBottom: "2px",
-                  }}
-                >
-                  Layout package #{layoutPkg.id}
-                </div>
-                <div style={{ color: "#6b7280", fontSize: "12px" }}>
-                  Saved:{" "}
-                  {new Date(
-                    layoutPkg.created_at,
-                  ).toLocaleString()}
-                </div>
-              </div>
-              <div style={{ textAlign: "right", fontSize: "12px" }}>
-                <a
-                  href={`/quote/layout?quote_no=${encodeURIComponent(
-                    quote.quote_no,
-                  )}`}
-                  style={{
-                    display: "inline-block",
-                    padding: "4px 10px",
-                    borderRadius: "999px",
-                    border: "1px solid #c7d2fe",
-                    background: "#eef2ff",
-                    color: "#1d4ed8",
-                    textDecoration: "none",
-                    fontWeight: 500,
-                  }}
-                >
-                  Open layout editor
-                </a>
-              </div>
-            </div>
-
-            {notesPreview && (
-              <div
-                style={{
-                  marginTop: "6px",
-                  color: "#4b5563",
-                  fontSize: "12px",
-                }}
-              >
-                <span style={{ fontWeight: 500 }}>Notes: </span>
-                {notesPreview}
-              </div>
-            )}
-
-            {/* Inline SVG preview, if we have one */}
-            {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
-              <div
-                style={{
-                  marginTop: "10px",
-                  padding: "8px",
-                  borderRadius: "10px",
-                  border: "1px solid #e5e7eb",
-                  background: "#ffffff",
-                }}
-              >
+              <div style={{ textAlign: "right" }}>
                 <div
                   style={{
                     fontSize: "12px",
-                    fontWeight: 500,
-                    color: "#374151",
-                    marginBottom: "6px",
+                    color: "#6b7280",
                   }}
                 >
-                  Layout preview
+                  Total quantity
                 </div>
                 <div
                   style={{
-                    width: "100%",
-                    maxHeight: "260px",
-                    overflow: "hidden",
-                    borderRadius: "8px",
-                    border: "1px solid #e5e7eb",
-                    background: "#f3f4f6",
+                    fontSize: "18px",
+                    fontWeight: 600,
                   }}
-                  // The SVG comes from your own generator (/quote/layout),
-                  // so we can safely render it inline for print preview.
-                  dangerouslySetInnerHTML={{
-                    __html: layoutPkg.svg_text,
-                  }}
-                />
+                >
+                  {overallQty}
+                </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Download buttons for layout assets */}
+          {/* ---------- Foam layout package ---------- */}
+          <hr
+            style={{
+              border: "none",
+              borderTop: "1px solid #e5e7eb",
+              margin: "24px 0 16px 0",
+            }}
+          />
+          <h2 style={{ fontSize: "16px", marginBottom: "8px" }}>
+            Foam layout package
+          </h2>
+          {!quote ? (
+            <p style={{ color: "#6b7280", fontSize: "13px" }}>
+              Once this quote exists in the system and a foam layout is
+              applied, the latest layout package will be shown here
+              (including SVG preview and downloads).
+            </p>
+          ) : !layoutPkg ? (
+            <p style={{ color: "#6b7280", fontSize: "13px" }}>
+              No foam layout has been saved for this quote yet. Use the{" "}
+              <strong>Open layout preview</strong> button in the emailed
+              quote to arrange cavities, then click <strong>Apply to
+              quote</strong> to store the layout here.
+            </p>
+          ) : (
             <div
               style={{
-                marginTop: "10px",
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "8px",
-                fontSize: "12px",
+                borderRadius: "12px",
+                border: "1px solid #e5e7eb",
+                background: "#f9fafb",
+                padding: "12px 14px",
+                fontSize: "13px",
               }}
             >
-              {svgDownloadHref && (
-                <a
-                  href={svgDownloadHref}
-                  download={`quote-${quote.quote_no}-layout.svg`}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: "4px",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      color: "#111827",
+                      marginBottom: "2px",
+                    }}
+                  >
+                    Layout package #{layoutPkg.id}
+                  </div>
+                  <div
+                    style={{
+                      color: "#6b7280",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Saved:{" "}
+                    {new Date(
+                      layoutPkg.created_at,
+                    ).toLocaleString()}
+                  </div>
+                </div>
+                <div
                   style={{
-                    display: "inline-block",
-                    padding: "6px 10px",
-                    borderRadius: "999px",
-                    border: "1px solid #c7d2fe",
-                    background: "#eef2ff",
-                    color: "#1d4ed8",
-                    textDecoration: "none",
-                    fontWeight: 500,
+                    textAlign: "right",
+                    fontSize: "12px",
                   }}
                 >
-                  Download SVG
-                </a>
-              )}
-              {dxfDownloadHref && (
-                <a
-                  href={dxfDownloadHref}
-                  download={`quote-${quote.quote_no}-layout.dxf`}
-                  style={{
-                    display: "inline-block",
-                    padding: "6px 10px",
-                    borderRadius: "999px",
-                    border: "1px solid #d1d5db",
-                    background: "#f9fafb",
-                    color: "#374151",
-                    textDecoration: "none",
-                    fontWeight: 500,
-                  }}
-                >
-                  Download DXF
-                </a>
-              )}
-              {stepDownloadHref && (
-                <a
-                  href={stepDownloadHref}
-                  download={`quote-${quote.quote_no}-layout.step`}
-                  style={{
-                    display: "inline-block",
-                    padding: "6px 10px",
-                    borderRadius: "999px",
-                    border: "1px solid #d1d5db",
-                    background: "#f9fafb",
-                    color: "#374151",
-                    textDecoration: "none",
-                    fontWeight: 500,
-                  }}
-                >
-                  Download STEP
-                </a>
-              )}
-            </div>
+                  <a
+                    href={`/quote/layout?quote_no=${encodeURIComponent(
+                      displayQuoteNo,
+                    )}`}
+                    style={{
+                      display: "inline-block",
+                      padding: "4px 10px",
+                      borderRadius: "999px",
+                      border: "1px solid #c7d2fe",
+                      background: "#eef2ff",
+                      color: "#1d4ed8",
+                      textDecoration: "none",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Open layout editor
+                  </a>
+                </div>
+              </div>
 
-            <div
-              style={{
-                marginTop: "6px",
-                color: "#6b7280",
-                fontSize: "12px",
-              }}
-            >
-              DXF export:{" "}
-              {layoutPkg.dxf_text ? "stored" : "not generated yet"}{" "}
-              · STEP export:{" "}
-              {layoutPkg.step_text ? "stored" : "not generated yet"}
-            </div>
-          </div>
-        )}
+              {notesPreview && (
+                <div
+                  style={{
+                    marginTop: "6px",
+                    color: "#4b5563",
+                    fontSize: "12px",
+                  }}
+                >
+                  <span style={{ fontWeight: 500 }}>Notes: </span>
+                  {notesPreview}
+                </div>
+              )}
 
-        <p
-          style={{
-            marginTop: "24px",
-            fontSize: "12px",
-            color: "#6b7280",
-            lineHeight: 1.5,
-          }}
-        >
-          This print view mirrors the core specs of your emailed quote.
-          Actual charges may differ if specs or quantities change or if
-          additional services are requested.
-        </p>
-      </div>
-    </div>
+              {layoutPkg.svg_text &&
+                layoutPkg.svg_text.trim().length > 0 && (
+                  <div
+                    style={{
+                      marginTop: "10px",
+                      padding: "8px",
+                      borderRadius: "10px",
+                      border: "1px solid #e5e7eb",
+                      background: "#ffffff",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 500,
+                        color: "#374151",
+                        marginBottom: "6px",
+                      }}
+                    >
+                      Layout preview
+                    </div>
+                    <div
+                      style={{
+                        width: "100%",
+                        maxHeight: "260px",
+                        overflow: "hidden",
+                        borderRadius: "8px",
+                        border: "1px solid #e5e7eb",
+                        background: "#f3f4f6",
+                      }}
+                      dangerouslySetInnerHTML={{
+                        __html: layoutPkg.svg_text,
+                      }}
+                    />
+                  </div>
+                )}
+
+              <div
+                style={{
+                  marginTop: "10px",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "8px",
+                  fontSize: "12px",
+                }}
+              >
+                {svgDownloadHref && (
+                  <a
+                    href={svgDownloadHref}
+                    download={`quote-${displayQuoteNo}-layout.svg`}
+                    style={{
+                      display: "inline-block",
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      border: "1px solid #c7d2fe",
+                      background: "#eef2ff",
+                      color: "#1d4ed8",
+                      textDecoration: "none",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Download SVG
+                  </a>
+                )}
+                {dxfDownloadHref && (
+                  <a
+                    href={dxfDownloadHref}
+                    download={`quote-${displayQuoteNo}-layout.dxf`}
+                    style={{
+                      display: "inline-block",
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      border: "1px solid #d1d5db",
+                      background: "#f9fafb",
+                      color: "#374151",
+                      textDecoration: "none",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Download DXF
+                  </a>
+                )}
+                {stepDownloadHref && (
+                  <a
+                    href={stepDownloadHref}
+                    download={`quote-${displayQuoteNo}-layout.step`}
+                    style={{
+                      display: "inline-block",
+                      padding: "6px 10px",
+                      borderRadius: "999px",
+                      border: "1px solid #d1d5db",
+                      background: "#f9fafb",
+                      color: "#374151",
+                      textDecoration: "none",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Download STEP
+                  </a>
+                )}
+              </div>
+
+              <div
+                style={{
+                  marginTop: "6px",
+                  color: "#6b7280",
+                  fontSize: "12px",
+                }}
+              >
+                DXF export:{" "}
+                {layoutPkg.dxf_text ? "stored" : "not generated yet"} · STEP
+                export:{" "}
+                {layoutPkg.step_text ? "stored" : "not generated yet"}
+              </div>
+            </div>
+          )}
+
+          <p
+            style={{
+              marginTop: "24px",
+              fontSize: "12px",
+              color: "#6b7280",
+              lineHeight: 1.5,
+            }}
+          >
+            This print view mirrors the core specs of your emailed quote.
+            Actual charges may differ if specs or quantities change or if
+            additional services are requested.
+          </p>
+        </div>
+
+        {/* Client-side helper to sync visible quote # with URL param */}
+        <script
+          dangerouslySetInnerHTML={{ __html: clientQuoteScript }}
+        />
+      </body>
+    </html>
   );
 }
