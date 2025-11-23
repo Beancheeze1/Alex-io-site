@@ -59,9 +59,20 @@ function usd(value: number | null | undefined): string {
 export default async function QuotePage({
   searchParams,
 }: {
-  searchParams: { quote_no?: string };
+  // Make this tolerant: accept any search param keys, including quote_no or quote
+  searchParams?: { [key: string]: string | string[] | undefined };
 }) {
-  const raw = searchParams?.quote_no || "";
+  // Support both ?quote_no= and ?quote= just like the layout editor
+  const rawParam =
+    (searchParams?.quote_no ??
+      searchParams?.quote ??
+      "") as string | string[] | undefined;
+
+  const raw =
+    Array.isArray(rawParam) && rawParam.length > 0
+      ? rawParam[0]
+      : ((rawParam as string) || "");
+
   const quoteNo = raw ? decodeURIComponent(raw) : "";
 
   if (!quoteNo) {
@@ -493,6 +504,7 @@ export default async function QuotePage({
                 <div
                   style={{
                     width: "100%",
+
                     maxHeight: "260px",
                     overflow: "hidden",
                     borderRadius: "8px",
