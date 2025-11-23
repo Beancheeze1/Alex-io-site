@@ -6,13 +6,15 @@
 // - Right: block + cavity inspector
 // - Apply to quote posts layout + notes + SVG to /api/quote/layout/apply
 //
-// Now also:
+// Extras:
 // - If opened with a real quote_no, it fetches the latest saved layout
 //   from /api/quote/print and uses layout_json + notes as the starting point.
 // - If no saved layout exists, it falls back to the old default layout
 //   (dims/cavities from query string, then 10x10x2 + 3x2x1).
 // - Shows a "View printable quote" button next to "Apply to quote" when
 //   a real quote_no is present.
+// - After a successful "Apply to quote", automatically navigates to
+//   /quote?quote_no=... so the user sees the updated printable quote.
 
 "use client";
 
@@ -353,6 +355,14 @@ function LayoutEditorHost(props: {
         throw new Error(`HTTP ${res.status}`);
       }
 
+      // ✅ Success: jump straight to printable quote so there’s no confusion
+      if (typeof window !== "undefined") {
+        window.location.href =
+          "/quote?quote_no=" + encodeURIComponent(quoteNo);
+        return;
+      }
+
+      // Fallback (shouldn’t really hit in browser)
       setApplyStatus("done");
       setTimeout(() => setApplyStatus("idle"), 2000);
     } catch (err) {
