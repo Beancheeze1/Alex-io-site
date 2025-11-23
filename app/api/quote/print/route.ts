@@ -237,6 +237,56 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
+    // ---------- NEW: treat layout block as source of truth for primary dims ----------
+    //
+    // If we have a layout package with a block that has valid dims,
+    // override the primary item (items[0]) L/W/H for display + pricing.
+    if (layoutPkg && layoutPkg.layout_json && items.length > 0) {
+      try {
+        const block = layoutPkg.layout_json.block || {};
+
+        const rawLength =
+          block.lengthIn ?? block.length ?? block.L ?? block.l;
+        const rawWidth =
+          block.widthIn ?? block.width ?? block.W ?? block.w;
+        const rawHeight =
+          block.thicknessIn ??
+          block.heightIn ??
+          block.height ??
+          block.H ??
+          block.h ??
+          block.T ??
+          block.t;
+
+        const L = Number(rawLength);
+        const W = Number(rawWidth);
+        const H = Number(rawHeight);
+
+        const allFinite = [L, W, H].every(
+          (n) => Number.isFinite(n) && n > 0,
+        );
+
+        if (allFinite) {
+          const primary = items[0];
+
+          const overridden: ItemRow = {
+            ...primary,
+            length_in: L.toString(),
+            width_in: W.toString(),
+            height_in: H.toString(),
+          };
+
+          const pricedPrimary = await attachPricingToItem(overridden);
+          items = [pricedPrimary, ...items.slice(1)];
+        }
+      } catch (overrideErr) {
+        console.error(
+          "quote/print: failed to override dims from layout block:",
+          overrideErr,
+        );
+      }
+    }
+
     return ok(
       {
         ok: true,
