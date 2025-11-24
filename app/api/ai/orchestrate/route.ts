@@ -12,6 +12,11 @@
 // - Also load + save facts under quote_no so sketch auto-quote
 //   data (dims/qty/cavities/material) is available on follow-up emails.
 // - Dynamic price-break generation for multiple quantities (and stored into facts).
+// - NEW 11/24: hydrateFromDBByQuoteNo()
+//     * Pulls latest qty + dims from quote_items for this quote_no
+//     * Pulls latest cavity sizes from quote_layout_packages.layout_json
+//     * Only fills in fields that were NOT explicitly updated in this turn,
+//       so “change qty to 250” in the email still wins over DB.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -161,7 +166,7 @@ function applyCavityNormalization(facts: Mem): Mem {
 }
 
 /* ============================================================
-   DB enrichment
+   DB enrichment (material)
    ============================================================ */
 
 async function enrichFromDB(f: Mem): Promise<Mem> {
@@ -203,6 +208,115 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     return f;
   } catch {
     return f;
+  }
+}
+
+/* ============================================================
+   NEW: hydrateFromDBByQuoteNo
+   Keeps facts in sync with DB qty + cavities
+   ============================================================ */
+
+async function hydrateFromDBByQuoteNo(
+  f: Mem,
+  opts: { lockQty?: boolean; lockCavities?: boolean; lockDims?: boolean } = {},
+): Promise<Mem> {
+  const out: Mem = { ...(f || {}) };
+
+  const quoteNo: string | undefined =
+    (out.quote_no as string | undefined) ||
+    (out.quoteNumber as string | undefined);
+
+  if (!quoteNo) return out;
+
+  try {
+    // 1) Primary item for this quote: qty + dims
+    const primaryItem = await one<any>(
+      `
+      select qi.id,
+             qi.quote_id,
+             qi.qty,
+             qi.length_in,
+             qi.width_in,
+             qi.height_in
+      from quote_items qi
+      join quotes q on qi.quote_id = q.id
+      where q.quote_no = $1
+      order by qi.id asc
+      limit 1;
+      `,
+      [quoteNo],
+    );
+
+    if (primaryItem) {
+      // Qty: only hydrate from DB if this turn did NOT explicitly provide a qty
+      if (!opts.lockQty) {
+        const dbQty = Number(primaryItem.qty);
+        if (Number.isFinite(dbQty) && dbQty > 0) {
+          out.qty = dbQty;
+        }
+      }
+
+      // Dims: if we don't already have dims (or they are clearly bogus), hydrate from DB
+      if (!opts.lockDims) {
+        const hasDims =
+          typeof out.dims === "string" && out.dims.trim().length > 0;
+        if (!hasDims) {
+          const L = Number(primaryItem.length_in) || 0;
+          const W = Number(primaryItem.width_in) || 0;
+          const H = Number(primaryItem.height_in) || 0;
+          if (L > 0 && W > 0 && H > 0) {
+            out.dims = `${L}x${W}x${H}`;
+          }
+        }
+      }
+    }
+
+    // 2) Latest saved layout package: cavity sizes from layout_json
+    if (!opts.lockCavities) {
+      const layoutPkg = await one<any>(
+        `
+        select lp.layout_json
+        from quote_layout_packages lp
+        join quotes q on lp.quote_id = q.id
+        where q.quote_no = $1
+        order by lp.created_at desc
+        limit 1;
+        `,
+        [quoteNo],
+      );
+
+      if (layoutPkg && layoutPkg.layout_json && !out.cavityDims) {
+        const layout = layoutPkg.layout_json as {
+          cavities?: {
+            lengthIn: number;
+            widthIn: number;
+            depthIn: number;
+          }[];
+        };
+
+        if (layout && Array.isArray(layout.cavities) && layout.cavities.length) {
+          const cavDims = layout.cavities
+            .map((c) => {
+              const L = Number(c.lengthIn) || 0;
+              const W = Number(c.widthIn) || 0;
+              const D = Number(c.depthIn) || 0;
+              if (L <= 0 || W <= 0 || D <= 0) return null;
+              return `${L}x${W}x${D}`;
+            })
+            .filter(Boolean) as string[];
+
+          if (cavDims.length) {
+            out.cavityDims = cavDims;
+            out.cavityCount = cavDims.length;
+          }
+        }
+      }
+    }
+
+    return out;
+  } catch {
+    // If anything goes wrong, fall back to existing facts
+    return out;
   }
 }
 
@@ -685,6 +799,11 @@ export async function POST(req: NextRequest) {
       newly = mergeFacts(newly, llmFacts);
     }
 
+    const hadNewQty = newly.qty != null;
+    const hadNewCavities =
+      Array.isArray(newly.cavityDims) && newly.cavityDims.length > 0;
+    const hadNewDims = !!newly.dims;
+
     /* ------------------- Merge with memory ------------------- */
 
     let loadedThread: Mem = {};
@@ -752,6 +871,13 @@ export async function POST(req: NextRequest) {
     /* ------------------- DB enrichment ------------------- */
 
     merged = await enrichFromDB(merged);
+
+    // 🔁 NEW: hydrate from DB so qty + cavities match the latest saved quote
+    merged = await hydrateFromDBByQuoteNo(merged, {
+      lockQty: hadNewQty,
+      lockCavities: hadNewCavities,
+      lockDims: hadNewDims,
+    });
 
     // Save early baseline facts (pre-pricing) under keys
     if (threadKey) await saveFacts(threadKey, merged);
