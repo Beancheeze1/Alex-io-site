@@ -157,8 +157,11 @@ function buildLayoutUrl(input: TemplateInput): string | null {
   }
 
   if (cavityDims && cavityDims.length) {
-    // join with semicolons so we can split cleanly later
+    // Join all cavity sizes for future multi-pocket support
     params.set("cavities", cavityDims.join(";"));
+    // Also provide the first cavity as `cavity=` so the layout page
+    // can pick it up even if it only looks at a single value.
+    params.set("cavity", cavityDims[0]);
   }
 
   return `${base}/quote/layout?${params.toString()}`;
