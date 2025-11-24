@@ -15,6 +15,11 @@
 //   /quote?quote_no=... so the user sees the updated printable quote.
 // - NEW: Shows editable Qty in the top-right next to Zoom / Apply,
 //   seeded from the primary quote item when available.
+// - NEW (11/23 fix): If the URL includes an explicit `cavities=` param,
+//   we treat that as fresh and ignore any saved DB layout geometry for
+//   the initial load, so email → layout always reflects the latest
+//   cavity dims instead of an old 3x2x1 test layout.
+//
 
 "use client";
 
@@ -100,6 +105,9 @@ export default function LayoutPage({
   const blockStr = normalizeDimsParam(dimsParam);
   const cavityStr = normalizeCavitiesParam(cavitiesParam);
 
+  const hasExplicitCavities =
+    !!cavitiesParam && cavitiesParam.trim().length > 0;
+
   const hasRealQuoteNo =
     !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
 
@@ -182,12 +190,19 @@ export default function LayoutPage({
           }
         }
 
-        // If we have a saved layout package with layout_json, prefer that
+        // KEY BEHAVIOR:
+        // If the URL includes explicit `cavities=...`, we treat that as the
+        // source of truth for the initial layout and IGNORE any saved DB
+        // layout_json for geometry. We still keep qtyFromItems if present.
+        //
+        // This prevents an older 3x2x1 test layout from overriding fresh
+        // 1x1x0.5 style cavity dims coming from the quote email.
         if (
           json &&
           json.ok &&
           json.layoutPkg &&
-          json.layoutPkg.layout_json
+          json.layoutPkg.layout_json &&
+          !hasExplicitCavities
         ) {
           const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
           const notesFromDb =
@@ -202,7 +217,8 @@ export default function LayoutPage({
           return;
         }
 
-        // Otherwise, still fall back to default layout (but keep qty if we have it)
+        // Otherwise, fall back to layout from URL (dims/cavities) and
+        // keep qty if we have it.
         const fallback = buildFallbackLayout();
         if (!cancelled) {
           setInitialLayout(fallback);
@@ -227,7 +243,12 @@ export default function LayoutPage({
     return () => {
       cancelled = true;
     };
-  }, [hasRealQuoteNo, quoteNoFromUrl, buildFallbackLayout]);
+  }, [
+    hasRealQuoteNo,
+    quoteNoFromUrl,
+    buildFallbackLayout,
+    hasExplicitCavities,
+  ]);
 
   if (loadingLayout || !initialLayout) {
     return (
