@@ -13,6 +13,8 @@
 //   (dims/cavities from query string, then 10x10x2 + 3x2x1).
 // - After a successful "Apply to quote", automatically navigates to
 //   /quote?quote_no=... so the user sees the updated printable quote.
+// - NEW: Shows editable Qty in the top-right next to Zoom / Apply,
+//   seeded from the primary quote item when available.
 
 "use client";
 
@@ -111,8 +113,11 @@ export default function LayoutPage({
     LayoutModel | null
   >(null);
   const [initialNotes, setInitialNotes] = React.useState<string>("");
-  const [initialQty, setInitialQty] = React.useState<number | null>(null);
-  const [loadingLayout, setLoadingLayout] = React.useState<boolean>(true);
+  const [initialQty, setInitialQty] = React.useState<number | null>(
+    null,
+  );
+  const [loadingLayout, setLoadingLayout] =
+    React.useState<boolean>(true);
 
   // Helper: fallback layout builder
   const buildFallbackLayout = React.useCallback((): LayoutModel => {
@@ -168,12 +173,12 @@ export default function LayoutPage({
 
         const json = await res.json();
 
-        // Pull qty from the primary item if present
-        let qtyFromApi: number | null = null;
-        if (json && json.ok && Array.isArray(json.items) && json.items.length) {
-          const first = json.items[0];
-          if (typeof first?.qty === "number") {
-            qtyFromApi = first.qty;
+        // Try to pull qty from primary line item (if present)
+        let qtyFromItems: number | null = null;
+        if (Array.isArray(json.items) && json.items.length > 0) {
+          const rawQty = Number(json.items[0]?.qty);
+          if (Number.isFinite(rawQty) && rawQty > 0) {
+            qtyFromItems = rawQty;
           }
         }
 
@@ -191,18 +196,18 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
             setInitialNotes(notesFromDb);
-            setInitialQty(qtyFromApi);
+            setInitialQty(qtyFromItems);
             setLoadingLayout(false);
           }
           return;
         }
 
-        // Otherwise, still fall back to default layout
+        // Otherwise, still fall back to default layout (but keep qty if we have it)
         const fallback = buildFallbackLayout();
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
-          setInitialQty(qtyFromApi);
+          setInitialQty(qtyFromItems);
           setLoadingLayout(false);
         }
       } catch (err) {
@@ -254,8 +259,13 @@ function LayoutEditorHost(props: {
   initialNotes: string;
   initialQty: number | null;
 }) {
-  const { quoteNo, hasRealQuoteNo, initialLayout, initialNotes, initialQty } =
-    props;
+  const {
+    quoteNo,
+    hasRealQuoteNo,
+    initialLayout,
+    initialNotes,
+    initialQty,
+  } = props;
 
   const {
     layout,
@@ -270,12 +280,12 @@ function LayoutEditorHost(props: {
 
   const [zoom, setZoom] = React.useState(1);
   const [notes, setNotes] = React.useState(initialNotes || "");
-  const [qty, setQty] = React.useState<number | "">(
-    typeof initialQty === "number" && initialQty > 0 ? initialQty : "",
-  );
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
   >("idle");
+  const [qty, setQty] = React.useState<number | "">(
+    initialQty != null ? initialQty : "",
+  );
 
   const { block, cavities } = layout;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
@@ -342,33 +352,38 @@ function LayoutEditorHost(props: {
       return;
     }
 
-    // Normalize qty: allow blank, but if set, must be > 0
-    const parsedQty =
-      qty === "" ? undefined : Number.isFinite(Number(qty)) ? Number(qty) : undefined;
-
     try {
       setApplyStatus("saving");
 
       const svg = buildSvgFromLayout(layout);
 
+      const payload: any = {
+        quoteNo,
+        layout,
+        notes,
+        svg,
+      };
+
+      if (
+        typeof qty === "number" &&
+        Number.isFinite(qty) &&
+        qty > 0
+      ) {
+        payload.qty = qty;
+      }
+
       const res = await fetch("/api/quote/layout/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          quoteNo,
-          layout,
-          notes,
-          svg,
-          qty: parsedQty,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
-        let payload: any = null;
+        let payloadJson: any = null;
         try {
-          payload = await res.json();
-          if (payload?.error === "quote_not_found") {
-            console.error("layout apply quote_not_found", payload);
+          payloadJson = await res.json();
+          if (payloadJson?.error === "quote_not_found") {
+            console.error("layout apply quote_not_found", payloadJson);
             alert(
               `Couldn’t find a quote header for ${quoteNo}.\n\nMake sure this layout link came from a real quote email or print view so the header exists in the database.`,
             );
@@ -503,8 +518,8 @@ function LayoutEditorHost(props: {
               )}
             </div>
 
-            {/* zoom + qty + apply button */}
-            <div className="flex items-center gap-4">
+            {/* zoom + qty + apply button (no more "view printable quote") */}
+            <div className="flex items-center gap-3">
               <div className="flex items-center gap-1 text-[11px] text-slate-500">
                 <span>Zoom</span>
                 <input
@@ -529,13 +544,13 @@ function LayoutEditorHost(props: {
                     const v = e.target.value;
                     if (!v) {
                       setQty("");
-                    } else {
-                      const n = Number(v);
-                      if (Number.isFinite(n) && n >= 0) {
-                        setQty(n);
-                      }
+                      return;
                     }
+                    const num = Number(v);
+                    if (!Number.isFinite(num) || num <= 0) return;
+                    setQty(num);
                   }}
+                  disabled={!hasRealQuoteNo}
                   className="w-20 rounded-md border border-slate-300 px-2 py-1 text-xs"
                 />
               </div>

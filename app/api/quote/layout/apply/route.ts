@@ -10,14 +10,16 @@
 //     "quoteNo": "Q-AI-20251121-123456",
 //     "layout": { ... LayoutModel ... },
 //     "notes": "Loose parts in this pocket",
-//     "svg": "<svg>...</svg>"
+//     "svg": "<svg>...</svg>",
+//     "qty": 250                // optional, updates quote_items.qty
+//   }
 //
 // Behaviour:
 //   - Looks up quotes.id by quote_no
 //   - Inserts a row into quote_layout_packages with layout_json + notes + svg_text
 //   - Updates the primary quote_items row for this quote so that
-//     length_in / width_in / height_in match the block in the layout.
-//   - Returns the new package id + timestamps (+ optional updated item + debug)
+//     length_in / width_in / height_in (and optionally qty) match the layout.
+//   - Returns the new package id + timestamps (+ optional updated item)
 //
 // GET (optional debug):
 //   - /api/quote/layout/apply?quote_no=Q-...   -> latest package for that quote
@@ -33,6 +35,7 @@ type LayoutApplyIn = {
   layout?: any;
   notes?: string;
   svg?: string;
+  qty?: number | string;
 };
 
 function ok(extra: Record<string, any> = {}) {
@@ -139,92 +142,90 @@ export async function POST(req: NextRequest) {
       body.notes && body.notes.trim().length ? body.notes.trim() : null;
     const svgText = body.svg && body.svg.trim().length ? body.svg : null;
 
-    // ---------- Update primary quote_item dims from layout.block ----------
+    // Parse qty (optional)
+    let qtyVal: number | null = null;
+    if (body.qty !== undefined) {
+      const n = Number(body.qty);
+      if (Number.isFinite(n) && n > 0) {
+        qtyVal = n;
+      }
+    }
+
+    // ---------- Update primary quote_item dims (and optional qty) ----------
     //
     // We treat the "primary" item as the first quote_items row for this quote.
     // The block in the layout is the foam blank dims (L/W/T), so we map:
-    //   block.lengthIn / length  -> quote_items.length_in
-    //   block.widthIn  / width   -> quote_items.width_in
-    //   block.thicknessIn / heightIn / height -> quote_items.height_in
+    //   block.lengthIn    -> quote_items.length_in
+    //   block.widthIn     -> quote_items.width_in
+    //   block.thicknessIn -> quote_items.height_in
+    //
+    // If qtyVal is present, we also update quote_items.qty.
 
     let updatedItem: any = null;
-    const debug: any = {
-      quoteId: quote.id,
-    };
-
     try {
       const block = (body.layout as any)?.block;
 
       if (block) {
-        // Capture raw values for debugging
-        const rawLength =
-          block.lengthIn ?? block.length ?? block.L ?? block.l;
-        const rawWidth =
-          block.widthIn ?? block.width ?? block.W ?? block.w;
-        const rawHeight =
-          block.thicknessIn ??
-          block.heightIn ??
-          block.height ??
-          block.H ??
-          block.h ??
-          block.T ??
-          block.t;
+        const L = Number(block.lengthIn);
+        const W = Number(block.widthIn);
+        const H = Number(block.thicknessIn ?? block.heightIn);
 
-        const L = Number(rawLength);
-        const W = Number(rawWidth);
-        const H = Number(rawHeight);
-
-        const allFinite = [L, W, H].every(
-          (n) => Number.isFinite(n) && n > 0,
-        );
-
-        debug.blockRaw = {
-          lengthIn: block.lengthIn,
-          length: block.length,
-          widthIn: block.widthIn,
-          width: block.width,
-          thicknessIn: block.thicknessIn,
-          heightIn: block.heightIn,
-        };
-        debug.parsedDims = { L, W, H, allFinite };
+        const allFinite =
+          [L, W, H].every((n) => Number.isFinite(n) && n > 0);
 
         if (allFinite) {
-          updatedItem = await one<any>(
-            `
-            UPDATE quote_items
-            SET
-              length_in  = $2,
-              width_in   = $3,
-              height_in  = $4,
-              updated_at = now()
-            WHERE id = (
-              SELECT id
-              FROM quote_items
-              WHERE quote_id = $1
-              ORDER BY id ASC
-              LIMIT 1
-            )
-            RETURNING id, quote_id, length_in, width_in, height_in, qty, material_id;
-            `,
-            [quote.id, L, W, H],
-          );
-
-          debug.updatedItemId = updatedItem?.id ?? null;
-          if (!updatedItem) {
-            debug.warning = "no_quote_item_found_for_update";
+          if (qtyVal != null) {
+            // Update dims + qty
+            updatedItem = await one<any>(
+              `
+              UPDATE quote_items
+              SET
+                length_in  = $2,
+                width_in   = $3,
+                height_in  = $4,
+                qty        = $5,
+                updated_at = now()
+              WHERE id = (
+                SELECT id
+                FROM quote_items
+                WHERE quote_id = $1
+                ORDER BY id ASC
+                LIMIT 1
+              )
+              RETURNING id, quote_id, length_in, width_in, height_in, qty, material_id;
+              `,
+              [quote.id, L, W, H, qtyVal],
+            );
+          } else {
+            // Update dims only
+            updatedItem = await one<any>(
+              `
+              UPDATE quote_items
+              SET
+                length_in  = $2,
+                width_in   = $3,
+                height_in  = $4,
+                updated_at = now()
+              WHERE id = (
+                SELECT id
+                FROM quote_items
+                WHERE quote_id = $1
+                ORDER BY id ASC
+                LIMIT 1
+              )
+              RETURNING id, quote_id, length_in, width_in, height_in, qty, material_id;
+              `,
+              [quote.id, L, W, H],
+            );
           }
-        } else {
-          debug.warning = "block_dims_not_finite";
         }
-      } else {
-        debug.warning = "no_block_in_layout";
       }
-    } catch (updateErr: any) {
+    } catch (updateErr) {
+      // Don't fail the whole request if the item update has an issue.
       console.error(
         "layout/apply: quote_items update failed:",
         updateErr,
       );
-      debug.updateError = String(updateErr?.message || updateErr);
     }
 
     // Insert a new layout package row. We allow multiple versions per quote;
@@ -247,7 +248,6 @@ export async function POST(req: NextRequest) {
     return ok({
       package: inserted,
       updatedItem: updatedItem || null,
-      debug,
     });
   } catch (e: any) {
     return bad(

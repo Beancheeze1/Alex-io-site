@@ -84,6 +84,9 @@ function extractQuoteNo(text: string): string | null {
    Cavity normalization
    ============================================================ */
 
+// Allow "1", "1.5" and also ".5" style numbers
+const NUM = "(?:\\d{1,4}(?:\\.\\d+)?|\\.\\d+)";
+
 function normalizeCavity(raw: string): string {
   if (!raw) return "";
   let s = raw.trim();
@@ -118,10 +121,10 @@ function applyCavityNormalization(facts: Mem): Mem {
   for (const raw of facts.cavityDims as string[]) {
     if (!raw) continue;
 
-    // First apply the DIA / whitespace normalization
+    // First basic normalization (DIA, quotes, etc.)
     const norm = normalizeCavity(String(raw));
 
-    // Require exactly 3 numeric components: L x W x H
+    // Require exactly 3 numeric components L x W x H
     const m = norm
       .toLowerCase()
       .replace(/"/g, "")
@@ -133,7 +136,7 @@ function applyCavityNormalization(facts: Mem): Mem {
       );
 
     if (!m) {
-      // If we can't see 3 numbers, skip this cavity entirely
+      // Can't see 3 numbers => skip this cavity
       continue;
     }
 
@@ -145,22 +148,17 @@ function applyCavityNormalization(facts: Mem): Mem {
   }
 
   if (!cleaned.length) {
-    // Nothing valid left — drop cavity info altogether
+    // Nothing valid left — drop cavity info
     delete (facts as any).cavityDims;
     delete (facts as any).cavityCount;
     return facts;
   }
 
   (facts as any).cavityDims = cleaned;
-
-  // 🔒 Tie cavityCount directly to number of dims so
-  // stale / hallucinated values can't survive.
   (facts as any).cavityCount = cleaned.length;
 
   return facts;
 }
-
-
 
 /* ============================================================
    DB enrichment
@@ -211,9 +209,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
 /* ============================================================
    Dimension / density helpers
    ============================================================ */
-
-// Allow "1", "1.5" and also ".5" style numbers
-const NUM = "(?:\\d{1,4}(?:\\.\\d+)?|\\.\\d+)";
 
 function normDims(raw: string | undefined | null): string | undefined {
   if (!raw) return undefined;
@@ -469,7 +464,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const rawBody = body || "";
   const facts: Mem = {};
 
-  // 1) For main dims, ignore lines that talk about cavities/pockets.
+  // 1) For main dims, ignore lines that talk about cavities/pockets/cutouts
   const bodyNoCavity = rawBody
     .split(/\r?\n/)
     .filter(
@@ -484,7 +479,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const dims = grabDims(dimsSource);
   if (dims) facts.dims = normDims(dims) || dims;
 
-  // 2) Everything else can look at full text (dimsSource + the original body)
+  // 2) Everything else can look at the full text
   const text = `${subject}\n\n${rawBody}`;
 
   const qtyVal = grabQty(text);
@@ -505,7 +500,6 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   return compact(facts);
 }
-
 
 /* ============================================================
    LLM helpers (facts + opener)
@@ -530,8 +524,8 @@ Valid keys:
 - qty: integer
 - material: string
 - density: string like "1.7#"
-- cavityCount: integer (only if explicitly stated like "4 cavities"; NEVER guess)
-- cavityDims: array of strings; each must include 3 numbers like "1x1x0.5". If depth isn't clear, omit that entry.
+- cavityCount: integer
+- cavityDims: array of strings
 
 Subject:
 ${subject}
@@ -539,7 +533,6 @@ ${subject}
 Body:
 ${body}
     `.trim();
-
 
     const r = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -560,48 +553,21 @@ ${body}
     const end = raw.lastIndexOf("}");
     if (start === -1 || end === -1) return {};
 
-       const parsed = JSON.parse(raw.slice(start, end + 1));
+    const parsed = JSON.parse(raw.slice(start, end + 1));
     const out: Mem = {};
 
     if (parsed.dims) out.dims = normDims(parsed.dims) || parsed.dims;
     if (parsed.qty) out.qty = parsed.qty;
     if (parsed.material) out.material = parsed.material;
     if (parsed.density) out.density = parsed.density;
-
-    // Cavity dims: normalize, require 3 numbers, drop junk
-    let cavityDims: string[] = [];
+    if (parsed.cavityCount != null) out.cavityCount = parsed.cavityCount;
     if (Array.isArray(parsed.cavityDims)) {
-      for (const rawDim of parsed.cavityDims as any[]) {
-        if (!rawDim) continue;
-        const s = String(rawDim);
-        const nd = normDims(s) || s;
-        const m = nd
-          .toLowerCase()
-          .replace(/"/g, "")
-          .match(
-            new RegExp(
-              `(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`,
-              "i",
-            ),
-          );
-        if (!m) continue;
-        cavityDims.push(`${m[1]}x${m[2]}x${m[3]}`);
-      }
-    }
-    if (cavityDims.length) {
-      out.cavityDims = cavityDims;
-    }
-
-    // Cavity count: NEVER guess. Only keep small, sane numbers
-    if (parsed.cavityCount != null && cavityDims.length) {
-      const n = Number(parsed.cavityCount);
-      if (Number.isFinite(n) && n > 0 && n <= 50) {
-        out.cavityCount = n;
-      }
+      out.cavityDims = parsed.cavityDims.map((x: string) =>
+        normalizeCavity(normDims(x) || x),
+      );
     }
 
     return compact(out);
-
   } catch {
     return {};
   }
