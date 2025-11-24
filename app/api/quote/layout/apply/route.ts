@@ -1,7 +1,6 @@
 // app/api/quote/layout/apply/route.ts
 //
-// Save a foam layout "package" against a quote AND update the primary
-// quote item dimensions from the block in the layout.
+// Save a foam layout "package" against a quote.
 // Called by the layout editor page (/quote/layout) when the user clicks
 // "Apply to quote".
 //
@@ -11,248 +10,238 @@
 //     "layout": { ... LayoutModel ... },
 //     "notes": "Loose parts in this pocket",
 //     "svg": "<svg>...</svg>",
-//     "qty": 250                // optional, updates quote_items.qty
+//     "qty": 100              // OPTIONAL: new quantity for primary item
 //   }
 //
 // Behaviour:
 //   - Looks up quotes.id by quote_no
 //   - Inserts a row into quote_layout_packages with layout_json + notes + svg_text
-//   - Updates the primary quote_items row for this quote so that
-//     length_in / width_in / height_in (and optionally qty) match the layout.
-//   - Returns the new package id + timestamps (+ optional updated item)
+//   - If qty is a positive number, updates the PRIMARY quote_items row for that
+//     quote to use the new qty.
+//   - Returns the new package id + (if changed) the updatedQty.
 //
-// GET (optional debug):
+// GET (debug helper):
 //   - /api/quote/layout/apply?quote_no=Q-...   -> latest package for that quote
 
 import { NextRequest, NextResponse } from "next/server";
-import { one } from "@/lib/db";
+import { one, q } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type LayoutApplyIn = {
-  quoteNo?: string;
-  layout?: any;
-  notes?: string;
-  svg?: string;
-  qty?: number | string;
+type QuoteRow = {
+  id: number;
+  quote_no: string;
 };
 
-function ok(extra: Record<string, any> = {}) {
-  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
+type LayoutPkgRow = {
+  id: number;
+  quote_id: number;
+  layout_json: any;
+  notes: string | null;
+  svg_text: string | null;
+  created_at: string;
+};
+
+function ok(body: any, status = 200) {
+  return NextResponse.json(body, { status });
 }
 
-function bad(error: string, detail?: any, status = 400) {
-  return NextResponse.json({ ok: false, error, detail }, { status });
+function bad(body: any, status = 400) {
+  return NextResponse.json(body, { status });
 }
 
-/* ---------------------- GET: debug / latest package ---------------------- */
-
-export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const quoteNo =
-    url.searchParams.get("quote_no") || url.searchParams.get("quote");
-
-  if (!quoteNo) {
-    return ok({
-      usage:
-        "POST to save, GET ?quote_no=... to inspect latest layout package",
-    });
-  }
-
-  // Latest package for this quote_no
-  const row = await one<any>(
-    `
-    SELECT
-      p.id,
-      p.quote_id,
-      q.quote_no,
-      p.layout_json,
-      p.notes,
-      p.svg_text,
-      p.dxf_text,
-      p.step_text,
-      p.created_at
-    FROM quote_layout_packages p
-    JOIN quotes q ON q.id = p.quote_id
-    WHERE q.quote_no = $1
-    ORDER BY p.created_at DESC
-    LIMIT 1;
-    `,
-    [quoteNo],
-  );
-
-  if (!row) {
-    return bad("layout_package_not_found", { quoteNo }, 404);
-  }
-
-  return ok({ package: row });
-}
-
-/* -------------------------- POST: save package --------------------------- */
+/* ===================== POST: save layout (+ optional qty) ===================== */
 
 export async function POST(req: NextRequest) {
-  let raw = "";
-  let body: LayoutApplyIn;
+  const body = (await req.json().catch(() => null)) as any;
 
-  try {
-    // Read the raw body text once and parse manually so we can see
-    // exactly what arrived from the browser if parsing fails.
-    raw = await req.text();
-
-    if (!raw || !raw.trim()) {
-      return bad("empty_body", { rawSnippet: "" });
-    }
-
-    const parsed = JSON.parse(raw);
-    body = parsed as LayoutApplyIn;
-  } catch (e: any) {
+  if (!body || !body.quoteNo || !body.layout) {
     return bad(
-      "invalid_json",
       {
-        message: String(e?.message || e),
-        // Trim so we don't blast logs / responses with megabytes of SVG
-        rawSnippet: raw ? raw.slice(0, 1000) : "",
+        ok: false,
+        error: "missing_fields",
+        message:
+          "POST body must include at least { quoteNo, layout }. Optional: { notes, svg, qty }.",
       },
       400,
     );
   }
 
-  const quoteNo = (body.quoteNo || "").trim();
-  if (!quoteNo) {
-    return bad("missing_quoteNo");
-  }
+  const quoteNo = String(body.quoteNo).trim();
+  const layout = body.layout;
+  const notes =
+    typeof body.notes === "string" && body.notes.trim().length > 0
+      ? body.notes.trim()
+      : null;
+  const svg =
+    typeof body.svg === "string" && body.svg.trim().length > 0
+      ? body.svg
+      : null;
 
-  if (!body.layout) {
-    return bad("missing_layout");
+  if (!quoteNo) {
+    return bad(
+      {
+        ok: false,
+        error: "missing_quote_no",
+        message: "quoteNo must be a non-empty string.",
+      },
+      400,
+    );
   }
 
   try {
-    // Look up the quote row
-    const quote = await one<{ id: number }>(
-      `SELECT id FROM quotes WHERE quote_no = $1`,
+    const quote = await one<QuoteRow>(
+      `
+      select id, quote_no
+      from quotes
+      where quote_no = $1
+      `,
       [quoteNo],
     );
 
     if (!quote) {
-      return bad("quote_not_found", { quoteNo }, 404);
-    }
-
-    const notes =
-      body.notes && body.notes.trim().length ? body.notes.trim() : null;
-    const svgText = body.svg && body.svg.trim().length ? body.svg : null;
-
-    // Parse qty (optional)
-    let qtyVal: number | null = null;
-    if (body.qty !== undefined) {
-      const n = Number(body.qty);
-      if (Number.isFinite(n) && n > 0) {
-        qtyVal = n;
-      }
-    }
-
-    // ---------- Update primary quote_item dims (and optional qty) ----------
-    //
-    // We treat the "primary" item as the first quote_items row for this quote.
-    // The block in the layout is the foam blank dims (L/W/T), so we map:
-    //   block.lengthIn    -> quote_items.length_in
-    //   block.widthIn     -> quote_items.width_in
-    //   block.thicknessIn -> quote_items.height_in
-    //
-    // If qtyVal is present, we also update quote_items.qty.
-
-    let updatedItem: any = null;
-    try {
-      const block = (body.layout as any)?.block;
-
-      if (block) {
-        const L = Number(block.lengthIn);
-        const W = Number(block.widthIn);
-        const H = Number(block.thicknessIn ?? block.heightIn);
-
-        const allFinite =
-          [L, W, H].every((n) => Number.isFinite(n) && n > 0);
-
-        if (allFinite) {
-          if (qtyVal != null) {
-            // Update dims + qty
-            updatedItem = await one<any>(
-              `
-              UPDATE quote_items
-              SET
-                length_in  = $2,
-                width_in   = $3,
-                height_in  = $4,
-                qty        = $5,
-                updated_at = now()
-              WHERE id = (
-                SELECT id
-                FROM quote_items
-                WHERE quote_id = $1
-                ORDER BY id ASC
-                LIMIT 1
-              )
-              RETURNING id, quote_id, length_in, width_in, height_in, qty, material_id;
-              `,
-              [quote.id, L, W, H, qtyVal],
-            );
-          } else {
-            // Update dims only
-            updatedItem = await one<any>(
-              `
-              UPDATE quote_items
-              SET
-                length_in  = $2,
-                width_in   = $3,
-                height_in  = $4,
-                updated_at = now()
-              WHERE id = (
-                SELECT id
-                FROM quote_items
-                WHERE quote_id = $1
-                ORDER BY id ASC
-                LIMIT 1
-              )
-              RETURNING id, quote_id, length_in, width_in, height_in, qty, material_id;
-              `,
-              [quote.id, L, W, H],
-            );
-          }
-        }
-      }
-    } catch (updateErr) {
-      // Don't fail the whole request if the item update has an issue.
-      console.error(
-        "layout/apply: quote_items update failed:",
-        updateErr,
+      return bad(
+        {
+          ok: false,
+          error: "quote_not_found",
+          message: `No quote header found for quote_no ${quoteNo}.`,
+        },
+        404,
       );
     }
 
-    // Insert a new layout package row. We allow multiple versions per quote;
-    // consumer code should use ORDER BY created_at DESC LIMIT 1 when reading.
-    const inserted = await one<{
-      id: number;
-      quote_id: number;
-      created_at: string;
-    }>(
+    // Insert layout package
+    const pkg = await one<LayoutPkgRow>(
       `
-      INSERT INTO quote_layout_packages
-        (quote_id, layout_json, notes, svg_text)
-      VALUES
-        ($1, $2::jsonb, $3, $4)
-      RETURNING id, quote_id, created_at;
+      insert into quote_layout_packages (quote_id, layout_json, notes, svg_text)
+      values ($1, $2, $3, $4)
+      returning id, quote_id, layout_json, notes, svg_text, created_at
       `,
-      [quote.id, JSON.stringify(body.layout), notes, svgText],
+      [quote.id, layout, notes, svg],
     );
 
-    return ok({
-      package: inserted,
-      updatedItem: updatedItem || null,
-    });
-  } catch (e: any) {
+    // Optional: update qty on the PRIMARY quote item for this quote.
+    // We treat the "first" item (by id asc) as the primary line.
+    let updatedQty: number | null = null;
+
+    if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
+      const n = Number(body.qty);
+      if (Number.isFinite(n) && n > 0) {
+        updatedQty = n;
+
+        await q(
+          `
+          update quote_items
+          set qty = $1
+          where id = (
+            select id
+            from quote_items
+            where quote_id = $2
+            order by id asc
+            limit 1
+          )
+          `,
+          [n, quote.id],
+        );
+      }
+    }
+
+    return ok(
+      {
+        ok: true,
+        quoteNo,
+        packageId: pkg?.id ?? null,
+        updatedQty,
+      },
+      200,
+    );
+  } catch (err) {
+    console.error("Error in /api/quote/layout/apply POST:", err);
     return bad(
-      "layout_apply_exception",
-      { message: String(e?.message || e) },
+      {
+        ok: false,
+        error: "server_error",
+        message:
+          "There was an unexpected problem saving this layout. Please try again.",
+      },
+      500,
+    );
+  }
+}
+
+/* ===================== GET: latest layout package (debug) ===================== */
+
+export async function GET(req: NextRequest) {
+  const url = req.nextUrl;
+  const quoteNo = url.searchParams.get("quote_no") || "";
+
+  if (!quoteNo) {
+    return bad(
+      {
+        ok: false,
+        error: "MISSING_QUOTE_NO",
+        message: "No quote_no was provided in the query string.",
+      },
+      400,
+    );
+  }
+
+  try {
+    const quote = await one<QuoteRow>(
+      `
+      select id, quote_no
+      from quotes
+      where quote_no = $1
+      `,
+      [quoteNo],
+    );
+
+    if (!quote) {
+      return bad(
+        {
+          ok: false,
+          error: "NOT_FOUND",
+          message: `No quote found with number ${quoteNo}.`,
+        },
+        404,
+      );
+    }
+
+    const layoutPkg = await one<LayoutPkgRow>(
+      `
+      select
+        id,
+        quote_id,
+        layout_json,
+        notes,
+        svg_text,
+        created_at
+      from quote_layout_packages
+      where quote_id = $1
+      order by created_at desc
+      limit 1
+      `,
+      [quote.id],
+    );
+
+    return ok(
+      {
+        ok: true,
+        quote,
+        layoutPkg,
+      },
+      200,
+    );
+  } catch (err) {
+    console.error("Error in /api/quote/layout/apply GET:", err);
+    return bad(
+      {
+        ok: false,
+        error: "SERVER_ERROR",
+        message:
+          "There was an unexpected problem loading the latest layout package.",
+      },
       500,
     );
   }

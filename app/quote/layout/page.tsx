@@ -385,12 +385,10 @@ function LayoutEditorHost(props: {
         svg,
       };
 
-      if (
-        typeof qty === "number" &&
-        Number.isFinite(qty) &&
-        qty > 0
-      ) {
-        payload.qty = qty;
+      // ✅ Qty fix: always coerce to a number before sending
+      const nQty = Number(qty);
+      if (Number.isFinite(nQty) && nQty > 0) {
+        payload.qty = nQty;
       }
 
       const res = await fetch("/api/quote/layout/apply", {

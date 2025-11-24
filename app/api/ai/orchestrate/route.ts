@@ -513,7 +513,6 @@ async function aiParseFacts(
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return {};
   if (!body && !subject) return {};
-
   try {
     const prompt = `
 Extract foam quote facts.
@@ -703,6 +702,22 @@ export async function POST(req: NextRequest) {
     let merged = mergeFacts(mergeFacts(loadedQuote, loadedThread), newly);
 
     merged = applyCavityNormalization(merged);
+
+    // NEW: drop bogus cavities that exactly equal the main outside dims
+    if (merged.dims && Array.isArray(merged.cavityDims)) {
+      const dimsNorm = String(merged.dims).toLowerCase().trim();
+      const filtered = (merged.cavityDims as string[]).filter(
+        (c) => String(c).toLowerCase().trim() !== dimsNorm,
+      );
+      if (filtered.length > 0) {
+        merged.cavityDims = filtered;
+        merged.cavityCount = filtered.length;
+      } else {
+        delete merged.cavityDims;
+        delete merged.cavityCount;
+      }
+    }
+
     merged.__turnCount = (merged.__turnCount || 0) + 1;
 
     // If sketch facts indicated fromSketch, normalize to a string flag

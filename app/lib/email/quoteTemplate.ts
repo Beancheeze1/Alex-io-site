@@ -15,7 +15,9 @@
 // - Visual layout preview link that points to NEXT_PUBLIC_BASE_URL
 //   (defaulting to https://api.alex-io.com)
 // - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file, View layout
-// - NEW: Cushion curve snapshot when pricing.raw.cushion is present
+// - Cushion curve snapshot when pricing.raw.cushion is present
+// - NEW (11/24): Filters out bogus cavity dims equal to the outside size,
+//   so we don't show "1 cavity (10x10x2)" when that's really the block.
 
 export type QuoteSpecs = {
   L_in: number | null;
@@ -256,14 +258,45 @@ ${missingList}`
     }
   }
 
-  // Cavity info from facts
-  const cavityCount =
+  // ---------- Cavity info (with guard against block-size dims) ----------
+  const cavityCountRaw =
     typeof (facts as any).cavityCount === "number"
       ? (facts as any).cavityCount
       : null;
-  const cavityDims = Array.isArray((facts as any).cavityDims)
+
+  const rawCavityDims = Array.isArray((facts as any).cavityDims)
     ? ((facts as any).cavityDims as string[])
     : [];
+
+  // Normalized outside dims string like "10x10x2"
+  const outsideDimsKey =
+    specs.L_in && specs.W_in && specs.H_in
+      ? `${specs.L_in}x${specs.W_in}x${specs.H_in}`.toLowerCase()
+      : typeof (facts as any).dims === "string"
+      ? String((facts as any).dims).trim().toLowerCase()
+      : "";
+
+  // Filter out any cavities that exactly match the outside size.
+  // This kills the "1 cavity (10x10x2)" lie.
+  const cavityDims = rawCavityDims
+    .map((d) => String(d).trim())
+    .filter((d) => d.length > 0)
+    .filter((d) =>
+      outsideDimsKey ? d.toLowerCase() !== outsideDimsKey : true,
+    );
+
+  let cavityCount =
+    cavityCountRaw != null ? cavityCountRaw : cavityDims.length || null;
+
+  // If count is wildly out-of-sync, trust the actual dim list.
+  if (
+    cavityCount != null &&
+    cavityDims.length > 0 &&
+    cavityCount !== cavityDims.length
+  ) {
+    cavityCount = cavityDims.length;
+  }
+
   let cavityLabel: string;
   if (cavityCount != null) {
     const word = cavityCount === 1 ? "cavity" : "cavities";
@@ -273,7 +306,8 @@ ${missingList}`
       cavityLabel = `${cavityCount} ${word}`;
     }
   } else if (cavityDims.length) {
-    cavityLabel = `${cavityDims.length} cavities (${cavityDims.join(", ")})`;
+    const word = cavityDims.length === 1 ? "cavity" : "cavities";
+    cavityLabel = `${cavityDims.length} ${word} (${cavityDims.join(", ")})`;
   } else {
     cavityLabel = "None noted";
   }
@@ -485,7 +519,7 @@ ${missingList}`
         </p>`;
   }
 
-  // Layout URL: use baseUrl (which is now rooted on api.alex-io.com).
+  // Layout URL: use baseUrl, and the *filtered* cavityDims
   const layoutUrl = (() => {
     if (!quoteNo || !specs.L_in || !specs.W_in || !specs.H_in) return undefined;
     const dims = `${specs.L_in}x${specs.W_in}x${specs.H_in}`;
