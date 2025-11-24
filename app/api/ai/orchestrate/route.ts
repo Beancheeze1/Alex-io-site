@@ -505,12 +505,14 @@ ${body}
     if (parsed.qty) out.qty = parsed.qty;
     if (parsed.material) out.material = parsed.material;
     if (parsed.density) out.density = parsed.density;
+
+    // NOTE:
+    // We intentionally IGNORE parsed.cavityDims here and only trust
+    // cavityDims derived from explicit patterns in the email text
+    // (extractCavities). This prevents the model from hallucinating
+    // cavity sizes that were never actually specified.
+
     if (parsed.cavityCount != null) out.cavityCount = parsed.cavityCount;
-    if (Array.isArray(parsed.cavityDims)) {
-      out.cavityDims = parsed.cavityDims.map((x: string) =>
-        normalizeCavity(normDims(x) || x),
-      );
-    }
 
     return compact(out);
   } catch {
