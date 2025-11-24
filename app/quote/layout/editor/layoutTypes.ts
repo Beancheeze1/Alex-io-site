@@ -32,7 +32,9 @@ export type LayoutModel = {
 /**
  * Format a label for a cavity, based on its dimensions + shape.
  */
-export function formatCavityLabel(c: Pick<Cavity, "shape" | "lengthIn" | "widthIn" | "depthIn">): string {
+export function formatCavityLabel(
+  c: Pick<Cavity, "shape" | "lengthIn" | "widthIn" | "depthIn">
+): string {
   if (c.shape === "circle") {
     return `Ø${c.lengthIn}×${c.depthIn} in`;
   }
@@ -40,20 +42,30 @@ export function formatCavityLabel(c: Pick<Cavity, "shape" | "lengthIn" | "widthI
 }
 
 /**
+ * Helper: pull numeric values (ints/decimals) out of a string.
+ * Examples:
+ *   "10x8x2"           -> ["10", "8", "2"]
+ *   '1 x 1 x 0.5 in'   -> ["1", "1", "0.5"]
+ *   '.5 x 1.25 x 2.0"' -> ["0.5", "1.25", "2.0"]
+ */
+function extractNums(input: string | null | undefined): number[] {
+  if (!input) return [];
+  const cleaned = String(input).toLowerCase();
+  const matches = cleaned.match(/(\d*\.?\d+)/g); // allow "1", "1.5", ".5"
+  if (!matches) return [];
+  return matches.map((m) => Number(m)).filter((n) => Number.isFinite(n));
+}
+
+/**
  * Parse a "10x8x2" style string into BlockDims.
+ * Now tolerant of units / spaces / quotes, e.g. "10 x 8 x 2 in".
  */
 export function parseBlockDims(dims: string): BlockDims | null {
-  if (!dims) return null;
-  const parts = dims
-    .toLowerCase()
-    .replace(/["\s]/g, "")
-    .split("x");
+  const nums = extractNums(dims);
+  if (nums.length < 3) return null;
 
-  if (parts.length < 3) return null;
-  const [l, w, t] = parts.map((p) => Number(p));
-  if (!l || !w || !t || Number.isNaN(l) || Number.isNaN(w) || Number.isNaN(t)) {
-    return null;
-  }
+  const [l, w, t] = nums;
+  if (![l, w, t].every((n) => n > 0)) return null;
 
   return {
     lengthIn: l,
@@ -66,25 +78,20 @@ export function parseBlockDims(dims: string): BlockDims | null {
  * Parse cavity strings like:
  *   "3x2x1"
  *   "3x2x1:deep pocket"
+ *   "1 x 1 x 0.5 in:label"
  *
- * into Cavity objects. `index` is used to stagger them.
+ * into Cavity objects. index is used to stagger them.
  * Shape defaults to "rect" and corner radius to 0.
  */
 export function parseCavity(spec: string, index: number): Cavity | null {
   if (!spec) return null;
 
   const [dimsPart, labelPart] = spec.split(":");
-  const parts = dimsPart
-    .toLowerCase()
-    .replace(/["\s]/g, "")
-    .split("x");
+  const nums = extractNums(dimsPart);
+  if (nums.length < 3) return null;
 
-  if (parts.length < 3) return null;
-
-  const [l, w, d] = parts.map((p) => Number(p));
-  if (!l || !w || !d || [l, w, d].some((n) => Number.isNaN(n) || n <= 0)) {
-    return null;
-  }
+  const [l, w, d] = nums;
+  if (![l, w, d].every((n) => n > 0)) return null;
 
   // Simple staggered positions to avoid overlap (0–1 space).
   const col = index % 3;
@@ -118,7 +125,9 @@ export function parseCavity(spec: string, index: number): Cavity | null {
 
 /**
  * Build a LayoutModel from a "10x8x2" block string and
- * semicolon-separated cavity strings like "3x2x1;2x2x1".
+ * semicolon- or comma-separated cavity strings like:
+ *   "3x2x1;2x2x1"
+ *   "1 x 1 x 0.5 in; 2 x 2 x 1 in:label"
  */
 export function buildLayoutFromStrings(
   blockDims: string,
@@ -128,6 +137,7 @@ export function buildLayoutFromStrings(
   if (!block) return null;
 
   const cavities: Cavity[] = [];
+
   if (cavitySpecs) {
     const parts = cavitySpecs
       .split(/[;,]/)
