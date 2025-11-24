@@ -2,796 +2,407 @@
 //
 // Unified HTML template for Alex-IO foam quotes.
 //
-// Inputs come from app/api/ai/orchestrate/route.ts via renderQuoteEmail(input).
-// This version:
-// - Shows Quote # + status pill
-// - Compact light-blue Specs / Pricing tables
-// - Cavities row in Specs
-// - Skiving row in Pricing + red callout note if skiving is needed
-// - Bold per-piece price in Price breaks
-// - Dynamic price-break table when provided
-// - Design optimization ideas pulled from facts.opt_suggestions,
-//   with sensible fallback suggestions when AI returns nothing
-// - Visual layout preview link that points to NEXT_PUBLIC_BASE_URL
-//   (defaulting to https://api.alex-io.com)
-// - Buttons: Forward to sales, View printable quote, Schedule a call, Upload sketch/file, View layout
-// - Cushion curve snapshot when pricing.raw.cushion is present
-// - NEW (11/24): Filters out bogus cavity dims equal to the outside size,
-//   so we don't show "1 cavity (10x10x2)" when that's really the block.
+// Input shape (from orchestrator):
+//
+// templateInput = {
+//   customerLine: string,
+//   quoteNumber: string | null,
+//   status: string,
+//   specs: {
+//     L_in: number;
+//     W_in: number;
+//     H_in: number;
+//     qty: number | string | null;
+//     density_pcf: number | null;
+//     foam_family: string | null;
+//     thickness_under_in?: number | null;
+//     color?: string | null;
+//     cavityCount?: number | null;
+//     cavityDims?: string[];          // e.g. ["1x1x1", "2x2x1"]
+//   },
+//   material: {
+//     name?: string | null;
+//     density_lbft3?: number | null;
+//     kerf_pct?: number | null;
+//     min_charge?: number | null;
+//   },
+//   pricing: {
+//     total: number;
+//     piece_ci?: number | null;
+//     order_ci?: number | null;
+//     order_ci_with_waste?: number | null;
+//     used_min_charge?: boolean | null;
+//     raw?: any;
+//     price_breaks?: {
+//       qty: number;
+//       total: number;
+//       piece: number | null;
+//       used_min_charge?: boolean | null;
+//     }[];
+//   },
+//   missing: string[];                // e.g. ["Cavity sizes"]
+//   facts: Record<string, any>;       // raw facts (for layout URL, etc.)
+// };
 
-export type QuoteSpecs = {
-  L_in: number | null;
-  W_in: number | null;
-  H_in: number | null;
-  thickness_under_in?: number | null;
-  qty: number | string | null;
-  density_pcf: number | null;
-  foam_family: string | null;
-  color?: string | null;
-};
-
-export type QuoteMaterial = {
-  name?: string | null;
-  density_lb_ft3?: number | null;
-  kerf_pct?: number | null;
-  min_charge?: number | null;
-};
-
-export type PriceBreakRow = {
+export type PriceBreak = {
   qty: number;
   total: number;
   piece: number | null;
   used_min_charge?: boolean | null;
 };
 
-export type QuotePricing = {
-  total: number | null;
+export type TemplateSpecs = {
+  L_in: number;
+  W_in: number;
+  H_in: number;
+  qty: number | string | null;
+  density_pcf: number | null;
+  foam_family: string | null;
+  thickness_under_in?: number | null;
+  color?: string | null;
+  cavityCount?: number | null;
+  cavityDims?: string[];
+};
+
+export type TemplateMaterial = {
+  name?: string | null;
+  density_lbft3?: number | null;
+  kerf_pct?: number | null;
+  min_charge?: number | null;
+};
+
+export type TemplatePricing = {
+  total: number;
   piece_ci?: number | null;
   order_ci?: number | null;
   order_ci_with_waste?: number | null;
   used_min_charge?: boolean | null;
-  raw?: any; // raw calc payload (optional)
-  price_breaks?: PriceBreakRow[] | null; // dynamic price breaks
+  raw?: any;
+  price_breaks?: PriceBreak[];
 };
 
-export type QuoteRenderInput = {
-  customerLine?: string | null;
-  quoteNumber?: string | number | null;
-  status?: string | null;
-  specs: QuoteSpecs;
-  material: QuoteMaterial;
-  pricing: QuotePricing;
+export type TemplateInput = {
+  customerLine: string;
+  quoteNumber?: string | null;
+  status?: string;
+  specs: TemplateSpecs;
+  material: TemplateMaterial;
+  pricing: TemplatePricing;
   missing: string[];
-  facts?: Record<string, any>;
+  facts: Record<string, any>;
 };
 
-function fmtDims(L: number | null, W: number | null, H: number | null) {
-  if (!L || !W || !H) return "";
+function fmtInchesTriple(L: number, W: number, H: number): string {
+  if (!L || !W || !H) return "—";
   return `${L} × ${W} × ${H} in`;
 }
 
-function fmtQty(q: number | string | null) {
-  if (q == null) return "";
+function fmtNumber(n: number | null | undefined, decimals = 2): string {
+  if (n == null || isNaN(Number(n))) return "—";
+  return Number(n).toFixed(decimals);
+}
+
+function fmtMoney(n: number | null | undefined): string {
+  if (n == null || isNaN(Number(n))) return "$0.00";
+  return `$${Number(n).toFixed(2)}`;
+}
+
+function fmtPercent(n: number | null | undefined): string {
+  if (n == null || isNaN(Number(n))) return "—";
+  return `${Number(n).toFixed(2)}%`;
+}
+
+function fmtQty(q: number | string | null | undefined): string {
+  if (q == null || q === "") return "—";
   return String(q);
 }
 
-function fmtDensity(d: number | null) {
-  if (!d && d !== 0) return "";
-  return `${d} pcf`;
+// Build human-readable cavity label like:
+// "1 cavity — 1x1x1" or "3 cavities — 1x1x1, 2x2x1"
+function buildCavityLabel(specs: TemplateSpecs): string {
+  const count = specs.cavityCount ?? (specs.cavityDims?.length || 0);
+  const dims = (specs.cavityDims || []).filter((s) => !!s && typeof s === "string");
+
+  if (!count && dims.length === 0) return "—";
+
+  const countLabel =
+    count === 1 ? "1 cavity" : `${count || dims.length} cavities`;
+
+  if (!dims.length) return countLabel;
+
+  const sizes = dims.join(", ");
+  return `${countLabel} — ${sizes}`;
 }
 
-function fmtMoney(n: number | null | undefined) {
-  if (n == null || !isFinite(Number(n))) return "";
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(Number(n));
-  } catch {
-    return `$${Number(n).toFixed(2)}`;
+// Layout preview URL based on dims + cavity dims
+function buildLayoutUrl(input: TemplateInput): string | null {
+  const base =
+    process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+
+  const qno =
+    input.quoteNumber ||
+    (typeof input.facts?.quote_no === "string"
+      ? input.facts.quote_no
+      : "");
+
+  if (!qno) return null;
+
+  const params = new URLSearchParams();
+  params.set("quote_no", qno);
+
+  const { L_in, W_in, H_in, cavityDims } = input.specs;
+  if (L_in && W_in && H_in) {
+    params.set("dims", `${L_in}x${W_in}x${H_in}`);
   }
+
+  if (cavityDims && cavityDims.length) {
+    // join with semicolons so we can split cleanly later
+    params.set("cavities", cavityDims.join(";"));
+  }
+
+  return `${base}/quote/layout?${params.toString()}`;
 }
 
-function htmlEscape(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+export function renderQuoteEmail(input: TemplateInput): string {
+  const { customerLine, quoteNumber, status, specs, material, pricing, missing } =
+    input;
 
-export function renderQuoteEmail(input: QuoteRenderInput): string {
-  const { specs, material, pricing, missing } = input;
-  const facts = input.facts || {};
-
-  // Treat either a string flag or boolean flag as "from sketch"
-  const fromSketch =
-    (facts as any).from === "sketch-auto-quote" ||
-    (facts as any).fromSketch === true;
-
-  const sketchLine = fromSketch
-    ? `<p style="margin:8px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
-          Dimensions and cavities interpreted from your uploaded sketch.
-       </p>`
-    : "";
-
-  const quoteNo = input.quoteNumber ? String(input.quoteNumber) : "";
-
-  const outsideSize = fmtDims(specs.L_in, specs.W_in, specs.H_in);
+  const outsideSize = fmtInchesTriple(specs.L_in, specs.W_in, specs.H_in);
   const qty = fmtQty(specs.qty);
-  const qtyNum =
-    specs.qty != null && !Number.isNaN(Number(specs.qty))
-      ? Number(specs.qty)
-      : null;
-  const density = fmtDensity(specs.density_pcf);
-  const foamFamily =
-    specs.foam_family && specs.foam_family.trim()
-      ? specs.foam_family.trim()
-      : material?.name || "TBD";
+  const densityLabel =
+    specs.density_pcf != null ? `${fmtNumber(specs.density_pcf, 1)} pcf` : "—";
+  const foamFamily = specs.foam_family || "—";
+  const thicknessUnder =
+    specs.thickness_under_in != null
+      ? `${fmtNumber(specs.thickness_under_in, 2)} in`
+      : "—";
 
-  // Thickness under the part (for skived pads)
-  const thicknessVal =
-    specs.thickness_under_in != null &&
-    !Number.isNaN(Number(specs.thickness_under_in))
-      ? Number(specs.thickness_under_in)
-      : null;
-  const thicknessLabel =
-    thicknessVal != null ? `${thicknessVal}" under part` : "";
+  const cavityLabel = buildCavityLabel(specs);
 
-  // IMPORTANT: default to api.alex-io.com so we avoid root-domain issues.
-  const baseUrl = (
-    process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com"
-  ).replace(/\/+$/, "");
+  const matName = material.name || "—";
+  const matDensity =
+    material.density_lbft3 != null
+      ? `${fmtNumber(material.density_lbft3, 1)} pcf`
+      : "—";
+  const matKerf = fmtPercent(material.kerf_pct ?? pricing.raw?.kerf_pct);
+  const minCharge =
+    material.min_charge != null
+      ? fmtMoney(material.min_charge)
+      : pricing.raw?.min_charge
+      ? fmtMoney(pricing.raw.min_charge)
+      : "$0.00";
 
-  const printUrl =
-    quoteNo !== ""
-      ? `${baseUrl}/quote?quote_no=${encodeURIComponent(quoteNo)}`
-      : undefined;
+  const pieceCi = fmtNumber(pricing.piece_ci ?? pricing.raw?.piece_ci);
+  const orderCi = fmtNumber(pricing.order_ci ?? pricing.raw?.order_ci);
+  const orderCiWithWaste = fmtNumber(
+    pricing.order_ci_with_waste ?? pricing.raw?.order_ci_with_waste,
+  );
+  const orderTotal = fmtMoney(
+    pricing.total ??
+      pricing.raw?.price_total ??
+      pricing.raw?.total ??
+      pricing.raw?.order_total,
+  );
 
-  const sketchUrl =
-    quoteNo !== ""
-      ? `${baseUrl}/sketch-upload?quote_no=${encodeURIComponent(quoteNo)}`
-      : `${baseUrl}/sketch-upload`;
+  const usedMinCharge =
+    pricing.used_min_charge ?? pricing.raw?.min_charge_applied ?? false;
 
-  const forwardToSalesEmail =
-    process.env.NEXT_PUBLIC_SALES_FORWARD_TO || "sales@example.com";
+  const priceBreaks = pricing.price_breaks || [];
 
-  const salesSubject =
-    quoteNo !== ""
-      ? `Foam quote ${quoteNo}`
-      : "Foam quote from Alex-IO";
+  const layoutUrl = buildLayoutUrl(input);
 
-  const schedulerBase =
-    process.env.NEXT_PUBLIC_SALES_SCHEDULER_URL || "";
+  const showMissing = Array.isArray(missing) && missing.length > 0;
 
-  const scheduleUrl =
-    schedulerBase ||
-    (quoteNo !== ""
-      ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
-          `Call about foam quote ${quoteNo}`,
-        )}&details=${encodeURIComponent(
-          `Let's review your foam packaging quote ${quoteNo} and any questions you might have.`,
-        )}`
-      : `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
-          "Foam quote call",
-        )}`);
+  const statusLabel = status || "draft";
 
-  const forwardHref = `mailto:${encodeURIComponent(
-    forwardToSalesEmail,
-  )}?subject=${encodeURIComponent(
-    salesSubject,
-  )}&body=${encodeURIComponent(
-    `Please review the attached foam quote.\n\nQuote number: ${
-      quoteNo || "(not set)"
-    }`,
-  )}`;
-
-  // Prefer caller's customerLine (from orchestrator / sketch) if provided
-  const introLine =
-    input.customerLine && input.customerLine.trim().length > 0
-      ? input.customerLine.trim()
-      : "Thanks for the details—here’s a preliminary quote based on the information we have so far.";
-
-  const missingList =
-    missing && missing.length
-      ? `<ul style="margin:4px 0 0 20px; padding:0; color:#374151; font-size:13px;">
-${missing
-  .map(
-    (m) =>
-      `<li style="margin:2px 0;">${htmlEscape(String(m))}</li>`,
-  )
-  .join("\n")}
-</ul>`
-      : "";
-
-  const missingBlock =
-    missing && missing.length
-      ? `<p style="margin:0 0 4px 0; font-size:13px; color:#111827;">
-To finalize, please confirm:</p>
-${missingList}`
-      : "";
-
-  const orderTotal = pricing.total ?? null;
-  const piecePrice =
-    orderTotal != null && qtyNum && qtyNum > 0
-      ? orderTotal / qtyNum
-      : null;
-
-  const priceBreaks = Array.isArray(pricing.price_breaks)
-    ? pricing.price_breaks
-    : null;
-
-  // Status pill (always show, default draft)
-  const rawStatus =
-    (input.status ??
-      (typeof (facts as any).status === "string"
-        ? (facts as any).status
-        : undefined) ??
-      "") || "draft";
-  const statusValue = rawStatus.trim().toLowerCase();
-  let statusBg = "#e5e7eb";
-  let statusFg = "#374151";
-  if (statusValue === "sent") {
-    statusBg = "#d1fae5";
-    statusFg = "#065f46";
-  } else if (statusValue === "accepted") {
-    statusBg = "#bfdbfe";
-    statusFg = "#1d4ed8";
-  }
-  const statusLabel = (statusValue || "draft").toUpperCase();
-
-  // Simple skiving detection: any non-integer thickness (using thickness_under if present)
-  const thicknessForSkive =
-    thicknessVal != null ? thicknessVal : specs.H_in != null ? specs.H_in : null;
-  let skivingText = "Not needed for this thickness";
-  let skiveNeeded = false;
-  if (
-    thicknessForSkive != null &&
-    !Number.isNaN(Number(thicknessForSkive))
-  ) {
-    const h = Number(thicknessForSkive);
-    if (Math.abs(h - Math.round(h)) > 1e-2) {
-      skivingText = 'Yes — includes skive for non-1" thickness';
-      skiveNeeded = true;
-    }
-  }
-
-  // ---------- Cavity info (with guard against block-size dims) ----------
-  const cavityCountRaw =
-    typeof (facts as any).cavityCount === "number"
-      ? (facts as any).cavityCount
-      : null;
-
-  const rawCavityDims = Array.isArray((facts as any).cavityDims)
-    ? ((facts as any).cavityDims as string[])
-    : [];
-
-  // Normalized outside dims string like "10x10x2"
-  const outsideDimsKey =
-    specs.L_in && specs.W_in && specs.H_in
-      ? `${specs.L_in}x${specs.W_in}x${specs.H_in}`.toLowerCase()
-      : typeof (facts as any).dims === "string"
-      ? String((facts as any).dims).trim().toLowerCase()
-      : "";
-
-  // Filter out any cavities that exactly match the outside size.
-  // This kills the "1 cavity (10x10x2)" lie.
-  const cavityDims = rawCavityDims
-    .map((d) => String(d).trim())
-    .filter((d) => d.length > 0)
-    .filter((d) =>
-      outsideDimsKey ? d.toLowerCase() !== outsideDimsKey : true,
-    );
-
-  let cavityCount =
-    cavityCountRaw != null ? cavityCountRaw : cavityDims.length || null;
-
-  // If count is wildly out-of-sync, trust the actual dim list.
-  if (
-    cavityCount != null &&
-    cavityDims.length > 0 &&
-    cavityCount !== cavityDims.length
-  ) {
-    cavityCount = cavityDims.length;
-  }
-
-  let cavityLabel: string;
-  if (cavityCount != null) {
-    const word = cavityCount === 1 ? "cavity" : "cavities";
-    if (cavityDims.length) {
-      cavityLabel = `${cavityCount} ${word} (${cavityDims.join(", ")})`;
-    } else {
-      cavityLabel = `${cavityCount} ${word}`;
-    }
-  } else if (cavityDims.length) {
-    const word = cavityDims.length === 1 ? "cavity" : "cavities";
-    cavityLabel = `${cavityDims.length} ${word} (${cavityDims.join(", ")})`;
-  } else {
-    cavityLabel = "None noted";
-  }
-
-  // Design optimization ideas from facts.opt_suggestions
-  const optSuggestionsRaw = Array.isArray((facts as any).opt_suggestions)
-    ? ((facts as any).opt_suggestions as any[])
-    : [];
-  let optSuggestions = optSuggestionsRaw
-    .map((s) => (typeof s === "string" ? s.trim() : ""))
-    .filter((s) => s.length > 0)
-    .slice(0, 5);
-
-  // Fallback: if AI didn't give any suggestions, synthesize a couple
-  // simple, honest ideas from the actual specs so the block still appears.
-  if (optSuggestions.length === 0) {
-    const fallback: string[] = [];
-
-    // Quantity-based idea
-    if (qtyNum && qtyNum > 0) {
-      const q2 = qtyNum * 2;
-      const q3 = qtyNum * 3;
-      fallback.push(
-        `If your usage can support it, we can also check pricing at about ${q2}–${q3} pcs to see if a higher volume drops the per-piece price.`,
-      );
-    }
-
-    // Density/material-based idea
-    if (specs.density_pcf && specs.density_pcf > 0) {
-      const d = specs.density_pcf;
-      if (d >= 1.7 && d <= 2.2) {
-        fallback.push(
-          `If the part isn’t extremely fragile, a nearby density in the ${(
-            d - 0.2
-          ).toFixed(1)}–${(d - 0.4).toFixed(
-            1,
-          )} pcf range might reduce cost while still handling normal drops—we can run that as an alternate.`,
-        );
-      } else if (d > 2.2) {
-        fallback.push(
-          `This is a relatively firm foam; if you’re mainly protecting against moderate handling, we can try a slightly lower density option to balance cost and cushion.`,
-        );
-      }
-    }
-
-    // Cavity layout idea
-    if (cavityDims.length > 0 && (cavityCount || cavityDims.length) >= 4) {
-      fallback.push(
-        `We can also look at grouping similar cavity sizes together to improve sheet yield and reduce scrap on the nesting layout.`,
-      );
-    }
-
-    optSuggestions = fallback.slice(0, 4);
-  }
-
-  // Shared colors (used by tables + price breaks)
-  const lightBlueBg = "#eef2ff";
-  const lightBlueBorder = "#c7d2fe";
-  const darkBlue = "#1d4ed8";
-
-  // Price-break HTML:
-  // - If price_breaks are provided, show a compact table.
-  // - Otherwise, fall back to a simple sentence.
-  let priceBreakHtml: string;
-  if (priceBreaks && priceBreaks.length > 0) {
-    const rows = priceBreaks
-      .filter((b) => b && typeof b.qty === "number" && b.qty > 0)
-      .map((b) => {
-        const qtyLabel = htmlEscape(String(b.qty));
-        const totalLabel = fmtMoney(b.total);
-        const pieceLabel =
-          b.piece != null ? fmtMoney(b.piece) : "";
-        const minLabel = b.used_min_charge ? "Yes" : "No";
-        return `<tr>
-  <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right;">${qtyLabel}</td>
-  <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right;">${totalLabel}</td>
-  <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:600;">${pieceLabel}</td>
-  <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:center;">${minLabel}</td>
-</tr>`;
-      })
-      .join("");
-
-    if (rows) {
-      priceBreakHtml = `
-<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px;">
-  <thead>
-    <tr style="background:${lightBlueBg};">
-      <th style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Qty</th>
-      <th style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Order total</th>
-      <th style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Est. per piece</th>
-      <th style="padding:4px 8px; border:1px solid ${lightBlueBorder}; text-align:center; font-weight:500; color:#374151;">Min charge?</th>
-    </tr>
-  </thead>
-  <tbody>
-    ${rows}
-  </tbody>
-</table>`;
-    } else {
-      priceBreakHtml = "";
-    }
-  } else if (piecePrice != null) {
-    const qtyLabel = qty || "this";
-    priceBreakHtml = `At ${htmlEscape(
-      String(qtyLabel),
-    )} pcs, this works out to about <span style="font-weight:600;">${fmtMoney(
-      piecePrice,
-    )}</span> per piece.`;
-  } else if (qty) {
-    priceBreakHtml = htmlEscape(
-      `At ${qty} pcs, this works out to the total shown above.`,
-    );
-  } else {
-    priceBreakHtml = htmlEscape(
-      "This works out to the total shown above based on the specs provided.",
-    );
-  }
-
-  // Cushion curve snapshot block (if calc attached cushion summary)
-  let cushionBlock = "";
-  const rawCushion: any = (pricing.raw as any)?.cushion;
-  if (
-    rawCushion &&
-    rawCushion.has_data &&
-    Array.isArray(rawCushion.points) &&
-    rawCushion.points.length > 0
-  ) {
-    const pts = [...rawCushion.points]
-      .map((p: any) => ({
-        static_psi: Number(p.static_psi),
-        deflect_pct: Number(p.deflect_pct),
-        g_level: Number(p.g_level),
-        source: p.source ? String(p.source) : "",
-      }))
-      .filter(
-        (p) =>
-          Number.isFinite(p.static_psi) &&
-          Number.isFinite(p.deflect_pct) &&
-          Number.isFinite(p.g_level),
-      )
-      .sort((a, b) => a.g_level - b.g_level || a.static_psi - b.static_psi);
-
-    if (pts.length > 0) {
-      const best = pts[0];
-      const top = pts.slice(0, 3);
-      const rows = top
-        .map(
-          (p) => `<tr>
-  <td style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right;">${p.static_psi.toFixed(
-    2,
-  )}</td>
-  <td style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right;">${p.deflect_pct.toFixed(
-    1,
-  )}%</td>
-  <td style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right;">${p.g_level.toFixed(
-    1,
-  )}</td>
-</tr>`,
-        )
-        .join("");
-
-      const summaryLine = `Best-tested point is around ${best.static_psi.toFixed(
-        2,
-      )} psi at ${best.deflect_pct.toFixed(
-        1,
-      )}% deflection, with about ${best.g_level.toFixed(
-        1,
-      )} g transmitted.`;
-
-      cushionBlock = `
-        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Cushion curve snapshot</h3>
-        <p style="margin:0 0 4px 0; font-size:11px; color:#4b5563;">
-          Based on lab data for this material, the points below show typical static load / deflection / g-level combinations.
-        </p>
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:11px; margin:0 0 4px 0;">
-          <thead>
-            <tr style="background:${lightBlueBg};">
-              <th style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Static (psi)</th>
-              <th style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">Deflection (%)</th>
-              <th style="padding:3px 6px; border:1px solid ${lightBlueBorder}; text-align:right; font-weight:500; color:#374151;">G-level</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-        <p style="margin:0 0 8px 0; font-size:11px; color:#4b5563;">
-          ${htmlEscape(summaryLine)} If you can share approximate part weight and drop height, we can double-check that this curve is a good match.
-        </p>`;
-    }
-  }
-
-  // Design optimization block (now always has content because of fallback)
-  let designBlock = "";
-  if (optSuggestions.length > 0) {
-    const items = optSuggestions
-      .map(
-        (s) =>
-          `<li style="margin:2px 0;">${htmlEscape(s)}</li>`,
-      )
-      .join("\n");
-
-    designBlock = `
-        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Design optimization ideas</h3>
-        <ul style="margin:0 0 6px 18px; padding:0; font-size:12px; color:#111827; list-style:disc;">
-          ${items}
-        </ul>
-        <p style="margin:0 0 10px 0; font-size:11px; color:#4b5563;">
-          These are optional tweaks based on typical foam applications. If one looks interesting, reply with which option you want to explore and any drop-height or fragility details you can share.
-        </p>`;
-  }
-
-  // Layout URL: use baseUrl, and the *filtered* cavityDims
-  const layoutUrl = (() => {
-    if (!quoteNo || !specs.L_in || !specs.W_in || !specs.H_in) return undefined;
-    const dims = `${specs.L_in}x${specs.W_in}x${specs.H_in}`;
-    const cavStr = cavityDims.length ? cavityDims.join(";") : "";
-    let url = `${baseUrl}/quote/layout?quote_no=${encodeURIComponent(
-      quoteNo,
-    )}&dims=${encodeURIComponent(dims)}`;
-    if (cavStr) {
-      url += `&cavities=${encodeURIComponent(cavStr)}`;
-    }
-    return url;
-  })();
-
-  return `<!DOCTYPE html>
+  return `<!doctype html>
 <html>
   <head>
-    <meta charSet="utf-8" />
-    <title>Foam quote${quoteNo ? " " + quoteNo : ""}</title>
+    <meta charset="utf-8" />
+    <title>Foam quote${quoteNumber ? " " + quoteNumber : ""}</title>
   </head>
-  <body style="margin:0; padding:0; background-color:#f3f4f6;">
-    <div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; padding:16px; background-color:#f3f4f6;">
-      <div style="max-width:720px; margin:0 auto; background-color:#ffffff; border-radius:16px; padding:20px 24px 24px 24px; box-shadow:0 10px 30px rgba(15,23,42,0.08);">
-
-        <div style="margin-bottom:8px; font-size:13px; color:#111827; white-space:normal;">
-          ${
-            quoteNo
-              ? `<span style="font-weight:600;">Quote # ${htmlEscape(
-                  quoteNo,
-                )}</span>`
-              : `<span style="font-weight:600;">Foam packaging quote</span>`
-          }
-          <span style="display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px; background-color:${statusBg}; color:${statusFg}; font-size:11px; font-weight:500;">
-            ${htmlEscape(statusLabel)}
-          </span>
-        </div>
-
-        <p style="margin:0 0 6px 0; font-size:13px; color:#111827;">
-          ${htmlEscape(introLine)}
-        </p>
-
-        ${missingBlock}
-
-        <h3 style="margin:14px 0 3px 0; font-size:13px; color:${darkBlue};">Specs</h3>
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:6px;">
-          <tbody>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; width:35%; color:#6b7280;">Outside size</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${outsideSize || "—"}</td>
+  <body style="margin:0;padding:0;background:#f3f4f6;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
+            <tr>
+              <td style="padding:20px 24px 8px 24px;border-bottom:1px solid #e5e7eb;">
+                <div style="font-size:13px;color:#6b7280;margin-bottom:4px;">Quote${quoteNumber ? " #" : ""} <span style="font-weight:600;color:#111827;">${quoteNumber ?? ""}</span></div>
+                <div style="display:inline-block;padding:2px 8px;border-radius:999px;background:#e5e7eb;font-size:11px;color:#374151;font-weight:500;text-transform:uppercase;letter-spacing:0.03em;">
+                  ${statusLabel}
+                </div>
+              </td>
             </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Quantity</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${qty || "—"}</td>
+
+            <tr>
+              <td style="padding:12px 24px 8px 24px;font-size:14px;color:#111827;">
+                <p style="margin:0 0 8px 0;">${customerLine}</p>
+                ${
+                  showMissing
+                    ? `<p style="margin:0 0 8px 0;font-size:13px;color:#374151;">To finalize, please confirm:</p>
+                       <ul style="margin:0 0 8px 20px;padding:0;font-size:13px;color:#374151;">
+                         ${missing
+                           .map(
+                             (m) =>
+                               `<li style="margin:0 0 2px 0;">${m}</li>`,
+                           )
+                           .join("")}
+                       </ul>`
+                    : ""
+                }
+              </td>
             </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Density</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${density || "TBD"}</td>
+
+            <tr>
+              <td style="padding:8px 24px 16px 24px;">
+                <!-- Specs table -->
+                <div style="font-size:13px;font-weight:600;color:#1f2933;margin:4px 0 4px 0;">Specs</div>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;">
+                  <tr>
+                    <td colspan="2" style="height:4px;"></td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" style="background:#e5edff;border-radius:6px 6px 0 0;padding:8px 10px;border:1px solid #c7d2fe;border-bottom:none;">
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:13px;color:#111827;">
+                        <tr>
+                          <td style="width:40%;padding:2px 6px;font-weight:600;">Outside size</td>
+                          <td style="width:60%;padding:2px 6px;">${outsideSize}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Quantity</td>
+                          <td style="padding:2px 6px;">${qty}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Density</td>
+                          <td style="padding:2px 6px;">${densityLabel}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Thickness under part</td>
+                          <td style="padding:2px 6px;">${thicknessUnder}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Cavities</td>
+                          <td style="padding:2px 6px;">${cavityLabel}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Foam family</td>
+                          <td style="padding:2px 6px;">${foamFamily}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Pricing table -->
+                <div style="font-size:13px;font-weight:600;color:#1f2933;margin:16px 0 4px 0;">Pricing</div>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;">
+                  <tr>
+                    <td colspan="2" style="height:4px;"></td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" style="background:#e5edff;border-radius:6px 6px 0 0;padding:8px 10px;border:1px solid #c7d2fe;border-bottom:none;">
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:13px;color:#111827;">
+                        <tr>
+                          <td style="width:40%;padding:2px 6px;font-weight:600;">Material</td>
+                          <td style="width:60%;padding:2px 6px;">${matName} — ${matDensity}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Material waste (kerf)</td>
+                          <td style="padding:2px 6px;">${matKerf}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Piece volume (CI)</td>
+                          <td style="padding:2px 6px;">${pieceCi} in³</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Order volume + waste (CI)</td>
+                          <td style="padding:2px 6px;">${orderCiWithWaste !== "—" ? orderCiWithWaste : orderCi} in³</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Skiving</td>
+                          <td style="padding:2px 6px;">
+                            ${
+                              specs.H_in && specs.H_in > 2
+                                ? "May require skiving depending on tooling"
+                                : "Not needed for this thickness"
+                            }
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Minimum charge (if applied)</td>
+                          <td style="padding:2px 6px;">${minCharge}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:2px 6px;font-weight:600;">Order total</td>
+                          <td style="padding:2px 6px;font-weight:700;">${orderTotal}${
+    usedMinCharge ? " (min charge applied)" : ""
+  }</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Price breaks (if any) -->
+                ${
+                  priceBreaks.length
+                    ? `<div style="font-size:13px;font-weight:600;color:#1f2933;margin:16px 0 4px 0;">Price breaks</div>
+                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px;">
+                         <tr>
+                           <th align="left" style="padding:4px 6px;border:1px solid #d1d5db;background:#eff6ff;">Qty</th>
+                           <th align="left" style="padding:4px 6px;border:1px solid #d1d5db;background:#eff6ff;">Order total</th>
+                           <th align="left" style="padding:4px 6px;border:1px solid #d1d5db;background:#eff6ff;">Est. per piece</th>
+                           <th align="left" style="padding:4px 6px;border:1px solid #d1d5db;background:#eff6ff;">Min charge?</th>
+                         </tr>
+                         ${priceBreaks
+                           .map((pb) => {
+                             const perPiece =
+                               pb.piece != null && !isNaN(Number(pb.piece))
+                                 ? fmtMoney(pb.piece)
+                                 : "—";
+                             return `<tr>
+                               <td style="padding:4px 6px;border:1px solid #e5e7eb;">${pb.qty}</td>
+                               <td style="padding:4px 6px;border:1px solid #e5e7eb;">${fmtMoney(pb.total)}</td>
+                               <td style="padding:4px 6px;border:1px solid #e5e7eb;">${perPiece}</td>
+                               <td style="padding:4px 6px;border:1px solid #e5e7eb;">${
+                                 pb.used_min_charge ? "Yes" : "No"
+                               }</td>
+                             </tr>`;
+                           })
+                           .join("")}
+                       </table>`
+                    : ""
+                }
+
+                <!-- Buttons -->
+                <div style="margin-top:18px;margin-bottom:4px;">
+                  ${
+                    layoutUrl
+                      ? `<a href="${layoutUrl}" style="display:inline-block;margin-right:8px;padding:8px 14px;border-radius:999px;background:#2563eb;color:#ffffff;font-size:12px;font-weight:500;text-decoration:none;">Open layout preview</a>`
+                      : ""
+                  }
+                  ${
+                    quoteNumber
+                      ? `<a href="${
+                          (process.env.NEXT_PUBLIC_BASE_URL ||
+                            "https://api.alex-io.com") +
+                          "/quote?quote_no=" +
+                          encodeURIComponent(quoteNumber)
+                        }" style="display:inline-block;margin-right:8px;padding:8px 14px;border-radius:999px;background:#1f2937;color:#ffffff;font-size:12px;font-weight:500;text-decoration:none;">View printable quote</a>`
+                      : ""
+                  }
+                  <a href="mailto:sales@example.com?subject=${encodeURIComponent(
+                    `Quote ${quoteNumber || ""}`,
+                  )}" style="display:inline-block;padding:8px 14px;border-radius:999px;background:#e5e7eb;color:#111827;font-size:12px;font-weight:500;text-decoration:none;">Forward quote to sales</a>
+                </div>
+              </td>
             </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Thickness under part</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${thicknessLabel || "—"}</td>
-            </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Cavities</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${htmlEscape(
-                cavityLabel,
-              )}</td>
-            </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Foam family</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${foamFamily || "TBD"}</td>
-            </tr>
-          </tbody>
-        </table>
 
-        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Pricing</h3>
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:12px; margin-bottom:6px;">
-          <tbody>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; width:35%; color:#6b7280;">Material</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
-                foamFamily
-                  ? `${foamFamily}${density ? " — " + density : ""}`
-                  : density || "—"
-              }</td>
-            </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Material waste (kerf)</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
-                material.kerf_pct != null ? `${material.kerf_pct}%` : "0%"
-              }</td>
-            </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Piece volume (CI)</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
-                pricing.piece_ci != null ? `${pricing.piece_ci} in³` : "0 in³"
-              }</td>
-            </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Order volume + waste (CI)</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
-                pricing.order_ci_with_waste != null
-                  ? `${pricing.order_ci_with_waste} in³`
-                  : pricing.order_ci != null
-                  ? `${pricing.order_ci} in³`
-                  : "0 in³"
-              }</td>
-            </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Skiving</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${skivingText}</td>
-            </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Minimum charge (if applied)</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827;">${
-                pricing.used_min_charge && material.min_charge != null
-                  ? fmtMoney(material.min_charge)
-                  : fmtMoney(0)
-              }</td>
-            </tr>
-            <tr style="background:${lightBlueBg};">
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#6b7280;">Order total</td>
-              <td style="padding:4px 8px; border:1px solid ${lightBlueBorder}; color:#111827; font-weight:600;">${
-                orderTotal != null ? fmtMoney(orderTotal) : fmtMoney(0)
-              }</td>
-            </tr>
-          </tbody>
-        </table>
-
-        ${
-          skiveNeeded
-            ? `<p style="margin:2px 0 8px 0; font-size:11px; color:#b91c1c;">
-* Note: This job requires skiving — quoted pricing includes skiving set-up and the up-charge for non-standard thickness.
-</p>`
-            : ""
-        }
-
-        <h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Price breaks</h3>
-        <div style="margin:0 0 6px 0; font-size:12px; color:#111827;">
-          ${priceBreakHtml}
-        </div>
-
-        <p style="margin:0 0 10px 0; font-size:12px; color:#4b5563;">
-          For cavities, replying with a short list like “2×3×1 qty 4; dia 6×1 qty 2” works best.
-        </p>
-
-        ${cushionBlock}
-
-        ${designBlock}
-
-        ${
-          layoutUrl
-            ? `<h3 style="margin:10px 0 3px 0; font-size:13px; color:${darkBlue};">Visual layout preview (auto-generated)</h3>
-        <p style="margin:0 0 6px 0; font-size:12px; color:#4b5563;">
-          Open a simple top-view layout showing the block and cavity arrangement.
-        </p>`
-            : ""
-        }
-
-        <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
-          <!-- Forward: dark blue -->
-          <a
-            href="${forwardHref}"
-            style="
-              display:inline-block;
-              padding:8px 14px;
-              border-radius:999px;
-              background:#1d4ed8;
-              color:#ffffff;
-              font-size:12px;
-              font-weight:500;
-              text-decoration:none;
-              border:1px solid #1d4ed8;
-            "
-          >
-            Forward quote to sales
-          </a>
-
-          <!-- View printable: light blue -->
-          ${
-            printUrl
-              ? `<a
-            href="${printUrl}"
-            style="
-              display:inline-block;
-              padding:8px 14px;
-              border-radius:999px;
-              background:${lightBlueBg};
-              color:${darkBlue};
-              font-size:12px;
-              font-weight:500;
-              text-decoration:none;
-              border:1px solid ${lightBlueBorder};
-            "
-          >
-            View printable quote
-          </a>`
-              : ""
-          }
-
-          <!-- Schedule: dark blue -->
-          <a
-            href="${scheduleUrl}"
-            style="
-              display:inline-block;
-              padding:8px 14px;
-              border-radius:999px;
-              background:#1d4ed8;
-              color:#ffffff;
-              font-size:12px;
-              font-weight:500;
-              text-decoration:none;
-              border:1px solid #1d4ed8;
-            "
-          >
-            Schedule a call
-          </a>
-
-          <!-- Upload sketch: light blue -->
-          <a
-            href="${sketchUrl}"
-            style="
-              display:inline-block;
-              padding:8px 14px;
-              border-radius:999px;
-              background:${lightBlueBg};
-              color:${darkBlue};
-              font-size:12px;
-              font-weight:500;
-              text-decoration:none;
-              border:1px solid ${lightBlueBorder};
-            "
-          >
-            Upload sketch / file
-          </a>
-
-          ${
-            layoutUrl
-              ? `<a
-            href="${layoutUrl}"
-            style="
-              display:inline-block;
-              padding:8px 14px;
-              border-radius:999px;
-              background:${lightBlueBg};
-              color:${darkBlue};
-              font-size:12px;
-              font-weight:500;
-              text-decoration:none;
-              border:1px solid ${lightBlueBorder};
-            "
-          >
-            Open layout preview
-          </a>`
-              : ""
-          }
-        </div>
-
-${sketchLine}
-
-        <p style="margin:14px 0 4px 0; font-size:11px; color:#4b5563; line-height:1.5;">
-          This is a preliminary price based on the information we have so far. We&apos;ll firm it up once we confirm any missing details or adjustments, and we can easily re-run the numbers if the quantity or material changes (including any skiving or non-standard thickness up-charges).
-        </p>
-
-        <p style="margin:4px 0 0 0; font-size:11px; color:#4b5563; line-height:1.5;">
-          To continue, you can forward this quote to sales, upload a sketch, schedule a call, or reply directly to this email with any revisions.
-        </p>
-
-        <p style="margin:14px 0 0 0; font-size:11px; color:#6b7280;">
-          — Alex-IO Estimator
-        </p>
-      </div>
-    </div>
+          </table>
+        </td>
+      </tr>
+    </table>
   </body>
 </html>`;
 }
