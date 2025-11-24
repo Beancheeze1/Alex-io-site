@@ -111,6 +111,7 @@ export default function LayoutPage({
     LayoutModel | null
   >(null);
   const [initialNotes, setInitialNotes] = React.useState<string>("");
+  const [initialQty, setInitialQty] = React.useState<number | null>(null);
   const [loadingLayout, setLoadingLayout] = React.useState<boolean>(true);
 
   // Helper: fallback layout builder
@@ -140,6 +141,7 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
+            setInitialQty(null);
             setLoadingLayout(false);
           }
           return;
@@ -158,12 +160,22 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
+            setInitialQty(null);
             setLoadingLayout(false);
           }
           return;
         }
 
         const json = await res.json();
+
+        // Pull qty from the primary item if present
+        let qtyFromApi: number | null = null;
+        if (json && json.ok && Array.isArray(json.items) && json.items.length) {
+          const first = json.items[0];
+          if (typeof first?.qty === "number") {
+            qtyFromApi = first.qty;
+          }
+        }
 
         // If we have a saved layout package with layout_json, prefer that
         if (
@@ -179,6 +191,7 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
             setInitialNotes(notesFromDb);
+            setInitialQty(qtyFromApi);
             setLoadingLayout(false);
           }
           return;
@@ -189,6 +202,7 @@ export default function LayoutPage({
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
+          setInitialQty(qtyFromApi);
           setLoadingLayout(false);
         }
       } catch (err) {
@@ -197,6 +211,7 @@ export default function LayoutPage({
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
+          setInitialQty(null);
           setLoadingLayout(false);
         }
       }
@@ -225,6 +240,7 @@ export default function LayoutPage({
       hasRealQuoteNo={hasRealQuoteNo}
       initialLayout={initialLayout}
       initialNotes={initialNotes}
+      initialQty={initialQty}
     />
   );
 }
@@ -236,8 +252,10 @@ function LayoutEditorHost(props: {
   hasRealQuoteNo: boolean;
   initialLayout: LayoutModel;
   initialNotes: string;
+  initialQty: number | null;
 }) {
-  const { quoteNo, hasRealQuoteNo, initialLayout, initialNotes } = props;
+  const { quoteNo, hasRealQuoteNo, initialLayout, initialNotes, initialQty } =
+    props;
 
   const {
     layout,
@@ -252,6 +270,9 @@ function LayoutEditorHost(props: {
 
   const [zoom, setZoom] = React.useState(1);
   const [notes, setNotes] = React.useState(initialNotes || "");
+  const [qty, setQty] = React.useState<number | "">(
+    typeof initialQty === "number" && initialQty > 0 ? initialQty : "",
+  );
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
   >("idle");
@@ -321,6 +342,10 @@ function LayoutEditorHost(props: {
       return;
     }
 
+    // Normalize qty: allow blank, but if set, must be > 0
+    const parsedQty =
+      qty === "" ? undefined : Number.isFinite(Number(qty)) ? Number(qty) : undefined;
+
     try {
       setApplyStatus("saving");
 
@@ -334,6 +359,7 @@ function LayoutEditorHost(props: {
           layout,
           notes,
           svg,
+          qty: parsedQty,
         }),
       });
 
@@ -477,8 +503,8 @@ function LayoutEditorHost(props: {
               )}
             </div>
 
-            {/* zoom + apply button (no more "view printable quote") */}
-            <div className="flex items-center gap-3">
+            {/* zoom + qty + apply button */}
+            <div className="flex items-center gap-4">
               <div className="flex items-center gap-1 text-[11px] text-slate-500">
                 <span>Zoom</span>
                 <input
@@ -489,6 +515,28 @@ function LayoutEditorHost(props: {
                   value={zoom}
                   onChange={(e) => setZoom(Number(e.target.value))}
                   className="w-28"
+                />
+              </div>
+
+              <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                <span>Qty</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={qty}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) {
+                      setQty("");
+                    } else {
+                      const n = Number(v);
+                      if (Number.isFinite(n) && n >= 0) {
+                        setQty(n);
+                      }
+                    }
+                  }}
+                  className="w-20 rounded-md border border-slate-300 px-2 py-1 text-xs"
                 />
               </div>
 
