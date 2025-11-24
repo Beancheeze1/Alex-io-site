@@ -144,27 +144,22 @@ function applyCavityNormalization(facts: Mem): Mem {
     cleaned.push(`${L}x${W}x${H}`);
   }
 
-  // If nothing survived, strip cavity info altogether
   if (!cleaned.length) {
+    // Nothing valid left — drop cavity info altogether
     delete (facts as any).cavityDims;
-    if (typeof (facts as any).cavityCount === "number") {
-      delete (facts as any).cavityCount;
-    }
+    delete (facts as any).cavityCount;
     return facts;
   }
 
   (facts as any).cavityDims = cleaned;
 
-  // Clamp cavityCount so LLM can't hallucinate wild numbers
-  if (typeof (facts as any).cavityCount === "number") {
-    const n = (facts as any).cavityCount;
-    if (!Number.isFinite(n) || n <= 0 || n > 200) {
-      delete (facts as any).cavityCount;
-    }
-  }
+  // 🔒 Tie cavityCount directly to number of dims so
+  // stale / hallucinated values can't survive.
+  (facts as any).cavityCount = cleaned.length;
 
   return facts;
 }
+
 
 
 /* ============================================================
@@ -471,11 +466,26 @@ function extractCavities(raw: string): {
    ============================================================ */
 
 function extractAllFromTextAndSubject(body: string, subject: string): Mem {
-  const text = `${subject}\n\n${body || ""}`;
+  const rawBody = body || "";
   const facts: Mem = {};
 
-  const dims = grabDims(text);
+  // 1) For main dims, ignore lines that talk about cavities/pockets.
+  const bodyNoCavity = rawBody
+    .split(/\r?\n/)
+    .filter(
+      (ln) =>
+        !/\bcavity\b|\bcavities\b|\bpocket\b|\bpockets\b|\bcutout\b|\bcutouts\b/i.test(
+          ln,
+        ),
+    )
+    .join("\n");
+
+  const dimsSource = `${subject}\n\n${bodyNoCavity}`;
+  const dims = grabDims(dimsSource);
   if (dims) facts.dims = normDims(dims) || dims;
+
+  // 2) Everything else can look at full text (dimsSource + the original body)
+  const text = `${subject}\n\n${rawBody}`;
 
   const qtyVal = grabQty(text);
   if (qtyVal) facts.qty = qtyVal;
@@ -495,6 +505,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   return compact(facts);
 }
+
 
 /* ============================================================
    LLM helpers (facts + opener)
