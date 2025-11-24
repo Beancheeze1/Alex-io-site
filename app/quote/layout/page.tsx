@@ -516,7 +516,8 @@ function LayoutEditorHost(props: {
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 text-sm text-slate-900">
-                <span className="font-semibold">Foam layout preview</span>
+                <span className="font-semibold">Foam layout preview (TEST XYZ)</span>
+
                 <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-medium">
                   BETA – interactive layout
                 </span>
