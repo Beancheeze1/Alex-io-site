@@ -1069,7 +1069,7 @@ export async function POST(req: NextRequest) {
       customerLine: opener,
       quoteNumber: merged.quoteNumber || merged.quote_no,
       status: merged.status || "draft",
-      specs: {
+            specs: {
         L_in: dimsNums.L,
         W_in: dimsNums.W,
         H_in: dimsNums.H,
@@ -1078,7 +1078,17 @@ export async function POST(req: NextRequest) {
         foam_family: specs.material,
         thickness_under_in: merged.thickness_under_in,
         color: merged.color,
+        // NEW: pass cavity info through to the template
+        cavityCount:
+          merged.cavityCount ??
+          (Array.isArray(merged.cavityDims)
+            ? merged.cavityDims.length
+            : null),
+        cavityDims: Array.isArray(merged.cavityDims)
+          ? (merged.cavityDims as string[])
+          : [],
       },
+
       material: {
         name: merged.material_name,
         density_lbft3: densityPcf,
