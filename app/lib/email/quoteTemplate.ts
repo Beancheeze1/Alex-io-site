@@ -82,7 +82,7 @@ export type TemplatePricing = {
 };
 
 export type TemplateInput = {
-  customerLine: string;
+  customerLine?: string | null;
   quoteNumber?: string | null;
   status?: string;
   specs: TemplateSpecs;
@@ -91,6 +91,7 @@ export type TemplateInput = {
   missing: string[];
   facts: Record<string, any>;
 };
+
 
 function fmtInchesTriple(L: number, W: number, H: number): string {
   if (!L || !W || !H) return "—";
@@ -164,8 +165,12 @@ function buildLayoutUrl(input: TemplateInput): string | null {
 }
 
 export function renderQuoteEmail(input: TemplateInput): string {
-  const { customerLine, quoteNumber, status, specs, material, pricing, missing } =
-    input;
+  const { quoteNumber, status, specs, material, pricing, missing } = input;
+
+  const customerLine =
+    input.customerLine ||
+    "Thanks for the details—I'll review a couple of specifications and get back to you with a price shortly.";
+
 
   const outsideSize = fmtInchesTriple(specs.L_in, specs.W_in, specs.H_in);
   const qty = fmtQty(specs.qty);
