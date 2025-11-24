@@ -89,7 +89,7 @@ export type TemplateInput = {
   material: TemplateMaterial;
   pricing: TemplatePricing;
   missing: string[];
-  facts: Record<string, any>;
+  facts?: Record<string, any>;   // <-- make it optional
 };
 
 
