@@ -112,11 +112,60 @@ function normalizeCavity(raw: string): string {
 function applyCavityNormalization(facts: Mem): Mem {
   if (!facts) return facts;
   if (!Array.isArray(facts.cavityDims)) return facts;
-  facts.cavityDims = facts.cavityDims
-    .map((c: string) => normalizeCavity(c))
-    .filter((x: string) => x && x.trim());
+
+  const cleaned: string[] = [];
+
+  for (const raw of facts.cavityDims as string[]) {
+    if (!raw) continue;
+
+    // First apply the DIA / whitespace normalization
+    const norm = normalizeCavity(String(raw));
+
+    // Require exactly 3 numeric components: L x W x H
+    const m = norm
+      .toLowerCase()
+      .replace(/"/g, "")
+      .match(
+        new RegExp(
+          `(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`,
+          "i",
+        ),
+      );
+
+    if (!m) {
+      // If we can't see 3 numbers, skip this cavity entirely
+      continue;
+    }
+
+    const L = m[1];
+    const W = m[2];
+    const H = m[3];
+
+    cleaned.push(`${L}x${W}x${H}`);
+  }
+
+  // If nothing survived, strip cavity info altogether
+  if (!cleaned.length) {
+    delete (facts as any).cavityDims;
+    if (typeof (facts as any).cavityCount === "number") {
+      delete (facts as any).cavityCount;
+    }
+    return facts;
+  }
+
+  (facts as any).cavityDims = cleaned;
+
+  // Clamp cavityCount so LLM can't hallucinate wild numbers
+  if (typeof (facts as any).cavityCount === "number") {
+    const n = (facts as any).cavityCount;
+    if (!Number.isFinite(n) || n <= 0 || n > 200) {
+      delete (facts as any).cavityCount;
+    }
+  }
+
   return facts;
 }
+
 
 /* ============================================================
    DB enrichment
@@ -168,7 +217,8 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
    Dimension / density helpers
    ============================================================ */
 
-const NUM = "\\d{1,4}(?:\\.\\d+)?";
+// Allow "1", "1.5" and also ".5" style numbers
+const NUM = "(?:\\d{1,4}(?:\\.\\d+)?|\\.\\d+)";
 
 function normDims(raw: string | undefined | null): string | undefined {
   if (!raw) return undefined;
@@ -469,8 +519,8 @@ Valid keys:
 - qty: integer
 - material: string
 - density: string like "1.7#"
-- cavityCount: integer
-- cavityDims: array of strings
+- cavityCount: integer (only if explicitly stated like "4 cavities"; NEVER guess)
+- cavityDims: array of strings; each must include 3 numbers like "1x1x0.5". If depth isn't clear, omit that entry.
 
 Subject:
 ${subject}
@@ -478,6 +528,7 @@ ${subject}
 Body:
 ${body}
     `.trim();
+
 
     const r = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -498,7 +549,7 @@ ${body}
     const end = raw.lastIndexOf("}");
     if (start === -1 || end === -1) return {};
 
-    const parsed = JSON.parse(raw.slice(start, end + 1));
+       const parsed = JSON.parse(raw.slice(start, end + 1));
     const out: Mem = {};
 
     if (parsed.dims) out.dims = normDims(parsed.dims) || parsed.dims;
@@ -506,15 +557,40 @@ ${body}
     if (parsed.material) out.material = parsed.material;
     if (parsed.density) out.density = parsed.density;
 
-    // NOTE:
-    // We intentionally IGNORE parsed.cavityDims here and only trust
-    // cavityDims derived from explicit patterns in the email text
-    // (extractCavities). This prevents the model from hallucinating
-    // cavity sizes that were never actually specified.
+    // Cavity dims: normalize, require 3 numbers, drop junk
+    let cavityDims: string[] = [];
+    if (Array.isArray(parsed.cavityDims)) {
+      for (const rawDim of parsed.cavityDims as any[]) {
+        if (!rawDim) continue;
+        const s = String(rawDim);
+        const nd = normDims(s) || s;
+        const m = nd
+          .toLowerCase()
+          .replace(/"/g, "")
+          .match(
+            new RegExp(
+              `(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`,
+              "i",
+            ),
+          );
+        if (!m) continue;
+        cavityDims.push(`${m[1]}x${m[2]}x${m[3]}`);
+      }
+    }
+    if (cavityDims.length) {
+      out.cavityDims = cavityDims;
+    }
 
-    if (parsed.cavityCount != null) out.cavityCount = parsed.cavityCount;
+    // Cavity count: NEVER guess. Only keep small, sane numbers
+    if (parsed.cavityCount != null && cavityDims.length) {
+      const n = Number(parsed.cavityCount);
+      if (Number.isFinite(n) && n > 0 && n <= 50) {
+        out.cavityCount = n;
+      }
+    }
 
     return compact(out);
+
   } catch {
     return {};
   }
