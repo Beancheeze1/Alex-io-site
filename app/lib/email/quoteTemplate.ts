@@ -157,15 +157,16 @@ function buildLayoutUrl(input: TemplateInput): string | null {
   }
 
   if (cavityDims && cavityDims.length) {
-    // Join all cavity sizes for future multi-pocket support
-    params.set("cavities", cavityDims.join(";"));
-    // Also provide the first cavity as `cavity=` so the layout page
-    // can pick it up even if it only looks at a single value.
+    // Use comma-separated list (safest with the existing builder)
+    // Example: "1x1x1,2x2x1,3x3x2"
+    params.set("cavities", cavityDims.join(","));
+    // Also give the first cavity as "cavity=" for older code paths
     params.set("cavity", cavityDims[0]);
   }
 
   return `${base}/quote/layout?${params.toString()}`;
 }
+
 
 export function renderQuoteEmail(input: TemplateInput): string {
   const { quoteNumber, status, specs, material, pricing, missing } = input;

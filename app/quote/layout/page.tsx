@@ -43,10 +43,10 @@ function normalizeDimsParam(raw: string | undefined): string {
 }
 
 function normalizeCavitiesParam(raw: string | undefined): string {
-  // Default to a single sample cavity so the layout starts clean
-  if (!raw || !raw.trim()) return "3x2x1";
+  if (!raw) return "";
   return raw.trim();
 }
+
 
 // Ensure all dimension edits snap to 0.125"
 const SNAP_IN = 0.125;
