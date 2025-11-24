@@ -565,19 +565,26 @@ function extractCavities(raw: string): {
     cavityCount = Number(mCount[1]);
   }
 
-  for (const line of lines) {
+ for (const line of lines) {
     const lower = line.toLowerCase();
     if (!/\bcavity|cavities|cutout|pocket\b/.test(lower)) continue;
 
-    const tokens = line.split(/[;,]/);
+    // NEW: split on period, comma, semicolon so we don't mix cavity dims with outside dims
+    const tokens = line.split(/[.;,]/);
+
     for (const tok of tokens) {
       const dd = grabDims(tok);
       if (dd) {
         cavityDims.push(dd);
         continue;
       }
+
       const mPair = tok.trim().match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`));
-      if (mPair) cavityDims.push(`${mPair[1]}x${mPair[2]}`);
+      if (mPair) {
+        // If only LxW found, we treat missing depth as 1"
+        // Example: "1x1" → "1x1x1"
+        cavityDims.push(`${mPair[1]}x${mPair[2]}x1`);
+      }
     }
   }
 
