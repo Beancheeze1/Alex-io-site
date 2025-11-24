@@ -816,9 +816,15 @@ export async function POST(req: NextRequest) {
       loadedQuote = await loadFacts(subjectQuoteNo);
     }
 
-    // Merge order: sketch / quote-level facts first, then thread-level,
+        // Merge order: thread-level facts first, then sketch / quote-level facts,
     // then the newest email facts overwrite.
-    let merged = mergeFacts(mergeFacts(loadedQuote, loadedThread), newly);
+    //
+    // IMPORTANT:
+    // For shared keys like dims / cavityDims / qty, the quote-level facts
+    // (which now reflect the latest layout/apply) should override older
+    // thread-level memory so we don't keep showing stale "3x2x1 in 10x10x2".
+    let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
+
 
     merged = applyCavityNormalization(merged);
 
