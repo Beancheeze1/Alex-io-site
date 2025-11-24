@@ -471,6 +471,23 @@ function grabDims(raw: string): string | undefined {
   return `${m[1]}x${m[2]}x${m[3]}`;
 }
 
+// Prefer explicit "overall / outside / block size" phrases for the main block.
+function grabOutsideDims(raw: string): string | undefined {
+  const text = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
+  const m = text.match(
+    new RegExp(
+      `\\b(?:overall|outside|block|foam)\\s+(?:size|dimensions?|dims?)` +
+        `\\s*(?:is|=|:)?\\s*` +
+        `(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})` +
+        `(?:\\s*(?:in|inch|inches))?\\b`,
+      "i",
+    ),
+  );
+  if (!m) return undefined;
+  return `${m[1]}x${m[2]}x${m[3]}`;
+}
+
+
 function grabQty(raw: string): number | undefined {
   const t = raw.toLowerCase();
 
@@ -578,23 +595,37 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const rawBody = body || "";
   const facts: Mem = {};
 
-  // 1) For main dims, ignore lines that talk about cavities/pockets/cutouts
-  const bodyNoCavity = rawBody
-    .split(/\r?\n/)
-    .filter(
-      (ln) =>
-        !/\bcavity\b|\bcavities\b|\bpocket\b|\bpockets\b|\bcutout\b|\bcutouts\b/i.test(
-          ln,
-        ),
-    )
-    .join("\n");
-
-  const dimsSource = `${subject}\n\n${bodyNoCavity}`;
-  const dims = grabDims(dimsSource);
-  if (dims) facts.dims = normDims(dims) || dims;
-
-  // 2) Everything else can look at the full text
+  // Full text (subject + body) for most parsing
   const text = `${subject}\n\n${rawBody}`;
+
+  // 1) MAIN DIMS (outside size / block size)
+  //
+  // First, try to find explicit "overall / outside / block size" phrases
+  // anywhere in the text (even if they share a line with "cavity").
+  const outsideDims = grabOutsideDims(text);
+  if (outsideDims) {
+    facts.dims = normDims(outsideDims) || outsideDims;
+  } else {
+    // Fallback: old behavior — ignore lines that talk about cavities/pockets/cutouts
+    const bodyNoCavity = rawBody
+      .split(/\r?\n/)
+      .filter(
+        (ln) =>
+          !/\bcavity\b|\bcavities\b|\bpocket\b|\bpockets\b|\bcutout\b|\bcutouts\b/i.test(
+            ln,
+          ),
+      )
+      .join("\n");
+
+    const dimsSource = `${subject}\n\n${bodyNoCavity}`;
+    const dims = grabDims(dimsSource);
+    if (dims && !facts.dims) {
+      facts.dims = normDims(dims) || dims;
+    }
+  }
+
+  // 2) Everything else (qty, density, material, cavities) can look at full text
+
 
   const qtyVal = grabQty(text);
   if (qtyVal) facts.qty = qtyVal;
