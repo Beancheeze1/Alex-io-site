@@ -565,7 +565,7 @@ function extractCavities(raw: string): {
     cavityCount = Number(mCount[1]);
   }
 
- for (const line of lines) {
+  for (const line of lines) {
     const lower = line.toLowerCase();
     if (!/\bcavity|cavities|cutout|pocket\b/.test(lower)) continue;
 
@@ -593,6 +593,44 @@ function extractCavities(raw: string): {
     cavityDims: cavityDims.length ? cavityDims : undefined,
   };
 }
+
+// Fallback: if we know there are cavities but no sizes, scan the text for
+// all LxWxH patterns and drop anything that matches the main outside dims.
+function recoverCavityDimsFromText(
+  rawText: string,
+  mainDims?: string | null,
+): string[] {
+  if (!rawText) return [];
+
+  const text = rawText.toLowerCase().replace(/"/g, " ").replace(/\s+/g, " ");
+  const mainNorm = (mainDims || "").toLowerCase().trim();
+
+  const re = new RegExp(
+    `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
+    "gi",
+  );
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = re.exec(text))) {
+    const dims = `${m[1]}x${m[2]}x${m[3]}`;
+    const norm = dims.toLowerCase().trim();
+
+    // Skip the main outside size
+    if (mainNorm && norm === mainNorm) continue;
+
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      out.push(dims);
+    }
+  }
+
+  return out;
+}
+
+
 
 /* ============================================================
    Initial fact extraction from subject + body
@@ -863,6 +901,21 @@ export async function POST(req: NextRequest) {
     // thread-level memory so we don't keep showing stale "3x2x1 in 10x10x2".
     let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
 
+    // Fallback: if we know there are cavities but no sizes yet, try to
+    // recover cavity dims directly from the email text (subject + body).
+    if (
+      merged.cavityCount &&
+      (!Array.isArray(merged.cavityDims) ||
+        merged.cavityDims.length === 0)
+    ) {
+      const recovered = recoverCavityDimsFromText(
+        `${subject}\n\n${lastText}`,
+        merged.dims,
+      );
+      if (recovered.length > 0) {
+        merged.cavityDims = recovered;
+      }
+    }
 
     merged = applyCavityNormalization(merged);
 
