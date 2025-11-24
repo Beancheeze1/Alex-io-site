@@ -18,6 +18,9 @@
 //   - Inserts a row into quote_layout_packages with layout_json + notes + svg_text
 //   - If qty is a positive number, updates the PRIMARY quote_items row for that
 //     quote to use the new qty.
+//   - Also syncs dims / cavities / qty into the facts store (loadFacts/saveFacts)
+//     under quote_no so follow-up emails + layout links use the latest layout,
+//     not stale "3x2x1 in a 10x10x2 block" test data.
 //   - Returns the new package id + (if changed) the updatedQty.
 //
 // GET (debug helper):
@@ -25,6 +28,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
+import { loadFacts, saveFacts } from "@/app/lib/memory";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -145,6 +149,58 @@ export async function POST(req: NextRequest) {
           [n, quote.id],
         );
       }
+    }
+
+    // Sync layout dims, cavities, and optional qty into the facts store
+    // for this quote so follow-up emails + layout links stay in sync
+    // with the editor instead of older parsed values.
+    try {
+      const factsKey = quoteNo;
+      const prevFacts = await loadFacts(factsKey);
+      const nextFacts: any =
+        prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
+
+      // Outside size from the saved block
+      if (layout && layout.block) {
+        const L = Number(layout.block.lengthIn) || 0;
+        const W = Number(layout.block.widthIn) || 0;
+        const T = Number(layout.block.thicknessIn) || 0;
+        if (L > 0 && W > 0 && T > 0) {
+          nextFacts.dims = `${L}x${W}x${T}`;
+        }
+      }
+
+      // Cavities from the saved layout (LxWxD for each pocket)
+      if (layout && Array.isArray(layout.cavities)) {
+        const cavDims: string[] = [];
+        for (const cav of layout.cavities as any[]) {
+          if (!cav) continue;
+          const L = Number(cav.lengthIn) || 0;
+          const W = Number(cav.widthIn) || 0;
+          const D = Number(cav.depthIn) || 0;
+          if (L > 0 && W > 0 && D > 0) {
+            cavDims.push(`${L}x${W}x${D}`);
+          }
+        }
+
+        if (cavDims.length) {
+          nextFacts.cavityDims = cavDims;
+          nextFacts.cavityCount = cavDims.length;
+        } else {
+          delete nextFacts.cavityDims;
+          delete nextFacts.cavityCount;
+        }
+      }
+
+      if (updatedQty != null) {
+        nextFacts.qty = updatedQty;
+      }
+
+      if (Object.keys(nextFacts).length > 0) {
+        await saveFacts(factsKey, nextFacts);
+      }
+    } catch (e) {
+      console.error("Error syncing layout facts for quote", quoteNo, e);
     }
 
     return ok(
