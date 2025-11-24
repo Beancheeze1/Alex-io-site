@@ -78,7 +78,7 @@ export type TemplatePricing = {
   order_ci_with_waste?: number | null;
   used_min_charge?: boolean | null;
   raw?: any;
-  price_breaks?: PriceBreak[];
+  price_breaks?: PriceBreak[] | null;
 };
 
 export type TemplateInput = {
@@ -212,8 +212,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const usedMinCharge =
     pricing.used_min_charge ?? pricing.raw?.min_charge_applied ?? false;
 
-  const priceBreaks = pricing.price_breaks || [];
-
+  const priceBreaks: PriceBreak[] = pricing.price_breaks ?? [];
   const layoutUrl = buildLayoutUrl(input);
 
   const showMissing = Array.isArray(missing) && missing.length > 0;
