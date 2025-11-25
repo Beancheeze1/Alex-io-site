@@ -569,8 +569,8 @@ function extractCavities(raw: string): {
     const lower = line.toLowerCase();
     if (!/\bcavity|cavities|cutout|pocket\b/.test(lower)) continue;
 
-    // NEW: split on period, comma, semicolon so we don't mix cavity dims with outside dims
-    const tokens = line.split(/[.;,]/);
+    // FIX: split on commas / semicolons only so decimals like 0.5 stay intact
+    const tokens = line.split(/[;,]/);
 
     for (const tok of tokens) {
       const dd = grabDims(tok);
