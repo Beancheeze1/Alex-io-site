@@ -19,9 +19,6 @@
 //   we treat that as fresh and ignore any saved DB layout geometry for
 //   the initial load, so email → layout always reflects the latest
 //   cavity dims instead of an old 3x2x1 test layout.
-// - NEW (11/24): If the URL includes `qty=` and the DB doesn't have an
-//   item yet, seed the Qty field from the URL so the first reply's qty
-//   flows into the editor.
 //
 
 "use client";
@@ -49,6 +46,7 @@ function normalizeCavitiesParam(raw: string | undefined): string {
   if (!raw) return "";
   return raw.trim();
 }
+
 
 // Ensure all dimension edits snap to 0.125"
 const SNAP_IN = 0.125;
@@ -94,7 +92,7 @@ export default function LayoutPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------- Other URL params (dims, cavities, qty) ---------- */
+  /* ---------- Other URL params (dims, cavities) ---------- */
 
   const dimsParam = (searchParams?.dims ??
     searchParams?.block ??
@@ -103,20 +101,6 @@ export default function LayoutPage({
   const cavitiesParam = (searchParams?.cavities ??
     searchParams?.cavity ??
     "") as string | undefined;
-
-  // NEW: read qty= from URL so first email can seed the editor
-  const qtyParamRaw = (searchParams?.qty ??
-    searchParams?.q ??
-    "") as string | undefined;
-
-  const qtyFromUrl: number | null = (() => {
-    if (!qtyParamRaw) return null;
-    const trimmed = String(qtyParamRaw).trim();
-    if (!trimmed) return null;
-    const n = Number(trimmed);
-    if (!Number.isFinite(n) || n <= 0) return null;
-    return n;
-  })();
 
   const blockStr = normalizeDimsParam(dimsParam);
   const cavityStr = normalizeCavitiesParam(cavitiesParam);
@@ -165,13 +149,12 @@ export default function LayoutPage({
 
       try {
         // If we don't have a real quote number, just use fallback layout
-        // and seed qty from URL if present.
         if (!hasRealQuoteNo) {
           const fallback = buildFallbackLayout();
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
-            setInitialQty(qtyFromUrl);
+            setInitialQty(null);
             setLoadingLayout(false);
           }
           return;
@@ -185,13 +168,12 @@ export default function LayoutPage({
         );
 
         if (!res.ok) {
-          // If the quote isn't found or API fails, fall back to local defaults.
-          // For qty, prefer URL qty if DB has nothing yet.
+          // If the quote isn't found or API fails, fall back to local defaults
           const fallback = buildFallbackLayout();
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
-            setInitialQty(qtyFromUrl);
+            setInitialQty(null);
             setLoadingLayout(false);
           }
           return;
@@ -229,20 +211,19 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
             setInitialNotes(notesFromDb);
-            // Prefer DB item qty; if none yet, fall back to qtyFromUrl
-            setInitialQty(qtyFromItems ?? qtyFromUrl);
+            setInitialQty(qtyFromItems);
             setLoadingLayout(false);
           }
           return;
         }
 
         // Otherwise, fall back to layout from URL (dims/cavities) and
-        // keep qty if we have it (DB first, then URL).
+        // keep qty if we have it.
         const fallback = buildFallbackLayout();
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
-          setInitialQty(qtyFromItems ?? qtyFromUrl);
+          setInitialQty(qtyFromItems);
           setLoadingLayout(false);
         }
       } catch (err) {
@@ -251,7 +232,7 @@ export default function LayoutPage({
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
-          setInitialQty(qtyFromUrl);
+          setInitialQty(null);
           setLoadingLayout(false);
         }
       }
@@ -267,7 +248,6 @@ export default function LayoutPage({
     quoteNoFromUrl,
     buildFallbackLayout,
     hasExplicitCavities,
-    qtyFromUrl,
   ]);
 
   if (loadingLayout || !initialLayout) {
@@ -536,9 +516,7 @@ function LayoutEditorHost(props: {
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 text-sm text-slate-900">
-                <span className="font-semibold">
-                  Foam layout preview (TEST XYZ)
-                </span>
+                <span className="font-semibold">Foam layout preview (TEST XYZ)</span>
 
                 <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-medium">
                   BETA – interactive layout
