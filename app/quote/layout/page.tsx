@@ -47,7 +47,6 @@ function normalizeCavitiesParam(raw: string | undefined): string {
   return raw.trim();
 }
 
-
 // Ensure all dimension edits snap to 0.125"
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
@@ -94,13 +93,39 @@ export default function LayoutPage({
 
   /* ---------- Other URL params (dims, cavities) ---------- */
 
-  const dimsParam = (searchParams?.dims ??
+  // Raw values from Next.js (server-side)
+  const dimsFromSearch = (searchParams?.dims ??
     searchParams?.block ??
     "") as string | undefined;
 
-  const cavitiesParam = (searchParams?.cavities ??
+  const cavitiesFromSearch = (searchParams?.cavities ??
     searchParams?.cavity ??
     "") as string | undefined;
+
+  // Client-side overrides: read directly from the real URL so we
+  // exactly match the link that was clicked in the email.
+  const [dimsOverride, setDimsOverride] = React.useState<string | null>(null);
+  const [cavitiesOverride, setCavitiesOverride] =
+    React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      const d =
+        url.searchParams.get("dims") || url.searchParams.get("block");
+      const c =
+        url.searchParams.get("cavities") || url.searchParams.get("cavity");
+
+      if (d) setDimsOverride(d);
+      if (c) setCavitiesOverride(c);
+    } catch {
+      // best-effort; fall back to searchParams
+    }
+  }, []);
+
+  const dimsParam = (dimsOverride ?? dimsFromSearch) || "";
+  const cavitiesParam = (cavitiesOverride ?? cavitiesFromSearch) || "";
 
   const blockStr = normalizeDimsParam(dimsParam);
   const cavityStr = normalizeCavitiesParam(cavitiesParam);
@@ -117,13 +142,11 @@ export default function LayoutPage({
 
   /* ---------- Build initial layout (from DB if available) ---------- */
 
-  const [initialLayout, setInitialLayout] = React.useState<
-    LayoutModel | null
-  >(null);
-  const [initialNotes, setInitialNotes] = React.useState<string>("");
-  const [initialQty, setInitialQty] = React.useState<number | null>(
+  const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(
     null,
   );
+  const [initialNotes, setInitialNotes] = React.useState<string>("");
+  const [initialQty, setInitialQty] = React.useState<number | null>(null);
   const [loadingLayout, setLoadingLayout] =
     React.useState<boolean>(true);
 
