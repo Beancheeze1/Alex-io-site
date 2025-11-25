@@ -284,6 +284,7 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
   // Updated to:
   // - use comma-separated cavities (1x1x1,2x2x0.5,3x1x1)
   // - include both `cavities` (full list) and `cavity` (first one)
+  // - include qty so /quote/layout can seed the Qty field even before DB items exist
   const layoutUrl = (() => {
     if (!quoteNo || !specs.L_in || !specs.W_in || !specs.H_in) return undefined;
     const dims = `${specs.L_in}x${specs.W_in}x${specs.H_in}`;
@@ -291,6 +292,7 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
     let url = `${baseUrl}/quote/layout?quote_no=${encodeURIComponent(
       quoteNo,
     )}&dims=${encodeURIComponent(dims)}`;
+
     if (cavStr) {
       url += `&cavities=${encodeURIComponent(cavStr)}`;
       const firstCavity = cavityDims[0];
@@ -298,6 +300,17 @@ export function renderQuoteEmail(input: QuoteRenderInput): string {
         url += `&cavity=${encodeURIComponent(firstCavity)}`;
       }
     }
+
+    const qtyParam =
+      qty && String(qty).trim().length
+        ? String(qty)
+        : qtyNum != null
+        ? String(qtyNum)
+        : "";
+    if (qtyParam) {
+      url += `&qty=${encodeURIComponent(qtyParam)}`;
+    }
+
     return url;
   })();
 
