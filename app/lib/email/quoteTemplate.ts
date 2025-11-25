@@ -14,11 +14,13 @@
 //     H_in: number;
 //     qty: number | string | null;
 //     density_pcf: number | null;
-//     foam_family: string | null;
-//     thickness_under_in?: number | null;
-//     color?: string | null;
+//     foam_family?: string | null;
+//     thickness_under?: number | null;
+//     thickness_over?: number | null;
+//     cut_loss_pct?: number | null;
+//     lost_dims?: string | null;
 //     cavityCount?: number | null;
-//     cavityDims?: string[];          // e.g. ["1x1x1", "2x2x1"]
+//     cavityDims?: string[];
 //   },
 //   material: {
 //     name?: string | null;
@@ -30,26 +32,16 @@
 //     total: number;
 //     piece_ci?: number | null;
 //     order_ci?: number | null;
-//     order_ci_with_waste?: number | null;
-//     used_min_charge?: boolean | null;
-//     raw?: any;
-//     price_breaks?: {
-//       qty: number;
-//       total: number;
-//       piece: number | null;
-//       used_min_charge?: boolean | null;
-//     }[];
+//     used_min_charge?: boolean;
+//     raw?: {
+//       min_charge_applied?: boolean;
+//       base_rate_per_ci?: number | null;
+//       effective_rate_per_ci?: number | null;
+//     } | null;
+//     price_breaks?: PriceBreak[] | null;
 //   },
-//   missing: string[];                // e.g. ["Cavity sizes"]
-//   facts: Record<string, any>;       // raw facts (for layout URL, etc.)
+//   missing?: string[] | null;
 // };
-
-export type PriceBreak = {
-  qty: number;
-  total: number;
-  piece: number | null;
-  used_min_charge?: boolean | null;
-};
 
 export type TemplateSpecs = {
   L_in: number;
@@ -57,9 +49,11 @@ export type TemplateSpecs = {
   H_in: number;
   qty: number | string | null;
   density_pcf: number | null;
-  foam_family: string | null;
-  thickness_under_in?: number | null;
-  color?: string | null;
+  foam_family?: string | null;
+  thickness_under?: number | null;
+  thickness_over?: number | null;
+  cut_loss_pct?: number | null;
+  lost_dims?: string | null;
   cavityCount?: number | null;
   cavityDims?: string[];
 };
@@ -71,102 +65,99 @@ export type TemplateMaterial = {
   min_charge?: number | null;
 };
 
+export type PriceBreak = {
+  qty: number;
+  piece?: number | null;
+  total?: number | null;
+  used_min_charge?: boolean | null;
+};
+
 export type TemplatePricing = {
   total: number;
   piece_ci?: number | null;
   order_ci?: number | null;
-  order_ci_with_waste?: number | null;
-  used_min_charge?: boolean | null;
-  raw?: any;
+  used_min_charge?: boolean;
+  raw?: {
+    min_charge_applied?: boolean;
+    base_rate_per_ci?: number | null;
+    effective_rate_per_ci?: number | null;
+  } | null;
   price_breaks?: PriceBreak[] | null;
 };
 
 export type TemplateInput = {
-  customerLine?: string | null;
-  quoteNumber?: string | null;
-  status?: string;
+  customerLine?: string;
+  quoteNumber: string | null;
+  status: string;
   specs: TemplateSpecs;
   material: TemplateMaterial;
   pricing: TemplatePricing;
-  missing: string[];
-  facts?: Record<string, any>;   // <-- make it optional
+  missing?: string[] | null;
 };
 
-
-function fmtInchesTriple(L: number, W: number, H: number): string {
-  if (!L || !W || !H) return "—";
-  return `${L} × ${W} × ${H} in`;
+function fmtInchesTriple(L: number | null | undefined, W: number | null | undefined, H: number | null | undefined) {
+  if (L == null || W == null || H == null) return "—";
+  return `${fmtNumber(L, 2)} × ${fmtNumber(W, 2)} × ${fmtNumber(H, 2)} in`;
 }
 
-function fmtNumber(n: number | null | undefined, decimals = 2): string {
-  if (n == null || isNaN(Number(n))) return "—";
-  return Number(n).toFixed(decimals);
+function fmtQty(qty: number | string | null | undefined): string {
+  if (qty == null || qty === "") return "—";
+  if (typeof qty === "string") return qty;
+  if (!isFinite(qty)) return String(qty);
+  return new Intl.NumberFormat("en-US").format(qty);
 }
 
-function fmtMoney(n: number | null | undefined): string {
-  if (n == null || isNaN(Number(n))) return "$0.00";
-  return `$${Number(n).toFixed(2)}`;
+function fmtNumber(value: number | null | undefined, decimals: number = 2): string {
+  if (value == null || !isFinite(value)) return "—";
+  return value.toFixed(decimals).replace(/\.00$/, "");
 }
 
-function fmtPercent(n: number | null | undefined): string {
-  if (n == null || isNaN(Number(n))) return "—";
-  return `${Number(n).toFixed(2)}%`;
+function fmtMoney(value: number | null | undefined): string {
+  if (value == null || !isFinite(value)) return "—";
+  return "$" + value.toFixed(2);
 }
 
-function fmtQty(q: number | string | null | undefined): string {
-  if (q == null || q === "") return "—";
-  return String(q);
+function fmtPercent(value: number | null | undefined): string {
+  if (value == null || !isFinite(value)) return "—";
+  return value.toFixed(1).replace(/\.0$/, "") + "%";
 }
 
-// Build human-readable cavity label like:
-// "1 cavity — 1x1x1" or "3 cavities — 1x1x1, 2x2x1"
-function buildCavityLabel(specs: TemplateSpecs): string {
-  const count = specs.cavityCount ?? (specs.cavityDims?.length || 0);
-  const dims = (specs.cavityDims || []).filter((s) => !!s && typeof s === "string");
-
-  if (!count && dims.length === 0) return "—";
-
-  const countLabel =
-    count === 1 ? "1 cavity" : `${count || dims.length} cavities`;
-
-  if (!dims.length) return countLabel;
-
-  const sizes = dims.join(", ");
-  return `${countLabel} — ${sizes}`;
+function escapeHtml(s: string | null | undefined): string {
+  if (!s) return "";
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
-// Layout preview URL based on dims + cavity dims
+// Build the layout editor URL for a given quote/specs.
 function buildLayoutUrl(input: TemplateInput): string | null {
+  const { quoteNumber, specs } = input;
+  if (!quoteNumber) return null;
+
   const base =
-    process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    (process.env.NEXT_PUBLIC_BASE_URL as string | undefined) ||
+    "https://api.alex-io.com";
 
-  const qno =
-    input.quoteNumber ||
-    (typeof input.facts?.quote_no === "string"
-      ? input.facts.quote_no
-      : "");
+  const url = new URL(base.replace(/\/+$/, "") + "/quote/layout", "https://api.alex-io.com");
 
-  if (!qno) return null;
+  url.searchParams.set("quote_no", quoteNumber);
 
-  const params = new URLSearchParams();
-  params.set("quote_no", qno);
-
-  const { L_in, W_in, H_in, cavityDims } = input.specs;
-  if (L_in && W_in && H_in) {
-    params.set("dims", `${L_in}x${W_in}x${H_in}`);
+  if (specs.L_in != null && specs.W_in != null && specs.H_in != null) {
+    url.searchParams.set("block", `${specs.L_in}x${specs.W_in}x${specs.H_in}`);
   }
 
-  if (cavityDims && cavityDims.length) {
-    // Use comma-separated list (safest with the existing builder)
-    // Example: "1x1x1,2x2x1,3x3x2"
-    params.set("cavities", cavityDims.join(","));
-    // Also give the first cavity as "cavity=" for older code paths
-    params.set("cavity", cavityDims[0]);
+  if (specs.cavityCount && specs.cavityCount > 0 && specs.cavityDims && specs.cavityDims.length > 0) {
+    url.searchParams.set("cavities", specs.cavityDims.join(","));
   }
 
-  return `${base}/quote/layout?${params.toString()}`;
+  if (specs.qty != null && specs.qty !== "") {
+    url.searchParams.set("qty", String(specs.qty));
+  }
+
+  return url.toString();
 }
-
 
 export function renderQuoteEmail(input: TemplateInput): string {
   const { quoteNumber, status, specs, material, pricing, missing } = input;
@@ -175,43 +166,29 @@ export function renderQuoteEmail(input: TemplateInput): string {
     input.customerLine ||
     "Thanks for the details—I'll review a couple of specifications and get back to you with a price shortly.";
 
-
   const outsideSize = fmtInchesTriple(specs.L_in, specs.W_in, specs.H_in);
   const qty = fmtQty(specs.qty);
   const densityLabel =
     specs.density_pcf != null ? `${fmtNumber(specs.density_pcf, 1)} pcf` : "—";
   const foamFamily = specs.foam_family || "—";
   const thicknessUnder =
-    specs.thickness_under_in != null
-      ? `${fmtNumber(specs.thickness_under_in, 2)} in`
-      : "—";
+    specs.thickness_under != null ? fmtNumber(specs.thickness_under, 2) + " in" : "—";
+  const thicknessOver =
+    specs.thickness_over != null ? fmtNumber(specs.thickness_over, 2) + " in" : "—";
+  const cutLossPctLabel =
+    specs.cut_loss_pct != null ? fmtPercent(specs.cut_loss_pct) : "—";
+  const lostDims = specs.lost_dims || "—";
 
-  const cavityLabel = buildCavityLabel(specs);
+  const densityLbft3 =
+    material.density_lbft3 != null ? fmtNumber(material.density_lbft3, 1) + " lb/ft³" : "—";
+  const kerfPct =
+    material.kerf_pct != null ? fmtPercent(material.kerf_pct) : "—";
+  const minChargeLabel =
+    material.min_charge != null ? fmtMoney(material.min_charge) : "—";
 
-  const matName = material.name || "—";
-  const matDensity =
-    material.density_lbft3 != null
-      ? `${fmtNumber(material.density_lbft3, 1)} pcf`
-      : "—";
-  const matKerf = fmtPercent(material.kerf_pct ?? pricing.raw?.kerf_pct);
-  const minCharge =
-    material.min_charge != null
-      ? fmtMoney(material.min_charge)
-      : pricing.raw?.min_charge
-      ? fmtMoney(pricing.raw.min_charge)
-      : "$0.00";
-
-  const pieceCi = fmtNumber(pricing.piece_ci ?? pricing.raw?.piece_ci);
-  const orderCi = fmtNumber(pricing.order_ci ?? pricing.raw?.order_ci);
-  const orderCiWithWaste = fmtNumber(
-    pricing.order_ci_with_waste ?? pricing.raw?.order_ci_with_waste,
-  );
-  const orderTotal = fmtMoney(
-    pricing.total ??
-      pricing.raw?.price_total ??
-      pricing.raw?.total ??
-      pricing.raw?.order_total,
-  );
+  const totalPrice = fmtMoney(pricing.total);
+  const pieceCi = pricing.piece_ci != null ? fmtNumber(pricing.piece_ci, 4) : "—";
+  const orderCi = pricing.order_ci != null ? fmtNumber(pricing.order_ci, 2) : "—";
 
   const usedMinCharge =
     pricing.used_min_charge ?? pricing.raw?.min_charge_applied ?? false;
@@ -220,6 +197,62 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const layoutUrl = buildLayoutUrl(input);
 
   const showMissing = Array.isArray(missing) && missing.length > 0;
+
+  // 🔹 New: Build button row (Azure & Slate, pill-style) in a typesafe way
+  const baseUrl =
+    (process.env.NEXT_PUBLIC_BASE_URL as string | undefined) ||
+    "https://api.alex-io.com";
+
+  const quoteLink =
+    quoteNumber && quoteNumber.length
+      ? baseUrl.replace(/\/+$/, "") +
+        "/quote?quote_no=" +
+        encodeURIComponent(quoteNumber)
+      : "";
+
+  const salesEmail =
+    (process.env.NEXT_PUBLIC_SALES_FORWARD_TO as string | undefined) ||
+    "sales@example.com";
+
+  const scheduleCallUrl =
+    (process.env.NEXT_PUBLIC_SCHEDULE_CALL_URL as string | undefined) || "";
+
+  const buttons: string[] = [];
+
+  if (layoutUrl) {
+    buttons.push(
+      `<a href="${layoutUrl}" style="display:inline-block;margin-right:8px;margin-bottom:8px;padding:9px 18px;border-radius:999px;background:#2563eb;color:#ffffff;font-size:13px;font-weight:600;text-decoration:none;">View &amp; edit layout</a>`,
+    );
+  }
+
+  if (quoteLink) {
+    buttons.push(
+      `<a href="${quoteLink}" style="display:inline-block;margin-right:8px;margin-bottom:8px;padding:9px 18px;border-radius:999px;background:#1f2937;color:#ffffff;font-size:13px;font-weight:500;text-decoration:none;">View printable quote</a>`,
+    );
+  }
+
+  if (salesEmail) {
+    buttons.push(
+      `<a href="mailto:${encodeURIComponent(
+        salesEmail,
+      )}?subject=${encodeURIComponent(
+        `Quote ${quoteNumber || ""}`,
+      )}" style="display:inline-block;margin-right:8px;margin-bottom:8px;padding:9px 18px;border-radius:999px;background:#e5edff;color:#111827;font-size:13px;font-weight:500;text-decoration:none;">Forward quote to sales</a>`,
+    );
+  }
+
+  if (scheduleCallUrl) {
+    buttons.push(
+      `<a href="${scheduleCallUrl}" style="display:inline-block;margin-right:0;margin-bottom:8px;padding:9px 18px;border-radius:999px;background:#111827;color:#ffffff;font-size:13px;font-weight:500;text-decoration:none;">Schedule a call</a>`,
+    );
+  }
+
+  const buttonsHtml =
+    buttons.length > 0
+      ? `<div style="margin-top:18px;margin-bottom:4px;">${buttons.join(
+          "",
+        )}</div>`
+      : "";
 
   const statusLabel = status || "draft";
 
@@ -236,8 +269,16 @@ export function renderQuoteEmail(input: TemplateInput): string {
           <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
             <tr>
               <td style="padding:20px 24px 8px 24px;border-bottom:1px solid #e5e7eb;">
-                <div style="font-size:13px;color:#6b7280;margin-bottom:4px;">Quote${quoteNumber ? " #" : ""} <span style="font-weight:600;color:#111827;">${quoteNumber ?? ""}</span></div>
-                <div style="display:inline-block;padding:2px 8px;border-radius:999px;background:#e5e7eb;font-size:11px;color:#374151;font-weight:500;text-transform:uppercase;letter-spacing:0.03em;">
+                <div style="font-size:13px;color:#6b7280;margin-bottom:4px;">Alex-IO automated foam quote</div>
+                <div style="font-size:18px;font-weight:600;color:#111827;">
+                  ${
+                    quoteNumber
+                      ? `<span style="font-weight:500;color:#6b7280;">Quote</span>
+                         <span style="margin-left:4px;font-weight:600;color:#111827;">${quoteNumber ?? ""}</span>`
+                      : "Foam quote"
+                  }
+                </div>
+                <div style="display:inline-block;padding:2px 8px;margin-top:8px;border-radius:999px;background:#e5edff;color:#1f2937;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.03em;">
                   ${statusLabel}
                 </div>
               </td>
@@ -245,123 +286,174 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
             <tr>
               <td style="padding:12px 24px 8px 24px;font-size:14px;color:#111827;">
-                <p style="margin:0 0 8px 0;">${customerLine}</p>
-                ${
-                  showMissing
-                    ? `<p style="margin:0 0 8px 0;font-size:13px;color:#374151;">To finalize, please confirm:</p>
-                       <ul style="margin:0 0 8px 20px;padding:0;font-size:13px;color:#374151;">
-                         ${missing
-                           .map(
-                             (m) =>
-                               `<li style="margin:0 0 2px 0;">${m}</li>`,
-                           )
-                           .join("")}
-                       </ul>`
-                    : ""
-                }
+                <p style="margin:0 0 8px 0;">Hi there,</p>
+                <p style="margin:0 0 8px 0;">${escapeHtml(customerLine)}</p>
               </td>
             </tr>
 
             <tr>
-              <td style="padding:8px 24px 16px 24px;">
-                <!-- Specs table -->
-                <div style="font-size:13px;font-weight:600;color:#1f2933;margin:4px 0 4px 0;">Specs</div>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;">
+              <td style="padding:0 24px 16px 24px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
                   <tr>
-                    <td colspan="2" style="height:4px;"></td>
-                  </tr>
-                  <tr>
-                    <td colspan="2" style="background:#e5edff;border-radius:6px 6px 0 0;padding:8px 10px;border:1px solid #c7d2fe;border-bottom:none;">
-                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:13px;color:#111827;">
+                    <td style="vertical-align:top;padding:0 16px 16px 0;">
+                      <!-- Specs card -->
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
                         <tr>
-                          <td style="width:40%;padding:2px 6px;font-weight:600;">Outside size</td>
-                          <td style="width:60%;padding:2px 6px;">${outsideSize}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Quantity</td>
-                          <td style="padding:2px 6px;">${qty}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Density</td>
-                          <td style="padding:2px 6px;">${densityLabel}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Thickness under part</td>
-                          <td style="padding:2px 6px;">${thicknessUnder}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Cavities</td>
-                          <td style="padding:2px 6px;">${cavityLabel}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Foam family</td>
-                          <td style="padding:2px 6px;">${foamFamily}</td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                </table>
-
-                <!-- Pricing table -->
-                <div style="font-size:13px;font-weight:600;color:#1f2933;margin:16px 0 4px 0;">Pricing</div>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:13px;">
-                  <tr>
-                    <td colspan="2" style="height:4px;"></td>
-                  </tr>
-                  <tr>
-                    <td colspan="2" style="background:#e5edff;border-radius:6px 6px 0 0;padding:8px 10px;border:1px solid #c7d2fe;border-bottom:none;">
-                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:13px;color:#111827;">
-                        <tr>
-                          <td style="width:40%;padding:2px 6px;font-weight:600;">Material</td>
-                          <td style="width:60%;padding:2px 6px;">${matName} — ${matDensity}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Material waste (kerf)</td>
-                          <td style="padding:2px 6px;">${matKerf}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Piece volume (CI)</td>
-                          <td style="padding:2px 6px;">${pieceCi} in³</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Order volume + waste (CI)</td>
-                          <td style="padding:2px 6px;">${orderCiWithWaste !== "—" ? orderCiWithWaste : orderCi} in³</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Skiving</td>
-                          <td style="padding:2px 6px;">
-                            ${
-                              specs.H_in && specs.H_in > 2
-                                ? "May require skiving depending on tooling"
-                                : "Not needed for this thickness"
-                            }
+                          <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;">
+                            <div style="font-size:13px;font-weight:600;color:#374151;">Specs</div>
                           </td>
                         </tr>
                         <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Minimum charge (if applied)</td>
-                          <td style="padding:2px 6px;">${minCharge}</td>
+                          <td style="padding:10px 12px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#374151;">
+                              <tr>
+                                <td style="padding:2px 0;width:40%;color:#6b7280;">Outside size</td>
+                                <td style="padding:2px 0;">${outsideSize}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Quantity</td>
+                                <td style="padding:2px 0;">${qty}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Foam family</td>
+                                <td style="padding:2px 0;">${escapeHtml(foamFamily)}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Density</td>
+                                <td style="padding:2px 0;">${densityLabel}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Under thickness</td>
+                                <td style="padding:2px 0;">${thicknessUnder}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Over thickness</td>
+                                <td style="padding:2px 0;">${thicknessOver}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Cut loss</td>
+                                <td style="padding:2px 0;">${cutLossPctLabel}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Lost dims</td>
+                                <td style="padding:2px 0;">${escapeHtml(lostDims)}</td>
+                              </tr>
+                              ${
+                                specs.cavityCount
+                                  ? `<tr>
+                                       <td style="padding:2px 0;color:#6b7280;">Cavities</td>
+                                       <td style="padding:2px 0;">${specs.cavityCount} ${
+                                      specs.cavityDims && specs.cavityDims.length
+                                        ? "(" +
+                                          specs.cavityDims.map((d) => escapeHtml(d || "")).join(", ") +
+                                          ")"
+                                        : ""
+                                    }</td>
+                                     </tr>`
+                                  : ""
+                              }
+                            </table>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+
+                    <td style="vertical-align:top;padding:0 0 16px 0;">
+                      <!-- Material + pricing card -->
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+                        <tr>
+                          <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;">
+                            <div style="font-size:13px;font-weight:600;color:#374151;">Material</div>
+                          </td>
                         </tr>
                         <tr>
-                          <td style="padding:2px 6px;font-weight:600;">Order total</td>
-                          <td style="padding:2px 6px;font-weight:700;">${orderTotal}${
-    usedMinCharge ? " (min charge applied)" : ""
-  }</td>
+                          <td style="padding:10px 12px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#374151;">
+                              <tr>
+                                <td style="padding:2px 0;width:40%;color:#6b7280;">Grade</td>
+                                <td style="padding:2px 0;">${escapeHtml(material.name || "—")}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Density</td>
+                                <td style="padding:2px 0;">${densityLbft3}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Kerf</td>
+                                <td style="padding:2px 0;">${kerfPct}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Min charge</td>
+                                <td style="padding:2px 0;">${minChargeLabel}</td>
+                              </tr>
+                            </table>
+                          </td>
+                        </tr>
+                      </table>
+
+                      <div style="height:8px;"></div>
+
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+                        <tr>
+                          <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;">
+                            <div style="font-size:13px;font-weight:600;color:#374151;">Pricing</div>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:10px 12px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:12px;color:#374151;">
+                              <tr>
+                                <td style="padding:2px 0;width:40%;color:#6b7280;">Total</td>
+                                <td style="padding:2px 0;">${totalPrice}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Piece volume</td>
+                                <td style="padding:2px 0;">${pieceCi} in³</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Order volume</td>
+                                <td style="padding:2px 0;">${orderCi} in³</td>
+                              </tr>
+                              ${
+                                pricing.raw?.base_rate_per_ci != null
+                                  ? `<tr>
+                                       <td style="padding:2px 0;color:#6b7280;">Base rate</td>
+                                       <td style="padding:2px 0;">${fmtMoney(
+                                         pricing.raw.base_rate_per_ci,
+                                       )} / in³</td>
+                                     </tr>`
+                                  : ""
+                              }
+                              ${
+                                pricing.raw?.effective_rate_per_ci != null
+                                  ? `<tr>
+                                       <td style="padding:2px 0;color:#6b7280;">Effective rate</td>
+                                       <td style="padding:2px 0;">${fmtMoney(
+                                         pricing.raw.effective_rate_per_ci,
+                                       )} / in³</td>
+                                     </tr>`
+                                  : ""
+                              }
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Min charge used?</td>
+                                <td style="padding:2px 0;">${usedMinCharge ? "Yes" : "No"}</td>
+                              </tr>
+                            </table>
+                          </td>
                         </tr>
                       </table>
                     </td>
                   </tr>
                 </table>
 
-                <!-- Price breaks (if any) -->
                 ${
                   priceBreaks.length
                     ? `<div style="font-size:13px;font-weight:600;color:#1f2933;margin:16px 0 4px 0;">Price breaks</div>
-                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px;">
+                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px;color:#374151;">
                          <tr>
-                           <th align="left" style="padding:4px 6px;border:1px solid #d1d5db;background:#eff6ff;">Qty</th>
-                           <th align="left" style="padding:4px 6px;border:1px solid #d1d5db;background:#eff6ff;">Order total</th>
-                           <th align="left" style="padding:4px 6px;border:1px solid #d1d5db;background:#eff6ff;">Est. per piece</th>
-                           <th align="left" style="padding:4px 6px;border:1px solid #d1d5db;background:#eff6ff;">Min charge?</th>
+                           <th align="left" style="padding:6px 8px;border:1px solid #d1d5db;background:#eff6ff;">Qty</th>
+                           <th align="left" style="padding:6px 8px;border:1px solid #d1d5db;background:#eff6ff;">Piece</th>
+                           <th align="left" style="padding:6px 8px;border:1px solid #d1d5db;background:#eff6ff;">Total</th>
+                           <th align="left" style="padding:6px 8px;border:1px solid #d1d5db;background:#eff6ff;">Min charge?</th>
                          </tr>
                          ${priceBreaks
                            .map((pb) => {
@@ -369,13 +461,16 @@ export function renderQuoteEmail(input: TemplateInput): string {
                                pb.piece != null && !isNaN(Number(pb.piece))
                                  ? fmtMoney(pb.piece)
                                  : "—";
+                             const total =
+                               pb.total != null && !isNaN(Number(pb.total))
+                                 ? fmtMoney(pb.total)
+                                 : "—";
+                             const usedMC = pb.used_min_charge ? "Yes" : "No";
                              return `<tr>
-                               <td style="padding:4px 6px;border:1px solid #e5e7eb;">${pb.qty}</td>
-                               <td style="padding:4px 6px;border:1px solid #e5e7eb;">${fmtMoney(pb.total)}</td>
-                               <td style="padding:4px 6px;border:1px solid #e5e7eb;">${perPiece}</td>
-                               <td style="padding:4px 6px;border:1px solid #e5e7eb;">${
-                                 pb.used_min_charge ? "Yes" : "No"
-                               }</td>
+                               <td style="padding:6px 8px;border:1px solid #d1d5db;">${fmtQty(pb.qty)}</td>
+                               <td style="padding:6px 8px;border:1px solid #d1d5db;">${perPiece}</td>
+                               <td style="padding:6px 8px;border:1px solid #d1d5db;">${total}</td>
+                               <td style="padding:6px 8px;border:1px solid #d1d5db;">${usedMC}</td>
                              </tr>`;
                            })
                            .join("")}
@@ -383,27 +478,39 @@ export function renderQuoteEmail(input: TemplateInput): string {
                     : ""
                 }
 
+                ${
+                  showMissing
+                    ? `<div style="margin-top:16px;padding:8px 10px;border-radius:6px;background:#fef3c7;color:#92400e;font-size:12px;">
+                         <div style="font-weight:600;margin-bottom:4px;">Heads up</div>
+                         <div>I'm missing a few details that might affect the final price:</div>
+                         <ul style="margin:4px 0 0 18px;padding:0;">
+                           ${missing!
+                             .map(
+                               (m) =>
+                                 `<li style="margin:2px 0;">${escapeHtml(m)}</li>`,
+                             )
+                             .join("")}
+                         </ul>
+                       </div>`
+                    : ""
+                }
+
                 <!-- Buttons -->
-                <div style="margin-top:18px;margin-bottom:4px;">
-                  ${
-                    layoutUrl
-                      ? `<a href="${layoutUrl}" style="display:inline-block;margin-right:8px;padding:8px 14px;border-radius:999px;background:#2563eb;color:#ffffff;font-size:12px;font-weight:500;text-decoration:none;">Open layout preview</a>`
-                      : ""
-                  }
-                  ${
-                    quoteNumber
-                      ? `<a href="${
-                          (process.env.NEXT_PUBLIC_BASE_URL ||
-                            "https://api.alex-io.com") +
-                          "/quote?quote_no=" +
-                          encodeURIComponent(quoteNumber)
-                        }" style="display:inline-block;margin-right:8px;padding:8px 14px;border-radius:999px;background:#1f2937;color:#ffffff;font-size:12px;font-weight:500;text-decoration:none;">View printable quote</a>`
-                      : ""
-                  }
-                  <a href="mailto:sales@example.com?subject=${encodeURIComponent(
-                    `Quote ${quoteNumber || ""}`,
-                  )}" style="display:inline-block;padding:8px 14px;border-radius:999px;background:#e5e7eb;color:#111827;font-size:12px;font-weight:500;text-decoration:none;">Forward quote to sales</a>
-                </div>
+                ${buttonsHtml}
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:12px 24px 20px 24px;font-size:12px;color:#6b7280;border-top:1px solid #e5e7eb;">
+                <p style="margin:0 0 4px 0;">
+                  This quote was generated automatically from your email by Alex-IO.
+                  If any of the specs above don’t look right, you can reply to this email
+                  or use the buttons above to adjust the layout, schedule a call, or
+                  forward everything to a salesperson.
+                </p>
+                <p style="margin:4px 0 0 0;">
+                  Actual charges may differ if specs or quantities change or if additional services are requested.
+                </p>
               </td>
             </tr>
 
