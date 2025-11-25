@@ -15,8 +15,8 @@
 //     qty: number | string | null;
 //     density_pcf: number | null;
 //     foam_family?: string | null;
-//     thickness_under?: number | null;
-//     thickness_over?: number | null;
+//     thickness_under_in?: number | null;
+//     thickness_over_in?: number | null;
 //     cut_loss_pct?: number | null;
 //     lost_dims?: string | null;
 //     cavityCount?: number | null;
@@ -50,8 +50,9 @@ export type TemplateSpecs = {
   qty: number | string | null;
   density_pcf: number | null;
   foam_family?: string | null;
-  thickness_under?: number | null;
-  thickness_over?: number | null;
+  // NOTE: keep *_in names to match existing callers (e.g. /app/api/ai/quote/route.ts)
+  thickness_under_in?: number | null;
+  thickness_over_in?: number | null;
   cut_loss_pct?: number | null;
   lost_dims?: string | null;
   cavityCount?: number | null;
@@ -171,10 +172,13 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const densityLabel =
     specs.density_pcf != null ? `${fmtNumber(specs.density_pcf, 1)} pcf` : "—";
   const foamFamily = specs.foam_family || "—";
+
+  // 🔹 Use *_in fields to match existing upstream code
   const thicknessUnder =
-    specs.thickness_under != null ? fmtNumber(specs.thickness_under, 2) + " in" : "—";
+    specs.thickness_under_in != null ? fmtNumber(specs.thickness_under_in, 2) + " in" : "—";
   const thicknessOver =
-    specs.thickness_over != null ? fmtNumber(specs.thickness_over, 2) + " in" : "—";
+    specs.thickness_over_in != null ? fmtNumber(specs.thickness_over_in, 2) + " in" : "—";
+
   const cutLossPctLabel =
     specs.cut_loss_pct != null ? fmtPercent(specs.cut_loss_pct) : "—";
   const lostDims = specs.lost_dims || "—";
@@ -198,7 +202,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
   const showMissing = Array.isArray(missing) && missing.length > 0;
 
-  // 🔹 New: Build button row (Azure & Slate, pill-style) in a typesafe way
+  // 🔹 New: Build button row (Azure & Slate, pill-style)
   const baseUrl =
     (process.env.NEXT_PUBLIC_BASE_URL as string | undefined) ||
     "https://api.alex-io.com";
