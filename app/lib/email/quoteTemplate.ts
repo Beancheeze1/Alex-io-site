@@ -198,45 +198,66 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const showMissing = Array.isArray(missing) && missing.length > 0;
   const statusLabel = status || "draft";
 
+  // Base URL for assets (logo) – same as used for layout links
+  const base =
+    process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const logoUrl = `${base}/alex-io-logo.svg`;
+
   return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <title>Foam quote${quoteNumber ? " " + quoteNumber : ""}</title>
   </head>
-  <body style="margin:0;padding:0;background:#0f172a;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0f172a;padding:24px 0;">
+  <body style="margin:0;padding:0;background:#111827;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#111827;padding:24px 0;">
       <tr>
         <td align="center">
-          <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="background:#0b1120;border-radius:18px;border:1px solid #1e293b;overflow:hidden;box-shadow:0 22px 45px rgba(15,23,42,0.7);">
+          <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="background:#0f172a;border-radius:18px;border:1px solid #1f2937;overflow:hidden;box-shadow:0 22px 45px rgba(15,23,42,0.55);">
             
             <!-- Header -->
             <tr>
-              <td style="padding:18px 24px 14px 24px;border-bottom:1px solid #1e293b;background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 45%,#0b1120 100%);">
+              <td style="padding:18px 24px 14px 24px;border-bottom:1px solid #1f2937;background:linear-gradient(135deg,#0ea5e9 0%,#0ea5e9 45%,#0f172a 100%);">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                   <tr>
                     <td style="vertical-align:middle;">
                       <table role="presentation" cellspacing="0" cellpadding="0">
                         <tr>
                           <td style="padding-right:10px;">
-                            <!-- Circle logo -->
-                            <div style="width:36px;height:36px;border-radius:999px;background:#0f172a;border:1px solid rgba(148,163,184,0.4);display:flex;align-items:center;justify-content:center;color:#e0f2fe;font-weight:700;font-size:14px;letter-spacing:0.12em;">
-                              AI
+                            <!-- Circle logo background -->
+                            <div style="width:36px;height:36px;border-radius:999px;background:#0f172a;border:1px solid rgba(148,163,184,0.4);display:flex;align-items:center;justify-content:center;">
+                              <!-- Your actual logo image inside the circle -->
+                              <img src="${logoUrl}" alt="Alex-IO" style="display:block;border-radius:999px;width:26px;height:26px;" />
                             </div>
                           </td>
                           <td>
-                            <div style="font-size:15px;font-weight:600;color:#f9fafb;">Alex-IO foam quote</div>
-                            <div style="font-size:12px;color:#e0f2fe;opacity:0.9;">
-                              Quote${quoteNumber ? ` · <span style="font-weight:600;color:#f9fafb;">${quoteNumber}</span>` : ""} 
-                              &nbsp;·&nbsp;
-                              <span style="text-transform:capitalize;">Status: ${statusLabel}</span>
-                            </div>
+                            <!-- Logo + title stacked -->
+                            <table role="presentation" cellspacing="0" cellpadding="0">
+                              <tr>
+                                <td>
+                                  <div style="font-size:15px;font-weight:600;color:#f9fafb;">Alex-IO foam quote</div>
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>
+                                  <div style="font-size:12px;color:#e0f2fe;opacity:0.9;">
+                                    Quote${
+                                      quoteNumber
+                                        ? ` · <span style="font-weight:600;color:#f9fafb;">${quoteNumber}</span>`
+                                        : ""
+                                    } 
+                                    &nbsp;·&nbsp;
+                                    <span style="text-transform:capitalize;">Status: ${statusLabel}</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            </table>
                           </td>
                         </tr>
                       </table>
                     </td>
                     <td style="vertical-align:middle;text-align:right;">
-                      <span style="display:inline-block;font-size:11px;font-weight:500;color:#e0f2fe;padding:5px 10px;border-radius:999px;border:1px solid rgba(226,232,240,0.7);background:rgba(15,23,42,0.35);backdrop-filter:blur(8px);">
+                      <span style="display:inline-block;font-size:11px;font-weight:500;color:#e0f2fe;padding:5px 10px;border-radius:999px;border:1px solid rgba(226,232,240,0.7);background:rgba(15,23,42,0.5);backdrop-filter:blur(8px);">
                         Automated first response
                       </span>
                     </td>
@@ -263,7 +284,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                     <td style="vertical-align:top;width:52%;padding-right:8px;">
                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
                         <tr>
-                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.14),rgba(15,23,42,0.8));">
+                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));">
                             Specs
                           </td>
                         </tr>
@@ -302,7 +323,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                     <td style="vertical-align:top;width:48%;padding-left:8px;">
                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
                         <tr>
-                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.14),rgba(15,23,42,0.8));">
+                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));">
                             Pricing
                           </td>
                         </tr>
@@ -369,7 +390,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
               <td style="padding:0 26px 18px 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
                   <tr>
-                    <td colspan="4" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.16),rgba(15,23,42,1));">
+                    <td colspan="4" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.2),rgba(15,23,42,1));">
                       Price breaks
                     </td>
                   </tr>
@@ -384,8 +405,8 @@ export function renderQuoteEmail(input: TemplateInput): string {
                       (br, idx) => `
                         <tr style="${
                           idx % 2 === 1
-                            ? "background:rgba(15,23,42,0.8);"
-                            : ""
+                            ? 'background:rgba(15,23,42,0.85);'
+                            : ''
                         }">
                           <td style="padding:4px 10px;font-size:11px;color:#e5e7eb;">${br.qty}</td>
                           <td style="padding:4px 10px;font-size:11px;color:#e5e7eb;">${priceBreakUnit(
