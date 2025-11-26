@@ -316,7 +316,7 @@ export default function QuotePrintClient() {
       style={{
         fontFamily:
           "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        background: "#020617", // dark page background
+        background: "#020617", // outer background
         minHeight: "100vh",
         padding: "24px",
       }}
@@ -335,7 +335,7 @@ export default function QuotePrintClient() {
         {!quoteNo && !loading && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
-            <p style={{ color: "#555" }}>
+            <p style={{ color: "#6b7280" }}>
               We could not find a quote number in this link. Please double-check
               the URL or open the quote directly from your inbox.
             </p>
@@ -356,7 +356,7 @@ export default function QuotePrintClient() {
         {!loading && notFound && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
-            <p style={{ color: "#555" }}>
+            <p style={{ color: "#6b7280" }}>
               {notFound}{" "}
               {quoteNo ? (
                 <>
@@ -374,7 +374,7 @@ export default function QuotePrintClient() {
               Problem loading quote
             </h1>
             {quoteNo && (
-              <p style={{ color: "#555", marginBottom: 6 }}>
+              <p style={{ color: "#6b7280", marginBottom: 6 }}>
                 Quote number: <code>{quoteNo}</code>
               </p>
             )}
@@ -639,8 +639,8 @@ export default function QuotePrintClient() {
                       alignItems: "center",
                       padding: "2px 8px",
                       borderRadius: 999,
-                      background: "#e0f2fe",
-                      color: "#0369a1",
+                      background: "#eef2ff",
+                      color: "#1d4ed8",
                       fontSize: 11,
                       fontWeight: 600,
                       textTransform: "uppercase",
@@ -678,7 +678,7 @@ export default function QuotePrintClient() {
                           style={{
                             fontSize: 11,
                             color: "#4b5563",
-                            background: "#e5f3ff",
+                            background: "#eef2ff",
                             borderRadius: 10,
                             padding: "6px 8px",
                           }}
@@ -1062,7 +1062,7 @@ export default function QuotePrintClient() {
                           style={{
                             fontSize: 12,
                             fontWeight: 500,
-                            color: "#374151",
+                            color: "#4b5563",
                             marginBottom: 6,
                           }}
                         >
