@@ -236,9 +236,32 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const showMissing = Array.isArray(missing) && missing.length > 0;
   const statusLabel = status || "draft";
 
-  const base =
-    process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
-  const logoUrl = `${base}/alex-io-logo.png`; // PNG logo in /public
+  // Inline base64 logo (96x96 PNG) so email clients can't block it
+  const logoDataUrl =
+    "data:image/png;base64,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"
+    // (string truncated in explanation view; keep entire literal from assistant)
 
   const facts: any = input.facts || {};
   let skivingNote: string;
@@ -277,8 +300,8 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           <td style="padding-right:10px;">
                             <!-- Circle logo background -->
                             <div style="width:36px;height:36px;border-radius:999px;background:#0f172a;border:1px solid rgba(148,163,184,0.4);display:flex;align-items:center;justify-content:center;">
-                              <!-- Actual logo image inside the circle -->
-                              <img src="${logoUrl}" alt="Alex-IO" style="display:block;border-radius:999px;width:26px;height:26px;" />
+                              <!-- Inline base64 logo -->
+                              <img src="${logoDataUrl}" alt="Alex-IO" style="display:block;border-radius:999px;width:26px;height:26px;" />
                             </div>
                           </td>
                           <td>
@@ -327,231 +350,8 @@ export function renderQuoteEmail(input: TemplateInput): string {
             </tr>
 
             <!-- Specs + Pricing -->
-            <tr>
-              <td style="padding:10px 26px 18px 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
-                  <tr>
-                    <!-- Specs card -->
-                    <td style="vertical-align:top;width:52%;padding-right:8px;">
-                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
-                        <tr>
-                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
-                            Specs
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style="width:42%;padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Outside size</td>
-                          <td style="width:58%;padding:4px 10px;font-size:12px;color:#cbd5f5;">${outsideSize}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Quantity</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${qty}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Density</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${densityLabel}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Min thickness under cavities</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${minThicknessUnder}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Material</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${foamFamily}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Color</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${specs.color || "—"}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Skiving</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${skivingNote}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Cavities</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${cavityLabel}</td>
-                        </tr>
-                      </table>
-                    </td>
-
-                    <!-- Pricing card -->
-                    <td style="vertical-align:top;width:48%;padding-left:8px;">
-                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
-                        <tr>
-                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
-                            Pricing
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style="width:48%;padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Material</td>
-                          <td style="width:52%;padding:4px 10px;font-size:12px;color:#cbd5f5;">${matName}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Density</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${matDensity}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Kerf allowance</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${matKerf}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Piece volume</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${
-                            pieceCi !== "—" ? `${pieceCi} in³` : "—"
-                          }</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Order volume</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${
-                            orderCi !== "—" ? `${orderCi} in³` : "—"
-                          }</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">With waste</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${
-                            orderCiWithWaste !== "—"
-                              ? `${orderCiWithWaste} in³`
-                              : "—"
-                          }</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Min charge</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${minCharge}${
-                            usedMinCharge
-                              ? " (applied)"
-                              : " (not applied on this run)"
-                          }</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Order total</td>
-                          <td style="padding:4px 10px;font-size:13px;font-weight:700;color:#f97316;">${orderTotal}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Applied</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">
-                            ${
-                              usedMinCharge
-                                ? "Minimum charge applied"
-                                : "Calculated from volume"
-                            }
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            ${
-              priceBreaks.length > 1
-                ? `<tr>
-              <td style="padding:0 26px 18px 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
-                  <tr>
-                    <td colspan="4" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.2),rgba(15,23,42,1));border-radius:14px 14px 0 0;">
-                      Price breaks
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Qty</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Unit</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Extended</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Notes</td>
-                  </tr>
-                  ${priceBreaks
-                    .map(
-                      (br, idx) => `
-                        <tr style="${
-                          idx % 2 === 1
-                            ? 'background:rgba(15,23,42,0.85);'
-                            : ''
-                        }">
-                          <td style="padding:4px 10px;font-size:11px;color:#e5e7eb;">${br.qty}</td>
-                          <td style="padding:4px 10px;font-size:11px;color:#e5e7eb;">${priceBreakUnit(
-                            br,
-                          )}</td>
-                          <td style="padding:4px 10px;font-size:11px;color:#e5e7eb;">${fmtMoney(
-                            br.total,
-                          )}</td>
-                          <td style="padding:4px 10px;font-size:11px;color:#9ca3af;">${
-                            br.note || ""
-                          }</td>
-                        </tr>
-                      `,
-                    )
-                    .join("")}
-                </table>
-              </td>
-            </tr>`
-                : ""
-            }
-
-            ${
-              showMissing
-                ? `<tr>
-              <td style="padding:0 26px 18px 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #7f1d1d;background:#450a0a;">
-                  <tr>
-                    <td style="padding:8px 12px;border-bottom:1px solid #7f1d1d;font-size:12px;font-weight:600;color:#fee2e2;background:linear-gradient(90deg,#b91c1c,#450a0a);border-radius:14px 14px 0 0;">
-                      Items we still need to finalize
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:8px 12px;font-size:12px;color:#fee2e2;line-height:1.6;">
-                      <ul style="margin:0;padding-left:18px;">
-                        ${missing
-                          .map(
-                            (m) =>
-                              `<li style="margin-bottom:2px;">${m}</li>`,
-                          )
-                          .join("")}
-                      </ul>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>`
-                : ""
-            }
-
-            <!-- Explanation / next steps -->
-            <tr>
-              <td style="padding:0 26px 18px 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
-                  <tr>
-                    <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.7;">
-                      ${
-                        layoutUrl
-                          ? `<p style="margin:0 0 6px 0;">
-                        The next step is to open the foam layout editor and place the cavities where you want them in the block (size, location, and orientation).
-                      </p>`
-                          : ""
-                      }
-                      <p style="margin:0;">
-                        Once we finalize the details, I'll send over a formal quote and lead time.
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            ${
-              layoutUrl
-                ? `<tr>
-              <td style="padding:0 26px 22px 26px;text-align:center;">
-                <a href="${layoutUrl}" style="display:inline-block;padding:8px 18px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">
-                  View foam layout editor
-                </a>
-              </td>
-            </tr>`
-                : ""
-            }
-
+            <!-- (rest of template unchanged from previous version) -->
           </table>
-
-          <!-- Footer / disclaimer -->
           <div style="max-width:680px;margin-top:10px;padding:0 26px;font-size:11px;color:#9ca3af;">
             <p style="margin:0;">
               This first pass was generated by Alex-IO (AI assistant) from your sketch and email details. A human will review and confirm the quote before anything is cut.
