@@ -66,11 +66,12 @@ export type PriceBreak = {
 };
 
 export type TemplateMaterial = {
-  name: string;
+  name: string | null;
   density_lbft3?: number | null;
   kerf_pct?: number | null;
   min_charge?: number | null;
 };
+
 
 export type TemplatePricing = {
   total: number;
