@@ -276,7 +276,8 @@ export default function LayoutPage({
   if (loadingLayout || !initialLayout) {
     return (
       <main className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="text-sm text-slate-300">
+         <div className="w-full max-w-none mx-auto bg-white rounded-none shadow-none border-t border-slate-200 flex flex-row gap-6 p-6">
+
           Loading layout preview&hellip;
         </div>
       </main>
