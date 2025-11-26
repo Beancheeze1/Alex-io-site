@@ -3,7 +3,7 @@
 // Unified HTML template for Alex-IO foam quotes.
 //
 // The types here are aligned with app/api/ai/orchestrate/route.ts.
-// Only HTML / styling should be edited when refining the template look.
+// Only HTML / styling and simple display helpers should be edited here.
 
 export type TemplateSpecs = {
   L_in: number;
@@ -101,6 +101,43 @@ function buildCavityLabel(specs: TemplateSpecs): string {
   return `${countLabel} — ${sizes}`;
 }
 
+// Compute a best-guess minimum thickness under cavities.
+// Preferred: use specs.thickness_under_in if upstream provided it.
+// Fallback: use H_in minus the deepest cavity depth parsed from cavityDims.
+function computeMinThicknessUnder(specs: TemplateSpecs): number | null {
+  if (specs.thickness_under_in != null) {
+    const n = Number(specs.thickness_under_in);
+    return isNaN(n) ? null : n;
+  }
+  if (!specs.H_in || !Array.isArray(specs.cavityDims) || specs.cavityDims.length === 0) {
+    return null;
+  }
+  const overall = Number(specs.H_in);
+  if (isNaN(overall)) return null;
+
+  let minUnder: number | null = null;
+
+  for (const raw of specs.cavityDims) {
+    if (!raw || typeof raw !== "string") continue;
+    const parts = raw
+      .split(/x|×/i)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length < 3) continue;
+    const depthStr = parts[2].replace(/[^0-9.]/g, "");
+    if (!depthStr) continue;
+    const depth = Number.parseFloat(depthStr);
+    if (isNaN(depth)) continue;
+    const under = overall - depth;
+    if (isNaN(under)) continue;
+    if (minUnder === null || under < minUnder) {
+      minUnder = under;
+    }
+  }
+
+  return minUnder;
+}
+
 // Build a layout-editor URL if we have enough info to make it useful.
 function buildLayoutUrl(input: TemplateInput): string | null {
   const base =
@@ -154,12 +191,13 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const densityLabel =
     specs.density_pcf != null ? `${fmtNumber(specs.density_pcf, 1)} pcf` : "—";
   const foamFamily = specs.foam_family || "—";
-  const thicknessUnder =
-    specs.thickness_under_in != null
-      ? `${fmtNumber(specs.thickness_under_in, 2)} in`
-      : "—";
 
   const cavityLabel = buildCavityLabel(specs);
+  const minThicknessUnderVal = computeMinThicknessUnder(specs);
+  const minThicknessUnder =
+    minThicknessUnderVal != null
+      ? `${fmtNumber(minThicknessUnderVal, 2)} in`
+      : "—";
 
   const matName = material.name || "—";
   const matDensity =
@@ -198,10 +236,23 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const showMissing = Array.isArray(missing) && missing.length > 0;
   const statusLabel = status || "draft";
 
-  // Base URL for assets (logo) – same as used for layout links
   const base =
     process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
   const logoUrl = `${base}/alex-io-logo.svg`;
+
+  const facts: any = input.facts || {};
+  let skivingNote: string;
+  if (typeof facts.skiving_note === "string" && facts.skiving_note.trim()) {
+    skivingNote = facts.skiving_note.trim();
+  } else if (typeof facts.skivingNote === "string" && facts.skivingNote.trim()) {
+    skivingNote = facts.skivingNote.trim();
+  } else if (typeof facts.skiving === "boolean") {
+    skivingNote = facts.skiving ? "Applied" : "Not applied";
+  } else if (typeof facts.skiving === "string" && facts.skiving.trim()) {
+    skivingNote = facts.skiving.trim();
+  } else {
+    skivingNote = "Not specified";
+  }
 
   return `<!doctype html>
 <html>
@@ -284,7 +335,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                     <td style="vertical-align:top;width:52%;padding-right:8px;">
                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
                         <tr>
-                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));">
+                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
                             Specs
                           </td>
                         </tr>
@@ -301,8 +352,8 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${densityLabel}</td>
                         </tr>
                         <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Thickness under part</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${thicknessUnder}</td>
+                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Min thickness under cavities</td>
+                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${minThicknessUnder}</td>
                         </tr>
                         <tr>
                           <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Material</td>
@@ -311,6 +362,10 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         <tr>
                           <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Color</td>
                           <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${specs.color || "—"}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Skiving</td>
+                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${skivingNote}</td>
                         </tr>
                         <tr>
                           <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Cavities</td>
@@ -323,7 +378,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                     <td style="vertical-align:top;width:48%;padding-left:8px;">
                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
                         <tr>
-                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));">
+                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
                             Pricing
                           </td>
                         </tr>
@@ -361,7 +416,11 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         </tr>
                         <tr>
                           <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Min charge</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${minCharge}</td>
+                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${minCharge}${
+                            usedMinCharge
+                              ? " (applied)"
+                              : " (not applied on this run)"
+                          }</td>
                         </tr>
                         <tr>
                           <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Order total</td>
@@ -390,7 +449,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
               <td style="padding:0 26px 18px 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
                   <tr>
-                    <td colspan="4" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.2),rgba(15,23,42,1));">
+                    <td colspan="4" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.2),rgba(15,23,42,1));border-radius:14px 14px 0 0;">
                       Price breaks
                     </td>
                   </tr>
@@ -434,7 +493,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
               <td style="padding:0 26px 18px 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #7f1d1d;background:#450a0a;">
                   <tr>
-                    <td style="padding:8px 12px;border-bottom:1px solid #7f1d1d;font-size:12px;font-weight:600;color:#fee2e2;background:linear-gradient(90deg,#b91c1c,#450a0a);">
+                    <td style="padding:8px 12px;border-bottom:1px solid #7f1d1d;font-size:12px;font-weight:600;color:#fee2e2;background:linear-gradient(90deg,#b91c1c,#450a0a);border-radius:14px 14px 0 0;">
                       Items we still need to finalize
                     </td>
                   </tr>
@@ -468,7 +527,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                       ${
                         layoutUrl
                           ? `<p style="margin:0 0 6px 0;">
-                        When you're ready, I can also share a printable layout showing how the parts nest into the foam (including cavity size and orientation).
+                        The next step is to open the foam layout editor and place the cavities where you want them in the block (size, location, and orientation).
                       </p>`
                           : ""
                       }
