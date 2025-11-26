@@ -21,6 +21,7 @@
 //     lost_dims?: string | null;
 //     cavityCount?: number | null;
 //     cavityDims?: string[];
+//     color?: string | null;
 //   },
 //   material: {
 //     name?: string | null;
@@ -57,6 +58,7 @@ export type TemplateSpecs = {
   lost_dims?: string | null;
   cavityCount?: number | null;
   cavityDims?: string[];
+  color?: string | null;
 };
 
 export type TemplateMaterial = {
@@ -173,7 +175,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
     specs.density_pcf != null ? `${fmtNumber(specs.density_pcf, 1)} pcf` : "—";
   const foamFamily = specs.foam_family || "—";
 
-  // 🔹 Use *_in fields to match existing upstream code
+  // Use *_in fields to match existing upstream code
   const thicknessUnder =
     specs.thickness_under_in != null ? fmtNumber(specs.thickness_under_in, 2) + " in" : "—";
   const thicknessOver =
@@ -182,6 +184,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const cutLossPctLabel =
     specs.cut_loss_pct != null ? fmtPercent(specs.cut_loss_pct) : "—";
   const lostDims = specs.lost_dims || "—";
+  const colorLabel = specs.color || "—";
 
   const densityLbft3 =
     material.density_lbft3 != null ? fmtNumber(material.density_lbft3, 1) + " lb/ft³" : "—";
@@ -202,7 +205,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
   const showMissing = Array.isArray(missing) && missing.length > 0;
 
-  // 🔹 New: Build button row (Azure & Slate, pill-style)
+  // Button row (Azure & Slate, pill-style)
   const baseUrl =
     (process.env.NEXT_PUBLIC_BASE_URL as string | undefined) ||
     "https://api.alex-io.com";
@@ -325,6 +328,10 @@ export function renderQuoteEmail(input: TemplateInput): string {
                               <tr>
                                 <td style="padding:2px 0;color:#6b7280;">Density</td>
                                 <td style="padding:2px 0;">${densityLabel}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:2px 0;color:#6b7280;">Color</td>
+                                <td style="padding:2px 0;">${escapeHtml(colorLabel)}</td>
                               </tr>
                               <tr>
                                 <td style="padding:2px 0;color:#6b7280;">Under thickness</td>
