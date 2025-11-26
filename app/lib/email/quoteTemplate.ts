@@ -238,7 +238,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
   const base =
     process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
-  const logoUrl = `${base}/alex-io-logo.svg`;
+  const logoUrl = `${base}/alex-io-logo.png`; // PNG logo in /public
 
   const facts: any = input.facts || {};
   let skivingNote: string;
@@ -277,7 +277,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           <td style="padding-right:10px;">
                             <!-- Circle logo background -->
                             <div style="width:36px;height:36px;border-radius:999px;background:#0f172a;border:1px solid rgba(148,163,184,0.4);display:flex;align-items:center;justify-content:center;">
-                              <!-- Your actual logo image inside the circle -->
+                              <!-- Actual logo image inside the circle -->
                               <img src="${logoUrl}" alt="Alex-IO" style="display:block;border-radius:999px;width:26px;height:26px;" />
                             </div>
                           </td>
@@ -521,9 +521,6 @@ export function renderQuoteEmail(input: TemplateInput): string {
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
                   <tr>
                     <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.7;">
-                      <p style="margin:0 0 6px 0;">
-                        If this layout and price range look close to what you had in mind, reply to this email with any tweaks or questions.
-                      </p>
                       ${
                         layoutUrl
                           ? `<p style="margin:0 0 6px 0;">
@@ -543,7 +540,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
             ${
               layoutUrl
                 ? `<tr>
-              <td style="padding:0 26px 22px 26px;">
+              <td style="padding:0 26px 22px 26px;text-align:center;">
                 <a href="${layoutUrl}" style="display:inline-block;padding:8px 18px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">
                   View foam layout editor
                 </a>
