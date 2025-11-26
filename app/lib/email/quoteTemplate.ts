@@ -85,8 +85,9 @@ export type TemplatePricing = {
 
 export type TemplateInput = {
   customerLine?: string;
-  quoteNumber: string | null;
-  status: string;
+  // 🔽 made optional to match existing callers
+  quoteNumber?: string | null;
+  status?: string;
   specs: TemplateSpecs;
   material: TemplateMaterial;
   pricing: TemplatePricing;
