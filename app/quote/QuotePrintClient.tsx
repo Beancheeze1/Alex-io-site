@@ -291,19 +291,19 @@ export default function QuotePrintClient() {
       style={{
         fontFamily:
           "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        background: "#f3f4f6",
+        background: "#020617", // dark page background to match editor
         minHeight: "100vh",
         padding: "24px",
       }}
     >
       <div
         style={{
-          maxWidth: "800px",
+          maxWidth: "960px",
           margin: "0 auto",
           background: "#ffffff",
-          borderRadius: "16px",
+          borderRadius: "24px",
           padding: "24px 24px 32px 24px",
-          boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
+          boxShadow: "0 16px 40px rgba(15,23,42,0.45)",
         }}
       >
         {/* No quote number at all */}
@@ -360,43 +360,70 @@ export default function QuotePrintClient() {
         {/* Happy path */}
         {!loading && quote && (
           <>
-            {/* HEADER: quote info + actions */}
+            {/* Gradient header: powered by Alex-IO + quote info + actions */}
             <div
               style={{
+                margin: "-24px -24px 20px -24px",
+                padding: "16px 24px",
+                borderRadius: "24px 24px 0 0",
+                background:
+                  "linear-gradient(90deg,#0ea5e9 0%,#22d3ee 35%,#6366f1 100%)",
                 display: "flex",
+                alignItems: "center",
                 justifyContent: "space-between",
-                marginBottom: 16,
+                gap: 16,
+                color: "#e0f2fe",
               }}
             >
               <div>
-                <h1 style={{ margin: 0, fontSize: 22 }}>
-                  Quote #{quote.quote_no}
-                </h1>
+                <div
+                  style={{
+                    fontSize: 11,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                    opacity: 0.9,
+                    marginBottom: 4,
+                  }}
+                >
+                  Powered by Alex-IO
+                </div>
+                <div
+                  style={{
+                    margin: 0,
+                    fontSize: 20,
+                    fontWeight: 600,
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  Interactive quote viewer
+                </div>
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 12,
+                    opacity: 0.94,
+                  }}
+                >
+                  Quote {quote.quote_no}
+                </div>
                 <p
                   style={{
-                    margin: "4px 0 0 0",
-                    color: "#4b5563",
+                    margin: "2px 0 0 0",
+                    fontSize: 12,
+                    opacity: 0.9,
                   }}
                 >
                   {quote.customer_name}
                   {quote.email ? <> • {quote.email}</> : null}
                   {quote.phone ? <> • {quote.phone}</> : null}
                 </p>
-                <p
-                  style={{
-                    margin: "4px 0 0 0",
-                    color: "#6b7280",
-                    fontSize: 12,
-                  }}
-                >
-                  Created: {new Date(quote.created_at).toLocaleString()}
-                </p>
               </div>
+
               <div
                 style={{
                   textAlign: "right",
                   fontSize: 12,
-                  color: "#6b7280",
+                  color: "#e0f2fe",
                 }}
               >
                 <div
@@ -404,22 +431,24 @@ export default function QuotePrintClient() {
                     display: "inline-block",
                     padding: "4px 10px",
                     borderRadius: 999,
-                    background:
-                      quote.status === "sent"
-                        ? "#d1fae5"
-                        : quote.status === "accepted"
-                        ? "#bfdbfe"
-                        : "#e5e7eb",
-                    color:
-                      quote.status === "sent"
-                        ? "#065f46"
-                        : quote.status === "accepted"
-                        ? "#1d4ed8"
-                        : "#374151",
+                    background: "rgba(15,23,42,0.2)",
+                    border: "1px solid rgba(15,23,42,0.25)",
+                    color: "#f9fafb",
+                    fontWeight: 600,
                   }}
                 >
                   {quote.status.toUpperCase()}
                 </div>
+                <p
+                  style={{
+                    margin: "4px 0 0 0",
+                    fontSize: 11,
+                    opacity: 0.9,
+                  }}
+                >
+                  Created:{" "}
+                  {new Date(quote.created_at).toLocaleString()}
+                </p>
                 <div
                   style={{
                     display: "flex",
@@ -434,12 +463,13 @@ export default function QuotePrintClient() {
                     style={{
                       padding: "6px 12px",
                       borderRadius: 999,
-                      border: "1px solid #d1d5db",
-                      background: "#f9fafb",
-                      color: "#111827",
+                      border: "1px solid rgba(15,23,42,0.15)",
+                      background: "rgba(15,23,42,0.12)",
+                      color: "#e5e7eb",
                       fontSize: 12,
                       fontWeight: 500,
                       cursor: "pointer",
+                      backdropFilter: "blur(4px)",
                     }}
                   >
                     Print this quote
@@ -450,12 +480,13 @@ export default function QuotePrintClient() {
                     style={{
                       padding: "6px 12px",
                       borderRadius: 999,
-                      border: "1px solid #bfdbfe",
-                      background: "#eff6ff",
-                      color: "#1d4ed8",
+                      border: "1px solid rgba(15,23,42,0.15)",
+                      background: "rgba(15,23,42,0.12)",
+                      color: "#e5e7eb",
                       fontSize: 12,
                       fontWeight: 500,
                       cursor: "pointer",
+                      backdropFilter: "blur(4px)",
                     }}
                   >
                     Forward to sales
@@ -466,11 +497,11 @@ export default function QuotePrintClient() {
                     style={{
                       padding: "6px 12px",
                       borderRadius: 999,
-                      border: "1px solid #1d4ed8",
-                      background: "#1d4ed8",
-                      color: "#ffffff",
+                      border: "1px solid #0f172a",
+                      background: "#0f172a",
+                      color: "#f9fafb",
                       fontSize: 12,
-                      fontWeight: 500,
+                      fontWeight: 600,
                       cursor: "pointer",
                     }}
                   >
@@ -479,14 +510,6 @@ export default function QuotePrintClient() {
                 </div>
               </div>
             </div>
-
-            <hr
-              style={{
-                border: "none",
-                borderTop: "1px solid #e5e7eb",
-                margin: "16px 0",
-              }}
-            />
 
             {/* QUOTE OVERVIEW (specs from primary line) */}
             {primaryItem && (
