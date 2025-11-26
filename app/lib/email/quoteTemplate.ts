@@ -33,12 +33,9 @@
 //     total: number;
 //     piece_ci?: number | null;
 //     order_ci?: number | null;
+//     order_ci_with_waste?: number | null;
 //     used_min_charge?: boolean;
-//     raw?: {
-//       min_charge_applied?: boolean;
-//       base_rate_per_ci?: number | null;
-//       effective_rate_per_ci?: number | null;
-//     } | null;
+//     raw?: any;
 //     price_breaks?: PriceBreak[] | null;
 //   },
 //   missing?: string[] | null;
@@ -79,12 +76,10 @@ export type TemplatePricing = {
   total: number;
   piece_ci?: number | null;
   order_ci?: number | null;
+  order_ci_with_waste?: number | null;
   used_min_charge?: boolean;
-  raw?: {
-    min_charge_applied?: boolean;
-    base_rate_per_ci?: number | null;
-    effective_rate_per_ci?: number | null;
-  } | null;
+  // Loosen this to match whatever /api/ai/quote is already passing through.
+  raw?: any;
   price_breaks?: PriceBreak[] | null;
 };
 
@@ -175,7 +170,6 @@ export function renderQuoteEmail(input: TemplateInput): string {
     specs.density_pcf != null ? `${fmtNumber(specs.density_pcf, 1)} pcf` : "—";
   const foamFamily = specs.foam_family || "—";
 
-  // Use *_in fields to match existing upstream code
   const thicknessUnder =
     specs.thickness_under_in != null ? fmtNumber(specs.thickness_under_in, 2) + " in" : "—";
   const thicknessOver =
@@ -198,7 +192,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const orderCi = pricing.order_ci != null ? fmtNumber(pricing.order_ci, 2) : "—";
 
   const usedMinCharge =
-    pricing.used_min_charge ?? pricing.raw?.min_charge_applied ?? false;
+    pricing.used_min_charge ?? (pricing.raw && (pricing.raw as any).min_charge_applied) ?? false;
 
   const priceBreaks: PriceBreak[] = pricing.price_breaks ?? [];
   const layoutUrl = buildLayoutUrl(input);
@@ -425,21 +419,21 @@ export function renderQuoteEmail(input: TemplateInput): string {
                                 <td style="padding:2px 0;">${orderCi} in³</td>
                               </tr>
                               ${
-                                pricing.raw?.base_rate_per_ci != null
+                                pricing.raw && (pricing.raw as any).base_rate_per_ci != null
                                   ? `<tr>
                                        <td style="padding:2px 0;color:#6b7280;">Base rate</td>
                                        <td style="padding:2px 0;">${fmtMoney(
-                                         pricing.raw.base_rate_per_ci,
+                                         (pricing.raw as any).base_rate_per_ci,
                                        )} / in³</td>
                                      </tr>`
                                   : ""
                               }
                               ${
-                                pricing.raw?.effective_rate_per_ci != null
+                                pricing.raw && (pricing.raw as any).effective_rate_per_ci != null
                                   ? `<tr>
                                        <td style="padding:2px 0;color:#6b7280;">Effective rate</td>
                                        <td style="padding:2px 0;">${fmtMoney(
-                                         pricing.raw.effective_rate_per_ci,
+                                         (pricing.raw as any).effective_rate_per_ci,
                                        )} / in³</td>
                                      </tr>`
                                   : ""
