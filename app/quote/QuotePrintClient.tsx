@@ -10,8 +10,10 @@
 //   - Print, Forward to sales, Schedule a call buttons
 //
 // Body:
-//   - Quote overview (specs from primary line item)
-//   - Line items table (with pricing columns if present)
+//   - Quote overview (specs from primary line item) in a "Specs" card
+//   - Pricing summary in a "Pricing" card
+//   - Layout status in a "Layout & next steps" card
+//   - Line items table (with pricing columns if present) in a card
 //   - Foam layout package summary + inline SVG preview
 //
 // Important:
@@ -285,6 +287,29 @@ export default function QuotePrintClient() {
 
   const primaryItem = items[0] || null;
 
+  // Shared card styles to feel like the email blocks
+  const cardBase = {
+    borderRadius: 16,
+    border: "1px solid #e5e7eb",
+    background: "#f9fafb",
+    padding: "12px 14px",
+  };
+
+  const cardTitleStyle = {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#0f172a",
+    marginBottom: 6,
+  };
+
+  const labelStyle = {
+    fontSize: 11,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.08em",
+    color: "#6b7280",
+    marginBottom: 2,
+  };
+
   // ===================== RENDER =====================
   return (
     <div
@@ -511,392 +536,511 @@ export default function QuotePrintClient() {
               </div>
             </div>
 
-            {/* QUOTE OVERVIEW (specs from primary line) */}
+            {/* TOP ROW: Specs / Pricing / Layout & next steps */}
             {primaryItem && (
               <div
                 style={{
-                  marginBottom: 16,
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #e5e7eb",
-                  background: "#f9fafb",
-                  fontSize: 13,
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3,minmax(0,1fr))",
+                  gap: 16,
+                  marginBottom: 20,
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#111827",
-                    marginBottom: 4,
-                  }}
-                >
-                  Quote overview
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 16,
-                    color: "#374151",
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.04em",
-                        color: "#6b7280",
-                        marginBottom: 2,
-                      }}
-                    >
-                      Dimensions
+                {/* Specs card */}
+                <div style={cardBase}>
+                  <div style={cardTitleStyle}>Specs</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div>
+                      <div style={labelStyle}>Dimensions</div>
+                      <div style={{ fontSize: 13, color: "#111827" }}>
+                        {primaryItem.length_in} × {primaryItem.width_in} ×{" "}
+                        {primaryItem.height_in} in
+                      </div>
                     </div>
                     <div>
-                      {primaryItem.length_in} × {primaryItem.width_in} ×{" "}
-                      {primaryItem.height_in} in
-                    </div>
-                  </div>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.04em",
-                        color: "#6b7280",
-                        marginBottom: 2,
-                      }}
-                    >
-                      Quantity
-                    </div>
-                    <div>{primaryItem.qty.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.04em",
-                        color: "#6b7280",
-                        marginBottom: 2,
-                      }}
-                    >
-                      Material
+                      <div style={labelStyle}>Quantity</div>
+                      <div style={{ fontSize: 13, color: "#111827" }}>
+                        {primaryItem.qty.toLocaleString()}
+                      </div>
                     </div>
                     <div>
-                      {primaryItem.material_name ||
-                        `Material #${primaryItem.material_id}`}
+                      <div style={labelStyle}>Material</div>
+                      <div style={{ fontSize: 13, color: "#111827" }}>
+                        {primaryItem.material_name ||
+                          `Material #${primaryItem.material_id}`}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
 
-            {/* LINE ITEMS */}
-            <h2 style={{ fontSize: 16, marginBottom: 8 }}>Line items</h2>
-
-            {items.length === 0 ? (
-              <p style={{ color: "#6b7280" }}>
-                No line items stored for this quote yet. Once the material and
-                details are finalized, the primary line will appear here.
-              </p>
-            ) : (
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: 13,
-                  marginBottom: 16,
-                }}
-              >
-                <thead>
-                  <tr style={{ background: "#eff6ff" }}>
-                    <th
-                      style={{
-                        textAlign: "left",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Item
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "left",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Dimensions (L × W × H)
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Qty
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Unit price
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Line total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item, idx) => {
-                    const dims =
-                      item.length_in +
-                      " × " +
-                      item.width_in +
-                      " × " +
-                      item.height_in;
-                    const label =
-                      item.material_name || "Material #" + item.material_id;
-                    const unit = parsePriceField(item.price_unit_usd ?? null);
-                    const total = parsePriceField(item.price_total_usd ?? null);
-                    return (
-                      <tr key={item.id}>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                          }}
-                        >
-                          <div style={{ fontWeight: 500 }}>
-                            Line {idx + 1}
-                          </div>
-                          <div style={{ color: "#6b7280" }}>{label}</div>
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                          }}
-                        >
-                          {dims}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                            textAlign: "right",
-                          }}
-                        >
-                          {item.qty}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                            textAlign: "right",
-                          }}
-                        >
-                          {formatUsd(unit)}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                            textAlign: "right",
-                          }}
-                        >
-                          {formatUsd(total)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                marginTop: 8,
-              }}
-            >
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  Total quantity
-                </div>
-                <div style={{ fontSize: 18, fontWeight: 600 }}>
-                  {overallQty}
-                </div>
-                {anyPricing && (
-                  <>
+                {/* Pricing card */}
+                <div style={cardBase}>
+                  <div style={cardTitleStyle}>Pricing</div>
+                  {anyPricing ? (
                     <div
                       style={{
-                        marginTop: 4,
-                        fontSize: 12,
-                        color: "#6b7280",
-                      }}
-                    >
-                      Estimated subtotal
-                    </div>
-                    <div style={{ fontSize: 16, fontWeight: 600 }}>
-                      {formatUsd(subtotal)}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Foam layout package */}
-            <hr
-              style={{
-                border: "none",
-                borderTop: "1px solid #e5e7eb",
-                margin: "24px 0 16px 0",
-              }}
-            />
-            <h2 style={{ fontSize: 16, marginBottom: 8 }}>
-              Foam layout package
-            </h2>
-
-            {!layoutPkg ? (
-              <p style={{ color: "#6b7280", fontSize: 13 }}>
-                No foam layout has been saved for this quote yet. Use the{" "}
-                <strong>Open layout preview</strong> button in the emailed
-                quote to arrange cavities, then click{" "}
-                <strong>Apply to quote</strong> to store the layout here.
-              </p>
-            ) : (
-              <div
-                style={{
-                  borderRadius: 12,
-                  border: "1px solid #e5e7eb",
-                  background: "#f9fafb",
-                  padding: "12px 14px",
-                  fontSize: 13,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: 4,
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontWeight: 600,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                        fontSize: 13,
                         color: "#111827",
-                        marginBottom: 2,
                       }}
                     >
-                      Layout package #{layoutPkg.id}
+                      <div>
+                        <div style={labelStyle}>Primary unit price</div>
+                        <div>
+                          {formatUsd(
+                            parsePriceField(primaryItem.price_unit_usd ?? null),
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={labelStyle}>Estimated subtotal</div>
+                        <div style={{ fontSize: 16, fontWeight: 600 }}>
+                          {formatUsd(subtotal)}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 11,
+                          color: "#6b7280",
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        Final billing may adjust if specs, quantities, or
+                        services change.
+                      </div>
                     </div>
+                  ) : (
                     <div
                       style={{
+                        fontSize: 13,
                         color: "#6b7280",
-                        fontSize: 12,
+                        lineHeight: 1.5,
                       }}
                     >
-                      Saved:{" "}
-                      {new Date(layoutPkg.created_at).toLocaleString()}
+                      Pricing is still being finalized for this quote. Once
+                      pricing is applied, the per-piece and subtotal values will
+                      appear here and in the line items below.
                     </div>
-                  </div>
-                  <div
-                    style={{
-                      textAlign: "right",
-                      fontSize: 12,
-                    }}
-                  >
-                    <a
-                      href={
-                        "/quote/layout?quote_no=" +
-                        encodeURIComponent(quote.quote_no)
-                      }
-                      style={{
-                        display: "inline-block",
-                        padding: "4px 10px",
-                        borderRadius: 999,
-                        border: "1px solid #c7d2fe",
-                        background: "#eef2ff",
-                        color: "#1d4ed8",
-                        textDecoration: "none",
-                        fontWeight: 500,
-                      }}
-                    >
-                      Open layout editor
-                    </a>
-                  </div>
+                  )}
                 </div>
 
-                {notesPreview && (
+                {/* Layout & next steps card */}
+                <div style={cardBase}>
+                  <div style={cardTitleStyle}>Layout & next steps</div>
                   <div
                     style={{
-                      marginTop: 6,
-                      color: "#4b5563",
-                      fontSize: 12,
+                      marginBottom: 8,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: "#e0f2fe",
+                      color: "#0369a1",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
                     }}
                   >
-                    <span style={{ fontWeight: 500 }}>Notes: </span>
-                    {notesPreview}
+                    Interactive layout
                   </div>
-                )}
 
-                {layoutPkg.svg_text &&
-                  layoutPkg.svg_text.trim().length > 0 && (
-                    <div
-                      style={{
-                        marginTop: 10,
-                        padding: 8,
-                        borderRadius: 10,
-                        border: "1px solid #e5e7eb",
-                        background: "#ffffff",
-                      }}
-                    >
+                  {layoutPkg ? (
+                    <>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: "#111827",
+                          marginBottom: 4,
+                        }}
+                      >
+                        A foam layout has been saved for this quote.
+                      </div>
                       <div
                         style={{
                           fontSize: 12,
-                          fontWeight: 500,
-                          color: "#374151",
-                          marginBottom: 6,
+                          color: "#6b7280",
+                          marginBottom: 8,
+                          lineHeight: 1.4,
                         }}
                       >
-                        Layout preview
+                        You can open the layout editor from this page or from
+                        your emailed quote to adjust pocket locations before
+                        finalizing.
                       </div>
-                      <div
-                        ref={svgContainerRef}
-                        style={{
-                          width: "100%",
-                          height: 480,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          borderRadius: 8,
-                          border: "1px solid #e5e7eb",
-                          background: "#f3f4f6",
-                          overflow: "hidden",
-                        }}
-                        dangerouslySetInnerHTML={{
-                          __html: layoutPkg.svg_text,
-                        }}
-                      />
+                      {notesPreview && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#4b5563",
+                            background: "#e5f3ff",
+                            borderRadius: 10,
+                            padding: "6px 8px",
+                          }}
+                        >
+                          <span style={{ fontWeight: 600 }}>Notes: </span>
+                          {notesPreview}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: "#6b7280",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      No foam layout has been saved yet. Use the layout editor
+                      link in your emailed quote to place cavities where you’d
+                      like your parts to sit, then click{" "}
+                      <strong>Apply to quote</strong> to store the layout with
+                      this quote.
                     </div>
                   )}
+                </div>
               </div>
             )}
+
+            {/* LINE ITEMS CARD */}
+            <div
+              style={{
+                ...cardBase,
+                background: "#fefefe",
+                marginBottom: 20,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#0f172a",
+                  marginBottom: 8,
+                }}
+              >
+                Line items
+              </div>
+
+              {items.length === 0 ? (
+                <p style={{ color: "#6b7280", fontSize: 13 }}>
+                  No line items stored for this quote yet. Once the material and
+                  details are finalized, the primary line will appear here.
+                </p>
+              ) : (
+                <>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: 13,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ background: "#eff6ff" }}>
+                        <th
+                          style={{
+                            textAlign: "left",
+                            padding: 8,
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          Item
+                        </th>
+                        <th
+                          style={{
+                            textAlign: "left",
+                            padding: 8,
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          Dimensions (L × W × H)
+                        </th>
+                        <th
+                          style={{
+                            textAlign: "right",
+                            padding: 8,
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          Qty
+                        </th>
+                        <th
+                          style={{
+                            textAlign: "right",
+                            padding: 8,
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          Unit price
+                        </th>
+                        <th
+                          style={{
+                            textAlign: "right",
+                            padding: 8,
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          Line total
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item, idx) => {
+                        const dims =
+                          item.length_in +
+                          " × " +
+                          item.width_in +
+                          " × " +
+                          item.height_in;
+                        const label =
+                          item.material_name ||
+                          "Material #" + item.material_id;
+                        const unit = parsePriceField(
+                          item.price_unit_usd ?? null,
+                        );
+                        const total = parsePriceField(
+                          item.price_total_usd ?? null,
+                        );
+                        return (
+                          <tr key={item.id}>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                              }}
+                            >
+                              <div style={{ fontWeight: 500 }}>
+                                Line {idx + 1}
+                              </div>
+                              <div style={{ color: "#6b7280" }}>{label}</div>
+                            </td>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                              }}
+                            >
+                              {dims}
+                            </td>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                                textAlign: "right",
+                              }}
+                            >
+                              {item.qty}
+                            </td>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                                textAlign: "right",
+                              }}
+                            >
+                              {formatUsd(unit)}
+                            </td>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                                textAlign: "right",
+                              }}
+                            >
+                              {formatUsd(total)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      marginTop: 4,
+                    }}
+                  >
+                    <div style={{ textAlign: "right" }}>
+                      <div
+                        style={{ fontSize: 12, color: "#6b7280" }}
+                      >
+                        Total quantity
+                      </div>
+                      <div
+                        style={{ fontSize: 18, fontWeight: 600 }}
+                      >
+                        {overallQty}
+                      </div>
+                      {anyPricing && (
+                        <>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontSize: 12,
+                              color: "#6b7280",
+                            }}
+                          >
+                            Estimated subtotal
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 16,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {formatUsd(subtotal)}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Foam layout package section */}
+            <div style={{ marginTop: 4 }}>
+              <div
+                style={{
+                  fontSize: 16,
+                  fontWeight: 600,
+                  color: "#0f172a",
+                  marginBottom: 8,
+                }}
+              >
+                Foam layout package
+              </div>
+
+              {!layoutPkg ? (
+                <p style={{ color: "#6b7280", fontSize: 13 }}>
+                  No foam layout has been saved for this quote yet. Use the{" "}
+                  <strong>Open layout preview</strong> button in the emailed
+                  quote to arrange cavities, then click{" "}
+                  <strong>Apply to quote</strong> to store the layout here.
+                </p>
+              ) : (
+                <div
+                  style={{
+                    ...cardBase,
+                    background: "#f9fafb",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          color: "#111827",
+                          marginBottom: 2,
+                        }}
+                      >
+                        Layout package #{layoutPkg.id}
+                      </div>
+                      <div
+                        style={{
+                          color: "#6b7280",
+                          fontSize: 12,
+                        }}
+                      >
+                        Saved:{" "}
+                        {new Date(layoutPkg.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        textAlign: "right",
+                        fontSize: 12,
+                      }}
+                    >
+                      <a
+                        href={
+                          "/quote/layout?quote_no=" +
+                          encodeURIComponent(quote.quote_no)
+                        }
+                        style={{
+                          display: "inline-block",
+                          padding: "4px 10px",
+                          borderRadius: 999,
+                          border: "1px solid #c7d2fe",
+                          background: "#eef2ff",
+                          color: "#1d4ed8",
+                          textDecoration: "none",
+                          fontWeight: 500,
+                        }}
+                      >
+                        Open layout editor
+                      </a>
+                    </div>
+                  </div>
+
+                  {notesPreview && (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        color: "#4b5563",
+                        fontSize: 12,
+                      }}
+                    >
+                      <span style={{ fontWeight: 500 }}>Notes: </span>
+                      {notesPreview}
+                    </div>
+                  )}
+
+                  {layoutPkg.svg_text &&
+                    layoutPkg.svg_text.trim().length > 0 && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          padding: 8,
+                          borderRadius: 10,
+                          border: "1px solid #e5e7eb",
+                          background: "#ffffff",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 500,
+                            color: "#374151",
+                            marginBottom: 6,
+                          }}
+                        >
+                          Layout preview
+                        </div>
+                        <div
+                          ref={svgContainerRef}
+                          style={{
+                            width: "100%",
+                            height: 480,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            borderRadius: 8,
+                            border: "1px solid #e5e7eb",
+                            background: "#f3f4f6",
+                            overflow: "hidden",
+                          }}
+                          dangerouslySetInnerHTML={{
+                            __html: layoutPkg.svg_text,
+                          }}
+                        />
+                      </div>
+                    )}
+                </div>
+              )}
+            </div>
 
             <p
               style={{
