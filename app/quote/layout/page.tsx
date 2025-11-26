@@ -499,7 +499,8 @@ function LayoutEditorHost(props: {
           {/* Body: three-column layout */}
           <div className="flex flex-row gap-5 p-5 bg-slate-950/80 text-slate-100">
             {/* LEFT: Cavity palette + notes */}
-            <aside className="w-64 shrink-0 flex flex-col gap-3 ...">
+            <aside className="w-52 shrink-0 flex flex-col gap-3 ...">
+
               <div>
                 <div className="text-xs font-semibold text-slate-100 mb-1">
                   Cavity palette
