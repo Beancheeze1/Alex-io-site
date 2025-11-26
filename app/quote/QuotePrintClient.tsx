@@ -316,7 +316,7 @@ export default function QuotePrintClient() {
       style={{
         fontFamily:
           "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        background: "#020617", // dark page background to match editor
+        background: "#020617", // dark page background
         minHeight: "100vh",
         padding: "24px",
       }}
@@ -328,7 +328,7 @@ export default function QuotePrintClient() {
           background: "#ffffff",
           borderRadius: "24px",
           padding: "24px 24px 32px 24px",
-          boxShadow: "0 16px 40px rgba(15,23,42,0.45)",
+          boxShadow: "0 18px 45px rgba(15,23,42,0.55)",
         }}
       >
         {/* No quote number at all */}
@@ -389,7 +389,7 @@ export default function QuotePrintClient() {
             <div
               style={{
                 margin: "-24px -24px 20px -24px",
-                padding: "16px 24px",
+                padding: "18px 24px 16px 24px",
                 borderRadius: "24px 24px 0 0",
                 background:
                   "linear-gradient(90deg,#0ea5e9 0%,#22d3ee 35%,#6366f1 100%)",
@@ -397,7 +397,7 @@ export default function QuotePrintClient() {
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 16,
-                color: "#e0f2fe",
+                color: "#e5e7eb",
               }}
             >
               <div>
@@ -406,7 +406,7 @@ export default function QuotePrintClient() {
                     fontSize: 11,
                     letterSpacing: "0.18em",
                     textTransform: "uppercase",
-                    opacity: 0.9,
+                    opacity: 0.95,
                     marginBottom: 4,
                   }}
                 >
@@ -426,7 +426,7 @@ export default function QuotePrintClient() {
                   style={{
                     marginTop: 4,
                     fontSize: 12,
-                    opacity: 0.94,
+                    opacity: 0.96,
                   }}
                 >
                   Quote {quote.quote_no}
@@ -435,7 +435,7 @@ export default function QuotePrintClient() {
                   style={{
                     margin: "2px 0 0 0",
                     fontSize: 12,
-                    opacity: 0.9,
+                    opacity: 0.96,
                   }}
                 >
                   {quote.customer_name}
@@ -448,37 +448,41 @@ export default function QuotePrintClient() {
                 style={{
                   textAlign: "right",
                   fontSize: 12,
-                  color: "#e0f2fe",
+                  color: "#e5e7eb",
                 }}
               >
                 <div
                   style={{
-                    display: "inline-block",
-                    padding: "4px 10px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    padding: "4px 12px",
                     borderRadius: 999,
-                    background: "rgba(15,23,42,0.2)",
-                    border: "1px solid rgba(15,23,42,0.25)",
-                    color: "#f9fafb",
+                    background: "#eef2ff",
+                    border: "1px solid #c7d2fe",
+                    color: "#1d4ed8",
                     fontWeight: 600,
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
                   }}
                 >
-                  {quote.status.toUpperCase()}
+                  {quote.status}
                 </div>
                 <p
                   style={{
-                    margin: "4px 0 0 0",
+                    margin: "6px 0 0 0",
                     fontSize: 11,
-                    opacity: 0.9,
+                    color: "#e5e7eb",
+                    opacity: 0.95,
                   }}
                 >
-                  Created:{" "}
-                  {new Date(quote.created_at).toLocaleString()}
+                  Created: {new Date(quote.created_at).toLocaleString()}
                 </p>
                 <div
                   style={{
                     display: "flex",
                     gap: 8,
-                    marginTop: 8,
+                    marginTop: 10,
                     justifyContent: "flex-end",
                   }}
                 >
@@ -486,15 +490,14 @@ export default function QuotePrintClient() {
                     type="button"
                     onClick={handlePrint}
                     style={{
-                      padding: "6px 12px",
+                      padding: "6px 14px",
                       borderRadius: 999,
-                      border: "1px solid rgba(15,23,42,0.15)",
-                      background: "rgba(15,23,42,0.12)",
-                      color: "#e5e7eb",
+                      border: "1px solid #e5e7eb",
+                      background: "#f9fafb",
+                      color: "#0f172a",
                       fontSize: 12,
                       fontWeight: 500,
                       cursor: "pointer",
-                      backdropFilter: "blur(4px)",
                     }}
                   >
                     Print this quote
@@ -503,15 +506,14 @@ export default function QuotePrintClient() {
                     type="button"
                     onClick={handleForwardToSales}
                     style={{
-                      padding: "6px 12px",
+                      padding: "6px 14px",
                       borderRadius: 999,
-                      border: "1px solid rgba(15,23,42,0.15)",
-                      background: "rgba(15,23,42,0.12)",
-                      color: "#e5e7eb",
+                      border: "1px solid #e5e7eb",
+                      background: "#f9fafb",
+                      color: "#0f172a",
                       fontSize: 12,
                       fontWeight: 500,
                       cursor: "pointer",
-                      backdropFilter: "blur(4px)",
                     }}
                   >
                     Forward to sales
@@ -520,7 +522,7 @@ export default function QuotePrintClient() {
                     type="button"
                     onClick={handleScheduleCall}
                     style={{
-                      padding: "6px 12px",
+                      padding: "6px 14px",
                       borderRadius: 999,
                       border: "1px solid #0f172a",
                       background: "#0f172a",
@@ -629,7 +631,7 @@ export default function QuotePrintClient() {
 
                 {/* Layout & next steps card */}
                 <div style={cardBase}>
-                  <div style={cardTitleStyle}>Layout & next steps</div>
+                  <div style={cardTitleStyle}>Layout &amp; next steps</div>
                   <div
                     style={{
                       marginBottom: 8,
@@ -709,8 +711,9 @@ export default function QuotePrintClient() {
             <div
               style={{
                 ...cardBase,
-                background: "#fefefe",
+                background: "#ffffff",
                 marginBottom: 20,
+                boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
               }}
             >
               <div
@@ -718,10 +721,20 @@ export default function QuotePrintClient() {
                   fontSize: 14,
                   fontWeight: 600,
                   color: "#0f172a",
-                  marginBottom: 8,
+                  marginBottom: 4,
                 }}
               >
                 Line items
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#6b7280",
+                  marginBottom: 8,
+                }}
+              >
+                These are the materials and quantities currently stored with your
+                quote.
               </div>
 
               {items.length === 0 ? (
@@ -737,15 +750,21 @@ export default function QuotePrintClient() {
                       borderCollapse: "collapse",
                       fontSize: 13,
                       marginBottom: 12,
+                      borderRadius: 12,
+                      overflow: "hidden",
                     }}
                   >
                     <thead>
-                      <tr style={{ background: "#eff6ff" }}>
+                      <tr style={{ background: "#f3f4f6" }}>
                         <th
                           style={{
                             textAlign: "left",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
+                            fontSize: 11,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.08em",
+                            color: "#6b7280",
                           }}
                         >
                           Item
@@ -755,6 +774,10 @@ export default function QuotePrintClient() {
                             textAlign: "left",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
+                            fontSize: 11,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.08em",
+                            color: "#6b7280",
                           }}
                         >
                           Dimensions (L × W × H)
@@ -764,6 +787,10 @@ export default function QuotePrintClient() {
                             textAlign: "right",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
+                            fontSize: 11,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.08em",
+                            color: "#6b7280",
                           }}
                         >
                           Qty
@@ -773,6 +800,10 @@ export default function QuotePrintClient() {
                             textAlign: "right",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
+                            fontSize: 11,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.08em",
+                            color: "#6b7280",
                           }}
                         >
                           Unit price
@@ -782,6 +813,10 @@ export default function QuotePrintClient() {
                             textAlign: "right",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
+                            fontSize: 11,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.08em",
+                            color: "#6b7280",
                           }}
                         >
                           Line total
@@ -805,23 +840,30 @@ export default function QuotePrintClient() {
                         const total = parsePriceField(
                           item.price_total_usd ?? null,
                         );
+                        const rowBg =
+                          idx % 2 === 0 ? "#ffffff" : "#f9fafb";
                         return (
                           <tr key={item.id}>
                             <td
                               style={{
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
+                                background: rowBg,
                               }}
                             >
-                              <div style={{ fontWeight: 500 }}>
+                              <div style={{ fontWeight: 500, color: "#111827" }}>
                                 Line {idx + 1}
                               </div>
-                              <div style={{ color: "#6b7280" }}>{label}</div>
+                              <div style={{ color: "#6b7280", fontSize: 12 }}>
+                                {label}
+                              </div>
                             </td>
                             <td
                               style={{
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
+                                background: rowBg,
+                                color: "#111827",
                               }}
                             >
                               {dims}
@@ -831,6 +873,8 @@ export default function QuotePrintClient() {
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
                                 textAlign: "right",
+                                background: rowBg,
+                                color: "#111827",
                               }}
                             >
                               {item.qty}
@@ -840,6 +884,8 @@ export default function QuotePrintClient() {
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
                                 textAlign: "right",
+                                background: rowBg,
+                                color: "#111827",
                               }}
                             >
                               {formatUsd(unit)}
@@ -849,6 +895,8 @@ export default function QuotePrintClient() {
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
                                 textAlign: "right",
+                                background: rowBg,
+                                color: "#111827",
                               }}
                             >
                               {formatUsd(total)}
@@ -873,7 +921,7 @@ export default function QuotePrintClient() {
                         Total quantity
                       </div>
                       <div
-                        style={{ fontSize: 18, fontWeight: 600 }}
+                        style={{ fontSize: 18, fontWeight: 600, color: "#111827" }}
                       >
                         {overallQty}
                       </div>
@@ -881,7 +929,7 @@ export default function QuotePrintClient() {
                         <>
                           <div
                             style={{
-                              marginTop: 4,
+                              marginTop: 6,
                               fontSize: 12,
                               color: "#6b7280",
                             }}
@@ -892,6 +940,7 @@ export default function QuotePrintClient() {
                             style={{
                               fontSize: 16,
                               fontWeight: 600,
+                              color: "#111827",
                             }}
                           >
                             {formatUsd(subtotal)}
