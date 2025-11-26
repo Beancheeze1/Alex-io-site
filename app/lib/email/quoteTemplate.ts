@@ -82,14 +82,14 @@ export type TemplatePricing = {
 };
 
 export type TemplateInput = {
-  customerLine?: string;
-  quoteNumber: string | null;
-  status: string;
+  customerLine?: string | null;
+  quoteNumber?: string | null;
+  status?: string;
   specs: TemplateSpecs;
   material: TemplateMaterial;
   pricing: TemplatePricing;
-  missing?: string[] | null;
-  facts?: Record<string, any>;
+  missing: string[];
+  facts?: Record<string, any>;   // <-- make it optional
 };
 
 function fmtInchesTriple(
