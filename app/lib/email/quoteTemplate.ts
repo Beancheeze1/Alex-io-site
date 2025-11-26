@@ -55,10 +55,13 @@ export type TemplateSpecs = {
   cavityDims?: string[];
 };
 
+// IMPORTANT: Match orchestrate/route.ts PriceBreak exactly
 export type PriceBreak = {
   qty: number;
-  unit_price: number;
-  ext_price: number;
+  total: number;
+  piece: number | null;
+  used_min_charge?: boolean | null;
+  // note is optional – orchestrate doesn't send it, but that's OK.
   note?: string | null;
 };
 
@@ -87,9 +90,8 @@ export type TemplateInput = {
   material: TemplateMaterial;
   pricing: TemplatePricing;
   missing: string[];
-  facts?: Record<string, any>;   // <-- make it optional
+  facts?: Record<string, any>;
 };
-
 
 function fmtInchesTriple(L: number, W: number, H: number): string {
   if (!L || !W || !H) return "—";
@@ -121,7 +123,9 @@ function fmtQty(q: number | string | null | undefined): string {
 // "1 cavity — 1x1x1" or "3 cavities — 1x1x1, 2x2x1"
 function buildCavityLabel(specs: TemplateSpecs): string {
   const count = specs.cavityCount ?? (specs.cavityDims?.length || 0);
-  const dims = (specs.cavityDims || []).filter((s) => !!s && typeof s === "string");
+  const dims = (specs.cavityDims || []).filter(
+    (s) => !!s && typeof s === "string",
+  );
 
   if (!count && dims.length === 0) return "—";
 
@@ -162,14 +166,12 @@ function buildLayoutUrl(input: TemplateInput): string | null {
   return `${base}/quote/layout?${params.toString()}`;
 }
 
-
 export function renderQuoteEmail(input: TemplateInput): string {
   const { quoteNumber, status, specs, material, pricing, missing } = input;
 
   const customerLine =
     input.customerLine ||
     "Thanks for the details—I'll review a couple of specifications and get back to you with a price shortly.";
-
 
   const outsideSize = fmtInchesTriple(specs.L_in, specs.W_in, specs.H_in);
   const qty = fmtQty(specs.qty);
@@ -203,7 +205,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const orderCiWithWaste = fmtNumber(
     pricing.order_ci_with_waste ?? pricing.raw?.order_ci_with_waste,
   );
-  
+
   const orderTotal = fmtMoney(
     pricing.total ??
       pricing.raw?.price_total ??
@@ -221,6 +223,18 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
   const statusLabel = status || "draft";
 
+  // Helper for unit price in the table: prefer piece; fallback to total/qty.
+  function priceBreakUnit(br: PriceBreak): string {
+    if (br.piece != null && !isNaN(Number(br.piece))) {
+      return fmtMoney(br.piece);
+    }
+    if (br.qty && br.total != null && !isNaN(Number(br.total))) {
+      const unit = Number(br.total) / Number(br.qty);
+      return fmtMoney(unit);
+    }
+    return fmtMoney(null);
+  }
+
   return `<!doctype html>
 <html>
   <head>
@@ -234,8 +248,10 @@ export function renderQuoteEmail(input: TemplateInput): string {
           <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
             <tr>
               <td style="padding:20px 24px 8px 24px;border-bottom:1px solid #e5e7eb;">
-                <div style="font-size:13px;color:#6b7280;margin-bottom:4px;">Quote${quoteNumber ? 
-                  ` · <span style="font-weight:600;color:#111827;">${quoteNumber}</span>` : ""
+                <div style="font-size:13px;color:#6b7280;margin-bottom:4px;">Quote${
+                  quoteNumber
+                    ? ` · <span style="font-weight:600;color:#111827;">${quoteNumber}</span>`
+                    : ""
                 }</div>
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
                   <div style="display:flex;align-items:center;gap:8px;">
@@ -325,15 +341,23 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         </tr>
                         <tr>
                           <td style="padding:2px 6px;font-weight:600;">Piece volume</td>
-                          <td style="padding:2px 6px;">${pieceCi !== "—" ? `${pieceCi} in³` : "—"}</td>
+                          <td style="padding:2px 6px;">${
+                            pieceCi !== "—" ? `${pieceCi} in³` : "—"
+                          }</td>
                         </tr>
                         <tr>
                           <td style="padding:2px 6px;font-weight:600;">Order volume</td>
-                          <td style="padding:2px 6px;">${orderCi !== "—" ? `${orderCi} in³` : "—"}</td>
+                          <td style="padding:2px 6px;">${
+                            orderCi !== "—" ? `${orderCi} in³` : "—"
+                          }</td>
                         </tr>
                         <tr>
                           <td style="padding:2px 6px;font-weight:600;">With waste</td>
-                          <td style="padding:2px 6px;">${orderCiWithWaste !== "—" ? `${orderCiWithWaste} in³` : "—"}</td>
+                          <td style="padding:2px 6px;">${
+                            orderCiWithWaste !== "—"
+                              ? `${orderCiWithWaste} in³`
+                              : "—"
+                          }</td>
                         </tr>
                         <tr>
                           <td style="padding:2px 6px;font-weight:600;">Min charge</td>
@@ -381,11 +405,17 @@ export function renderQuoteEmail(input: TemplateInput): string {
                       (br) => `
                         <tr>
                           <td style="padding:4px 8px;font-size:11px;">${br.qty}</td>
-                          <td style="padding:4px 8px;font-size:11px;">${fmtMoney(br.unit_price)}</td>
-                          <td style="padding:4px 8px;font-size:11px;">${fmtMoney(br.ext_price)}</td>
-                          <td style="padding:4px 8px;font-size:11px;color:#6b7280;">${br.note || ""}</td>
+                          <td style="padding:4px 8px;font-size:11px;">${priceBreakUnit(
+                            br,
+                          )}</td>
+                          <td style="padding:4px 8px;font-size:11px;">${fmtMoney(
+                            br.total,
+                          )}</td>
+                          <td style="padding:4px 8px;font-size:11px;color:#6b7280;">${
+                            br.note || ""
+                          }</td>
                         </tr>
-                      `
+                      `,
                     )
                     .join("")}
                 </table>
@@ -410,7 +440,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         ${missing
                           .map(
                             (m) =>
-                              `<li style="margin-bottom:2px;">${m}</li>`
+                              `<li style="margin-bottom:2px;">${m}</li>`,
                           )
                           .join("")}
                       </ul>
