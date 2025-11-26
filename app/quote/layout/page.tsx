@@ -493,7 +493,8 @@ function LayoutEditorHost(props: {
           {/* Body: three-column layout */}
           <div className="flex flex-row gap-5 p-5 bg-slate-950/80 text-slate-100">
             {/* ---------- LEFT: Cavity palette + notes ---------- */}
-            <aside className="w-64 shrink-0 flex flex-col gap-3 border-r border-slate-800 pr-4">
+            <aside className="min-w-[16rem] shrink-0 flex flex-col gap-3 border-r border-slate-200 pr-4">
+
               <div>
                 <div className="text-xs font-semibold text-slate-100 mb-1">
                   Cavity palette
@@ -677,7 +678,8 @@ function LayoutEditorHost(props: {
             </section>
 
             {/* ---------- RIGHT: Inspector ---------- */}
-            <aside className="w-80 shrink-0 flex flex-col gap-3 border-l border-slate-800 pl-4">
+            <aside className="min-w-[20rem] shrink-0 flex flex-col gap-3 border-l border-slate-200 pl-4">
+
               {/* Block editor */}
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                 <div className="text-xs font-semibold text-slate-100 mb-1">
