@@ -37,9 +37,9 @@ type DragState =
     }
   | null;
 
-// Slightly larger canvas so the foam block can breathe more on wide screens
-const CANVAS_WIDTH = 1400;
-const CANVAS_HEIGHT = 720;
+// Back to original internal canvas size so side panels still fit on screen
+const CANVAS_WIDTH = 1200;
+const CANVAS_HEIGHT = 620;
 
 const PADDING = 32;
 const WALL_IN = 0.5;
