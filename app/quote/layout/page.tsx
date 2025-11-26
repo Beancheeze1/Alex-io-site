@@ -13,12 +13,12 @@
 //   (dims/cavities from query string, then 10x10x2 + 3x2x1).
 // - After a successful "Apply to quote", automatically navigates to
 //   /quote?quote_no=... so the user sees the updated printable quote.
-// - NEW: Shows editable Qty in the top-right next to Zoom / Apply,
+// - Shows editable Qty in the top-right next to Zoom / Apply,
 //   seeded from the primary quote item when available.
-// - NEW (11/23 fix): If the URL includes an explicit `cavities=` param,
-//   we treat that as fresh and ignore any saved DB layout geometry for
-//   the initial load, so email → layout always reflects the latest
-//   cavity dims instead of an old 3x2x1 test layout.
+// - If the URL includes an explicit `cavities=` param, we treat that as fresh
+//   and ignore any saved DB layout geometry for the initial load, so
+//   email → layout always reflects the latest cavity dims instead of an
+//   old 3x2x1 test layout.
 //
 
 "use client";
@@ -213,13 +213,9 @@ export default function LayoutPage({
           }
         }
 
-        // KEY BEHAVIOR:
         // If the URL includes explicit `cavities=...`, we treat that as the
         // source of truth for the initial layout and IGNORE any saved DB
         // layout_json for geometry. We still keep qtyFromItems if present.
-        //
-        // This prevents an older 3x2x1 test layout from overriding fresh
-        // 1x1x0.5 style cavity dims coming from the quote email.
         if (
           json &&
           json.ok &&
@@ -276,8 +272,7 @@ export default function LayoutPage({
   if (loadingLayout || !initialLayout) {
     return (
       <main className="min-h-screen bg-slate-950 flex items-center justify-center">
-         <div className="w-full max-w-none mx-auto bg-white rounded-none shadow-none border-t border-slate-200 flex flex-row gap-6 p-6">
-
+        <div className="text-sm text-slate-300">
           Loading layout preview&hellip;
         </div>
       </main>
@@ -295,7 +290,7 @@ export default function LayoutPage({
   );
 }
 
-/* ---------- Layout editor host (was main body) ---------- */
+/* ---------- Layout editor host (main body) ---------- */
 
 function LayoutEditorHost(props: {
   quoteNo: string;
@@ -335,7 +330,7 @@ function LayoutEditorHost(props: {
   const { block, cavities } = layout;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
 
-  /* ---------- Palette Interactions ---------- */
+  /* ---------- Palette interactions ---------- */
 
   const handleAddPreset = (shape: CavityShape) => {
     if (shape === "circle") {
@@ -409,7 +404,7 @@ function LayoutEditorHost(props: {
         svg,
       };
 
-      // ✅ Qty fix: always coerce to a number before sending
+      // Always coerce qty to a number before sending
       const nQty = Number(qty);
       if (Number.isFinite(nQty) && nQty > 0) {
         payload.qty = nQty;
@@ -437,7 +432,7 @@ function LayoutEditorHost(props: {
         throw new Error(`HTTP ${res.status}`);
       }
 
-      // ✅ Success: jump straight to printable quote so there’s no confusion
+      // Success: jump straight to printable quote so there’s no confusion
       if (typeof window !== "undefined") {
         window.location.href =
           "/quote?quote_no=" + encodeURIComponent(quoteNo);
@@ -454,47 +449,57 @@ function LayoutEditorHost(props: {
     }
   };
 
+  /* ---------- Layout ---------- */
+
   return (
     <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
-      <div className="w-full max-w-6xl mx-auto">
+      <div className="w-full max-w-none mx-auto">
         <div className="rounded-2xl border border-slate-800 bg-slate-950/80 shadow-[0_22px_45px_rgba(15,23,42,0.85)] overflow-hidden">
-          {/* Header: carry over email look */}
-          <div className="border-b border-slate-800 bg-gradient-to-r from-sky-500 via-sky-500/80 to-slate-900 px-6 py-4 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-sky-50/90">
-                Powered by
+          {/* Header */}
+          <div className="border-b border-slate-800 bg-gradient-to-r from-sky-500 via-sky-500/80 to-slate-900 px-6 py-4">
+            <div className="flex items-center gap-4 w-full">
+              {/* LEFT: powered by + quote */}
+              <div className="flex flex-col">
+                <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-sky-50/90">
+                  Powered by Alex-IO
+                </div>
+                <div className="mt-1 text-xs text-sky-50/95">
+                  Quote{" "}
+                  <span className="font-mono font-semibold text-slate-50">
+                    {quoteNo}
+                  </span>
+                  {hasRealQuoteNo ? (
+                    <span className="ml-1 text-sky-100/90">
+                      · Linked to active quote
+                    </span>
+                  ) : (
+                    <span className="ml-1 text-amber-50/90">
+                      · Demo view (no quote linked)
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="text-xl font-extrabold text-slate-50 leading-snug drop-shadow-[0_0_8px_rgba(15,23,42,0.6)]">
-                Alex-IO foam layout editor
+
+              {/* CENTER: big title */}
+              <div className="flex-1 text-center">
+                <div className="text-xl font-extrabold text-slate-50 leading-snug drop-shadow-[0_0_8px_rgba(15,23,42,0.6)]">
+                  Interactive layout editor
+                </div>
               </div>
-              <div className="mt-1 text-xs text-sky-50/95">
-                Quote{" "}
-                <span className="font-mono font-semibold text-slate-50">
-                  {quoteNo}
+
+              {/* RIGHT: BETA pill */}
+              <div className="flex items-center justify-end">
+                <span className="inline-flex items-center rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
+                  Layout editor · BETA
                 </span>
-                {hasRealQuoteNo ? (
-                  <span className="ml-1 text-sky-100/90">
-                    · Linked to active quote
-                  </span>
-                ) : (
-                  <span className="ml-1 text-amber-50/90">
-                    · Demo view (no quote linked)
-                  </span>
-                )}
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
-                Layout editor · BETA
-              </span>
             </div>
           </div>
 
           {/* Body: three-column layout */}
           <div className="flex flex-row gap-5 p-5 bg-slate-950/80 text-slate-100">
-            {/* ---------- LEFT: Cavity palette + notes ---------- */}
-            <aside className="min-w-[16rem] shrink-0 flex flex-col gap-3 border-r border-slate-200 pr-4">
-
+            {/* LEFT: Cavity palette + notes */}
+            <aside className="min-w-[16rem] shrink-0 flex flex-col gap-3 border-r border-slate-800 pr-4">
               <div>
                 <div className="text-xs font-semibold text-slate-100 mb-1">
                   Cavity palette
@@ -571,7 +576,7 @@ function LayoutEditorHost(props: {
               )}
             </aside>
 
-            {/* ---------- CENTER: Big visualizer ---------- */}
+            {/* CENTER: Big visualizer */}
             <section className="flex-1 flex flex-col gap-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -579,7 +584,6 @@ function LayoutEditorHost(props: {
                     <span className="font-semibold">
                       Foam layout preview
                     </span>
-
                     <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium">
                       Interactive layout
                     </span>
@@ -677,9 +681,8 @@ function LayoutEditorHost(props: {
               </div>
             </section>
 
-            {/* ---------- RIGHT: Inspector ---------- */}
-            <aside className="min-w-[20rem] shrink-0 flex flex-col gap-3 border-l border-slate-200 pl-4">
-
+            {/* RIGHT: Inspector */}
+            <aside className="min-w-[20rem] shrink-0 flex flex-col gap-3 border-l border-slate-800 pl-4">
               {/* Block editor */}
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                 <div className="text-xs font-semibold text-slate-100 mb-1">
@@ -824,7 +827,6 @@ function LayoutEditorHost(props: {
 
                 {selectedCavity && (
                   <>
-                    {/* circle uses Diameter; others use Length + Width */}
                     {selectedCavity.shape === "circle" ? (
                       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                         <label className="flex flex-col gap-1">
