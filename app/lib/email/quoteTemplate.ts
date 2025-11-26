@@ -250,9 +250,10 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
   const buttonsHtml =
     buttons.length > 0
-      ? `<div style="margin-top:18px;margin-bottom:4px;">${buttons.join(
-          "",
-        )}</div>`
+      ? `<div style="margin-top:18px;margin-bottom:4px;">
+           <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">Next steps</div>
+           ${buttons.join("")}
+         </div>`
       : "";
 
   const statusLabel = status || "draft";
@@ -268,8 +269,20 @@ export function renderQuoteEmail(input: TemplateInput): string {
       <tr>
         <td align="center">
           <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
+            <!-- Brand header bar -->
             <tr>
-              <td style="padding:20px 24px 8px 24px;border-bottom:1px solid #e5e7eb;">
+              <td style="background:#020617;padding:14px 24px;border-bottom:1px solid #0f172a;">
+                <div style="display:inline-block;padding:6px 14px;border-radius:999px;background:#0b1120;color:#e5e7eb;font-size:12px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;">
+                  Alex-IO
+                </div>
+                <div style="margin-top:6px;font-size:11px;color:#9ca3af;">
+                  Automated foam quoting assistant
+                </div>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:16px 24px 8px 24px;border-bottom:1px solid #e5e7eb;">
                 <div style="font-size:13px;color:#6b7280;margin-bottom:4px;">Alex-IO automated foam quote</div>
                 <div style="font-size:18px;font-weight:600;color:#111827;">
                   ${
