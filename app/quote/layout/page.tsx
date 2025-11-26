@@ -683,7 +683,7 @@ function LayoutEditorHost(props: {
             </section>
 
             {/* RIGHT: Inspector */}
-            <aside className="w-80 shrink-0 flex flex-col gap-3 ...">
+            <aside className="w-70 shrink-0 flex flex-col gap-3 ...">
 
               {/* Block editor */}
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
