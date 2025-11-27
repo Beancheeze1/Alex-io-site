@@ -1,4 +1,3 @@
-// TEST BUMP 1
 // app/quote/QuotePrintClient.tsx
 //
 // Client component that:
@@ -289,23 +288,23 @@ export default function QuotePrintClient() {
   const primaryItem = items[0] || null;
 
   // Shared card styles to feel like the email blocks
-  const cardBase = {
+  const cardBase: React.CSSProperties = {
     borderRadius: 16,
     border: "1px solid #e5e7eb",
     background: "#f9fafb",
     padding: "12px 14px",
   };
 
-  const cardTitleStyle = {
+  const cardTitleStyle: React.CSSProperties = {
     fontSize: 13,
     fontWeight: 600,
     color: "#0f172a",
     marginBottom: 6,
   };
 
-  const labelStyle = {
+  const labelStyle: React.CSSProperties = {
     fontSize: 11,
-    textTransform: "uppercase" as const,
+    textTransform: "uppercase",
     letterSpacing: "0.08em",
     color: "#6b7280",
     marginBottom: 2,
@@ -317,7 +316,7 @@ export default function QuotePrintClient() {
       style={{
         fontFamily:
           "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        background: "#020617", // outer background
+        background: "#020617", // dark page background to match editor
         minHeight: "100vh",
         padding: "24px",
       }}
@@ -329,14 +328,14 @@ export default function QuotePrintClient() {
           background: "#ffffff",
           borderRadius: "24px",
           padding: "24px 24px 32px 24px",
-          boxShadow: "0 18px 45px rgba(15,23,42,0.55)",
+          boxShadow: "0 16px 40px rgba(15,23,42,0.45)",
         }}
       >
         {/* No quote number at all */}
         {!quoteNo && !loading && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
-            <p style={{ color: "#6b7280" }}>
+            <p style={{ color: "#555" }}>
               We could not find a quote number in this link. Please double-check
               the URL or open the quote directly from your inbox.
             </p>
@@ -357,7 +356,7 @@ export default function QuotePrintClient() {
         {!loading && notFound && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
-            <p style={{ color: "#6b7280" }}>
+            <p style={{ color: "#555" }}>
               {notFound}{" "}
               {quoteNo ? (
                 <>
@@ -375,7 +374,7 @@ export default function QuotePrintClient() {
               Problem loading quote
             </h1>
             {quoteNo && (
-              <p style={{ color: "#6b7280", marginBottom: 6 }}>
+              <p style={{ color: "#555", marginBottom: 6 }}>
                 Quote number: <code>{quoteNo}</code>
               </p>
             )}
@@ -390,7 +389,7 @@ export default function QuotePrintClient() {
             <div
               style={{
                 margin: "-24px -24px 20px -24px",
-                padding: "18px 24px 16px 24px",
+                padding: "16px 24px",
                 borderRadius: "24px 24px 0 0",
                 background:
                   "linear-gradient(90deg,#0ea5e9 0%,#22d3ee 35%,#6366f1 100%)",
@@ -398,7 +397,7 @@ export default function QuotePrintClient() {
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 16,
-                color: "#e5e7eb",
+                color: "#e0f2fe",
               }}
             >
               <div>
@@ -407,7 +406,7 @@ export default function QuotePrintClient() {
                     fontSize: 11,
                     letterSpacing: "0.18em",
                     textTransform: "uppercase",
-                    opacity: 0.95,
+                    opacity: 0.9,
                     marginBottom: 4,
                   }}
                 >
@@ -427,7 +426,7 @@ export default function QuotePrintClient() {
                   style={{
                     marginTop: 4,
                     fontSize: 12,
-                    opacity: 0.96,
+                    opacity: 0.94,
                   }}
                 >
                   Quote {quote.quote_no}
@@ -436,7 +435,7 @@ export default function QuotePrintClient() {
                   style={{
                     margin: "2px 0 0 0",
                     fontSize: 12,
-                    opacity: 0.96,
+                    opacity: 0.9,
                   }}
                 >
                   {quote.customer_name}
@@ -449,41 +448,37 @@ export default function QuotePrintClient() {
                 style={{
                   textAlign: "right",
                   fontSize: 12,
-                  color: "#e5e7eb",
+                  color: "#e0f2fe",
                 }}
               >
                 <div
                   style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    padding: "4px 12px",
+                    display: "inline-block",
+                    padding: "4px 10px",
                     borderRadius: 999,
-                    background: "#eef2ff",
-                    border: "1px solid #c7d2fe",
-                    color: "#1d4ed8",
+                    background: "rgba(15,23,42,0.2)",
+                    border: "1px solid rgba(15,23,42,0.25)",
+                    color: "#f9fafb",
                     fontWeight: 600,
-                    fontSize: 11,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
                   }}
                 >
-                  {quote.status}
+                  {quote.status.toUpperCase()}
                 </div>
                 <p
                   style={{
-                    margin: "6px 0 0 0",
+                    margin: "4px 0 0 0",
                     fontSize: 11,
-                    color: "#e5e7eb",
-                    opacity: 0.95,
+                    opacity: 0.9,
                   }}
                 >
-                  Created: {new Date(quote.created_at).toLocaleString()}
+                  Created:{" "}
+                  {new Date(quote.created_at).toLocaleString()}
                 </p>
                 <div
                   style={{
                     display: "flex",
                     gap: 8,
-                    marginTop: 10,
+                    marginTop: 8,
                     justifyContent: "flex-end",
                   }}
                 >
@@ -491,14 +486,15 @@ export default function QuotePrintClient() {
                     type="button"
                     onClick={handlePrint}
                     style={{
-                      padding: "6px 14px",
+                      padding: "6px 12px",
                       borderRadius: 999,
-                      border: "1px solid #e5e7eb",
-                      background: "#f9fafb",
-                      color: "#0f172a",
+                      border: "1px solid rgba(15,23,42,0.15)",
+                      background: "rgba(15,23,42,0.12)",
+                      color: "#e5e7eb",
                       fontSize: 12,
                       fontWeight: 500,
                       cursor: "pointer",
+                      backdropFilter: "blur(4px)",
                     }}
                   >
                     Print this quote
@@ -507,14 +503,15 @@ export default function QuotePrintClient() {
                     type="button"
                     onClick={handleForwardToSales}
                     style={{
-                      padding: "6px 14px",
+                      padding: "6px 12px",
                       borderRadius: 999,
-                      border: "1px solid #e5e7eb",
-                      background: "#f9fafb",
-                      color: "#0f172a",
+                      border: "1px solid rgba(15,23,42,0.15)",
+                      background: "rgba(15,23,42,0.12)",
+                      color: "#e5e7eb",
                       fontSize: 12,
                       fontWeight: 500,
                       cursor: "pointer",
+                      backdropFilter: "blur(4px)",
                     }}
                   >
                     Forward to sales
@@ -523,7 +520,7 @@ export default function QuotePrintClient() {
                     type="button"
                     onClick={handleScheduleCall}
                     style={{
-                      padding: "6px 14px",
+                      padding: "6px 12px",
                       borderRadius: 999,
                       border: "1px solid #0f172a",
                       background: "#0f172a",
@@ -552,7 +549,13 @@ export default function QuotePrintClient() {
                 {/* Specs card */}
                 <div style={cardBase}>
                   <div style={cardTitleStyle}>Specs</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                    }}
+                  >
                     <div>
                       <div style={labelStyle}>Dimensions</div>
                       <div style={{ fontSize: 13, color: "#111827" }}>
@@ -576,156 +579,10 @@ export default function QuotePrintClient() {
                   </div>
                 </div>
 
-            {/* LINE ITEMS (main test) */}
-            <h2 style={{ fontSize: 16, marginBottom: 8 }}>Line items (main test)</h2>
-
-
-            {items.length === 0 ? (
-              <p style={{ color: "#6b7280" }}>
-                No line items stored for this quote yet. Once the material and
-                details are finalized, the primary line will appear here.
-              </p>
-            ) : (
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: 13,
-                  marginBottom: 16,
-                }}
-              >
-                <thead>
-                  <tr style={{ background: "#eff6ff" }}>
-                    <th
-                      style={{
-                        textAlign: "left",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Item
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "left",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Dimensions (L × W × H)
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Qty
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Unit price
-                    </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        padding: 8,
-                        borderBottom: "1px solid #e5e7eb",
-                      }}
-                    >
-                      Line total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item, idx) => {
-                    const dims =
-                      item.length_in +
-                      " × " +
-                      item.width_in +
-                      " × " +
-                      item.height_in;
-                    const label =
-                      item.material_name || "Material #" + item.material_id;
-                    const unit = parsePriceField(item.price_unit_usd ?? null);
-                    const total = parsePriceField(item.price_total_usd ?? null);
-                    return (
-                      <tr key={item.id}>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                          }}
-                        >
-                          <div style={{ fontWeight: 500 }}>
-                            Line {idx + 1}
-                          </div>
-                          <div style={{ color: "#6b7280" }}>{label}</div>
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                          }}
-                        >
-                          {dims}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                            textAlign: "right",
-                          }}
-                        >
-                          {item.qty}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                            textAlign: "right",
-                          }}
-                        >
-                          {formatUsd(unit)}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f3f4f6",
-                            textAlign: "right",
-                          }}
-                        >
-                          {formatUsd(total)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                marginTop: 8,
-              }}
-            >
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  Total quantity
-                </div>
-                <div style={{ fontSize: 18, fontWeight: 600 }}>
-                  {overallQty}
-                </div>
-                {anyPricing && (
-                  <>
+                {/* Pricing card */}
+                <div style={cardBase}>
+                  <div style={cardTitleStyle}>Pricing</div>
+                  {anyPricing ? (
                     <div
                       style={{
                         display: "flex",
@@ -739,7 +596,9 @@ export default function QuotePrintClient() {
                         <div style={labelStyle}>Primary unit price</div>
                         <div>
                           {formatUsd(
-                            parsePriceField(primaryItem.price_unit_usd ?? null),
+                            parsePriceField(
+                              primaryItem.price_unit_usd ?? null,
+                            ),
                           )}
                         </div>
                       </div>
@@ -778,7 +637,7 @@ export default function QuotePrintClient() {
 
                 {/* Layout & next steps card */}
                 <div style={cardBase}>
-                  <div style={cardTitleStyle}>Layout &amp; next steps</div>
+                  <div style={cardTitleStyle}>Layout & next steps</div>
                   <div
                     style={{
                       marginBottom: 8,
@@ -786,8 +645,8 @@ export default function QuotePrintClient() {
                       alignItems: "center",
                       padding: "2px 8px",
                       borderRadius: 999,
-                      background: "#eef2ff",
-                      color: "#1d4ed8",
+                      background: "#e0f2fe",
+                      color: "#0369a1",
                       fontSize: 11,
                       fontWeight: 600,
                       textTransform: "uppercase",
@@ -825,7 +684,7 @@ export default function QuotePrintClient() {
                           style={{
                             fontSize: 11,
                             color: "#4b5563",
-                            background: "#eef2ff",
+                            background: "#e5f3ff",
                             borderRadius: 10,
                             padding: "6px 8px",
                           }}
@@ -858,9 +717,8 @@ export default function QuotePrintClient() {
             <div
               style={{
                 ...cardBase,
-                background: "#ffffff",
+                background: "#fefefe",
                 marginBottom: 20,
-                boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
               }}
             >
               <div
@@ -902,17 +760,13 @@ export default function QuotePrintClient() {
                     }}
                   >
                     <thead>
-                      {/* OBVIOUS TEST CHANGE: header row color now #eef2ff (indigo-tinted) */}
+                      {/* header row with soft indigo tint */}
                       <tr style={{ background: "#eef2ff" }}>
                         <th
                           style={{
                             textAlign: "left",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
-                            fontSize: 11,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.08em",
-                            color: "#6b7280",
                           }}
                         >
                           Item
@@ -922,10 +776,6 @@ export default function QuotePrintClient() {
                             textAlign: "left",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
-                            fontSize: 11,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.08em",
-                            color: "#6b7280",
                           }}
                         >
                           Dimensions (L × W × H)
@@ -935,10 +785,6 @@ export default function QuotePrintClient() {
                             textAlign: "right",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
-                            fontSize: 11,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.08em",
-                            color: "#6b7280",
                           }}
                         >
                           Qty
@@ -948,10 +794,6 @@ export default function QuotePrintClient() {
                             textAlign: "right",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
-                            fontSize: 11,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.08em",
-                            color: "#6b7280",
                           }}
                         >
                           Unit price
@@ -961,10 +803,6 @@ export default function QuotePrintClient() {
                             textAlign: "right",
                             padding: 8,
                             borderBottom: "1px solid #e5e7eb",
-                            fontSize: 11,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.08em",
-                            color: "#6b7280",
                           }}
                         >
                           Line total
@@ -988,30 +826,23 @@ export default function QuotePrintClient() {
                         const total = parsePriceField(
                           item.price_total_usd ?? null,
                         );
-                        const rowBg =
-                          idx % 2 === 0 ? "#ffffff" : "#f9fafb";
                         return (
                           <tr key={item.id}>
                             <td
                               style={{
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
-                                background: rowBg,
                               }}
                             >
-                              <div style={{ fontWeight: 500, color: "#111827" }}>
+                              <div style={{ fontWeight: 500 }}>
                                 Line {idx + 1}
                               </div>
-                              <div style={{ color: "#6b7280", fontSize: 12 }}>
-                                {label}
-                              </div>
+                              <div style={{ color: "#6b7280" }}>{label}</div>
                             </td>
                             <td
                               style={{
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
-                                background: rowBg,
-                                color: "#111827",
                               }}
                             >
                               {dims}
@@ -1021,8 +852,6 @@ export default function QuotePrintClient() {
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
                                 textAlign: "right",
-                                background: rowBg,
-                                color: "#111827",
                               }}
                             >
                               {item.qty}
@@ -1032,8 +861,6 @@ export default function QuotePrintClient() {
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
                                 textAlign: "right",
-                                background: rowBg,
-                                color: "#111827",
                               }}
                             >
                               {formatUsd(unit)}
@@ -1043,8 +870,6 @@ export default function QuotePrintClient() {
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
                                 textAlign: "right",
-                                background: rowBg,
-                                color: "#111827",
                               }}
                             >
                               {formatUsd(total)}
@@ -1069,7 +894,7 @@ export default function QuotePrintClient() {
                         Total quantity
                       </div>
                       <div
-                        style={{ fontSize: 18, fontWeight: 600, color: "#111827" }}
+                        style={{ fontSize: 18, fontWeight: 600 }}
                       >
                         {overallQty}
                       </div>
@@ -1077,7 +902,7 @@ export default function QuotePrintClient() {
                         <>
                           <div
                             style={{
-                              marginTop: 6,
+                              marginTop: 4,
                               fontSize: 12,
                               color: "#6b7280",
                             }}
@@ -1088,7 +913,6 @@ export default function QuotePrintClient() {
                             style={{
                               fontSize: 16,
                               fontWeight: 600,
-                              color: "#111827",
                             }}
                           >
                             {formatUsd(subtotal)}
@@ -1210,7 +1034,7 @@ export default function QuotePrintClient() {
                           style={{
                             fontSize: 12,
                             fontWeight: 500,
-                            color: "#4b5563",
+                            color: "#374151",
                             marginBottom: 6,
                           }}
                         >
