@@ -46,6 +46,14 @@ type ItemRow = {
   material_name: string | null;
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
+
+  // NEW: richer pricing metadata from /api/quote/print
+  pricing_meta?: {
+    min_charge?: number | null;
+    used_min_charge?: boolean;
+    setup_fee?: number | null;
+    kerf_pct?: number | null;
+  } | null;
 };
 
 type LayoutPkgRow = {
@@ -110,9 +118,7 @@ export default function QuotePrintClient() {
   const [notFound, setNotFound] = React.useState<string | null>(null);
   const [quote, setQuote] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
-  const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(
-    null,
-  );
+  const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
   // Ref to the SVG preview container so we can scale/center the inner <svg>
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -286,6 +292,16 @@ export default function QuotePrintClient() {
   }, [layoutPkg]);
 
   const primaryItem = items[0] || null;
+  const primaryPricing = primaryItem?.pricing_meta || null;
+  const minChargeApplied = !!primaryPricing?.used_min_charge;
+  const setupFee =
+    typeof primaryPricing?.setup_fee === "number"
+      ? primaryPricing.setup_fee
+      : null;
+  const kerfPct =
+    typeof primaryPricing?.kerf_pct === "number"
+      ? primaryPricing.kerf_pct
+      : null;
 
   // Shared card styles to feel like the email blocks
   const cardBase: React.CSSProperties = {
@@ -533,30 +549,6 @@ export default function QuotePrintClient() {
                     Schedule a call
                   </button>
                 </div>
-                {/* Internal-only helper link to admin view */}
-                <div
-                  style={{
-                    marginTop: 6,
-                    fontSize: 11,
-                    opacity: 0.9,
-                  }}
-                >
-                  <a
-                    href={
-                      "/admin/quotes/" +
-                      encodeURIComponent(quote.quote_no)
-                    }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      color: "#e5e7eb",
-                      textDecoration: "underline",
-                      fontWeight: 500,
-                    }}
-                  >
-                    Open admin view
-                  </a>
-                </div>
               </div>
             </div>
 
@@ -640,8 +632,32 @@ export default function QuotePrintClient() {
                           lineHeight: 1.4,
                         }}
                       >
-                        Final billing may adjust if specs, quantities, or
-                        services change.
+                        {primaryPricing ? (
+                          <>
+                            <span>
+                              Pricing includes material, cutting, and standard
+                              waste allowance
+                              {typeof kerfPct === "number"
+                                ? ` (~${kerfPct}% kerf)`
+                                : ""}.
+                              {setupFee && setupFee > 0
+                                ? ` A one-time setup fee of ${formatUsd(
+                                    setupFee,
+                                  )} is included.`
+                                : ""}
+                              {minChargeApplied
+                                ? ` A minimum charge of ${formatUsd(
+                                    primaryPricing.min_charge ?? subtotal,
+                                  )} applies to this configuration.`
+                                : ""}
+                            </span>
+                            <br />
+                            Final billing may adjust if specs, quantities, or
+                            services change.
+                          </>
+                        ) : (
+                          "Final billing may adjust if specs, quantities, or services change."
+                        )}
                       </div>
                     </div>
                   ) : (

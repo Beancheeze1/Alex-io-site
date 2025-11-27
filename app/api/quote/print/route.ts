@@ -35,6 +35,27 @@ type ItemRow = {
   // These are NOT read from DB; we attach them after calling calc.
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
+
+  // NEW: full pricing metadata from /api/quotes/calc (optional)
+  pricing_meta?: {
+    variant_used?: string | null;
+    // direct carry-through of calc.result
+    piece_ci?: number | null;
+    order_ci?: number | null;
+    order_ci_with_waste?: number | null;
+    price_per_ci?: number | null;
+    price_per_bf?: number | null;
+    min_charge?: number | null;
+    total?: number | null;
+    used_min_charge?: boolean;
+    kerf_pct?: number | null;
+    is_skived?: boolean;
+    skive_pct?: number | null;
+    setup_fee?: number | null;
+    cavities_ci?: number | null;
+    piece_ci_raw?: number | null;
+    material_name?: string | null;
+  } | null;
 };
 
 type LayoutPkgRow = {
@@ -85,7 +106,7 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
         height_in: H,
         material_id: materialId,
         qty,
-        cavities: [],
+        cavities: [], // IMPORTANT: we do not change cavity logic here (Path A)
         round_to_bf: false,
       }),
     });
@@ -96,15 +117,36 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       return item;
     }
 
-    const rawTotal = Number(json.result.total ?? json.result.price_total ?? 0);
-    const total =
-      Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : 0;
+    const result = json.result || {};
+    const rawTotal = Number(result.total ?? result.price_total ?? 0);
+    const total = Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : 0;
     const piece = qty > 0 && Number.isFinite(total) ? total / qty : null;
+
+    // NEW: compact pricing_meta blob we can use on the UI
+    const pricing_meta: ItemRow["pricing_meta"] = {
+      variant_used: json.variant_used ?? null,
+      piece_ci: result.piece_ci ?? null,
+      order_ci: result.order_ci ?? null,
+      order_ci_with_waste: result.order_ci_with_waste ?? null,
+      price_per_ci: result.price_per_ci ?? null,
+      price_per_bf: result.price_per_bf ?? null,
+      min_charge: result.min_charge ?? null,
+      total: result.total ?? null,
+      used_min_charge: !!result.used_min_charge,
+      kerf_pct: result.kerf_pct ?? null,
+      is_skived: !!result.is_skived,
+      skive_pct: result.skive_pct ?? null,
+      setup_fee: result.setup_fee ?? null,
+      cavities_ci: result.cavities_ci ?? null,
+      piece_ci_raw: result.piece_ci_raw ?? null,
+      material_name: result.material_name ?? null,
+    };
 
     return {
       ...item,
       price_total_usd: Number.isFinite(total) ? total : null,
       price_unit_usd: piece != null && Number.isFinite(piece) ? piece : null,
+      pricing_meta,
     };
   } catch (err) {
     console.error("attachPricingToItem error:", err);
@@ -186,11 +228,7 @@ export async function GET(req: NextRequest) {
         const qtyFact = Number(facts?.qty ?? 0);
         const matId = Number(facts?.material_id ?? 0);
 
-        if (
-          [L, W, H, qtyFact, matId].every(
-            (n) => Number.isFinite(n) && n > 0,
-          )
-        ) {
+        if ([L, W, H, qtyFact, matId].every((n) => Number.isFinite(n) && n > 0)) {
           const synthetic: ItemRow = {
             id: 0,
             quote_id: quote.id,
@@ -237,7 +275,7 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // ---------- NEW: treat layout block as source of truth for primary dims ----------
+    // ---------- treat layout block as source of truth for primary dims ----------
     //
     // If we have a layout package with a block that has valid dims,
     // override the primary item (items[0]) L/W/H for display + pricing.
@@ -262,9 +300,7 @@ export async function GET(req: NextRequest) {
         const W = Number(rawWidth);
         const H = Number(rawHeight);
 
-        const allFinite = [L, W, H].every(
-          (n) => Number.isFinite(n) && n > 0,
-        );
+        const allFinite = [L, W, H].every((n) => Number.isFinite(n) && n > 0);
 
         if (allFinite) {
           const primary = items[0];

@@ -40,6 +40,14 @@ type ItemRow = {
   material_name: string | null;
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
+
+  // NEW: richer pricing metadata from /api/quote/print
+  pricing_meta?: {
+    min_charge?: number | null;
+    used_min_charge?: boolean;
+    setup_fee?: number | null;
+    kerf_pct?: number | null;
+  } | null;
 };
 
 type LayoutPkgRow = {
@@ -292,6 +300,22 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   );
 
   const primaryItem = items[0] || null;
+
+  // NEW: unpack richer pricing info for quick engineering context
+  const primaryPricing = primaryItem?.pricing_meta || null;
+  const minChargeApplied = !!primaryPricing?.used_min_charge;
+  const setupFee =
+    typeof primaryPricing?.setup_fee === "number"
+      ? primaryPricing.setup_fee
+      : null;
+  const kerfPct =
+    typeof primaryPricing?.kerf_pct === "number"
+      ? primaryPricing.kerf_pct
+      : null;
+  const minChargeValue =
+    typeof primaryPricing?.min_charge === "number"
+      ? primaryPricing.min_charge
+      : null;
 
   // shared card styles (aligned with client-facing quote page palette)
   const cardBase: React.CSSProperties = {
@@ -565,6 +589,35 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                 ),
                               )}
                             </div>
+                          </div>
+                        )}
+                        {/* NEW: tiny internal-only context about how pricing was built */}
+                        {primaryPricing && (
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontSize: 11,
+                              color: "#6b7280",
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            <span>
+                              Calc basis: volumetric foam charge with{" "}
+                              {typeof kerfPct === "number"
+                                ? `~${kerfPct}% kerf/waste`
+                                : "standard kerf/waste"}
+                              .
+                              {setupFee && setupFee > 0
+                                ? ` Includes a setup fee of ${formatUsd(
+                                    setupFee,
+                                  )}.`
+                                : ""}
+                              {minChargeApplied
+                                ? ` Pricing is currently governed by the minimum charge (${formatUsd(
+                                    minChargeValue ?? subtotal,
+                                  )}), not the raw volume math.`
+                                : " Minimum charge is not the limiting factor for this configuration."}
+                            </span>
                           </div>
                         )}
                       </>
