@@ -202,6 +202,7 @@ function buildDxfFromLayout(layout: any): string | null {
  * Takes the raw SVG from the editor and injects a small legend group:
  *
  *   <g id="alex-io-notes">
+ *     <text>NOT TO SCALE</text>
  *     <text>FOAM BLOCK: L x W x T in</text>
  *     <text>CAVITY 1: ...</text>
  *     ...
@@ -210,8 +211,8 @@ function buildDxfFromLayout(layout: any): string | null {
  * The geometry is NOT changed; this only adds text.
  *
  * Note: SVG units are not "full scale" CAD units — they’re just viewBox/canvas
- * units. CAD imports will almost always come in at arbitrary scale; you can
- * scale them using the known foam block size.
+ * units. CAD imports will almost always come in at arbitrary scale; the engineer
+ * should rely on these dimensions when building the real model.
  */
 function buildSvgWithAnnotations(
   layout: any,
@@ -231,6 +232,9 @@ function buildSvgWithAnnotations(
   }
 
   const lines: string[] = [];
+
+  // ✅ New: simple scale warning
+  lines.push("NOT TO SCALE");
 
   if (Number.isFinite(T) && T > 0) {
     lines.push(`FOAM BLOCK: ${L} x ${W} x ${T} in`);
@@ -341,14 +345,14 @@ export async function POST(req: NextRequest) {
           message: `No quote header found for quote_no ${quoteNo}.`,
         },
         404,
-      );
+    );
     }
 
     // Build DXF from the incoming layout; STEP left null for now.
     const dxf = buildDxfFromLayout(layout);
     const step: string | null = null;
 
-    // Annotate SVG (if provided) with foam + cavity notes.
+    // Annotate SVG (if provided) with foam + cavity notes + NOT TO SCALE.
     const svgAnnotated = buildSvgWithAnnotations(layout, svgRaw);
 
     // Insert layout package (now including annotated svg_text, dxf_text, step_text).
@@ -497,7 +501,7 @@ export async function GET(req: NextRequest) {
           message: `No quote found with number ${quoteNo}.`,
         },
         404,
-      );
+    );
     }
 
     const layoutPkg = await one<LayoutPkgRow>(
