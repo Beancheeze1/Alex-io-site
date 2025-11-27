@@ -9,8 +9,8 @@
 // Extras:
 // - If opened with a real quote_no, it fetches the latest saved layout
 //   from /api/quote/print and uses layout_json + notes as the starting point.
-// - If no saved layout exists, it falls back to the old default layout
-//   (dims/cavities from query string, then 10x10x2 + 3x2x1).
+// - If no saved layout exists, it falls back to a layout built from the
+//   URL dims/cavities (or just a bare block if we can’t parse cavities).
 // - After a successful "Apply to quote", automatically navigates to
 //   /quote?quote_no=... so the user sees the updated printable quote.
 // - Shows editable Qty in the top-right next to Zoom / Apply,
@@ -26,7 +26,6 @@
 import * as React from "react";
 
 import {
-  buildLayoutFromStrings,
   CavityShape,
   LayoutModel,
 } from "./editor/layoutTypes";
@@ -106,16 +105,14 @@ export default function LayoutPage({
 }) {
   /* ---------- Read quote number (URL → state) ---------- */
 
-  // Initial guess from Next.js-provided searchParams
-  const initialQuoteNoParam = (searchParams?.quote_no ?? 
-    searchParams?.quote ?? 
+  const initialQuoteNoParam = (searchParams?.quote_no ??
+    searchParams?.quote ??
     "") as string | undefined;
 
   const [quoteNoFromUrl, setQuoteNoFromUrl] = React.useState<string>(
     initialQuoteNoParam?.trim() || "",
   );
 
-  // On the client, re-parse the real address bar so we always match
   React.useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -129,7 +126,7 @@ export default function LayoutPage({
         setQuoteNoFromUrl(q);
       }
     } catch {
-      // If anything goes wrong, just stick with the initial value
+      // ignore
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -144,12 +141,12 @@ export default function LayoutPage({
     typeof searchParams?.cavities !== "undefined" ||
     typeof searchParams?.cavity !== "undefined";
 
-  const dimsParam = (searchParams?.dims ?? 
-    searchParams?.block ?? 
+  const dimsParam = (searchParams?.dims ??
+    searchParams?.block ??
     "") as string | undefined;
 
-  const cavitiesParam = (searchParams?.cavities ?? 
-    searchParams?.cavity ?? 
+  const cavitiesParam = (searchParams?.cavities ??
+    searchParams?.cavity ??
     "") as string | undefined;
 
   const blockStr = normalizeDimsParam(dimsParam);
@@ -177,26 +174,9 @@ export default function LayoutPage({
   const [loadingLayout, setLoadingLayout] =
     React.useState<boolean>(true);
 
-  // Helper: fallback layout builder
+  // Helper: fallback layout builder, driven ONLY by URL + simple rules
   const buildFallbackLayout = React.useCallback((): LayoutModel => {
-    // First choice: let the shared helper try — but ONLY when the URL
-    // did NOT explicitly specify cavities. For explicit cavities from
-    // the email link, we want to force our manual grid builder so we
-    // don't accidentally resurrect the old 3×2×1 default.
-    const fromQuery = buildLayoutFromStrings(blockStr, cavityStr);
-    if (
-      !hasExplicitCavities &&
-      fromQuery &&
-      Array.isArray(fromQuery.cavities) &&
-      fromQuery.cavities.length > 0
-    ) {
-      return fromQuery;
-    }
-
-    // NEW: If we have explicit cavity text but no cavities were built,
-    // or we deliberately skipped buildLayoutFromStrings because the
-    // email passed `cavities=...`, manually build a very simple layout
-    // so the editor never shows the old 3×2×1 when the URL has real dims.
+    // Block from dims=..., default 10x10x2 if missing.
     const parsedBlock = parseDimsTriple(blockStr) ?? {
       L: 10,
       W: 10,
@@ -209,6 +189,7 @@ export default function LayoutPage({
       thicknessIn: parsedBlock.H,
     };
 
+    // Cavities from cavities=... string (can be "1x1x1;2x2x1" etc).
     const cavTokens = (cavityStr || "")
       .split(/[;,]/)
       .map((s) => s.trim())
@@ -277,21 +258,12 @@ export default function LayoutPage({
       }
     }
 
-    // If we still ended up with no cavities, keep the old ultra-safe default.
-    if (cavities.length === 0) {
-      return (
-        buildLayoutFromStrings("10x10x2", "3x2x1") || {
-          block: { lengthIn: 10, widthIn: 10, thicknessIn: 2 },
-          cavities: [],
-        }
-      );
-    }
-
+    // If we can’t build any cavities, just return a bare block.
     return {
       block,
       cavities,
     };
-  }, [blockStr, cavityStr, hasExplicitCavities]);
+  }, [blockStr, cavityStr]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -320,7 +292,6 @@ export default function LayoutPage({
         );
 
         if (!res.ok) {
-          // If the quote isn't found or API fails, fall back to local defaults
           const fallback = buildFallbackLayout();
           if (!cancelled) {
             setInitialLayout(fallback);
@@ -342,9 +313,7 @@ export default function LayoutPage({
           }
         }
 
-        // If the URL includes explicit `cavities=...`, we treat that as the
-        // source of truth for the initial layout and IGNORE any saved DB
-        // layout_json for geometry. We still keep qtyFromItems if present.
+        // Only use DB layout geometry when NO URL dims/cavities are present.
         if (
           json &&
           json.ok &&
@@ -368,8 +337,7 @@ export default function LayoutPage({
           return;
         }
 
-        // Otherwise, fall back to layout from URL (dims/cavities) and
-        // keep qty if we have it.
+        // Otherwise, use layout from URL (dims/cavities) and keep qty.
         const fallback = buildFallbackLayout();
         if (!cancelled) {
           setInitialLayout(fallback);
@@ -491,7 +459,6 @@ function LayoutEditorHost(props: {
 
     if (!block.lengthIn || !block.widthIn || !len || !wid) return;
 
-    // center so cavity center = block center, respect 0.5" wall + snap
     let xIn = (block.lengthIn - len) / 2;
     let yIn = (block.widthIn - wid) / 2;
 
@@ -518,7 +485,6 @@ function LayoutEditorHost(props: {
   /* ---------- Apply to quote ---------- */
 
   const handleApplyToQuote = async () => {
-    // Guard: must be linked to a real quote number
     if (!hasRealQuoteNo) {
       alert(
         "This layout preview isn’t linked to a quote yet.\n\nOpen this page from an emailed quote or from the /quote print view so Alex-IO knows which quote to save it against.",
@@ -538,7 +504,6 @@ function LayoutEditorHost(props: {
         svg,
       };
 
-      // Always coerce qty to a number before sending
       const nQty = Number(qty);
       if (Number.isFinite(nQty) && nQty > 0) {
         payload.qty = nQty;
@@ -566,14 +531,12 @@ function LayoutEditorHost(props: {
         throw new Error(`HTTP ${res.status}`);
       }
 
-      // Success: jump straight to printable quote so there’s no confusion
       if (typeof window !== "undefined") {
         window.location.href =
           "/quote?quote_no=" + encodeURIComponent(quoteNo);
         return;
       }
 
-      // Fallback (non-browser)
       setApplyStatus("done");
       setTimeout(() => setApplyStatus("idle"), 2000);
     } catch (err) {
