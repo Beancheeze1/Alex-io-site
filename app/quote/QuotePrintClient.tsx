@@ -397,7 +397,7 @@ export default function QuotePrintClient() {
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 16,
-                color: "#e0f2fe",
+                color: "#e5e7eb", // palette text color
               }}
             >
               <div>
@@ -448,7 +448,7 @@ export default function QuotePrintClient() {
                 style={{
                   textAlign: "right",
                   fontSize: 12,
-                  color: "#e0f2fe",
+                  color: "#e5e7eb",
                 }}
               >
                 <div
@@ -645,8 +645,8 @@ export default function QuotePrintClient() {
                       alignItems: "center",
                       padding: "2px 8px",
                       borderRadius: 999,
-                      background: "#e0f2fe",
-                      color: "#0369a1",
+                      background: "#eef2ff", // pill bg from palette
+                      color: "#1d4ed8", // pill text from palette
                       fontSize: 11,
                       fontWeight: 600,
                       textTransform: "uppercase",
@@ -684,7 +684,7 @@ export default function QuotePrintClient() {
                           style={{
                             fontSize: 11,
                             color: "#4b5563",
-                            background: "#e5f3ff",
+                            background: "#eef2ff",
                             borderRadius: 10,
                             padding: "6px 8px",
                           }}
@@ -717,8 +717,8 @@ export default function QuotePrintClient() {
             <div
               style={{
                 ...cardBase,
-                background: "#fefefe",
-                marginBottom: 20,
+                background: "#ffffff",
+                marginBottom: 24,
               }}
             >
               <div
@@ -925,8 +925,12 @@ export default function QuotePrintClient() {
               )}
             </div>
 
-            {/* Foam layout package section */}
-            <div style={{ marginTop: 4 }}>
+            {/* Foam layout package section (cardified to match email) */}
+            <div
+              style={{
+                marginTop: 4,
+              }}
+            >
               <div
                 style={{
                   fontSize: 16,
@@ -938,129 +942,131 @@ export default function QuotePrintClient() {
                 Foam layout package
               </div>
 
-              {!layoutPkg ? (
-                <p style={{ color: "#6b7280", fontSize: 13 }}>
-                  No foam layout has been saved for this quote yet. Use the{" "}
-                  <strong>Open layout preview</strong> button in the emailed
-                  quote to arrange cavities, then click{" "}
-                  <strong>Apply to quote</strong> to store the layout here.
-                </p>
-              ) : (
-                <div
-                  style={{
-                    ...cardBase,
-                    background: "#f9fafb",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      marginBottom: 4,
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          color: "#111827",
-                          marginBottom: 2,
-                        }}
-                      >
-                        Layout package #{layoutPkg.id}
+              <div
+                style={{
+                  ...cardBase,
+                  background: "#ffffff",
+                }}
+              >
+                {!layoutPkg ? (
+                  <p style={{ color: "#6b7280", fontSize: 13 }}>
+                    No foam layout has been saved for this quote yet. Use the{" "}
+                    <strong>Open layout preview</strong> button in the emailed
+                    quote to arrange cavities, then click{" "}
+                    <strong>Apply to quote</strong> to store the layout here.
+                  </p>
+                ) : (
+                  <>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            color: "#111827",
+                            marginBottom: 2,
+                          }}
+                        >
+                          Layout package #{layoutPkg.id}
+                        </div>
+                        <div
+                          style={{
+                            color: "#6b7280",
+                            fontSize: 12,
+                          }}
+                        >
+                          Saved:{" "}
+                          {new Date(layoutPkg.created_at).toLocaleString()}
+                        </div>
                       </div>
                       <div
                         style={{
-                          color: "#6b7280",
+                          textAlign: "right",
                           fontSize: 12,
                         }}
                       >
-                        Saved:{" "}
-                        {new Date(layoutPkg.created_at).toLocaleString()}
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        textAlign: "right",
-                        fontSize: 12,
-                      }}
-                    >
-                      <a
-                        href={
-                          "/quote/layout?quote_no=" +
-                          encodeURIComponent(quote.quote_no)
-                        }
-                        style={{
-                          display: "inline-block",
-                          padding: "4px 10px",
-                          borderRadius: 999,
-                          border: "1px solid #c7d2fe",
-                          background: "#eef2ff",
-                          color: "#1d4ed8",
-                          textDecoration: "none",
-                          fontWeight: 500,
-                        }}
-                      >
-                        Open layout editor
-                      </a>
-                    </div>
-                  </div>
-
-                  {notesPreview && (
-                    <div
-                      style={{
-                        marginTop: 6,
-                        color: "#4b5563",
-                        fontSize: 12,
-                      }}
-                    >
-                      <span style={{ fontWeight: 500 }}>Notes: </span>
-                      {notesPreview}
-                    </div>
-                  )}
-
-                  {layoutPkg.svg_text &&
-                    layoutPkg.svg_text.trim().length > 0 && (
-                      <div
-                        style={{
-                          marginTop: 10,
-                          padding: 8,
-                          borderRadius: 10,
-                          border: "1px solid #e5e7eb",
-                          background: "#ffffff",
-                        }}
-                      >
-                        <div
+                        <a
+                          href={
+                            "/quote/layout?quote_no=" +
+                            encodeURIComponent(quote.quote_no)
+                          }
                           style={{
-                            fontSize: 12,
+                            display: "inline-block",
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            border: "1px solid #c7d2fe",
+                            background: "#eef2ff",
+                            color: "#1d4ed8",
+                            textDecoration: "none",
                             fontWeight: 500,
-                            color: "#374151",
-                            marginBottom: 6,
                           }}
                         >
-                          Layout preview
-                        </div>
-                        <div
-                          ref={svgContainerRef}
-                          style={{
-                            width: "100%",
-                            height: 480,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            borderRadius: 8,
-                            border: "1px solid #e5e7eb",
-                            background: "#f3f4f6",
-                            overflow: "hidden",
-                          }}
-                          dangerouslySetInnerHTML={{
-                            __html: layoutPkg.svg_text,
-                          }}
-                        />
+                          Open layout editor
+                        </a>
+                      </div>
+                    </div>
+
+                    {notesPreview && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          color: "#4b5563",
+                          fontSize: 12,
+                        }}
+                      >
+                        <span style={{ fontWeight: 500 }}>Notes: </span>
+                        {notesPreview}
                       </div>
                     )}
-                </div>
-              )}
+
+                    {layoutPkg.svg_text &&
+                      layoutPkg.svg_text.trim().length > 0 && (
+                        <div
+                          style={{
+                            marginTop: 10,
+                            padding: 8,
+                            borderRadius: 10,
+                            border: "1px solid #e5e7eb",
+                            background: "#ffffff",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 500,
+                              color: "#374151",
+                              marginBottom: 6,
+                            }}
+                          >
+                            Layout preview
+                          </div>
+                          <div
+                            ref={svgContainerRef}
+                            style={{
+                              width: "100%",
+                              height: 480,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderRadius: 8,
+                              border: "1px solid #e5e7eb",
+                              background: "#f3f4f6",
+                              overflow: "hidden",
+                            }}
+                            dangerouslySetInnerHTML={{
+                              __html: layoutPkg.svg_text,
+                            }}
+                          />
+                        </div>
+                      )}
+                  </>
+                )}
+              </div>
             </div>
 
             <p
