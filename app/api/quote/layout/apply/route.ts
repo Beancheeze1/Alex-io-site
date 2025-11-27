@@ -58,34 +58,35 @@ function bad(body: any, status = 400) {
   return NextResponse.json(body, { status });
 }
 
-/* ===================== Simple DXF builder from layout ===================== */
+/* ===================== Simple DXF builder from layout (LINES only) ===================== */
 
 /**
  * Very small DXF writer that:
  *  - Draws the foam block as 4 LINE entities (rectangle).
  *  - Draws each cavity as 4 LINE entities (rectangle).
- *  - Adds text annotations:
- *      - One note for the foam block with full L × W × T.
- *      - One note for each cavity with L × W × Depth.
+ *
+ * No TEXT for now — this keeps imports as robust as possible across CAD tools.
  *
  * Layout assumptions (matches editor types, but we DO NOT change them):
  *  - layout.block: { lengthIn, widthIn, thicknessIn }
  *  - layout.cavities: [{ lengthIn, widthIn, depthIn, x, y }, ...]
  *      where x,y are normalized 0–1 coordinates for the top-left of the cavity
  *      relative to the block footprint.
- *
- * We keep this conservative: ASCII DXF, ENTITIES section with LINE + TEXT.
  */
 function buildDxfFromLayout(layout: any): string | null {
   if (!layout || !layout.block) return null;
 
   const block = layout.block || {};
-  const L = Number(block.lengthIn);
-  const W = Number(block.widthIn);
-  const T = Number(block.thicknessIn);
+  let L = Number(block.lengthIn);
+  let W = Number(block.widthIn);
 
-  if (!Number.isFinite(L) || !Number.isFinite(W) || L <= 0 || W <= 0) {
+  // Fallbacks to avoid degenerate rectangles:
+  if (!Number.isFinite(L) || L <= 0) {
     return null;
+  }
+  if (!Number.isFinite(W) || W <= 0) {
+    // If width is garbage, treat as a square for DXF purposes.
+    W = L;
   }
 
   function fmt(n: number) {
@@ -115,30 +116,6 @@ function buildDxfFromLayout(layout: any): string | null {
     ].join("\n");
   }
 
-  function textEntity(
-    content: string,
-    x: number,
-    y: number,
-    height: number,
-  ): string {
-    const safeHeight = Math.max(height, 0.5);
-    return [
-      "0",
-      "TEXT",
-      "8",
-      "0", // layer
-      "10",
-      fmt(x),
-      "20",
-      fmt(y),
-      "40",
-      fmt(safeHeight), // text height
-      "1",
-      content,
-      "",
-    ].join("\n");
-  }
-
   const entities: string[] = [];
 
   // 1) Foam block as outer rectangle from (0,0) to (L,W) – 4 LINES.
@@ -147,47 +124,21 @@ function buildDxfFromLayout(layout: any): string | null {
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // Block annotation: show full size including thickness if we have it.
-  const blockNoteHeight = Math.max(Math.min(L, W) * 0.08, 0.75);
-  if (Number.isFinite(T) && T > 0) {
-    const blockLabel = `FOAM BLOCK: ${L} x ${W} x ${T} in`;
-    // Place text slightly above the block, near the left.
-    entities.push(
-      textEntity(
-        blockLabel,
-        0,
-        W + Math.max(W * 0.05, blockNoteHeight * 1.5),
-        blockNoteHeight,
-      ),
-    );
-  } else {
-    const blockLabel = `FOAM BLOCK: ${L} x ${W} in (thickness see quote)`;
-    entities.push(
-      textEntity(
-        blockLabel,
-        0,
-        W + Math.max(W * 0.05, blockNoteHeight * 1.5),
-        blockNoteHeight,
-      ),
-    );
-  }
-
-  // 2) Cavities as inner rectangles (plus text notes)
+  // 2) Cavities as inner rectangles
   if (Array.isArray(layout.cavities)) {
-    let idx = 1;
     for (const cav of layout.cavities as any[]) {
       if (!cav) continue;
-      const cL = Number(cav.lengthIn);
-      const cW = Number(cav.widthIn);
-      const cD = Number(cav.depthIn);
+      let cL = Number(cav.lengthIn);
+      let cW = Number(cav.widthIn);
       const nx = Number(cav.x);
       const ny = Number(cav.y);
 
-      if (
-        ![cL, cW, nx, ny].every((n) => Number.isFinite(n) && n >= 0) ||
-        cL <= 0 ||
-        cW <= 0
-      ) {
+      if (!Number.isFinite(cL) || cL <= 0) continue;
+      if (!Number.isFinite(cW) || cW <= 0) {
+        // Fallback to square if needed
+        cW = cL;
+      }
+      if (![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) {
         continue;
       }
 
@@ -195,35 +146,17 @@ function buildDxfFromLayout(layout: any): string | null {
       const left = L * nx;
       const top = W * ny;
 
-      // Cavity rectangle (4 LINES).
       entities.push(lineEntity(left, top, left + cL, top));
       entities.push(lineEntity(left + cL, top, left + cL, top + cW));
       entities.push(lineEntity(left + cL, top + cW, left, top + cW));
       entities.push(lineEntity(left, top + cW, left, top));
-
-      // Cavity label: "CAVITY n: L x W x D in"
-      const depthPart =
-        Number.isFinite(cD) && cD > 0 ? `${cD}` : "depth?";
-      const label = `CAVITY ${idx}: ${cL} x ${cW} x ${depthPart} in`;
-      idx += 1;
-
-      // Place text roughly at the center of the cavity.
-      const cx = left + cL / 2;
-      const cy = top + cW / 2;
-      const textHeight = Math.max(Math.min(cL, cW) * 0.3, 0.75);
-      entities.push(textEntity(label, cx, cy, textHeight));
     }
   }
 
   if (!entities.length) return null;
 
-  const header = [
-    "0",
-    "SECTION",
-    "2",
-    "ENTITIES",
-  ].join("\n");
-
+  // Minimal but valid DXF: ENTITIES section only.
+  const header = ["0", "SECTION", "2", "ENTITIES"].join("\n");
   const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
 
   return [header, entities.join("\n"), footer].join("\n");
