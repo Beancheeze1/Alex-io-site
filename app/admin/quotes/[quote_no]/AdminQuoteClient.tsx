@@ -1,7 +1,9 @@
 // app/admin/quotes/[quote_no]/AdminQuoteClient.tsx
 //
 // Internal admin quote viewer:
-//  - Reads quote_no from props (server passes dynamic route param).
+//  - Uses quote_no from props when available.
+//  - If props are missing, rescues quote_no from window.location.pathname
+//    (/admin/quotes/<quote_no>).
 //  - Calls /api/quote/print to fetch:
 //      - quote header
 //      - items
@@ -67,7 +69,7 @@ type ApiErr = {
 type ApiResponse = ApiOk | ApiErr;
 
 type Props = {
-  quoteNo: string;
+  quoteNo?: string;
 };
 
 function parsePriceField(
@@ -94,22 +96,53 @@ function formatUsd(value: number | null | undefined): string {
 }
 
 export default function AdminQuoteClient({ quoteNo }: Props) {
-  const [loading, setLoading] = React.useState<boolean>(!!quoteNo);
+  // Local quote number value: prefer prop, fall back to URL path.
+  const [quoteNoValue, setQuoteNoValue] = React.useState<string>(
+    quoteNo || "",
+  );
+
+  const [loading, setLoading] = React.useState<boolean>(!!quoteNoValue);
   const [error, setError] = React.useState<string | null>(null);
   const [notFound, setNotFound] = React.useState<string | null>(null);
-  const [quote, setQuote] = React.useState<QuoteRow | null>(null);
+  const [quoteState, setQuoteState] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
 
-  // Fetch quote data from /api/quote/print
+  // 🔁 Rescue quote_no from URL path if prop is missing/empty.
+  // Expected path: /admin/quotes/<quote_no>
   React.useEffect(() => {
-    if (!quoteNo) {
+    if (quoteNoValue) return;
+    if (typeof window === "undefined") return;
+
+    try {
+      const path = window.location.pathname || "";
+      const parts = path.split("/").filter(Boolean); // e.g. ["admin", "quotes", "Q-AI-..."]
+      const idx = parts.findIndex((p) => p === "quotes");
+      const fromPath =
+        idx >= 0 && parts[idx + 1]
+          ? decodeURIComponent(parts[idx + 1])
+          : "";
+
+      if (fromPath) {
+        setQuoteNoValue(fromPath);
+        setLoading(true);
+        setNotFound(null);
+        setError(null);
+      } else {
+        setLoading(false);
+        setNotFound("No quote number provided in the URL.");
+      }
+    } catch {
       setLoading(false);
       setNotFound("No quote number provided in the URL.");
-      return;
     }
+  }, [quoteNoValue]);
+
+  // Fetch quote data from /api/quote/print when we have a quote number.
+  React.useEffect(() => {
+    if (!quoteNoValue) return;
 
     let cancelled = false;
 
@@ -117,13 +150,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       setLoading(true);
       setError(null);
       setNotFound(null);
-      setQuote(null);
+      setQuoteState(null);
       setItems([]);
       setLayoutPkg(null);
 
       try {
         const res = await fetch(
-          "/api/quote/print?quote_no=" + encodeURIComponent(quoteNo),
+          "/api/quote/print?quote_no=" + encodeURIComponent(quoteNoValue),
           { cache: "no-store" },
         );
 
@@ -144,7 +177,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
         if (!cancelled) {
           if (json.ok) {
-            setQuote(json.quote);
+            setQuoteState(json.quote);
             setItems(json.items || []);
             setLayoutPkg(json.layoutPkg || null);
           } else {
@@ -170,7 +203,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [quoteNo]);
+  }, [quoteNoValue]);
 
   const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
 
@@ -244,7 +277,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         const a = document.createElement("a");
         a.href = url;
 
-        const baseName = quote?.quote_no || "quote";
+        const baseName = quoteState?.quote_no || "quote";
         a.download = `${baseName}-layout-${layoutPkg.id}.${ext || "txt"}`;
 
         document.body.appendChild(a);
@@ -255,7 +288,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         console.error("Admin: download failed:", err);
       }
     },
-    [layoutPkg, quote],
+    [layoutPkg, quoteState],
   );
 
   const primaryItem = items[0] || null;
@@ -347,7 +380,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 opacity: 0.94,
               }}
             >
-              Quote {quoteNo}
+              Quote {quoteNoValue || "—"}
             </div>
           </div>
 
@@ -358,7 +391,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               color: "#e5e7eb",
             }}
           >
-            {quote && (
+            {quoteState && (
               <>
                 <div
                   style={{
@@ -371,7 +404,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     fontWeight: 600,
                   }}
                 >
-                  {quote.status.toUpperCase()}
+                  {quoteState.status.toUpperCase()}
                 </div>
                 <p
                   style={{
@@ -381,7 +414,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   }}
                 >
                   Created:{" "}
-                  {new Date(quote.created_at).toLocaleString()}
+                  {new Date(quoteState.created_at).toLocaleString()}
                 </p>
               </>
             )}
@@ -409,7 +442,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
           </>
         )}
 
-        {!loading && error && !quote && (
+        {!loading && error && !quoteState && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>
               Problem loading quote
@@ -419,7 +452,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         )}
 
         {/* main content */}
-        {!loading && quote && (
+        {!loading && quoteState && (
           <>
             {/* top row: basic specs + quick pricing snapshot */}
             <div
@@ -444,9 +477,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   <div>
                     <div style={labelStyle}>Customer</div>
                     <div>
-                      {quote.customer_name}
-                      {quote.email ? <> • {quote.email}</> : null}
-                      {quote.phone ? <> • {quote.phone}</> : null}
+                      {quoteState.customer_name}
+                      {quoteState.email ? <> • {quoteState.email}</> : null}
+                      {quoteState.phone ? <> • {quoteState.phone}</> : null}
                     </div>
                   </div>
                   {primaryItem && (
