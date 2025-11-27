@@ -1,7 +1,8 @@
 // app/quote/layout/editor/layoutTypes.ts
 //
 // Core types + helpers for the quote layout editor.
-// Safe, standalone module — no React imports.
+// SAFE module — no React imports. Path A only.
+//
 
 export type BlockDims = {
   lengthIn: number;
@@ -13,15 +14,17 @@ export type CavityShape = "rect" | "circle" | "roundedRect";
 
 export type Cavity = {
   id: string;
-  label: string; // human-readable label, e.g. "3×2×1 in"
+  label: string;        // "3×2×1 in"
   shape: CavityShape;
-  cornerRadiusIn: number; // for roundedRect; 0 for rect/circle
+  cornerRadiusIn: number;
   lengthIn: number;
   widthIn: number;
   depthIn: number;
-  // Normalized 0–1 coordinates inside the block footprint:
-  x: number; // left
-  y: number; // top
+
+  // IMPORTANT:
+  // These will be assigned later by page.tsx grid placement.
+  x: number;
+  y: number;
 };
 
 export type LayoutModel = {
@@ -29,9 +32,7 @@ export type LayoutModel = {
   cavities: Cavity[];
 };
 
-/**
- * Format a label for a cavity, based on its dimensions + shape.
- */
+/** Format human-readable cavity label */
 export function formatCavityLabel(
   c: Pick<Cavity, "shape" | "lengthIn" | "widthIn" | "depthIn">
 ): string {
@@ -41,25 +42,16 @@ export function formatCavityLabel(
   return `${c.lengthIn}×${c.widthIn}×${c.depthIn} in`;
 }
 
-/**
- * Helper: pull numeric values (ints/decimals) out of a string.
- * Examples:
- *   "10x8x2"           -> ["10", "8", "2"]
- *   '1 x 1 x 0.5 in'   -> ["1", "1", "0.5"]
- *   '.5 x 1.25 x 2.0"' -> ["0.5", "1.25", "2.0"]
- */
+/** Extract numbers from a string */
 function extractNums(input: string | null | undefined): number[] {
   if (!input) return [];
   const cleaned = String(input).toLowerCase();
-  const matches = cleaned.match(/(\d*\.?\d+)/g); // allow "1", "1.5", ".5"
+  const matches = cleaned.match(/(\d*\.?\d+)/g);
   if (!matches) return [];
   return matches.map((m) => Number(m)).filter((n) => Number.isFinite(n));
 }
 
-/**
- * Parse a "10x8x2" style string into BlockDims.
- * Now tolerant of units / spaces / quotes, e.g. "10 x 8 x 2 in".
- */
+/** Parse block dims "10x8x2" */
 export function parseBlockDims(dims: string): BlockDims | null {
   const nums = extractNums(dims);
   if (nums.length < 3) return null;
@@ -75,13 +67,8 @@ export function parseBlockDims(dims: string): BlockDims | null {
 }
 
 /**
- * Parse cavity strings like:
- *   "3x2x1"
- *   "3x2x1:deep pocket"
- *   "1 x 1 x 0.5 in:label"
- *
- * into Cavity objects. index is used to stagger them.
- * Shape defaults to "rect" and corner radius to 0.
+ * Parse a cavity specification into dims ONLY.
+ * DO NOT assign x/y. Page.tsx will handle positioning.
  */
 export function parseCavity(spec: string, index: number): Cavity | null {
   if (!spec) return null;
@@ -92,12 +79,6 @@ export function parseCavity(spec: string, index: number): Cavity | null {
 
   const [l, w, d] = nums;
   if (![l, w, d].every((n) => n > 0)) return null;
-
-  // Simple staggered positions to avoid overlap (0–1 space).
-  const col = index % 3;
-  const row = Math.floor(index / 3);
-  const x = 0.1 + col * 0.25;
-  const y = 0.1 + row * 0.25;
 
   const baseLabel = formatCavityLabel({
     shape: "rect",
@@ -111,23 +92,23 @@ export function parseCavity(spec: string, index: number): Cavity | null {
     : baseLabel;
 
   return {
-    id: `cav-${index}`,
+    id: `cav-${index + 1}`,
     label: prettyLabel,
     shape: "rect",
     cornerRadiusIn: 0,
     lengthIn: l,
     widthIn: w,
     depthIn: d,
-    x,
-    y,
+
+    // PLACEHOLDERS — real placement done later
+    x: 0,
+    y: 0,
   };
 }
 
 /**
- * Build a LayoutModel from a "10x8x2" block string and
- * semicolon- or comma-separated cavity strings like:
- *   "3x2x1;2x2x1"
- *   "1 x 1 x 0.5 in; 2 x 2 x 1 in:label"
+ * Build LayoutModel from block + cavity strings.
+ * This version returns clean dims only.
  */
 export function buildLayoutFromStrings(
   blockDims: string,
