@@ -157,7 +157,7 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       }>(
         `
           select
-            density_lbft3,
+            density_lb_ft3,
             cost_per_lb
           from materials
           where id = $1
