@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
+import { computePricingBreakdown } from "@/app/lib/pricing/compute";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -56,6 +57,10 @@ type ItemRow = {
     piece_ci_raw?: number | null;
     material_name?: string | null;
   } | null;
+
+  // NEW: high-level breakdown for UI (material + machine + markup + breaks).
+  // This is optional and may be omitted if we can't safely compute it.
+  pricing_breakdown?: any;
 };
 
 type LayoutPkgRow = {
@@ -142,11 +147,59 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       material_name: result.material_name ?? null,
     };
 
+    // NEW: optional high-level pricing breakdown using material data.
+    // This is guarded so if the DB doesn't have the needed fields, we simply skip it.
+    let pricing_breakdown: any = undefined;
+    try {
+      const matRow = await one<{
+        density_lbft3: number | null;
+        cost_per_lb: number | null;
+      }>(
+        `
+          select
+            density_lbft3,
+            cost_per_lb
+          from materials
+          where id = $1
+        `,
+        [materialId],
+      );
+
+      const density = Number(matRow?.density_lbft3 ?? 0);
+      const costPerLb = Number(matRow?.cost_per_lb ?? 0);
+
+      if (
+        Number.isFinite(density) &&
+        density > 0 &&
+        Number.isFinite(costPerLb) &&
+        costPerLb > 0
+      ) {
+        pricing_breakdown = computePricingBreakdown({
+          length_in: L,
+          width_in: W,
+          height_in: H,
+          density_lbft3: density,
+          cost_per_lb: costPerLb,
+          qty,
+        });
+      }
+    } catch (bdErr) {
+      console.warn(
+        "quote/print: pricing_breakdown computation skipped for material",
+        materialId,
+        bdErr,
+      );
+    }
+
     return {
       ...item,
       price_total_usd: Number.isFinite(total) ? total : null,
-      price_unit_usd: piece != null && Number.isFinite(piece) ? piece : null,
+      price_unit_usd:
+        piece != null && Number.isFinite(piece) ? piece : null,
       pricing_meta,
+      ...(pricing_breakdown
+        ? { pricing_breakdown }
+        : {}),
     };
   } catch (err) {
     console.error("attachPricingToItem error:", err);

@@ -54,6 +54,26 @@ type ItemRow = {
     setup_fee?: number | null;
     kerf_pct?: number | null;
   } | null;
+
+  // NEW: high-level pricing breakdown blob from /api/quote/print
+  pricing_breakdown?: {
+    volumeIn3: number;
+    materialWeightLb: number;
+    materialCost: number;
+    machineMinutes: number;
+    machineCost: number;
+    rawCost: number;
+    markupFactor: number;
+    sellPrice: number;
+    unitPrice: number;
+    extendedPrice: number;
+    qty: number;
+    breaks: {
+      qty: number;
+      unit: number;
+      total: number;
+    }[];
+  } | null;
 };
 
 type LayoutPkgRow = {
@@ -302,6 +322,41 @@ export default function QuotePrintClient() {
     typeof primaryPricing?.kerf_pct === "number"
       ? primaryPricing.kerf_pct
       : null;
+
+  // NEW: high-level breakdown from server, if available
+  const primaryBreakdown = primaryItem?.pricing_breakdown || null;
+
+  const breakdownUnitPrice =
+    primaryBreakdown && Number.isFinite(primaryBreakdown.unitPrice)
+      ? primaryBreakdown.unitPrice
+      : parsePriceField(primaryItem?.price_unit_usd ?? null);
+
+  const breakdownSubtotal =
+    primaryBreakdown && Number.isFinite(primaryBreakdown.extendedPrice)
+      ? primaryBreakdown.extendedPrice
+      : subtotal;
+
+  const materialCost =
+    primaryBreakdown && Number.isFinite(primaryBreakdown.materialCost)
+      ? primaryBreakdown.materialCost
+      : null;
+
+  const machineCost =
+    primaryBreakdown && Number.isFinite(primaryBreakdown.machineCost)
+      ? primaryBreakdown.machineCost
+      : null;
+
+  const rawCost =
+    primaryBreakdown && Number.isFinite(primaryBreakdown.rawCost)
+      ? primaryBreakdown.rawCost
+      : null;
+
+  const markupFactor =
+    primaryBreakdown && Number.isFinite(primaryBreakdown.markupFactor)
+      ? primaryBreakdown.markupFactor
+      : null;
+
+  const priceBreaks = primaryBreakdown?.breaks ?? [];
 
   // Shared card styles to feel like the email blocks
   const cardBase: React.CSSProperties = {
@@ -595,7 +650,7 @@ export default function QuotePrintClient() {
                   </div>
                 </div>
 
-                {/* Pricing card */}
+                {/* Pricing card (now with breakdown when present) */}
                 <div style={cardBase}>
                   <div style={cardTitleStyle}>Pricing</div>
                   {anyPricing ? (
@@ -612,18 +667,99 @@ export default function QuotePrintClient() {
                         <div style={labelStyle}>Primary unit price</div>
                         <div>
                           {formatUsd(
-                            parsePriceField(
-                              primaryItem.price_unit_usd ?? null,
-                            ),
+                            breakdownUnitPrice ?? null,
                           )}
                         </div>
                       </div>
                       <div>
                         <div style={labelStyle}>Estimated subtotal</div>
                         <div style={{ fontSize: 16, fontWeight: 600 }}>
-                          {formatUsd(subtotal)}
+                          {formatUsd(breakdownSubtotal)}
                         </div>
                       </div>
+
+                      {/* NEW: show material / machine / markup slices when breakdown is present */}
+                      {primaryBreakdown && (
+                        <>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              paddingTop: 6,
+                              borderTop: "1px dashed #e5e7eb",
+                              display: "grid",
+                              gridTemplateColumns:
+                                "repeat(2,minmax(0,1fr))",
+                              gap: 8,
+                            }}
+                          >
+                            <div>
+                              <div style={labelStyle}>Material</div>
+                              <div style={{ fontSize: 13 }}>
+                                {formatUsd(materialCost)}
+                              </div>
+                            </div>
+                            <div>
+                              <div style={labelStyle}>Machine</div>
+                              <div style={{ fontSize: 13 }}>
+                                {formatUsd(machineCost)}
+                              </div>
+                            </div>
+                            <div>
+                              <div style={labelStyle}>Raw cost</div>
+                              <div style={{ fontSize: 13 }}>
+                                {formatUsd(rawCost)}
+                              </div>
+                            </div>
+                            <div>
+                              <div style={labelStyle}>Markup</div>
+                              <div style={{ fontSize: 13 }}>
+                                {markupFactor != null
+                                  ? (() => {
+                                      const over =
+                                        (markupFactor - 1) * 100;
+                                      if (over > 0) {
+                                        return `${over.toFixed(
+                                          0,
+                                        )}% over cost`;
+                                      }
+                                      return `${markupFactor.toFixed(
+                                        2,
+                                      )}×`;
+                                    })()
+                                  : "—"}
+                              </div>
+                            </div>
+                          </div>
+
+                          {priceBreaks && priceBreaks.length > 1 && (
+                            <div
+                              style={{
+                                marginTop: 6,
+                                fontSize: 11,
+                                color: "#6b7280",
+                                lineHeight: 1.4,
+                              }}
+                            >
+                              <span style={{ fontWeight: 500 }}>
+                                Example price breaks:{" "}
+                              </span>
+                              {priceBreaks
+                                .filter(
+                                  (b) =>
+                                    b.qty === 10 || b.qty === 50,
+                                )
+                                .map(
+                                  (b) =>
+                                    `${b.qty} pcs – ${formatUsd(
+                                      b.unit,
+                                    )}/pc`,
+                                )
+                                .join(" · ")}
+                            </div>
+                          )}
+                        </>
+                      )}
+
                       <div
                         style={{
                           marginTop: 4,
@@ -635,11 +771,19 @@ export default function QuotePrintClient() {
                         {primaryPricing ? (
                           <>
                             <span>
-                              Pricing includes material, cutting, and standard
-                              waste allowance
+                              Pricing includes material, cutting, and
+                              standard waste allowance
                               {typeof kerfPct === "number"
                                 ? ` (~${kerfPct}% kerf)`
                                 : ""}.
+                              {materialCost != null &&
+                              machineCost != null
+                                ? ` In this estimate, material is approximately ${formatUsd(
+                                    materialCost,
+                                  )} and machine time approximately ${formatUsd(
+                                    machineCost,
+                                  )} before markup.`
+                                : ""}
                               {setupFee && setupFee > 0
                                 ? ` A one-time setup fee of ${formatUsd(
                                     setupFee,
@@ -647,7 +791,9 @@ export default function QuotePrintClient() {
                                 : ""}
                               {minChargeApplied
                                 ? ` A minimum charge of ${formatUsd(
-                                    primaryPricing.min_charge ?? subtotal,
+                                    primaryPricing.min_charge ??
+                                      breakdownSubtotal ??
+                                      subtotal,
                                   )} applies to this configuration.`
                                 : ""}
                             </span>

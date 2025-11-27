@@ -435,6 +435,13 @@ export function renderQuoteEmail(input: TemplateInput): string {
                             }
                           </td>
                         </tr>
+                        <!-- NEW: plain-language pricing breakdown sentence -->
+                        <tr>
+                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">How this price is built</td>
+                          <td style="padding:4px 10px;font-size:11px;color:#cbd5f5;line-height:1.5;">
+                            Behind the scenes, this estimate is based on the block volume (piece size × quantity), a kerf/waste allowance, and any minimum charge shown above.
+                          </td>
+                        </tr>
                       </table>
                     </td>
                   </tr>
