@@ -47,10 +47,52 @@ function normalizeCavitiesParam(raw: string | undefined): string {
   return raw.trim();
 }
 
-
 // Ensure all dimension edits snap to 0.125"
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
+
+// Simple parser for "LxWxH" strings
+function parseDimsTriple(
+  raw: string | undefined | null,
+): { L: number; W: number; H: number } | null {
+  if (!raw) return null;
+  const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
+  const m = t.match(
+    /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/,
+  );
+  if (!m) return null;
+  const L = Number(m[1]) || 0;
+  const W = Number(m[2]) || 0;
+  const H = Number(m[3]) || 0;
+  if (!L || !W || !H) return null;
+  return { L, W, H };
+}
+
+// Simple parser for cavity dims; if only LxW, assume depth = 1"
+function parseCavityDims(
+  raw: string,
+): { L: number; W: number; D: number } | null {
+  const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
+  let m =
+    t.match(
+      /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/,
+    ) || null;
+  if (m) {
+    const L = Number(m[1]) || 0;
+    const W = Number(m[2]) || 0;
+    const D = Number(m[3]) || 0;
+    if (!L || !W || !D) return null;
+    return { L, W, D };
+  }
+  m = t.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/);
+  if (m) {
+    const L = Number(m[1]) || 0;
+    const W = Number(m[2]) || 0;
+    if (!L || !W) return null;
+    return { L, W, D: 1 };
+  }
+  return null;
+}
 
 function snapInches(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -129,16 +171,111 @@ export default function LayoutPage({
 
   // Helper: fallback layout builder
   const buildFallbackLayout = React.useCallback((): LayoutModel => {
+    // First choice: let the shared helper try
     const fromQuery = buildLayoutFromStrings(blockStr, cavityStr);
-    if (fromQuery) return fromQuery;
+    if (
+      fromQuery &&
+      Array.isArray(fromQuery.cavities) &&
+      fromQuery.cavities.length > 0
+    ) {
+      return fromQuery;
+    }
 
-    // Fallback: 10×10×2 block with ONE sample cavity 3×2×1
-    return (
-      buildLayoutFromStrings("10x10x2", "3x2x1") || {
-        block: { lengthIn: 10, widthIn: 10, thicknessIn: 2 },
-        cavities: [],
+    // NEW: If we have explicit cavity text but no cavities were built,
+    // manually build a very simple layout so the editor never shows
+    // a blank canvas when email → layout passes cavity sizes through.
+    const parsedBlock = parseDimsTriple(blockStr) ?? {
+      L: 10,
+      W: 10,
+      H: 2,
+    };
+
+    const block = {
+      lengthIn: parsedBlock.L,
+      widthIn: parsedBlock.W,
+      thicknessIn: parsedBlock.H,
+    };
+
+    const cavTokens = (cavityStr || "")
+      .split(/[;,]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const cavities: LayoutModel["cavities"] = [];
+
+    if (cavTokens.length > 0) {
+      const parsedCavs = cavTokens
+        .map((tok) => parseCavityDims(tok))
+        .filter(Boolean) as { L: number; W: number; D: number }[];
+
+      const count = parsedCavs.length;
+
+      if (count > 0) {
+        const cols = Math.ceil(Math.sqrt(count));
+        const rows = Math.ceil(count / cols);
+
+        const availW =
+          Math.max(block.lengthIn - 2 * WALL_IN, 1) || block.lengthIn;
+        const availH =
+          Math.max(block.widthIn - 2 * WALL_IN, 1) || block.widthIn;
+
+        const cellW = availW / cols;
+        const cellH = availH / rows;
+
+        parsedCavs.forEach((c, idx) => {
+          const col = idx % cols;
+          const row = Math.floor(idx / cols);
+
+          const rawX =
+            WALL_IN + col * cellW + (cellW - c.L) / 2;
+          const rawY =
+            WALL_IN + row * cellH + (cellH - c.W) / 2;
+
+          const clamp = (v: number, min: number, max: number) =>
+            v < min ? min : v > max ? max : v;
+
+          const minX = WALL_IN;
+          const maxX = block.lengthIn - WALL_IN - c.L;
+          const minY = WALL_IN;
+          const maxY = block.widthIn - WALL_IN - c.W;
+
+          const xIn = clamp(rawX, minX, Math.max(minX, maxX));
+          const yIn = clamp(rawY, minY, Math.max(minY, maxY));
+
+          const xNorm =
+            block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
+          const yNorm =
+            block.widthIn > 0 ? yIn / block.widthIn : 0.1;
+
+          cavities.push({
+            id: `cav-${idx + 1}`,
+            label: `${c.L}×${c.W}×${c.D} in`,
+            shape: "rect",
+            cornerRadiusIn: 0,
+            lengthIn: c.L,
+            widthIn: c.W,
+            depthIn: c.D,
+            x: xNorm,
+            y: yNorm,
+          });
+        });
       }
-    );
+    }
+
+  // If we still ended up with no cavities, keep the old ultra-safe default.
+    if (cavities.length === 0) {
+      return (
+        buildLayoutFromStrings("10x10x2", "3x2x1") || {
+          block: { lengthIn: 10, widthIn: 10, thicknessIn: 2 },
+          cavities: [],
+        }
+      );
+    }
+
+    return {
+      block,
+      cavities,
+    };
   }, [blockStr, cavityStr]);
 
   React.useEffect(() => {
@@ -477,7 +614,6 @@ function LayoutEditorHost(props: {
           <div className="flex flex-row gap-5 p-5 bg-slate-950/80 text-slate-100">
             {/* LEFT: Cavity palette + notes */}
             <aside className="w-52 shrink-0 flex flex-col gap-3 ...">
-
               <div>
                 <div className="text-xs font-semibold text-slate-100 mb-1">
                   Cavity palette
@@ -661,7 +797,6 @@ function LayoutEditorHost(props: {
 
             {/* RIGHT: Inspector */}
             <aside className="w-70 shrink-0 flex flex-col gap-3 ...">
-
               {/* Block editor */}
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                 <div className="text-xs font-semibold text-slate-100 mb-1">
