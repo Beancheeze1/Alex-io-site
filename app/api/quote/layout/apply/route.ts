@@ -58,14 +58,16 @@ function bad(body: any, status = 400) {
   return NextResponse.json(body, { status });
 }
 
-/* ===================== Simple DXF builder from layout (LINES only) ===================== */
+/* ===================== DXF builder from layout (LINES + full header) ===================== */
 
 /**
- * Very small DXF writer that:
- *  - Draws the foam block as 4 LINE entities (rectangle).
- *  - Draws each cavity as 4 LINE entities (rectangle).
+ * DXF writer that:
+ *  - Writes a basic R12-style HEADER with ACADVER + INSUNITS (inches).
+ *  - Uses ENTITIES section with:
+ *      - Foam block as 4 LINE entities (rectangle).
+ *      - Each cavity as 4 LINE entities (rectangle).
  *
- * No TEXT for now — this keeps imports as robust as possible across CAD tools.
+ * No TEXT for now — keep imports robust across CAD tools.
  *
  * Layout assumptions (matches editor types, but we DO NOT change them):
  *  - layout.block: { lengthIn, widthIn, thicknessIn }
@@ -80,13 +82,10 @@ function buildDxfFromLayout(layout: any): string | null {
   let L = Number(block.lengthIn);
   let W = Number(block.widthIn);
 
-  // Fallbacks to avoid degenerate rectangles:
-  if (!Number.isFinite(L) || L <= 0) {
-    return null;
-  }
+  // Basic sanity / fallback
+  if (!Number.isFinite(L) || L <= 0) return null;
   if (!Number.isFinite(W) || W <= 0) {
-    // If width is garbage, treat as a square for DXF purposes.
-    W = L;
+    W = L; // fallback to square if width is bad
   }
 
   function fmt(n: number) {
@@ -135,10 +134,13 @@ function buildDxfFromLayout(layout: any): string | null {
 
       if (!Number.isFinite(cL) || cL <= 0) continue;
       if (!Number.isFinite(cW) || cW <= 0) {
-        // Fallback to square if needed
-        cW = cL;
+        cW = cL; // fallback to square
       }
-      if (![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) {
+      if (
+        ![nx, ny].every(
+          (n) => Number.isFinite(n) && n >= 0 && n <= 1,
+        )
+      ) {
         continue;
       }
 
@@ -155,8 +157,40 @@ function buildDxfFromLayout(layout: any): string | null {
 
   if (!entities.length) return null;
 
-  // Minimal but valid DXF: ENTITIES section only.
-  const header = ["0", "SECTION", "2", "ENTITIES"].join("\n");
+  // Full-ish R12-style DXF with HEADER / TABLES / BLOCKS / ENTITIES.
+  const header = [
+    "0",
+    "SECTION",
+    "2",
+    "HEADER",
+    "9",
+    "$ACADVER",
+    "1",
+    "AC1009", // R12
+    "9",
+    "$INSUNITS",
+    "70",
+    "1", // 1 = inches
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "TABLES",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "BLOCKS",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "ENTITIES",
+  ].join("\n");
+
   const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
 
   return [header, entities.join("\n"), footer].join("\n");
@@ -174,6 +208,10 @@ function buildDxfFromLayout(layout: any): string | null {
  *   </g>
  *
  * The geometry is NOT changed; this only adds text.
+ *
+ * Note: SVG units are not "full scale" CAD units — they’re just viewBox/canvas
+ * units. CAD imports will almost always come in at arbitrary scale; you can
+ * scale them using the known foam block size.
  */
 function buildSvgWithAnnotations(
   layout: any,
