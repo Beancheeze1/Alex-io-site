@@ -17,6 +17,8 @@
 //     * Pulls latest cavity sizes from quote_layout_packages.layout_json
 //     * Only fills in fields that were NOT explicitly updated in this turn,
 //       so “change qty to 250” in the email still wins over DB.
+// - UPDATED 11/27: fixed price-break ladder (1/10/50/100/250) and
+//   sync back final specs (dims/qty/cavities) into facts *before* saving.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -881,7 +883,7 @@ export async function POST(req: NextRequest) {
     }
 
     const hadNewQty = newly.qty != null;
-       const hadNewCavities =
+    const hadNewCavities =
       Array.isArray(newly.cavityDims) && newly.cavityDims.length > 0;
     const hadNewDims = !!newly.dims;
 
@@ -981,10 +983,6 @@ export async function POST(req: NextRequest) {
       lockDims: hadNewDims,
     });
 
-    // Save early baseline facts (pre-pricing) under keys
-    if (threadKey) await saveFacts(threadKey, merged);
-    if (merged.quote_no) await saveFacts(merged.quote_no, merged);
-
     /* ------------------- LLM opener ------------------- */
 
     const context = pickThreadContext(threadMsgs);
@@ -1043,6 +1041,22 @@ export async function POST(req: NextRequest) {
     if (priceBreaks && priceBreaks.length) {
       merged.price_breaks = priceBreaks;
     }
+
+    // 🔁 NEW: sync final specs back into facts *before* saving
+    if (specs.dims) {
+      merged.dims = specs.dims;
+    }
+    if (specs.qty != null) {
+      merged.qty = specs.qty;
+    }
+    if (Array.isArray(specs.cavityDims) && specs.cavityDims.length) {
+      merged.cavityDims = specs.cavityDims;
+      merged.cavityCount = specs.cavityDims.length;
+    }
+
+    // Save facts after specs/pricing are final so layout/editor see correct block + cavities
+    if (threadKey) await saveFacts(threadKey, merged);
+    if (merged.quote_no) await saveFacts(merged.quote_no, merged);
 
     const hasDimsQty = !!(specs.dims && specs.qty);
 
@@ -1136,7 +1150,7 @@ export async function POST(req: NextRequest) {
         foam_family: specs.material,
         thickness_under_in: merged.thickness_under_in,
         color: merged.color,
-        // NEW: pass cavity info through to the template
+        // Pass cavity info through to the template
         cavityCount:
           merged.cavityCount ??
           (Array.isArray(merged.cavityDims)
