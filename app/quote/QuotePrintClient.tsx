@@ -533,6 +533,30 @@ export default function QuotePrintClient() {
                     Schedule a call
                   </button>
                 </div>
+                {/* Internal-only helper link to admin view */}
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 11,
+                    opacity: 0.9,
+                  }}
+                >
+                  <a
+                    href={
+                      "/admin/quotes/" +
+                      encodeURIComponent(quote.quote_no)
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      color: "#e5e7eb",
+                      textDecoration: "underline",
+                      fontWeight: 500,
+                    }}
+                  >
+                    Open admin view
+                  </a>
+                </div>
               </div>
             </div>
 
