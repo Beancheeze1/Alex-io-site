@@ -17,8 +17,8 @@
 //     * Pulls latest cavity sizes from quote_layout_packages.layout_json
 //     * Only fills in fields that were NOT explicitly updated in this turn,
 //       so “change qty to 250” in the email still wins over DB.
-// - UPDATED 11/27: fixed price-break ladder (1/10/50/100/250) and
-//   sync back final specs (dims/qty/cavities) into facts *before* saving.
+// - NEW 11/27: Pricing calc now ignores cavity volume so that the
+//   first-response email, quote page, and layout snapshot all match.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -369,12 +369,15 @@ async function fetchCalcQuote(opts: {
   dims: string;
   qty: number;
   material_id: number;
-  cavities: string[];
   round_to_bf: boolean;
 }) {
   const { L, W, H } = parseDimsNums(opts.dims);
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
+  // IMPORTANT 11/27:
+  // For now we IGNORE cavity volume in pricing so that the
+  // first-response email, quote print page, and layout snapshot
+  // all show the same totals (full block volume pricing).
   const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -384,7 +387,8 @@ async function fetchCalcQuote(opts: {
       height_in: H,
       material_id: opts.material_id,
       qty: opts.qty,
-      cavities: opts.cavities,
+      // cavities intentionally omitted for pricing consistency
+      cavities: [],
       round_to_bf: opts.round_to_bf,
     }),
   });
@@ -394,7 +398,7 @@ async function fetchCalcQuote(opts: {
   return j.result;
 }
 
-// Dynamic price breaks (for email template + facts)
+// Dynamic price breaks
 type PriceBreak = {
   qty: number;
   total: number;
@@ -402,13 +406,11 @@ type PriceBreak = {
   used_min_charge?: boolean | null;
 };
 
-// UPDATED 11/27: use fixed break quantities 1, 10, 50, 100, 250
 async function buildPriceBreaks(
   baseOpts: {
     dims: string;
     qty: number;
     material_id: number;
-    cavities: string[];
     round_to_bf: boolean;
   },
   baseCalc: any,
@@ -416,20 +418,18 @@ async function buildPriceBreaks(
   const baseQty = baseOpts.qty;
   if (!baseQty || baseQty <= 0) return null;
 
-  // Fixed ladder of quantities, independent of baseQty
-  const breakQuantities = [1, 10, 50, 100, 250];
-
+  // New: price breaks at 1×, 10×, 50×, 100×, 250× of base qty
+  const factors = [1, 10, 50, 100, 250];
   const seen = new Set<number>();
   const out: PriceBreak[] = [];
 
-  for (const q of breakQuantities) {
+  for (const f of factors) {
+    const q = Math.round(baseQty * f);
     if (!q || q <= 0 || seen.has(q)) continue;
     seen.add(q);
 
-    // Reuse the main calc if this row matches the primary qty,
-    // otherwise re-run /api/quotes/calc for that quantity.
     let calc = baseCalc;
-    if (q !== baseQty) {
+    if (f !== 1) {
       calc = await fetchCalcQuote({
         ...baseOpts,
         qty: q,
@@ -437,21 +437,16 @@ async function buildPriceBreaks(
       if (!calc) continue;
     }
 
-    const rawTotal =
-      (calc.price_total ??
-        calc.total ??
-        calc.order_total ??
-        0) as number | 0;
-    const total = Number(rawTotal) || 0;
+    const total = (calc.price_total ?? calc.total ?? calc.order_total ?? 0) as
+      | number
+      | 0;
     const piece = total && q > 0 ? total / q : null;
 
     out.push({
       qty: q,
       total,
       piece,
-      used_min_charge: (calc.min_charge_applied ??
-        calc.used_min_charge ??
-        null) as boolean | null,
+      used_min_charge: (calc.min_charge_applied ?? null) as boolean | null,
     });
   }
 
@@ -983,6 +978,10 @@ export async function POST(req: NextRequest) {
       lockDims: hadNewDims,
     });
 
+    // Save early baseline facts (pre-pricing) under keys
+    if (threadKey) await saveFacts(threadKey, merged);
+    if (merged.quote_no) await saveFacts(merged.quote_no, merged);
+
     /* ------------------- LLM opener ------------------- */
 
     const context = pickThreadContext(threadMsgs);
@@ -1019,7 +1018,6 @@ export async function POST(req: NextRequest) {
         dims: specs.dims as string,
         qty: Number(specs.qty),
         material_id: Number(specs.material_id),
-        cavities: specs.cavityDims,
         round_to_bf: false,
       });
 
@@ -1029,7 +1027,6 @@ export async function POST(req: NextRequest) {
             dims: specs.dims as string,
             qty: Number(specs.qty),
             material_id: Number(specs.material_id),
-            cavities: specs.cavityDims,
             round_to_bf: false,
           },
           calc,
@@ -1041,22 +1038,6 @@ export async function POST(req: NextRequest) {
     if (priceBreaks && priceBreaks.length) {
       merged.price_breaks = priceBreaks;
     }
-
-    // 🔁 NEW: sync final specs back into facts *before* saving
-    if (specs.dims) {
-      merged.dims = specs.dims;
-    }
-    if (specs.qty != null) {
-      merged.qty = specs.qty;
-    }
-    if (Array.isArray(specs.cavityDims) && specs.cavityDims.length) {
-      merged.cavityDims = specs.cavityDims;
-      merged.cavityCount = specs.cavityDims.length;
-    }
-
-    // Save facts after specs/pricing are final so layout/editor see correct block + cavities
-    if (threadKey) await saveFacts(threadKey, merged);
-    if (merged.quote_no) await saveFacts(merged.quote_no, merged);
 
     const hasDimsQty = !!(specs.dims && specs.qty);
 
@@ -1150,7 +1131,7 @@ export async function POST(req: NextRequest) {
         foam_family: specs.material,
         thickness_under_in: merged.thickness_under_in,
         color: merged.color,
-        // Pass cavity info through to the template
+        // pass cavity info through to the template (for display + layout links)
         cavityCount:
           merged.cavityCount ??
           (Array.isArray(merged.cavityDims)
@@ -1168,7 +1149,7 @@ export async function POST(req: NextRequest) {
         min_charge: merged.min_charge,
       },
       pricing: {
-        total: calc?.price_total ?? calc?.total ?? 0,
+        total: calc?.price_total ?? calc?.order_total ?? calc?.total ?? 0,
         piece_ci: calc?.piece_ci,
         order_ci: calc?.order_ci,
         order_ci_with_waste: calc?.order_ci_with_waste,
