@@ -168,19 +168,19 @@ export default function LayoutPage({
     typeof searchParams?.cavities !== "undefined" ||
     typeof searchParams?.cavity !== "undefined";
 
-  // IMPORTANT: keep raw as string | string[] and normalize safely
-  const blockStr = normalizeDimsParam(
+  // Server-side / initial guesses from Next searchParams
+  const serverBlockStr = normalizeDimsParam(
     (searchParams?.dims ??
       searchParams?.block) as string | string[] | undefined,
   );
 
-  const cavityStr = normalizeCavitiesParam(
+  const serverCavityStr = normalizeCavitiesParam(
     (searchParams?.cavities ??
       searchParams?.cavity) as string | string[] | undefined,
   );
 
   const hasExplicitCavities =
-    hasCavitiesFromUrl && cavityStr.length > 0;
+    hasCavitiesFromUrl && serverCavityStr.length > 0;
 
   const hasRealQuoteNo =
     !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
@@ -201,96 +201,103 @@ export default function LayoutPage({
   const [loadingLayout, setLoadingLayout] =
     React.useState<boolean>(true);
 
-  // Helper: fallback layout builder, driven ONLY by URL + simple rules
-  const buildFallbackLayout = React.useCallback((): LayoutModel => {
-    // Block from dims=..., default 10x10x2 if missing.
-    const parsedBlock = parseDimsTriple(blockStr) ?? {
-      L: 10,
-      W: 10,
-      H: 2,
-    };
+  /**
+   * Fallback layout builder, driven by arbitrary dims/cavities strings.
+   * We pass in the *effective* strings (from window.location when possible)
+   * so we aren't at the mercy of how Next packaged searchParams.
+   */
+  const buildFallbackLayout = React.useCallback(
+    (blockStr: string, cavityStr: string): LayoutModel => {
+      // Block from dims=..., default 10x10x2 if missing.
+      const parsedBlock = parseDimsTriple(blockStr) ?? {
+        L: 10,
+        W: 10,
+        H: 2,
+      };
 
-    const block = {
-      lengthIn: parsedBlock.L,
-      widthIn: parsedBlock.W,
-      thicknessIn: parsedBlock.H,
-    };
+      const block = {
+        lengthIn: parsedBlock.L,
+        widthIn: parsedBlock.W,
+        thicknessIn: parsedBlock.H,
+      };
 
-    // Cavities from cavities=... string (can be "1x1x1;2x2x1" etc).
-    const cavTokens = (cavityStr || "")
-      .split(/[;,]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+      // Cavities from cavities=... string (can be "1x1x1;2x2x1" etc).
+      const cavTokens = (cavityStr || "")
+        .split(/[;,]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
 
-    const cavities: LayoutModel["cavities"] = [];
+      const cavities: LayoutModel["cavities"] = [];
 
-    if (cavTokens.length > 0) {
-      const parsedCavs = cavTokens
-        .map((tok) => parseCavityDims(tok))
-        .filter(Boolean) as { L: number; W: number; D: number }[];
+      if (cavTokens.length > 0) {
+        const parsedCavs = cavTokens
+          .map((tok) => parseCavityDims(tok))
+          .filter(Boolean) as { L: number; W: number; D: number }[];
 
-      const count = parsedCavs.length;
+        const count = parsedCavs.length;
 
-      if (count > 0) {
-        const cols = Math.ceil(Math.sqrt(count));
-        const rows = Math.ceil(count / cols);
+        if (count > 0) {
+          const cols = Math.ceil(Math.sqrt(count));
+          const rows = Math.ceil(count / cols);
 
-        const availW =
-          Math.max(block.lengthIn - 2 * WALL_IN, 1) ||
-          block.lengthIn;
-        const availH =
-          Math.max(block.widthIn - 2 * WALL_IN, 1) ||
-          block.widthIn;
+          const availW =
+            Math.max(block.lengthIn - 2 * WALL_IN, 1) ||
+            block.lengthIn;
+          const availH =
+            Math.max(block.widthIn - 2 * WALL_IN, 1) ||
+            block.widthIn;
 
-        const cellW = availW / cols;
-        const cellH = availH / rows;
+          const cellW = availW / cols;
+          const cellH = availH / rows;
 
-        parsedCavs.forEach((c, idx) => {
-          const col = idx % cols;
-          const row = Math.floor(idx / cols);
+          parsedCavs.forEach((c, idx) => {
+            const col = idx % cols;
+            const row = Math.floor(idx / cols);
 
-          const rawX =
-            WALL_IN + col * cellW + (cellW - c.L) / 2;
-          const rawY =
-            WALL_IN + row * cellH + (cellH - c.W) / 2;
+            const rawX =
+              WALL_IN + col * cellW + (cellW - c.L) / 2;
+            const rawY =
+              WALL_IN + row * cellH + (cellH - c.W) / 2;
 
-          const clamp = (v: number, min: number, max: number) =>
-            v < min ? min : v > max ? max : v;
+            const clamp = (v: number, min: number, max: number) =>
+              v < min ? min : v > max ? max : v;
 
-          const minX = WALL_IN;
-          const maxX = block.lengthIn - WALL_IN - c.L;
-          const minY = WALL_IN;
-          const maxY = block.widthIn - WALL_IN - c.W;
+            const minX = WALL_IN;
+            const maxX = block.lengthIn - WALL_IN - c.L;
+            const minY = WALL_IN;
+            const maxY = block.widthIn - WALL_IN - c.W;
 
-          const xIn = clamp(rawX, minX, Math.max(minX, maxX));
-          const yIn = clamp(rawY, minY, Math.max(minY, maxY));
+            const xIn = clamp(rawX, minX, Math.max(minX, maxX));
+            const yIn = clamp(rawY, minY, Math.max(minY, maxY));
 
-          const xNorm =
-            block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
-          const yNorm =
-            block.widthIn > 0 ? yIn / block.widthIn : 0.1;
+            const xNorm =
+              block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
+            const yNorm =
+              block.widthIn > 0 ? yIn / block.widthIn : 0.1;
 
-          cavities.push({
-            id: `cav-${idx + 1}`,
-            label: `${c.L}×${c.W}×${c.D} in`,
-            shape: "rect",
-            cornerRadiusIn: 0,
-            lengthIn: c.L,
-            widthIn: c.W,
-            depthIn: c.D,
-            x: xNorm,
-            y: yNorm,
+            cavities.push({
+              id: `cav-${idx + 1}`,
+              label: `${c.L}×${c.W}×${c.D} in`,
+              shape: "rect",
+              cornerRadiusIn: 0,
+              lengthIn: c.L,
+              widthIn: c.W,
+              depthIn: c.D,
+              x: xNorm,
+              y: yNorm,
+            });
           });
-        });
+        }
       }
-    }
 
-    // If we can’t build any cavities, just return a bare block.
-    return {
-      block,
-      cavities,
-    };
-  }, [blockStr, cavityStr]);
+      // If we can’t build any cavities, just return a bare block.
+      return {
+        block,
+        cavities,
+      };
+    },
+    [],
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -298,10 +305,53 @@ export default function LayoutPage({
     async function load() {
       setLoadingLayout(true);
 
+      // Re-read dims/cavities from the actual address bar.
+      // This is the same pattern we used on other pages when Next's
+      // searchParams stopped matching the real URL.
+      let effectiveBlockStr = serverBlockStr;
+      let effectiveCavityStr = serverCavityStr;
+
+      try {
+        if (typeof window !== "undefined") {
+          const url = new URL(window.location.href);
+
+          const dimsCandidates: string[] = [];
+          const dimsA = url.searchParams.get("dims");
+          const dimsB = url.searchParams.get("block");
+          if (dimsA) dimsCandidates.push(dimsA);
+          if (!dimsA && dimsB) dimsCandidates.push(dimsB);
+
+          const cavityParts: string[] = [];
+          url.searchParams
+            .getAll("cavities")
+            .forEach((v) => v && cavityParts.push(v));
+          url.searchParams
+            .getAll("cavity")
+            .forEach((v) => v && cavityParts.push(v));
+
+          if (dimsCandidates.length > 0) {
+            effectiveBlockStr = normalizeDimsParam(
+              dimsCandidates[0],
+            );
+          }
+
+          if (cavityParts.length > 0) {
+            effectiveCavityStr = normalizeCavitiesParam(
+              cavityParts,
+            );
+          }
+        }
+      } catch {
+        // if anything goes wrong, we fall back to serverBlockStr/serverCavityStr
+      }
+
       try {
         // If we don't have a real quote number, just use fallback layout
         if (!hasRealQuoteNo) {
-          const fallback = buildFallbackLayout();
+          const fallback = buildFallbackLayout(
+            effectiveBlockStr,
+            effectiveCavityStr,
+          );
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
@@ -319,7 +369,10 @@ export default function LayoutPage({
         );
 
         if (!res.ok) {
-          const fallback = buildFallbackLayout();
+          const fallback = buildFallbackLayout(
+            effectiveBlockStr,
+            effectiveCavityStr,
+          );
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
@@ -365,7 +418,10 @@ export default function LayoutPage({
         }
 
         // Otherwise, use layout from URL (dims/cavities) and keep qty.
-        const fallback = buildFallbackLayout();
+        const fallback = buildFallbackLayout(
+          effectiveBlockStr,
+          effectiveCavityStr,
+        );
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
@@ -374,7 +430,10 @@ export default function LayoutPage({
         }
       } catch (err) {
         console.error("Error loading layout for /quote/layout:", err);
-        const fallback = buildFallbackLayout();
+        const fallback = buildFallbackLayout(
+          effectiveBlockStr,
+          effectiveCavityStr,
+        );
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
@@ -396,6 +455,8 @@ export default function LayoutPage({
     hasExplicitCavities,
     hasDimsFromUrl,
     hasCavitiesFromUrl,
+    serverBlockStr,
+    serverCavityStr,
   ]);
 
   if (loadingLayout || !initialLayout) {
