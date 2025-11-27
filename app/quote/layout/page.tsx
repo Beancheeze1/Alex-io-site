@@ -107,8 +107,8 @@ export default function LayoutPage({
   /* ---------- Read quote number (URL → state) ---------- */
 
   // Initial guess from Next.js-provided searchParams
-  const initialQuoteNoParam = (searchParams?.quote_no ??
-    searchParams?.quote ??
+  const initialQuoteNoParam = (searchParams?.quote_no ?? 
+    searchParams?.quote ?? 
     "") as string | undefined;
 
   const [quoteNoFromUrl, setQuoteNoFromUrl] = React.useState<string>(
@@ -144,12 +144,12 @@ export default function LayoutPage({
     typeof searchParams?.cavities !== "undefined" ||
     typeof searchParams?.cavity !== "undefined";
 
-  const dimsParam = (searchParams?.dims ??
-    searchParams?.block ??
+  const dimsParam = (searchParams?.dims ?? 
+    searchParams?.block ?? 
     "") as string | undefined;
 
-  const cavitiesParam = (searchParams?.cavities ??
-    searchParams?.cavity ??
+  const cavitiesParam = (searchParams?.cavities ?? 
+    searchParams?.cavity ?? 
     "") as string | undefined;
 
   const blockStr = normalizeDimsParam(dimsParam);
@@ -179,9 +179,13 @@ export default function LayoutPage({
 
   // Helper: fallback layout builder
   const buildFallbackLayout = React.useCallback((): LayoutModel => {
-    // First choice: let the shared helper try
+    // First choice: let the shared helper try — but ONLY when the URL
+    // did NOT explicitly specify cavities. For explicit cavities from
+    // the email link, we want to force our manual grid builder so we
+    // don't accidentally resurrect the old 3×2×1 default.
     const fromQuery = buildLayoutFromStrings(blockStr, cavityStr);
     if (
+      !hasExplicitCavities &&
       fromQuery &&
       Array.isArray(fromQuery.cavities) &&
       fromQuery.cavities.length > 0
@@ -190,8 +194,9 @@ export default function LayoutPage({
     }
 
     // NEW: If we have explicit cavity text but no cavities were built,
-    // manually build a very simple layout so the editor never shows
-    // a blank canvas when email → layout passes cavity sizes through.
+    // or we deliberately skipped buildLayoutFromStrings because the
+    // email passed `cavities=...`, manually build a very simple layout
+    // so the editor never shows the old 3×2×1 when the URL has real dims.
     const parsedBlock = parseDimsTriple(blockStr) ?? {
       L: 10,
       W: 10,
@@ -286,7 +291,7 @@ export default function LayoutPage({
       block,
       cavities,
     };
-  }, [blockStr, cavityStr]);
+  }, [blockStr, cavityStr, hasExplicitCavities]);
 
   React.useEffect(() => {
     let cancelled = false;
