@@ -57,18 +57,25 @@ function normalizeDimsParam(
 /**
  * Normalize cavity dims from searchParams (cavities= / cavity=).
  * - Accepts string or string[]
- * - When multiple values are present, join them with ";" so
- *   "1x1x1&cavity=2x2x1" becomes "1x1x1;2x2x1"
+ * - When multiple values are present, join them with ";"
+ * - NEW: de-duplicate identical strings so
+ *   "cavities=1x1x1&cavity=1x1x1" → "1x1x1" (one pocket)
  */
 function normalizeCavitiesParam(
   raw: string | string[] | undefined,
 ): string {
   if (!raw) return "";
   if (Array.isArray(raw)) {
-    return raw
+    const cleaned = raw
       .map((s) => s.trim())
-      .filter(Boolean)
-      .join(";");
+      .filter(Boolean);
+    const unique: string[] = [];
+    for (const val of cleaned) {
+      if (!unique.includes(val)) {
+        unique.push(val);
+      }
+    }
+    return unique.join(";");
   }
   return raw.trim();
 }
@@ -134,10 +141,12 @@ export default function LayoutPage({
 
   const initialQuoteNoParam = (searchParams?.quote_no ??
     searchParams?.quote ??
-    "") as string | undefined;
+    "") as string | string[] | undefined;
 
   const [quoteNoFromUrl, setQuoteNoFromUrl] = React.useState<string>(
-    initialQuoteNoParam?.trim() || "",
+    Array.isArray(initialQuoteNoParam)
+      ? initialQuoteNoParam[0]?.trim() || ""
+      : initialQuoteNoParam?.trim() || "",
   );
 
   React.useEffect(() => {
@@ -306,8 +315,6 @@ export default function LayoutPage({
       setLoadingLayout(true);
 
       // Re-read dims/cavities from the actual address bar.
-      // This is the same pattern we used on other pages when Next's
-      // searchParams stopped matching the real URL.
       let effectiveBlockStr = serverBlockStr;
       let effectiveCavityStr = serverCavityStr;
 
