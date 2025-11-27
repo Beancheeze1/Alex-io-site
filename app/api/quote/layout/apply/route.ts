@@ -128,7 +128,12 @@ function buildDxfFromLayout(layout: any): string | null {
     ].join("\n");
   }
 
-  function textEntity(content: string, x: number, y: number, height = 0.25): string {
+  function textEntity(
+    content: string,
+    x: number,
+    y: number,
+    height = 0.25,
+  ): string {
     // Simple TEXT entity on layer 0.
     return [
       "0",
@@ -156,10 +161,14 @@ function buildDxfFromLayout(layout: any): string | null {
   if (Number.isFinite(T) && T > 0) {
     const blockLabel = `FOAM BLOCK: ${L} x ${W} x ${T} in`;
     // Place text slightly above the block, near the left.
-    entities.push(textEntity(blockLabel, 0, W + Math.max(W * 0.05, 0.5)));
+    entities.push(
+      textEntity(blockLabel, 0, W + Math.max(W * 0.05, 0.5)),
+    );
   } else {
     const blockLabel = `FOAM BLOCK: ${L} x ${W} in (thickness see quote)`;
-    entities.push(textEntity(blockLabel, 0, W + Math.max(W * 0.05, 0.5)));
+    entities.push(
+      textEntity(blockLabel, 0, W + Math.max(W * 0.05, 0.5)),
+    );
   }
 
   // 2) Cavities as inner rectangles (plus text notes)
@@ -174,9 +183,7 @@ function buildDxfFromLayout(layout: any): string | null {
       const ny = Number(cav.y);
 
       if (
-        ![cL, cW, nx, ny].every(
-          (n) => Number.isFinite(n) && n >= 0,
-        ) ||
+        ![cL, cW, nx, ny].every((n) => Number.isFinite(n) && n >= 0) ||
         cL <= 0 ||
         cW <= 0
       ) {
@@ -191,16 +198,16 @@ function buildDxfFromLayout(layout: any): string | null {
 
       // Cavity label: "CAVITY n: L x W x D in"
       const depthPart =
-        Number.isFinite(cD) && cD > 0
-          ? `${cD}`
-          : "depth?";
+        Number.isFinite(cD) && cD > 0 ? `${cD}` : "depth?";
       const label = `CAVITY ${idx}: ${cL} x ${cW} x ${depthPart} in`;
       idx += 1;
 
       // Place text roughly at the center of the cavity.
       const cx = left + cL / 2;
       const cy = top + cW / 2;
-      entities.push(textEntity(label, cx, cy, Math.min(cL, cW) * 0.18 || 0.25));
+      entities.push(
+        textEntity(label, cx, cy, Math.min(cL, cW) * 0.18 || 0.25),
+      );
     }
   }
 
@@ -222,6 +229,92 @@ function buildDxfFromLayout(layout: any): string | null {
   const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
 
   return [header, entities.join("\n"), footer].join("\n");
+}
+
+/* ===================== SVG annotator from layout ===================== */
+
+/**
+ * Takes the raw SVG from the editor and injects a small legend group:
+ *
+ *   <g id="alex-io-notes">
+ *     <text>FOAM BLOCK: L x W x T in</text>
+ *     <text>CAVITY 1: ...</text>
+ *     ...
+ *   </g>
+ *
+ * The geometry is NOT changed; this only adds text.
+ */
+function buildSvgWithAnnotations(
+  layout: any,
+  svgRaw: string | null,
+): string | null {
+  if (!svgRaw || typeof svgRaw !== "string") return svgRaw ?? null;
+  if (!layout || !layout.block) return svgRaw;
+
+  const block = layout.block || {};
+  const L = Number(block.lengthIn);
+  const W = Number(block.widthIn);
+  const T = Number(block.thicknessIn);
+
+  if (!Number.isFinite(L) || !Number.isFinite(W) || L <= 0 || W <= 0) {
+    // If dims are garbage, leave SVG unchanged.
+    return svgRaw;
+  }
+
+  const lines: string[] = [];
+
+  if (Number.isFinite(T) && T > 0) {
+    lines.push(`FOAM BLOCK: ${L} x ${W} x ${T} in`);
+  } else {
+    lines.push(`FOAM BLOCK: ${L} x ${W} in (thickness see quote)`);
+  }
+
+  if (Array.isArray(layout.cavities)) {
+    let idx = 1;
+    for (const cav of layout.cavities as any[]) {
+      if (!cav) continue;
+      const cL = Number(cav.lengthIn);
+      const cW = Number(cav.widthIn);
+      const cD = Number(cav.depthIn);
+      if (!Number.isFinite(cL) || !Number.isFinite(cW) || cL <= 0 || cW <= 0) {
+        continue;
+      }
+      const depthPart =
+        Number.isFinite(cD) && cD > 0 ? `${cD}` : "depth?";
+      lines.push(
+        `CAVITY ${idx}: ${cL} x ${cW} x ${depthPart} in`,
+      );
+      idx += 1;
+    }
+  }
+
+  if (lines.length === 0) {
+    return svgRaw;
+  }
+
+  // Insert just before </svg>
+  const closeIdx = svgRaw.lastIndexOf("</svg");
+  if (closeIdx === -1) {
+    // Not a normal SVG; leave it unchanged.
+    return svgRaw;
+  }
+
+  const textYStart = 20;
+  const textYStep = 14;
+
+  const texts = lines
+    .map((line, i) => {
+      const y = textYStart + i * textYStep;
+      return `<text x="16" y="${y}" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#111827">${line}</text>`;
+    })
+    .join("");
+
+  const notesGroup = `<g id="alex-io-notes">${texts}</g>`;
+
+  const before = svgRaw.slice(0, closeIdx);
+  const after = svgRaw.slice(closeIdx);
+
+  return `${before}${notesGroup}\n${after}`;
 }
 
 /* ===================== POST: save layout (+ optional qty) ===================== */
@@ -247,7 +340,7 @@ export async function POST(req: NextRequest) {
     typeof body.notes === "string" && body.notes.trim().length > 0
       ? body.notes.trim()
       : null;
-  const svg =
+  const svgRaw =
     typeof body.svg === "string" && body.svg.trim().length > 0
       ? body.svg
       : null;
@@ -288,14 +381,17 @@ export async function POST(req: NextRequest) {
     const dxf = buildDxfFromLayout(layout);
     const step: string | null = null;
 
-    // Insert layout package (now including dxf_text, step_text).
+    // Annotate SVG (if provided) with foam + cavity notes.
+    const svgAnnotated = buildSvgWithAnnotations(layout, svgRaw);
+
+    // Insert layout package (now including annotated svg_text, dxf_text, step_text).
     const pkg = await one<LayoutPkgRow>(
       `
       insert into quote_layout_packages (quote_id, layout_json, notes, svg_text, dxf_text, step_text)
       values ($1, $2, $3, $4, $5, $6)
       returning id, quote_id, layout_json, notes, svg_text, dxf_text, step_text, created_at
       `,
-      [quote.id, layout, notes, svg, dxf, step],
+      [quote.id, layout, notes, svgAnnotated, dxf, step],
     );
 
     // Optional: update qty on the PRIMARY quote item for this quote.
