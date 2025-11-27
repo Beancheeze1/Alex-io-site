@@ -755,7 +755,8 @@ export default function QuotePrintClient() {
                     }}
                   >
                     <thead>
-                      <tr style={{ background: "#f3f4f6" }}>
+                      {/* OBVIOUS TEST CHANGE: header row color now #eef2ff (indigo-tinted) */}
+                      <tr style={{ background: "#eef2ff" }}>
                         <th
                           style={{
                             textAlign: "left",
