@@ -37,8 +37,10 @@ type DragState =
     }
   | null;
 
+// Back to original internal canvas size so side panels still fit on screen
 const CANVAS_WIDTH = 1200;
 const CANVAS_HEIGHT = 620;
+
 const PADDING = 32;
 const WALL_IN = 0.5;
 // Snap for movement / resize = 1/16"
@@ -83,7 +85,7 @@ export default function InteractiveCanvas({
 
   const handleCavityMouseDown = (
     e: MouseEvent<SVGGraphicsElement>,
-    cavity: Cavity
+    cavity: Cavity,
   ) => {
     e.stopPropagation();
     e.preventDefault();
@@ -108,7 +110,7 @@ export default function InteractiveCanvas({
 
   const handleResizeMouseDown = (
     e: MouseEvent<SVGGraphicsElement>,
-    cavity: Cavity
+    cavity: Cavity,
   ) => {
     e.stopPropagation();
     e.preventDefault();
@@ -155,7 +157,18 @@ export default function InteractiveCanvas({
       yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
 
       // enforce 0.5" min gap to other cavities
-      if (violatesMinGap(cav.id, xIn, yIn, len, wid, block, cavities, MIN_GAP_IN)) {
+      if (
+        violatesMinGap(
+          cav.id,
+          xIn,
+          yIn,
+          len,
+          wid,
+          block,
+          cavities,
+          MIN_GAP_IN,
+        )
+      ) {
         return;
       }
 
@@ -206,7 +219,7 @@ export default function InteractiveCanvas({
           newWidIn,
           block,
           cavities,
-          MIN_GAP_IN
+          MIN_GAP_IN,
         )
       ) {
         return;
@@ -239,7 +252,8 @@ export default function InteractiveCanvas({
           ref={svgRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
-          className="block w-full max-w-full"
+          // Keep CSS width tied to the internal canvas size so drag math stays correct
+          className="block"
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
@@ -272,7 +286,8 @@ export default function InteractiveCanvas({
           {/* 0.5" inner wall (dashed) */}
           <rect
             x={
-              blockOffset.x + (innerWall.leftIn / block.lengthIn) * blockPx.width
+              blockOffset.x +
+              (innerWall.leftIn / block.lengthIn) * blockPx.width
             }
             y={
               blockOffset.y + (innerWall.topIn / block.widthIn) * blockPx.height
@@ -405,7 +420,7 @@ function violatesMinGap(
   widIn: number,
   block: LayoutModel["block"],
   cavities: Cavity[],
-  minGapIn: number
+  minGapIn: number,
 ): boolean {
   const x1 = xIn;
   const x2 = xIn + lenIn;
@@ -435,7 +450,7 @@ function violatesMinGap(
 function drawInchGrid(
   block: LayoutModel["block"],
   blockPx: { width: number; height: number },
-  blockOffset: { x: number; y: number }
+  blockOffset: { x: number; y: number },
 ) {
   const vLines = [];
   for (let xIn = 0.5; xIn < block.lengthIn; xIn += 0.5) {
@@ -449,7 +464,7 @@ function drawInchGrid(
         y2={blockOffset.y + blockPx.height}
         stroke="#e5e7eb"
         strokeWidth={0.5}
-      />
+      />,
     );
   }
 
@@ -465,11 +480,16 @@ function drawInchGrid(
         y2={y}
         stroke="#e5e7eb"
         strokeWidth={0.5}
-      />
+      />,
     );
   }
 
-  return <g>{vLines}{hLines}</g>;
+  return (
+    <g>
+      {vLines}
+      {hLines}
+    </g>
+  );
 }
 
 // ===== spacing calcs (edges + nearest neighbor) =====
@@ -510,7 +530,7 @@ function computeSpacing(
   block: LayoutModel["block"],
   cavities: Cavity[],
   blockPx: { width: number; height: number },
-  blockOffset: { x: number; y: number }
+  blockOffset: { x: number; y: number },
 ): SpacingInfo {
   const cavLeftIn = cav.x * block.lengthIn;
   const cavTopIn = cav.y * block.widthIn;
@@ -534,7 +554,9 @@ function computeSpacing(
     blockOffset.x + blockPx.width - (WALL_IN / block.lengthIn) * blockPx.width;
   const topWallPx = blockOffset.y + (WALL_IN / block.widthIn) * blockPx.height;
   const bottomWallPx =
-    blockOffset.y + blockPx.height - (WALL_IN / block.widthIn) * blockPx.height;
+    blockOffset.y +
+    blockPx.height -
+    (WALL_IN / block.widthIn) * blockPx.height;
 
   let bestHorizGapIn = Infinity;
   let bestHoriz: SpacingInfo["neighborDims"]["horiz"] | undefined;
@@ -579,7 +601,8 @@ function computeSpacing(
           fromPx,
           toPx,
           yPx:
-            (Math.max(cavTopPx, oTopPx) + Math.min(cavBottomPx, oBottomPx)) / 2,
+            (Math.max(cavTopPx, oTopPx) + Math.min(cavBottomPx, oBottomPx)) /
+            2,
           gapIn,
         };
       }
