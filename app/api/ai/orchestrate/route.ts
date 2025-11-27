@@ -392,7 +392,7 @@ async function fetchCalcQuote(opts: {
   return j.result;
 }
 
-// Dynamic price breaks
+// Dynamic price breaks (for email template + facts)
 type PriceBreak = {
   qty: number;
   total: number;
@@ -400,6 +400,7 @@ type PriceBreak = {
   used_min_charge?: boolean | null;
 };
 
+// UPDATED 11/27: use fixed break quantities 1, 10, 50, 100, 250
 async function buildPriceBreaks(
   baseOpts: {
     dims: string;
@@ -413,17 +414,20 @@ async function buildPriceBreaks(
   const baseQty = baseOpts.qty;
   if (!baseQty || baseQty <= 0) return null;
 
-  const factors = [1, 2, 3, 5, 10];
+  // Fixed ladder of quantities, independent of baseQty
+  const breakQuantities = [1, 10, 50, 100, 250];
+
   const seen = new Set<number>();
   const out: PriceBreak[] = [];
 
-  for (const f of factors) {
-    const q = Math.round(baseQty * f);
+  for (const q of breakQuantities) {
     if (!q || q <= 0 || seen.has(q)) continue;
     seen.add(q);
 
+    // Reuse the main calc if this row matches the primary qty,
+    // otherwise re-run /api/quotes/calc for that quantity.
     let calc = baseCalc;
-    if (f !== 1) {
+    if (q !== baseQty) {
       calc = await fetchCalcQuote({
         ...baseOpts,
         qty: q,
@@ -431,16 +435,21 @@ async function buildPriceBreaks(
       if (!calc) continue;
     }
 
-    const total = (calc.price_total ?? calc.total ?? calc.order_total ?? 0) as
-      | number
-      | 0;
+    const rawTotal =
+      (calc.price_total ??
+        calc.total ??
+        calc.order_total ??
+        0) as number | 0;
+    const total = Number(rawTotal) || 0;
     const piece = total && q > 0 ? total / q : null;
 
     out.push({
       qty: q,
       total,
       piece,
-      used_min_charge: (calc.min_charge_applied ?? null) as boolean | null,
+      used_min_charge: (calc.min_charge_applied ??
+        calc.used_min_charge ??
+        null) as boolean | null,
     });
   }
 
@@ -486,7 +495,6 @@ function grabOutsideDims(raw: string): string | undefined {
   if (!m) return undefined;
   return `${m[1]}x${m[2]}x${m[3]}`;
 }
-
 
 function grabQty(raw: string): number | undefined {
   const t = raw.toLowerCase();
@@ -630,8 +638,6 @@ function recoverCavityDimsFromText(
   return out;
 }
 
-
-
 /* ============================================================
    Initial fact extraction from subject + body
    ============================================================ */
@@ -670,7 +676,6 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   }
 
   // 2) Everything else (qty, density, material, cavities) can look at full text
-
 
   const qtyVal = grabQty(text);
   if (qtyVal) facts.qty = qtyVal;
@@ -876,7 +881,7 @@ export async function POST(req: NextRequest) {
     }
 
     const hadNewQty = newly.qty != null;
-    const hadNewCavities =
+       const hadNewCavities =
       Array.isArray(newly.cavityDims) && newly.cavityDims.length > 0;
     const hadNewDims = !!newly.dims;
 
@@ -892,7 +897,7 @@ export async function POST(req: NextRequest) {
       loadedQuote = await loadFacts(subjectQuoteNo);
     }
 
-        // Merge order: thread-level facts first, then sketch / quote-level facts,
+    // Merge order: thread-level facts first, then sketch / quote-level facts,
     // then the newest email facts overwrite.
     //
     // IMPORTANT:
@@ -1122,7 +1127,7 @@ export async function POST(req: NextRequest) {
       customerLine: opener,
       quoteNumber: merged.quoteNumber || merged.quote_no,
       status: merged.status || "draft",
-            specs: {
+      specs: {
         L_in: dimsNums.L,
         W_in: dimsNums.W,
         H_in: dimsNums.H,
