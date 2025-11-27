@@ -62,8 +62,8 @@ function bad(body: any, status = 400) {
 
 /**
  * Very small DXF writer that:
- *  - Draws the foam block as a rectangle from (0,0) to (L,W).
- *  - Draws each cavity as a rectangle inside the block.
+ *  - Draws the foam block as 4 LINE entities (rectangle).
+ *  - Draws each cavity as 4 LINE entities (rectangle).
  *  - Adds text annotations:
  *      - One note for the foam block with full L × W × T.
  *      - One note for each cavity with L × W × Depth.
@@ -74,7 +74,7 @@ function bad(body: any, status = 400) {
  *      where x,y are normalized 0–1 coordinates for the top-left of the cavity
  *      relative to the block footprint.
  *
- * We keep this conservative: ASCII DXF, ENTITIES section with LWPOLYLINEs + TEXT.
+ * We keep this conservative: ASCII DXF, ENTITIES section with LINE + TEXT.
  */
 function buildDxfFromLayout(layout: any): string | null {
   if (!layout || !layout.block) return null;
@@ -92,38 +92,25 @@ function buildDxfFromLayout(layout: any): string | null {
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
   }
 
-  function rectLwpolyline(x: number, y: number, w: number, h: number): string {
-    // Rect as a closed LWPOLYLINE.
-    const x1 = fmt(x);
-    const y1 = fmt(y);
-    const x2 = fmt(x + w);
-    const y2 = fmt(y + h);
-
+  function lineEntity(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+  ): string {
     return [
       "0",
-      "LWPOLYLINE",
+      "LINE",
       "8",
       "0", // layer
-      "90",
-      "4", // number of vertices
-      "70",
-      "1", // closed polyline
       "10",
-      x1,
+      fmt(x1),
       "20",
-      y1,
-      "10",
-      x2,
-      "20",
-      y1,
-      "10",
-      x2,
-      "20",
-      y2,
-      "10",
-      x1,
-      "20",
-      y2,
+      fmt(y1),
+      "11",
+      fmt(x2),
+      "21",
+      fmt(y2),
       "",
     ].join("\n");
   }
@@ -132,9 +119,9 @@ function buildDxfFromLayout(layout: any): string | null {
     content: string,
     x: number,
     y: number,
-    height = 0.25,
+    height: number,
   ): string {
-    // Simple TEXT entity on layer 0.
+    const safeHeight = Math.max(height, 0.5);
     return [
       "0",
       "TEXT",
@@ -145,7 +132,7 @@ function buildDxfFromLayout(layout: any): string | null {
       "20",
       fmt(y),
       "40",
-      fmt(height), // text height
+      fmt(safeHeight), // text height
       "1",
       content,
       "",
@@ -154,20 +141,34 @@ function buildDxfFromLayout(layout: any): string | null {
 
   const entities: string[] = [];
 
-  // 1) Foam block as outer rectangle from (0,0) to (L,W)
-  entities.push(rectLwpolyline(0, 0, L, W));
+  // 1) Foam block as outer rectangle from (0,0) to (L,W) – 4 LINES.
+  entities.push(lineEntity(0, 0, L, 0));
+  entities.push(lineEntity(L, 0, L, W));
+  entities.push(lineEntity(L, W, 0, W));
+  entities.push(lineEntity(0, W, 0, 0));
 
   // Block annotation: show full size including thickness if we have it.
+  const blockNoteHeight = Math.max(Math.min(L, W) * 0.08, 0.75);
   if (Number.isFinite(T) && T > 0) {
     const blockLabel = `FOAM BLOCK: ${L} x ${W} x ${T} in`;
     // Place text slightly above the block, near the left.
     entities.push(
-      textEntity(blockLabel, 0, W + Math.max(W * 0.05, 0.5)),
+      textEntity(
+        blockLabel,
+        0,
+        W + Math.max(W * 0.05, blockNoteHeight * 1.5),
+        blockNoteHeight,
+      ),
     );
   } else {
     const blockLabel = `FOAM BLOCK: ${L} x ${W} in (thickness see quote)`;
     entities.push(
-      textEntity(blockLabel, 0, W + Math.max(W * 0.05, 0.5)),
+      textEntity(
+        blockLabel,
+        0,
+        W + Math.max(W * 0.05, blockNoteHeight * 1.5),
+        blockNoteHeight,
+      ),
     );
   }
 
@@ -194,7 +195,11 @@ function buildDxfFromLayout(layout: any): string | null {
       const left = L * nx;
       const top = W * ny;
 
-      entities.push(rectLwpolyline(left, top, cL, cW));
+      // Cavity rectangle (4 LINES).
+      entities.push(lineEntity(left, top, left + cL, top));
+      entities.push(lineEntity(left + cL, top, left + cL, top + cW));
+      entities.push(lineEntity(left + cL, top + cW, left, top + cW));
+      entities.push(lineEntity(left, top + cW, left, top));
 
       // Cavity label: "CAVITY n: L x W x D in"
       const depthPart =
@@ -205,21 +210,14 @@ function buildDxfFromLayout(layout: any): string | null {
       // Place text roughly at the center of the cavity.
       const cx = left + cL / 2;
       const cy = top + cW / 2;
-      entities.push(
-        textEntity(label, cx, cy, Math.min(cL, cW) * 0.18 || 0.25),
-      );
+      const textHeight = Math.max(Math.min(cL, cW) * 0.3, 0.75);
+      entities.push(textEntity(label, cx, cy, textHeight));
     }
   }
 
   if (!entities.length) return null;
 
   const header = [
-    "0",
-    "SECTION",
-    "2",
-    "HEADER",
-    "0",
-    "ENDSEC",
     "0",
     "SECTION",
     "2",
@@ -281,9 +279,7 @@ function buildSvgWithAnnotations(
       }
       const depthPart =
         Number.isFinite(cD) && cD > 0 ? `${cD}` : "depth?";
-      lines.push(
-        `CAVITY ${idx}: ${cL} x ${cW} x ${depthPart} in`,
-      );
+      lines.push(`CAVITY ${idx}: ${cL} x ${cW} x ${depthPart} in`);
       idx += 1;
     }
   }
