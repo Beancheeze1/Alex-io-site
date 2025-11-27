@@ -36,13 +36,40 @@ type SearchParams = {
   [key: string]: string | string[] | undefined;
 };
 
-function normalizeDimsParam(raw: string | undefined): string {
-  if (!raw || !raw.trim()) return "10x10x2";
-  return raw.trim();
+/**
+ * Normalize block dims from searchParams (dims= / block=).
+ * - Accepts string or string[]
+ * - Uses the first non-empty entry when an array is provided
+ * - Falls back to 10x10x2 if nothing usable is present
+ */
+function normalizeDimsParam(
+  raw: string | string[] | undefined,
+): string {
+  if (!raw) return "10x10x2";
+  if (Array.isArray(raw)) {
+    const first = raw.find((s) => s && s.trim());
+    return first ? first.trim() : "10x10x2";
+  }
+  const trimmed = raw.trim();
+  return trimmed || "10x10x2";
 }
 
-function normalizeCavitiesParam(raw: string | undefined): string {
+/**
+ * Normalize cavity dims from searchParams (cavities= / cavity=).
+ * - Accepts string or string[]
+ * - When multiple values are present, join them with ";" so
+ *   "1x1x1&cavity=2x2x1" becomes "1x1x1;2x2x1"
+ */
+function normalizeCavitiesParam(
+  raw: string | string[] | undefined,
+): string {
   if (!raw) return "";
+  if (Array.isArray(raw)) {
+    return raw
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join(";");
+  }
   return raw.trim();
 }
 
@@ -141,16 +168,16 @@ export default function LayoutPage({
     typeof searchParams?.cavities !== "undefined" ||
     typeof searchParams?.cavity !== "undefined";
 
-  const dimsParam = (searchParams?.dims ??
-    searchParams?.block ??
-    "") as string | undefined;
+  // IMPORTANT: keep raw as string | string[] and normalize safely
+  const blockStr = normalizeDimsParam(
+    (searchParams?.dims ??
+      searchParams?.block) as string | string[] | undefined,
+  );
 
-  const cavitiesParam = (searchParams?.cavities ??
-    searchParams?.cavity ??
-    "") as string | undefined;
-
-  const blockStr = normalizeDimsParam(dimsParam);
-  const cavityStr = normalizeCavitiesParam(cavitiesParam);
+  const cavityStr = normalizeCavitiesParam(
+    (searchParams?.cavities ??
+      searchParams?.cavity) as string | string[] | undefined,
+  );
 
   const hasExplicitCavities =
     hasCavitiesFromUrl && cavityStr.length > 0;
