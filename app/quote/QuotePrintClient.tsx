@@ -570,7 +570,7 @@ export default function QuotePrintClient() {
               </div>
             )}
 
-            {/* LINE ITEMS */}
+            {/* LINE ITEMS (main test) */}
             <h2 style={{ fontSize: 16, marginBottom: 8 }}>Line items</h2>
 
             {items.length === 0 ? (
