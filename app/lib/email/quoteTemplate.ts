@@ -196,7 +196,14 @@ export function renderQuoteEmail(input: TemplateInput): string {
     specs.density_pcf != null
       ? `${fmtNumber(specs.density_pcf, 1)} pcf`
       : "—";
-  const foamFamily = specs.foam_family || "—";
+
+  // Prefer the material family that came from the email (PE / EPE / etc),
+  // but fall back to the DB material name if needed so both cards match.
+  const foamFamilySource =
+    (specs.foam_family && specs.foam_family.trim()) ||
+    (material.name && material.name.trim()) ||
+    "";
+  const foamFamily = foamFamilySource || "—";
 
   const cavityLabel = buildCavityLabel(specs);
   const minThicknessUnderVal = computeMinThicknessUnder(specs);
@@ -205,7 +212,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
       ? `${fmtNumber(minThicknessUnderVal, 2)} in`
       : "—";
 
-  const matName = material.name || "—";
+  const matName = foamFamily;
   const matDensity =
     material.density_lbft3 != null
       ? `${fmtNumber(material.density_lbft3, 1)} lb/ft³`

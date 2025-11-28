@@ -418,35 +418,44 @@ async function buildPriceBreaks(
   const baseQty = baseOpts.qty;
   if (!baseQty || baseQty <= 0) return null;
 
-  // New: price breaks at 1×, 10×, 50×, 100×, 250× of base qty
-  const factors = [1, 10, 50, 100, 250];
-  const seen = new Set<number>();
+  // New: fixed ladder 1, 10, 25, 50, 100, 150, 250
+  // Always include the requested qty as well so the table shows their run.
+  const ladder = Array.from(
+    new Set(
+      [1, 10, 25, 50, 100, 150, 250, baseQty]
+        .map((q) => Math.round(q))
+        .filter((q) => q > 0),
+    ),
+  ).sort((a, b) => a - b);
+
   const out: PriceBreak[] = [];
 
-  for (const f of factors) {
-    const q = Math.round(baseQty * f);
-    if (!q || q <= 0 || seen.has(q)) continue;
-    seen.add(q);
+  for (const q of ladder) {
+    let calcForQ = baseCalc;
 
-    let calc = baseCalc;
-    if (f !== 1) {
-      calc = await fetchCalcQuote({
+    if (q !== baseQty) {
+      calcForQ = await fetchCalcQuote({
         ...baseOpts,
         qty: q,
       });
-      if (!calc) continue;
+      if (!calcForQ) continue;
+    } else if (!calcForQ) {
+      // Should not happen if canCalc was true, but guard anyway.
+      continue;
     }
 
-    const total = (calc.price_total ?? calc.total ?? calc.order_total ?? 0) as
-      | number
-      | 0;
+    const total = (calcForQ.price_total ??
+      calcForQ.total ??
+      calcForQ.order_total ??
+      0) as number | 0;
     const piece = total && q > 0 ? total / q : null;
 
     out.push({
       qty: q,
       total,
       piece,
-      used_min_charge: (calc.min_charge_applied ?? null) as boolean | null,
+      used_min_charge: (calcForQ.min_charge_applied ??
+        null) as boolean | null,
     });
   }
 

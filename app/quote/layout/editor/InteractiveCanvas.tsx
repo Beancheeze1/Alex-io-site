@@ -328,6 +328,15 @@ export default function InteractiveCanvas({
 
             const isSelected = cavity.id === selectedId;
             const isCircle = cavity.shape === "circle";
+            const isRounded = cavity.shape === "roundedRect";
+
+            const cornerRadiusPx = isRounded
+              ? Math.min(
+                  cavity.cornerRadiusIn * scale,
+                  cavWidthPx / 2,
+                  cavHeightPx / 2,
+                )
+              : 0;
 
             const handleSize = 10;
             const handleX = cavX + cavWidthPx - handleSize / 2;
@@ -351,8 +360,8 @@ export default function InteractiveCanvas({
                     y={cavY}
                     width={cavWidthPx}
                     height={cavHeightPx}
-                    rx={0}
-                    ry={0}
+                    rx={cornerRadiusPx}
+                    ry={cornerRadiusPx}
                     fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
                     stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
                     strokeWidth={isSelected ? 2 : 1}
@@ -601,8 +610,7 @@ function computeSpacing(
           fromPx,
           toPx,
           yPx:
-            (Math.max(cavTopPx, oTopPx) + Math.min(cavBottomPx, oBottomPx)) /
-            2,
+            (Math.max(cavTopPx, oTopPx) + Math.min(cavBottomPx, oBottomPx)) / 2,
           gapIn,
         };
       }

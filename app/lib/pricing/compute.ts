@@ -70,7 +70,10 @@ export function computePricingBreakdown(args: {
   const unitPrice = sellPrice;
   const extendedPrice = unitPrice * qty;
 
-  const breaks = [1, 10, 50, 100].map((bq) => {
+  // New ladder: 1, 10, 25, 50, 100, 150, 250
+  const breakQtys = [1, 10, 25, 50, 100, 150, 250];
+
+  const breaks = breakQtys.map((bq) => {
     const bTotal = unitPrice * bq;
     return {
       qty: bq,
