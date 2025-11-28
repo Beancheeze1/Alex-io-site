@@ -695,7 +695,31 @@ function LayoutEditorHost(props: {
     try {
       setApplyStatus("saving");
 
-      const svg = buildSvgFromLayout(layout);
+      // Build a friendly material/notes footer for the SVG
+      const selectedMaterial =
+        selectedMaterialId != null
+          ? materials.find((m) => m.id === selectedMaterialId) ||
+            null
+          : null;
+
+      const materialLabel =
+        selectedMaterial != null
+          ? `${selectedMaterial.name}${
+              selectedMaterial.density_lb_ft3 != null
+                ? ` (${selectedMaterial.density_lb_ft3.toFixed(
+                    1,
+                  )} lb/ft³)`
+                : ""
+            }`
+          : null;
+
+      const svg = buildSvgFromLayout(layout, {
+        notes:
+          notes && notes.trim().length > 0
+            ? notes.trim()
+            : undefined,
+        materialLabel: materialLabel || undefined,
+      });
 
       const payload: any = {
         quoteNo,
@@ -1315,7 +1339,10 @@ function LayoutEditorHost(props: {
 
 /* ---------- SVG export helper ---------- */
 
-function buildSvgFromLayout(layout: LayoutModel): string {
+function buildSvgFromLayout(
+  layout: LayoutModel,
+  meta?: { notes?: string; materialLabel?: string | null },
+): string {
   const { block, cavities } = layout;
 
   const VIEW_W = 1000;
@@ -1330,6 +1357,9 @@ function buildSvgFromLayout(layout: LayoutModel): string {
   const blockH = block.widthIn * scale;
   const blockX = (VIEW_W - blockW) / 2;
   const blockY = (VIEW_H - blockH) / 2;
+
+  const escapeText = (s: string): string =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   const cavRects = cavities
     .map((c) => {
@@ -1355,7 +1385,7 @@ function buildSvgFromLayout(layout: LayoutModel): string {
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(
           2,
         )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${label}</text>
+          font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
       }
 
@@ -1375,10 +1405,34 @@ function buildSvgFromLayout(layout: LayoutModel): string {
       ).toFixed(
         2,
       )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${label}</text>
+          font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
     })
     .join("\n");
+
+  const metaLines: string[] = [];
+  if (meta?.materialLabel) {
+    metaLines.push(`Material: ${meta.materialLabel}`);
+  }
+  if (meta?.notes) {
+    metaLines.push(`Notes: ${meta.notes}`);
+  }
+
+  const metaSection =
+    metaLines.length > 0
+      ? `
+  <g>
+    ${metaLines
+      .map(
+        (line, idx) => `<text x="${PADDING.toFixed(
+          2,
+        )}" y="${(VIEW_H - PADDING + idx * 14).toFixed(
+          2,
+        )}" font-size="10" fill="#111827">${escapeText(line)}</text>`,
+      )
+      .join("\n    ")}
+  </g>`
+      : "";
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg"
@@ -1389,6 +1443,7 @@ function buildSvgFromLayout(layout: LayoutModel): string {
         rx="8" ry="8"
         fill="#e5e7eb" stroke="#111827" stroke-width="2" />
   ${cavRects}
+  ${metaSection}
 </svg>
 `.trim();
 

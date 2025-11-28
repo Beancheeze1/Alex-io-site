@@ -207,32 +207,37 @@ export function renderQuoteEmail(input: TemplateInput): string {
     (material.name && material.name.trim()) ||
     "";
 
-  // Light normalization so "pe" → "Polyethylene", "epe" → "EPE", etc.
+  // Light normalization:
+  //  - Any PE / EPE / expanded polyethylene → Polyethylene family
+  //  - Keeps the detailed DB name for the Pricing card.
   let foamFamily = rawFamily;
   const lowerFamily = rawFamily.toLowerCase();
-  if (lowerFamily === "pe" || lowerFamily === "polyethylene foam") {
-    foamFamily = "Polyethylene";
-  } else if (
-    lowerFamily === "epe" ||
-    lowerFamily === "epe type iii" ||
-    lowerFamily === "expanded polyethylene"
+
+  if (
+    lowerFamily === "pe" ||
+    lowerFamily === "pe foam" ||
+    lowerFamily.includes("polyethylene") ||
+    lowerFamily === "polyethylene foam" ||
+    lowerFamily.includes("epe") ||
+    lowerFamily.includes("expanded polyethylene")
   ) {
-    foamFamily = "EPE";
+    foamFamily = "Polyethylene";
   }
+
   if (!foamFamily) {
     foamFamily = "—";
   }
 
-  // Grade / specific material name from DB (e.g. "1.7# Black").
+  // Grade / specific material name from DB (e.g. "EPE Type III").
   const gradeName =
     (material.name && material.name.trim()) ||
     (foamFamily !== "—" ? foamFamily : "");
 
-  // What we show on the Specs card: the family ("Polyethylene") to match the quote viewer subtitle.
+  // Specs card: family ("Polyethylene") to match the quote viewer.
   const specsMaterialLabel =
     foamFamily !== "—" ? foamFamily : gradeName || "—";
 
-  // What we show on the Pricing card: the specific grade (e.g. "1.7# Black").
+  // Pricing card: specific grade.
   const matName = gradeName || specsMaterialLabel || "—";
 
   const cavityLabel = buildCavityLabel(specs);
