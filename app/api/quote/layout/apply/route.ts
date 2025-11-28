@@ -10,22 +10,22 @@
 //     "layout": { ... LayoutModel ... },
 //     "notes": "Loose parts in this pocket",
 //     "svg": "<svg>...</svg>",
-//     "qty": 100,          // OPTIONAL: new quantity for primary item
-//     "materialId": 42     // OPTIONAL: foam material id from dropdown
+//     "qty": 100,             // OPTIONAL: new quantity for primary item
+//     "materialId": 6         // OPTIONAL: new material for primary item
 //   }
-//
+//////////////////////////
 // Behaviour:
 //   - Looks up quotes.id by quote_no
 //   - Inserts a row into quote_layout_packages with layout_json + notes +
 //     svg_text + dxf_text (STEP left nullable for now).
 //   - If qty is a positive number, updates the PRIMARY quote_items row for that
 //     quote to use the new qty.
-//   - NEW (11/27): If materialId is provided and valid, updates material_id on
-//     the PRIMARY quote_items row, and syncs material_id/material_name into the
-//     facts store for this quote.
-//   - Also syncs dims / cavities / qty into the facts store (loadFacts/saveFacts)
-//     under quote_no so follow-up emails + layout links use the latest layout,
-//     not stale "3x2x1 in a 10x10x2 block" test data.
+//   - If materialId is a positive number, updates the PRIMARY quote_items row
+//     for that quote to use the new material, and syncs material info into the
+//     facts store.
+//   - Also syncs dims / cavities / qty / material into the facts store
+//     (loadFacts/saveFacts) under quote_no so follow-up emails + layout links
+//     use the latest layout, not stale test data.
 //   - Returns the new package id + (if changed) the updatedQty.
 //
 // GET (debug helper):
@@ -71,8 +71,6 @@ function bad(body: any, status = 400) {
  *      - Foam block as 4 LINE entities (rectangle).
  *      - Each cavity as 4 LINE entities (rectangle).
  *
- * No TEXT for now — keep imports robust across CAD tools.
- *
  * Layout assumptions (matches editor types, but we DO NOT change them):
  *  - layout.block: { lengthIn, widthIn, thicknessIn }
  *  - layout.cavities: [{ lengthIn, widthIn, depthIn, x, y }, ...]
@@ -96,12 +94,7 @@ function buildDxfFromLayout(layout: any): string | null {
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
   }
 
-  function lineEntity(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-  ): string {
+  function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
     return [
       "0",
       "LINE",
@@ -141,9 +134,7 @@ function buildDxfFromLayout(layout: any): string | null {
         cW = cL; // fallback to square
       }
       if (
-        ![nx, ny].every(
-          (n) => Number.isFinite(n) && n >= 0 && n <= 1,
-        )
+        ![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)
       ) {
         continue;
       }
@@ -207,6 +198,7 @@ function buildDxfFromLayout(layout: any): string | null {
  *
  *   <g id="alex-io-notes">
  *     <text>NOT TO SCALE</text>
+ *     <text>FOAM: 1030 White · Polyurethane Foam · 1.7 lb/ft³</text>
  *     <text>FOAM BLOCK: L x W x T in</text>
  *     <text>CAVITY 1: ...</text>
  *     ...
@@ -217,6 +209,7 @@ function buildDxfFromLayout(layout: any): string | null {
 function buildSvgWithAnnotations(
   layout: any,
   svgRaw: string | null,
+  materialLegend?: string | null,
 ): string | null {
   if (!svgRaw || typeof svgRaw !== "string") return svgRaw ?? null;
   if (!layout || !layout.block) return svgRaw;
@@ -227,12 +220,19 @@ function buildSvgWithAnnotations(
   const T = Number(block.thicknessIn);
 
   if (!Number.isFinite(L) || !Number.isFinite(W) || L <= 0 || W <= 0) {
+    // If dims are garbage, leave SVG unchanged.
     return svgRaw;
   }
 
   const lines: string[] = [];
 
+  // Simple scale warning
   lines.push("NOT TO SCALE");
+
+  // NEW: material legend, if provided
+  if (materialLegend && materialLegend.trim().length > 0) {
+    lines.push(`FOAM: ${materialLegend.trim()}`);
+  }
 
   if (Number.isFinite(T) && T > 0) {
     lines.push(`FOAM BLOCK: ${L} x ${W} x ${T} in`);
@@ -261,8 +261,10 @@ function buildSvgWithAnnotations(
     return svgRaw;
   }
 
+  // Insert just before </svg>
   const closeIdx = svgRaw.lastIndexOf("</svg");
   if (closeIdx === -1) {
+    // Not a normal SVG; leave it unchanged.
     return svgRaw;
   }
 
@@ -295,7 +297,7 @@ export async function POST(req: NextRequest) {
         ok: false,
         error: "missing_fields",
         message:
-          "POST body must include at least { quoteNo, layout }. Optional: { notes, svg, qty, materialId }.",
+          "POST body must include at least { quoteNo, layout }. Optional: { notes, svg, qty, materialId }. ",
       },
       400,
     );
@@ -312,20 +314,6 @@ export async function POST(req: NextRequest) {
       ? body.svg
       : null;
 
-  // NEW: normalize optional materialId coming from the dropdown
-  const materialIdRaw = body.materialId;
-  let materialId: number | null = null;
-  if (
-    materialIdRaw !== undefined &&
-    materialIdRaw !== null &&
-    materialIdRaw !== ""
-  ) {
-    const n = Number(materialIdRaw);
-    if (Number.isFinite(n) && n > 0) {
-      materialId = n;
-    }
-  }
-
   if (!quoteNo) {
     return bad(
       {
@@ -335,6 +323,21 @@ export async function POST(req: NextRequest) {
       },
       400,
     );
+  }
+
+  // Material coming from the layout editor
+  const rawMaterialId =
+    body.materialId ?? body.material_id ?? body.material ?? null;
+  let materialId: number | null = null;
+  if (
+    rawMaterialId !== null &&
+    rawMaterialId !== undefined &&
+    rawMaterialId !== ""
+  ) {
+    const n = Number(rawMaterialId);
+    if (Number.isFinite(n) && n > 0) {
+      materialId = n;
+    }
   }
 
   try {
@@ -358,14 +361,85 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Material details (for facts + SVG legend)
+    let materialLegend: string | null = null;
+    let materialNameForFacts: string | null = null;
+    let materialFamilyForFacts: string | null = null;
+    let materialDensityForFacts: number | null = null;
+
+    if (materialId != null) {
+      // Update the PRIMARY quote item to this material
+      await q(
+        `
+          update quote_items
+          set material_id = $1
+          where id = (
+            select id
+            from quote_items
+            where quote_id = $2
+            order by id asc
+            limit 1
+          )
+        `,
+        [materialId, quote.id],
+      );
+
+      const mat = await one<{
+        name: string | null;
+        material_family: string | null;
+        density_lb_ft3: any;
+      }>(
+        `
+          select
+            name,
+            material_family,
+            density_lb_ft3
+          from materials
+          where id = $1
+        `,
+        [materialId],
+      );
+
+      if (mat) {
+        materialNameForFacts = mat.name ?? null;
+        materialFamilyForFacts = mat.material_family ?? null;
+
+        const rawDens: any = (mat as any).density_lb_ft3;
+        const densNum =
+          typeof rawDens === "number"
+            ? rawDens
+            : rawDens != null
+            ? Number(rawDens)
+            : NaN;
+
+        if (Number.isFinite(densNum) && densNum > 0) {
+          materialDensityForFacts = densNum;
+        }
+
+        const legendParts: string[] = [];
+        if (mat.name) legendParts.push(mat.name);
+        if (mat.material_family) legendParts.push(mat.material_family);
+        if (materialDensityForFacts != null) {
+          legendParts.push(`${materialDensityForFacts.toFixed(1)} lb/ft³`);
+        }
+        if (legendParts.length) {
+          materialLegend = legendParts.join(" · ");
+        }
+      }
+    }
+
     // Build DXF from the incoming layout; STEP left null for now.
     const dxf = buildDxfFromLayout(layout);
     const step: string | null = null;
 
     // Annotate SVG (if provided) with foam + cavity notes + NOT TO SCALE.
-    const svgAnnotated = buildSvgWithAnnotations(layout, svgRaw);
+    const svgAnnotated = buildSvgWithAnnotations(
+      layout,
+      svgRaw,
+      materialLegend,
+    );
 
-    // Insert layout package.
+    // Insert layout package (now including annotated svg_text, dxf_text, step_text).
     const pkg = await one<LayoutPkgRow>(
       `
       insert into quote_layout_packages (quote_id, layout_json, notes, svg_text, dxf_text, step_text)
@@ -376,6 +450,7 @@ export async function POST(req: NextRequest) {
     );
 
     // Optional: update qty on the PRIMARY quote item for this quote.
+    // We treat the "first" item (by id asc) as the primary line.
     let updatedQty: number | null = null;
 
     if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
@@ -400,41 +475,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // NEW: optionally update material_id on the PRIMARY quote item.
-    // Only runs if a valid materialId was provided.
-    let materialName: string | null = null;
-    if (materialId != null) {
-      await q(
-        `
-        update quote_items
-        set material_id = $1
-        where id = (
-          select id
-          from quote_items
-          where quote_id = $2
-          order by id asc
-          limit 1
-        )
-        `,
-        [materialId, quote.id],
-      );
-
-      // Look up the material name for facts / fallback
-      const matRow = await one<{ name: string }>(
-        `
-        select name
-        from materials
-        where id = $1
-        `,
-        [materialId],
-      );
-      if (matRow && typeof matRow.name === "string") {
-        materialName = matRow.name;
-      }
-    }
-
-    // Sync layout dims, cavities, qty, and now material into the facts store
-    // for this quote so follow-up emails + layout links stay in sync.
+    // Sync layout dims, cavities, qty, and material into the facts store
+    // so follow-up emails + layout links stay in sync with the editor.
     try {
       const factsKey = quoteNo;
       const prevFacts = await loadFacts(factsKey);
@@ -477,13 +519,17 @@ export async function POST(req: NextRequest) {
         nextFacts.qty = updatedQty;
       }
 
-      // NEW: sync material_id + material_name into facts so /quote/print
-      // fallback can show the correct material even if no DB items yet.
       if (materialId != null) {
         nextFacts.material_id = materialId;
-        if (materialName) {
-          nextFacts.material_name = materialName;
-        }
+      }
+      if (materialNameForFacts) {
+        nextFacts.material_name = materialNameForFacts;
+      }
+      if (materialFamilyForFacts) {
+        nextFacts.material_family = materialFamilyForFacts;
+      }
+      if (materialDensityForFacts != null) {
+        nextFacts.material_density_lb_ft3 = materialDensityForFacts;
       }
 
       if (Object.keys(nextFacts).length > 0) {
@@ -497,7 +543,7 @@ export async function POST(req: NextRequest) {
       {
         ok: true,
         quoteNo,
-        packageId: pkg?.id ?? null,
+        packageId: pkg ? pkg.id : null,
         updatedQty,
       },
       200,

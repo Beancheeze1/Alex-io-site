@@ -44,6 +44,8 @@ type ItemRow = {
   qty: number;
   material_id: number;
   material_name: string | null;
+  material_family?: string | null;
+  density_lb_ft3?: number | string | null;
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
 
@@ -322,6 +324,32 @@ export default function QuotePrintClient() {
     typeof primaryPricing?.kerf_pct === "number"
       ? primaryPricing.kerf_pct
       : null;
+
+  // NEW: material display lines for primary item
+  const primaryMaterialName =
+    primaryItem?.material_name ||
+    (primaryItem ? `Material #${primaryItem.material_id}` : "");
+
+  let primaryMaterialSubline: string | null = null;
+  if (primaryItem) {
+    const subParts: string[] = [];
+    if (primaryItem.material_family) {
+      subParts.push(primaryItem.material_family);
+    }
+    const densRaw = (primaryItem as any).density_lb_ft3;
+    const densNum =
+      typeof densRaw === "number"
+        ? densRaw
+        : densRaw != null
+        ? Number(densRaw)
+        : NaN;
+    if (Number.isFinite(densNum) && densNum > 0) {
+      subParts.push(`${densNum.toFixed(1)} lb/ft³`);
+    }
+    if (subParts.length) {
+      primaryMaterialSubline = subParts.join(" · ");
+    }
+  }
 
   // NEW: high-level breakdown from server, if available
   const primaryBreakdown = primaryItem?.pricing_breakdown || null;
@@ -643,9 +671,19 @@ export default function QuotePrintClient() {
                     <div>
                       <div style={labelStyle}>Material</div>
                       <div style={{ fontSize: 13, color: "#111827" }}>
-                        {primaryItem.material_name ||
-                          `Material #${primaryItem.material_id}`}
+                        {primaryMaterialName}
                       </div>
+                      {primaryMaterialSubline && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#6b7280",
+                            marginTop: 2,
+                          }}
+                        >
+                          {primaryMaterialSubline}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1003,9 +1041,29 @@ export default function QuotePrintClient() {
                           item.width_in +
                           " × " +
                           item.height_in;
-                        const label =
+                        const baseLabel =
                           item.material_name ||
                           "Material #" + item.material_id;
+
+                        const subParts: string[] = [];
+                        if (item.material_family) {
+                          subParts.push(item.material_family);
+                        }
+                        const densRaw = (item as any).density_lb_ft3;
+                        const densNum =
+                          typeof densRaw === "number"
+                            ? densRaw
+                            : densRaw != null
+                            ? Number(densRaw)
+                            : NaN;
+                        if (Number.isFinite(densNum) && densNum > 0) {
+                          subParts.push(`${densNum.toFixed(1)} lb/ft³`);
+                        }
+                        const subLabel =
+                          subParts.length > 0
+                            ? subParts.join(" · ")
+                            : null;
+
                         const unit = parsePriceField(
                           item.price_unit_usd ?? null,
                         );
@@ -1023,7 +1081,19 @@ export default function QuotePrintClient() {
                               <div style={{ fontWeight: 500 }}>
                                 Line {idx + 1}
                               </div>
-                              <div style={{ color: "#6b7280" }}>{label}</div>
+                              <div style={{ color: "#6b7280" }}>
+                                {baseLabel}
+                                {subLabel && (
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      marginTop: 2,
+                                    }}
+                                  >
+                                    {subLabel}
+                                  </div>
+                                )}
+                              </div>
                             </td>
                             <td
                               style={{
@@ -1167,7 +1237,9 @@ export default function QuotePrintClient() {
                           }}
                         >
                           Saved:{" "}
-                          {new Date(layoutPkg.created_at).toLocaleString()}
+                          {new Date(
+                            layoutPkg.created_at,
+                          ).toLocaleString()}
                         </div>
                       </div>
                       <div

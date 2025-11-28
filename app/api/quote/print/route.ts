@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
+import { computePricingBreakdown } from "@/app/lib/pricing/compute";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -32,13 +33,17 @@ type ItemRow = {
   qty: number;
   material_id: number;
   material_name: string | null;
+  material_family?: string | null;
+  density_lb_ft3?: number | null;
+
   // These are NOT read from DB; we attach them after calling calc.
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
 
-  // richer pricing metadata from /api/quotes/calc (optional)
+  // NEW: full pricing metadata from /api/quotes/calc (optional)
   pricing_meta?: {
     variant_used?: string | null;
+    // direct carry-through of calc.result
     piece_ci?: number | null;
     order_ci?: number | null;
     order_ci_with_waste?: number | null;
@@ -56,8 +61,8 @@ type ItemRow = {
     material_name?: string | null;
   } | null;
 
-  // High-level pricing breakdown – left in the type, but currently unused
-  // until the materials table has cost_per_lb, etc.
+  // NEW: high-level breakdown for UI (material + machine + markup + breaks).
+  // This is optional and may be omitted if we can't safely compute it.
   pricing_breakdown?: any;
 };
 
@@ -98,7 +103,8 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       return item;
     }
 
-    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const base =
+      process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
     const resp = await fetch(`${base}/api/quotes/calc`, {
       method: "POST",
@@ -125,7 +131,7 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
     const total = Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : 0;
     const piece = qty > 0 && Number.isFinite(total) ? total / qty : null;
 
-    // Compact pricing_meta blob we can use on the UI
+    // NEW: compact pricing_meta blob we can use on the UI
     const pricing_meta: ItemRow["pricing_meta"] = {
       variant_used: json.variant_used ?? null,
       piece_ci: result.piece_ci ?? null,
@@ -145,16 +151,57 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       material_name: result.material_name ?? null,
     };
 
-    // NOTE (Path A): the richer pricing_breakdown that queried
-    // materials.cost_per_lb has been temporarily disabled because that
-    // column does not exist yet in your DB. We still return pricing_meta
-    // and normal price_unit_usd / price_total_usd here.
+    // NEW: optional high-level pricing breakdown using material data.
+    // This is guarded so if the DB doesn't have the needed fields, we simply skip it.
+    let pricing_breakdown: any = undefined;
+    try {
+      const matRow = await one<{
+        density_lb_ft3: number | null;
+        cost_per_lb: number | null;
+      }>(
+        `
+          select
+            density_lb_ft3,
+            cost_per_lb
+          from materials
+          where id = $1
+        `,
+        [materialId],
+      );
+
+      const density = Number(matRow?.density_lb_ft3 ?? 0);
+      const costPerLb = Number(matRow?.cost_per_lb ?? 0);
+
+      if (
+        Number.isFinite(density) &&
+        density > 0 &&
+        Number.isFinite(costPerLb) &&
+        costPerLb > 0
+      ) {
+        pricing_breakdown = computePricingBreakdown({
+          length_in: L,
+          width_in: W,
+          height_in: H,
+          density_lbft3: density,
+          cost_per_lb: costPerLb,
+          qty,
+        });
+      }
+    } catch (bdErr) {
+      console.warn(
+        "quote/print: pricing_breakdown computation skipped for material",
+        materialId,
+        bdErr,
+      );
+    }
+
     return {
       ...item,
       price_total_usd: Number.isFinite(total) ? total : null,
       price_unit_usd:
         piece != null && Number.isFinite(piece) ? piece : null,
       pricing_meta,
+      ...(pricing_breakdown ? { pricing_breakdown } : {}),
     };
   } catch (err) {
     console.error("attachPricingToItem error:", err);
@@ -208,7 +255,9 @@ export async function GET(req: NextRequest) {
           qi.height_in::text,
           qi.qty,
           qi.material_id,
-          m.name as material_name
+          m.name as material_name,
+          m.material_family,
+          m.density_lb_ft3
         from quote_items qi
         left join materials m on m.id = qi.material_id
         where qi.quote_id = $1
@@ -226,7 +275,7 @@ export async function GET(req: NextRequest) {
       // FALLBACK: no items stored yet. Pull facts from memory (same source as email)
       // and synthesize a primary line item so the print page still shows numbers.
       try {
-        const facts = await loadFacts(quote.quote_no);
+        const facts = (await loadFacts(quote.quote_no)) as any;
 
         const dims = String(facts?.dims || "");
         const [Lraw, Wraw, Hraw] = dims.split("x");
@@ -236,7 +285,11 @@ export async function GET(req: NextRequest) {
         const qtyFact = Number(facts?.qty ?? 0);
         const matId = Number(facts?.material_id ?? 0);
 
-        if ([L, W, H, qtyFact, matId].every((n) => Number.isFinite(n) && n > 0)) {
+        if (
+          [L, W, H, qtyFact, matId].every(
+            (n) => Number.isFinite(n) && n > 0,
+          )
+        ) {
           const synthetic: ItemRow = {
             id: 0,
             quote_id: quote.id,
@@ -245,7 +298,13 @@ export async function GET(req: NextRequest) {
             height_in: H.toString(),
             qty: qtyFact,
             material_id: matId,
-            material_name: (facts as any).material_name || null,
+            material_name: facts.material_name || null,
+            material_family: facts.material_family || null,
+            density_lb_ft3: Number.isFinite(
+              Number(facts.material_density_lb_ft3),
+            )
+              ? Number(facts.material_density_lb_ft3)
+              : undefined,
             price_total_usd: null,
             price_unit_usd: null,
           };
@@ -308,7 +367,9 @@ export async function GET(req: NextRequest) {
         const W = Number(rawWidth);
         const H = Number(rawHeight);
 
-        const allFinite = [L, W, H].every((n) => Number.isFinite(n) && n > 0);
+        const allFinite = [L, W, H].every(
+          (n) => Number.isFinite(n) && n > 0,
+        );
 
         if (allFinite) {
           const primary = items[0];
