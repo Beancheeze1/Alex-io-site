@@ -25,12 +25,7 @@
 
 import * as React from "react";
 
-import {
-  CavityShape,
-  LayoutModel,
-  formatCavityLabel,
-} from "./editor/layoutTypes";
-
+import { CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
 
@@ -93,10 +88,6 @@ function normalizeCavitiesParam(
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
 
-// Allow "1", "1.5", and ".5" style numbers (matches orchestrator)
-const NUM = "(?:\\d{1,4}(?:\\.\\d+)?|\\.\\d+)";
-
-
 // Simple parser for "LxWxH" strings
 function parseDimsTriple(
   raw: string | undefined | null,
@@ -115,18 +106,14 @@ function parseDimsTriple(
 }
 
 // Simple parser for cavity dims; if only LxW, assume depth = 1"
-// Simple parser for cavity dims; if only LxW, assume depth = 1"
 function parseCavityDims(
   raw: string,
 ): { L: number; W: number; D: number } | null {
   const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
-
-  const tripleRe = new RegExp(
-    `(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`,
-  );
-  const pairRe = new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`);
-
-  let m = t.match(tripleRe);
+  let m =
+    t.match(
+      /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/,
+    ) || null;
   if (m) {
     const L = Number(m[1]) || 0;
     const W = Number(m[2]) || 0;
@@ -134,19 +121,15 @@ function parseCavityDims(
     if (!L || !W || !D) return null;
     return { L, W, D };
   }
-
-  m = t.match(pairRe);
+  m = t.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/);
   if (m) {
     const L = Number(m[1]) || 0;
     const W = Number(m[2]) || 0;
     if (!L || !W) return null;
-    // No depth given: default to 1"
     return { L, W, D: 1 };
   }
-
   return null;
 }
-
 
 function snapInches(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -300,30 +283,22 @@ export default function LayoutPage({
             const yIn = clamp(rawY, minY, Math.max(minY, maxY));
 
             const xNorm =
-    block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
-  const yNorm =
-    block.widthIn > 0 ? yIn / block.widthIn : 0.1;
+              block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
+            const yNorm =
+              block.widthIn > 0 ? yIn / block.widthIn : 0.1;
 
-  const label = formatCavityLabel({
-    shape: "rect",
-    lengthIn: c.L,
-    widthIn: c.W,
-    depthIn: c.D,
-  });
-
-  cavities.push({
-    id: `cav-${idx + 1}`,
-    label,
-    shape: "rect",
-    cornerRadiusIn: 0,
-    lengthIn: c.L,
-    widthIn: c.W,
-    depthIn: c.D,
-    x: xNorm,
-    y: yNorm,
-  });
-});
-
+            cavities.push({
+              id: `cav-${idx + 1}`,
+              label: `${c.L}×${c.W}×${c.D} in`,
+              shape: "rect",
+              cornerRadiusIn: 0,
+              lengthIn: c.L,
+              widthIn: c.W,
+              depthIn: c.D,
+              x: xNorm,
+              y: yNorm,
+            });
+          });
         }
       }
 
@@ -1394,6 +1369,7 @@ function LayoutEditorHost(props: {
     </main>
   );
 }
+
 /* ---------- SVG export helper ---------- */
 
 function buildSvgFromLayout(
@@ -1471,7 +1447,7 @@ function buildSvgFromLayout(
   const headerLines: string[] = [];
   headerLines.push("NOT TO SCALE");
   headerLines.push(
-    `BLOCK: ${block.lengthIn}" × ${block.widthIn}" × ${block.thicknessIn}"`,
+    `FOAM BLOCK: ${block.lengthIn}" × ${block.widthIn}" × ${block.thicknessIn}"`,
   );
   if (meta?.materialLabel) {
     headerLines.push(`MATERIAL: ${meta.materialLabel}`);
@@ -1493,7 +1469,7 @@ function buildSvgFromLayout(
       .join("\n    ")}
   </g>`;
 
-  // Notes at the bottom (material now lives in the header above)
+  // Notes at the bottom: user-entered notes only.
   const metaLines: string[] = [];
   if (meta?.notes) {
     metaLines.push(`Notes: ${meta.notes}`);
@@ -1522,7 +1498,7 @@ function buildSvgFromLayout(
   ${headerSection}
   <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
         width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
-        rx="8" ry="8"
+        rx="0" ry="0"
         fill="#e5e7eb" stroke="#111827" stroke-width="2" />
   ${cavRects}
   ${metaSection}
