@@ -204,29 +204,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
   try {
     if (!f.material) return f;
 
-    const rawMaterial = String(f.material || "").toLowerCase();
-
-    // Decide which DB family we prefer based on the words in the email.
-    // - If the customer says "epe" / "expanded polyethylene" ⇒ Expanded Polyethylene
-    // - If they say "pe" / "polyethylene" ⇒ Polyethylene
-    // We still NEVER relabel the row’s family; we just prefer the matching family
-    // when multiple rows tie on density + name.
-    let preferredFamily: string | null = null;
-
-    if (
-      rawMaterial.includes("epe") ||
-      rawMaterial.includes("expanded polyethylene")
-    ) {
-      preferredFamily = "Expanded Polyethylene";
-    } else if (
-      rawMaterial === "pe" ||
-      rawMaterial === "pe foam" ||
-      rawMaterial.includes("polyethylene")
-    ) {
-      preferredFamily = "Polyethylene";
-    }
-
-    const like = `%${rawMaterial}%`;
+    const like = `%${String(f.material).toLowerCase()}%`;
     const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
 
     const row = await one<any>(
@@ -234,45 +212,40 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       SELECT
         id,
         name,
+        material_family,
         category,
         subcategory,
-        material_family,
         density_lb_ft3,
         kerf_waste_pct AS kerf_pct,
         min_charge_usd AS min_charge
       FROM materials
       WHERE active = true
-        AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
-      ORDER BY
-        CASE
-          WHEN $3::text IS NULL THEN 0                -- no preference: neutral
-          WHEN material_family = $3 THEN 0            -- preferred family first
-          ELSE 1                                      -- other families after
-        END,
-        ABS(COALESCE(density_lb_ft3, 0) - $2)         -- then closest density
+        AND (name ILIKE $1 OR material_family ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
+      ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $2)
       LIMIT 1;
       `,
-      [like, densNum, preferredFamily],
+      [like, densNum],
     );
 
     if (row) {
       if (!f.material_id) f.material_id = row.id;
       if (!f.material_name) f.material_name = row.name;
+      if (!f.material_family && row.material_family) {
+        f.material_family = row.material_family;
+      }
 
-      // Prefer explicit material_family from DB; fall back to legacy fields.
+      // Prefer the DB family as our "nice" label, but DO NOT
+      // cross-map PE/EPE/XLPE. We only fill material from family
+      // if material was completely missing.
       const familyFromRow: string | null =
-        row.material_family || row.category || row.subcategory || null;
+        row.material_family ||
+        row.category ||
+        row.subcategory ||
+        row.name ||
+        null;
 
-      if (familyFromRow) {
-        // Store the DB family explicitly so downstream layers
-        // (email, SVG, etc.) can use it directly.
-        (f as any).material_family = familyFromRow;
-
-        // If we didn't already have a material label from parsing,
-        // backfill it with the DB family. No PE/EPE guessing or remap.
-        if (!f.material) {
-          f.material = familyFromRow;
-        }
+      if (!f.material && familyFromRow) {
+        f.material = familyFromRow;
       }
 
       if (!f.density && row.density_lb_ft3 != null) {
@@ -1080,13 +1053,17 @@ export async function POST(req: NextRequest) {
     const specs = {
       dims: merged.dims || null,
       qty: merged.qty || null,
-      // For display, prefer the DB's material_family; fall back to parsed material.
-      material: merged.material_family || merged.material || null,
+      material: merged.material || null,
       density: merged.density || null,
       cavityCount: merged.cavityCount ?? null,
       cavityDims: merged.cavityDims || [],
       material_id: merged.material_id || null,
     };
+
+    // NEW: foam family comes from DB material_family first, then
+    // falls back to whatever material string we had.
+    const foamFamily =
+      merged.material_family || specs.material || null;
 
     /* ------------------- Pricing & price breaks ------------------- */
 
@@ -1215,7 +1192,7 @@ export async function POST(req: NextRequest) {
         H_in: dimsNums.H,
         qty: specs.qty,
         density_pcf: densityPcf,
-        foam_family: specs.material,
+        foam_family: foamFamily,
         thickness_under_in: merged.thickness_under_in,
         color: merged.color,
         // pass cavity info through to the template (for display + layout links)
@@ -1231,6 +1208,7 @@ export async function POST(req: NextRequest) {
 
       material: {
         name: merged.material_name,
+        family: merged.material_family,
         density_lbft3: densityPcf,
         kerf_pct: merged.kerf_pct,
         min_charge: merged.min_charge,
@@ -1248,8 +1226,7 @@ export async function POST(req: NextRequest) {
         const miss: string[] = [];
         if (!merged.dims) miss.push("Dimensions");
         if (!merged.qty) miss.push("Quantity");
-        // Material is considered present if we have either a family or a parsed label.
-        if (!merged.material && !merged.material_family) miss.push("Material");
+        if (!foamFamily) miss.push("Material");
         if (!merged.density) miss.push("Density");
         if (
           merged.cavityCount > 0 &&
