@@ -235,7 +235,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         kerf_waste_pct AS kerf_pct,
         min_charge_usd AS min_charge
       FROM materials
-      WHERE active = true
+      WHERE is_active = true
         ${familyFilter}
         AND (
           name ILIKE $1
@@ -946,7 +946,7 @@ export async function POST(req: NextRequest) {
 
     /* ------------------- Parse new turn ------------------- */
 
-       let newly = extractAllFromTextAndSubject(lastText, subject);
+    let newly = extractAllFromTextAndSubject(lastText, subject);
 
     // If the regex pass already found a main block size (e.g. from
     // "overall dimension / outside size / block size"), we treat that
@@ -978,7 +978,6 @@ export async function POST(req: NextRequest) {
     const hadNewCavities =
       Array.isArray(newly.cavityDims) && newly.cavityDims.length > 0;
     const hadNewDims = !!newly.dims;
-
 
     /* ------------------- Merge with memory ------------------- */
 
