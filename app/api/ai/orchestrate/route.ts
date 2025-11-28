@@ -672,6 +672,10 @@ function extractCavities(raw: string): {
 } {
   const t = raw.toLowerCase();
   const lines = raw.split(/\r?\n/);
+  
+  // PROTECT DECIMALS: convert "1x1x.5" → "1x1x0.5" so the '.' never splits the token
+raw = raw.replace(/x\.(\d+)/g, "x0.$1").replace(/\.([0-9]+)/g, "0.$1");
+
   const cavityDims: string[] = [];
   let cavityCount: number | undefined;
 
@@ -803,7 +807,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   const mEmail = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   if (mEmail) facts.customerEmail = mEmail[0];
-  
+
   // NEW: fallback — if we have a main outside dims but no cavity sizes,
   // scan the text for extra LxWxH patterns and treat those as cavities.
   if (facts.dims && (!facts.cavityDims || facts.cavityDims.length === 0)) {
