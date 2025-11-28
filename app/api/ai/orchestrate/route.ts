@@ -208,6 +208,21 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     const like = `%${materialToken}%`;
     const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
 
+    // Family guard:
+    // - If the email says PE → only allow Polyethylene rows.
+    // - If the email says EPE → only allow Expanded Polyethylene rows.
+    // We are NOT renaming families; we’re just making sure we only ever
+    // pull from the correct bucket.
+    let familyFilter = "";
+    if (materialToken === "pe" || materialToken === "polyethylene") {
+      familyFilter = "AND material_family = 'Polyethylene'";
+    } else if (
+      materialToken === "epe" ||
+      materialToken === "expanded polyethylene"
+    ) {
+      familyFilter = "AND material_family = 'Expanded Polyethylene'";
+    }
+
     const row = await one<any>(
       `
       SELECT
@@ -221,26 +236,17 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         min_charge_usd AS min_charge
       FROM materials
       WHERE active = true
+        ${familyFilter}
         AND (
           name ILIKE $1
           OR material_family ILIKE $1
           OR category ILIKE $1
           OR subcategory ILIKE $1
         )
-      ORDER BY
-        -- Prefer the correct family based on the token (PE vs EPE),
-        -- but never collapse them into each other.
-        CASE
-          WHEN $3 = 'pe' AND material_family = 'Polyethylene' THEN 0
-          WHEN $3 = 'polyethylene' AND material_family = 'Polyethylene' THEN 0
-          WHEN $3 = 'epe' AND material_family = 'Expanded Polyethylene' THEN 0
-          WHEN $3 = 'expanded polyethylene' AND material_family = 'Expanded Polyethylene' THEN 0
-          ELSE 1
-        END,
-        ABS(COALESCE(density_lb_ft3, 0) - $2)
+      ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $2)
       LIMIT 1;
       `,
-      [like, densNum, materialToken],
+      [like, densNum],
     );
 
     if (row) {
@@ -250,8 +256,8 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         f.material_family = row.material_family;
       }
 
-      // We only fill material from the DB family if we had nothing at all.
-      // We no longer do any "PE/EPE/XLPE" cross-mapping here.
+      // Only fill material from the DB if we had *nothing*.
+      // No PE/EPE cross-mapping here.
       const familyFromRow: string | null =
         row.material_family ||
         row.category ||
@@ -277,6 +283,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     return f;
   }
 }
+
 
 /* ============================================================
    NEW: hydrateFromDBByQuoteNo
