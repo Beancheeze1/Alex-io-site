@@ -1369,7 +1369,6 @@ function LayoutEditorHost(props: {
     </main>
   );
 }
-
 /* ---------- SVG export helper ---------- */
 
 function buildSvgFromLayout(

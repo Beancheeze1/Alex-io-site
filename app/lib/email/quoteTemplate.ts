@@ -207,19 +207,22 @@ export function renderQuoteEmail(input: TemplateInput): string {
     (material.name && material.name.trim()) ||
     "";
 
-  // Light normalization:
-  //  - Any PE / EPE / expanded polyethylene → Polyethylene family
-  //  - Keeps the detailed DB name for the Pricing card.
   let foamFamily = rawFamily;
   const lowerFamily = rawFamily.toLowerCase();
 
+  // FIRST: treat EPE / Expanded Polyethylene as its own family.
   if (
+    lowerFamily.startsWith("epe") ||
+    lowerFamily.includes("expanded polyethylene")
+  ) {
+    foamFamily = "Expanded Polyethylene";
+  }
+  // THEN: normalize plain PE / Polyethylene variants.
+  else if (
     lowerFamily === "pe" ||
     lowerFamily === "pe foam" ||
-    lowerFamily.includes("polyethylene") ||
-    lowerFamily === "polyethylene foam" ||
-    lowerFamily.includes("epe") ||
-    lowerFamily.includes("expanded polyethylene")
+    lowerFamily === "polyethylene" ||
+    lowerFamily === "polyethylene foam"
   ) {
     foamFamily = "Polyethylene";
   }
@@ -233,12 +236,11 @@ export function renderQuoteEmail(input: TemplateInput): string {
     (material.name && material.name.trim()) ||
     (foamFamily !== "—" ? foamFamily : "");
 
-  // Specs card: family ("Polyethylene") to match the quote viewer.
+  // Specs card: family ("Polyethylene", "Expanded Polyethylene", etc.)
   const specsMaterialLabel =
     foamFamily !== "—" ? foamFamily : gradeName || "—";
 
   // Pricing card: use the same customer-facing family label as Specs.
-  // (Prevents "EPE Type III" from showing when the foam family is actually Polyethylene.)
   const matName = specsMaterialLabel || gradeName || "—";
 
   const cavityLabel = buildCavityLabel(specs);
