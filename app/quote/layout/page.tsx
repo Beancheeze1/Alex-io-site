@@ -14,7 +14,7 @@
 // - After a successful "Apply to quote", automatically navigates to
 //   /quote?quote_no=... so the user sees the updated printable quote.
 // - Shows editable Qty in the top-right next to Zoom / Apply,
-//   seeded from the primary quote item when available.
+//   seeded from the primary line item when available.
 // - If the URL includes an explicit `cavities=` param, we treat that as fresh
 //   and ignore any saved DB layout geometry for the initial load, so
 //   email → layout always reflects the latest cavity dims instead of an
@@ -210,6 +210,8 @@ export default function LayoutPage({
   const [initialQty, setInitialQty] = React.useState<number | null>(
     null,
   );
+  const [initialMaterialId, setInitialMaterialId] =
+    React.useState<number | null>(null);
   const [loadingLayout, setLoadingLayout] =
     React.useState<boolean>(true);
 
@@ -373,6 +375,7 @@ export default function LayoutPage({
             setInitialLayout(fallback);
             setInitialNotes("");
             setInitialQty(null);
+            setInitialMaterialId(null);
             setLoadingLayout(false);
           }
           return;
@@ -394,6 +397,7 @@ export default function LayoutPage({
             setInitialLayout(fallback);
             setInitialNotes("");
             setInitialQty(null);
+            setInitialMaterialId(null);
             setLoadingLayout(false);
           }
           return;
@@ -401,12 +405,18 @@ export default function LayoutPage({
 
         const json = await res.json();
 
-        // Try to pull qty from primary line item (if present)
+        // Try to pull qty + material from primary line item (if present)
         let qtyFromItems: number | null = null;
+        let materialIdFromItems: number | null = null;
         if (Array.isArray(json.items) && json.items.length > 0) {
-          const rawQty = Number(json.items[0]?.qty);
+          const first = json.items[0];
+          const rawQty = Number(first?.qty);
           if (Number.isFinite(rawQty) && rawQty > 0) {
             qtyFromItems = rawQty;
+          }
+          const mid = Number(first?.material_id);
+          if (Number.isFinite(mid) && mid > 0) {
+            materialIdFromItems = mid;
           }
         }
 
@@ -429,12 +439,13 @@ export default function LayoutPage({
             setInitialLayout(layoutFromDb);
             setInitialNotes(notesFromDb);
             setInitialQty(qtyFromItems);
+            setInitialMaterialId(materialIdFromItems);
             setLoadingLayout(false);
           }
           return;
         }
 
-        // Otherwise, use layout from URL (dims/cavities) and keep qty.
+        // Otherwise, use layout from URL (dims/cavities) and keep qty/material.
         const fallback = buildFallbackLayout(
           effectiveBlockStr,
           effectiveCavityStr,
@@ -443,6 +454,7 @@ export default function LayoutPage({
           setInitialLayout(fallback);
           setInitialNotes("");
           setInitialQty(qtyFromItems);
+          setInitialMaterialId(materialIdFromItems);
           setLoadingLayout(false);
         }
       } catch (err) {
@@ -455,6 +467,7 @@ export default function LayoutPage({
           setInitialLayout(fallback);
           setInitialNotes("");
           setInitialQty(null);
+          setInitialMaterialId(null);
           setLoadingLayout(false);
         }
       }
@@ -493,6 +506,7 @@ export default function LayoutPage({
       initialLayout={initialLayout}
       initialNotes={initialNotes}
       initialQty={initialQty}
+      initialMaterialId={initialMaterialId}
     />
   );
 }
@@ -505,6 +519,7 @@ function LayoutEditorHost(props: {
   initialLayout: LayoutModel;
   initialNotes: string;
   initialQty: number | null;
+  initialMaterialId: number | null;
 }) {
   const {
     quoteNo,
@@ -512,6 +527,7 @@ function LayoutEditorHost(props: {
     initialLayout,
     initialNotes,
     initialQty,
+    initialMaterialId,
   } = props;
 
   const {
@@ -542,7 +558,7 @@ function LayoutEditorHost(props: {
     string | null
   >(null);
   const [selectedMaterialId, setSelectedMaterialId] =
-    React.useState<number | null>(null);
+    React.useState<number | null>(initialMaterialId);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -603,7 +619,7 @@ function LayoutEditorHost(props: {
     };
   }, []);
 
-  // 🔧 SAFE MATERIAL GROUPING + SORT (fixes localeCompare crash)
+  // 🔧 SAFE MATERIAL GROUPING + SORT (no localeCompare crashes, no PE/EPE remap)
   const materialsByFamily = React.useMemo(
     () => {
       const map = new Map<string, MaterialOption[]>();
@@ -711,25 +727,13 @@ function LayoutEditorHost(props: {
 
       let materialLabel: string | null = null;
       if (selectedMaterial) {
-        // Start from family, then fall back to name
-        let familyLabel =
+        // Use DB-provided family/name as-is (no PE/EPE remap)
+        const familyLabel =
           (selectedMaterial.family &&
             selectedMaterial.family.trim()) ||
           (selectedMaterial.name &&
             selectedMaterial.name.trim()) ||
           "";
-
-        const lf = familyLabel.toLowerCase();
-        // Normalize PE / EPE / expanded polyethylene to "Polyethylene"
-        if (
-          lf === "pe" ||
-          lf === "pe foam" ||
-          lf.includes("polyethylene") ||
-          lf.includes("epe") ||
-          lf.includes("expanded polyethylene")
-        ) {
-          familyLabel = "Polyethylene";
-        }
 
         let densityLabel: string | null = null;
         if (
@@ -1426,12 +1430,7 @@ function buildSvgFromLayout(
   <g>
     <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
           width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
-          rx="${(
-            c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0
-          ).toFixed(2)}"
-          ry="${(
-            c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0
-          ).toFixed(2)}"
+          rx="0" ry="0"
           fill="none" stroke="#111827" stroke-width="1" />
     <text x="${(x + cavW / 2).toFixed(2)}" y="${(
         y + cavH / 2
@@ -1443,7 +1442,7 @@ function buildSvgFromLayout(
     })
     .join("\n");
 
-  // Header block: NOT TO SCALE, block dims, and material line if available.
+  // Header block: NOT TO SCALE, FOAM BLOCK dims, and material line if available.
   const headerLines: string[] = [];
   headerLines.push("NOT TO SCALE");
   headerLines.push(
@@ -1469,7 +1468,7 @@ function buildSvgFromLayout(
       .join("\n    ")}
   </g>`;
 
-  // Notes at the bottom: user-entered notes only.
+  // Notes at the bottom only (no dims here, no duplicate material)
   const metaLines: string[] = [];
   if (meta?.notes) {
     metaLines.push(`Notes: ${meta.notes}`);
