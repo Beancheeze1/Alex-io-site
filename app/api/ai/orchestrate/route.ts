@@ -564,7 +564,9 @@ function grabOutsideDims(raw: string): string | undefined {
   const m = text.match(
     new RegExp(
       `\\b(?:overall|outside|block|foam)\\s+(?:size|dimensions?|dims?)` +
-        `\\s*(?:is|=|:)?\\s*` +
+        // allow filler like "of the foam / of the block" between
+        // "overall dimensions" and "is/="
+        `\\s*(?:of\\s+the\\s+[a-z]+\\s*)?(?:is|=|:)?\\s*` +
         `(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})` +
         `(?:\\s*(?:in|inch|inches))?\\b`,
       "i",
@@ -573,6 +575,7 @@ function grabOutsideDims(raw: string): string | undefined {
   if (!m) return undefined;
   return `${m[1]}x${m[2]}x${m[3]}`;
 }
+
 
 function grabQty(raw: string): number | undefined {
   const t = raw.toLowerCase();
