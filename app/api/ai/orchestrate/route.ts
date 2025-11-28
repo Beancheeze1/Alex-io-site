@@ -214,6 +214,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         name,
         category,
         subcategory,
+        material_family,
         density_lb_ft3,
         kerf_waste_pct AS kerf_pct,
         min_charge_usd AS min_charge
@@ -230,20 +231,20 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       if (!f.material_id) f.material_id = row.id;
       if (!f.material_name) f.material_name = row.name;
 
-      // Prefer a "family" style label (Polyethylene, Polyurethane, etc.)
+      // Prefer explicit material_family from DB; fall back to legacy fields.
       const familyFromRow: string | null =
-        row.category || row.subcategory || row.name || null;
+        row.material_family || row.category || row.subcategory || null;
 
-      // If we only had a shorthand like "pe" / "epe" / "xlpe",
-      // upgrade it to the nicer family label from the DB.
-      if (
-        familyFromRow &&
-        (!f.material ||
-          ["pe", "epe", "xlpe", "pu", "urethane"].includes(
-            String(f.material).toLowerCase(),
-          ))
-      ) {
-        f.material = familyFromRow;
+      if (familyFromRow) {
+        // Store the DB family explicitly so downstream layers
+        // (email, SVG, etc.) can use it directly.
+        (f as any).material_family = familyFromRow;
+
+        // If we didn't already have a material label from parsing,
+        // backfill it with the DB family. No PE/EPE guessing or remap.
+        if (!f.material) {
+          f.material = familyFromRow;
+        }
       }
 
       if (!f.density && row.density_lb_ft3 != null) {
@@ -1051,7 +1052,8 @@ export async function POST(req: NextRequest) {
     const specs = {
       dims: merged.dims || null,
       qty: merged.qty || null,
-      material: merged.material || null,
+      // For display, prefer the DB's material_family; fall back to parsed material.
+      material: merged.material_family || merged.material || null,
       density: merged.density || null,
       cavityCount: merged.cavityCount ?? null,
       cavityDims: merged.cavityDims || [],
@@ -1218,7 +1220,8 @@ export async function POST(req: NextRequest) {
         const miss: string[] = [];
         if (!merged.dims) miss.push("Dimensions");
         if (!merged.qty) miss.push("Quantity");
-        if (!merged.material) miss.push("Material");
+        // Material is considered present if we have either a family or a parsed label.
+        if (!merged.material && !merged.material_family) miss.push("Material");
         if (!merged.density) miss.push("Density");
         if (
           merged.cavityCount > 0 &&
