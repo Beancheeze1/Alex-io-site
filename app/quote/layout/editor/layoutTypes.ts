@@ -33,14 +33,43 @@ export type LayoutModel = {
 };
 
 /** Format human-readable cavity label */
+/**
+ * Format a label for a cavity, based on its dimensions + shape.
+ * - Keeps decimals like .5 instead of rounding to whole inches.
+ * - Strips trailing zeros (1.50 -> 1.5, 1.00 -> 1).
+ * - Uses ".5" style for values between 0 and 1.
+ */
 export function formatCavityLabel(
-  c: Pick<Cavity, "shape" | "lengthIn" | "widthIn" | "depthIn">
+  c: Pick<Cavity, "shape" | "lengthIn" | "widthIn" | "depthIn">,
 ): string {
+  const fmt = (n: number): string => {
+    if (!Number.isFinite(n)) return "?";
+
+    // Round to 3 decimal places to avoid float junk
+    const rounded = Math.round(n * 1000) / 1000;
+
+    // Format with up to 3 decimals, then strip trailing zeros
+    let s = rounded.toFixed(3).replace(/\.?0+$/, "");
+
+    // Turn "0.5" into ".5" for nicer foam-style dimensions
+    s = s.replace(/^0\./, ".");
+
+    return s;
+  };
+
+  const L = fmt(c.lengthIn);
+  const W = fmt(c.widthIn);
+  const D = fmt(c.depthIn);
+
   if (c.shape === "circle") {
-    return `Ø${c.lengthIn}×${c.depthIn} in`;
+    // Ø6 × .5 in
+    return `Ø${L} × ${D} in`;
   }
-  return `${c.lengthIn}×${c.widthIn}×${c.depthIn} in`;
+
+  // 1 × 1 × .5 in
+  return `${L} × ${W} × ${D} in`;
 }
+
 
 /** Extract numbers from a string */
 function extractNums(input: string | null | undefined): number[] {
