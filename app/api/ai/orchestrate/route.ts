@@ -803,6 +803,16 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   const mEmail = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   if (mEmail) facts.customerEmail = mEmail[0];
+  
+  // NEW: fallback — if we have a main outside dims but no cavity sizes,
+  // scan the text for extra LxWxH patterns and treat those as cavities.
+  if (facts.dims && (!facts.cavityDims || facts.cavityDims.length === 0)) {
+    const recovered = recoverCavityDimsFromText(text, facts.dims);
+    if (recovered.length > 0) {
+      facts.cavityDims = recovered;
+      facts.cavityCount = recovered.length;
+    }
+  }
 
   return compact(facts);
 }
