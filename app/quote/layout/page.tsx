@@ -332,12 +332,19 @@ export default function LayoutPage({
           if (!dimsA && dimsB) dimsCandidates.push(dimsB);
 
           const cavityParts: string[] = [];
-          url.searchParams
+          const cavitiesParams = url.searchParams
             .getAll("cavities")
-            .forEach((v) => v && cavityParts.push(v));
-          url.searchParams
+            .filter((v) => v);
+          const cavityParams = url.searchParams
             .getAll("cavity")
-            .forEach((v) => v && cavityParts.push(v));
+            .filter((v) => v);
+
+          // Prefer explicit "cavities" list over "cavity" (single) to avoid double-counting
+          if (cavitiesParams.length > 0) {
+            cavitiesParams.forEach((v) => cavityParts.push(v));
+          } else {
+            cavityParams.forEach((v) => cavityParts.push(v));
+          }
 
           if (dimsCandidates.length > 0) {
             effectiveBlockStr = normalizeDimsParam(
@@ -695,23 +702,49 @@ function LayoutEditorHost(props: {
     try {
       setApplyStatus("saving");
 
-      // Build a friendly material/notes footer for the SVG
+      // Build a friendly material/notes footer + header data for the SVG
       const selectedMaterial =
         selectedMaterialId != null
           ? materials.find((m) => m.id === selectedMaterialId) ||
             null
           : null;
 
-      const materialLabel =
-        selectedMaterial != null
-          ? `${selectedMaterial.name}${
-              selectedMaterial.density_lb_ft3 != null
-                ? ` (${selectedMaterial.density_lb_ft3.toFixed(
-                    1,
-                  )} lb/ft³)`
-                : ""
-            }`
-          : null;
+      let materialLabel: string | null = null;
+      if (selectedMaterial) {
+        // Start from family, then fall back to name
+        let familyLabel =
+          (selectedMaterial.family &&
+            selectedMaterial.family.trim()) ||
+          (selectedMaterial.name &&
+            selectedMaterial.name.trim()) ||
+          "";
+
+        const lf = familyLabel.toLowerCase();
+        // Normalize PE / EPE / expanded polyethylene to "Polyethylene"
+        if (
+          lf === "pe" ||
+          lf === "pe foam" ||
+          lf.includes("polyethylene") ||
+          lf.includes("epe") ||
+          lf.includes("expanded polyethylene")
+        ) {
+          familyLabel = "Polyethylene";
+        }
+
+        let densityLabel: string | null = null;
+        if (
+          typeof selectedMaterial.density_lb_ft3 === "number" &&
+          Number.isFinite(selectedMaterial.density_lb_ft3)
+        ) {
+          densityLabel = `${selectedMaterial.density_lb_ft3.toFixed(
+            1,
+          )} pcf`;
+        }
+
+        materialLabel = densityLabel
+          ? `${familyLabel}, ${densityLabel}`
+          : familyLabel || null;
+      }
 
       const svg = buildSvgFromLayout(layout, {
         notes:
@@ -1410,10 +1443,34 @@ function buildSvgFromLayout(
     })
     .join("\n");
 
-  const metaLines: string[] = [];
+  // Header block: NOT TO SCALE, block dims, and material line if available.
+  const headerLines: string[] = [];
+  headerLines.push("NOT TO SCALE");
+  headerLines.push(
+    `BLOCK: ${block.lengthIn}" × ${block.widthIn}" × ${block.thicknessIn}"`,
+  );
   if (meta?.materialLabel) {
-    metaLines.push(`Material: ${meta.materialLabel}`);
+    headerLines.push(`MATERIAL: ${meta.materialLabel}`);
   }
+
+  const headerSection = `
+  <g>
+    ${headerLines
+      .map(
+        (line, idx) =>
+          `<text x="${PADDING.toFixed(
+            2,
+          )}" y="${(PADDING + idx * 14).toFixed(
+            2,
+          )}" font-size="${idx === 0 ? 11 : 10}" fill="#111827">${escapeText(
+            line,
+          )}</text>`,
+      )
+      .join("\n    ")}
+  </g>`;
+
+  // Notes at the bottom (material now lives in the header above)
+  const metaLines: string[] = [];
   if (meta?.notes) {
     metaLines.push(`Notes: ${meta.notes}`);
   }
@@ -1438,6 +1495,7 @@ function buildSvgFromLayout(
 <svg xmlns="http://www.w3.org/2000/svg"
      width="${VIEW_W}" height="${VIEW_H}"
      viewBox="0 0 ${VIEW_W} ${VIEW_H}">
+  ${headerSection}
   <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
         width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
         rx="8" ry="8"

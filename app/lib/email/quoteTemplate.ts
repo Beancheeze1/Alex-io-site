@@ -237,8 +237,9 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const specsMaterialLabel =
     foamFamily !== "—" ? foamFamily : gradeName || "—";
 
-  // Pricing card: specific grade.
-  const matName = gradeName || specsMaterialLabel || "—";
+  // Pricing card: use the same customer-facing family label as Specs.
+  // (Prevents "EPE Type III" from showing when the foam family is actually Polyethylene.)
+  const matName = specsMaterialLabel || gradeName || "—";
 
   const cavityLabel = buildCavityLabel(specs);
   const minThicknessUnderVal = computeMinThicknessUnder(specs);
