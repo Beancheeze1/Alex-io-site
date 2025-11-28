@@ -204,7 +204,29 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
   try {
     if (!f.material) return f;
 
-    const like = `%${String(f.material).toLowerCase()}%`;
+    const rawMaterial = String(f.material || "").toLowerCase();
+
+    // Decide which DB family we prefer based on the words in the email.
+    // - If the customer says "epe" / "expanded polyethylene" ⇒ Expanded Polyethylene
+    // - If they say "pe" / "polyethylene" ⇒ Polyethylene
+    // We still NEVER relabel the row’s family; we just prefer the matching family
+    // when multiple rows tie on density + name.
+    let preferredFamily: string | null = null;
+
+    if (
+      rawMaterial.includes("epe") ||
+      rawMaterial.includes("expanded polyethylene")
+    ) {
+      preferredFamily = "Expanded Polyethylene";
+    } else if (
+      rawMaterial === "pe" ||
+      rawMaterial === "pe foam" ||
+      rawMaterial.includes("polyethylene")
+    ) {
+      preferredFamily = "Polyethylene";
+    }
+
+    const like = `%${rawMaterial}%`;
     const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
 
     const row = await one<any>(
@@ -221,10 +243,16 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       FROM materials
       WHERE active = true
         AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
-      ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $2)
+      ORDER BY
+        CASE
+          WHEN $3::text IS NULL THEN 0                -- no preference: neutral
+          WHEN material_family = $3 THEN 0            -- preferred family first
+          ELSE 1                                      -- other families after
+        END,
+        ABS(COALESCE(density_lb_ft3, 0) - $2)         -- then closest density
       LIMIT 1;
       `,
-      [like, densNum],
+      [like, densNum, preferredFamily],
     );
 
     if (row) {
