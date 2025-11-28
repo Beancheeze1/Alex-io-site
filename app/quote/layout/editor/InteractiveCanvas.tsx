@@ -13,7 +13,9 @@
 "use client";
 
 import { useRef, useState, MouseEvent } from "react";
-import type { LayoutModel, Cavity } from "./layoutTypes";
+import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
+
+
 
 type Props = {
   layout: LayoutModel;
@@ -369,17 +371,18 @@ export default function InteractiveCanvas({
                   />
                 )}
 
-                {/* label (always cavity.label so it tracks edits) */}
-                <text
-                  x={cavX + cavWidthPx / 2}
-                  y={cavY + cavHeightPx / 2}
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  className="fill-slate-700 text-[9px]"
-                  onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
-                >
-                  {cavity.label}
-                </text>
+                {/* label (computed from dims so it always matches the cavity size) */}
+<text
+  x={cavX + cavWidthPx / 2}
+  y={cavY + cavHeightPx / 2}
+  textAnchor="middle"
+  dominantBaseline="central"
+  className="fill-slate-700 text-[9px]"
+  onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+>
+  {formatCavityLabel(cavity)}
+</text>
+
 
                 {/* resize handle */}
                 <rect
