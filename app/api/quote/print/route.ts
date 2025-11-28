@@ -151,49 +151,11 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       material_name: result.material_name ?? null,
     };
 
-    // NEW: optional high-level pricing breakdown using material data.
-    // This is guarded so if the DB doesn't have the needed fields, we simply skip it.
+    // Optional pricing_breakdown is currently disabled because the old
+    // cost_per_lb column was removed from the materials table. Once we
+    // have a new, stable source for cost data (price books, etc.), this
+    // can be re-enabled using those fields instead of cost_per_lb.
     let pricing_breakdown: any = undefined;
-    try {
-      const matRow = await one<{
-        density_lb_ft3: number | null;
-        cost_per_lb: number | null;
-      }>(
-        `
-          select
-            density_lb_ft3,
-            cost_per_lb
-          from materials
-          where id = $1
-        `,
-        [materialId],
-      );
-
-      const density = Number(matRow?.density_lb_ft3 ?? 0);
-      const costPerLb = Number(matRow?.cost_per_lb ?? 0);
-
-      if (
-        Number.isFinite(density) &&
-        density > 0 &&
-        Number.isFinite(costPerLb) &&
-        costPerLb > 0
-      ) {
-        pricing_breakdown = computePricingBreakdown({
-          length_in: L,
-          width_in: W,
-          height_in: H,
-          density_lbft3: density,
-          cost_per_lb: costPerLb,
-          qty,
-        });
-      }
-    } catch (bdErr) {
-      console.warn(
-        "quote/print: pricing_breakdown computation skipped for material",
-        materialId,
-        bdErr,
-      );
-    }
 
     return {
       ...item,
