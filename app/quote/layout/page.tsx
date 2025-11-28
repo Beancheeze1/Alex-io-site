@@ -25,7 +25,12 @@
 
 import * as React from "react";
 
-import { CavityShape, LayoutModel } from "./editor/layoutTypes";
+import {
+  CavityShape,
+  LayoutModel,
+  formatCavityLabel,
+} from "./editor/layoutTypes";
+
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
 
@@ -88,6 +93,10 @@ function normalizeCavitiesParam(
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
 
+// Allow "1", "1.5", and ".5" style numbers (matches orchestrator)
+const NUM = "(?:\\d{1,4}(?:\\.\\d+)?|\\.\\d+)";
+
+
 // Simple parser for "LxWxH" strings
 function parseDimsTriple(
   raw: string | undefined | null,
@@ -106,14 +115,18 @@ function parseDimsTriple(
 }
 
 // Simple parser for cavity dims; if only LxW, assume depth = 1"
+// Simple parser for cavity dims; if only LxW, assume depth = 1"
 function parseCavityDims(
   raw: string,
 ): { L: number; W: number; D: number } | null {
   const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
-  let m =
-    t.match(
-      /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/,
-    ) || null;
+
+  const tripleRe = new RegExp(
+    `(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`,
+  );
+  const pairRe = new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`);
+
+  let m = t.match(tripleRe);
   if (m) {
     const L = Number(m[1]) || 0;
     const W = Number(m[2]) || 0;
@@ -121,15 +134,19 @@ function parseCavityDims(
     if (!L || !W || !D) return null;
     return { L, W, D };
   }
-  m = t.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/);
+
+  m = t.match(pairRe);
   if (m) {
     const L = Number(m[1]) || 0;
     const W = Number(m[2]) || 0;
     if (!L || !W) return null;
+    // No depth given: default to 1"
     return { L, W, D: 1 };
   }
+
   return null;
 }
+
 
 function snapInches(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -283,22 +300,30 @@ export default function LayoutPage({
             const yIn = clamp(rawY, minY, Math.max(minY, maxY));
 
             const xNorm =
-              block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
-            const yNorm =
-              block.widthIn > 0 ? yIn / block.widthIn : 0.1;
+    block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
+  const yNorm =
+    block.widthIn > 0 ? yIn / block.widthIn : 0.1;
 
-            cavities.push({
-              id: `cav-${idx + 1}`,
-              label: `${c.L}×${c.W}×${c.D} in`,
-              shape: "rect",
-              cornerRadiusIn: 0,
-              lengthIn: c.L,
-              widthIn: c.W,
-              depthIn: c.D,
-              x: xNorm,
-              y: yNorm,
-            });
-          });
+  const label = formatCavityLabel({
+    shape: "rect",
+    lengthIn: c.L,
+    widthIn: c.W,
+    depthIn: c.D,
+  });
+
+  cavities.push({
+    id: `cav-${idx + 1}`,
+    label,
+    shape: "rect",
+    cornerRadiusIn: 0,
+    lengthIn: c.L,
+    widthIn: c.W,
+    depthIn: c.D,
+    x: xNorm,
+    y: yNorm,
+  });
+});
+
         }
       }
 
