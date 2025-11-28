@@ -197,19 +197,24 @@ function buildDxfFromLayout(layout: any): string | null {
  * Takes the raw SVG from the editor and injects a small legend group:
  *
  *   <g id="alex-io-notes">
+ *     <text>QUOTE: Q-...</text>
  *     <text>NOT TO SCALE</text>
- *     <text>FOAM: 1030 White · Polyurethane Foam · 1.7 lb/ft³</text>
- *     <text>FOAM BLOCK: L x W x T in</text>
- *     <text>CAVITY 1: ...</text>
- *     ...
+ *     <text>BLOCK: L x W x T in</text>
+ *     <text>MATERIAL: 1.7# Black PE · Polyethylene</text>
  *   </g>
  *
  * The geometry is NOT changed; this only adds text.
+ *
+ * NOTE:
+ *   - We no longer embed cavity lines or free-typed notes here.
+ *   - Typed notes stay with the quote (quote_layout_packages.notes)
+ *     and show on the print page, but do NOT go into the SVG.
  */
 function buildSvgWithAnnotations(
   layout: any,
   svgRaw: string | null,
-  materialLegend?: string | null,
+  materialLegend: string | null,
+  quoteNo: string,
 ): string | null {
   if (!svgRaw || typeof svgRaw !== "string") return svgRaw ?? null;
   if (!layout || !layout.block) return svgRaw;
@@ -226,35 +231,25 @@ function buildSvgWithAnnotations(
 
   const lines: string[] = [];
 
-  // Simple scale warning
+  // 1) Quote number
+  const safeQuoteNo = quoteNo && quoteNo.trim().length > 0 ? quoteNo.trim() : "";
+  if (safeQuoteNo) {
+    lines.push(`QUOTE: ${safeQuoteNo}`);
+  }
+
+  // 2) Simple scale warning
   lines.push("NOT TO SCALE");
 
-  // NEW: material legend, if provided
-  if (materialLegend && materialLegend.trim().length > 0) {
-    lines.push(`FOAM: ${materialLegend.trim()}`);
-  }
-
+  // 3) Block size (outside foam block)
   if (Number.isFinite(T) && T > 0) {
-    lines.push(`FOAM BLOCK: ${L} x ${W} x ${T} in`);
+    lines.push(`BLOCK: ${L} x ${W} x ${T} in`);
   } else {
-    lines.push(`FOAM BLOCK: ${L} x ${W} in (thickness see quote)`);
+    lines.push(`BLOCK: ${L} x ${W} in (thickness see quote)`);
   }
 
-  if (Array.isArray(layout.cavities)) {
-    let idx = 1;
-    for (const cav of layout.cavities as any[]) {
-      if (!cav) continue;
-      const cL = Number(cav.lengthIn);
-      const cW = Number(cav.widthIn);
-      const cD = Number(cav.depthIn);
-      if (!Number.isFinite(cL) || !Number.isFinite(cW) || cL <= 0 || cW <= 0) {
-        continue;
-      }
-      const depthPart =
-        Number.isFinite(cD) && cD > 0 ? `${cD}` : "depth?";
-      lines.push(`CAVITY ${idx}: ${cL} x ${cW} x ${depthPart} in`);
-      idx += 1;
-    }
+  // 4) Material legend, if provided
+  if (materialLegend && materialLegend.trim().length > 0) {
+    lines.push(`MATERIAL: ${materialLegend.trim()}`);
   }
 
   if (lines.length === 0) {
@@ -432,11 +427,12 @@ export async function POST(req: NextRequest) {
     const dxf = buildDxfFromLayout(layout);
     const step: string | null = null;
 
-    // Annotate SVG (if provided) with foam + cavity notes + NOT TO SCALE.
+    // Annotate SVG (if provided) with quote legend.
     const svgAnnotated = buildSvgWithAnnotations(
       layout,
       svgRaw,
-      materialLegend,
+      materialLegend ?? null,
+      quoteNo,
     );
 
     // Insert layout package (now including annotated svg_text, dxf_text, step_text).
