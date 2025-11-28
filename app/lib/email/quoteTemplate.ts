@@ -197,23 +197,43 @@ export function renderQuoteEmail(input: TemplateInput): string {
       ? `${fmtNumber(specs.density_pcf, 1)} pcf`
       : "—";
 
-  // Normalize material name and foam family so we can show:
-  // - Specs: family-first
-  // - Pricing: "MaterialName — FoamFamily" when both are present
-  const materialNameClean =
-    (material.name && material.name.trim()) || "";
-  const foamFamilyClean =
-    (specs.foam_family && specs.foam_family.trim()) || "";
+  // ---------- Material / family labels (email + viewer alignment) ----------
 
-  // Specs card: show a simple foam family label (fallback to material name)
-  const foamFamily =
-    foamFamilyClean || materialNameClean || "—";
+  // Pull a foam family from: parsed specs -> pricing.raw.material_family -> DB name.
+  const rawFamily =
+    (specs.foam_family && specs.foam_family.trim()) ||
+    (pricing.raw?.material_family &&
+      String(pricing.raw.material_family).trim()) ||
+    (material.name && material.name.trim()) ||
+    "";
 
-  // Pricing card: show combined label like "1030 White — Polyurethane Foam"
-  const matDisplayName =
-    materialNameClean && foamFamilyClean && materialNameClean !== foamFamilyClean
-      ? `${materialNameClean} — ${foamFamilyClean}`
-      : materialNameClean || foamFamilyClean || "—";
+  // Light normalization so "pe" → "Polyethylene", "epe" → "EPE", etc.
+  let foamFamily = rawFamily;
+  const lowerFamily = rawFamily.toLowerCase();
+  if (lowerFamily === "pe" || lowerFamily === "polyethylene foam") {
+    foamFamily = "Polyethylene";
+  } else if (
+    lowerFamily === "epe" ||
+    lowerFamily === "epe type iii" ||
+    lowerFamily === "expanded polyethylene"
+  ) {
+    foamFamily = "EPE";
+  }
+  if (!foamFamily) {
+    foamFamily = "—";
+  }
+
+  // Grade / specific material name from DB (e.g. "1.7# Black").
+  const gradeName =
+    (material.name && material.name.trim()) ||
+    (foamFamily !== "—" ? foamFamily : "");
+
+  // What we show on the Specs card: the family ("Polyethylene") to match the quote viewer subtitle.
+  const specsMaterialLabel =
+    foamFamily !== "—" ? foamFamily : gradeName || "—";
+
+  // What we show on the Pricing card: the specific grade (e.g. "1.7# Black").
+  const matName = gradeName || specsMaterialLabel || "—";
 
   const cavityLabel = buildCavityLabel(specs);
   const minThicknessUnderVal = computeMinThicknessUnder(specs);
@@ -372,7 +392,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         </tr>
                         <tr>
                           <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Material</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${foamFamily}</td>
+                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${specsMaterialLabel}</td>
                         </tr>
                         <tr>
                           <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Color</td>
@@ -399,7 +419,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         </tr>
                         <tr>
                           <td style="width:48%;padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Material</td>
-                          <td style="width:52%;padding:4px 10px;font-size:12px;color:#cbd5f5;">${matDisplayName}</td>
+                          <td style="width:52%;padding:4px 10px;font-size:12px;color:#cbd5f5;">${matName}</td>
                         </tr>
                         <tr>
                           <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Density</td>
