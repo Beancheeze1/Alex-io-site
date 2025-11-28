@@ -9,7 +9,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
-import { computePricingBreakdown } from "@/app/lib/pricing/compute";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -37,10 +36,9 @@ type ItemRow = {
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
 
-  // NEW: full pricing metadata from /api/quotes/calc (optional)
+  // richer pricing metadata from /api/quotes/calc (optional)
   pricing_meta?: {
     variant_used?: string | null;
-    // direct carry-through of calc.result
     piece_ci?: number | null;
     order_ci?: number | null;
     order_ci_with_waste?: number | null;
@@ -58,8 +56,8 @@ type ItemRow = {
     material_name?: string | null;
   } | null;
 
-  // NEW: high-level breakdown for UI (material + machine + markup + breaks).
-  // This is optional and may be omitted if we can't safely compute it.
+  // High-level pricing breakdown – left in the type, but currently unused
+  // until the materials table has cost_per_lb, etc.
   pricing_breakdown?: any;
 };
 
@@ -127,7 +125,7 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
     const total = Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : 0;
     const piece = qty > 0 && Number.isFinite(total) ? total / qty : null;
 
-    // NEW: compact pricing_meta blob we can use on the UI
+    // Compact pricing_meta blob we can use on the UI
     const pricing_meta: ItemRow["pricing_meta"] = {
       variant_used: json.variant_used ?? null,
       piece_ci: result.piece_ci ?? null,
@@ -147,59 +145,16 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       material_name: result.material_name ?? null,
     };
 
-    // NEW: optional high-level pricing breakdown using material data.
-    // This is guarded so if the DB doesn't have the needed fields, we simply skip it.
-    let pricing_breakdown: any = undefined;
-    try {
-      const matRow = await one<{
-        density_lbft3: number | null;
-        cost_per_lb: number | null;
-      }>(
-        `
-          select
-            density_lb_ft3,
-            cost_per_lb
-          from materials
-          where id = $1
-        `,
-        [materialId],
-      );
-
-      const density = Number(matRow?.density_lbft3 ?? 0);
-      const costPerLb = Number(matRow?.cost_per_lb ?? 0);
-
-      if (
-        Number.isFinite(density) &&
-        density > 0 &&
-        Number.isFinite(costPerLb) &&
-        costPerLb > 0
-      ) {
-        pricing_breakdown = computePricingBreakdown({
-          length_in: L,
-          width_in: W,
-          height_in: H,
-          density_lbft3: density,
-          cost_per_lb: costPerLb,
-          qty,
-        });
-      }
-    } catch (bdErr) {
-      console.warn(
-        "quote/print: pricing_breakdown computation skipped for material",
-        materialId,
-        bdErr,
-      );
-    }
-
+    // NOTE (Path A): the richer pricing_breakdown that queried
+    // materials.cost_per_lb has been temporarily disabled because that
+    // column does not exist yet in your DB. We still return pricing_meta
+    // and normal price_unit_usd / price_total_usd here.
     return {
       ...item,
       price_total_usd: Number.isFinite(total) ? total : null,
       price_unit_usd:
         piece != null && Number.isFinite(piece) ? piece : null,
       pricing_meta,
-      ...(pricing_breakdown
-        ? { pricing_breakdown }
-        : {}),
     };
   } catch (err) {
     console.error("attachPricingToItem error:", err);
@@ -290,7 +245,7 @@ export async function GET(req: NextRequest) {
             height_in: H.toString(),
             qty: qtyFact,
             material_id: matId,
-            material_name: facts.material_name || null,
+            material_name: (facts as any).material_name || null,
             price_total_usd: null,
             price_unit_usd: null,
           };
