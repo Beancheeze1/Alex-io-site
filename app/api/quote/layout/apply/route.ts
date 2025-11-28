@@ -219,6 +219,15 @@ function buildSvgWithAnnotations(
   if (!svgRaw || typeof svgRaw !== "string") return svgRaw ?? null;
   if (!layout || !layout.block) return svgRaw;
 
+  // Work on a mutable copy of the SVG string.
+  let svg = svgRaw as string;
+
+  // Strip any previous alex-io-notes group so we don't double-stack legends.
+  svg = svg.replace(
+    /<g[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g>/i,
+    "",
+  );
+
   const block = layout.block || {};
   const L = Number(block.lengthIn);
   const W = Number(block.widthIn);
@@ -226,7 +235,7 @@ function buildSvgWithAnnotations(
 
   if (!Number.isFinite(L) || !Number.isFinite(W) || L <= 0 || W <= 0) {
     // If dims are garbage, leave SVG unchanged.
-    return svgRaw;
+    return svg;
   }
 
   const lines: string[] = [];
@@ -253,14 +262,14 @@ function buildSvgWithAnnotations(
   }
 
   if (lines.length === 0) {
-    return svgRaw;
+    return svg;
   }
 
   // Insert just before </svg>
-  const closeIdx = svgRaw.lastIndexOf("</svg");
+  const closeIdx = svg.lastIndexOf("</svg");
   if (closeIdx === -1) {
     // Not a normal SVG; leave it unchanged.
-    return svgRaw;
+    return svg;
   }
 
   const textYStart = 20;
@@ -275,8 +284,8 @@ function buildSvgWithAnnotations(
 
   const notesGroup = `<g id="alex-io-notes">${texts}</g>`;
 
-  const before = svgRaw.slice(0, closeIdx);
-  const after = svgRaw.slice(closeIdx);
+  const before = svg.slice(0, closeIdx);
+  const after = svg.slice(closeIdx);
 
   return `${before}${notesGroup}\n${after}`;
 }
