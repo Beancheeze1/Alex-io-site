@@ -194,21 +194,12 @@ function buildDxfFromLayout(layout: any): string | null {
 /* ===================== SVG annotator from layout ===================== */
 
 /**
- * Takes the raw SVG from the editor and injects a small legend group:
+ * For now, we strip any previous alex-io-notes legend from the SVG
+ * and return the SVG with **no embedded notes at all**.
  *
- *   <g id="alex-io-notes">
- *     <text>QUOTE: Q-...</text>
- *     <text>NOT TO SCALE</text>
- *     <text>BLOCK: L x W x T in</text>
- *     <text>MATERIAL: 1.7# Black PE · Polyethylene</text>
- *   </g>
- *
- * The geometry is NOT changed; this only adds text.
- *
- * NOTE:
- *   - We no longer embed cavity lines or free-typed notes here.
- *   - Typed notes stay with the quote (quote_layout_packages.notes)
- *     and show on the print page, but do NOT go into the SVG.
+ * - Geometry + cavity labels from the editor remain untouched.
+ * - Typed notes stay with the quote (quote_layout_packages.notes) and
+ *   are NOT written into the SVG.
  */
 function buildSvgWithAnnotations(
   layout: any,
@@ -217,77 +208,18 @@ function buildSvgWithAnnotations(
   quoteNo: string,
 ): string | null {
   if (!svgRaw || typeof svgRaw !== "string") return svgRaw ?? null;
-  if (!layout || !layout.block) return svgRaw;
 
-  // Work on a mutable copy of the SVG string.
+  // Start from the incoming SVG string.
   let svg = svgRaw as string;
 
-  // Strip any previous alex-io-notes group so we don't double-stack legends.
+  // Strip any existing <g id="alex-io-notes">...</g> group (old legends).
   svg = svg.replace(
-    /<g[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g>/i,
+    /<g[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g>/gi,
     "",
   );
 
-  const block = layout.block || {};
-  const L = Number(block.lengthIn);
-  const W = Number(block.widthIn);
-  const T = Number(block.thicknessIn);
-
-  if (!Number.isFinite(L) || !Number.isFinite(W) || L <= 0 || W <= 0) {
-    // If dims are garbage, leave SVG unchanged.
-    return svg;
-  }
-
-  const lines: string[] = [];
-
-  // 1) Quote number
-  const safeQuoteNo = quoteNo && quoteNo.trim().length > 0 ? quoteNo.trim() : "";
-  if (safeQuoteNo) {
-    lines.push(`QUOTE: ${safeQuoteNo}`);
-  }
-
-  // 2) Simple scale warning
-  lines.push("NOT TO SCALE");
-
-  // 3) Block size (outside foam block)
-  if (Number.isFinite(T) && T > 0) {
-    lines.push(`BLOCK: ${L} x ${W} x ${T} in`);
-  } else {
-    lines.push(`BLOCK: ${L} x ${W} in (thickness see quote)`);
-  }
-
-  // 4) Material legend, if provided
-  if (materialLegend && materialLegend.trim().length > 0) {
-    lines.push(`MATERIAL: ${materialLegend.trim()}`);
-  }
-
-  if (lines.length === 0) {
-    return svg;
-  }
-
-  // Insert just before </svg>
-  const closeIdx = svg.lastIndexOf("</svg");
-  if (closeIdx === -1) {
-    // Not a normal SVG; leave it unchanged.
-    return svg;
-  }
-
-  const textYStart = 20;
-  const textYStep = 14;
-
-  const texts = lines
-    .map((line, i) => {
-      const y = textYStart + i * textYStep;
-      return `<text x="16" y="${y}" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#111827">${line}</text>`;
-    })
-    .join("");
-
-  const notesGroup = `<g id="alex-io-notes">${texts}</g>`;
-
-  const before = svg.slice(0, closeIdx);
-  const after = svg.slice(closeIdx);
-
-  return `${before}${notesGroup}\n${after}`;
+  // Do NOT add any new notes/legend; just return the cleaned SVG.
+  return svg;
 }
 
 /* ===================== POST: save layout (+ optional qty/material) ===================== */
@@ -436,7 +368,7 @@ export async function POST(req: NextRequest) {
     const dxf = buildDxfFromLayout(layout);
     const step: string | null = null;
 
-    // Annotate SVG (if provided) with quote legend.
+    // Clean SVG (strip alex-io-notes) if provided.
     const svgAnnotated = buildSvgWithAnnotations(
       layout,
       svgRaw,
@@ -444,7 +376,7 @@ export async function POST(req: NextRequest) {
       quoteNo,
     );
 
-    // Insert layout package (now including annotated svg_text, dxf_text, step_text).
+    // Insert layout package (now including cleaned svg_text, dxf_text, step_text).
     const pkg = await one<LayoutPkgRow>(
       `
       insert into quote_layout_packages (quote_id, layout_json, notes, svg_text, dxf_text, step_text)
