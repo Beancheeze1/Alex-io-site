@@ -223,7 +223,8 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       familyFilter = "AND material_family = 'Expanded Polyethylene'";
     }
 
-    const row = await one<any>(
+    // 1) First pass: LIKE + density (what we had before, but with is_active)
+    let row = await one<any>(
       `
       SELECT
         id,
@@ -249,40 +250,69 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       [like, densNum],
     );
 
-    if (row) {
-      if (!f.material_id) f.material_id = row.id;
-      if (!f.material_name) f.material_name = row.name;
-      if (!f.material_family && row.material_family) {
-        f.material_family = row.material_family;
-      }
-
-      // Only fill material from the DB if we had *nothing*.
-      // No PE/EPE cross-mapping here.
-      const familyFromRow: string | null =
-        row.material_family ||
-        row.category ||
-        row.subcategory ||
-        row.name ||
-        null;
-
-      if (!f.material && familyFromRow) {
-        f.material = familyFromRow;
-      }
-
-      if (!f.density && row.density_lb_ft3 != null) {
-        f.density = `${row.density_lb_ft3}lb`;
-      }
-      if (f.kerf_pct == null && row.kerf_pct != null)
-        f.kerf_pct = row.kerf_pct;
-      if (f.min_charge == null && row.min_charge != null)
-        f.min_charge = row.min_charge;
+    // 2) Fallback: if LIKE didn’t hit anything, just use family + density.
+    // This keeps PE and EPE separated, but makes us robust to naming noise.
+    if (!row) {
+      row = await one<any>(
+        `
+        SELECT
+          id,
+          name,
+          material_family,
+          category,
+          subcategory,
+          density_lb_ft3,
+          kerf_waste_pct AS kerf_pct,
+          min_charge_usd AS min_charge
+        FROM materials
+        WHERE is_active = true
+          ${familyFilter}
+        ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $1)
+        LIMIT 1;
+        `,
+        [densNum],
+      );
     }
+
+    if (!row) {
+      // Nothing we can do; leave facts alone.
+      return f;
+    }
+
+    if (!f.material_id) f.material_id = row.id;
+    if (!f.material_name) f.material_name = row.name;
+    if (!f.material_family && row.material_family) {
+      f.material_family = row.material_family;
+    }
+
+    // Only fill material from the DB if we had *nothing*.
+    // No PE/EPE cross-mapping here.
+    const familyFromRow: string | null =
+      row.material_family ||
+      row.category ||
+      row.subcategory ||
+      row.name ||
+      null;
+
+    if (!f.material && familyFromRow) {
+      f.material = familyFromRow;
+    }
+
+    if (!f.density && row.density_lb_ft3 != null) {
+      f.density = `${row.density_lb_ft3}lb`;
+    }
+    if (f.kerf_pct == null && row.kerf_pct != null)
+      f.kerf_pct = row.kerf_pct;
+    if (f.min_charge == null && row.min_charge != null)
+      f.min_charge = row.min_charge;
 
     return f;
   } catch {
+    // On any error, don’t block the quote; just return current facts.
     return f;
   }
 }
+
 
 
 /* ============================================================
