@@ -204,7 +204,8 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
   try {
     if (!f.material) return f;
 
-    const like = `%${String(f.material).toLowerCase()}%`;
+    const materialToken = String(f.material).toLowerCase().trim();
+    const like = `%${materialToken}%`;
     const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
 
     const row = await one<any>(
@@ -220,11 +221,26 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         min_charge_usd AS min_charge
       FROM materials
       WHERE active = true
-        AND (name ILIKE $1 OR material_family ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
-      ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $2)
+        AND (
+          name ILIKE $1
+          OR material_family ILIKE $1
+          OR category ILIKE $1
+          OR subcategory ILIKE $1
+        )
+      ORDER BY
+        -- Prefer the correct family based on the token (PE vs EPE),
+        -- but never collapse them into each other.
+        CASE
+          WHEN $3 = 'pe' AND material_family = 'Polyethylene' THEN 0
+          WHEN $3 = 'polyethylene' AND material_family = 'Polyethylene' THEN 0
+          WHEN $3 = 'epe' AND material_family = 'Expanded Polyethylene' THEN 0
+          WHEN $3 = 'expanded polyethylene' AND material_family = 'Expanded Polyethylene' THEN 0
+          ELSE 1
+        END,
+        ABS(COALESCE(density_lb_ft3, 0) - $2)
       LIMIT 1;
       `,
-      [like, densNum],
+      [like, densNum, materialToken],
     );
 
     if (row) {
@@ -234,9 +250,8 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         f.material_family = row.material_family;
       }
 
-      // Prefer the DB family as our "nice" label, but DO NOT
-      // cross-map PE/EPE/XLPE. We only fill material from family
-      // if material was completely missing.
+      // We only fill material from the DB family if we had nothing at all.
+      // We no longer do any "PE/EPE/XLPE" cross-mapping here.
       const familyFromRow: string | null =
         row.material_family ||
         row.category ||
