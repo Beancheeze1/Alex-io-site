@@ -1443,14 +1443,16 @@ function buildSvgFromLayout(
     .join("\n");
 
   // Header block: NOT TO SCALE, FOAM BLOCK dims, and material line if available.
-  const headerLines: string[] = [];
-  headerLines.push("NOT TO SCALE");
-  headerLines.push(
-    `FOAM BLOCK: ${block.lengthIn}" × ${block.widthIn}" × ${block.thicknessIn}"`,
-  );
-  if (meta?.materialLabel) {
-    headerLines.push(`MATERIAL: ${meta.materialLabel}`);
-  }
+ // Header block: NOT TO SCALE, block dims, material
+const headerLines: string[] = [];
+headerLines.push("NOT TO SCALE");
+headerLines.push(
+  `BLOCK: ${block.lengthIn}" × ${block.widthIn}" × ${block.thicknessIn}"`
+);
+if (meta?.materialLabel) {
+  headerLines.push(`MATERIAL: ${meta.materialLabel}`);
+}
+
 
   const headerSection = `
   <g>
