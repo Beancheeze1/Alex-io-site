@@ -25,10 +25,7 @@
 
 import * as React from "react";
 
-import {
-  CavityShape,
-  LayoutModel,
-} from "./editor/layoutTypes";
+import { CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
 
@@ -42,9 +39,7 @@ type SearchParams = {
  * - Uses the first non-empty entry when an array is provided
  * - Falls back to 10x10x2 if nothing usable is present
  */
-function normalizeDimsParam(
-  raw: string | string[] | undefined,
-): string {
+function normalizeDimsParam(raw: string | string[] | undefined): string {
   if (!raw) return "10x10x2";
   if (Array.isArray(raw)) {
     const first = raw.find((s) => s && s.trim());
@@ -61,9 +56,7 @@ function normalizeDimsParam(
  * - NEW: de-duplicate identical strings so
  *   "cavities=1x1x1&cavity=1x1x1" → "1x1x1" (one pocket)
  */
-function normalizeCavitiesParam(
-  raw: string | string[] | undefined,
-): string {
+function normalizeCavitiesParam(raw: string | string[] | undefined): string {
   if (!raw) return "";
   if (Array.isArray(raw)) {
     const cleaned = raw
@@ -194,21 +187,16 @@ export default function LayoutPage({
   const hasRealQuoteNo =
     !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
 
-  const quoteNo = hasRealQuoteNo
-    ? quoteNoFromUrl.trim()
-    : "Q-AI-EXAMPLE";
+  const quoteNo = hasRealQuoteNo ? quoteNoFromUrl.trim() : "Q-AI-EXAMPLE";
 
   /* ---------- Build initial layout (from DB if available) ---------- */
 
-  const [initialLayout, setInitialLayout] = React.useState<
-    LayoutModel | null
-  >(null);
-  const [initialNotes, setInitialNotes] = React.useState<string>("");
-  const [initialQty, setInitialQty] = React.useState<number | null>(
+  const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(
     null,
   );
-  const [loadingLayout, setLoadingLayout] =
-    React.useState<boolean>(true);
+  const [initialNotes, setInitialNotes] = React.useState<string>("");
+  const [initialQty, setInitialQty] = React.useState<number | null>(null);
+  const [loadingLayout, setLoadingLayout] = React.useState<boolean>(true);
 
   /**
    * Fallback layout builder, driven by arbitrary dims/cavities strings.
@@ -250,11 +238,9 @@ export default function LayoutPage({
           const rows = Math.ceil(count / cols);
 
           const availW =
-            Math.max(block.lengthIn - 2 * WALL_IN, 1) ||
-            block.lengthIn;
+            Math.max(block.lengthIn - 2 * WALL_IN, 1) || block.lengthIn;
           const availH =
-            Math.max(block.widthIn - 2 * WALL_IN, 1) ||
-            block.widthIn;
+            Math.max(block.widthIn - 2 * WALL_IN, 1) || block.widthIn;
 
           const cellW = availW / cols;
           const cellH = availH / rows;
@@ -263,10 +249,8 @@ export default function LayoutPage({
             const col = idx % cols;
             const row = Math.floor(idx / cols);
 
-            const rawX =
-              WALL_IN + col * cellW + (cellW - c.L) / 2;
-            const rawY =
-              WALL_IN + row * cellH + (cellH - c.W) / 2;
+            const rawX = WALL_IN + col * cellW + (cellW - c.L) / 2;
+            const rawY = WALL_IN + row * cellH + (cellH - c.W) / 2;
 
             const clamp = (v: number, min: number, max: number) =>
               v < min ? min : v > max ? max : v;
@@ -279,10 +263,8 @@ export default function LayoutPage({
             const xIn = clamp(rawX, minX, Math.max(minX, maxX));
             const yIn = clamp(rawY, minY, Math.max(minY, maxY));
 
-            const xNorm =
-              block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
-            const yNorm =
-              block.widthIn > 0 ? yIn / block.widthIn : 0.1;
+            const xNorm = block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
+            const yNorm = block.widthIn > 0 ? yIn / block.widthIn : 0.1;
 
             cavities.push({
               id: `cav-${idx + 1}`,
@@ -337,15 +319,11 @@ export default function LayoutPage({
             .forEach((v) => v && cavityParts.push(v));
 
           if (dimsCandidates.length > 0) {
-            effectiveBlockStr = normalizeDimsParam(
-              dimsCandidates[0],
-            );
+            effectiveBlockStr = normalizeDimsParam(dimsCandidates[0]);
           }
 
           if (cavityParts.length > 0) {
-            effectiveCavityStr = normalizeCavitiesParam(
-              cavityParts,
-            );
+            effectiveCavityStr = normalizeCavitiesParam(cavityParts);
           }
         }
       } catch {
@@ -410,10 +388,8 @@ export default function LayoutPage({
           !hasDimsFromUrl &&
           !hasCavitiesFromUrl
         ) {
-          const layoutFromDb = json.layoutPkg
-            .layout_json as LayoutModel;
-          const notesFromDb =
-            (json.layoutPkg.notes as string | null) ?? "";
+          const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
+          const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
 
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
@@ -496,13 +472,8 @@ function LayoutEditorHost(props: {
   initialNotes: string;
   initialQty: number | null;
 }) {
-  const {
-    quoteNo,
-    hasRealQuoteNo,
-    initialLayout,
-    initialNotes,
-    initialQty,
-  } = props;
+  const { quoteNo, hasRealQuoteNo, initialLayout, initialNotes, initialQty } =
+    props;
 
   const {
     layout,
@@ -590,7 +561,9 @@ function LayoutEditorHost(props: {
     try {
       setApplyStatus("saving");
 
-      const svg = buildSvgFromLayout(layout);
+      // NEW: include notes text inside the exported SVG so
+      // material + special callouts ride along with the CAD.
+      const svg = buildSvgFromLayout(layout, notes);
 
       const payload: any = {
         quoteNo,
@@ -744,8 +717,9 @@ function LayoutEditorHost(props: {
                 </div>
                 <div className="text-[11px] text-slate-400 mb-2">
                   Optional text for anything the foam layout needs to call out
-                  (loose parts, labels, extra protection, etc.). This will be
-                  saved with the quote when you apply.
+                  (loose parts, labels, extra protection, material, etc.). This
+                  will be saved with the quote and embedded in the SVG when you
+                  apply.
                 </div>
                 <textarea
                   value={notes}
@@ -894,9 +868,7 @@ function LayoutEditorHost(props: {
                       step={0.125}
                       value={block.lengthIn}
                       onChange={(e) => {
-                        const snapped = snapInches(
-                          Number(e.target.value),
-                        );
+                        const snapped = snapInches(Number(e.target.value));
                         updateBlockDims({ lengthIn: snapped });
                       }}
                       className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
@@ -911,9 +883,7 @@ function LayoutEditorHost(props: {
                       step={0.125}
                       value={block.widthIn}
                       onChange={(e) => {
-                        const snapped = snapInches(
-                          Number(e.target.value),
-                        );
+                        const snapped = snapInches(Number(e.target.value));
                         updateBlockDims({ widthIn: snapped });
                       }}
                       className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
@@ -928,9 +898,7 @@ function LayoutEditorHost(props: {
                       step={0.125}
                       value={block.thicknessIn}
                       onChange={(e) => {
-                        const snapped = snapInches(
-                          Number(e.target.value),
-                        );
+                        const snapped = snapInches(Number(e.target.value));
                         updateBlockDims({ thicknessIn: snapped });
                       }}
                       className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
@@ -1030,9 +998,7 @@ function LayoutEditorHost(props: {
                             step={0.125}
                             value={selectedCavity.lengthIn}
                             onChange={(e) => {
-                              const d = snapInches(
-                                Number(e.target.value),
-                              );
+                              const d = snapInches(Number(e.target.value));
                               updateCavityDims(selectedCavity.id, {
                                 lengthIn: d,
                                 widthIn: d,
@@ -1070,9 +1036,7 @@ function LayoutEditorHost(props: {
                             value={selectedCavity.lengthIn}
                             onChange={(e) =>
                               updateCavityDims(selectedCavity.id, {
-                                lengthIn: snapInches(
-                                  Number(e.target.value),
-                                ),
+                                lengthIn: snapInches(Number(e.target.value)),
                               })
                             }
                             className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
@@ -1088,9 +1052,7 @@ function LayoutEditorHost(props: {
                             value={selectedCavity.widthIn}
                             onChange={(e) =>
                               updateCavityDims(selectedCavity.id, {
-                                widthIn: snapInches(
-                                  Number(e.target.value),
-                                ),
+                                widthIn: snapInches(Number(e.target.value)),
                               })
                             }
                             className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
@@ -1153,7 +1115,7 @@ function LayoutEditorHost(props: {
 
 /* ---------- SVG export helper ---------- */
 
-function buildSvgFromLayout(layout: LayoutModel): string {
+function buildSvgFromLayout(layout: LayoutModel, notes?: string): string {
   const { block, cavities } = layout;
 
   const VIEW_W = 1000;
@@ -1176,7 +1138,8 @@ function buildSvgFromLayout(layout: LayoutModel): string {
       const x = blockX + c.x * blockW;
       const y = blockY + c.y * blockH;
 
-      const label = c.label ?? `${c.lengthIn}×${c.widthIn}×${c.depthIn}"`;
+      const baseLabel = c.label ?? `${c.lengthIn}×${c.widthIn}×${c.depthIn}"`;
+      const label = baseLabel;
 
       if (c.shape === "circle") {
         const r = Math.min(cavW, cavH) / 2;
@@ -1190,24 +1153,57 @@ function buildSvgFromLayout(layout: LayoutModel): string {
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(
           2,
         )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${label}</text>
+          font-size="10" fill="#111827">${escapeXml(label)}</text>
   </g>`;
       }
+
+      const rPx = (c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2);
 
       return `
   <g>
     <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
           width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
-          rx="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
-          ry="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
+          rx="${rPx}"
+          ry="${rPx}"
           fill="none" stroke="#111827" stroke-width="1" />
     <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
         2,
       )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${label}</text>
+          font-size="10" fill="#111827">${escapeXml(label)}</text>
   </g>`;
     })
     .join("\n");
+
+  // Optional notes block at the bottom of the SVG.
+  const noteLines = (notes || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  let notesSvg = "";
+  if (noteLines.length) {
+    // Anchor notes along the bottom-left, inside the viewbox.
+    const lineHeight = 14;
+    const firstLineY =
+      VIEW_H - PADDING - (noteLines.length + 1) * lineHeight;
+
+    const lines = noteLines
+      .map(
+        (line, idx) =>
+          `<text x="${PADDING + 6}" y="${firstLineY + (idx + 1) * lineHeight}" font-size="12" fill="#111827">${escapeXml(
+            line,
+          )}</text>`,
+      )
+      .join("\n");
+
+    notesSvg = `
+  <g>
+    <text x="${PADDING}" y="${firstLineY}" font-size="12" font-weight="bold" fill="#111827">
+      Notes:
+    </text>
+${lines}
+  </g>`;
+  }
 
   const VIEW_W_STR = VIEW_W.toString();
   const VIEW_H_STR = VIEW_H.toString();
@@ -1222,5 +1218,15 @@ function buildSvgFromLayout(layout: LayoutModel): string {
   )}"
         fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />
 ${cavRects}
+${notesSvg}
 </svg>`;
+}
+
+// Simple XML escape so notes and labels don't break the SVG
+function escapeXml(input: string): string {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
