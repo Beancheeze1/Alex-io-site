@@ -943,7 +943,12 @@ export async function POST(req: NextRequest) {
 
     /* ------------------- Parse new turn ------------------- */
 
-    let newly = extractAllFromTextAndSubject(lastText, subject);
+       let newly = extractAllFromTextAndSubject(lastText, subject);
+
+    // If the regex pass already found a main block size (e.g. from
+    // "overall dimension / outside size / block size"), we treat that
+    // as the source of truth and will not let the LLM override it.
+    const regexDims = newly.dims || null;
 
     const needsLLM =
       !newly.dims ||
@@ -956,12 +961,21 @@ export async function POST(req: NextRequest) {
     if (needsLLM) {
       const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
       newly = mergeFacts(newly, llmFacts);
+
+      // IMPORTANT: if the regex parser already gave us a dims value,
+      // keep it and ignore any conflicting dims suggested by the LLM.
+      // This prevents cavity sizes (like 1x1x0.5) from becoming the
+      // main block size when the email also includes an "overall" size.
+      if (regexDims) {
+        newly.dims = regexDims;
+      }
     }
 
     const hadNewQty = newly.qty != null;
     const hadNewCavities =
       Array.isArray(newly.cavityDims) && newly.cavityDims.length > 0;
     const hadNewDims = !!newly.dims;
+
 
     /* ------------------- Merge with memory ------------------- */
 
