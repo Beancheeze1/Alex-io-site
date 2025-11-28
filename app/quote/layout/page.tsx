@@ -1470,10 +1470,30 @@ if (meta?.materialLabel) {
       .join("\n    ")}
   </g>`;
 
-  // Notes at the bottom only (no dims here, no duplicate material)
+   // Notes at the bottom (material now lives in the header above)
+  // We keep real notes, but strip out old scaffold lines like
+  // "FOAM BLOCK:", "CAVITY 1:", "FOAM:", "MATERIAL:" so they
+  // don’t duplicate the new header.
   const metaLines: string[] = [];
-  if (meta?.notes) {
-    metaLines.push(`Notes: ${meta.notes}`);
+
+  if (meta?.notes && meta.notes.trim().length > 0) {
+    const rawNotes = meta.notes.trim();
+
+    const cleanedLines = rawNotes
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(
+        (line) =>
+          line &&
+          !/^FOAM(?:\s+BLOCK)?:/i.test(line) &&
+          !/^BLOCK:/i.test(line) &&
+          !/^CAVITY/i.test(line) &&
+          !/^MATERIAL:/i.test(line)
+      );
+
+    if (cleanedLines.length > 0) {
+      metaLines.push(`Notes: ${cleanedLines.join("  ")}`);
+    }
   }
 
   const metaSection =
@@ -1491,6 +1511,7 @@ if (meta?.materialLabel) {
       .join("\n    ")}
   </g>`
       : "";
+
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg"
