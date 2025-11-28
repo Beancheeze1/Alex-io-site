@@ -66,7 +66,7 @@ function mergeFacts(a: Mem, b: Mem): Mem {
   return { ...(a || {}), ...compact(b || {}) };
 }
 
-function pickThreadContext(threadMsgs: any[] = []): string {
+function pickThreadContext(threadMsgs: any[] = []) {
   const take = threadMsgs.slice(-3);
   const snippets = take
     .map((m) => {
@@ -119,9 +119,21 @@ function normalizeCavity(raw: string): string {
   return rect || raw.trim();
 }
 
+/**
+ * Option 1 behavior:
+ * - Clean up cavity dims
+ * - Preserve the user's stated cavityCount when possible
+ * - If they said "2 cavities" but only gave one size, duplicate that size
+ *   so lengths match (e.g. ["2x1x1", "2x1x1"]).
+ */
 function applyCavityNormalization(facts: Mem): Mem {
   if (!facts) return facts;
   if (!Array.isArray(facts.cavityDims)) return facts;
+
+  const originalCount =
+    typeof facts.cavityCount === "number" && facts.cavityCount > 0
+      ? facts.cavityCount
+      : undefined;
 
   const cleaned: string[] = [];
 
@@ -161,8 +173,25 @@ function applyCavityNormalization(facts: Mem): Mem {
     return facts;
   }
 
-  (facts as any).cavityDims = cleaned;
-  (facts as any).cavityCount = cleaned.length;
+  // Target count: prefer the user's stated count if it's reasonable,
+  // otherwise just use however many unique dims we parsed.
+  let targetCount =
+    originalCount && originalCount > 0 ? originalCount : cleaned.length;
+
+  if (targetCount < 1) {
+    targetCount = cleaned.length;
+  }
+
+  const finalDims: string[] = [...cleaned];
+
+  // If they said "2 cavities" but only one size parsed,
+  // duplicate the sizes in a simple repeating pattern.
+  while (finalDims.length < targetCount) {
+    finalDims.push(cleaned[finalDims.length % cleaned.length]);
+  }
+
+  (facts as any).cavityDims = finalDims;
+  (facts as any).cavityCount = targetCount;
 
   return facts;
 }
@@ -176,26 +205,21 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     if (!f.material) return f;
 
     const like = `%${String(f.material).toLowerCase()}%`;
-    const densNum = Number(
-      (f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0,
-    );
+    const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
 
-    // Updated for new materials schema with material_name / material_family / is_active
     const row = await one<any>(
       `
       SELECT
         id,
-        material_name,
-        material_family,
+        name,
+        category,
+        subcategory,
         density_lb_ft3,
         kerf_waste_pct AS kerf_pct,
         min_charge_usd AS min_charge
       FROM materials
-      WHERE is_active = true
-        AND (
-          material_name   ILIKE $1
-          OR material_family ILIKE $1
-        )
+      WHERE active = true
+        AND (name ILIKE $1 OR category ILIKE $1 OR subcategory ILIKE $1)
       ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $2)
       LIMIT 1;
       `,
@@ -203,35 +227,36 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     );
 
     if (row) {
-      // ID for pricing + quote_items
       if (!f.material_id) f.material_id = row.id;
+      if (!f.material_name) f.material_name = row.name;
 
-      // Grade / specific name (e.g. "1.7# Black")
-      if (!f.material_name) f.material_name = row.material_name;
+      // Prefer a "family" style label (Polyethylene, Polyurethane, etc.)
+      const familyFromRow: string | null =
+        row.category || row.subcategory || row.name || null;
 
-      // Canonical family (e.g. "Polyethylene") for specs + pipeline
-      if (!f.foam_family && row.material_family) {
-        f.foam_family = row.material_family;
+      // If we only had a shorthand like "pe" / "epe" / "xlpe",
+      // upgrade it to the nicer family label from the DB.
+      if (
+        familyFromRow &&
+        (!f.material ||
+          ["pe", "epe", "xlpe", "pu", "urethane"].includes(
+            String(f.material).toLowerCase(),
+          ))
+      ) {
+        f.material = familyFromRow;
       }
-      if (!f.material && row.material_family) {
-        f.material = row.material_family;
-      }
 
-      // Density, kerf, min charge from DB if missing
       if (!f.density && row.density_lb_ft3 != null) {
-        f.density = `${row.density_lb_ft3}#`;
+        f.density = `${row.density_lb_ft3}lb`;
       }
-      if (f.kerf_pct == null && row.kerf_pct != null) {
+      if (f.kerf_pct == null && row.kerf_pct != null)
         f.kerf_pct = row.kerf_pct;
-      }
-      if (f.min_charge == null && row.min_charge != null) {
+      if (f.min_charge == null && row.min_charge != null)
         f.min_charge = row.min_charge;
-      }
     }
 
     return f;
   } catch {
-    // If anything fails, just return the original facts
     return f;
   }
 }
@@ -395,8 +420,7 @@ async function fetchCalcQuote(opts: {
   round_to_bf: boolean;
 }) {
   const { L, W, H } = parseDimsNums(opts.dims);
-  const base =
-    process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
   // IMPORTANT 11/27:
   // For now we IGNORE cavity volume in pricing so that the
@@ -1044,8 +1068,7 @@ export async function POST(req: NextRequest) {
 
     let calc: any = null;
     let priceBreaks: PriceBreak[] | null = null;
-    const base =
-      process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
     if (canCalc) {
       calc = await fetchCalcQuote({
@@ -1152,20 +1175,6 @@ export async function POST(req: NextRequest) {
     const dimsNums = parseDimsNums(specs.dims);
     const densityPcf = densityToPcf(specs.density);
 
-    // NEW: separate the family (Specs) from the specific grade (Pricing)
-    const foamFamilyForSpecs =
-      merged.foam_family ||
-      specs.material ||
-      (typeof merged.material_name === "string"
-        ? merged.material_name
-        : null);
-
-    const materialDisplayName =
-      (typeof merged.material_name === "string" &&
-      merged.material_name.trim().length > 0
-        ? merged.material_name
-        : foamFamilyForSpecs) || null;
-
     const templateInput = {
       customerLine: opener,
       quoteNumber: merged.quoteNumber || merged.quote_no,
@@ -1176,7 +1185,7 @@ export async function POST(req: NextRequest) {
         H_in: dimsNums.H,
         qty: specs.qty,
         density_pcf: densityPcf,
-        foam_family: foamFamilyForSpecs,
+        foam_family: specs.material,
         thickness_under_in: merged.thickness_under_in,
         color: merged.color,
         // pass cavity info through to the template (for display + layout links)
@@ -1191,7 +1200,7 @@ export async function POST(req: NextRequest) {
       },
 
       material: {
-        name: materialDisplayName,
+        name: merged.material_name,
         density_lbft3: densityPcf,
         kerf_pct: merged.kerf_pct,
         min_charge: merged.min_charge,
