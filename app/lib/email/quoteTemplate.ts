@@ -197,13 +197,23 @@ export function renderQuoteEmail(input: TemplateInput): string {
       ? `${fmtNumber(specs.density_pcf, 1)} pcf`
       : "—";
 
-  // Prefer the material family that came from the email (PE / EPE / etc),
-  // but fall back to the DB material name if needed so both cards match.
-  const foamFamilySource =
-    (specs.foam_family && specs.foam_family.trim()) ||
-    (material.name && material.name.trim()) ||
-    "";
-  const foamFamily = foamFamilySource || "—";
+  // Normalize material name and foam family so we can show:
+  // - Specs: family-first
+  // - Pricing: "MaterialName — FoamFamily" when both are present
+  const materialNameClean =
+    (material.name && material.name.trim()) || "";
+  const foamFamilyClean =
+    (specs.foam_family && specs.foam_family.trim()) || "";
+
+  // Specs card: show a simple foam family label (fallback to material name)
+  const foamFamily =
+    foamFamilyClean || materialNameClean || "—";
+
+  // Pricing card: show combined label like "1030 White — Polyurethane Foam"
+  const matDisplayName =
+    materialNameClean && foamFamilyClean && materialNameClean !== foamFamilyClean
+      ? `${materialNameClean} — ${foamFamilyClean}`
+      : materialNameClean || foamFamilyClean || "—";
 
   const cavityLabel = buildCavityLabel(specs);
   const minThicknessUnderVal = computeMinThicknessUnder(specs);
@@ -212,7 +222,6 @@ export function renderQuoteEmail(input: TemplateInput): string {
       ? `${fmtNumber(minThicknessUnderVal, 2)} in`
       : "—";
 
-  const matName = foamFamily;
   const matDensity =
     material.density_lbft3 != null
       ? `${fmtNumber(material.density_lbft3, 1)} lb/ft³`
@@ -390,7 +399,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         </tr>
                         <tr>
                           <td style="width:48%;padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Material</td>
-                          <td style="width:52%;padding:4px 10px;font-size:12px;color:#cbd5f5;">${matName}</td>
+                          <td style="width:52%;padding:4px 10px;font-size:12px;color:#cbd5f5;">${matDisplayName}</td>
                         </tr>
                         <tr>
                           <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Density</td>
