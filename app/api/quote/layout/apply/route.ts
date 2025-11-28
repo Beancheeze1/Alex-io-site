@@ -64,19 +64,6 @@ function bad(body: any, status = 400) {
 
 /* ===================== DXF builder from layout (LINES + full header) ===================== */
 
-/**
- * DXF writer that:
- *  - Writes a basic R12-style HEADER with ACADVER + INSUNITS (inches).
- *  - Uses ENTITIES section with:
- *      - Foam block as 4 LINE entities (rectangle).
- *      - Each cavity as 4 LINE entities (rectangle).
- *
- * Layout assumptions (matches editor types, but we DO NOT change them):
- *  - layout.block: { lengthIn, widthIn, thicknessIn }
- *  - layout.cavities: [{ lengthIn, widthIn, depthIn, x, y }, ...]
- *      where x,y are normalized 0–1 coordinates for the top-left of the cavity
- *      relative to the block footprint.
- */
 function buildDxfFromLayout(layout: any): string | null {
   if (!layout || !layout.block) return null;
 
@@ -84,10 +71,9 @@ function buildDxfFromLayout(layout: any): string | null {
   let L = Number(block.lengthIn);
   let W = Number(block.widthIn);
 
-  // Basic sanity / fallback
   if (!Number.isFinite(L) || L <= 0) return null;
   if (!Number.isFinite(W) || W <= 0) {
-    W = L; // fallback to square if width is bad
+    W = L;
   }
 
   function fmt(n: number) {
@@ -99,7 +85,7 @@ function buildDxfFromLayout(layout: any): string | null {
       "0",
       "LINE",
       "8",
-      "0", // layer
+      "0",
       "10",
       fmt(x1),
       "20",
@@ -114,13 +100,11 @@ function buildDxfFromLayout(layout: any): string | null {
 
   const entities: string[] = [];
 
-  // 1) Foam block as outer rectangle from (0,0) to (L,W) – 4 LINES.
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // 2) Cavities as inner rectangles
   if (Array.isArray(layout.cavities)) {
     for (const cav of layout.cavities as any[]) {
       if (!cav) continue;
@@ -131,7 +115,7 @@ function buildDxfFromLayout(layout: any): string | null {
 
       if (!Number.isFinite(cL) || cL <= 0) continue;
       if (!Number.isFinite(cW) || cW <= 0) {
-        cW = cL; // fallback to square
+        cW = cL;
       }
       if (
         ![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)
@@ -139,7 +123,6 @@ function buildDxfFromLayout(layout: any): string | null {
         continue;
       }
 
-      // x,y are normalized top-left; convert to block inches.
       const left = L * nx;
       const top = W * ny;
 
@@ -152,7 +135,6 @@ function buildDxfFromLayout(layout: any): string | null {
 
   if (!entities.length) return null;
 
-  // Full-ish R12-style DXF with HEADER / TABLES / BLOCKS / ENTITIES.
   const header = [
     "0",
     "SECTION",
@@ -161,11 +143,11 @@ function buildDxfFromLayout(layout: any): string | null {
     "9",
     "$ACADVER",
     "1",
-    "AC1009", // R12
+    "AC1009",
     "9",
     "$INSUNITS",
     "70",
-    "1", // 1 = inches
+    "1",
     "0",
     "ENDSEC",
     "0",
@@ -194,12 +176,12 @@ function buildDxfFromLayout(layout: any): string | null {
 /* ===================== SVG annotator from layout ===================== */
 
 /**
- * For now, we strip any previous alex-io-notes legend from the SVG
- * and return the SVG with **no embedded notes at all**.
+ * For now, we strip any previous alex-io-notes legend AND any old legend
+ * text nodes (NOT TO SCALE / BLOCK: / FOAM BLOCK: / FOAM: / MATERIAL:)
+ * from the SVG and return it with **no embedded notes at all**.
  *
  * - Geometry + cavity labels from the editor remain untouched.
- * - Typed notes stay with the quote (quote_layout_packages.notes) and
- *   are NOT written into the SVG.
+ * - Typed notes stay with the quote (quote_layout_packages.notes).
  */
 function buildSvgWithAnnotations(
   layout: any,
@@ -209,16 +191,25 @@ function buildSvgWithAnnotations(
 ): string | null {
   if (!svgRaw || typeof svgRaw !== "string") return svgRaw ?? null;
 
-  // Start from the incoming SVG string.
   let svg = svgRaw as string;
 
-  // Strip any existing <g id="alex-io-notes">...</g> group (old legends).
+  // 1) Remove any previous <g id="alex-io-notes">...</g> groups.
   svg = svg.replace(
     /<g[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g>/gi,
     "",
   );
 
-  // Do NOT add any new notes/legend; just return the cleaned SVG.
+  // 2) Remove individual <text> nodes that look like our old legends.
+  //    We keep this narrow so we don't touch cavity dimension labels.
+  const legendLabelPattern =
+    /(NOT TO SCALE|FOAM BLOCK:|FOAM:|BLOCK:|MATERIAL:)/i;
+
+  svg = svg.replace(
+    /<text\b[^>]*>[\s\S]*?<\/text>/gi,
+    (match) => (legendLabelPattern.test(match) ? "" : match),
+  );
+
+  // Return cleaned SVG. We don't add any new notes.
   return svg;
 }
 
@@ -261,7 +252,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Material coming from the layout editor
   const rawMaterialId =
     body.materialId ?? body.material_id ?? body.material ?? null;
   let materialId: number | null = null;
@@ -297,14 +287,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Material details (for facts + SVG legend)
     let materialLegend: string | null = null;
     let materialNameForFacts: string | null = null;
     let materialFamilyForFacts: string | null = null;
     let materialDensityForFacts: number | null = null;
 
     if (materialId != null) {
-      // Update the PRIMARY quote item to this material
       await q(
         `
           update quote_items
@@ -364,11 +352,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Build DXF from the incoming layout; STEP left null for now.
     const dxf = buildDxfFromLayout(layout);
     const step: string | null = null;
 
-    // Clean SVG (strip alex-io-notes) if provided.
     const svgAnnotated = buildSvgWithAnnotations(
       layout,
       svgRaw,
@@ -376,7 +362,6 @@ export async function POST(req: NextRequest) {
       quoteNo,
     );
 
-    // Insert layout package (now including cleaned svg_text, dxf_text, step_text).
     const pkg = await one<LayoutPkgRow>(
       `
       insert into quote_layout_packages (quote_id, layout_json, notes, svg_text, dxf_text, step_text)
@@ -386,8 +371,6 @@ export async function POST(req: NextRequest) {
       [quote.id, layout, notes, svgAnnotated, dxf, step],
     );
 
-    // Optional: update qty on the PRIMARY quote item for this quote.
-    // We treat the "first" item (by id asc) as the primary line.
     let updatedQty: number | null = null;
 
     if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
@@ -412,15 +395,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Sync layout dims, cavities, qty, and material into the facts store
-    // so follow-up emails + layout links stay in sync with the editor.
     try {
       const factsKey = quoteNo;
       const prevFacts = await loadFacts(factsKey);
       const nextFacts: any =
         prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
 
-      // Outside size from the saved block
       if (layout && layout.block) {
         const L = Number(layout.block.lengthIn) || 0;
         const W = Number(layout.block.widthIn) || 0;
@@ -430,7 +410,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Cavities from the saved layout (LxWxD for each pocket)
       if (layout && Array.isArray(layout.cavities)) {
         const cavDims: string[] = [];
         for (const cav of layout.cavities as any[]) {
