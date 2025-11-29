@@ -207,7 +207,10 @@ function buildDxfFromLayout(layout: any): string | null {
  *
  *    This pushes the entire foam drawing down by 80 units, regardless of block size.
  *
- * 3) Inject a fresh legend group at the top, centered:
+ * 3) Increase the SVG's height / viewBox height by the same 80 units so the
+ *    shifted block is never clipped at the bottom.
+ *
+ * 4) Inject a fresh legend group at the top, centered:
  *
  *   <g id="alex-io-notes">
  *     <text>QUOTE: ...</text>
@@ -261,7 +264,8 @@ function buildSvgWithAnnotations(
 
   // 4) Split SVG into:
   //    <svg ...> [children...] </svg>
-  //    We'll wrap the children in a translated <g>, and inject notes just after <svg ...>.
+  //    We'll wrap the children in a translated <g>, bump height/viewBox,
+  //    and inject notes just after <svg ...>.
   const closeIdx = svg.lastIndexOf("</svg");
   if (closeIdx === -1) {
     return svg;
@@ -272,9 +276,43 @@ function buildSvgWithAnnotations(
     return svg;
   }
 
-  const svgOpen = svg.slice(0, firstTagEnd + 1); // <svg ...>
+  const GEOMETRY_SHIFT_Y = 80;
+
+  let svgOpen = svg.slice(0, firstTagEnd + 1); // <svg ...>
   const svgChildren = svg.slice(firstTagEnd + 1, closeIdx); // inner content
   const svgClose = svg.slice(closeIdx); // </svg ...>
+
+  // 4a) Helper to bump a numeric length attribute (e.g., height="400" or "400px").
+  function bumpLengthAttr(tag: string, attrName: string, delta: number): string {
+    const re = new RegExp(`${attrName}\\s*=\\s*"([^"]+)"`);
+    const m = tag.match(re);
+    if (!m) return tag;
+    const original = m[1];
+    const numMatch = original.match(/^([0-9.]+)/);
+    if (!numMatch) return tag;
+    const num = parseFloat(numMatch[1]);
+    if (!Number.isFinite(num)) return tag;
+    const suffix = original.slice(numMatch[1].length);
+    const updated = (num + delta).toString() + suffix;
+    return tag.replace(re, `${attrName}="${updated}"`);
+  }
+
+  // 4b) Bump viewBox height.
+  const vbRe = /viewBox\s*=\s*"([^"]+)"/;
+  const vbMatch = svgOpen.match(vbRe);
+  if (vbMatch) {
+    const parts = vbMatch[1].trim().split(/\s+/);
+    if (parts.length === 4) {
+      const h = parseFloat(parts[3]);
+      if (Number.isFinite(h)) {
+        parts[3] = (h + GEOMETRY_SHIFT_Y).toString();
+        svgOpen = svgOpen.replace(vbRe, `viewBox="${parts.join(" ")}"`);
+      }
+    }
+  }
+
+  // 4c) Bump height attribute, if present.
+  svgOpen = bumpLengthAttr(svgOpen, "height", GEOMETRY_SHIFT_Y);
 
   // 5) Build the lines we want in the legend band.
   const lines: string[] = [];
@@ -297,8 +335,9 @@ function buildSvgWithAnnotations(
   }
 
   if (!lines.length) {
-    // No legend lines → just return SVG with geometry only.
-    return svg;
+    // No legend lines → just return SVG with geometry only (but still shifted & taller).
+    const geometryGroupOnly = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
+    return `${svgOpen}\n${geometryGroupOnly}\n${svgClose}`;
   }
 
   // 6) Build the note texts, centered at the top of the SVG.
@@ -315,8 +354,7 @@ function buildSvgWithAnnotations(
   const notesGroup = `<g id="alex-io-notes">${notesTexts}</g>`;
 
   // 7) Shift the original geometry down with a translate, so it never collides
-  //    with the notes band at the top.
-  const GEOMETRY_SHIFT_Y = 80;
+  //    with the notes band at the top, and fits within the now-taller SVG.
   const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
 
   // 8) Reassemble the final SVG:
