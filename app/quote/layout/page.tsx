@@ -105,29 +105,35 @@ function parseDimsTriple(
   return { L, W, H };
 }
 
-// Simple parser for cavity dims; if only LxW, assume depth = 1"
+/**
+ * Simple parser for cavity dims.
+ * - Accepts decimals with or without leading zero: "1x1x.5" → D = 0.5
+ * - If only LxW are present, assume depth = 1"
+ */
 function parseCavityDims(
   raw: string,
 ): { L: number; W: number; D: number } | null {
+  if (!raw) return null;
   const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
-  let m =
-    t.match(
-      /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/,
-    ) || null;
-  if (m) {
-    const L = Number(m[1]) || 0;
-    const W = Number(m[2]) || 0;
-    const D = Number(m[3]) || 0;
+
+  // Extract all numeric tokens, allowing ".5" style values
+  const nums = (t.match(/(\d*\.?\d+)/g) || [])
+    .map((m) => Number(m))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  if (nums.length >= 3) {
+    const [L, W, D] = nums;
     if (!L || !W || !D) return null;
     return { L, W, D };
   }
-  m = t.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/);
-  if (m) {
-    const L = Number(m[1]) || 0;
-    const W = Number(m[2]) || 0;
+
+  if (nums.length >= 2) {
+    const [L, W] = nums;
     if (!L || !W) return null;
+    // If only LxW found, keep existing behavior: default depth = 1"
     return { L, W, D: 1 };
   }
+
   return null;
 }
 
@@ -1442,17 +1448,15 @@ function buildSvgFromLayout(
     })
     .join("\n");
 
-  // Header block: NOT TO SCALE, FOAM BLOCK dims, and material line if available.
- // Header block: NOT TO SCALE, block dims, material
-const headerLines: string[] = [];
-headerLines.push("NOT TO SCALE");
-headerLines.push(
-  `BLOCK: ${block.lengthIn}" × ${block.widthIn}" × ${block.thicknessIn}"`
-);
-if (meta?.materialLabel) {
-  headerLines.push(`MATERIAL: ${meta.materialLabel}`);
-}
-
+  // Header block: NOT TO SCALE, block dims, material
+  const headerLines: string[] = [];
+  headerLines.push("NOT TO SCALE");
+  headerLines.push(
+    `BLOCK: ${block.lengthIn}" × ${block.widthIn}" × ${block.thicknessIn}"`,
+  );
+  if (meta?.materialLabel) {
+    headerLines.push(`MATERIAL: ${meta.materialLabel}`);
+  }
 
   const headerSection = `
   <g>
@@ -1470,7 +1474,7 @@ if (meta?.materialLabel) {
       .join("\n    ")}
   </g>`;
 
-   // Notes at the bottom (material now lives in the header above)
+  // Notes at the bottom (material now lives in the header above)
   // We keep real notes, but strip out old scaffold lines like
   // "FOAM BLOCK:", "CAVITY 1:", "FOAM:", "MATERIAL:" so they
   // don’t duplicate the new header.
@@ -1488,7 +1492,7 @@ if (meta?.materialLabel) {
           !/^FOAM(?:\s+BLOCK)?:/i.test(line) &&
           !/^BLOCK:/i.test(line) &&
           !/^CAVITY/i.test(line) &&
-          !/^MATERIAL:/i.test(line)
+          !/^MATERIAL:/i.test(line),
       );
 
     if (cleanedLines.length > 0) {
@@ -1511,7 +1515,6 @@ if (meta?.materialLabel) {
       .join("\n    ")}
   </g>`
       : "";
-
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg"
