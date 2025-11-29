@@ -11,7 +11,12 @@
 //     "notes": "Loose parts in this pocket",
 //     "svg": "<svg>...</svg>",
 //     "qty": 100,             // OPTIONAL: new quantity for primary item
-//     "materialId": 6         // OPTIONAL: new material for primary item
+//     "materialId": 6,        // OPTIONAL: new material for primary item
+//     "customer": {           // OPTIONAL: customer info from editor
+//        "name": "Acme Inc.",
+//        "email": "buyer@acme.com",
+//        "phone": "555-123-4567"
+//     }
 //   }
 //////////////////////////
 // Behaviour:
@@ -23,6 +28,8 @@
 //   - If materialId is a positive number, updates the PRIMARY quote_items row
 //     for that quote to use the new material, and syncs material info into the
 //     facts store.
+//   - If customer info is provided from the editor, updates quotes.customer_name,
+//     quotes.email, and quotes.phone, and mirrors that into the facts store.
 //   - Also syncs dims / cavities / qty / material into the facts store
 //     (loadFacts/saveFacts) under quote_no so follow-up emails + layout links
 //     use the latest layout, not stale test data.
@@ -133,9 +140,7 @@ function buildDxfFromLayout(layout: any): string | null {
       if (!Number.isFinite(cW) || cW <= 0) {
         cW = cL; // fallback to square
       }
-      if (
-        ![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)
-      ) {
+      if (![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) {
         continue;
       }
 
@@ -353,20 +358,13 @@ function buildSvgWithAnnotations(
 
   const notesGroup = `<g id="alex-io-notes">${notesTexts}</g>`;
 
-  // 7) Shift the original geometry down with a translate, so it never collides
-  //    with the notes band at the top, and fits within the now-taller SVG.
   const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
 
-  // 8) Reassemble the final SVG:
-  //    <svg ...>
-  //      <g id="alex-io-notes">...</g>
-  //      <g id="alex-io-geometry" transform="translate(0, 80)">...</g>
-  //    </svg>
   const rebuilt = `${svgOpen}\n${notesGroup}\n${geometryGroup}\n${svgClose}`;
   return rebuilt;
 }
 
-/* ===================== POST: save layout (+ optional qty/material) ===================== */
+/* ===================== POST: save layout (+ optional qty/material/customer) ===================== */
 
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as any;
@@ -377,7 +375,7 @@ export async function POST(req: NextRequest) {
         ok: false,
         error: "missing_fields",
         message:
-          "POST body must include at least { quoteNo, layout }. Optional: { notes, svg, qty, materialId }. ",
+          "POST body must include at least { quoteNo, layout }. Optional: { notes, svg, qty, materialId, customer }. ",
       },
       400,
     );
@@ -403,6 +401,45 @@ export async function POST(req: NextRequest) {
       },
       400,
     );
+  }
+
+  // Optional customer info from the layout editor
+  const rawCustomer =
+    body.customer && typeof body.customer === "object" ? body.customer : null;
+
+  let customerName: string | null = null;
+  let customerEmail: string | null = null;
+  let customerPhone: string | null = null;
+
+  if (rawCustomer) {
+    const rawName =
+      rawCustomer.name ??
+      rawCustomer.customerName ??
+      rawCustomer.customer_name ??
+      null;
+    const rawEmail =
+      rawCustomer.email ??
+      rawCustomer.customerEmail ??
+      rawCustomer.customer_email ??
+      null;
+    const rawPhone =
+      rawCustomer.phone ??
+      rawCustomer.customerPhone ??
+      rawCustomer.customer_phone ??
+      null;
+
+    customerName =
+      typeof rawName === "string" && rawName.trim().length > 0
+        ? rawName.trim()
+        : null;
+    customerEmail =
+      typeof rawEmail === "string" && rawEmail.trim().length > 0
+        ? rawEmail.trim()
+        : null;
+    customerPhone =
+      typeof rawPhone === "string" && rawPhone.trim().length > 0
+        ? rawPhone.trim()
+        : null;
   }
 
   // Material coming from the layout editor
@@ -438,6 +475,21 @@ export async function POST(req: NextRequest) {
           message: `No quote header found for quote_no ${quoteNo}.`,
         },
         404,
+      );
+    }
+
+    // Optional: update customer info on the quote using editor input
+    if (customerName || customerEmail || customerPhone) {
+      await q(
+        `
+          update quotes
+          set
+            customer_name = coalesce($2, customer_name),
+            email = coalesce($3, email),
+            phone = coalesce($4, phone)
+          where id = $1
+        `,
+        [quote.id, customerName, customerEmail, customerPhone],
       );
     }
 
@@ -556,7 +608,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Sync layout dims, cavities, qty, and material into the facts store
+    // Sync layout dims, cavities, qty, material, and customer into the facts store
     // so follow-up emails + layout links stay in sync with the editor.
     try {
       const factsKey = quoteNo;
@@ -611,6 +663,17 @@ export async function POST(req: NextRequest) {
       }
       if (materialDensityForFacts != null) {
         nextFacts.material_density_lb_ft3 = materialDensityForFacts;
+      }
+
+      // Mirror customer info into facts if present
+      if (customerName) {
+        nextFacts.customer_name = customerName;
+      }
+      if (customerEmail) {
+        nextFacts.customer_email = customerEmail;
+      }
+      if (customerPhone) {
+        nextFacts.customer_phone = customerPhone;
       }
 
       if (Object.keys(nextFacts).length > 0) {
