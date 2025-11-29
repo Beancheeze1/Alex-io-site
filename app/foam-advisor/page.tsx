@@ -1,11 +1,12 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v3 + live curve canvas
+// Foam Advisor · Path A layout v4
 //
 // - Inputs on the LEFT
-// - Center: cushion-curve canvas that auto-loads the primary pick’s curve
-//   from /api/cushion/curves/{material_id} and marks the operating point.
-// - RIGHT: analysis summary + recommended materials (with View cushion curve link).
+// - Center: cushion-curve canvas that shows the selected recommendation’s curve
+//   from /api/cushion/curves/{material_id}, with the operating point marked.
+// - RIGHT: analysis summary + recommended materials, where you can choose
+//   which recommendation drives the center canvas.
 //
 // No changes to pricing, quotes, or existing core logic.
 //
@@ -125,6 +126,10 @@ export default function FoamAdvisorPage({
     React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState<boolean>(false);
 
+  // Which recommendation is currently driving the center canvas
+  const [selectedRecKey, setSelectedRecKey] =
+    React.useState<string | null>(null);
+
   // Materials catalog (from /api/materials)
   const [materials, setMaterials] =
     React.useState<MaterialOption[]>([]);
@@ -220,6 +225,7 @@ export default function FoamAdvisorPage({
     e.preventDefault();
     setAdvisorError(null);
     setAdvisorResult(null);
+    setSelectedRecKey(null);
     // reset curve state when running a new analysis
     setCurveMaterial(null);
     setCurvePoints([]);
@@ -294,7 +300,18 @@ export default function FoamAdvisorPage({
             : [],
       };
 
+      // Choose default recommendation for the canvas (primary, else first)
+      let defaultKey: string | null = null;
+      if (result.recommendations.length > 0) {
+        const primary =
+          result.recommendations.find(
+            (r) => r.confidence === "primary",
+          ) ?? result.recommendations[0];
+        defaultKey = primary.key;
+      }
+
       setAdvisorResult(result);
+      setSelectedRecKey(defaultKey);
     } catch (err) {
       console.error("Foam Advisor submit error", err);
       setAdvisorError(
@@ -363,20 +380,19 @@ export default function FoamAdvisorPage({
     [materials],
   );
 
-  // Auto-load a cushion curve for the primary recommendation's best match
+  // Auto-load a cushion curve for the selected recommendation's best match
   React.useEffect(() => {
     if (!advisorResult) return;
     if (!advisorResult.recommendations.length) return;
     if (!materials.length) return;
+    if (!selectedRecKey) return;
 
-    const primary =
-      advisorResult.recommendations.find(
-        (r) => r.confidence === "primary",
-      ) ?? advisorResult.recommendations[0];
+    const rec = advisorResult.recommendations.find(
+      (r) => r.key === selectedRecKey,
+    );
+    if (!rec) return;
 
-    if (!primary) return;
-
-    const matches = findMaterialsForRecommendation(primary);
+    const matches = findMaterialsForRecommendation(rec);
     if (!matches || matches.length === 0) return;
 
     const best = matches[0];
@@ -434,6 +450,7 @@ export default function FoamAdvisorPage({
   }, [
     advisorResult,
     materials,
+    selectedRecKey,
     findMaterialsForRecommendation,
     curveMaterial,
     curvePoints.length,
@@ -448,6 +465,19 @@ export default function FoamAdvisorPage({
     if (psi < 1.5) return "Typical 0–1.5 psi band";
     return "Firm / high psi band";
   }, [advisorResult]);
+
+  // Helper to find the currently selected recommendation
+  const selectedRecommendation: AdvisorRecommendation | null =
+    React.useMemo(() => {
+      if (!advisorResult || !advisorResult.recommendations.length)
+        return null;
+      if (!selectedRecKey) return null;
+      return (
+        advisorResult.recommendations.find(
+          (r) => r.key === selectedRecKey,
+        ) ?? null
+      );
+    }, [advisorResult, selectedRecKey]);
 
   return (
     <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
@@ -664,7 +694,7 @@ export default function FoamAdvisorPage({
                     Cushion curve canvas
                   </div>
                   <div className="text-[10px] text-slate-500">
-                    Auto-loads the primary pick’s curve and marks your load.
+                    Choose a recommendation on the right to drive this view.
                   </div>
                 </div>
 
@@ -673,9 +703,8 @@ export default function FoamAdvisorPage({
                   <div className="flex-1 flex items-center justify-center">
                     <div className="text-[11px] text-slate-500 text-center max-w-xs">
                       Run an analysis on the left. Once Foam Advisor has a
-                      static load and primary recommendation, this canvas will
-                      pull the matching cushion curve and show your operating
-                      point.
+                      static load and recommendations, this canvas will pull the
+                      matching cushion curve and show your operating point.
                     </div>
                   </div>
                 )}
@@ -743,7 +772,9 @@ export default function FoamAdvisorPage({
                     <div className="mt-3 flex-1 flex flex-col">
                       <div className="flex items-center justify-between mb-1">
                         <div className="text-[11px] font-semibold text-slate-100">
-                          Primary curve preview
+                          {selectedRecommendation
+                            ? `Curve preview: ${selectedRecommendation.label}`
+                            : "Primary curve preview"}
                         </div>
                         <div className="text-[10px] text-slate-500">
                           Source: public.cushion_curves
@@ -761,7 +792,7 @@ export default function FoamAdvisorPage({
                       {!curveLoading && curveError && (
                         <div className="flex-1 flex items-center justify-center">
                           <div className="rounded-xl border border-rose-700/70 bg-rose-950/60 px-3 py-2 text-[11px] text-rose-50 max-w-xs text-center">
-                            Couldn’t load cushion curve for the primary
+                            Couldn’t load cushion curve for the selected
                             recommendation.
                             <br />
                             <span className="font-mono">{curveError}</span>
@@ -803,7 +834,7 @@ export default function FoamAdvisorPage({
                                   shows your operating load.
                                 </>
                               ) : (
-                                "Plotting primary recommendation curve."
+                                "Plotting selected recommendation curve."
                               )}
                             </div>
 
@@ -1018,7 +1049,7 @@ export default function FoamAdvisorPage({
               </div>
             </section>
 
-            {/* RIGHT: Summary + recommendations */}
+            {/* RIGHT: Summary + recommendations (now clickable) */}
             <aside className="w-80 shrink-0 flex flex-col gap-3">
               {!advisorResult && (
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 text-[11px] text-slate-400">
@@ -1081,10 +1112,20 @@ export default function FoamAdvisorPage({
                             ? matchedMaterials[0]
                             : null;
 
+                        const isActive =
+                          !!selectedRecKey &&
+                          selectedRecKey === rec.key;
+
                         return (
                           <div
                             key={rec.key}
-                            className="mb-3 last:mb-0 rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2"
+                            className={[
+                              "mb-3 last:mb-0 rounded-xl border px-3 py-2 cursor-pointer transition",
+                              isActive
+                                ? "border-sky-500/90 bg-slate-900 shadow-[0_0_0_1px_rgba(56,189,248,0.4)]"
+                                : "border-slate-700 bg-slate-950/80 hover:border-sky-500/70 hover:bg-sky-500/5",
+                            ].join(" ")}
+                            onClick={() => setSelectedRecKey(rec.key)}
                           >
                             <div className="flex items-center justify-between mb-1">
                               <div>
@@ -1095,22 +1136,29 @@ export default function FoamAdvisorPage({
                                   {rec.family}
                                 </div>
                               </div>
-                              <span
-                                className={[
-                                  "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
-                                  rec.confidence === "primary"
-                                    ? "bg-sky-500/20 border border-sky-400 text-sky-100"
+                              <div className="flex flex-col items-end gap-1">
+                                <span
+                                  className={[
+                                    "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
+                                    rec.confidence === "primary"
+                                      ? "bg-sky-500/20 border border-sky-400 text-sky-100"
+                                      : rec.confidence === "alternative"
+                                      ? "bg-emerald-500/15 border border-emerald-400 text-emerald-100"
+                                      : "bg-slate-700/60 border border-slate-500 text-slate-100",
+                                  ].join(" ")}
+                                >
+                                  {rec.confidence === "primary"
+                                    ? "Primary pick"
                                     : rec.confidence === "alternative"
-                                    ? "bg-emerald-500/15 border border-emerald-400 text-emerald-100"
-                                    : "bg-slate-700/60 border border-slate-500 text-slate-100",
-                                ].join(" ")}
-                              >
-                                {rec.confidence === "primary"
-                                  ? "Primary pick"
-                                  : rec.confidence === "alternative"
-                                  ? "Alternative"
-                                  : "Stretch option"}
-                              </span>
+                                    ? "Alternative"
+                                    : "Stretch option"}
+                                </span>
+                                {isActive && (
+                                  <span className="inline-flex items-center rounded-full border border-sky-400/70 bg-sky-500/10 px-2 py-0.5 text-[9px] font-medium text-sky-100">
+                                    Showing on canvas
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <p className="leading-snug text-[11px] mb-1">
                               {rec.notes}
@@ -1141,6 +1189,7 @@ export default function FoamAdvisorPage({
                                       target="_blank"
                                       rel="noreferrer"
                                       className="inline-flex items-center rounded-full border border-sky-500/70 px-3 py-1 text-[10px] font-medium text-sky-100 hover:bg-sky-500/15 transition"
+                                      onClick={(e) => e.stopPropagation()}
                                     >
                                       View cushion curve
                                     </a>
