@@ -17,11 +17,21 @@ function bad(msg: string, detail?: any, status = 400) {
   return NextResponse.json({ ok: false, error: msg, detail }, { status });
 }
 
+// Support both [material_id] and [material-id] folder param names
+type RouteParams = {
+  material_id?: string;
+  "material-id"?: string;
+};
+
 export async function GET(
   req: NextRequest,
-  { params }: { params: { material_id?: string } },
+  { params }: { params: RouteParams },
 ) {
-  const rawId = params.material_id ?? "";
+  const rawId =
+    params.material_id ??
+    (params as any)["material-id"] ??
+    "";
+
   const materialId = Number(rawId);
 
   if (!Number.isFinite(materialId) || materialId <= 0) {
@@ -82,6 +92,10 @@ export async function GET(
     });
   } catch (err: any) {
     console.error("cushion-curves GET error:", err);
-    return bad("cushion_curves_exception", { message: String(err?.message || err) }, 500);
+    return bad(
+      "cushion_curves_exception",
+      { message: String(err?.message || err) },
+      500,
+    );
   }
 }
