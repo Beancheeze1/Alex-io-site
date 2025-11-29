@@ -1,17 +1,18 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A skeleton
+// Foam Advisor · Path A step 2
 //
-// - Accessed from the layout editor "Recommend my foam" button.
-// - Reads ?quote_no= and ?block=LxWxH from the searchParams prop.
-// - Shows a simple form for:
+// - Reads ?quote_no= and ?block=LxWxH from searchParams prop.
+// - Lets the user enter:
 //     • Product weight (lb)
 //     • Contact area (in²)
 //     • Environment
 //     • Fragility
-// - Prefills contact area from block L×W when available.
-// - NO calls to pricing, quotes, or cushion_curves yet.
-//   This is a UI-only starting point, safe for Path A.
+// - On submit, POSTS to /api/foam-advisor/recommend and shows:
+//     • Static load summary
+//     • 2–3 generic foam recommendations.
+// - Still NO direct DB access here; the API is a stub that we can
+//   later swap to read from materials + cushion_curves.
 //
 
 "use client";
@@ -23,6 +24,22 @@ type FragilityOption = "very_fragile" | "moderate" | "rugged";
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
+};
+
+type AdvisorRecommendation = {
+  key: string;
+  family: string;
+  label: string;
+  confidence: "primary" | "alternative" | "stretch";
+  notes: string;
+};
+
+type AdvisorResult = {
+  staticLoadPsi: number;
+  staticLoadPsiLabel: string;
+  environmentLabel: string;
+  fragilityLabel: string;
+  recommendations: AdvisorRecommendation[];
 };
 
 function parseBlockDims(
@@ -46,7 +63,7 @@ export default function FoamAdvisorPage({
 }: {
   searchParams?: SearchParams;
 }) {
-  // ----- Read query params from props (no useSearchParams hook) -----
+  // ----- Read query params from props -----
 
   const quoteParam = searchParams?.quote_no ?? searchParams?.quote ?? "";
   const quoteNo = Array.isArray(quoteParam)
@@ -72,8 +89,13 @@ export default function FoamAdvisorPage({
     React.useState<EnvironmentOption>("normal");
   const [fragility, setFragility] =
     React.useState<FragilityOption>("moderate");
-  const [submittedSummary, setSubmittedSummary] =
+
+  // Advisor result / status
+  const [advisorResult, setAdvisorResult] =
+    React.useState<AdvisorResult | null>(null);
+  const [advisorError, setAdvisorError] =
     React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState<boolean>(false);
 
   // Prefill contact area from block L×W if available
   React.useEffect(() => {
@@ -88,8 +110,10 @@ export default function FoamAdvisorPage({
     }
   }, [parsedBlock]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAdvisorError(null);
+    setAdvisorResult(null);
 
     const w = Number(weightLb);
     const a = Number(contactAreaIn2);
@@ -103,37 +127,72 @@ export default function FoamAdvisorPage({
       return;
     }
 
-    // For now, we only show a friendly summary.
-    // A later Path A step will call a real /api/foam-advisor endpoint
-    // that uses materials + cushion_curves to pick 2–3 foams.
-    const staticLoadPsi = w / a;
+    try {
+      setSubmitting(true);
 
-    let envLabel = "Normal shipping";
-    if (environment === "cold_chain") envLabel = "Cold chain / low temp";
-    if (environment === "vibration")
-      envLabel = "Heavy vibration / rough handling";
+      const res = await fetch("/api/foam-advisor/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weightLb: w,
+          contactAreaIn2: a,
+          environment,
+          fragility,
+          quoteNo: quoteNo || null,
+          block: blockParam || null,
+        }),
+      });
 
-    let fragLabel = "General industrial";
-    if (fragility === "very_fragile")
-      fragLabel = "Very fragile electronics / optics";
-    if (fragility === "rugged") fragLabel = "Rugged hardware";
+      if (!res.ok) {
+        let payload: any = null;
+        try {
+          payload = await res.json();
+        } catch {
+          // ignore
+        }
+        const message =
+          payload?.error === "invalid_weight"
+            ? "The weight value was not valid."
+            : payload?.error === "invalid_area"
+            ? "The contact-area value was not valid."
+            : "Foam Advisor had trouble analyzing this input.";
+        setAdvisorError(message);
+        return;
+      }
 
-    const parts: string[] = [];
-    parts.push(
-      `Static load ≈ ${staticLoadPsi.toFixed(3)} psi (weight ÷ area).`,
-    );
-    parts.push(`Environment: ${envLabel}.`);
-    parts.push(`Fragility band: ${fragLabel}.`);
-    if (parsedBlock) {
-      parts.push(
-        `Block: ${parsedBlock.L}" × ${parsedBlock.W}" × ${parsedBlock.H}" (from layout).`,
+      const json: any = await res.json();
+      if (!json || !json.ok) {
+        setAdvisorError(
+          "Foam Advisor returned an unexpected response.",
+        );
+        return;
+      }
+
+      const result: AdvisorResult = {
+        staticLoadPsi: Number(json.staticLoadPsi) || 0,
+        staticLoadPsiLabel:
+          json.staticLoadPsiLabel ||
+          "Static load calculated from weight and contact area.",
+        environmentLabel:
+          json.environmentLabel || "Shipping environment",
+        fragilityLabel:
+          json.fragilityLabel || "Product fragility band",
+        recommendations:
+          Array.isArray(json.recommendations) &&
+          json.recommendations.length > 0
+            ? json.recommendations
+            : [],
+      };
+
+      setAdvisorResult(result);
+    } catch (err) {
+      console.error("Foam Advisor submit error", err);
+      setAdvisorError(
+        "Foam Advisor is unavailable right now. Please try again.",
       );
+    } finally {
+      setSubmitting(false);
     }
-    if (quoteNo) {
-      parts.push(`Linked quote: ${quoteNo}.`);
-    }
-
-    setSubmittedSummary(parts.join(" "));
   };
 
   const hasQuote = !!quoteNo;
@@ -180,8 +239,10 @@ export default function FoamAdvisorPage({
           {/* Body */}
           <div className="p-6 bg-slate-950/90 text-slate-100">
             <p className="text-[11px] text-slate-400 mb-4 leading-snug">
-              Start by telling Alex-IO about your product and how it ships. In a
-              later step, this advisor will use your existing{" "}
+              Start by telling Alex-IO about your product and how it ships. This
+              advisor calculates your static load and suggests foam families as
+              a starting point. In a later Path A step, this same screen will
+              use your{" "}
               <span className="font-semibold text-sky-300">
                 materials
               </span>{" "}
@@ -189,8 +250,8 @@ export default function FoamAdvisorPage({
               <span className="font-semibold text-sky-300">
                 cushion_curves
               </span>{" "}
-              tables to recommend 2–3 foam options (PE / PU / XLPE) and show
-              where your operating point lands on the curve.
+              tables to return live recommendations and highlight your
+              operating point on the curve.
             </p>
 
             {parsedBlock && (
@@ -201,7 +262,7 @@ export default function FoamAdvisorPage({
                   {parsedBlock.L}" × {parsedBlock.W}" × {parsedBlock.H}"
                 </span>
                 <span className="ml-2 text-slate-400">
-                  (contact area prefilled from L × W when empty)
+                  (contact area can start from L × W)
                 </span>
               </div>
             )}
@@ -272,8 +333,7 @@ export default function FoamAdvisorPage({
                     </option>
                   </select>
                   <span className="text-[10px] text-slate-500">
-                    Helps pick curves and safety factors for harsher shipping
-                    conditions.
+                    Helps tune the recommendation toward harsher conditions.
                   </span>
                 </label>
 
@@ -307,29 +367,105 @@ export default function FoamAdvisorPage({
               <div className="pt-2 flex items-center gap-3">
                 <button
                   type="submit"
-                  className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition"
+                  disabled={submitting}
+                  className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
                 >
-                  Analyze and prepare recommendation
+                  {submitting
+                    ? "Analyzing…"
+                    : "Analyze and prepare recommendation"}
                 </button>
                 <span className="text-[11px] text-slate-500">
-                  For now this shows a summary and static load. Next step will
-                  return actual foam picks.
+                  This version uses generic foam families. Next step: wire this
+                  into your real materials + cushion_curves data.
                 </span>
               </div>
             </form>
 
-            {submittedSummary && (
-              <div className="mt-5 rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
-                <div className="font-semibold text-sky-200 mb-1">
-                  Analysis summary (preview only)
+            {advisorError && (
+              <div className="mt-4 rounded-xl border border-amber-600 bg-amber-900/60 px-4 py-3 text-[11px] text-amber-50">
+                {advisorError}
+              </div>
+            )}
+
+            {advisorResult && (
+              <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Summary card */}
+                <div className="md:col-span-1 rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
+                  <div className="font-semibold text-sky-200 mb-1">
+                    Analysis summary
+                  </div>
+                  <p className="mb-2">{advisorResult.staticLoadPsiLabel}</p>
+                  <p className="mb-1">
+                    <span className="font-semibold">Environment: </span>
+                    {advisorResult.environmentLabel}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Fragility: </span>
+                    {advisorResult.fragilityLabel}
+                  </p>
+                  {parsedBlock && (
+                    <p className="mt-2 text-[10px] text-slate-500">
+                      Block from layout: {parsedBlock.L}" × {parsedBlock.W}" ×{" "}
+                      {parsedBlock.H}".
+                    </p>
+                  )}
                 </div>
-                <p className="leading-snug">{submittedSummary}</p>
-                <p className="mt-2 text-[10px] text-slate-500">
-                  In a future Path A step, this screen will list the top 2–3
-                  foam families/grades from your database (PE, PU, XLPE) and can
-                  show a comparison cushion curve with your operating point
-                  highlighted.
-                </p>
+
+                {/* Recommendations */}
+                <div className="md:col-span-2 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[11px] font-semibold text-slate-100">
+                      Suggested foam families (preview)
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Generic bands only – will be hooked to your actual
+                      materials list.
+                    </div>
+                  </div>
+
+                  {advisorResult.recommendations.length === 0 ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-300">
+                      No specific suggestions returned for this combination yet.
+                    </div>
+                  ) : (
+                    advisorResult.recommendations.map((rec) => (
+                      <div
+                        key={rec.key}
+                        className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div>
+                            <div className="font-semibold">
+                              {rec.label}
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              {rec.family}
+                            </div>
+                          </div>
+                          <span
+                            className={[
+                              "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
+                              rec.confidence === "primary"
+                                ? "bg-sky-500/20 border border-sky-400 text-sky-100"
+                                : rec.confidence === "alternative"
+                                ? "bg-emerald-500/15 border border-emerald-400 text-emerald-100"
+                                : "bg-slate-700/60 border border-slate-500 text-slate-100",
+                            ].join(" ")}
+                          >
+                            {rec.confidence === "primary"
+                              ? "Primary pick"
+                              : rec.confidence === "alternative"
+                              ? "Alternative"
+                              : "Stretch option"}
+                          </span>
+                        </div>
+                        <p className="mt-1 leading-snug text-[11px]">
+                          {rec.notes}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             )}
           </div>
