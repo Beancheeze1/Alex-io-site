@@ -1,13 +1,14 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v2
+// Foam Advisor · Path A layout v2 + curve link
 //
 // - Inputs on the LEFT
 // - Center reserved for graphical cushion-curve canvas
 // - RIGHT shows analysis summary + recommended materials
+// - NEW: each recommendation card links to the cushion-curve viewer
+//   for the first matched catalog material.
 //
-// All behavior is the same as before (POST to /api/foam-advisor/recommend
-// and mapping to /api/materials). This is a visual/layout reshuffle only.
+// No changes to pricing, quotes, or existing APIs.
 //
 
 "use client";
@@ -586,19 +587,12 @@ export default function FoamAdvisorPage({
                         {/* Firm band */}
                         <div className="absolute inset-y-0 left-2/3 w-1/3 bg-amber-500/25" />
 
-                        {/* Operating point marker (just normalized psi range) */}
+                        {/* Operating point marker (normalized 0–3 psi) */}
                         {advisorResult.staticLoadPsi > 0 && (
-                          <div
-                            className="absolute inset-y-0 flex items-center"
-                            style={{
-                              left: "0%",
-                              right: "0%",
-                            }}
-                          >
+                          <div className="absolute inset-y-0 flex items-center">
                             {(() => {
                               const psi =
                                 advisorResult.staticLoadPsi || 0;
-                              // Clamp into 0–3 psi range for now
                               const clamped =
                                 psi <= 0
                                   ? 0
@@ -607,10 +601,7 @@ export default function FoamAdvisorPage({
                                   : psi;
                               const pct = (clamped / 3) * 100;
                               return (
-                                <div
-                                  className="relative h-full w-full"
-                                  style={{}}
-                                >
+                                <div className="relative h-full w-full">
                                   <div
                                     className="absolute top-0 bottom-0 w-[2px] bg-slate-50 shadow-[0_0_6px_rgba(248,250,252,0.9)]"
                                     style={{ left: `${pct}%` }}
@@ -700,6 +691,11 @@ export default function FoamAdvisorPage({
                         const matchedMaterials =
                           findMaterialsForRecommendation(rec);
 
+                        const firstMatched =
+                          matchedMaterials.length > 0
+                            ? matchedMaterials[0]
+                            : null;
+
                         return (
                           <div
                             key={rec.key}
@@ -752,6 +748,20 @@ export default function FoamAdvisorPage({
                                     </li>
                                   ))}
                                 </ul>
+
+                                {firstMatched && (
+                                  <div className="mt-2">
+                                    <a
+                                      href={`/admin/cushion/curves/${firstMatched.id}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center rounded-full border border-sky-500/70 px-3 py-1 text-[10px] font-medium text-sky-100 hover:bg-sky-500/15 transition"
+                                    >
+                                      View cushion curve
+                                    </a>
+                                  </div>
+                                )}
+
                                 {materialsLoading && (
                                   <div className="mt-1 text-[10px] text-slate-500">
                                     Loading materials…
