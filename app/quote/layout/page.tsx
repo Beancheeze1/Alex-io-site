@@ -24,6 +24,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 
 import { CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { useLayoutModel } from "./editor/useLayoutModel";
@@ -606,6 +607,8 @@ function LayoutEditorHost(props: {
     initialCustomerPhone,
   } = props;
 
+  const router = useRouter();
+
   const {
     layout,
     selectedId,
@@ -790,6 +793,29 @@ function LayoutEditorHost(props: {
     const yNorm = yIn / block.widthIn;
 
     updateCavityPosition(selectedCavity.id, xNorm, yNorm);
+  };
+
+  /* ---------- Foam Advisor navigation ---------- */
+
+  const handleGoToFoamAdvisor = () => {
+    const params = new URLSearchParams();
+
+    if (hasRealQuoteNo && quoteNo) {
+      params.set("quote_no", quoteNo);
+    }
+
+    const L = Number(block.lengthIn) || 0;
+    const W = Number(block.widthIn) || 0;
+    const T = Number(block.thicknessIn) || 0;
+
+    if (L > 0 && W > 0 && T >= 0) {
+      params.set("block", `${L}x${W}x${T}`);
+    }
+
+    const query = params.toString();
+    const url = query ? `/foam-advisor?${query}` : "/foam-advisor";
+
+    router.push(url);
   };
 
   /* ---------- Apply to quote ---------- */
@@ -1120,7 +1146,7 @@ function LayoutEditorHost(props: {
                   )}
                 </div>
 
-                {/* zoom + qty + apply button */}
+                {/* zoom + qty + advisor + apply button */}
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-1 text-[11px] text-slate-400">
                     <span>Zoom</span>
@@ -1156,6 +1182,14 @@ function LayoutEditorHost(props: {
                       className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
                     />
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={handleGoToFoamAdvisor}
+                    className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition"
+                  >
+                    Recommend my foam
+                  </button>
 
                   <button
                     type="button"
