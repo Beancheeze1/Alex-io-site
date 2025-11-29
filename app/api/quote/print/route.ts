@@ -20,6 +20,7 @@ type QuoteRow = {
   customer_name: string;
   email: string | null;
   phone: string | null;
+  company: string | null;
   status: string;
   created_at: string;
 };
@@ -189,7 +190,15 @@ export async function GET(req: NextRequest) {
   try {
     const quote = await one<QuoteRow>(
       `
-        select id, quote_no, customer_name, email, phone, status, created_at
+        select
+          id,
+          quote_no,
+          customer_name,
+          email,
+          phone,
+          company,
+          status,
+          created_at
         from quotes
         where quote_no = $1
       `,

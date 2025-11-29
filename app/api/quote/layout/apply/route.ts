@@ -15,6 +15,7 @@
 //     "customer": {           // OPTIONAL: customer info from editor
 //        "name": "Acme Inc.",
 //        "email": "buyer@acme.com",
+//        "company": "Acme Corporation",
 //        "phone": "555-123-4567"
 //     }
 //   }
@@ -29,7 +30,8 @@
 //     for that quote to use the new material, and syncs material info into the
 //     facts store.
 //   - If customer info is provided from the editor, updates quotes.customer_name,
-//     quotes.email, and quotes.phone, and mirrors that into the facts store.
+//     quotes.email, quotes.phone, and quotes.company, and mirrors that into the
+//     facts store.
 //   - Also syncs dims / cavities / qty / material into the facts store
 //     (loadFacts/saveFacts) under quote_no so follow-up emails + layout links
 //     use the latest layout, not stale test data.
@@ -410,6 +412,7 @@ export async function POST(req: NextRequest) {
   let customerName: string | null = null;
   let customerEmail: string | null = null;
   let customerPhone: string | null = null;
+  let customerCompany: string | null = null;
 
   if (rawCustomer) {
     const rawName =
@@ -427,6 +430,12 @@ export async function POST(req: NextRequest) {
       rawCustomer.customerPhone ??
       rawCustomer.customer_phone ??
       null;
+    const rawCompany =
+      rawCustomer.company ??
+      rawCustomer.companyName ??
+      rawCustomer.customerCompany ??
+      rawCustomer.customer_company ??
+      null;
 
     customerName =
       typeof rawName === "string" && rawName.trim().length > 0
@@ -439,6 +448,10 @@ export async function POST(req: NextRequest) {
     customerPhone =
       typeof rawPhone === "string" && rawPhone.trim().length > 0
         ? rawPhone.trim()
+        : null;
+    customerCompany =
+      typeof rawCompany === "string" && rawCompany.trim().length > 0
+        ? rawCompany.trim()
         : null;
   }
 
@@ -479,17 +492,18 @@ export async function POST(req: NextRequest) {
     }
 
     // Optional: update customer info on the quote using editor input
-    if (customerName || customerEmail || customerPhone) {
+    if (customerName || customerEmail || customerPhone || customerCompany) {
       await q(
         `
           update quotes
           set
             customer_name = coalesce($2, customer_name),
             email = coalesce($3, email),
-            phone = coalesce($4, phone)
+            phone = coalesce($4, phone),
+            company = coalesce($5, company)
           where id = $1
         `,
-        [quote.id, customerName, customerEmail, customerPhone],
+        [quote.id, customerName, customerEmail, customerPhone, customerCompany],
       );
     }
 
@@ -674,6 +688,9 @@ export async function POST(req: NextRequest) {
       }
       if (customerPhone) {
         nextFacts.customer_phone = customerPhone;
+      }
+      if (customerCompany) {
+        nextFacts.customer_company = customerCompany;
       }
 
       if (Object.keys(nextFacts).length > 0) {

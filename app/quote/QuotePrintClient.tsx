@@ -31,6 +31,7 @@ type QuoteRow = {
   customer_name: string;
   email: string | null;
   phone: string | null;
+  company: string | null;
   status: string;
   created_at: string;
 };
@@ -410,6 +411,8 @@ export default function QuotePrintClient() {
   };
 
   // ===================== RENDER =====================
+
+
   return (
     <div
       style={{
@@ -538,6 +541,7 @@ export default function QuotePrintClient() {
                   }}
                 >
                   {quote.customer_name}
+                  {quote.company ? <> • {quote.company}</> : null}
                   {quote.email ? <> • {quote.email}</> : null}
                   {quote.phone ? <> • {quote.phone}</> : null}
                 </p>
@@ -822,11 +826,13 @@ export default function QuotePrintClient() {
                                     machineCost,
                                   )} before markup.`
                                 : ""}
+
                               {setupFee && setupFee > 0
                                 ? ` A one-time setup fee of ${formatUsd(
                                     setupFee,
                                   )} is included.`
                                 : ""}
+
                               {minChargeApplied
                                 ? ` A minimum charge of ${formatUsd(
                                     primaryPricing.min_charge ??
