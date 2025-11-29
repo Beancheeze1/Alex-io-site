@@ -1,9 +1,9 @@
-// app/admin/cushion-curves/[material_id]/page.tsx
+// app/admin/cushion/curves/[material_id]/page.tsx
 //
 // Read-only cushion curve viewer for a single material.
-// URL: /admin/cushion-curves/[material_id]
+// URL: /admin/cushion/curves/[material_id]
 //
-// - Uses /api/cushion-curves/[material_id]
+// - Uses /api/cushion/curves/[material_id]
 // - Shows material name + family
 // - Shows a simple table of points (static_psi, deflect_pct, g_level)
 // - No editing, no impact on pricing or quotes.
@@ -41,9 +41,19 @@ type ApiResponse =
       detail?: any;
     };
 
+// Support both [material_id] and [material-id] just in case
+type RouteParams = {
+  material_id?: string;
+  "material-id"?: string;
+};
+
 export default function CushionCurvesMaterialPage() {
-  const params = useParams<{ material_id: string }>();
-  const materialId = params?.material_id ?? "";
+  const params = useParams<RouteParams>();
+
+  const materialId =
+    params?.material_id ??
+    (params as any)?.["material-id"] ??
+    "";
 
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -58,7 +68,7 @@ export default function CushionCurvesMaterialPage() {
       setError(null);
 
       try {
-        const res = await fetch(`/api/cushion-curves/${materialId}`, {
+        const res = await fetch(`/api/cushion/curves/${materialId}`, {
           cache: "no-store",
         });
 
@@ -295,7 +305,9 @@ export default function CushionCurvesMaterialPage() {
                             {p.g_level.toFixed(1)}
                           </td>
                           <td className="px-3 py-1.5 text-slate-300">
-                            {p.source || <span className="text-slate-500">—</span>}
+                            {p.source || (
+                              <span className="text-slate-500">—</span>
+                            )}
                           </td>
                         </tr>
                       ))}
