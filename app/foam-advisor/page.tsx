@@ -13,7 +13,7 @@
 //   for each recommendation, shows matching materials (PE / PU / XLPE)
 //   in the density band suggested by the API.
 // - NEW: For each matched catalog material, shows a
-//   “View cushion curve” link to /admin/cushion-curves/[material_id],
+//   “View cushion curve” link to /admin/cushion/curves/[material_id],
 //   and marks the first match as “Best match in catalog”.
 //
 // Still NO cushion_curves math here yet; that will be a later step.
@@ -635,7 +635,7 @@ export default function FoamAdvisorPage({
                                       )}
                                     </div>
                                     <a
-                                      href={`/admin/cushion-curves/${m.id}`}
+                                      href={`/admin/cushion/curves/${m.id}`}
                                       target="_blank"
                                       rel="noreferrer"
                                       className="shrink-0 inline-flex items-center rounded-full border border-sky-500/70 px-2 py-0.5 text-[9px] font-medium text-sky-100 hover:bg-sky-500/15"
