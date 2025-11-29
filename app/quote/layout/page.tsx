@@ -3,7 +3,7 @@
 // Layout editor host page (wide).
 // - Left: palette + notes
 // - Center: large canvas
-// - Right: block + cavity inspector
+// - Right: block + cavity inspector + customer info
 // - Apply to quote posts layout + notes + SVG to /api/quote/layout/apply
 //
 // Extras:
@@ -105,35 +105,29 @@ function parseDimsTriple(
   return { L, W, H };
 }
 
-/**
- * Simple parser for cavity dims.
- * - Accepts decimals with or without leading zero: "1x1x.5" → D = 0.5
- * - If only LxW are present, assume depth = 1"
- */
+// Simple parser for cavity dims; if only LxW, assume depth = 1"
 function parseCavityDims(
   raw: string,
 ): { L: number; W: number; D: number } | null {
-  if (!raw) return null;
   const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
-
-  // Extract all numeric tokens, allowing ".5" style values
-  const nums = (t.match(/(\d*\.?\d+)/g) || [])
-    .map((m) => Number(m))
-    .filter((n) => Number.isFinite(n) && n > 0);
-
-  if (nums.length >= 3) {
-    const [L, W, D] = nums;
+  let m =
+    t.match(
+      /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/,
+    ) || null;
+  if (m) {
+    const L = Number(m[1]) || 0;
+    const W = Number(m[2]) || 0;
+    const D = Number(m[3]) || 0;
     if (!L || !W || !D) return null;
     return { L, W, D };
   }
-
-  if (nums.length >= 2) {
-    const [L, W] = nums;
+  m = t.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/);
+  if (m) {
+    const L = Number(m[1]) || 0;
+    const W = Number(m[2]) || 0;
     if (!L || !W) return null;
-    // If only LxW found, keep existing behavior: default depth = 1"
     return { L, W, D: 1 };
   }
-
   return null;
 }
 
@@ -547,6 +541,10 @@ function LayoutEditorHost(props: {
     deleteCavity,
   } = useLayoutModel(initialLayout);
 
+  const { block, cavities } = layout;
+  const selectedCavity =
+    cavities.find((c) => c.id === selectedId) || null;
+
   const [zoom, setZoom] = React.useState(1);
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
@@ -555,6 +553,14 @@ function LayoutEditorHost(props: {
   const [qty, setQty] = React.useState<number | "">(
     initialQty != null ? initialQty : "",
   );
+
+  // NEW: customer info (Option A — Name + Email required)
+  const [customerName, setCustomerName] = React.useState<string>("");
+  const [customerEmail, setCustomerEmail] = React.useState<string>("");
+  const [customerCompany, setCustomerCompany] =
+    React.useState<string>("");
+  const [customerPhone, setCustomerPhone] =
+    React.useState<string>("");
 
   const [materials, setMaterials] =
     React.useState<MaterialOption[]>([]);
@@ -626,40 +632,36 @@ function LayoutEditorHost(props: {
   }, []);
 
   // 🔧 SAFE MATERIAL GROUPING + SORT (no localeCompare crashes, no PE/EPE remap)
-  const materialsByFamily = React.useMemo(
-    () => {
-      const map = new Map<string, MaterialOption[]>();
+  const materialsByFamily = React.useMemo(() => {
+    const map = new Map<string, MaterialOption[]>();
 
-      for (const m of materials) {
-        const safeName =
-          (m.name && m.name.trim().length > 0
-            ? m.name
-            : `Material #${m.id}`) || `Material #${m.id}`;
-        const key = m.family || "Other";
+    for (const m of materials) {
+      const safeName =
+        (m.name && m.name.trim().length > 0
+          ? m.name
+          : `Material #${m.id}`) || `Material #${m.id}`;
+      const key = m.family || "Other";
 
-        const entry: MaterialOption = {
-          ...m,
-          name: safeName,
-        };
+      const entry: MaterialOption = {
+        ...m,
+        name: safeName,
+      };
 
-        if (!map.has(key)) map.set(key, []);
-        map.get(key)!.push(entry);
-      }
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(entry);
+    }
 
-      for (const [, list] of map) {
-        list.sort((a, b) =>
-          (a.name || "").localeCompare(b.name || ""),
-        );
-      }
+    for (const [, list] of map) {
+      list.sort((a, b) =>
+        (a.name || "").localeCompare(b.name || ""),
+      );
+    }
 
-      return Array.from(map.entries());
-    },
-    [materials],
-  );
+    return Array.from(map.entries());
+  }, [materials]);
 
-  const { block, cavities } = layout;
-  const selectedCavity =
-    cavities.find((c) => c.id === selectedId) || null;
+  const missingCustomerInfo =
+    !customerName.trim() || !customerEmail.trim();
 
   /* ---------- Palette interactions ---------- */
 
@@ -721,6 +723,13 @@ function LayoutEditorHost(props: {
       return;
     }
 
+    if (missingCustomerInfo) {
+      alert(
+        "Please add at least a customer name and email before applying this layout to the quote.",
+      );
+      return;
+    }
+
     try {
       setApplyStatus("saving");
 
@@ -769,6 +778,12 @@ function LayoutEditorHost(props: {
         layout,
         notes,
         svg,
+        customer: {
+          name: customerName.trim(),
+          email: customerEmail.trim(),
+          company: customerCompany.trim() || null,
+          phone: customerPhone.trim() || null,
+        },
       };
 
       const nQty = Number(qty);
@@ -821,6 +836,9 @@ function LayoutEditorHost(props: {
   };
 
   /* ---------- Layout ---------- */
+
+  const canApplyButton =
+    hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
 
   return (
     <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
@@ -1063,11 +1081,13 @@ function LayoutEditorHost(props: {
                   <button
                     type="button"
                     onClick={handleApplyToQuote}
-                    disabled={!hasRealQuoteNo || applyStatus === "saving"}
+                    disabled={!canApplyButton}
                     className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
                   >
                     {!hasRealQuoteNo
                       ? "Link to a quote first"
+                      : missingCustomerInfo
+                      ? "Add name + email"
                       : applyStatus === "saving"
                       ? "Applying…"
                       : applyStatus === "done"
@@ -1102,7 +1122,7 @@ function LayoutEditorHost(props: {
               </div>
             </section>
 
-            {/* RIGHT: Inspector */}
+            {/* RIGHT: Inspector + customer info */}
             <aside className="w-70 shrink-0 flex flex-col gap-3">
               {/* Block editor */}
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
@@ -1166,6 +1186,76 @@ function LayoutEditorHost(props: {
                     />
                   </label>
                 </div>
+              </div>
+
+              {/* NEW: Customer info card */}
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+                <div className="text-xs font-semibold text-slate-100 mb-1">
+                  Customer info
+                </div>
+                <div className="text-[11px] text-slate-400 mb-2">
+                  Add who this foam layout is for.{" "}
+                  <span className="text-sky-300">
+                    Name + email are required before applying.
+                  </span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-300">
+                      Customer name <span className="text-rose-300">*</span>
+                    </span>
+                    <input
+                      type="text"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-300">
+                      Company (optional)
+                    </span>
+                    <input
+                      type="text"
+                      value={customerCompany}
+                      onChange={(e) => setCustomerCompany(e.target.value)}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-300">
+                      Email <span className="text-rose-300">*</span>
+                    </span>
+                    <input
+                      type="email"
+                      value={customerEmail}
+                      onChange={(e) => setCustomerEmail(e.target.value)}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-300">
+                      Phone (optional)
+                    </span>
+                    <input
+                      type="tel"
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    />
+                  </label>
+                </div>
+
+                {missingCustomerInfo && hasRealQuoteNo && (
+                  <div className="mt-2 text-[11px] text-amber-300">
+                    Enter a name and email to enable{" "}
+                    <span className="font-semibold">Apply to quote</span>.
+                  </div>
+                )}
               </div>
 
               {/* Cavities list + editor */}
@@ -1506,11 +1596,12 @@ function buildSvgFromLayout(
   <g>
     ${metaLines
       .map(
-        (line, idx) => `<text x="${PADDING.toFixed(
-          2,
-        )}" y="${(VIEW_H - PADDING + idx * 14).toFixed(
-          2,
-        )}" font-size="10" fill="#111827">${escapeText(line)}</text>`,
+        (line, idx) =>
+          `<text x="${PADDING.toFixed(
+            2,
+          )}" y="${(VIEW_H - PADDING + idx * 14).toFixed(
+            2,
+          )}" font-size="10" fill="#111827">${escapeText(line)}</text>`,
       )
       .join("\n    ")}
   </g>`
