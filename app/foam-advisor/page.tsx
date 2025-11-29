@@ -1,21 +1,13 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout refresh
+// Foam Advisor · Path A layout v2
 //
-// - Reads ?quote_no= and ?block=LxWxH from searchParams prop.
-// - Lets the user enter:
-//     • Product weight (lb)
-//     • Contact area (in²)
-//     • Environment
-//     • Fragility
-// - On submit, POSTS to /api/foam-advisor/recommend.
-// - ALSO loads your real foam catalog from /api/materials and,
-//   for each recommendation, shows matching materials (PE / PU / XLPE)
-//   in the density band suggested by the API.
+// - Inputs on the LEFT
+// - Center reserved for graphical cushion-curve canvas
+// - RIGHT shows analysis summary + recommended materials
 //
-// This version keeps all behavior the same, but wraps the UI in the
-// same three-column dark layout shell as the layout editor so that
-// clicking “Recommend my foam” feels visually consistent.
+// All behavior is the same as before (POST to /api/foam-advisor/recommend
+// and mapping to /api/materials). This is a visual/layout reshuffle only.
 //
 
 "use client";
@@ -124,7 +116,6 @@ export default function FoamAdvisorPage({
     const { L, W } = parsedBlock;
     if (L > 0 && W > 0) {
       const area = L * W;
-      // Only prefill if user hasn't started typing
       setContactAreaIn2((prev) =>
         prev.trim() ? prev : area.toFixed(1),
       );
@@ -307,7 +298,6 @@ export default function FoamAdvisorPage({
           return true;
         });
 
-        // If nothing is in the band, fall back to any in the family
         if (filtered.length === 0) {
           filtered = familyMatches;
         }
@@ -330,6 +320,16 @@ export default function FoamAdvisorPage({
     },
     [materials],
   );
+
+  // Simple helper for the center bar visualization
+  const operatingBandLabel = React.useMemo(() => {
+    if (!advisorResult) return null;
+    const psi = advisorResult.staticLoadPsi;
+    if (!Number.isFinite(psi) || psi <= 0) return null;
+    if (psi < 0.5) return "Soft / low psi band";
+    if (psi < 1.5) return "Typical 0–1.5 psi band";
+    return "Firm / high psi band";
+  }, [advisorResult]);
 
   return (
     <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
@@ -376,24 +376,22 @@ export default function FoamAdvisorPage({
             </div>
           </div>
 
-          {/* Body – three-column layout like the editor */}
+          {/* Body – three-column layout */}
           <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100">
-            {/* LEFT: context + block info */}
-            <aside className="w-60 shrink-0 flex flex-col gap-3">
+            {/* LEFT: Inputs + context */}
+            <aside className="w-72 shrink-0 flex flex-col gap-3">
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                 <div className="text-xs font-semibold text-slate-100 mb-1">
                   How this works
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Tell Alex-IO about your product and how it ships. Foam
-                  Advisor calculates static load and suggests foam families as a
-                  starting point.
+                  Enter the product weight, contact area, environment, and
+                  fragility. Foam Advisor computes static load and suggests foam
+                  families as a starting point.
                 </p>
                 <p className="mt-2 text-[11px] text-slate-500">
-                  In later Path A steps, this screen will pull directly from{" "}
-                  <span className="text-sky-300">materials</span> and{" "}
-                  <span className="text-sky-300">cushion_curves</span> to
-                  highlight your operating point on real curves.
+                  In later Path A steps, this will drive a live cushion-curve
+                  overlay in the center canvas.
                 </p>
               </div>
 
@@ -407,28 +405,17 @@ export default function FoamAdvisorPage({
                   </div>
                   <div className="mt-1 text-slate-400">
                     Contact area can start as L × W for snug fits. You can
-                    override it in the form.
+                    override it below.
                   </div>
                 </div>
               )}
-            </aside>
-
-            {/* CENTER: form + result */}
-            <section className="flex-1 flex flex-col gap-3">
-              {/* Intro text */}
-              <p className="text-[11px] text-slate-400 leading-snug">
-                Start by telling Alex-IO about your product and how it ships.
-                This advisor calculates your static load and suggests foam
-                families as a starting point. Later, the same inputs will drive
-                a live cushion-curve overlay.
-              </p>
 
               {/* Advisor form */}
               <form
                 onSubmit={handleSubmit}
-                className="space-y-4 max-w-xl text-xs bg-slate-900 rounded-2xl border border-slate-800 p-4"
+                className="space-y-4 text-xs bg-slate-900 rounded-2xl border border-slate-800 p-4"
               >
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3">
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-300">
                       Product weight (lb)
@@ -462,13 +449,12 @@ export default function FoamAdvisorPage({
                       className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                     />
                     <span className="text-[10px] text-slate-500">
-                      Area of foam directly supporting the product. For a snug
-                      fit, this is often close to the cavity footprint.
+                      Area of foam directly supporting the product.
                     </span>
                   </label>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3">
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-300">
                       Shipping environment
@@ -493,7 +479,7 @@ export default function FoamAdvisorPage({
                       </option>
                     </select>
                     <span className="text-[10px] text-slate-500">
-                      Helps tune the recommendation toward harsher conditions.
+                      Tunes recommendations toward harsher or gentler handling.
                     </span>
                   </label>
 
@@ -521,12 +507,12 @@ export default function FoamAdvisorPage({
                       </option>
                     </select>
                     <span className="text-[10px] text-slate-500">
-                      Later this will map to g-level bands for selecting curves.
+                      Later this maps to g-level bands for curve selection.
                     </span>
                   </label>
                 </div>
 
-                <div className="pt-2 flex items-center gap-3">
+                <div className="pt-1 flex items-center gap-3">
                   <button
                     type="submit"
                     disabled={submitting}
@@ -536,31 +522,138 @@ export default function FoamAdvisorPage({
                       ? "Analyzing…"
                       : "Analyze and prepare recommendation"}
                   </button>
-                  <span className="text-[11px] text-slate-500">
-                    Uses your foam catalog to show example materials for each
-                    pick.
-                  </span>
                 </div>
+
+                {advisorError && (
+                  <div className="mt-3 rounded-xl border border-amber-600 bg-amber-900/60 px-3 py-2 text-[11px] text-amber-50">
+                    {advisorError}
+                  </div>
+                )}
+
+                {materialsError && (
+                  <div className="mt-2 rounded-xl border border-amber-700 bg-amber-950/70 px-3 py-2 text-[11px] text-amber-100">
+                    {materialsError}
+                  </div>
+                )}
               </form>
+            </aside>
 
-              {/* Errors */}
-              {advisorError && (
-                <div className="mt-3 rounded-xl border border-amber-600 bg-amber-900/60 px-4 py-3 text-[11px] text-amber-50">
-                  {advisorError}
+            {/* CENTER: Graphical cushion canvas placeholder */}
+            <section className="flex-1 flex flex-col">
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 flex-1 flex flex-col">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm font-semibold text-slate-100">
+                    Cushion curve canvas
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    This area is reserved for live curves and operating point.
+                  </div>
+                </div>
+
+                {!advisorResult && (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-[11px] text-slate-500 text-center max-w-xs">
+                      Run an analysis on the left. Once Foam Advisor has a
+                      static load, this canvas will show how your operating
+                      point sits in the soft / typical / firm band, and later
+                      will overlay real cushion curves by material.
+                    </div>
+                  </div>
+                )}
+
+                {advisorResult && (
+                  <div className="flex-1 flex flex-col justify-between gap-4">
+                    <div className="text-[11px] text-slate-300">
+                      <div className="mb-1">
+                        <span className="font-semibold text-sky-200">
+                          Static load:
+                        </span>{" "}
+                        {advisorResult.staticLoadPsi.toFixed(3)} psi
+                      </div>
+                      <p>{advisorResult.staticLoadPsiLabel}</p>
+                    </div>
+
+                    {/* Simple band visualization */}
+                    <div className="mt-2">
+                      <div className="text-[11px] text-slate-300 mb-1">
+                        Operating band preview
+                      </div>
+                      <div className="relative h-10 rounded-full overflow-hidden border border-slate-700 bg-slate-950">
+                        {/* Soft band */}
+                        <div className="absolute inset-y-0 left-0 w-1/3 bg-emerald-500/25" />
+                        {/* Typical band */}
+                        <div className="absolute inset-y-0 left-1/3 w-1/3 bg-sky-500/25" />
+                        {/* Firm band */}
+                        <div className="absolute inset-y-0 left-2/3 w-1/3 bg-amber-500/25" />
+
+                        {/* Operating point marker (just normalized psi range) */}
+                        {advisorResult.staticLoadPsi > 0 && (
+                          <div
+                            className="absolute inset-y-0 flex items-center"
+                            style={{
+                              left: "0%",
+                              right: "0%",
+                            }}
+                          >
+                            {(() => {
+                              const psi =
+                                advisorResult.staticLoadPsi || 0;
+                              // Clamp into 0–3 psi range for now
+                              const clamped =
+                                psi <= 0
+                                  ? 0
+                                  : psi >= 3
+                                  ? 3
+                                  : psi;
+                              const pct = (clamped / 3) * 100;
+                              return (
+                                <div
+                                  className="relative h-full w-full"
+                                  style={{}}
+                                >
+                                  <div
+                                    className="absolute top-0 bottom-0 w-[2px] bg-slate-50 shadow-[0_0_6px_rgba(248,250,252,0.9)]"
+                                    style={{ left: `${pct}%` }}
+                                  />
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                      {operatingBandLabel && (
+                        <div className="mt-1 text-[10px] text-slate-400">
+                          {operatingBandLabel}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 text-[10px] text-slate-500">
+                      Future step: for each recommended material, this canvas
+                      will pull points from{" "}
+                      <span className="font-mono text-sky-300">
+                        public.cushion_curves
+                      </span>{" "}
+                      and draw the actual curve, with your operating point
+                      highlighted.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* RIGHT: Summary + recommendations */}
+            <aside className="w-80 shrink-0 flex flex-col gap-3">
+              {!advisorResult && (
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 text-[11px] text-slate-400">
+                  Run an analysis on the left to see a summary and mapped foam
+                  families here.
                 </div>
               )}
 
-              {materialsError && (
-                <div className="mt-3 rounded-xl border border-amber-700 bg-amber-950/70 px-4 py-3 text-[11px] text-amber-100">
-                  {materialsError}
-                </div>
-              )}
-
-              {/* Results */}
               {advisorResult && (
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Analysis summary card */}
-                  <div className="md:col-span-1 rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
+                <>
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
                     <div className="font-semibold text-sky-200 mb-1">
                       Analysis summary
                     </div>
@@ -587,19 +680,18 @@ export default function FoamAdvisorPage({
                     )}
                   </div>
 
-                  {/* Recommendations */}
-                  <div className="md:col-span-2 space-y-3">
-                    <div className="flex items-center justify-between">
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200 max-h-[420px] overflow-auto">
+                    <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-semibold text-slate-100">
-                        Suggested foam families (mapped to your catalog)
+                        Suggested foam families
                       </div>
                       <div className="text-[10px] text-slate-500">
-                        Using /api/materials to show example SKUs.
+                        Using /api/materials for catalog mapping.
                       </div>
                     </div>
 
                     {advisorResult.recommendations.length === 0 ? (
-                      <div className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-300">
+                      <div className="text-[11px] text-slate-300">
                         No specific suggestions returned for this combination
                         yet.
                       </div>
@@ -611,7 +703,7 @@ export default function FoamAdvisorPage({
                         return (
                           <div
                             key={rec.key}
-                            className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200"
+                            className="mb-3 last:mb-0 rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2"
                           >
                             <div className="flex items-center justify-between mb-1">
                               <div>
@@ -639,12 +731,12 @@ export default function FoamAdvisorPage({
                                   : "Stretch option"}
                               </span>
                             </div>
-                            <p className="mt-1 leading-snug text-[11px]">
+                            <p className="leading-snug text-[11px] mb-1">
                               {rec.notes}
                             </p>
 
                             {matchedMaterials.length > 0 && (
-                              <div className="mt-2 text-[10px] text-slate-400">
+                              <div className="mt-1 text-[10px] text-slate-400">
                                 <div className="font-semibold text-[10px] text-slate-300 mb-0.5">
                                   In your catalog:
                                 </div>
@@ -672,36 +764,8 @@ export default function FoamAdvisorPage({
                       })
                     )}
                   </div>
-                </div>
+                </>
               )}
-            </section>
-
-            {/* RIGHT: legend / future curve info */}
-            <aside className="w-64 shrink-0 flex flex-col gap-3">
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                <div className="text-xs font-semibold text-slate-100 mb-1">
-                  What&apos;s coming next
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  Once cushion curves are wired in, this panel will show how the
-                  chosen foam family sits on the curve at your operating psi,
-                  with soft / typical / firm bands highlighted.
-                </p>
-              </div>
-
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                <div className="text-xs font-semibold text-slate-100 mb-1">
-                  Catalog mapping
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  Each recommendation is mapped to your real materials by
-                  family and density band. This uses the same{" "}
-                  <span className="font-mono text-sky-300">
-                    /api/materials
-                  </span>{" "}
-                  endpoint the layout editor uses.
-                </p>
-              </div>
             </aside>
           </div>
         </div>
