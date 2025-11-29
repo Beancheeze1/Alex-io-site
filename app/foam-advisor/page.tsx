@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A "big + beautiful" step
+// Foam Advisor · Path A layout refresh
 //
 // - Reads ?quote_no= and ?block=LxWxH from searchParams prop.
 // - Lets the user enter:
@@ -9,16 +9,13 @@
 //     • Environment
 //     • Fragility
 // - On submit, POSTS to /api/foam-advisor/recommend.
-// - Loads your real foam catalog from /api/materials and,
+// - ALSO loads your real foam catalog from /api/materials and,
 //   for each recommendation, shows matching materials (PE / PU / XLPE)
 //   in the density band suggested by the API.
-// - “View cushion curve” link goes to /admin/cushion/curves/[material_id].
 //
-// NEW (this step):
-//   • Summary shows weight, contact area, and static load together.
-//   • Adds a visual "Operating point" gauge (0–10 psi) for quick feel.
-//   • Each recommendation shows the target density band as a tiny bar.
-//   • All logic still uses existing advisor + materials; no new math yet.
+// This version keeps all behavior the same, but wraps the UI in the
+// same three-column dark layout shell as the layout editor so that
+// clicking “Recommend my foam” feels visually consistent.
 //
 
 "use client";
@@ -156,9 +153,8 @@ export default function FoamAdvisorPage({
             (m: any) => ({
               id: m.id,
               name:
-                (m.name ??
-                  m.material_name ??
-                  `Material #${m.id}`) || `Material #${m.id}`,
+                (m.name ?? m.material_name ?? `Material #${m.id}`) ||
+                `Material #${m.id}`,
               family: m.material_family || "Uncategorized",
               density_lb_ft3:
                 typeof m.density_lb_ft3 === "number"
@@ -278,25 +274,6 @@ export default function FoamAdvisorPage({
 
   const hasQuote = !!quoteNo;
 
-  // Basic view of the current inputs (for the summary card)
-  const inputWeight = Number(weightLb);
-  const hasWeight =
-    Number.isFinite(inputWeight) && inputWeight > 0;
-  const inputArea = Number(contactAreaIn2);
-  const hasArea =
-    Number.isFinite(inputArea) && inputArea > 0;
-
-  // Operating-point gauge (0–10 psi window for now)
-  const operatingStaticPsi = advisorResult?.staticLoadPsi ?? 0;
-  const normalizedOperating = React.useMemo(() => {
-    if (!advisorResult) return 0;
-    const raw = advisorResult.staticLoadPsi;
-    if (!Number.isFinite(raw) || raw <= 0) return 0;
-    const maxPsi = 10; // simple visual band for now
-    const frac = raw / maxPsi;
-    return Math.max(0, Math.min(1, frac));
-  }, [advisorResult]);
-
   // Helper: find best catalog matches for a recommendation
   const findMaterialsForRecommendation = React.useCallback(
     (rec: AdvisorRecommendation): MaterialOption[] => {
@@ -356,434 +333,376 @@ export default function FoamAdvisorPage({
 
   return (
     <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
-      <div className="w-full max-w-4xl mx-auto">
+      <div className="w-full max-w-6xl mx-auto">
         <div className="rounded-2xl border border-slate-800 bg-slate-950/90 shadow-[0_22px_45px_rgba(15,23,42,0.85)] overflow-hidden">
-          {/* Header */}
+          {/* Header – match layout editor vibe */}
           <div className="border-b border-slate-800 bg-gradient-to-r from-sky-500 via-sky-500/80 to-slate-900 px-6 py-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-4 w-full">
+              {/* LEFT: powered by + quote */}
               <div className="flex flex-col">
                 <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-sky-50/90">
                   Powered by Alex-IO
                 </div>
                 <div className="mt-1 text-xs text-sky-50/95">
-                  Foam Advisor{" "}
-                  {hasQuote && (
+                  Foam Advisor ·{" "}
+                  {hasQuote ? (
                     <>
-                      · Quote{" "}
+                      Quote{" "}
                       <span className="font-mono font-semibold text-slate-50">
                         {quoteNo}
                       </span>
                     </>
-                  )}
-                  {!hasQuote && (
-                    <span className="ml-1 text-amber-50/90">
-                      · No quote linked (demo input)
+                  ) : (
+                    <span className="text-amber-50/90">
+                      No quote linked (demo input)
                     </span>
                   )}
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-sm font-semibold text-slate-50">
+
+              {/* CENTER: big title */}
+              <div className="flex-1 text-center">
+                <div className="text-xl font-extrabold text-slate-50 leading-snug drop-shadow-[0_0_8px_rgba(15,23,42,0.6)]">
                   Foam recommendation assistant
                 </div>
-                <div className="mt-1 inline-flex items-center rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
+              </div>
+
+              {/* RIGHT: BETA pill */}
+              <div className="flex items-center justify-end">
+                <span className="inline-flex items-center rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
                   Foam Advisor · BETA
-                </div>
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Body */}
-          <div className="p-6 bg-slate-950/90 text-slate-100">
-            <p className="text-[11px] text-slate-400 mb-4 leading-snug">
-              Start by telling Alex-IO about your product and how it ships. This
-              advisor calculates your static load and suggests foam families as
-              a starting point. In a later Path A step, this same screen will
-              use your{" "}
-              <span className="font-semibold text-sky-300">
-                materials
-              </span>{" "}
-              and{" "}
-              <span className="font-semibold text-sky-300">
-                cushion_curves
-              </span>{" "}
-              tables to return live recommendations and highlight your
-              operating point on the curve.
-            </p>
-
-            {parsedBlock && (
-              <div className="mb-4 inline-flex items-center rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-2 text-[11px] text-slate-200">
-                <span className="font-semibold mr-1">From layout:</span>
-                Block{" "}
-                <span className="font-mono ml-1">
-                  {parsedBlock.L}" × {parsedBlock.W}" × {parsedBlock.H}"
-                </span>
-                <span className="ml-2 text-slate-400">
-                  (contact area can start from L × W)
-                </span>
-              </div>
-            )}
-
-            {/* Advisor form */}
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-4 max-w-xl text-xs"
-            >
-              <div className="grid grid-cols-2 gap-4">
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-300">
-                    Product weight (lb)
-                  </span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={weightLb}
-                    onChange={(e) => setWeightLb(e.target.value)}
-                    className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                  />
-                  <span className="text-[10px] text-slate-500">
-                    Approximate weight of the protected item or load on each
-                    cavity.
-                  </span>
-                </label>
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-300">
-                    Contact area (in²)
-                  </span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={contactAreaIn2}
-                    onChange={(e) =>
-                      setContactAreaIn2(e.target.value)
-                    }
-                    className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                  />
-                  <span className="text-[10px] text-slate-500">
-                    Area of foam directly supporting the product. For a snug
-                    fit, this is often close to the cavity footprint.
-                  </span>
-                </label>
+          {/* Body – three-column layout like the editor */}
+          <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100">
+            {/* LEFT: context + block info */}
+            <aside className="w-60 shrink-0 flex flex-col gap-3">
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+                <div className="text-xs font-semibold text-slate-100 mb-1">
+                  How this works
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Tell Alex-IO about your product and how it ships. Foam
+                  Advisor calculates static load and suggests foam families as a
+                  starting point.
+                </p>
+                <p className="mt-2 text-[11px] text-slate-500">
+                  In later Path A steps, this screen will pull directly from{" "}
+                  <span className="text-sky-300">materials</span> and{" "}
+                  <span className="text-sky-300">cushion_curves</span> to
+                  highlight your operating point on real curves.
+                </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-300">
-                    Shipping environment
-                  </span>
-                  <select
-                    value={environment}
-                    onChange={(e) =>
-                      setEnvironment(e.target.value as EnvironmentOption)
-                    }
-                    className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+              {parsedBlock && (
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 text-[11px] text-slate-200">
+                  <div className="text-xs font-semibold text-slate-100 mb-1">
+                    From layout
+                  </div>
+                  <div className="font-mono">
+                    {parsedBlock.L}" × {parsedBlock.W}" × {parsedBlock.H}"
+                  </div>
+                  <div className="mt-1 text-slate-400">
+                    Contact area can start as L × W for snug fits. You can
+                    override it in the form.
+                  </div>
+                </div>
+              )}
+            </aside>
+
+            {/* CENTER: form + result */}
+            <section className="flex-1 flex flex-col gap-3">
+              {/* Intro text */}
+              <p className="text-[11px] text-slate-400 leading-snug">
+                Start by telling Alex-IO about your product and how it ships.
+                This advisor calculates your static load and suggests foam
+                families as a starting point. Later, the same inputs will drive
+                a live cushion-curve overlay.
+              </p>
+
+              {/* Advisor form */}
+              <form
+                onSubmit={handleSubmit}
+                className="space-y-4 max-w-xl text-xs bg-slate-900 rounded-2xl border border-slate-800 p-4"
+              >
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-300">
+                      Product weight (lb)
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={weightLb}
+                      onChange={(e) => setWeightLb(e.target.value)}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    />
+                    <span className="text-[10px] text-slate-500">
+                      Approximate weight of the protected item or load on each
+                      cavity.
+                    </span>
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-300">
+                      Contact area (in²)
+                    </span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={contactAreaIn2}
+                      onChange={(e) =>
+                        setContactAreaIn2(e.target.value)
+                      }
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    />
+                    <span className="text-[10px] text-slate-500">
+                      Area of foam directly supporting the product. For a snug
+                      fit, this is often close to the cavity footprint.
+                    </span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-300">
+                      Shipping environment
+                    </span>
+                    <select
+                      value={environment}
+                      onChange={(e) =>
+                        setEnvironment(
+                          e.target.value as EnvironmentOption,
+                        )
+                      }
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    >
+                      <option value="normal">
+                        Normal parcel / LTL
+                      </option>
+                      <option value="cold_chain">
+                        Cold chain / refrigerated
+                      </option>
+                      <option value="vibration">
+                        Heavy vibration / rough handling
+                      </option>
+                    </select>
+                    <span className="text-[10px] text-slate-500">
+                      Helps tune the recommendation toward harsher conditions.
+                    </span>
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-300">
+                      Product fragility
+                    </span>
+                    <select
+                      value={fragility}
+                      onChange={(e) =>
+                        setFragility(
+                          e.target.value as FragilityOption,
+                        )
+                      }
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    >
+                      <option value="very_fragile">
+                        Very fragile electronics / optics
+                      </option>
+                      <option value="moderate">
+                        General industrial components
+                      </option>
+                      <option value="rugged">
+                        Rugged hardware / tooling
+                      </option>
+                    </select>
+                    <span className="text-[10px] text-slate-500">
+                      Later this will map to g-level bands for selecting curves.
+                    </span>
+                  </label>
+                </div>
+
+                <div className="pt-2 flex items-center gap-3">
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
                   >
-                    <option value="normal">Normal parcel / LTL</option>
-                    <option value="cold_chain">
-                      Cold chain / refrigerated
-                    </option>
-                    <option value="vibration">
-                      Heavy vibration / rough handling
-                    </option>
-                  </select>
-                  <span className="text-[10px] text-slate-500">
-                    Helps tune the recommendation toward harsher conditions.
+                    {submitting
+                      ? "Analyzing…"
+                      : "Analyze and prepare recommendation"}
+                  </button>
+                  <span className="text-[11px] text-slate-500">
+                    Uses your foam catalog to show example materials for each
+                    pick.
                   </span>
-                </label>
+                </div>
+              </form>
 
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-300">
-                    Product fragility
-                  </span>
-                  <select
-                    value={fragility}
-                    onChange={(e) =>
-                      setFragility(e.target.value as FragilityOption)
-                    }
-                    className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                  >
-                    <option value="very_fragile">
-                      Very fragile electronics / optics
-                    </option>
-                    <option value="moderate">
-                      General industrial components
-                    </option>
-                    <option value="rugged">
-                      Rugged hardware / tooling
-                    </option>
-                  </select>
-                  <span className="text-[10px] text-slate-500">
-                    Later this will map to g-level bands for selecting curves.
-                  </span>
-                </label>
-              </div>
+              {/* Errors */}
+              {advisorError && (
+                <div className="mt-3 rounded-xl border border-amber-600 bg-amber-900/60 px-4 py-3 text-[11px] text-amber-50">
+                  {advisorError}
+                </div>
+              )}
 
-              <div className="pt-2 flex items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
-                >
-                  {submitting
-                    ? "Analyzing…"
-                    : "Analyze and prepare recommendation"}
-                </button>
-                <span className="text-[11px] text-slate-500">
-                  This version uses your real foam catalog to show example
-                  materials for each pick.
-                </span>
-              </div>
-            </form>
+              {materialsError && (
+                <div className="mt-3 rounded-xl border border-amber-700 bg-amber-950/70 px-4 py-3 text-[11px] text-amber-100">
+                  {materialsError}
+                </div>
+              )}
 
-            {advisorError && (
-              <div className="mt-4 rounded-xl border border-amber-600 bg-amber-900/60 px-4 py-3 text-[11px] text-amber-50">
-                {advisorError}
-              </div>
-            )}
-
-            {materialsError && (
-              <div className="mt-3 rounded-xl border border-amber-700 bg-amber-950/70 px-4 py-3 text-[11px] text-amber-100">
-                {materialsError}
-              </div>
-            )}
-
-            {advisorResult && (
-              <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Summary card */}
-                <div className="md:col-span-1 rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
-                  <div className="font-semibold text-sky-200 mb-2">
-                    Analysis summary
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">
-                    <div className="rounded-lg border border-slate-700 bg-slate-950/70 px-2 py-1.5">
-                      <div className="text-slate-400">Weight</div>
-                      <div className="font-mono text-xs text-slate-50">
-                        {hasWeight
-                          ? `${inputWeight.toFixed(2)} lb`
-                          : "—"}
-                      </div>
+              {/* Results */}
+              {advisorResult && (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Analysis summary card */}
+                  <div className="md:col-span-1 rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
+                    <div className="font-semibold text-sky-200 mb-1">
+                      Analysis summary
                     </div>
-                    <div className="rounded-lg border border-slate-700 bg-slate-950/70 px-2 py-1.5">
-                      <div className="text-slate-400">Area</div>
-                      <div className="font-mono text-xs text-slate-50">
-                        {hasArea
-                          ? `${inputArea.toFixed(1)} in²`
-                          : "—"}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-sky-600/70 bg-slate-950/80 px-2 py-1.5">
-                      <div className="text-slate-300">Static load</div>
-                      <div className="font-mono text-xs text-sky-100">
-                        {operatingStaticPsi.toFixed(2)} psi
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="mb-2 text-slate-400">
-                    {advisorResult.staticLoadPsiLabel}
-                  </p>
-
-                  {/* Operating point gauge */}
-                  <div className="mt-2">
-                    <div className="text-[10px] text-slate-400 mb-1">
-                      Operating point vs typical cushioning band
-                    </div>
-                    <div className="relative h-3 rounded-full bg-gradient-to-r from-emerald-500 via-sky-500 to-rose-500 overflow-hidden">
-                      <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_top,_white_0,_transparent_55%)]" />
-                      <div
-                        className="absolute top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-full bg-slate-950 shadow-[0_0_0_1px_rgba(15,23,42,0.6)]"
-                        style={{
-                          left: `${Math.round(
-                            normalizedOperating * 100,
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="mt-1 flex justify-between text-[9px] text-slate-500">
-                      <span>Soft / low psi</span>
-                      <span>Typical 0–10 psi band</span>
-                      <span>Firm / high psi</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-3">
+                    <p className="mb-2">
+                      {advisorResult.staticLoadPsiLabel}
+                    </p>
                     <p className="mb-1">
                       <span className="font-semibold">
-                        Environment:
-                      </span>{" "}
+                        Environment:{" "}
+                      </span>
                       {advisorResult.environmentLabel}
                     </p>
                     <p>
                       <span className="font-semibold">
-                        Fragility:
-                      </span>{" "}
+                        Fragility:{" "}
+                      </span>
                       {advisorResult.fragilityLabel}
                     </p>
+                    {parsedBlock && (
+                      <p className="mt-2 text-[10px] text-slate-500">
+                        Block from layout: {parsedBlock.L}" ×{" "}
+                        {parsedBlock.W}" × {parsedBlock.H}".
+                      </p>
+                    )}
                   </div>
 
-                  {parsedBlock && (
-                    <p className="mt-2 text-[10px] text-slate-500">
-                      Block from layout: {parsedBlock.L}" × {parsedBlock.W}" ×{" "}
-                      {parsedBlock.H}".
-                    </p>
-                  )}
-                </div>
-
-                {/* Recommendations */}
-                <div className="md:col-span-2 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-[11px] font-semibold text-slate-100">
-                      Suggested foam families (mapped to your catalog)
+                  {/* Recommendations */}
+                  <div className="md:col-span-2 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-semibold text-slate-100">
+                        Suggested foam families (mapped to your catalog)
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        Using /api/materials to show example SKUs.
+                      </div>
                     </div>
-                    <div className="text-[10px] text-slate-500">
-                      Using /api/materials to show example SKUs.
-                    </div>
-                  </div>
 
-                  {advisorResult.recommendations.length === 0 ? (
-                    <div className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-300">
-                      No specific suggestions returned for this combination yet.
-                    </div>
-                  ) : (
-                    advisorResult.recommendations.map((rec) => {
-                      const matchedMaterials =
-                        findMaterialsForRecommendation(rec);
+                    {advisorResult.recommendations.length === 0 ? (
+                      <div className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-300">
+                        No specific suggestions returned for this combination
+                        yet.
+                      </div>
+                    ) : (
+                      advisorResult.recommendations.map((rec) => {
+                        const matchedMaterials =
+                          findMaterialsForRecommendation(rec);
 
-                      const hasDensityBand =
-                        rec.targetDensityMin != null ||
-                        rec.targetDensityMax != null;
-
-                      let densityBandLabel: string | null = null;
-                      if (
-                        rec.targetDensityMin != null &&
-                        rec.targetDensityMax != null
-                      ) {
-                        densityBandLabel = `Target density band: ${rec.targetDensityMin.toFixed(
-                          1,
-                        )}–${rec.targetDensityMax.toFixed(1)} pcf`;
-                      } else if (rec.targetDensityMin != null) {
-                        densityBandLabel = `Target density around ${rec.targetDensityMin.toFixed(
-                          1,
-                        )} pcf`;
-                      } else if (rec.targetDensityMax != null) {
-                        densityBandLabel = `Target density up to ${rec.targetDensityMax.toFixed(
-                          1,
-                        )} pcf`;
-                      }
-
-                      return (
-                        <div
-                          key={rec.key}
-                          className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200"
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div>
-                              <div className="font-semibold">
-                                {rec.label}
-                              </div>
-                              <div className="text-[10px] text-slate-400">
-                                {rec.family}
-                              </div>
-                            </div>
-                            <span
-                              className={[
-                                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
-                                rec.confidence === "primary"
-                                  ? "bg-sky-500/20 border border-sky-400 text-sky-100"
-                                  : rec.confidence === "alternative"
-                                  ? "bg-emerald-500/15 border border-emerald-400 text-emerald-100"
-                                  : "bg-slate-700/60 border border-slate-500 text-slate-100",
-                              ].join(" ")}
-                            >
-                              {rec.confidence === "primary"
-                                ? "Primary pick"
-                                : rec.confidence === "alternative"
-                                ? "Alternative"
-                                : "Stretch option"}
-                            </span>
-                          </div>
-
-                          <p className="mt-1 leading-snug text-[11px]">
-                            {rec.notes}
-                          </p>
-
-                          {/* Density band mini-bar */}
-                          {hasDensityBand && densityBandLabel && (
-                            <div className="mt-2">
-                              <div className="text-[10px] text-slate-400 mb-1">
-                                {densityBandLabel}
-                              </div>
-                              <div className="relative h-2 rounded-full bg-slate-800 overflow-hidden">
-                                <div className="absolute inset-0 bg-gradient-to-r from-slate-600 via-sky-600 to-slate-600 opacity-60" />
-                                {rec.targetDensityMin != null &&
-                                  rec.targetDensityMax != null && (
-                                    <div
-                                      className="absolute inset-y-0 bg-sky-400/70"
-                                      style={{
-                                        left: "25%",
-                                        right: "25%",
-                                      }}
-                                    />
-                                  )}
-                              </div>
-                            </div>
-                          )}
-
-                          {matchedMaterials.length > 0 && (
-                            <div className="mt-3 text-[10px] text-slate-400">
-                              <div className="font-semibold text-[10px] text-slate-300 mb-0.5">
-                                In your catalog:
-                              </div>
-                              <ul className="list-disc list-inside space-y-0.5">
-                                {matchedMaterials.map((m, idx) => (
-                                  <li
-                                    key={m.id}
-                                    className="flex items-center justify-between gap-2"
-                                  >
-                                    <div className="flex-1">
-                                      <span>
-                                        {m.name}
-                                        {m.density_lb_ft3 != null
-                                          ? ` · ${m.density_lb_ft3.toFixed(
-                                              1,
-                                            )} pcf`
-                                          : ""}
-                                      </span>
-                                      {idx === 0 && (
-                                        <span className="ml-1 inline-flex items-center rounded-full border border-emerald-400/70 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium text-emerald-100">
-                                          Best match in catalog
-                                        </span>
-                                      )}
-                                    </div>
-                                    <a
-                                      href={`/admin/cushion/curves/${m.id}`}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="shrink-0 inline-flex items-center rounded-full border border-sky-500/70 px-2 py-0.5 text-[9px] font-medium text-sky-100 hover:bg-sky-500/15"
-                                    >
-                                      View cushion curve
-                                    </a>
-                                  </li>
-                                ))}
-                              </ul>
-                              {materialsLoading && (
-                                <div className="mt-1 text-[10px] text-slate-500">
-                                  Loading materials…
+                        return (
+                          <div
+                            key={rec.key}
+                            className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200"
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <div>
+                                <div className="font-semibold">
+                                  {rec.label}
                                 </div>
-                              )}
+                                <div className="text-[10px] text-slate-400">
+                                  {rec.family}
+                                </div>
+                              </div>
+                              <span
+                                className={[
+                                  "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
+                                  rec.confidence === "primary"
+                                    ? "bg-sky-500/20 border border-sky-400 text-sky-100"
+                                    : rec.confidence === "alternative"
+                                    ? "bg-emerald-500/15 border border-emerald-400 text-emerald-100"
+                                    : "bg-slate-700/60 border border-slate-500 text-slate-100",
+                                ].join(" ")}
+                              >
+                                {rec.confidence === "primary"
+                                  ? "Primary pick"
+                                  : rec.confidence === "alternative"
+                                  ? "Alternative"
+                                  : "Stretch option"}
+                              </span>
                             </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
+                            <p className="mt-1 leading-snug text-[11px]">
+                              {rec.notes}
+                            </p>
+
+                            {matchedMaterials.length > 0 && (
+                              <div className="mt-2 text-[10px] text-slate-400">
+                                <div className="font-semibold text-[10px] text-slate-300 mb-0.5">
+                                  In your catalog:
+                                </div>
+                                <ul className="list-disc list-inside space-y-0.5">
+                                  {matchedMaterials.map((m) => (
+                                    <li key={m.id}>
+                                      {m.name}
+                                      {m.density_lb_ft3 != null
+                                        ? ` · ${m.density_lb_ft3.toFixed(
+                                            1,
+                                          )} pcf`
+                                        : ""}
+                                    </li>
+                                  ))}
+                                </ul>
+                                {materialsLoading && (
+                                  <div className="mt-1 text-[10px] text-slate-500">
+                                    Loading materials…
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
+              )}
+            </section>
+
+            {/* RIGHT: legend / future curve info */}
+            <aside className="w-64 shrink-0 flex flex-col gap-3">
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+                <div className="text-xs font-semibold text-slate-100 mb-1">
+                  What&apos;s coming next
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Once cushion curves are wired in, this panel will show how the
+                  chosen foam family sits on the curve at your operating psi,
+                  with soft / typical / firm bands highlighted.
+                </p>
               </div>
-            )}
+
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+                <div className="text-xs font-semibold text-slate-100 mb-1">
+                  Catalog mapping
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Each recommendation is mapped to your real materials by
+                  family and density band. This uses the same{" "}
+                  <span className="font-mono text-sky-300">
+                    /api/materials
+                  </span>{" "}
+                  endpoint the layout editor uses.
+                </p>
+              </div>
+            </aside>
           </div>
         </div>
       </div>
