@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A step 2b
+// Foam Advisor · Path A step 2b (+ curve links)
 //
 // - Reads ?quote_no= and ?block=LxWxH from searchParams prop.
 // - Lets the user enter:
@@ -12,6 +12,9 @@
 // - ALSO loads your real foam catalog from /api/materials and,
 //   for each recommendation, shows matching materials (PE / PU / XLPE)
 //   in the density band suggested by the API.
+// - NEW: For each matched catalog material, shows a
+//   “View cushion curve” link to /admin/cushion-curves/[material_id],
+//   and marks the first match as “Best match in catalog”.
 //
 // Still NO cushion_curves math here yet; that will be a later step.
 //
@@ -611,14 +614,34 @@ export default function FoamAdvisorPage({
                                 In your catalog:
                               </div>
                               <ul className="list-disc list-inside space-y-0.5">
-                                {matchedMaterials.map((m) => (
-                                  <li key={m.id}>
-                                    {m.name}
-                                    {m.density_lb_ft3 != null
-                                      ? ` · ${m.density_lb_ft3.toFixed(
-                                          1,
-                                        )} pcf`
-                                      : ""}
+                                {matchedMaterials.map((m, idx) => (
+                                  <li
+                                    key={m.id}
+                                    className="flex items-center justify-between gap-2"
+                                  >
+                                    <div className="flex-1">
+                                      <span>
+                                        {m.name}
+                                        {m.density_lb_ft3 != null
+                                          ? ` · ${m.density_lb_ft3.toFixed(
+                                              1,
+                                            )} pcf`
+                                          : ""}
+                                      </span>
+                                      {idx === 0 && (
+                                        <span className="ml-1 inline-flex items-center rounded-full border border-emerald-400/70 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium text-emerald-100">
+                                          Best match in catalog
+                                        </span>
+                                      )}
+                                    </div>
+                                    <a
+                                      href={`/admin/cushion-curves/${m.id}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="shrink-0 inline-flex items-center rounded-full border border-sky-500/70 px-2 py-0.5 text-[9px] font-medium text-sky-100 hover:bg-sky-500/15"
+                                    >
+                                      View cushion curve
+                                    </a>
                                   </li>
                                 ))}
                               </ul>
