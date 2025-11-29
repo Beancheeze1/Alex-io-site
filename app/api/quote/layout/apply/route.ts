@@ -201,7 +201,13 @@ function buildDxfFromLayout(layout: any): string | null {
  *    - <text> nodes whose contents look like our legacy labels:
  *      NOT TO SCALE / FOAM BLOCK: / FOAM: / BLOCK: / MATERIAL:
  *
- * 2) Inject a fresh legend group at the top-left:
+ * 2) Wrap the existing geometry in a translated group:
+ *
+ *    <g id="alex-io-geometry" transform="translate(0, 80)"> ...original children... </g>
+ *
+ *    This pushes the entire foam drawing down by 80 units, regardless of block size.
+ *
+ * 3) Inject a fresh legend group at the top, centered:
  *
  *   <g id="alex-io-notes">
  *     <text>QUOTE: ...</text>
@@ -210,8 +216,8 @@ function buildDxfFromLayout(layout: any): string | null {
  *     <text>MATERIAL: ...</text>   // only if materialLegend is present
  *   </g>
  *
- * - Geometry + cavity labels from the editor remain untouched.
- * - Typed notes stay with the quote (quote_layout_packages.notes).
+ * - Geometry + cavity labels from the editor remain intact, just shifted down.
+ * - Typed notes stay with the quote (quote_layout_packages.notes), not in the SVG.
  */
 function buildSvgWithAnnotations(
   layout: any,
@@ -238,7 +244,8 @@ function buildSvgWithAnnotations(
     (match) => (legendLabelPattern.test(match) ? "" : match),
   );
 
-  // 3) Build the new legend we actually want.
+  // 3) We need basic layout info for dynamic block text; if it's missing, just
+  //    leave the SVG as-is (with geometry only).
   if (!layout || !layout.block) {
     return svg;
   }
@@ -252,55 +259,73 @@ function buildSvgWithAnnotations(
     return svg;
   }
 
+  // 4) Split SVG into:
+  //    <svg ...> [children...] </svg>
+  //    We'll wrap the children in a translated <g>, and inject notes just after <svg ...>.
+  const closeIdx = svg.lastIndexOf("</svg");
+  if (closeIdx === -1) {
+    return svg;
+  }
+
+  const firstTagEnd = svg.indexOf(">");
+  if (firstTagEnd === -1 || firstTagEnd > closeIdx) {
+    return svg;
+  }
+
+  const svgOpen = svg.slice(0, firstTagEnd + 1); // <svg ...>
+  const svgChildren = svg.slice(firstTagEnd + 1, closeIdx); // inner content
+  const svgClose = svg.slice(closeIdx); // </svg ...>
+
+  // 5) Build the lines we want in the legend band.
   const lines: string[] = [];
 
-  // Quote number
   const safeQuoteNo = quoteNo && quoteNo.trim().length > 0 ? quoteNo.trim() : "";
   if (safeQuoteNo) {
     lines.push(`QUOTE: ${safeQuoteNo}`);
   }
 
-  // Not to scale
   lines.push("NOT TO SCALE");
 
-  // Block size
   if (Number.isFinite(T) && T > 0) {
     lines.push(`BLOCK: ${L} x ${W} x ${T} in`);
   } else {
     lines.push(`BLOCK: ${L} x ${W} in (thickness see quote)`);
   }
 
-  // Material line (optional)
   if (materialLegend && materialLegend.trim().length > 0) {
     lines.push(`MATERIAL: ${materialLegend.trim()}`);
   }
 
   if (!lines.length) {
+    // No legend lines → just return SVG with geometry only.
     return svg;
   }
 
-  // Insert just before </svg>
-  const closeIdx = svg.lastIndexOf("</svg");
-  if (closeIdx === -1) {
-    return svg;
-  }
-
+  // 6) Build the note texts, centered at the top of the SVG.
   const textYStart = 20;
   const textYStep = 14;
 
-  const texts = lines
+  const notesTexts = lines
     .map((line, i) => {
       const y = textYStart + i * textYStep;
-      return `<text x="16" y="${y}" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#111827">${line}</text>`;
+      return `<text x="50%" y="${y}" text-anchor="middle" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif" font-size="12" fill="#111827">${line}</text>`;
     })
     .join("");
 
-  const notesGroup = `<g id="alex-io-notes">${texts}</g>`;
+  const notesGroup = `<g id="alex-io-notes">${notesTexts}</g>`;
 
-  const before = svg.slice(0, closeIdx);
-  const after = svg.slice(closeIdx);
+  // 7) Shift the original geometry down with a translate, so it never collides
+  //    with the notes band at the top.
+  const GEOMETRY_SHIFT_Y = 80;
+  const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
 
-  return `${before}${notesGroup}\n${after}`;
+  // 8) Reassemble the final SVG:
+  //    <svg ...>
+  //      <g id="alex-io-notes">...</g>
+  //      <g id="alex-io-geometry" transform="translate(0, 80)">...</g>
+  //    </svg>
+  const rebuilt = `${svgOpen}\n${notesGroup}\n${geometryGroup}\n${svgClose}`;
+  return rebuilt;
 }
 
 /* ===================== POST: save layout (+ optional qty/material) ===================== */
@@ -449,7 +474,7 @@ export async function POST(req: NextRequest) {
     const dxf = buildDxfFromLayout(layout);
     const step: string | null = null;
 
-    // Clean + re-annotate SVG (if provided) with quote legend.
+    // Clean + re-annotate SVG (if provided) with quote legend and shifted geometry.
     const svgAnnotated = buildSvgWithAnnotations(
       layout,
       svgRaw,
@@ -503,11 +528,11 @@ export async function POST(req: NextRequest) {
 
       // Outside size from the saved block
       if (layout && layout.block) {
-        const L = Number(layout.block.lengthIn) || 0;
-        const W = Number(layout.block.widthIn) || 0;
-        const T = Number(layout.block.thicknessIn) || 0;
-        if (L > 0 && W > 0 && T > 0) {
-          nextFacts.dims = `${L}x${W}x${T}`;
+        const Lb = Number(layout.block.lengthIn) || 0;
+        const Wb = Number(layout.block.widthIn) || 0;
+        const Tb = Number(layout.block.thicknessIn) || 0;
+        if (Lb > 0 && Wb > 0 && Tb > 0) {
+          nextFacts.dims = `${Lb}x${Wb}x${Tb}`;
         }
       }
 
@@ -516,11 +541,11 @@ export async function POST(req: NextRequest) {
         const cavDims: string[] = [];
         for (const cav of layout.cavities as any[]) {
           if (!cav) continue;
-          const L = Number(cav.lengthIn) || 0;
-          const W = Number(cav.widthIn) || 0;
-          const D = Number(cav.depthIn) || 0;
-          if (L > 0 && W > 0 && D > 0) {
-            cavDims.push(`${L}x${W}x${D}`);
+          const Lc = Number(cav.lengthIn) || 0;
+          const Wc = Number(cav.widthIn) || 0;
+          const Dc = Number(cav.depthIn) || 0;
+          if (Lc > 0 && Wc > 0 && Dc > 0) {
+            cavDims.push(`${Lc}x${Wc}x${Dc}`);
           }
         }
 
