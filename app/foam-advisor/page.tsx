@@ -5,11 +5,15 @@
 // - Inputs on the LEFT
 // - Center: cushion-curve canvas that shows the selected recommendation’s curve
 //   from /api/cushion/curves/{material_id}, with the operating point marked.
-// - NEW in this step:
-//   • Finds the nearest tested cushion-curve point to your operating psi
-//   • Highlights it on the graph
-//   • Shows a small numeric readout: psi / % deflection / G
+// - Finds the nearest tested cushion-curve point to your operating psi
+//   and highlights it on the graph, plus numeric readout.
 // - RIGHT: analysis summary + recommended materials (clickable to drive the canvas)
+//
+// NEW IN THIS REV:
+// - Keeps the full cushion-curve system intact.
+// - Adds a friendly G-band / fragility interpretation line in the summary.
+// - Adds “Use this in layout” on each recommendation card:
+//     → pushes to /quote/layout?quote_no=...&block=...&material_id=<id>
 //
 // No changes to pricing, quotes, or existing core logic.
 //
@@ -17,6 +21,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 
 type EnvironmentOption = "normal" | "cold_chain" | "vibration";
 type FragilityOption = "very_fragile" | "moderate" | "rugged";
@@ -95,6 +100,8 @@ export default function FoamAdvisorPage({
 }: {
   searchParams?: SearchParams;
 }) {
+  const router = useRouter();
+
   // ----- Read query params from props -----
 
   const quoteParam = searchParams?.quote_no ?? searchParams?.quote ?? "";
@@ -220,7 +227,7 @@ export default function FoamAdvisorPage({
     loadMaterials();
 
     return () => {
-      cancelled = true;
+      cancelled = false;
     };
   }, []);
 
@@ -481,6 +488,36 @@ export default function FoamAdvisorPage({
         ) ?? null
       );
     }, [advisorResult, selectedRecKey]);
+
+  // NEW: Friendly fragility / G-band interpretation text
+  const fragilityInterpretation = React.useMemo(() => {
+    switch (fragility) {
+      case "very_fragile":
+        return "This is treated as a highly fragile item, so we bias toward lower G-levels (softer ride) and thicker cushions to build in safety margin.";
+      case "moderate":
+        return "This is moderately fragile. We aim for a mid-range G-band that balances protection with reasonable foam thickness and cost.";
+      case "rugged":
+        return "This is considered rugged. It can tolerate higher G-levels, so denser foams and thinner cushions are acceptable without over-packing.";
+      default:
+        return null;
+    }
+  }, [fragility]);
+  // Helper to navigate back to layout with a selected material
+  const handleUseInLayout = (materialId: number) => {
+    const params = new URLSearchParams();
+
+    if (quoteNo) {
+      params.set("quote_no", quoteNo);
+    }
+    if (blockParam) {
+      params.set("block", blockParam);
+    }
+    params.set("material_id", String(materialId));
+
+    const qs = params.toString();
+    const url = qs ? `/quote/layout?${qs}` : "/quote/layout";
+    router.push(url);
+  };
 
   return (
     <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
@@ -765,14 +802,7 @@ export default function FoamAdvisorPage({
                         )}
                       </div>
                       {(() => {
-                        const label = (() => {
-                          if (!advisorResult) return null;
-                          const psi = advisorResult.staticLoadPsi;
-                          if (!Number.isFinite(psi) || psi <= 0) return null;
-                          if (psi < 0.5) return "Soft / low psi band";
-                          if (psi < 1.5) return "Typical 0–1.5 psi band";
-                          return "Firm / high psi band";
-                        })();
+                        const label = operatingBandLabel;
                         return label ? (
                           <div className="mt-1 text-[10px] text-slate-400">
                             {label}
@@ -1057,7 +1087,7 @@ export default function FoamAdvisorPage({
                                         </>
                                       )}
 
-                                      {/* NEW: Nearest tested curve point highlight */}
+                                      {/* Nearest tested curve point highlight */}
                                       {nearestX != null &&
                                         nearestY != null && (
                                           <>
@@ -1120,7 +1150,7 @@ export default function FoamAdvisorPage({
                                       </text>
                                     </svg>
 
-                                    {/* NEW: nearest-point numeric readout */}
+                                    {/* nearest-point numeric readout */}
                                     {nearestPoint && (
                                       <div className="mt-2 text-[10px] text-slate-300">
                                         Nearest tested point to your load:{" "}
@@ -1189,6 +1219,11 @@ export default function FoamAdvisorPage({
                       </span>
                       {advisorResult.fragilityLabel}
                     </p>
+                    {fragilityInterpretation && (
+                      <p className="mt-2 text-[10px] text-slate-400">
+                        {fragilityInterpretation}
+                      </p>
+                    )}
                     {parsedBlock && (
                       <p className="mt-2 text-[10px] text-slate-500">
                         Block from layout: {parsedBlock.L}" ×{" "}
@@ -1293,7 +1328,7 @@ export default function FoamAdvisorPage({
                                 </ul>
 
                                 {firstMatched && (
-                                  <div className="mt-2">
+                                  <div className="mt-2 flex flex-wrap gap-2">
                                     <a
                                       href={`/admin/cushion/curves/${firstMatched.id}`}
                                       target="_blank"
@@ -1303,6 +1338,17 @@ export default function FoamAdvisorPage({
                                     >
                                       View cushion curve
                                     </a>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleUseInLayout(firstMatched.id);
+                                      }}
+                                      className="inline-flex items-center rounded-full border border-emerald-500/70 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/15 transition"
+                                    >
+                                      Use this in layout
+                                    </button>
                                   </div>
                                 )}
 
