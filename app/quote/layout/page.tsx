@@ -215,6 +215,16 @@ export default function LayoutPage({
   const [loadingLayout, setLoadingLayout] =
     React.useState<boolean>(true);
 
+  // NEW: initial customer fields (pre-fill from quote header)
+  const [initialCustomerName, setInitialCustomerName] =
+    React.useState<string>("");
+  const [initialCustomerEmail, setInitialCustomerEmail] =
+    React.useState<string>("");
+  const [initialCustomerCompany, setInitialCustomerCompany] =
+    React.useState<string>("");
+  const [initialCustomerPhone, setInitialCustomerPhone] =
+    React.useState<string>("");
+
   /**
    * Fallback layout builder, driven by arbitrary dims/cavities strings.
    * We pass in the *effective* strings (from window.location when possible)
@@ -281,8 +291,16 @@ export default function LayoutPage({
             const minY = WALL_IN;
             const maxY = block.widthIn - WALL_IN - c.W;
 
-            const xIn = clamp(rawX, minX, Math.max(minX, maxX));
-            const yIn = clamp(rawY, minY, Math.max(minY, maxY));
+            const xIn = clamp(
+              rawX,
+              minX,
+              Math.max(minX, maxX),
+            );
+            const yIn = clamp(
+              rawY,
+              minY,
+              Math.max(minY, maxY),
+            );
 
             const xNorm =
               block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
@@ -376,6 +394,10 @@ export default function LayoutPage({
             setInitialNotes("");
             setInitialQty(null);
             setInitialMaterialId(null);
+            setInitialCustomerName("");
+            setInitialCustomerEmail("");
+            setInitialCustomerCompany("");
+            setInitialCustomerPhone("");
             setLoadingLayout(false);
           }
           return;
@@ -398,12 +420,33 @@ export default function LayoutPage({
             setInitialNotes("");
             setInitialQty(null);
             setInitialMaterialId(null);
+            setInitialCustomerName("");
+            setInitialCustomerEmail("");
+            setInitialCustomerCompany("");
+            setInitialCustomerPhone("");
             setLoadingLayout(false);
           }
           return;
         }
 
-        const json = await res.json();
+        const json: any = await res.json();
+
+        // Prefill customer info from quote header if available
+        if (!cancelled && json && json.ok && json.quote) {
+          const q = json.quote;
+          setInitialCustomerName(
+            (q.customer_name as string) || "",
+          );
+          setInitialCustomerEmail((q.email as string) || "");
+          setInitialCustomerPhone((q.phone as string) || "");
+          if (typeof q.customer_company === "string") {
+            setInitialCustomerCompany(
+              q.customer_company || "",
+            );
+          } else {
+            setInitialCustomerCompany("");
+          }
+        }
 
         // Try to pull qty + material from primary line item (if present)
         let qtyFromItems: number | null = null;
@@ -468,6 +511,10 @@ export default function LayoutPage({
           setInitialNotes("");
           setInitialQty(null);
           setInitialMaterialId(null);
+          setInitialCustomerName("");
+          setInitialCustomerEmail("");
+          setInitialCustomerCompany("");
+          setInitialCustomerPhone("");
           setLoadingLayout(false);
         }
       }
@@ -507,6 +554,10 @@ export default function LayoutPage({
       initialNotes={initialNotes}
       initialQty={initialQty}
       initialMaterialId={initialMaterialId}
+      initialCustomerName={initialCustomerName}
+      initialCustomerEmail={initialCustomerEmail}
+      initialCustomerCompany={initialCustomerCompany}
+      initialCustomerPhone={initialCustomerPhone}
     />
   );
 }
@@ -520,6 +571,10 @@ function LayoutEditorHost(props: {
   initialNotes: string;
   initialQty: number | null;
   initialMaterialId: number | null;
+  initialCustomerName: string;
+  initialCustomerEmail: string;
+  initialCustomerCompany: string;
+  initialCustomerPhone: string;
 }) {
   const {
     quoteNo,
@@ -528,6 +583,10 @@ function LayoutEditorHost(props: {
     initialNotes,
     initialQty,
     initialMaterialId,
+    initialCustomerName,
+    initialCustomerEmail,
+    initialCustomerCompany,
+    initialCustomerPhone,
   } = props;
 
   const {
@@ -554,13 +613,17 @@ function LayoutEditorHost(props: {
     initialQty != null ? initialQty : "",
   );
 
-  // NEW: customer info (Option A — Name + Email required)
-  const [customerName, setCustomerName] = React.useState<string>("");
-  const [customerEmail, setCustomerEmail] = React.useState<string>("");
+  // Customer info now seeded from quote header
+  const [customerName, setCustomerName] = React.useState<string>(
+    initialCustomerName || "",
+  );
+  const [customerEmail, setCustomerEmail] = React.useState<string>(
+    initialCustomerEmail || "",
+  );
   const [customerCompany, setCustomerCompany] =
-    React.useState<string>("");
+    React.useState<string>(initialCustomerCompany || "");
   const [customerPhone, setCustomerPhone] =
-    React.useState<string>("");
+    React.useState<string>(initialCustomerPhone || "");
 
   const [materials, setMaterials] =
     React.useState<MaterialOption[]>([]);
@@ -1188,7 +1251,7 @@ function LayoutEditorHost(props: {
                 </div>
               </div>
 
-              {/* NEW: Customer info card */}
+              {/* Customer info card */}
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                 <div className="text-xs font-semibold text-slate-100 mb-1">
                   Customer info
@@ -1203,7 +1266,8 @@ function LayoutEditorHost(props: {
                 <div className="space-y-2 text-xs">
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-300">
-                      Customer name <span className="text-rose-300">*</span>
+                      Customer name{" "}
+                      <span className="text-rose-300">*</span>
                     </span>
                     <input
                       type="text"
