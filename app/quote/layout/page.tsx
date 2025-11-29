@@ -209,6 +209,24 @@ export default function LayoutPage({
   const quoteNo = hasRealQuoteNo
     ? quoteNoFromUrl.trim()
     : "Q-AI-EXAMPLE";
+      // Optional material override from URL: ?material_id=###
+  const materialIdParamRaw = (searchParams?.material_id ?? null) as
+    | string
+    | string[]
+    | null
+    | undefined;
+
+  let materialIdFromUrl: number | null = null;
+  if (materialIdParamRaw) {
+    const raw = Array.isArray(materialIdParamRaw)
+      ? materialIdParamRaw[0]
+      : materialIdParamRaw;
+    const parsed = raw != null ? Number(raw) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      materialIdFromUrl = parsed;
+    }
+  }
+
 
   /* ---------- Build initial layout (from DB if available) ---------- */
 
@@ -218,8 +236,9 @@ export default function LayoutPage({
   const [initialQty, setInitialQty] = React.useState<number | null>(
     null,
   );
-  const [initialMaterialId, setInitialMaterialId] =
-    React.useState<number | null>(null);
+    const [initialMaterialId, setInitialMaterialId] =
+    React.useState<number | null>(materialIdFromUrl);
+
 
   // NEW: customer initial values (prefill from quote header when available)
   const [initialCustomerName, setInitialCustomerName] =
@@ -394,11 +413,12 @@ export default function LayoutPage({
             effectiveBlockStr,
             effectiveCavityStr,
           );
-          if (!cancelled) {
+                  if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
             setInitialQty(null);
-            setInitialMaterialId(null);
+            // Prefer URL material_id if present; otherwise leave null
+            setInitialMaterialId(materialIdFromUrl ?? null);
             // no header to pull customer info from in demo mode
             setInitialCustomerName("");
             setInitialCustomerEmail("");
@@ -406,6 +426,7 @@ export default function LayoutPage({
             setInitialCustomerPhone("");
             setLoadingLayout(false);
           }
+
           return;
         }
 
@@ -421,17 +442,19 @@ export default function LayoutPage({
             effectiveBlockStr,
             effectiveCavityStr,
           );
-          if (!cancelled) {
+                    if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
             setInitialQty(null);
-            setInitialMaterialId(null);
+            // Prefer URL override if present
+            setInitialMaterialId(materialIdFromUrl ?? null);
             setInitialCustomerName("");
             setInitialCustomerEmail("");
             setInitialCustomerCompany("");
             setInitialCustomerPhone("");
             setLoadingLayout(false);
           }
+
           return;
         }
 
@@ -496,45 +519,55 @@ export default function LayoutPage({
           const notesFromDb =
             (json.layoutPkg.notes as string | null) ?? "";
 
+                   const effectiveMaterialId =
+            materialIdFromUrl ?? materialIdFromItems;
+
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
             setInitialNotes(notesFromDb);
             setInitialQty(qtyFromItems);
-            setInitialMaterialId(materialIdFromItems);
+            setInitialMaterialId(effectiveMaterialId ?? null);
             setLoadingLayout(false);
           }
+
           return;
         }
 
         // Otherwise, use layout from URL (dims/cavities) and keep qty/material.
-        const fallback = buildFallbackLayout(
+            const fallback = buildFallbackLayout(
           effectiveBlockStr,
           effectiveCavityStr,
         );
+        const effectiveMaterialId =
+          materialIdFromUrl ?? materialIdFromItems;
+
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
           setInitialQty(qtyFromItems);
-          setInitialMaterialId(materialIdFromItems);
+          setInitialMaterialId(effectiveMaterialId ?? null);
           setLoadingLayout(false);
         }
+
       } catch (err) {
         console.error("Error loading layout for /quote/layout:", err);
         const fallback = buildFallbackLayout(
           effectiveBlockStr,
           effectiveCavityStr,
         );
-        if (!cancelled) {
+                if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
           setInitialQty(null);
-          setInitialMaterialId(null);
+          // Prefer URL override if present
+          setInitialMaterialId(materialIdFromUrl ?? null);
           setInitialCustomerName("");
           setInitialCustomerEmail("");
           setInitialCustomerCompany("");
           setInitialCustomerPhone("");
           setLoadingLayout(false);
         }
+
       }
     }
 
