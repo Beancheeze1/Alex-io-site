@@ -3,7 +3,7 @@
 // Foam Advisor · Path A skeleton
 //
 // - Accessed from the layout editor "Recommend my foam" button.
-// - Reads ?quote_no= and ?block=LxWxH from the URL.
+// - Reads ?quote_no= and ?block=LxWxH from the searchParams prop.
 // - Shows a simple form for:
 //     • Product weight (lb)
 //     • Contact area (in²)
@@ -17,10 +17,13 @@
 "use client";
 
 import * as React from "react";
-import { useSearchParams } from "next/navigation";
 
 type EnvironmentOption = "normal" | "cold_chain" | "vibration";
 type FragilityOption = "very_fragile" | "moderate" | "rugged";
+
+type SearchParams = {
+  [key: string]: string | string[] | undefined;
+};
 
 function parseBlockDims(
   raw: string | null,
@@ -38,21 +41,30 @@ function parseBlockDims(
   return { L, W, H };
 }
 
-export default function FoamAdvisorPage() {
-  const searchParams = useSearchParams();
+export default function FoamAdvisorPage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
+  // ----- Read query params from props (no useSearchParams hook) -----
 
-  const quoteNo =
-    searchParams.get("quote_no") ??
-    searchParams.get("quote") ??
-    "";
+  const quoteParam = searchParams?.quote_no ?? searchParams?.quote ?? "";
+  const quoteNo = Array.isArray(quoteParam)
+    ? (quoteParam[0] ?? "").trim()
+    : (quoteParam ?? "").trim();
 
-  const blockParam = searchParams.get("block");
+  const blockParamRaw = searchParams?.block ?? null;
+  const blockParam = Array.isArray(blockParamRaw)
+    ? blockParamRaw[0] ?? null
+    : blockParamRaw ?? null;
+
   const parsedBlock = React.useMemo(
     () => parseBlockDims(blockParam),
     [blockParam],
   );
 
-  // Form state
+  // ----- Form state -----
+
   const [weightLb, setWeightLb] = React.useState<string>("");
   const [contactAreaIn2, setContactAreaIn2] =
     React.useState<string>("");
@@ -124,7 +136,7 @@ export default function FoamAdvisorPage() {
     setSubmittedSummary(parts.join(" "));
   };
 
-  const hasQuote = !!quoteNo.trim();
+  const hasQuote = !!quoteNo;
 
   return (
     <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
@@ -168,8 +180,8 @@ export default function FoamAdvisorPage() {
           {/* Body */}
           <div className="p-6 bg-slate-950/90 text-slate-100">
             <p className="text-[11px] text-slate-400 mb-4 leading-snug">
-              Start by telling Alex-IO about your product and how it ships. In a later
-              step, this advisor will use your existing{" "}
+              Start by telling Alex-IO about your product and how it ships. In a
+              later step, this advisor will use your existing{" "}
               <span className="font-semibold text-sky-300">
                 materials
               </span>{" "}
