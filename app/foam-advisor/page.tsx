@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A step 2b (+ curve links)
+// Foam Advisor · Path A step 2c (+ curve links + exposed bands)
 //
 // - Reads ?quote_no= and ?block=LxWxH from searchParams prop.
 // - Lets the user enter:
@@ -9,12 +9,12 @@
 //     • Environment
 //     • Fragility
 // - On submit, POSTS to /api/foam-advisor/recommend.
-// - ALSO loads your real foam catalog from /api/materials and,
+// - Loads your real foam catalog from /api/materials and,
 //   for each recommendation, shows matching materials (PE / PU / XLPE)
 //   in the density band suggested by the API.
-// - NEW: For each matched catalog material, shows a
-//   “View cushion curve” link to /admin/cushion/curves/[material_id],
-//   and marks the first match as “Best match in catalog”.
+// - “View cushion curve” link goes to /admin/cushion/curves/[material_id].
+// - NEW: Summary shows numeric static load (psi).
+// - NEW: Each recommendation shows the target density band when present.
 //
 // Still NO cushion_curves math here yet; that will be a later step.
 //
@@ -536,7 +536,17 @@ export default function FoamAdvisorPage({
                   <div className="font-semibold text-sky-200 mb-1">
                     Analysis summary
                   </div>
-                  <p className="mb-2">{advisorResult.staticLoadPsiLabel}</p>
+                  <p className="mb-1">
+                    <span className="text-slate-300">
+                      Static load:
+                    </span>{" "}
+                    <span className="font-mono font-semibold text-slate-50">
+                      {advisorResult.staticLoadPsi.toFixed(2)} psi
+                    </span>
+                  </p>
+                  <p className="mb-2 text-slate-400">
+                    {advisorResult.staticLoadPsiLabel}
+                  </p>
                   <p className="mb-1">
                     <span className="font-semibold">Environment: </span>
                     {advisorResult.environmentLabel}
@@ -573,6 +583,28 @@ export default function FoamAdvisorPage({
                       const matchedMaterials =
                         findMaterialsForRecommendation(rec);
 
+                      const hasDensityBand =
+                        rec.targetDensityMin != null ||
+                        rec.targetDensityMax != null;
+
+                      let densityBandLabel: string | null = null;
+                      if (
+                        rec.targetDensityMin != null &&
+                        rec.targetDensityMax != null
+                      ) {
+                        densityBandLabel = `Target density band: ${rec.targetDensityMin.toFixed(
+                          1,
+                        )}–${rec.targetDensityMax.toFixed(1)} pcf`;
+                      } else if (rec.targetDensityMin != null) {
+                        densityBandLabel = `Target density around ${rec.targetDensityMin.toFixed(
+                          1,
+                        )} pcf`;
+                      } else if (rec.targetDensityMax != null) {
+                        densityBandLabel = `Target density up to ${rec.targetDensityMax.toFixed(
+                          1,
+                        )} pcf`;
+                      }
+
                       return (
                         <div
                           key={rec.key}
@@ -607,6 +639,12 @@ export default function FoamAdvisorPage({
                           <p className="mt-1 leading-snug text-[11px]">
                             {rec.notes}
                           </p>
+
+                          {hasDensityBand && densityBandLabel && (
+                            <p className="mt-1 text-[10px] text-slate-400">
+                              {densityBandLabel}
+                            </p>
+                          )}
 
                           {matchedMaterials.length > 0 && (
                             <div className="mt-2 text-[10px] text-slate-400">
