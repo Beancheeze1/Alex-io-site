@@ -219,6 +219,17 @@ export default function LayoutPage({
   );
   const [initialMaterialId, setInitialMaterialId] =
     React.useState<number | null>(null);
+
+  // NEW: customer initial values (prefill from quote header when available)
+  const [initialCustomerName, setInitialCustomerName] =
+    React.useState<string>("");
+  const [initialCustomerEmail, setInitialCustomerEmail] =
+    React.useState<string>("");
+  const [initialCustomerCompany, setInitialCustomerCompany] =
+    React.useState<string>("");
+  const [initialCustomerPhone, setInitialCustomerPhone] =
+    React.useState<string>("");
+
   const [loadingLayout, setLoadingLayout] =
     React.useState<boolean>(true);
 
@@ -288,8 +299,16 @@ export default function LayoutPage({
             const minY = WALL_IN;
             const maxY = block.widthIn - WALL_IN - c.W;
 
-            const xIn = clamp(rawX, minX, Math.max(minX, maxX));
-            const yIn = clamp(rawY, minY, Math.max(minY, maxY));
+            const xIn = clamp(
+              rawX,
+              minX,
+              Math.max(minX, maxX),
+            );
+            const yIn = clamp(
+              rawY,
+              minY,
+              Math.max(minY, maxY),
+            );
 
             const xNorm =
               block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
@@ -379,6 +398,11 @@ export default function LayoutPage({
             setInitialNotes("");
             setInitialQty(null);
             setInitialMaterialId(null);
+            // no header to pull customer info from in demo mode
+            setInitialCustomerName("");
+            setInitialCustomerEmail("");
+            setInitialCustomerCompany("");
+            setInitialCustomerPhone("");
             setLoadingLayout(false);
           }
           return;
@@ -401,6 +425,10 @@ export default function LayoutPage({
             setInitialNotes("");
             setInitialQty(null);
             setInitialMaterialId(null);
+            setInitialCustomerName("");
+            setInitialCustomerEmail("");
+            setInitialCustomerCompany("");
+            setInitialCustomerPhone("");
             setLoadingLayout(false);
           }
           return;
@@ -408,7 +436,7 @@ export default function LayoutPage({
 
         const json = await res.json();
 
-        // Try to pull qty + material from primary line item (if present)
+        // Pull qty + material from primary line item (if present)
         let qtyFromItems: number | null = null;
         let materialIdFromItems: number | null = null;
         if (Array.isArray(json.items) && json.items.length > 0) {
@@ -421,6 +449,35 @@ export default function LayoutPage({
           if (Number.isFinite(mid) && mid > 0) {
             materialIdFromItems = mid;
           }
+        }
+
+        // NEW: pull customer info from quote header when present
+        if (json && json.quote && typeof json.quote === "object") {
+          const qh = json.quote as {
+            customer_name?: string;
+            email?: string | null;
+            phone?: string | null;
+          };
+
+          if (!cancelled) {
+            setInitialCustomerName(
+              (qh.customer_name ?? "").toString(),
+            );
+            setInitialCustomerEmail(
+              (qh.email ?? "").toString(),
+            );
+            // Company isn’t stored on quotes table yet; keep blank for now.
+            setInitialCustomerCompany("");
+            setInitialCustomerPhone(
+              (qh.phone ?? "").toString(),
+            );
+          }
+        } else if (!cancelled) {
+          // No header → clear initial customer fields
+          setInitialCustomerName("");
+          setInitialCustomerEmail("");
+          setInitialCustomerCompany("");
+          setInitialCustomerPhone("");
         }
 
         // Only use DB layout geometry when NO URL dims/cavities are present.
@@ -471,6 +528,10 @@ export default function LayoutPage({
           setInitialNotes("");
           setInitialQty(null);
           setInitialMaterialId(null);
+          setInitialCustomerName("");
+          setInitialCustomerEmail("");
+          setInitialCustomerCompany("");
+          setInitialCustomerPhone("");
           setLoadingLayout(false);
         }
       }
@@ -510,6 +571,10 @@ export default function LayoutPage({
       initialNotes={initialNotes}
       initialQty={initialQty}
       initialMaterialId={initialMaterialId}
+      initialCustomerName={initialCustomerName}
+      initialCustomerEmail={initialCustomerEmail}
+      initialCustomerCompany={initialCustomerCompany}
+      initialCustomerPhone={initialCustomerPhone}
     />
   );
 }
@@ -523,6 +588,10 @@ function LayoutEditorHost(props: {
   initialNotes: string;
   initialQty: number | null;
   initialMaterialId: number | null;
+  initialCustomerName: string;
+  initialCustomerEmail: string;
+  initialCustomerCompany: string;
+  initialCustomerPhone: string;
 }) {
   const {
     quoteNo,
@@ -531,6 +600,10 @@ function LayoutEditorHost(props: {
     initialNotes,
     initialQty,
     initialMaterialId,
+    initialCustomerName,
+    initialCustomerEmail,
+    initialCustomerCompany,
+    initialCustomerPhone,
   } = props;
 
   const {
@@ -557,14 +630,16 @@ function LayoutEditorHost(props: {
     initialQty != null ? initialQty : "",
   );
 
-  // NEW: customer info (Option A — Name + Email required)
-  const [customerName, setCustomerName] = React.useState<string>("");
+  // NEW: customer info (Option A — Name + Email required), now prefills from quote header
+  const [customerName, setCustomerName] = React.useState<string>(
+    initialCustomerName || "",
+  );
   const [customerEmail, setCustomerEmail] =
-    React.useState<string>("");
+    React.useState<string>(initialCustomerEmail || "");
   const [customerCompany, setCustomerCompany] =
-    React.useState<string>("");
+    React.useState<string>(initialCustomerCompany || "");
   const [customerPhone, setCustomerPhone] =
-    React.useState<string>("");
+    React.useState<string>(initialCustomerPhone || "");
 
   const [materials, setMaterials] =
     React.useState<MaterialOption[]>([]);
@@ -1192,7 +1267,7 @@ function LayoutEditorHost(props: {
                 </div>
               </div>
 
-              {/* NEW: Customer info card */}
+              {/* Customer info card (now prefilled when quote has data) */}
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                 <div className="text-xs font-semibold text-slate-100 mb-1">
                   Customer info
@@ -1482,102 +1557,130 @@ function buildSvgFromLayout(
 ): string {
   const { block, cavities } = layout;
 
+  // Basic guard so we don't divide by zero
+  const L = Number(block.lengthIn) || 0;
+  const W = Number(block.widthIn) || 0;
+  const T = Number(block.thicknessIn) || 0;
+
   const VIEW_W = 1000;
   const VIEW_H = 700;
   const PADDING = 40;
 
-  const scaleX = (VIEW_W - 2 * PADDING) / block.lengthIn;
-  const scaleY = (VIEW_H - 2 * PADDING) / block.widthIn;
+  if (L <= 0 || W <= 0) {
+    // Fallback: just return an empty SVG rather than throwing
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}"></svg>`;
+  }
+
+  const scaleX = (VIEW_W - 2 * PADDING) / L;
+  const scaleY = (VIEW_H - 2 * PADDING) / W;
   const scale = Math.min(scaleX, scaleY);
 
-  const blockW = block.lengthIn * scale;
-  const blockH = block.widthIn * scale;
+  const blockW = L * scale;
+  const blockH = W * scale;
   const blockX = (VIEW_W - blockW) / 2;
   const blockY = (VIEW_H - blockH) / 2;
 
   const escapeText = (s: string): string =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  const cavRects = cavities
-    .map((c) => {
-      const cavW = c.lengthIn * scale;
-      const cavH = c.widthIn * scale;
-      const x = blockX + c.x * blockW;
-      const y = blockY + c.y * blockH;
+  // ----- Cavities -----
+  const cavects: string[] = [];
 
-      const label =
-        c.label ?? `${c.lengthIn}×${c.widthIn}×${c.depthIn}"`;
+  for (const c of cavities) {
+    const cavW = c.lengthIn * scale;
+    const cavH = c.widthIn * scale;
+    const x = blockX + c.x * blockW;
+    const y = blockY + c.y * blockH;
 
-      if (c.shape === "circle") {
-        const r = Math.min(cavW, cavH) / 2;
-        const cx = x + cavW / 2;
-        const cy = y + cavH / 2;
-        return `
-  <g>
-    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(
-          2,
-        )}" r="${r.toFixed(
-          2,
-        )}" fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-          2,
-        )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${escapeText(label)}</text>
-  </g>`;
-      }
+    const label =
+      c.label ?? `${c.lengthIn}×${c.widthIn}×${c.depthIn}"`;
 
-      return `
-  <g>
-    <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
-          width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
-          rx="0" ry="0"
-          fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${(x + cavW / 2).toFixed(2)}" y="${(
-        y + cavH / 2
-      ).toFixed(
-        2,
-      )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${escapeText(label)}</text>
-  </g>`;
-    })
-    .join("\n");
+    if (c.shape === "circle") {
+      const r = Math.min(cavW, cavH) / 2;
+      const cx = x + cavW / 2;
+      const cy = y + cavH / 2;
+      cavects.push(
+        [
+          `<g>`,
+          `  <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(
+            2,
+          )}" r="${r.toFixed(2)}" fill="none" stroke="#111827" stroke-width="1" />`,
+          `  <text x="${cx.toFixed(
+            2,
+          )}" y="${cy.toFixed(
+            2,
+          )}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#111827">${escapeText(
+            label,
+          )}</text>`,
+          `</g>`,
+        ].join("\n"),
+      );
+    } else {
+      cavects.push(
+        [
+          `<g>`,
+          `  <rect x="${x.toFixed(2)}" y="${y.toFixed(
+            2,
+          )}" width="${cavW.toFixed(
+            2,
+          )}" height="${cavH.toFixed(
+            2,
+          )}" rx="0" ry="0" fill="none" stroke="#111827" stroke-width="1" />`,
+          `  <text x="${(x + cavW / 2).toFixed(
+            2,
+          )}" y="${(y + cavH / 2).toFixed(
+            2,
+          )}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#111827">${escapeText(
+            label,
+          )}</text>`,
+          `</g>`,
+        ].join("\n"),
+      );
+    }
+  }
 
-  // Header block: NOT TO SCALE, block dims, material
+  const cavRects = cavects.join("\n");
+
+  // ----- Header block: NOT TO SCALE, BLOCK, MATERIAL -----
   const headerLines: string[] = [];
   headerLines.push("NOT TO SCALE");
-  headerLines.push(
-    `BLOCK: ${block.lengthIn}" × ${block.widthIn}" × ${block.thicknessIn}"`,
-  );
+  if (T > 0) {
+    headerLines.push(
+      `BLOCK: ${L}" × ${W}" × ${T}"`,
+    );
+  } else {
+    headerLines.push(`BLOCK: ${L}" × ${W}" (thickness see quote)`);
+  }
+
   if (meta?.materialLabel) {
     headerLines.push(`MATERIAL: ${meta.materialLabel}`);
   }
 
-  const headerSection = `
-  <g>
-    ${headerLines
-      .map(
-        (line, idx) =>
-          `<text x="${PADDING.toFixed(
-            2,
-          )}" y="${(PADDING + idx * 14).toFixed(
-            2,
-          )}" font-size="${idx === 0 ? 11 : 10}" fill="#111827">${escapeText(
-            line,
-          )}</text>`,
-      )
-      .join("\n    ")}
+  const headerTexts = headerLines
+    .map((line, idx) => {
+      const y = PADDING + idx * 14;
+      const fontSize = idx === 0 ? 11 : 10;
+      return `<text x="${PADDING.toFixed(
+        2,
+      )}" y="${y.toFixed(
+        2,
+      )}" font-size="${fontSize}" fill="#111827">${escapeText(
+        line,
+      )}</text>`;
+    })
+    .join("\n    ");
+
+  const headerSection = `<g>
+    ${headerTexts}
   </g>`;
 
-  // Notes at the bottom (material now lives in the header above)
-  // We keep real notes, but strip out old scaffold lines like
-  // "FOAM BLOCK:", "CAVITY 1:", "FOAM:", "MATERIAL:" so they
-  // don’t duplicate the new header.
+  // ----- Notes at bottom (strip old scaffold lines) -----
   const metaLines: string[] = [];
 
   if (meta?.notes && meta.notes.trim().length > 0) {
     const rawNotes = meta.notes.trim();
 
-    const cleanedLines = rawNotes
+    const cleaned = rawNotes
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(
@@ -1586,44 +1689,65 @@ function buildSvgFromLayout(
           !/^FOAM(?:\s+BLOCK)?:/i.test(line) &&
           !/^BLOCK:/i.test(line) &&
           !/^CAVITY/i.test(line) &&
+          !/^FOAM:/i.test(line) &&
           !/^MATERIAL:/i.test(line),
       );
 
-    if (cleanedLines.length > 0) {
-      metaLines.push(`Notes: ${cleanedLines.join("  ")}`);
+    if (cleaned.length > 0) {
+      metaLines.push(`Notes: ${cleaned.join("  ")}`);
     }
   }
 
-  const metaSection =
-    metaLines.length > 0
-      ? `
-  <g>
-    ${metaLines
-      .map(
-        (line, idx) =>
-          `<text x="${PADDING.toFixed(
-            2,
-          )}" y="${(VIEW_H - PADDING + idx * 14).toFixed(
-            2,
-          )}" font-size="10" fill="#111827">${escapeText(line)}</text>`,
-      )
-      .join("\n    ")}
-  </g>`
-      : "";
+  let metaSection = "";
+  if (metaLines.length > 0) {
+    const notesTexts = metaLines
+      .map((line, idx) => {
+        const y = VIEW_H - PADDING + idx * 14;
+        return `<text x="${PADDING.toFixed(
+          2,
+        )}" y="${y.toFixed(
+          2,
+        )}" font-size="10" fill="#111827">${escapeText(
+          line,
+        )}</text>`;
+      })
+      .join("\n    ");
 
-  const svg = `
-<svg xmlns="http://www.w3.org/2000/svg"
-     width="${VIEW_W}" height="${VIEW_H}"
-     viewBox="0 0 ${VIEW_W} ${VIEW_H}">
-  ${headerSection}
-  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
-        width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
-        rx="0" ry="0"
-        fill="#e5e7eb" stroke="#111827" stroke-width="2" />
-  ${cavRects}
-  ${metaSection}
-</svg>
-`.trim();
+    metaSection = `<g>
+    ${notesTexts}
+  </g>`;
+  }
 
-  return svg;
+  // ----- Full SVG -----
+  const svgParts: string[] = [];
+
+  svgParts.push(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}">`,
+  );
+
+  svgParts.push(`  ${headerSection}`);
+
+  svgParts.push(
+    `  <rect x="${blockX.toFixed(
+      2,
+    )}" y="${blockY.toFixed(
+      2,
+    )}" width="${blockW.toFixed(
+      2,
+    )}" height="${blockH.toFixed(
+      2,
+    )}" rx="0" ry="0" fill="#e5e7eb" stroke="#111827" stroke-width="2" />`,
+  );
+
+  if (cavRects) {
+    svgParts.push(cavRects);
+  }
+
+  if (metaSection) {
+    svgParts.push(metaSection);
+  }
+
+  svgParts.push(`</svg>`);
+
+  return svgParts.join("\n");
 }
