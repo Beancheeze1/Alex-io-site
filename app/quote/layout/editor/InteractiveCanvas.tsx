@@ -15,8 +15,6 @@
 import { useRef, useState, MouseEvent } from "react";
 import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
 
-
-
 type Props = {
   layout: LayoutModel;
   selectedId: string | null;
@@ -43,6 +41,10 @@ type DragState =
 const CANVAS_WIDTH = 1200;
 const CANVAS_HEIGHT = 620;
 
+// Reserved band at the top of the SVG for auto notes (QUOTE / NOT TO SCALE / BLOCK / MATERIAL)
+// The foam block + cavities are always drawn below this Y, so notes never overlap the block.
+const HEADER_BAND = 80;
+
 const PADDING = 32;
 const WALL_IN = 0.5;
 // Snap for movement / resize = 1/16"
@@ -64,7 +66,10 @@ export default function InteractiveCanvas({
 
   // ==== Block scaling / centering (with zoom) ====
   const innerW = CANVAS_WIDTH - PADDING * 2;
-  const innerH = CANVAS_HEIGHT - PADDING * 2;
+
+  // For vertical space, we reserve HEADER_BAND at the top for the legend,
+  // and use the remaining space for the foam block.
+  const innerH = CANVAS_HEIGHT - PADDING * 2 - HEADER_BAND;
 
   const sx = innerW / (block.lengthIn || 1);
   const sy = innerH / (block.widthIn || 1);
@@ -76,9 +81,12 @@ export default function InteractiveCanvas({
     height: block.widthIn * scale,
   };
 
+  // Horizontally center the block within the canvas.
+  // Vertically, center it within the region BELOW the header band so that
+  // the block's top is always >= HEADER_BAND and never collides with the notes.
   const blockOffset = {
     x: (CANVAS_WIDTH - blockPx.width) / 2,
-    y: (CANVAS_HEIGHT - blockPx.height) / 2,
+    y: HEADER_BAND + (CANVAS_HEIGHT - HEADER_BAND - blockPx.height) / 2,
   };
 
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
@@ -372,17 +380,16 @@ export default function InteractiveCanvas({
                 )}
 
                 {/* label (computed from dims so it always matches the cavity size) */}
-<text
-  x={cavX + cavWidthPx / 2}
-  y={cavY + cavHeightPx / 2}
-  textAnchor="middle"
-  dominantBaseline="central"
-  className="fill-slate-700 text-[9px]"
-  onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
->
-  {formatCavityLabel(cavity)}
-</text>
-
+                <text
+                  x={cavX + cavWidthPx / 2}
+                  y={cavY + cavHeightPx / 2}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  className="fill-slate-700 text-[9px]"
+                  onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+                >
+                  {formatCavityLabel(cavity)}
+                </text>
 
                 {/* resize handle */}
                 <rect
@@ -613,7 +620,9 @@ function computeSpacing(
           fromPx,
           toPx,
           yPx:
-            (Math.max(cavTopPx, oTopPx) + Math.min(cavBottomPx, oBottomPx)) / 2,
+            (Math.max(cavTopPx, oTopPx) +
+              Math.min(cavBottomPx, oBottomPx)) /
+            2,
           gapIn,
         };
       }
