@@ -106,14 +106,20 @@ function parseDimsTriple(
 }
 
 // Simple parser for cavity dims; if only LxW, assume depth = 1"
+// IMPORTANT: accepts both "0.5" and ".5" style numbers.
 function parseCavityDims(
   raw: string,
 ): { L: number; W: number; D: number } | null {
   const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
-  let m =
-    t.match(
-      /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/,
-    ) || null;
+
+  // allow "1", "1.5", ".5" etc.
+  const num = String.raw`(?:\d+(?:\.\d+)?|\.\d+)`;
+  const tripleRe = new RegExp(
+    `(${num})\\s*[x×]\\s*(${num})\\s*[x×]\\s*(${num})`,
+  );
+  const doubleRe = new RegExp(`(${num})\\s*[x×]\\s*(${num})`);
+
+  let m = t.match(tripleRe);
   if (m) {
     const L = Number(m[1]) || 0;
     const W = Number(m[2]) || 0;
@@ -121,7 +127,8 @@ function parseCavityDims(
     if (!L || !W || !D) return null;
     return { L, W, D };
   }
-  m = t.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/);
+
+  m = t.match(doubleRe);
   if (m) {
     const L = Number(m[1]) || 0;
     const W = Number(m[2]) || 0;
@@ -215,16 +222,6 @@ export default function LayoutPage({
   const [loadingLayout, setLoadingLayout] =
     React.useState<boolean>(true);
 
-  // NEW: initial customer fields (pre-fill from quote header)
-  const [initialCustomerName, setInitialCustomerName] =
-    React.useState<string>("");
-  const [initialCustomerEmail, setInitialCustomerEmail] =
-    React.useState<string>("");
-  const [initialCustomerCompany, setInitialCustomerCompany] =
-    React.useState<string>("");
-  const [initialCustomerPhone, setInitialCustomerPhone] =
-    React.useState<string>("");
-
   /**
    * Fallback layout builder, driven by arbitrary dims/cavities strings.
    * We pass in the *effective* strings (from window.location when possible)
@@ -291,16 +288,8 @@ export default function LayoutPage({
             const minY = WALL_IN;
             const maxY = block.widthIn - WALL_IN - c.W;
 
-            const xIn = clamp(
-              rawX,
-              minX,
-              Math.max(minX, maxX),
-            );
-            const yIn = clamp(
-              rawY,
-              minY,
-              Math.max(minY, maxY),
-            );
+            const xIn = clamp(rawX, minX, Math.max(minX, maxX));
+            const yIn = clamp(rawY, minY, Math.max(minY, maxY));
 
             const xNorm =
               block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
@@ -359,12 +348,8 @@ export default function LayoutPage({
             .getAll("cavity")
             .filter((v) => v);
 
-          // Prefer explicit "cavities" list over "cavity" (single) to avoid double-counting
-          if (cavitiesParams.length > 0) {
-            cavitiesParams.forEach((v) => cavityParts.push(v));
-          } else {
-            cavityParams.forEach((v) => cavityParts.push(v));
-          }
+          // Merge both sets (cavities + cavity), then dedupe via normalizeCavitiesParam.
+          cavityParts.push(...cavitiesParams, ...cavityParams);
 
           if (dimsCandidates.length > 0) {
             effectiveBlockStr = normalizeDimsParam(
@@ -394,10 +379,6 @@ export default function LayoutPage({
             setInitialNotes("");
             setInitialQty(null);
             setInitialMaterialId(null);
-            setInitialCustomerName("");
-            setInitialCustomerEmail("");
-            setInitialCustomerCompany("");
-            setInitialCustomerPhone("");
             setLoadingLayout(false);
           }
           return;
@@ -420,33 +401,12 @@ export default function LayoutPage({
             setInitialNotes("");
             setInitialQty(null);
             setInitialMaterialId(null);
-            setInitialCustomerName("");
-            setInitialCustomerEmail("");
-            setInitialCustomerCompany("");
-            setInitialCustomerPhone("");
             setLoadingLayout(false);
           }
           return;
         }
 
-        const json: any = await res.json();
-
-        // Prefill customer info from quote header if available
-        if (!cancelled && json && json.ok && json.quote) {
-          const q = json.quote;
-          setInitialCustomerName(
-            (q.customer_name as string) || "",
-          );
-          setInitialCustomerEmail((q.email as string) || "");
-          setInitialCustomerPhone((q.phone as string) || "");
-          if (typeof q.customer_company === "string") {
-            setInitialCustomerCompany(
-              q.customer_company || "",
-            );
-          } else {
-            setInitialCustomerCompany("");
-          }
-        }
+        const json = await res.json();
 
         // Try to pull qty + material from primary line item (if present)
         let qtyFromItems: number | null = null;
@@ -511,10 +471,6 @@ export default function LayoutPage({
           setInitialNotes("");
           setInitialQty(null);
           setInitialMaterialId(null);
-          setInitialCustomerName("");
-          setInitialCustomerEmail("");
-          setInitialCustomerCompany("");
-          setInitialCustomerPhone("");
           setLoadingLayout(false);
         }
       }
@@ -554,10 +510,6 @@ export default function LayoutPage({
       initialNotes={initialNotes}
       initialQty={initialQty}
       initialMaterialId={initialMaterialId}
-      initialCustomerName={initialCustomerName}
-      initialCustomerEmail={initialCustomerEmail}
-      initialCustomerCompany={initialCustomerCompany}
-      initialCustomerPhone={initialCustomerPhone}
     />
   );
 }
@@ -571,10 +523,6 @@ function LayoutEditorHost(props: {
   initialNotes: string;
   initialQty: number | null;
   initialMaterialId: number | null;
-  initialCustomerName: string;
-  initialCustomerEmail: string;
-  initialCustomerCompany: string;
-  initialCustomerPhone: string;
 }) {
   const {
     quoteNo,
@@ -583,10 +531,6 @@ function LayoutEditorHost(props: {
     initialNotes,
     initialQty,
     initialMaterialId,
-    initialCustomerName,
-    initialCustomerEmail,
-    initialCustomerCompany,
-    initialCustomerPhone,
   } = props;
 
   const {
@@ -613,17 +557,14 @@ function LayoutEditorHost(props: {
     initialQty != null ? initialQty : "",
   );
 
-  // Customer info now seeded from quote header
-  const [customerName, setCustomerName] = React.useState<string>(
-    initialCustomerName || "",
-  );
-  const [customerEmail, setCustomerEmail] = React.useState<string>(
-    initialCustomerEmail || "",
-  );
+  // NEW: customer info (Option A — Name + Email required)
+  const [customerName, setCustomerName] = React.useState<string>("");
+  const [customerEmail, setCustomerEmail] =
+    React.useState<string>("");
   const [customerCompany, setCustomerCompany] =
-    React.useState<string>(initialCustomerCompany || "");
+    React.useState<string>("");
   const [customerPhone, setCustomerPhone] =
-    React.useState<string>(initialCustomerPhone || "");
+    React.useState<string>("");
 
   const [materials, setMaterials] =
     React.useState<MaterialOption[]>([]);
@@ -1251,7 +1192,7 @@ function LayoutEditorHost(props: {
                 </div>
               </div>
 
-              {/* Customer info card */}
+              {/* NEW: Customer info card */}
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                 <div className="text-xs font-semibold text-slate-100 mb-1">
                   Customer info
@@ -1266,8 +1207,7 @@ function LayoutEditorHost(props: {
                 <div className="space-y-2 text-xs">
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-300">
-                      Customer name{" "}
-                      <span className="text-rose-300">*</span>
+                      Customer name <span className="text-rose-300">*</span>
                     </span>
                     <input
                       type="text"
