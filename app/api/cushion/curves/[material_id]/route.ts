@@ -17,21 +17,26 @@ function bad(msg: string, detail?: any, status = 400) {
   return NextResponse.json({ ok: false, error: msg, detail }, { status });
 }
 
-// Support both [material_id] and [material-id] folder param names
+// Support both [material_id] and [material-id], and string | string[]
 type RouteParams = {
-  material_id?: string;
-  "material-id"?: string;
+  material_id?: string | string[];
+  "material-id"?: string | string[];
 };
 
 export async function GET(
   req: NextRequest,
   { params }: { params: RouteParams },
 ) {
-  const rawId =
-    params.material_id ??
-    (params as any)["material-id"] ??
-    "";
+  // Pull whatever key exists
+  let rawIdAny: string | string[] | undefined =
+    params.material_id ?? params["material-id"];
 
+  // If it’s an array, use the first element
+  if (Array.isArray(rawIdAny)) {
+    rawIdAny = rawIdAny[0];
+  }
+
+  const rawId = rawIdAny != null ? String(rawIdAny) : "";
   const materialId = Number(rawId);
 
   if (!Number.isFinite(materialId) || materialId <= 0) {
