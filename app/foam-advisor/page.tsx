@@ -1,14 +1,13 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v2 + curve link
+// Foam Advisor · Path A layout v3 + live curve canvas
 //
 // - Inputs on the LEFT
-// - Center reserved for graphical cushion-curve canvas
-// - RIGHT shows analysis summary + recommended materials
-// - NEW: each recommendation card links to the cushion-curve viewer
-//   for the first matched catalog material.
+// - Center: cushion-curve canvas that auto-loads the primary pick’s curve
+//   from /api/cushion/curves/{material_id} and marks the operating point.
+// - RIGHT: analysis summary + recommended materials (with View cushion curve link).
 //
-// No changes to pricing, quotes, or existing APIs.
+// No changes to pricing, quotes, or existing core logic.
 //
 
 "use client";
@@ -46,6 +45,30 @@ type MaterialOption = {
   family: string;
   density_lb_ft3: number | null;
 };
+
+type CushionPoint = {
+  static_psi: number;
+  deflect_pct: number;
+  g_level: number;
+  source: string | null;
+};
+
+type CushionCurvesApiResponse =
+  | {
+      ok: true;
+      material: {
+        id: number;
+        name: string;
+        material_family: string | null;
+      };
+      points: CushionPoint[];
+      point_count: number;
+    }
+  | {
+      ok: false;
+      error: string;
+      detail?: any;
+    };
 
 function parseBlockDims(
   raw: string | null,
@@ -110,6 +133,20 @@ export default function FoamAdvisorPage({
   const [materialsError, setMaterialsError] = React.useState<
     string | null
   >(null);
+
+  // Cushion curve state for the center canvas
+  const [curveMaterial, setCurveMaterial] = React.useState<{
+    id: number;
+    name: string;
+    material_family: string | null;
+  } | null>(null);
+  const [curvePoints, setCurvePoints] = React.useState<CushionPoint[]>(
+    [],
+  );
+  const [curveLoading, setCurveLoading] =
+    React.useState<boolean>(false);
+  const [curveError, setCurveError] =
+    React.useState<string | null>(null);
 
   // Prefill contact area from block L×W if available
   React.useEffect(() => {
@@ -183,6 +220,10 @@ export default function FoamAdvisorPage({
     e.preventDefault();
     setAdvisorError(null);
     setAdvisorResult(null);
+    // reset curve state when running a new analysis
+    setCurveMaterial(null);
+    setCurvePoints([]);
+    setCurveError(null);
 
     const w = Number(weightLb);
     const a = Number(contactAreaIn2);
@@ -322,7 +363,83 @@ export default function FoamAdvisorPage({
     [materials],
   );
 
-  // Simple helper for the center bar visualization
+  // Auto-load a cushion curve for the primary recommendation's best match
+  React.useEffect(() => {
+    if (!advisorResult) return;
+    if (!advisorResult.recommendations.length) return;
+    if (!materials.length) return;
+
+    const primary =
+      advisorResult.recommendations.find(
+        (r) => r.confidence === "primary",
+      ) ?? advisorResult.recommendations[0];
+
+    if (!primary) return;
+
+    const matches = findMaterialsForRecommendation(primary);
+    if (!matches || matches.length === 0) return;
+
+    const best = matches[0];
+    if (!best || !best.id) return;
+
+    // If we already have this material loaded, do nothing
+    if (curveMaterial && curveMaterial.id === best.id && curvePoints.length) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCurve() {
+      setCurveLoading(true);
+      setCurveError(null);
+
+      try {
+        const res = await fetch(`/api/cushion/curves/${best.id}`, {
+          cache: "no-store",
+        });
+        const json: CushionCurvesApiResponse = await res.json();
+
+        if (cancelled) return;
+
+        if (!res.ok || !json.ok) {
+          const msg =
+            (!json.ok && json.error) ||
+            `HTTP ${res.status}` ||
+            "Unknown error";
+          setCurveError(msg);
+          setCurveMaterial(null);
+          setCurvePoints([]);
+          setCurveLoading(false);
+          return;
+        }
+
+        setCurveMaterial(json.material);
+        setCurvePoints(json.points || []);
+        setCurveLoading(false);
+      } catch (err: any) {
+        if (cancelled) return;
+        console.error("Foam Advisor cushion curve load error:", err);
+        setCurveError(String(err?.message || err));
+        setCurveMaterial(null);
+        setCurvePoints([]);
+        setCurveLoading(false);
+      }
+    }
+
+    loadCurve();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    advisorResult,
+    materials,
+    findMaterialsForRecommendation,
+    curveMaterial,
+    curvePoints.length,
+  ]);
+
+  // Simple helper for the center band text label
   const operatingBandLabel = React.useMemo(() => {
     if (!advisorResult) return null;
     const psi = advisorResult.staticLoadPsi;
@@ -391,8 +508,8 @@ export default function FoamAdvisorPage({
                   families as a starting point.
                 </p>
                 <p className="mt-2 text-[11px] text-slate-500">
-                  In later Path A steps, this will drive a live cushion-curve
-                  overlay in the center canvas.
+                  The center canvas uses your cushion curve data to show where
+                  this load sits.
                 </p>
               </div>
 
@@ -539,7 +656,7 @@ export default function FoamAdvisorPage({
               </form>
             </aside>
 
-            {/* CENTER: Graphical cushion canvas placeholder */}
+            {/* CENTER: Graphical cushion canvas */}
             <section className="flex-1 flex flex-col">
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 flex-1 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
@@ -547,23 +664,26 @@ export default function FoamAdvisorPage({
                     Cushion curve canvas
                   </div>
                   <div className="text-[10px] text-slate-500">
-                    This area is reserved for live curves and operating point.
+                    Auto-loads the primary pick’s curve and marks your load.
                   </div>
                 </div>
 
+                {/* States when we don't have an analysis yet */}
                 {!advisorResult && (
                   <div className="flex-1 flex items-center justify-center">
                     <div className="text-[11px] text-slate-500 text-center max-w-xs">
                       Run an analysis on the left. Once Foam Advisor has a
-                      static load, this canvas will show how your operating
-                      point sits in the soft / typical / firm band, and later
-                      will overlay real cushion curves by material.
+                      static load and primary recommendation, this canvas will
+                      pull the matching cushion curve and show your operating
+                      point.
                     </div>
                   </div>
                 )}
 
+                {/* States once we have an analysis */}
                 {advisorResult && (
-                  <div className="flex-1 flex flex-col justify-between gap-4">
+                  <div className="flex-1 flex flex-col gap-4">
+                    {/* Static load + band bar */}
                     <div className="text-[11px] text-slate-300">
                       <div className="mb-1">
                         <span className="font-semibold text-sky-200">
@@ -574,7 +694,7 @@ export default function FoamAdvisorPage({
                       <p>{advisorResult.staticLoadPsiLabel}</p>
                     </div>
 
-                    {/* Simple band visualization */}
+                    {/* Band visualization */}
                     <div className="mt-2">
                       <div className="text-[11px] text-slate-300 mb-1">
                         Operating band preview
@@ -619,14 +739,279 @@ export default function FoamAdvisorPage({
                       )}
                     </div>
 
-                    <div className="mt-4 text-[10px] text-slate-500">
-                      Future step: for each recommended material, this canvas
-                      will pull points from{" "}
-                      <span className="font-mono text-sky-300">
-                        public.cushion_curves
-                      </span>{" "}
-                      and draw the actual curve, with your operating point
-                      highlighted.
+                    {/* Curve loading / error / chart */}
+                    <div className="mt-3 flex-1 flex flex-col">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-[11px] font-semibold text-slate-100">
+                          Primary curve preview
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          Source: public.cushion_curves
+                        </div>
+                      </div>
+
+                      {curveLoading && (
+                        <div className="flex-1 flex items-center justify-center">
+                          <div className="text-[11px] text-sky-200">
+                            Loading cushion curve data…
+                          </div>
+                        </div>
+                      )}
+
+                      {!curveLoading && curveError && (
+                        <div className="flex-1 flex items-center justify-center">
+                          <div className="rounded-xl border border-rose-700/70 bg-rose-950/60 px-3 py-2 text-[11px] text-rose-50 max-w-xs text-center">
+                            Couldn’t load cushion curve for the primary
+                            recommendation.
+                            <br />
+                            <span className="font-mono">{curveError}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {!curveLoading &&
+                        !curveError &&
+                        (!curvePoints || curvePoints.length === 0) && (
+                          <div className="flex-1 flex items-center justify-center">
+                            <div className="text-[11px] text-slate-500 text-center max-w-xs">
+                              No curve data was found for the selected catalog
+                              material yet. You can still click{" "}
+                              <span className="font-semibold">
+                                View cushion curve
+                              </span>{" "}
+                              in the sidebar to open its admin view.
+                            </div>
+                          </div>
+                        )}
+
+                      {!curveLoading &&
+                        !curveError &&
+                        curvePoints &&
+                        curvePoints.length > 0 && (
+                          <div className="flex-1 flex flex-col gap-2">
+                            <div className="text-[11px] text-slate-300">
+                              {curveMaterial ? (
+                                <>
+                                  Plotting{" "}
+                                  <span className="font-semibold text-sky-200">
+                                    {curveMaterial.material_family ??
+                                      "Foam"}
+                                    {" – "}
+                                    {curveMaterial.name}
+                                  </span>{" "}
+                                  as G-level vs static psi. The vertical marker
+                                  shows your operating load.
+                                </>
+                              ) : (
+                                "Plotting primary recommendation curve."
+                              )}
+                            </div>
+
+                            {/* Simple SVG chart */}
+                            <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2">
+                              {(() => {
+                                const sorted = [...curvePoints].sort(
+                                  (a, b) =>
+                                    a.static_psi - b.static_psi,
+                                );
+                                const psis = sorted.map(
+                                  (p) => p.static_psi,
+                                );
+                                const gs = sorted.map(
+                                  (p) => p.g_level,
+                                );
+
+                                const minPsi = Math.min(...psis);
+                                const maxPsi = Math.max(...psis);
+                                const minG = Math.min(...gs);
+                                const maxG = Math.max(...gs);
+
+                                const spanPsi =
+                                  maxPsi - minPsi || 1;
+                                const spanG = maxG - minG || 1;
+
+                                const VIEW_W = 420;
+                                const VIEW_H = 220;
+                                const PAD_X = 40;
+                                const PAD_Y = 30;
+
+                                const mapX = (psi: number) =>
+                                  PAD_X +
+                                  ((psi - minPsi) / spanPsi) *
+                                    (VIEW_W - 2 * PAD_X);
+                                const mapY = (g: number) =>
+                                  VIEW_H -
+                                  PAD_Y -
+                                  ((g - minG) / spanG) *
+                                    (VIEW_H - 2 * PAD_Y);
+
+                                const pathD = sorted
+                                  .map((p, idx) => {
+                                    const x = mapX(p.static_psi);
+                                    const y = mapY(p.g_level);
+                                    return `${idx === 0 ? "M" : "L"} ${x.toFixed(
+                                      2,
+                                    )} ${y.toFixed(2)}`;
+                                  })
+                                  .join(" ");
+
+                                const operatingPsi =
+                                  advisorResult.staticLoadPsi;
+                                const operatingInRange =
+                                  Number.isFinite(operatingPsi) &&
+                                  operatingPsi >= minPsi &&
+                                  operatingPsi <= maxPsi;
+
+                                const opX = operatingInRange
+                                  ? mapX(operatingPsi)
+                                  : null;
+
+                                return (
+                                  <svg
+                                    width={VIEW_W}
+                                    height={VIEW_H}
+                                    viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+                                  >
+                                    {/* Background */}
+                                    <rect
+                                      x={0}
+                                      y={0}
+                                      width={VIEW_W}
+                                      height={VIEW_H}
+                                      fill="#020617"
+                                    />
+
+                                    {/* Axes */}
+                                    <line
+                                      x1={PAD_X}
+                                      y1={VIEW_H - PAD_Y}
+                                      x2={VIEW_W - PAD_X}
+                                      y2={VIEW_H - PAD_Y}
+                                      stroke="#64748b"
+                                      strokeWidth={1}
+                                    />
+                                    <line
+                                      x1={PAD_X}
+                                      y1={PAD_Y}
+                                      x2={PAD_X}
+                                      y2={VIEW_H - PAD_Y}
+                                      stroke="#64748b"
+                                      strokeWidth={1}
+                                    />
+
+                                    {/* Axis labels */}
+                                    <text
+                                      x={VIEW_W / 2}
+                                      y={VIEW_H - 6}
+                                      textAnchor="middle"
+                                      fontSize={10}
+                                      fill="#e5e7eb"
+                                    >
+                                      Static load (psi)
+                                    </text>
+                                    <text
+                                      x={12}
+                                      y={VIEW_H / 2}
+                                      textAnchor="middle"
+                                      fontSize={10}
+                                      fill="#e5e7eb"
+                                      transform={`rotate(-90 12 ${
+                                        VIEW_H / 2
+                                      })`}
+                                    >
+                                      G-level
+                                    </text>
+
+                                    {/* Curve path */}
+                                    <path
+                                      d={pathD}
+                                      fill="none"
+                                      stroke="#38bdf8"
+                                      strokeWidth={1.5}
+                                    />
+
+                                    {/* Curve points */}
+                                    {sorted.map((p, idx) => {
+                                      const x = mapX(p.static_psi);
+                                      const y = mapY(p.g_level);
+                                      return (
+                                        <circle
+                                          key={`${p.static_psi}-${p.g_level}-${idx}`}
+                                          cx={x}
+                                          cy={y}
+                                          r={2}
+                                          fill="#e0f2fe"
+                                        />
+                                      );
+                                    })}
+
+                                    {/* Operating point marker */}
+                                    {opX != null && (
+                                      <>
+                                        <line
+                                          x1={opX}
+                                          y1={PAD_Y}
+                                          x2={opX}
+                                          y2={VIEW_H - PAD_Y}
+                                          stroke="#f9fafb"
+                                          strokeWidth={1}
+                                          strokeDasharray="4 4"
+                                        />
+                                        <text
+                                          x={opX}
+                                          y={PAD_Y - 6}
+                                          textAnchor="middle"
+                                          fontSize={9}
+                                          fill="#f9fafb"
+                                        >
+                                          Operating load
+                                        </text>
+                                      </>
+                                    )}
+
+                                    {/* Min/max tick labels */}
+                                    <text
+                                      x={PAD_X}
+                                      y={VIEW_H - PAD_Y + 12}
+                                      textAnchor="middle"
+                                      fontSize={9}
+                                      fill="#cbd5f5"
+                                    >
+                                      {minPsi.toFixed(3)}
+                                    </text>
+                                    <text
+                                      x={VIEW_W - PAD_X}
+                                      y={VIEW_H - PAD_Y + 12}
+                                      textAnchor="middle"
+                                      fontSize={9}
+                                      fill="#cbd5f5"
+                                    >
+                                      {maxPsi.toFixed(3)}
+                                    </text>
+                                    <text
+                                      x={PAD_X - 8}
+                                      y={VIEW_H - PAD_Y}
+                                      textAnchor="end"
+                                      fontSize={9}
+                                      fill="#cbd5f5"
+                                    >
+                                      {minG.toFixed(1)}
+                                    </text>
+                                    <text
+                                      x={PAD_X - 8}
+                                      y={PAD_Y + 4}
+                                      textAnchor="end"
+                                      fontSize={9}
+                                      fill="#cbd5f5"
+                                    >
+                                      {maxG.toFixed(1)}
+                                    </text>
+                                  </svg>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        )}
                     </div>
                   </div>
                 )}
