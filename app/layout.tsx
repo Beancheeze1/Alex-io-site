@@ -1,6 +1,5 @@
 // app/layout.tsx
 import "../styles/globals.css";
-import BrandHeader from "@/components/BrandHeader";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -17,8 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-neutral-50 text-neutral-800">
-        <BrandHeader />
-        {/* Full-width content */}
+        {/* Root layout without the global Alex-IO top banner.
+            Individual pages (quote, layout editor, admin, etc.)
+            can render their own headers as needed. */}
         <main className="w-full px-4 py-6">
           {children}
         </main>
