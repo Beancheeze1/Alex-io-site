@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A step 2c (+ curve links + exposed bands)
+// Foam Advisor · Path A "big + beautiful" step
 //
 // - Reads ?quote_no= and ?block=LxWxH from searchParams prop.
 // - Lets the user enter:
@@ -13,10 +13,12 @@
 //   for each recommendation, shows matching materials (PE / PU / XLPE)
 //   in the density band suggested by the API.
 // - “View cushion curve” link goes to /admin/cushion/curves/[material_id].
-// - NEW: Summary shows numeric static load (psi).
-// - NEW: Each recommendation shows the target density band when present.
 //
-// Still NO cushion_curves math here yet; that will be a later step.
+// NEW (this step):
+//   • Summary shows weight, contact area, and static load together.
+//   • Adds a visual "Operating point" gauge (0–10 psi) for quick feel.
+//   • Each recommendation shows the target density band as a tiny bar.
+//   • All logic still uses existing advisor + materials; no new math yet.
 //
 
 "use client";
@@ -276,6 +278,25 @@ export default function FoamAdvisorPage({
 
   const hasQuote = !!quoteNo;
 
+  // Basic view of the current inputs (for the summary card)
+  const inputWeight = Number(weightLb);
+  const hasWeight =
+    Number.isFinite(inputWeight) && inputWeight > 0;
+  const inputArea = Number(contactAreaIn2);
+  const hasArea =
+    Number.isFinite(inputArea) && inputArea > 0;
+
+  // Operating-point gauge (0–10 psi window for now)
+  const operatingStaticPsi = advisorResult?.staticLoadPsi ?? 0;
+  const normalizedOperating = React.useMemo(() => {
+    if (!advisorResult) return 0;
+    const raw = advisorResult.staticLoadPsi;
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    const maxPsi = 10; // simple visual band for now
+    const frac = raw / maxPsi;
+    return Math.max(0, Math.min(1, frac));
+  }, [advisorResult]);
+
   // Helper: find best catalog matches for a recommendation
   const findMaterialsForRecommendation = React.useCallback(
     (rec: AdvisorRecommendation): MaterialOption[] => {
@@ -533,28 +554,77 @@ export default function FoamAdvisorPage({
               <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Summary card */}
                 <div className="md:col-span-1 rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
-                  <div className="font-semibold text-sky-200 mb-1">
+                  <div className="font-semibold text-sky-200 mb-2">
                     Analysis summary
                   </div>
-                  <p className="mb-1">
-                    <span className="text-slate-300">
-                      Static load:
-                    </span>{" "}
-                    <span className="font-mono font-semibold text-slate-50">
-                      {advisorResult.staticLoadPsi.toFixed(2)} psi
-                    </span>
-                  </p>
+
+                  <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">
+                    <div className="rounded-lg border border-slate-700 bg-slate-950/70 px-2 py-1.5">
+                      <div className="text-slate-400">Weight</div>
+                      <div className="font-mono text-xs text-slate-50">
+                        {hasWeight
+                          ? `${inputWeight.toFixed(2)} lb`
+                          : "—"}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-slate-700 bg-slate-950/70 px-2 py-1.5">
+                      <div className="text-slate-400">Area</div>
+                      <div className="font-mono text-xs text-slate-50">
+                        {hasArea
+                          ? `${inputArea.toFixed(1)} in²`
+                          : "—"}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-sky-600/70 bg-slate-950/80 px-2 py-1.5">
+                      <div className="text-slate-300">Static load</div>
+                      <div className="font-mono text-xs text-sky-100">
+                        {operatingStaticPsi.toFixed(2)} psi
+                      </div>
+                    </div>
+                  </div>
+
                   <p className="mb-2 text-slate-400">
                     {advisorResult.staticLoadPsiLabel}
                   </p>
-                  <p className="mb-1">
-                    <span className="font-semibold">Environment: </span>
-                    {advisorResult.environmentLabel}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Fragility: </span>
-                    {advisorResult.fragilityLabel}
-                  </p>
+
+                  {/* Operating point gauge */}
+                  <div className="mt-2">
+                    <div className="text-[10px] text-slate-400 mb-1">
+                      Operating point vs typical cushioning band
+                    </div>
+                    <div className="relative h-3 rounded-full bg-gradient-to-r from-emerald-500 via-sky-500 to-rose-500 overflow-hidden">
+                      <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_top,_white_0,_transparent_55%)]" />
+                      <div
+                        className="absolute top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-full bg-slate-950 shadow-[0_0_0_1px_rgba(15,23,42,0.6)]"
+                        style={{
+                          left: `${Math.round(
+                            normalizedOperating * 100,
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="mt-1 flex justify-between text-[9px] text-slate-500">
+                      <span>Soft / low psi</span>
+                      <span>Typical 0–10 psi band</span>
+                      <span>Firm / high psi</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <p className="mb-1">
+                      <span className="font-semibold">
+                        Environment:
+                      </span>{" "}
+                      {advisorResult.environmentLabel}
+                    </p>
+                    <p>
+                      <span className="font-semibold">
+                        Fragility:
+                      </span>{" "}
+                      {advisorResult.fragilityLabel}
+                    </p>
+                  </div>
+
                   {parsedBlock && (
                     <p className="mt-2 text-[10px] text-slate-500">
                       Block from layout: {parsedBlock.L}" × {parsedBlock.W}" ×{" "}
@@ -636,18 +706,35 @@ export default function FoamAdvisorPage({
                                 : "Stretch option"}
                             </span>
                           </div>
+
                           <p className="mt-1 leading-snug text-[11px]">
                             {rec.notes}
                           </p>
 
+                          {/* Density band mini-bar */}
                           {hasDensityBand && densityBandLabel && (
-                            <p className="mt-1 text-[10px] text-slate-400">
-                              {densityBandLabel}
-                            </p>
+                            <div className="mt-2">
+                              <div className="text-[10px] text-slate-400 mb-1">
+                                {densityBandLabel}
+                              </div>
+                              <div className="relative h-2 rounded-full bg-slate-800 overflow-hidden">
+                                <div className="absolute inset-0 bg-gradient-to-r from-slate-600 via-sky-600 to-slate-600 opacity-60" />
+                                {rec.targetDensityMin != null &&
+                                  rec.targetDensityMax != null && (
+                                    <div
+                                      className="absolute inset-y-0 bg-sky-400/70"
+                                      style={{
+                                        left: "25%",
+                                        right: "25%",
+                                      }}
+                                    />
+                                  )}
+                              </div>
+                            </div>
                           )}
 
                           {matchedMaterials.length > 0 && (
-                            <div className="mt-2 text-[10px] text-slate-400">
+                            <div className="mt-3 text-[10px] text-slate-400">
                               <div className="font-semibold text-[10px] text-slate-300 mb-0.5">
                                 In your catalog:
                               </div>
