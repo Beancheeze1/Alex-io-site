@@ -2,6 +2,9 @@
 //
 // Read-only cushion curve lookup for a single material_id.
 // URL: /api/cushion/curves/[material_id]
+// NOTE: We *do not* rely on Next.js params here; instead we parse
+// the material_id from the URL path to avoid any [material-id] vs
+// [material_id] / array / typing issues.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -17,26 +20,12 @@ function bad(msg: string, detail?: any, status = 400) {
   return NextResponse.json({ ok: false, error: msg, detail }, { status });
 }
 
-// Support both [material_id] and [material-id], and string | string[]
-type RouteParams = {
-  material_id?: string | string[];
-  "material-id"?: string | string[];
-};
-
-export async function GET(
-  req: NextRequest,
-  { params }: { params: RouteParams },
-) {
-  // Pull whatever key exists
-  let rawIdAny: string | string[] | undefined =
-    params.material_id ?? params["material-id"];
-
-  // If it’s an array, use the first element
-  if (Array.isArray(rawIdAny)) {
-    rawIdAny = rawIdAny[0];
-  }
-
-  const rawId = rawIdAny != null ? String(rawIdAny) : "";
+export async function GET(req: NextRequest) {
+  // Example path: /api/cushion/curves/223
+  const url = new URL(req.url);
+  const segments = url.pathname.split("/").filter(Boolean);
+  // ... ["api", "cushion", "curves", "223"]
+  const rawId = segments[segments.length - 1] ?? "";
   const materialId = Number(rawId);
 
   if (!Number.isFinite(materialId) || materialId <= 0) {
