@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A step 2
+// Foam Advisor · Path A step 2b
 //
 // - Reads ?quote_no= and ?block=LxWxH from searchParams prop.
 // - Lets the user enter:
@@ -8,11 +8,12 @@
 //     • Contact area (in²)
 //     • Environment
 //     • Fragility
-// - On submit, POSTS to /api/foam-advisor/recommend and shows:
-//     • Static load summary
-//     • 2–3 generic foam recommendations.
-// - Still NO direct DB access here; the API is a stub that we can
-//   later swap to read from materials + cushion_curves.
+// - On submit, POSTS to /api/foam-advisor/recommend.
+// - ALSO loads your real foam catalog from /api/materials and,
+//   for each recommendation, shows matching materials (PE / PU / XLPE)
+//   in the density band suggested by the API.
+//
+// Still NO cushion_curves math here yet; that will be a later step.
 //
 
 "use client";
@@ -32,6 +33,8 @@ type AdvisorRecommendation = {
   label: string;
   confidence: "primary" | "alternative" | "stretch";
   notes: string;
+  targetDensityMin?: number;
+  targetDensityMax?: number;
 };
 
 type AdvisorResult = {
@@ -40,6 +43,13 @@ type AdvisorResult = {
   environmentLabel: string;
   fragilityLabel: string;
   recommendations: AdvisorRecommendation[];
+};
+
+type MaterialOption = {
+  id: number;
+  name: string;
+  family: string;
+  density_lb_ft3: number | null;
 };
 
 function parseBlockDims(
@@ -97,6 +107,15 @@ export default function FoamAdvisorPage({
     React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState<boolean>(false);
 
+  // Materials catalog (from /api/materials)
+  const [materials, setMaterials] =
+    React.useState<MaterialOption[]>([]);
+  const [materialsLoading, setMaterialsLoading] =
+    React.useState<boolean>(true);
+  const [materialsError, setMaterialsError] = React.useState<
+    string | null
+  >(null);
+
   // Prefill contact area from block L×W if available
   React.useEffect(() => {
     if (!parsedBlock) return;
@@ -109,6 +128,63 @@ export default function FoamAdvisorPage({
       );
     }
   }, [parsedBlock]);
+
+  // Load materials list from existing API (same one the editor uses)
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadMaterials() {
+      setMaterialsLoading(true);
+      setMaterialsError(null);
+
+      try {
+        const res = await fetch("/api/materials", {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const json = await res.json();
+
+        if (!cancelled && Array.isArray(json.materials)) {
+          const mapped: MaterialOption[] = json.materials.map(
+            (m: any) => ({
+              id: m.id,
+              name:
+                (m.name ??
+                  m.material_name ??
+                  `Material #${m.id}`) || `Material #${m.id}`,
+              family: m.material_family || "Uncategorized",
+              density_lb_ft3:
+                typeof m.density_lb_ft3 === "number"
+                  ? m.density_lb_ft3
+                  : m.density_lb_ft3 != null
+                  ? Number(m.density_lb_ft3)
+                  : null,
+            }),
+          );
+          setMaterials(mapped);
+        }
+      } catch (err) {
+        console.error("Error loading materials for Foam Advisor", err);
+        if (!cancelled) {
+          setMaterialsError(
+            "Couldn’t load your foam catalog. Recommendations will still show, but won’t be mapped to actual materials.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setMaterialsLoading(false);
+        }
+      }
+    }
+
+    loadMaterials();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,6 +272,63 @@ export default function FoamAdvisorPage({
   };
 
   const hasQuote = !!quoteNo;
+
+  // Helper: find best catalog matches for a recommendation
+  const findMaterialsForRecommendation = React.useCallback(
+    (rec: AdvisorRecommendation): MaterialOption[] => {
+      if (!materials || materials.length === 0) return [];
+
+      const familyMatches = materials.filter((m) => {
+        if (!m.family || !rec.family) return false;
+        return (
+          m.family.toLowerCase() === rec.family.toLowerCase() &&
+          m.density_lb_ft3 != null
+        );
+      });
+
+      if (familyMatches.length === 0) return [];
+
+      let filtered = familyMatches;
+
+      if (rec.targetDensityMin != null || rec.targetDensityMax != null) {
+        filtered = familyMatches.filter((m) => {
+          const d = m.density_lb_ft3!;
+          if (
+            rec.targetDensityMin != null &&
+            d < rec.targetDensityMin
+          )
+            return false;
+          if (
+            rec.targetDensityMax != null &&
+            d > rec.targetDensityMax
+          )
+            return false;
+          return true;
+        });
+
+        // If nothing is in the band, fall back to any in the family
+        if (filtered.length === 0) {
+          filtered = familyMatches;
+        }
+      }
+
+      const target =
+        rec.targetDensityMin != null &&
+        rec.targetDensityMax != null
+          ? (rec.targetDensityMin + rec.targetDensityMax) / 2
+          : rec.targetDensityMin ?? rec.targetDensityMax ?? null;
+
+      filtered.sort((a, b) => {
+        const da = a.density_lb_ft3 ?? 0;
+        const db = b.density_lb_ft3 ?? 0;
+        if (target == null) return da - db;
+        return Math.abs(da - target) - Math.abs(db - target);
+      });
+
+      return filtered.slice(0, 3);
+    },
+    [materials],
+  );
 
   return (
     <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
@@ -375,8 +508,8 @@ export default function FoamAdvisorPage({
                     : "Analyze and prepare recommendation"}
                 </button>
                 <span className="text-[11px] text-slate-500">
-                  This version uses generic foam families. Next step: wire this
-                  into your real materials + cushion_curves data.
+                  This version uses your real foam catalog to show example
+                  materials for each pick.
                 </span>
               </div>
             </form>
@@ -384,6 +517,12 @@ export default function FoamAdvisorPage({
             {advisorError && (
               <div className="mt-4 rounded-xl border border-amber-600 bg-amber-900/60 px-4 py-3 text-[11px] text-amber-50">
                 {advisorError}
+              </div>
+            )}
+
+            {materialsError && (
+              <div className="mt-3 rounded-xl border border-amber-700 bg-amber-950/70 px-4 py-3 text-[11px] text-amber-100">
+                {materialsError}
               </div>
             )}
 
@@ -415,11 +554,10 @@ export default function FoamAdvisorPage({
                 <div className="md:col-span-2 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="text-[11px] font-semibold text-slate-100">
-                      Suggested foam families (preview)
+                      Suggested foam families (mapped to your catalog)
                     </div>
                     <div className="text-[10px] text-slate-500">
-                      Generic bands only – will be hooked to your actual
-                      materials list.
+                      Using /api/materials to show example SKUs.
                     </div>
                   </div>
 
@@ -428,42 +566,72 @@ export default function FoamAdvisorPage({
                       No specific suggestions returned for this combination yet.
                     </div>
                   ) : (
-                    advisorResult.recommendations.map((rec) => (
-                      <div
-                        key={rec.key}
-                        className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200"
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <div>
-                            <div className="font-semibold">
-                              {rec.label}
+                    advisorResult.recommendations.map((rec) => {
+                      const matchedMaterials =
+                        findMaterialsForRecommendation(rec);
+
+                      return (
+                        <div
+                          key={rec.key}
+                          className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <div>
+                              <div className="font-semibold">
+                                {rec.label}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {rec.family}
+                              </div>
                             </div>
-                            <div className="text-[10px] text-slate-400">
-                              {rec.family}
-                            </div>
-                          </div>
-                          <span
-                            className={[
-                              "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
-                              rec.confidence === "primary"
-                                ? "bg-sky-500/20 border border-sky-400 text-sky-100"
+                            <span
+                              className={[
+                                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
+                                rec.confidence === "primary"
+                                  ? "bg-sky-500/20 border border-sky-400 text-sky-100"
+                                  : rec.confidence === "alternative"
+                                  ? "bg-emerald-500/15 border border-emerald-400 text-emerald-100"
+                                  : "bg-slate-700/60 border border-slate-500 text-slate-100",
+                              ].join(" ")}
+                            >
+                              {rec.confidence === "primary"
+                                ? "Primary pick"
                                 : rec.confidence === "alternative"
-                                ? "bg-emerald-500/15 border border-emerald-400 text-emerald-100"
-                                : "bg-slate-700/60 border border-slate-500 text-slate-100",
-                            ].join(" ")}
-                          >
-                            {rec.confidence === "primary"
-                              ? "Primary pick"
-                              : rec.confidence === "alternative"
-                              ? "Alternative"
-                              : "Stretch option"}
-                          </span>
+                                ? "Alternative"
+                                : "Stretch option"}
+                            </span>
+                          </div>
+                          <p className="mt-1 leading-snug text-[11px]">
+                            {rec.notes}
+                          </p>
+
+                          {matchedMaterials.length > 0 && (
+                            <div className="mt-2 text-[10px] text-slate-400">
+                              <div className="font-semibold text-[10px] text-slate-300 mb-0.5">
+                                In your catalog:
+                              </div>
+                              <ul className="list-disc list-inside space-y-0.5">
+                                {matchedMaterials.map((m) => (
+                                  <li key={m.id}>
+                                    {m.name}
+                                    {m.density_lb_ft3 != null
+                                      ? ` · ${m.density_lb_ft3.toFixed(
+                                          1,
+                                        )} pcf`
+                                      : ""}
+                                  </li>
+                                ))}
+                              </ul>
+                              {materialsLoading && (
+                                <div className="mt-1 text-[10px] text-slate-500">
+                                  Loading materials…
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        <p className="mt-1 leading-snug text-[11px]">
-                          {rec.notes}
-                        </p>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

@@ -1,11 +1,13 @@
 // app/api/foam-advisor/recommend/route.ts
 //
-// Foam Advisor recommend endpoint (stub version).
+// Foam Advisor recommend endpoint (stub version with density bands).
 //
 // Path A safe:
 // - NO database access yet.
 // - Uses only request body fields to compute static load (psi)
 //   and returns generic PE / PU / XLPE suggestions.
+// - Each suggestion includes an optional target density band so
+//   the UI can map into your real materials list via /api/materials.
 // - Later we can replace the recommendation block to pull from
 //   materials + cushion_curves without changing the API surface.
 //
@@ -21,6 +23,9 @@ type Recommendation = {
   label: string;
   confidence: "primary" | "alternative" | "stretch";
   notes: string;
+  /** Optional density band in pcf for matching catalog materials */
+  targetDensityMin?: number;
+  targetDensityMax?: number;
 };
 
 export async function POST(req: Request) {
@@ -85,27 +90,33 @@ export async function POST(req: Request) {
     recs.push({
       key: "soft_pu_primary",
       family: "Polyurethane Foam",
-      label: "Soft PU (≈ 1.3–1.5 pcf)",
+      label: "Soft PU (≈ 1.3–1.6 pcf)",
       confidence: "primary",
       notes:
         "Good for very fragile items and low static loads. Look for a curve where your static load sits near the flat middle of the deflection band.",
+      targetDensityMin: 1.3,
+      targetDensityMax: 1.6,
     });
     recs.push({
       key: "xlpe_alt",
       family: "Cross-linked Polyethylene",
-      label: "Soft XLPE (≈ 1.7–2.0 pcf)",
+      label: "Soft XLPE (≈ 1.7–2.1 pcf)",
       confidence: "alternative",
       notes:
         "Fine-cell XLPE works well when you need a cleaner look or repeated use. Keep deflection moderate so g-levels stay below your fragility band.",
+      targetDensityMin: 1.7,
+      targetDensityMax: 2.1,
     });
     if (mediumLoad || highLoad) {
       recs.push({
         key: "med_pe_stretch",
         family: "Polyethylene",
-        label: "Medium PE (≈ 1.7 pcf)",
+        label: "Medium PE (≈ 1.7–2.0 pcf)",
         confidence: "stretch",
         notes:
           "Use with extra care for very fragile items—only if curves show acceptable g-levels at your static load and a reasonable deflection.",
+        targetDensityMin: 1.7,
+        targetDensityMax: 2.0,
       });
     }
   } else if (fragility === "rugged") {
@@ -117,6 +128,8 @@ export async function POST(req: Request) {
       confidence: "primary",
       notes:
         "Workhorse option for rugged hardware. Aim for the central, efficient part of the cushion curve at your expected drop height.",
+      targetDensityMin: 1.7,
+      targetDensityMax: 2.2,
     });
     if (highLoad) {
       recs.push({
@@ -126,15 +139,19 @@ export async function POST(req: Request) {
         confidence: "alternative",
         notes:
           "Consider higher density PE when static loads climb and you need more support with limited deflection.",
+        targetDensityMin: 2.2,
+        targetDensityMax: 4.0,
       });
     }
     recs.push({
       key: "pu_alt",
       family: "Polyurethane Foam",
-      label: "Medium PU (≈ 1.9–2.2 pcf)",
+      label: "Medium PU (≈ 1.9–2.3 pcf)",
       confidence: "stretch",
       notes:
         "Can help when you want a softer feel but products are still relatively rugged.",
+      targetDensityMin: 1.9,
+      targetDensityMax: 2.3,
     });
   } else {
     // Moderate fragility → balanced mix
@@ -146,15 +163,19 @@ export async function POST(req: Request) {
         confidence: "primary",
         notes:
           "Static load is low; softer PU helps keep g-levels down without over-compressing the foam.",
+        targetDensityMin: 1.5,
+        targetDensityMax: 1.9,
       });
     } else if (mediumLoad) {
       recs.push({
         key: "med_pe_primary_mod",
         family: "Polyethylene",
-        label: "Medium PE (≈ 1.7 pcf)",
+        label: "Medium PE (≈ 1.7 pcf band)",
         confidence: "primary",
         notes:
           "Good balance of support and protection for general industrial components.",
+        targetDensityMin: 1.6,
+        targetDensityMax: 1.9,
       });
     } else if (highLoad) {
       recs.push({
@@ -164,6 +185,8 @@ export async function POST(req: Request) {
         confidence: "primary",
         notes:
           "Higher static load favors firmer materials to avoid bottoming-out at typical deflections.",
+        targetDensityMin: 2.2,
+        targetDensityMax: 4.0,
       });
     }
 
@@ -174,6 +197,8 @@ export async function POST(req: Request) {
       confidence: "alternative",
       notes:
         "Use when you need cleaner edges, laminated sets, or repeated use with similar performance to standard PE.",
+      targetDensityMin: 1.7,
+      targetDensityMax: 2.2,
     });
 
     recs.push({
@@ -183,6 +208,8 @@ export async function POST(req: Request) {
       confidence: "stretch",
       notes:
         "Useful when you want more cushioning feel or tighter fit around complex shapes.",
+      targetDensityMin: 1.5,
+      targetDensityMax: 2.2,
     });
   }
 
