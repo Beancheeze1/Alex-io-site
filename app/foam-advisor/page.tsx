@@ -1,7 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v6 (polished chart + band gauge)
-//
+// Foam Advisor · Path A layout v7
 // - Inputs on the LEFT
 // - Center: cushion-curve canvas that shows the selected recommendation’s curve
 //   from /api/cushion/curves/{material_id}, with the operating point marked.
@@ -11,6 +10,9 @@
 //   • Shows a small numeric readout: psi / % deflection / G
 //   • Operating band gauge with 0 / 1 / 2 / 3 psi ticks and segment labels
 //   • Subtle but visible grid behind the curve
+//   • Hover tooltips on tested data points
+//   • Axis ticks on psi and G for easier reading
+//   • Short explanation of the operating band for non-experts
 // - RIGHT: analysis summary + recommended materials (clickable to drive the canvas)
 //
 // No changes to pricing, quotes, or existing core logic.
@@ -202,6 +204,13 @@ export default function FoamAdvisorPage({
   const [curveError, setCurveError] =
     React.useState<string | null>(null);
 
+  // Hovered tested point (for flyout tooltip)
+  const [hoverPoint, setHoverPoint] = React.useState<{
+    point: CushionPoint;
+    x: number;
+    y: number;
+  } | null>(null);
+
   // Prefill contact area from block L×W if available
   React.useEffect(() => {
     if (!parsedBlock) return;
@@ -279,6 +288,7 @@ export default function FoamAdvisorPage({
     setCurveMaterial(null);
     setCurvePoints([]);
     setCurveError(null);
+    setHoverPoint(null);
 
     const w = Number(weightLb);
     const a = Number(contactAreaIn2);
@@ -373,6 +383,11 @@ export default function FoamAdvisorPage({
 
   const hasQuote = !!effectiveQuoteNo;
 
+  // Clear hover tooltip when curve data changes
+  React.useEffect(() => {
+    setHoverPoint(null);
+  }, [curvePoints]);
+
   // Helper: find best catalog matches for a recommendation
   const findMaterialsForRecommendation = React.useCallback(
     (rec: AdvisorRecommendation): MaterialOption[] => {
@@ -457,6 +472,7 @@ export default function FoamAdvisorPage({
     async function loadCurve() {
       setCurveLoading(true);
       setCurveError(null);
+      setHoverPoint(null);
 
       try {
         const res = await fetch(`/api/cushion/curves/${best.id}`, {
@@ -724,6 +740,7 @@ export default function FoamAdvisorPage({
                 )}
               </form>
             </aside>
+
             {/* CENTER: Graphical cushion canvas */}
             <section className="flex-1 flex flex-col">
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 flex-1 flex flex-col shadow-[0_18px_45px_rgba(15,23,42,0.9)]">
@@ -821,6 +838,11 @@ export default function FoamAdvisorPage({
                           </div>
                         )}
                       </div>
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        The colored bar shows a typical static-load range for
+                        this type of foam. The vertical line shows where your
+                        product sits within that range.
+                      </p>
                     </div>
 
                     {/* Curve loading / error / chart */}
@@ -874,7 +896,7 @@ export default function FoamAdvisorPage({
                         !curveError &&
                         curvePoints &&
                         curvePoints.length > 0 && (
-                          <div className="flex-1 flex flex-col gap-2">
+                        <div className="flex-1 flex flex-col gap-2">
                             <div className="text-[11px] text-slate-300">
                               {curveMaterial ? (
                                 <>
@@ -893,27 +915,21 @@ export default function FoamAdvisorPage({
                               )}
                             </div>
 
-                            {/* SVG chart with nearest-point highlight + grid */}
-                            <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2">
+                            {/* SVG chart with ticks + hover tooltips */}
+                            <div className="relative flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2 select-none">
                               {(() => {
                                 const sorted = [...curvePoints].sort(
-                                  (a, b) =>
-                                    a.static_psi - b.static_psi,
+                                  (a, b) => a.static_psi - b.static_psi,
                                 );
-                                const psis = sorted.map(
-                                  (p) => p.static_psi,
-                                );
-                                const gs = sorted.map(
-                                  (p) => p.g_level,
-                                );
+                                const psis = sorted.map((p) => p.static_psi);
+                                const gs = sorted.map((p) => p.g_level);
 
                                 const minPsi = Math.min(...psis);
                                 const maxPsi = Math.max(...psis);
                                 const minG = Math.min(...gs);
                                 const maxG = Math.max(...gs);
 
-                                const spanPsi =
-                                  maxPsi - minPsi || 1;
+                                const spanPsi = maxPsi - minPsi || 1;
                                 const spanG = maxG - minG || 1;
 
                                 const VIEW_W = 420;
@@ -931,13 +947,12 @@ export default function FoamAdvisorPage({
                                   ((g - minG) / spanG) *
                                     (VIEW_H - 2 * PAD_Y);
 
-                                // Grid lines (data-aware)
+                                // Grid lines
                                 const xGridCount = 4;
                                 const xGridValues = Array.from(
                                   { length: xGridCount + 1 },
                                   (_, i) =>
-                                    minPsi +
-                                    (spanPsi * i) / xGridCount,
+                                    minPsi + (spanPsi * i) / xGridCount,
                                 );
                                 const yGridCount = 4;
                                 const yGridValues = Array.from(
@@ -956,6 +971,7 @@ export default function FoamAdvisorPage({
                                   })
                                   .join(" ");
 
+                                // Operating point vertical marker
                                 const operatingPsi =
                                   advisorResult.staticLoadPsi;
                                 const hasOperating =
@@ -972,7 +988,7 @@ export default function FoamAdvisorPage({
                                     ? mapX(operatingPsi)
                                     : null;
 
-                                // Nearest tested point on the curve
+                                // Nearest tested point
                                 const nearestPoint: CushionPoint | null =
                                   hasOperating
                                     ? sorted.reduce<{
@@ -981,17 +997,13 @@ export default function FoamAdvisorPage({
                                       }>(
                                         (acc, p) => {
                                           const d = Math.abs(
-                                            p.static_psi -
-                                              operatingPsi,
+                                            p.static_psi - operatingPsi,
                                           );
                                           if (
                                             acc.best === null ||
                                             d < acc.dist
                                           ) {
-                                            return {
-                                              best: p,
-                                              dist: d,
-                                            };
+                                            return { best: p, dist: d };
                                           }
                                           return acc;
                                         },
@@ -1008,7 +1020,6 @@ export default function FoamAdvisorPage({
                                     ? mapY(nearestPoint.g_level)
                                     : null;
 
-                                // Helper for mid-psi label
                                 const midPsi = minPsi + spanPsi / 2;
 
                                 return (
@@ -1017,6 +1028,7 @@ export default function FoamAdvisorPage({
                                       width={VIEW_W}
                                       height={VIEW_H}
                                       viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+                                      onMouseLeave={() => setHoverPoint(null)}
                                     >
                                       {/* Background */}
                                       <rect
@@ -1046,7 +1058,7 @@ export default function FoamAdvisorPage({
                                         </linearGradient>
                                       </defs>
 
-                                      {/* Grid lines (behind axes + curve) */}
+                                      {/* Grid */}
                                       {xGridValues.map((v, idx) => {
                                         const x = mapX(v);
                                         return (
@@ -1057,7 +1069,7 @@ export default function FoamAdvisorPage({
                                             x2={x}
                                             y2={VIEW_H - PAD_Y}
                                             stroke="#1e293b"
-                                            strokeWidth={0.6}
+                                            strokeWidth={0.7}
                                             strokeDasharray="3 5"
                                           />
                                         );
@@ -1072,7 +1084,7 @@ export default function FoamAdvisorPage({
                                             x2={VIEW_W - PAD_X}
                                             y2={y}
                                             stroke="#1e293b"
-                                            strokeWidth={0.6}
+                                            strokeWidth={0.7}
                                             strokeDasharray="3 5"
                                           />
                                         );
@@ -1124,30 +1136,34 @@ export default function FoamAdvisorPage({
                                         d={pathD}
                                         fill="none"
                                         stroke="url(#curveStroke)"
-                                        strokeWidth={1.6}
+                                        strokeWidth={1.8}
                                       />
 
-                                      {/* Curve points */}
+                                      {/* Hoverable points */}
                                       {sorted.map((p, idx) => {
-                                        const x = mapX(
-                                          p.static_psi,
-                                        );
+                                        const x = mapX(p.static_psi);
                                         const y = mapY(p.g_level);
                                         return (
                                           <circle
                                             key={`${p.static_psi}-${p.g_level}-${idx}`}
                                             cx={x}
                                             cy={y}
-                                            r={2}
+                                            r={3}
                                             fill="#e0f2fe"
+                                            onMouseEnter={() =>
+                                              setHoverPoint({
+                                                point: p,
+                                                x,
+                                                y,
+                                              })
+                                            }
                                           />
                                         );
                                       })}
 
-                                      {/* Operating point marker (vertical line with glow) */}
+                                      {/* Operating point marker */}
                                       {opX != null && (
                                         <>
-                                          {/* Glow behind line */}
                                           <line
                                             x1={opX}
                                             y1={PAD_Y}
@@ -1155,9 +1171,8 @@ export default function FoamAdvisorPage({
                                             y2={VIEW_H - PAD_Y}
                                             stroke="#0ea5e9"
                                             strokeWidth={4}
-                                            strokeOpacity={0.2}
+                                            strokeOpacity={0.18}
                                           />
-                                          {/* Main dashed line */}
                                           <line
                                             x1={opX}
                                             y1={PAD_Y}
@@ -1167,43 +1182,31 @@ export default function FoamAdvisorPage({
                                             strokeWidth={1}
                                             strokeDasharray="4 4"
                                           />
-                                          <text
-                                            x={opX}
-                                            y={PAD_Y - 6}
-                                            textAnchor="middle"
-                                            fontSize={9}
-                                            fill="#f9fafb"
-                                          >
-                                            Operating load
-                                          </text>
                                         </>
                                       )}
 
-                                      {/* Nearest tested curve point highlight */}
-                                      {nearestX != null &&
-                                        nearestY != null && (
-                                          <>
-                                            <circle
-                                              cx={nearestX}
-                                              cy={nearestY}
-                                              r={4}
-                                              fill="#22c55e"
-                                              stroke="#022c22"
-                                              strokeWidth={1}
-                                            />
-                                            <circle
-                                              cx={nearestX}
-                                              cy={nearestY}
-                                              r={7}
-                                              fill="none"
-                                              stroke="#22c55e"
-                                              strokeWidth={1}
-                                              strokeDasharray="3 3"
-                                            />
-                                          </>
-                                        )}
+                                      {/* Nearest highlighted point */}
+                                      {nearestX != null && nearestY != null && (
+                                        <>
+                                          <circle
+                                            cx={nearestX}
+                                            cy={nearestY}
+                                            r={4.2}
+                                            fill="#22c55e"
+                                          />
+                                          <circle
+                                            cx={nearestX}
+                                            cy={nearestY}
+                                            r={7}
+                                            fill="none"
+                                            stroke="#22c55e"
+                                            strokeWidth={1}
+                                            strokeDasharray="3 3"
+                                          />
+                                        </>
+                                      )}
 
-                                      {/* Min / mid / max tick labels on x-axis */}
+                                      {/* Axis ticks (min/mid/max) */}
                                       <text
                                         x={PAD_X}
                                         y={VIEW_H - PAD_Y + 12}
@@ -1232,7 +1235,6 @@ export default function FoamAdvisorPage({
                                         {maxPsi.toFixed(3)}
                                       </text>
 
-                                      {/* Min / max tick labels on y-axis */}
                                       <text
                                         x={PAD_X - 8}
                                         y={VIEW_H - PAD_Y}
@@ -1253,49 +1255,122 @@ export default function FoamAdvisorPage({
                                       </text>
                                     </svg>
 
-                                    {/* Nearest-point numeric readout + disclaimer */}
-                                    {nearestPoint && (
-                                      <div className="mt-3 text-[10px] text-slate-300">
+                                    {/* Hover tooltip */}
+                                    {hoverPoint && (
+                                      <div
+                                        className="absolute bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-[10px] text-slate-200 shadow-xl pointer-events-none"
+                                        style={{
+                                          left: `${hoverPoint.x + 15}px`,
+                                          top: `${hoverPoint.y + 15}px`,
+                                        }}
+                                      >
                                         <div>
-                                          <span className="font-semibold text-slate-200">
-                                            Nearest tested point:
-                                          </span>{" "}
-                                          <span className="font-mono text-sky-200">
-                                            {nearestPoint.static_psi.toFixed(
+                                          <span className="text-sky-300 font-mono">
+                                            {hoverPoint.point.static_psi.toFixed(
                                               3,
-                                            )}{" "}
-                                            psi
+                                            )}
                                           </span>{" "}
-                                          <span className="text-slate-500">
-                                            ·
-                                          </span>{" "}
-                                          <span className="font-mono text-sky-200">
-                                            {nearestPoint.deflect_pct.toFixed(
+                                          psi
+                                        </div>
+                                        <div>
+                                          <span className="text-sky-300 font-mono">
+                                            {hoverPoint.point.deflect_pct.toFixed(
                                               1,
                                             )}
-                                            % deflection
                                           </span>{" "}
-                                          <span className="text-slate-500">
-                                            ·
-                                          </span>{" "}
-                                          <span className="font-mono text-sky-200">
-                                            {nearestPoint.g_level.toFixed(
-                                              1,
-                                            )}{" "}
-                                            G
-                                          </span>
+                                          % defl
                                         </div>
-                                        <div className="mt-1 text-[9px] text-slate-500">
-                                          Lab curves are a guide, not a
-                                          guarantee. Always verify performance
-                                          with real-world testing.
+                                        <div>
+                                          <span className="text-sky-300 font-mono">
+                                            {hoverPoint.point.g_level.toFixed(
+                                              1,
+                                            )}
+                                          </span>{" "}
+                                          G
                                         </div>
                                       </div>
                                     )}
+
+                                    {/* Legend */}
+                                    <div className="absolute top-2 right-2 bg-slate-900/80 border border-slate-700 rounded-md px-2 py-1 text-[10px] text-slate-200 backdrop-blur-sm">
+                                      <div className="flex items-center gap-1">
+                                        <span className="w-2 h-2 bg-sky-300 inline-block rounded-sm"></span>
+                                        Curve
+                                      </div>
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <span className="w-2 h-2 bg-emerald-400 inline-block rounded-sm"></span>
+                                        Closest test point
+                                      </div>
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <span className="w-2 h-2 bg-slate-50 inline-block rounded-sm"></span>
+                                        Operating load
+                                      </div>
+                                    </div>
                                   </>
                                 );
                               })()}
                             </div>
+
+                            {/* Nearest-point numeric readout */}
+                            {(() => {
+                              const operatingPsi = advisorResult.staticLoadPsi;
+                              const hasOperating =
+                                Number.isFinite(operatingPsi) &&
+                                operatingPsi > 0;
+
+                              if (!hasOperating) return null;
+
+                              // Find nearest point again for text summary
+                              const sorted = [...curvePoints].sort(
+                                (a, b) => a.static_psi - b.static_psi,
+                              );
+                              const nearestPoint =
+                                sorted.reduce<{
+                                  best: CushionPoint | null;
+                                  dist: number;
+                                }>(
+                                  (acc, p) => {
+                                    const d = Math.abs(
+                                      p.static_psi - operatingPsi,
+                                    );
+                                    if (
+                                      acc.best === null ||
+                                      d < acc.dist
+                                    ) {
+                                      return { best: p, dist: d };
+                                    }
+                                    return acc;
+                                  },
+                                  { best: null, dist: Infinity },
+                                ).best ?? null;
+
+                              if (!nearestPoint) return null;
+
+                              return (
+                                <div className="mt-3 text-[10px] text-slate-300">
+                                  <div>
+                                    <span className="font-semibold text-slate-200">
+                                      Nearest tested point:
+                                    </span>{" "}
+                                    <span className="font-mono text-sky-200">
+                                      {nearestPoint.static_psi.toFixed(3)} psi
+                                    </span>
+                                    <span className="text-slate-500"> · </span>
+                                    <span className="font-mono text-sky-200">
+                                      {nearestPoint.deflect_pct.toFixed(1)}%
+                                    </span>
+                                    <span className="text-slate-500"> · </span>
+                                    <span className="font-mono text-sky-200">
+                                      {nearestPoint.g_level.toFixed(1)} G
+                                    </span>
+                                  </div>
+                                  <div className="mt-1 text-[9px] text-slate-500">
+                                    Lab curves are a guide, not a guarantee.
+                                    Always verify with real-world testing.
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                     </div>
@@ -1304,7 +1379,7 @@ export default function FoamAdvisorPage({
               </div>
             </section>
 
-            {/* RIGHT: Summary + recommendations (now clickable) */}
+            {/* RIGHT: Summary + recommendations (clickable) */}
             <aside className="w-80 shrink-0 flex flex-col gap-3">
               {!advisorResult && (
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 text-[11px] text-slate-400">
@@ -1342,7 +1417,7 @@ export default function FoamAdvisorPage({
                     )}
                   </div>
 
-                  {/* Let this card grow with content (no inner scroll) */}
+                  {/* Suggested foam families */}
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-semibold text-slate-100">
@@ -1430,9 +1505,7 @@ export default function FoamAdvisorPage({
                                     <li key={m.id}>
                                       {m.name}
                                       {m.density_lb_ft3 != null
-                                        ? ` · ${m.density_lb_ft3.toFixed(
-                                            1,
-                                          )} pcf`
+                                        ? ` · ${m.density_lb_ft3.toFixed(1)} pcf`
                                         : ""}
                                     </li>
                                   ))}
@@ -1445,9 +1518,7 @@ export default function FoamAdvisorPage({
                                       target="_blank"
                                       rel="noreferrer"
                                       className="inline-flex items-center rounded-full border border-sky-500/70 px-3 py-1 text-[10px] font-medium text-sky-100 hover:bg-sky-500/15 transition"
-                                      onClick={(e) =>
-                                        e.stopPropagation()
-                                      }
+                                      onClick={(e) => e.stopPropagation()}
                                     >
                                       View cushion curve
                                     </a>
@@ -1457,8 +1528,7 @@ export default function FoamAdvisorPage({
                                       className="inline-flex items-center rounded-full border border-emerald-500/70 bg-emerald-500/20 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/30 transition"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        const q =
-                                          effectiveQuoteNo || "";
+                                        const q = effectiveQuoteNo || "";
                                         const blk = blockParam || "";
                                         const mid = firstMatched.id;
                                         window.location.href = `/quote/layout?quote_no=${encodeURIComponent(
