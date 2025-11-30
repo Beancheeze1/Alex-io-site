@@ -108,6 +108,31 @@ function storageKeyForQuote(quoteNo: string): string {
   return `foamAdvisorState:${key}`;
 }
 
+function computeOperatingFraction(
+  points: CushionPoint[] | null | undefined,
+  operatingPsi: number | null | undefined,
+): number | null {
+  if (!points || points.length < 2) return null;
+  if (operatingPsi == null || !Number.isFinite(operatingPsi) || operatingPsi <= 0) {
+    return null;
+  }
+
+  const psis = points.map((p) => p.static_psi);
+  const minPsi = Math.min(...psis);
+  const maxPsi = Math.max(...psis);
+  const span = maxPsi - minPsi;
+
+  if (!span || !Number.isFinite(span)) return null;
+
+  let normalized = (operatingPsi - minPsi) / span;
+  if (normalized < 0) normalized = 0;
+  if (normalized > 1) normalized = 1;
+
+  return normalized; // 0–1 across the actual curve range
+}
+
+
+
 export default function FoamAdvisorPage({
   searchParams,
 }: {
@@ -877,38 +902,32 @@ export default function FoamAdvisorPage({
     - If curve data is loaded, align with the chart's psi range (min→max)
     - Otherwise fall back to a 0–3 psi band */}
 {advisorResult.staticLoadPsi > 0 && (() => {
-  const psi = advisorResult.staticLoadPsi || 0;
   let pct: number;
 
-  if (curvePoints && curvePoints.length > 1) {
-    // Match the chart: position within the curve's psi span
-    const psis = curvePoints.map((p) => p.static_psi);
-    const minPsi = Math.min(...psis);
-    const maxPsi = Math.max(...psis);
-    const span = maxPsi - minPsi || 1;
+  const fraction = computeOperatingFraction(
+    curvePoints,
+    advisorResult.staticLoadPsi,
+  );
 
-    let normalized = (psi - minPsi) / span;
-    if (normalized < 0) normalized = 0;
-    if (normalized > 1) normalized = 1;
-
-    pct = normalized * 100;
+  if (fraction != null) {
+    // Match the chart exactly
+    pct = fraction * 100;
   } else {
-    // Fallback: simple 0–3 psi band
+    // Fallback: simple 0–3 psi band if we ever don't have curves
+    const psi = advisorResult.staticLoadPsi || 0;
     const clamped = psi <= 0 ? 0 : psi >= 3 ? 3 : psi;
     pct = (clamped / 3) * 100;
   }
 
-    return (
-    // Outer container matches the tick strip padding (px-6)
+  return (
     <div className="pointer-events-none absolute inset-y-0 inset-x-6">
-          <div
-      className="absolute inset-y-0"
-      style={{
-        left: `${pct}%`,
-        transform: "translateX(-50%) translateX(9px)",
-      }}
-    >
-
+      <div
+        className="absolute inset-y-0"
+        style={{
+          left: `${pct}%`,
+          transform: "translateX(-50%)",
+        }}
+      >
         {/* Glow column behind the line (same vibe as chart) */}
         <div className="absolute inset-y-0 w-[10px] bg-sky-300/30 shadow-[0_0_18px_rgba(56,189,248,0.95)]" />
         {/* Dashed operating line to match curve canvas */}
@@ -916,8 +935,8 @@ export default function FoamAdvisorPage({
       </div>
     </div>
   );
-
 })()}
+
 
 
 
@@ -1055,21 +1074,16 @@ export default function FoamAdvisorPage({
                                   })
                                   .join(" ");
 
-                                const operatingPsi =
-                                  advisorResult.staticLoadPsi;
-                                const hasOperating =
-                                  Number.isFinite(operatingPsi) &&
-                                  operatingPsi > 0;
+                                const operatingFraction = computeOperatingFraction(
+  sorted,
+  advisorResult.staticLoadPsi,
+);
 
-                                const operatingInRange =
-                                  hasOperating &&
-                                  operatingPsi >= minPsi &&
-                                  operatingPsi <= maxPsi;
+const opX =
+  operatingFraction != null
+    ? PAD_X + operatingFraction * (VIEW_W - 2 * PAD_X)
+    : null;
 
-                                const opX =
-                                  operatingInRange && hasOperating
-                                    ? mapX(operatingPsi)
-                                    : null;
 
                                 // Nearest tested point to operating psi
                                 const nearestPoint: CushionPoint | null =
