@@ -727,9 +727,10 @@ export default function FoamAdvisorPage({
             <section className="flex-1 flex flex-col">
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 flex-1 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-sm font-semibold text-slate-100">
-                    Cushion curve canvas
-                  </div>
+                  <div className="text-[15px] font-semibold text-slate-100 tracking-tight">
+  Cushion curve canvas
+</div>
+
                   <div className="text-[10px] text-slate-500">
                     Choose a recommendation on the right to drive this view.
                   </div>
@@ -772,6 +773,17 @@ export default function FoamAdvisorPage({
                         <div className="absolute inset-y-0 left-1/3 w-1/3 bg-sky-500/25" />
                         {/* Firm band */}
                         <div className="absolute inset-y-0 left-2/3 w-1/3 bg-amber-500/25" />
+
+                        {/* Tick marks at 0, 1, 2, 3 psi */}
+<div className="absolute inset-0 flex items-end justify-between px-5 pb-1 text-[9px] text-slate-200/80 pointer-events-none">
+  {[0, 1, 2, 3].map((v) => (
+    <div key={v} className="flex flex-col items-center">
+      <div className="h-2 w-px bg-slate-100/80" />
+      <span className="mt-0.5">{v}</span>
+    </div>
+  ))}
+</div>
+
 
                         {/* Operating point marker (normalized 0–3 psi) */}
                         {advisorResult.staticLoadPsi > 0 && (
@@ -992,6 +1004,16 @@ export default function FoamAdvisorPage({
                                       height={VIEW_H}
                                       viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
                                     >
+
+<defs>
+  <linearGradient id="curveStroke" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stopColor="#7dd3fc" />
+    <stop offset="100%" stopColor="#38bdf8" />
+  </linearGradient>
+</defs>
+
+
+
                                       {/* Background */}
                                       <rect
                                         x={0}
@@ -1044,11 +1066,12 @@ export default function FoamAdvisorPage({
 
                                       {/* Curve path */}
                                       <path
-                                        d={pathD}
-                                        fill="none"
-                                        stroke="#38bdf8"
-                                        strokeWidth={1.5}
-                                      />
+  d={pathD}
+  fill="none"
+  stroke="url(#curveStroke)"
+  strokeWidth={1.5}
+/>
+
 
                                       {/* Curve points */}
                                       {sorted.map((p, idx) => {
@@ -1068,28 +1091,40 @@ export default function FoamAdvisorPage({
                                       })}
 
                                       {/* Operating point marker (vertical line) */}
-                                      {opX != null && (
-                                        <>
-                                          <line
-                                            x1={opX}
-                                            y1={PAD_Y}
-                                            x2={opX}
-                                            y2={VIEW_H - PAD_Y}
-                                            stroke="#f9fafb"
-                                            strokeWidth={1}
-                                            strokeDasharray="4 4"
-                                          />
-                                          <text
-                                            x={opX}
-                                            y={PAD_Y - 6}
-                                            textAnchor="middle"
-                                            fontSize={9}
-                                            fill="#f9fafb"
-                                          >
-                                            Operating load
-                                          </text>
-                                        </>
-                                      )}
+                                    {opX != null && (
+  <>
+    {/* Soft glow behind the operating line */}
+    <line
+      x1={opX}
+      y1={PAD_Y}
+      x2={opX}
+      y2={VIEW_H - PAD_Y}
+      stroke="#0ea5e9"
+      strokeWidth={4}
+      strokeOpacity={0.18}
+    />
+    {/* Main dashed operating line */}
+    <line
+      x1={opX}
+      y1={PAD_Y}
+      x2={opX}
+      y2={VIEW_H - PAD_Y}
+      stroke="#f9fafb"
+      strokeWidth={1}
+      strokeDasharray="4 4"
+    />
+    <text
+      x={opX}
+      y={PAD_Y - 6}
+      textAnchor="middle"
+      fontSize={9}
+      fill="#f9fafb"
+    >
+      Operating load
+    </text>
+  </>
+)}
+
 
                                       {/* Nearest tested curve point highlight */}
                                       {nearestX != null &&
@@ -1156,8 +1191,9 @@ export default function FoamAdvisorPage({
 
                                     {/* Nearest-point numeric readout */}
                                     {nearestPoint && (
-                                      <div className="mt-2 text-[10px] text-slate-300">
+                                      <div className="mt-3 text-[10px] text-slate-300">
                                         Nearest tested point to your load:{" "}
+
                                         <span className="font-mono text-sky-200">
                                           {nearestPoint.static_psi.toFixed(
                                             3,
