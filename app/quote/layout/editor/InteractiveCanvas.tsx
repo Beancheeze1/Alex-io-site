@@ -255,9 +255,10 @@ export default function InteractiveCanvas({
     : null;
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
+    // Dark wrapper to match the rest of the editor
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/90 p-3 shadow-[0_18px_40px_rgba(15,23,42,0.9)]">
       {/* Allow scrolling when zooming in so the whole block is always accessible */}
-      <div className="overflow-auto rounded-xl bg-white">
+      <div className="overflow-auto rounded-xl bg-transparent">
         <svg
           ref={svgRef}
           width={CANVAS_WIDTH}
@@ -268,13 +269,13 @@ export default function InteractiveCanvas({
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          {/* background */}
+          {/* background for the editor workspace */}
           <rect
             x={0}
             y={0}
             width={CANVAS_WIDTH}
             height={CANVAS_HEIGHT}
-            fill="#f8fafc"
+            fill="#020617" // slate-950 style
           />
 
           {/* block */}
@@ -285,12 +286,12 @@ export default function InteractiveCanvas({
             height={blockPx.height}
             rx={0}
             ry={0}
-            fill="#eef2ff"
-            stroke="#c7d2fe"
+            fill="#020617"
+            stroke="#334155"
             strokeWidth={2}
           />
 
-          {/* 0.5" grid */}
+          {/* 0.5" grid (now darker lines on dark bg) */}
           {drawInchGrid(block, blockPx, blockOffset)}
 
           {/* 0.5" inner wall (dashed) */}
@@ -311,7 +312,7 @@ export default function InteractiveCanvas({
               ((innerWall.bottomIn - innerWall.topIn) / block.widthIn)
             }
             fill="none"
-            stroke="#94a3b8"
+            stroke="#64748b"
             strokeDasharray="4 3"
             strokeWidth={1}
           />
@@ -321,7 +322,7 @@ export default function InteractiveCanvas({
             x={blockOffset.x + blockPx.width / 2}
             y={blockOffset.y - 10}
             textAnchor="middle"
-            className="fill-slate-600 text-[10px]"
+            className="fill-slate-200 text-[10px]"
           >
             Block: {block.lengthIn}×{block.widthIn}×{block.thicknessIn}" thick
           </text>
@@ -352,6 +353,9 @@ export default function InteractiveCanvas({
             const handleX = cavX + cavWidthPx - handleSize / 2;
             const handleY = cavY + cavHeightPx - handleSize / 2;
 
+            const cavFill = isSelected ? "#1e293b" : "#020617";
+            const cavStroke = isSelected ? "#38bdf8" : "#64748b";
+
             return (
               <g key={cavity.id}>
                 {isCircle ? (
@@ -359,8 +363,8 @@ export default function InteractiveCanvas({
                     cx={cavX + cavWidthPx / 2}
                     cy={cavY + cavHeightPx / 2}
                     r={Math.min(cavWidthPx, cavHeightPx) / 2}
-                    fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
-                    stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
+                    fill={cavFill}
+                    stroke={cavStroke}
                     strokeWidth={isSelected ? 2 : 1}
                     onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
                   />
@@ -372,8 +376,8 @@ export default function InteractiveCanvas({
                     height={cavHeightPx}
                     rx={cornerRadiusPx}
                     ry={cornerRadiusPx}
-                    fill={isSelected ? "#bfdbfe" : "#e5e7eb"}
-                    stroke={isSelected ? "#1d4ed8" : "#9ca3af"}
+                    fill={cavFill}
+                    stroke={cavStroke}
                     strokeWidth={isSelected ? 2 : 1}
                     onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
                   />
@@ -385,7 +389,7 @@ export default function InteractiveCanvas({
                   y={cavY + cavHeightPx / 2}
                   textAnchor="middle"
                   dominantBaseline="central"
-                  className="fill-slate-700 text-[9px]"
+                  className="fill-slate-100 text-[9px]"
                   onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
                 >
                   {formatCavityLabel(cavity)}
@@ -399,7 +403,7 @@ export default function InteractiveCanvas({
                   height={handleSize}
                   rx={2}
                   ry={2}
-                  fill={isSelected ? "#1d4ed8" : "#64748b"}
+                  fill={isSelected ? "#38bdf8" : "#1f2937"}
                   stroke="#e5e7eb"
                   strokeWidth={1}
                   onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
@@ -481,7 +485,7 @@ function drawInchGrid(
         y1={blockOffset.y}
         x2={x}
         y2={blockOffset.y + blockPx.height}
-        stroke="#e5e7eb"
+        stroke="#1e293b"
         strokeWidth={0.5}
       />,
     );
@@ -497,7 +501,7 @@ function drawInchGrid(
         y1={y}
         x2={blockOffset.x + blockPx.width}
         y2={y}
-        stroke="#e5e7eb"
+        stroke="#1e293b"
         strokeWidth={0.5}
       />,
     );
@@ -621,8 +625,7 @@ function computeSpacing(
           toPx,
           yPx:
             (Math.max(cavTopPx, oTopPx) +
-              Math.min(cavBottomPx, oBottomPx)) /
-            2,
+              Math.min(cavBottomPx, oBottomPx)) / 2,
           gapIn,
         };
       }
@@ -652,8 +655,7 @@ function computeSpacing(
           toPx,
           xPx:
             (Math.max(cavLeftPx, oLeftPx) +
-              Math.min(cavRightPx, oRightPx)) /
-            2,
+              Math.min(cavRightPx, oRightPx)) / 2,
           gapIn,
         };
       }
@@ -704,7 +706,7 @@ function drawSpacing(info: SpacingInfo) {
             x={edgeDims.leftPx}
             y={edgeDims.cavTopPx - textOffset}
             textAnchor="middle"
-            className="fill-slate-600 text-[9px]"
+            className="fill-slate-200 text-[9px]"
           >
             {edgeDims.leftIn.toFixed(3)}"
           </text>
@@ -727,7 +729,7 @@ function drawSpacing(info: SpacingInfo) {
             x={edgeDims.rightPx}
             y={edgeDims.cavTopPx - textOffset}
             textAnchor="middle"
-            className="fill-slate-600 text-[9px]"
+            className="fill-slate-200 text-[9px]"
           >
             {edgeDims.rightIn.toFixed(3)}"
           </text>
@@ -750,7 +752,7 @@ function drawSpacing(info: SpacingInfo) {
             x={(edgeDims.cavLeftPx + edgeDims.cavRightPx) / 2}
             y={edgeDims.topPx - textOffset}
             textAnchor="middle"
-            className="fill-slate-600 text-[9px]"
+            className="fill-slate-200 text-[9px]"
           >
             {edgeDims.topIn.toFixed(3)}"
           </text>
@@ -773,7 +775,7 @@ function drawSpacing(info: SpacingInfo) {
             x={(edgeDims.cavLeftPx + edgeDims.cavRightPx) / 2}
             y={edgeDims.bottomPx + textOffset + 2}
             textAnchor="middle"
-            className="fill-slate-600 text-[9px]"
+            className="fill-slate-200 text-[9px]"
           >
             {edgeDims.bottomIn.toFixed(3)}"
           </text>
@@ -788,7 +790,7 @@ function drawSpacing(info: SpacingInfo) {
             y1={neighborDims.horiz.yPx}
             x2={neighborDims.horiz.toPx}
             y2={neighborDims.horiz.yPx}
-            stroke="#0f766e"
+            stroke="#22c55e"
             strokeDasharray="3 2"
             strokeWidth={1}
           />
@@ -796,7 +798,7 @@ function drawSpacing(info: SpacingInfo) {
             x={(neighborDims.horiz.fromPx + neighborDims.horiz.toPx) / 2}
             y={neighborDims.horiz.yPx - 6}
             textAnchor="middle"
-            className="fill-emerald-700 text-[9px]"
+            className="fill-emerald-300 text-[9px]"
           >
             {neighborDims.horiz.gapIn.toFixed(3)}"
           </text>
@@ -811,14 +813,14 @@ function drawSpacing(info: SpacingInfo) {
             y1={neighborDims.vert.fromPx}
             x2={neighborDims.vert.xPx}
             y2={neighborDims.vert.toPx}
-            stroke="#0f766e"
+            stroke="#22c55e"
             strokeDasharray="3 2"
             strokeWidth={1}
           />
           <text
             x={neighborDims.vert.xPx + 4}
             y={(neighborDims.vert.fromPx + neighborDims.vert.toPx) / 2}
-            className="fill-emerald-700 text-[9px]"
+            className="fill-emerald-300 text-[9px]"
           >
             {neighborDims.vert.gapIn.toFixed(3)}"
           </text>
