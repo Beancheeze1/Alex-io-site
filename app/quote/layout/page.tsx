@@ -871,7 +871,7 @@ function LayoutEditorHost(props: {
       return;
     }
 
-  try {
+    try {
       setApplyStatus("saving");
 
       // Build a friendly material/notes footer + header data for the SVG
@@ -1016,16 +1016,15 @@ function LayoutEditorHost(props: {
                   </div>
                 </div>
 
-                {/* CENTER: big title */}
+                {/* CENTER: stylized title */}
                 <div className="flex-1 text-center">
-                  <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/35 px-4 py-1.5 shadow-[0_0_25px_rgba(15,23,42,0.7)]">
-                    <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_14px_rgba(52,211,153,0.9)]" />
-                    <div className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-100/80">
-                      Layout workspace
+                  <div className="inline-flex flex-col items-center gap-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-100/70">
+                      Foam layout tools
                     </div>
-                  </div>
-                  <div className="mt-2 text-xl font-extrabold text-slate-50 leading-snug drop-shadow-[0_0_14px_rgba(15,23,42,0.9)]">
-                    Interactive foam layout editor
+                    <div className="text-2xl md:text-[26px] font-extrabold leading-snug bg-gradient-to-r from-sky-50 via-cyan-200 to-sky-100 bg-clip-text text-transparent drop-shadow-[0_0_18px_rgba(15,23,42,0.9)]">
+                      Interactive foam layout editor
+                    </div>
                   </div>
                 </div>
 
@@ -1314,10 +1313,10 @@ function LayoutEditorHost(props: {
                 </p>
 
                 {/* canvas wrapper */}
-                <div className="relative flex-1 rounded-2xl border border-slate-800 bg-slate-950/95 overflow-hidden">
+                <div className="relative flex-1 rounded-2xl border border-slate-800/90 bg-slate-950 overflow-hidden shadow-[0_22px_55px_rgba(15,23,42,0.95)]">
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 opacity-60 bg-[radial-gradient(circle_at_center,_rgba(148,163,184,0.32),transparent_55%),linear-gradient(to_right,rgba(30,64,175,0.28)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.28)_1px,transparent_1px)] [background-size:520px_520px,26px_26px,26px_26px]"
+                    className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,rgba(30,64,175,0.3)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.3)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
                   />
                   <div className="relative p-4 overflow-auto">
                     <InteractiveCanvas
@@ -1708,6 +1707,7 @@ function LayoutEditorHost(props: {
     </main>
   );
 }
+
 /* ---------- SVG export helper ---------- */
 
 function buildSvgFromLayout(
