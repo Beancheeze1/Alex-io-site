@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v8
+// Foam Advisor · Path A layout v9
 // - Inputs on the LEFT
 // - Center: cushion-curve canvas that shows the selected recommendation’s curve
 //   from /api/cushion/curves/{material_id}, with the operating point marked.
@@ -9,10 +9,11 @@
 //   • Highlights it on the graph
 //   • Shows a small numeric readout: psi / % deflection / G
 //   • Operating band gauge with 0 / 1 / 2 / 3 psi ticks and segment labels
-//   • Bright gradient band colors so the range “pops”
+//   • Bright gradient band colors so the range “pops” (soft → typical → firm/red)
+//   • Dashed operating-line marker inside the band, aligned with chart line
 //   • Subtle but visible grid behind the curve
 //   • Hover tooltips on tested data points
-//   • Axis ticks on psi and G for easier reading
+//   • Axis ticks on psi and G that line up with the grid
 //   • Short explanation of the operating band for non-experts
 // - RIGHT: analysis summary + recommended materials (clickable to drive the canvas)
 //
@@ -785,8 +786,8 @@ export default function FoamAdvisorPage({
                         Operating band preview
                       </div>
                       <div className="relative h-12 rounded-full overflow-hidden border border-slate-600 bg-slate-950">
-                        {/* Bright gradient band */}
-                        <div className="absolute inset-0 bg-gradient-to-r from-emerald-400/60 via-sky-400/80 to-amber-400/70" />
+                        {/* Bright gradient band (soft → typical → firm/red) */}
+                        <div className="absolute inset-0 bg-gradient-to-r from-emerald-400/60 via-sky-400/80 to-rose-500/80" />
 
                         {/* Content overlay (ticks, labels, marker) */}
                         <div className="absolute inset-0">
@@ -827,8 +828,14 @@ export default function FoamAdvisorPage({
                                 const pct = (clamped / 3) * 100;
                                 return (
                                   <div className="relative h-full w-full">
+                                    {/* Soft glow column */}
                                     <div
-                                      className="absolute top-0 bottom-0 w-[3px] bg-slate-50 shadow-[0_0_12px_rgba(15,23,42,0.9)]"
+                                      className="absolute top-0 bottom-0 w-[6px] -ml-[3px] bg-slate-50/25 shadow-[0_0_14px_rgba(15,23,42,0.9)]"
+                                      style={{ left: `${pct}%` }}
+                                    />
+                                    {/* Dashed operating line */}
+                                    <div
+                                      className="absolute top-1 bottom-1 border-l border-dashed border-slate-50 shadow-[0_0_10px_rgba(15,23,42,0.8)]"
                                       style={{ left: `${pct}%` }}
                                     />
                                   </div>
@@ -840,8 +847,8 @@ export default function FoamAdvisorPage({
                       </div>
                       <p className="mt-1 text-[10px] text-slate-500">
                         The colored bar shows a typical static-load range for
-                        this type of foam. The vertical line shows where your
-                        product sits within that range.
+                        this type of foam. The dashed line and glow mark where
+                        your product sits within that range.
                       </p>
                     </div>
 
@@ -896,480 +903,485 @@ export default function FoamAdvisorPage({
                         !curveError &&
                         curvePoints &&
                         curvePoints.length > 0 && (
-                        <div className="flex-1 flex flex-col gap-2">
-                          <div className="text-[11px] text-slate-300">
-                            {curveMaterial ? (
-                              <>
-                                Plotting{" "}
-                                <span className="font-semibold text-sky-200">
-                                  {curveMaterial.material_family ?? "Foam"}
-                                  {" – "}
-                                  {curveMaterial.name}
-                                </span>{" "}
-                                as G-level vs static psi. The vertical marker
-                                shows your operating load.
-                              </>
-                            ) : (
-                              "Plotting selected recommendation curve."
-                            )}
-                          </div>
+                          <div className="flex-1 flex flex-col gap-2">
+                            <div className="text-[11px] text-slate-300">
+                              {curveMaterial ? (
+                                <>
+                                  Plotting{" "}
+                                  <span className="font-semibold text-sky-200">
+                                    {curveMaterial.material_family ?? "Foam"}
+                                    {" – "}
+                                    {curveMaterial.name}
+                                  </span>{" "}
+                                  as G-level vs static psi. The vertical marker
+                                  shows your operating load.
+                                </>
+                              ) : (
+                                "Plotting selected recommendation curve."
+                              )}
+                            </div>
 
-                          {/* SVG chart with grid, ticks, hover tooltips */}
-                          <div className="relative flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2 select-none">
+                            {/* SVG chart with grid, ticks, hover tooltips */}
+                            <div className="relative flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2 select-none">
+                              {(() => {
+                                const sorted = [...curvePoints].sort(
+                                  (a, b) => a.static_psi - b.static_psi,
+                                );
+                                const psis = sorted.map((p) => p.static_psi);
+                                const gs = sorted.map((p) => p.g_level);
+
+                                const minPsi = Math.min(...psis);
+                                const maxPsi = Math.max(...psis);
+                                const minG = Math.min(...gs);
+                                const maxG = Math.max(...gs);
+
+                                const spanPsi = maxPsi - minPsi || 1;
+                                const spanG = maxG - minG || 1;
+
+                                const VIEW_W = 420;
+                                const VIEW_H = 260;
+                                const PAD_X = 40;
+                                const PAD_Y = 30;
+
+                                const mapX = (psi: number) =>
+                                  PAD_X +
+                                  ((psi - minPsi) / spanPsi) *
+                                    (VIEW_W - 2 * PAD_X);
+                                const mapY = (g: number) =>
+                                  VIEW_H -
+                                  PAD_Y -
+                                  ((g - minG) / spanG) *
+                                    (VIEW_H - 2 * PAD_Y);
+
+                                // Grid line positions
+                                const xGridCount = 4;
+                                const xGridValues = Array.from(
+                                  { length: xGridCount + 1 },
+                                  (_, i) =>
+                                    minPsi + (spanPsi * i) / xGridCount,
+                                );
+                                const yGridCount = 4;
+                                const yGridValues = Array.from(
+                                  { length: yGridCount + 1 },
+                                  (_, i) =>
+                                    minG + (spanG * i) / yGridCount,
+                                );
+
+                                const pathD = sorted
+                                  .map((p, idx) => {
+                                    const x = mapX(p.static_psi);
+                                    const y = mapY(p.g_level);
+                                    return `${idx === 0 ? "M" : "L"} ${x.toFixed(
+                                      2,
+                                    )} ${y.toFixed(2)}`;
+                                  })
+                                  .join(" ");
+
+                                const operatingPsi =
+                                  advisorResult.staticLoadPsi;
+                                const hasOperating =
+                                  Number.isFinite(operatingPsi) &&
+                                  operatingPsi > 0;
+
+                                const operatingInRange =
+                                  hasOperating &&
+                                  operatingPsi >= minPsi &&
+                                  operatingPsi <= maxPsi;
+
+                                const opX =
+                                  operatingInRange && hasOperating
+                                    ? mapX(operatingPsi)
+                                    : null;
+
+                                // Nearest tested point to operating psi
+                                const nearestPoint: CushionPoint | null =
+                                  hasOperating
+                                    ? sorted.reduce<{
+                                        best: CushionPoint | null;
+                                        dist: number;
+                                      }>(
+                                        (acc, p) => {
+                                          const d = Math.abs(
+                                            p.static_psi - operatingPsi,
+                                          );
+                                          if (
+                                            acc.best === null ||
+                                            d < acc.dist
+                                          ) {
+                                            return { best: p, dist: d };
+                                          }
+                                          return acc;
+                                        },
+                                        { best: null, dist: Infinity },
+                                      ).best
+                                    : null;
+
+                                const nearestX =
+                                  nearestPoint != null
+                                    ? mapX(nearestPoint.static_psi)
+                                    : null;
+                                const nearestY =
+                                  nearestPoint != null
+                                    ? mapY(nearestPoint.g_level)
+                                    : null;
+
+                                return (
+                                  <>
+                                    <svg
+                                      width={VIEW_W}
+                                      height={VIEW_H}
+                                      viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+                                      onMouseLeave={() => setHoverPoint(null)}
+                                    >
+                                      {/* Background */}
+                                      <rect
+                                        x={0}
+                                        y={0}
+                                        width={VIEW_W}
+                                        height={VIEW_H}
+                                        fill="#020617"
+                                      />
+
+                                      <defs>
+                                        <linearGradient
+                                          id="curveStroke"
+                                          x1="0"
+                                          y1="0"
+                                          x2="1"
+                                          y2="0"
+                                        >
+                                          <stop
+                                            offset="0%"
+                                            stopColor="#7dd3fc"
+                                          />
+                                          <stop
+                                            offset="100%"
+                                            stopColor="#38bdf8"
+                                          />
+                                        </linearGradient>
+                                      </defs>
+
+                                      {/* Grid lines behind everything */}
+                                      {xGridValues.map((v, idx) => {
+                                        const x = mapX(v);
+                                        return (
+                                          <line
+                                            key={`gx-${idx}`}
+                                            x1={x}
+                                            y1={PAD_Y}
+                                            x2={x}
+                                            y2={VIEW_H - PAD_Y}
+                                            stroke="#1e293b"
+                                            strokeWidth={0.7}
+                                            strokeDasharray="3 5"
+                                          />
+                                        );
+                                      })}
+                                      {yGridValues.map((v, idx) => {
+                                        const y = mapY(v);
+                                        return (
+                                          <line
+                                            key={`gy-${idx}`}
+                                            x1={PAD_X}
+                                            y1={y}
+                                            x2={VIEW_W - PAD_X}
+                                            y2={y}
+                                            stroke="#1e293b"
+                                            strokeWidth={0.7}
+                                            strokeDasharray="3 5"
+                                          />
+                                        );
+                                      })}
+
+                                      {/* Axes */}
+                                      <line
+                                        x1={PAD_X}
+                                        y1={VIEW_H - PAD_Y}
+                                        x2={VIEW_W - PAD_X}
+                                        y2={VIEW_H - PAD_Y}
+                                      />
+                                      <line
+                                        x1={PAD_X}
+                                        y1={PAD_Y}
+                                        x2={PAD_X}
+                                        y2={VIEW_H - PAD_Y}
+                                        stroke="#64748b"
+                                        strokeWidth={1}
+                                      />
+
+                                      {/* Axis ticks – Static load (psi), aligned with grid */}
+                                      {xGridValues.map((v, idx) => {
+                                        const x = mapX(v);
+                                        const yAxis = VIEW_H - PAD_Y;
+                                        return (
+                                          <g key={`xt-${idx}`}>
+                                            <line
+                                              x1={x}
+                                              y1={yAxis}
+                                              x2={x}
+                                              y2={yAxis - 6}
+                                              stroke="#cbd5f5"
+                                              strokeWidth={1}
+                                            />
+                                            <text
+                                              x={x}
+                                              y={yAxis + 12}
+                                              textAnchor="middle"
+                                              fontSize={9}
+                                              fill="#cbd5f5"
+                                            >
+                                              {v.toFixed(3)}
+                                            </text>
+                                          </g>
+                                        );
+                                      })}
+
+                                      {/* Axis ticks – G-level, aligned with grid */}
+                                      {yGridValues.map((v, idx) => {
+                                        const y = mapY(v);
+                                        const xAxis = PAD_X;
+                                        return (
+                                          <g key={`yt-${idx}`}>
+                                            <line
+                                              x1={xAxis}
+                                              y1={y}
+                                              x2={xAxis + 6}
+                                              y2={y}
+                                              stroke="#cbd5f5"
+                                              strokeWidth={1}
+                                            />
+                                            <text
+                                              x={xAxis - 8}
+                                              y={y + 3}
+                                              textAnchor="end"
+                                              fontSize={9}
+                                              fill="#cbd5f5"
+                                            >
+                                              {v.toFixed(1)}
+                                            </text>
+                                          </g>
+                                        );
+                                      })}
+
+                                      {/* Axis labels */}
+                                      <text
+                                        x={VIEW_W / 2}
+                                        y={VIEW_H - 6}
+                                        textAnchor="middle"
+                                        fontSize={11}
+                                        fill="#e5e7eb"
+                                      >
+                                        Static load (psi)
+                                      </text>
+                                      <text
+                                        x={12}
+                                        y={VIEW_H / 2}
+                                        textAnchor="middle"
+                                        fontSize={11}
+                                        fill="#e5e7eb"
+                                        transform={`rotate(-90 12 ${
+                                          VIEW_H / 2
+                                        })`}
+                                      >
+                                        G-level
+                                      </text>
+
+                                      {/* Curve path */}
+                                      <path
+                                        d={pathD}
+                                        fill="none"
+                                        stroke="url(#curveStroke)"
+                                        strokeWidth={1.8}
+                                      />
+
+                                      {/* Hoverable points */}
+                                      {sorted.map((p, idx) => {
+                                        const x = mapX(p.static_psi);
+                                        const y = mapY(p.g_level);
+                                        return (
+                                          <circle
+                                            key={`${p.static_psi}-${p.g_level}-${idx}`}
+                                            cx={x}
+                                            cy={y}
+                                            r={3}
+                                            fill="#e0f2fe"
+                                            onMouseEnter={() =>
+                                              setHoverPoint({ point: p, x, y })
+                                            }
+                                          />
+                                        );
+                                      })}
+
+                                      {/* Operating point marker */}
+                                      {opX != null && (
+                                        <>
+                                          <line
+                                            x1={opX}
+                                            y1={PAD_Y}
+                                            x2={opX}
+                                            y2={VIEW_H - PAD_Y}
+                                            stroke="#0ea5e9"
+                                            strokeWidth={4}
+                                            strokeOpacity={0.2}
+                                          />
+                                          <line
+                                            x1={opX}
+                                            y1={PAD_Y}
+                                            x2={opX}
+                                            y2={VIEW_H - PAD_Y}
+                                            stroke="#f9fafb"
+                                            strokeWidth={1}
+                                            strokeDasharray="4 4"
+                                          />
+                                        </>
+                                      )}
+
+                                      {/* Nearest highlighted point */}
+                                      {nearestX != null && nearestY != null && (
+                                        <>
+                                          <circle
+                                            cx={nearestX}
+                                            cy={nearestY}
+                                            r={4.2}
+                                            fill="#22c55e"
+                                          />
+                                          <circle
+                                            cx={nearestX}
+                                            cy={nearestY}
+                                            r={7}
+                                            fill="none"
+                                            stroke="#22c55e"
+                                            strokeWidth={1}
+                                            strokeDasharray="3 3"
+                                          />
+                                        </>
+                                      )}
+                                    </svg>
+
+                                    {/* Hover tooltip for tested point */}
+                                    {hoverPoint && (
+                                      <div
+                                        className="absolute bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-[10px] text-slate-200 shadow-xl pointer-events-none"
+                                        style={{
+                                          left: `${hoverPoint.x + 15}px`,
+                                          top: `${hoverPoint.y + 15}px`,
+                                        }}
+                                      >
+                                        <div>
+                                          <span className="text-sky-300 font-mono">
+                                            {hoverPoint.point.static_psi.toFixed(
+                                              3,
+                                            )}
+                                          </span>{" "}
+                                          psi
+                                        </div>
+                                        <div>
+                                          <span className="text-sky-300 font-mono">
+                                            {hoverPoint.point.deflect_pct.toFixed(
+                                              1,
+                                            )}
+                                          </span>{" "}
+                                          % defl
+                                        </div>
+                                        <div>
+                                          <span className="text-sky-300 font-mono">
+                                            {hoverPoint.point.g_level.toFixed(
+                                              1,
+                                            )}
+                                          </span>{" "}
+                                          G
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Legend */}
+                                    <div className="absolute top-2 right-2 bg-slate-900/80 border border-slate-700 rounded-md px-2 py-1 text-[10px] text-slate-200 backdrop-blur-sm">
+                                      <div className="flex items-center gap-1">
+                                        <span className="w-2 h-2 bg-sky-300 inline-block rounded-sm"></span>
+                                        Curve
+                                      </div>
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <span className="w-2 h-2 bg-emerald-400 inline-block rounded-sm"></span>
+                                        Closest test point
+                                      </div>
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <span className="w-2 h-2 bg-slate-50 inline-block rounded-sm"></span>
+                                        Operating load
+                                      </div>
+                                    </div>
+                                  </>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Nearest-point numeric readout + disclaimer */}
                             {(() => {
-                              const sorted = [...curvePoints].sort(
-                                (a, b) => a.static_psi - b.static_psi,
-                              );
-                              const psis = sorted.map((p) => p.static_psi);
-                              const gs = sorted.map((p) => p.g_level);
-
-                              const minPsi = Math.min(...psis);
-                              const maxPsi = Math.max(...psis);
-                              const minG = Math.min(...gs);
-                              const maxG = Math.max(...gs);
-
-                              const spanPsi = maxPsi - minPsi || 1;
-                              const spanG = maxG - minG || 1;
-
-                              const VIEW_W = 420;
-                              const VIEW_H = 260;
-                              const PAD_X = 40;
-                              const PAD_Y = 30;
-
-                              const mapX = (psi: number) =>
-                                PAD_X +
-                                ((psi - minPsi) / spanPsi) *
-                                  (VIEW_W - 2 * PAD_X);
-                              const mapY = (g: number) =>
-                                VIEW_H -
-                                PAD_Y -
-                                ((g - minG) / spanG) *
-                                  (VIEW_H - 2 * PAD_Y);
-
-                              // Grid line positions
-                              const xGridCount = 4;
-                              const xGridValues = Array.from(
-                                { length: xGridCount + 1 },
-                                (_, i) => minPsi + (spanPsi * i) / xGridCount,
-                              );
-                              const yGridCount = 4;
-                              const yGridValues = Array.from(
-                                { length: yGridCount + 1 },
-                                (_, i) => minG + (spanG * i) / yGridCount,
-                              );
-
-                              const pathD = sorted
-                                .map((p, idx) => {
-                                  const x = mapX(p.static_psi);
-                                  const y = mapY(p.g_level);
-                                  return `${idx === 0 ? "M" : "L"} ${x.toFixed(
-                                    2,
-                                  )} ${y.toFixed(2)}`;
-                                })
-                                .join(" ");
-
-                              const operatingPsi = advisorResult.staticLoadPsi;
+                              const operatingPsi =
+                                advisorResult.staticLoadPsi;
                               const hasOperating =
                                 Number.isFinite(operatingPsi) &&
                                 operatingPsi > 0;
 
-                              const operatingInRange =
-                                hasOperating &&
-                                operatingPsi >= minPsi &&
-                                operatingPsi <= maxPsi;
+                              if (!hasOperating) return null;
 
-                              const opX =
-                                operatingInRange && hasOperating
-                                  ? mapX(operatingPsi)
-                                  : null;
+                              const sorted = [...curvePoints].sort(
+                                (a, b) => a.static_psi - b.static_psi,
+                              );
+                              const nearest =
+                                sorted.reduce<{
+                                  best: CushionPoint | null;
+                                  dist: number;
+                                }>(
+                                  (acc, p) => {
+                                    const d = Math.abs(
+                                      p.static_psi - operatingPsi,
+                                    );
+                                    if (
+                                      acc.best === null ||
+                                      d < acc.dist
+                                    ) {
+                                      return { best: p, dist: d };
+                                    }
+                                    return acc;
+                                  },
+                                  { best: null, dist: Infinity },
+                                ).best ?? null;
 
-                              // Nearest tested point to operating psi
-                              const nearestPoint: CushionPoint | null =
-                                hasOperating
-                                  ? sorted.reduce<{
-                                      best: CushionPoint | null;
-                                      dist: number;
-                                    }>(
-                                      (acc, p) => {
-                                        const d = Math.abs(
-                                          p.static_psi - operatingPsi,
-                                        );
-                                        if (acc.best === null || d < acc.dist) {
-                                          return { best: p, dist: d };
-                                        }
-                                        return acc;
-                                      },
-                                      { best: null, dist: Infinity },
-                                    ).best
-                                  : null;
-
-                              const nearestX =
-                                nearestPoint != null
-                                  ? mapX(nearestPoint.static_psi)
-                                  : null;
-                              const nearestY =
-                                nearestPoint != null
-                                  ? mapY(nearestPoint.g_level)
-                                  : null;
-
-                              const midPsi = minPsi + spanPsi / 2;
-                              const midG = minG + spanG / 2;
+                              if (!nearest) return null;
 
                               return (
-                                <>
-                                  <svg
-                                    width={VIEW_W}
-                                    height={VIEW_H}
-                                    viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-                                    onMouseLeave={() => setHoverPoint(null)}
-                                  >
-                                    {/* Background */}
-                                    <rect
-                                      x={0}
-                                      y={0}
-                                      width={VIEW_W}
-                                      height={VIEW_H}
-                                      fill="#020617"
-                                    />
-
-                                    <defs>
-                                      <linearGradient
-                                        id="curveStroke"
-                                        x1="0"
-                                        y1="0"
-                                        x2="1"
-                                        y2="0"
-                                      >
-                                        <stop
-                                          offset="0%"
-                                          stopColor="#7dd3fc"
-                                        />
-                                        <stop
-                                          offset="100%"
-                                          stopColor="#38bdf8"
-                                        />
-                                      </linearGradient>
-                                    </defs>
-
-                                    {/* Grid lines behind everything */}
-                                    {xGridValues.map((v, idx) => {
-                                      const x = mapX(v);
-                                      return (
-                                        <line
-                                          key={`gx-${idx}`}
-                                          x1={x}
-                                          y1={PAD_Y}
-                                          x2={x}
-                                          y2={VIEW_H - PAD_Y}
-                                          stroke="#1e293b"
-                                          strokeWidth={0.7}
-                                          strokeDasharray="3 5"
-                                        />
-                                      );
-                                    })}
-                                    {yGridValues.map((v, idx) => {
-                                      const y = mapY(v);
-                                      return (
-                                        <line
-                                          key={`gy-${idx}`}
-                                          x1={PAD_X}
-                                          y1={y}
-                                          x2={VIEW_W - PAD_X}
-                                          y2={y}
-                                          stroke="#1e293b"
-                                          strokeWidth={0.7}
-                                          strokeDasharray="3 5"
-                                        />
-                                      );
-                                    })}
-
-                                    {/* Axes */}
-                                    <line
-                                      x1={PAD_X}
-                                      y1={VIEW_H - PAD_Y}
-                                      x2={VIEW_W - PAD_X}
-                                      y2={VIEW_H - PAD_Y}
-                                      stroke="#64748b"
-                                      strokeWidth={1}
-                                    />
-                                    <line
-                                      x1={PAD_X}
-                                      y1={PAD_Y}
-                                      x2={PAD_X}
-                                      y2={VIEW_H - PAD_Y}
-                                      stroke="#64748b"
-                                      strokeWidth={1}
-                                    />
-
-                                    {/* Axis ticks – Static load (psi) */}
-                                    {[
-                                      { v: minPsi, label: minPsi.toFixed(3) },
-                                      { v: midPsi, label: midPsi.toFixed(3) },
-                                      { v: maxPsi, label: maxPsi.toFixed(3) },
-                                    ].map(({ v, label }, idx) => {
-                                      const x = mapX(v);
-                                      const yAxis = VIEW_H - PAD_Y;
-                                      return (
-                                        <g key={`xt-${idx}`}>
-                                          <line
-                                            x1={x}
-                                            y1={yAxis}
-                                            x2={x}
-                                            y2={yAxis - 6}
-                                            stroke="#cbd5f5"
-                                            strokeWidth={1}
-                                          />
-                                          <text
-                                            x={x}
-                                            y={yAxis + 12}
-                                            textAnchor="middle"
-                                            fontSize={9}
-                                            fill="#cbd5f5"
-                                          >
-                                            {label}
-                                          </text>
-                                        </g>
-                                      );
-                                    })}
-
-                                    {/* Axis ticks – G-level */}
-                                    {[
-                                      { v: minG, label: minG.toFixed(1) },
-                                      { v: midG, label: midG.toFixed(1) },
-                                      { v: maxG, label: maxG.toFixed(1) },
-                                    ].map(({ v, label }, idx) => {
-                                      const y = mapY(v);
-                                      const xAxis = PAD_X;
-                                      return (
-                                        <g key={`yt-${idx}`}>
-                                          <line
-                                            x1={xAxis}
-                                            y1={y}
-                                            x2={xAxis + 6}
-                                            y2={y}
-                                            stroke="#cbd5f5"
-                                            strokeWidth={1}
-                                          />
-                                          <text
-                                            x={xAxis - 8}
-                                            y={y + 3}
-                                            textAnchor="end"
-                                            fontSize={9}
-                                            fill="#cbd5f5"
-                                          >
-                                            {label}
-                                          </text>
-                                        </g>
-                                      );
-                                    })}
-
-                                    {/* Axis labels */}
-                                    <text
-                                      x={VIEW_W / 2}
-                                      y={VIEW_H - 6}
-                                      textAnchor="middle"
-                                      fontSize={11}
-                                      fill="#e5e7eb"
-                                    >
-                                      Static load (psi)
-                                    </text>
-                                    <text
-                                      x={12}
-                                      y={VIEW_H / 2}
-                                      textAnchor="middle"
-                                      fontSize={11}
-                                      fill="#e5e7eb"
-                                      transform={`rotate(-90 12 ${
-                                        VIEW_H / 2
-                                      })`}
-                                    >
-                                      G-level
-                                    </text>
-
-                                    {/* Curve path */}
-                                    <path
-                                      d={pathD}
-                                      fill="none"
-                                      stroke="url(#curveStroke)"
-                                      strokeWidth={1.8}
-                                    />
-
-                                    {/* Hoverable points */}
-                                    {sorted.map((p, idx) => {
-                                      const x = mapX(p.static_psi);
-                                      const y = mapY(p.g_level);
-                                      return (
-                                        <circle
-                                          key={`${p.static_psi}-${p.g_level}-${idx}`}
-                                          cx={x}
-                                          cy={y}
-                                          r={3}
-                                          fill="#e0f2fe"
-                                          onMouseEnter={() =>
-                                            setHoverPoint({ point: p, x, y })
-                                          }
-                                        />
-                                      );
-                                    })}
-
-                                    {/* Operating point marker */}
-                                    {opX != null && (
-                                      <>
-                                        <line
-                                          x1={opX}
-                                          y1={PAD_Y}
-                                          x2={opX}
-                                          y2={VIEW_H - PAD_Y}
-                                          stroke="#0ea5e9"
-                                          strokeWidth={4}
-                                          strokeOpacity={0.18}
-                                        />
-                                        <line
-                                          x1={opX}
-                                          y1={PAD_Y}
-                                          x2={opX}
-                                          y2={VIEW_H - PAD_Y}
-                                          stroke="#f9fafb"
-                                          strokeWidth={1}
-                                          strokeDasharray="4 4"
-                                        />
-                                      </>
-                                    )}
-
-                                    {/* Nearest highlighted point */}
-                                    {nearestX != null && nearestY != null && (
-                                      <>
-                                        <circle
-                                          cx={nearestX}
-                                          cy={nearestY}
-                                          r={4.2}
-                                          fill="#22c55e"
-                                        />
-                                        <circle
-                                          cx={nearestX}
-                                          cy={nearestY}
-                                          r={7}
-                                          fill="none"
-                                          stroke="#22c55e"
-                                          strokeWidth={1}
-                                          strokeDasharray="3 3"
-                                        />
-                                      </>
-                                    )}
-                                  </svg>
-
-                                  {/* Hover tooltip for tested point */}
-                                  {hoverPoint && (
-                                    <div
-                                      className="absolute bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-[10px] text-slate-200 shadow-xl pointer-events-none"
-                                      style={{
-                                        left: `${hoverPoint.x + 15}px`,
-                                        top: `${hoverPoint.y + 15}px`,
-                                      }}
-                                    >
-                                      <div>
-                                        <span className="text-sky-300 font-mono">
-                                          {hoverPoint.point.static_psi.toFixed(
-                                            3,
-                                          )}
-                                        </span>{" "}
-                                        psi
-                                      </div>
-                                      <div>
-                                        <span className="text-sky-300 font-mono">
-                                          {hoverPoint.point.deflect_pct.toFixed(
-                                            1,
-                                          )}
-                                        </span>{" "}
-                                        % defl
-                                      </div>
-                                      <div>
-                                        <span className="text-sky-300 font-mono">
-                                          {hoverPoint.point.g_level.toFixed(1)}
-                                        </span>{" "}
-                                        G
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* Legend */}
-                                  <div className="absolute top-2 right-2 bg-slate-900/80 border border-slate-700 rounded-md px-2 py-1 text-[10px] text-slate-200 backdrop-blur-sm">
-                                    <div className="flex items-center gap-1">
-                                      <span className="w-2 h-2 bg-sky-300 inline-block rounded-sm"></span>
-                                      Curve
-                                    </div>
-                                    <div className="flex items-center gap-1 mt-1">
-                                      <span className="w-2 h-2 bg-emerald-400 inline-block rounded-sm"></span>
-                                      Closest test point
-                                    </div>
-                                    <div className="flex items-center gap-1 mt-1">
-                                      <span className="w-2 h-2 bg-slate-50 inline-block rounded-sm"></span>
-                                      Operating load
-                                    </div>
+                                <div className="mt-3 text-[10px] text-slate-300">
+                                  <div>
+                                    <span className="font-semibold text-slate-200">
+                                      Nearest tested point:
+                                    </span>{" "}
+                                    <span className="font-mono text-sky-200">
+                                      {nearest.static_psi.toFixed(3)} psi
+                                    </span>
+                                    <span className="text-slate-500">
+                                      {" "}
+                                      ·{" "}
+                                    </span>
+                                    <span className="font-mono text-sky-200">
+                                      {nearest.deflect_pct.toFixed(1)}%
+                                    </span>
+                                    <span className="text-slate-500">
+                                      {" "}
+                                      ·{" "}
+                                    </span>
+                                    <span className="font-mono text-sky-200">
+                                      {nearest.g_level.toFixed(1)} G
+                                    </span>
                                   </div>
-                                </>
+                                  <div className="mt-1 text-[9px] text-slate-500">
+                                    Lab curves are a guide, not a guarantee.
+                                    Always verify with real-world testing.
+                                  </div>
+                                </div>
                               );
                             })()}
                           </div>
-
-                          {/* Nearest-point numeric readout + disclaimer */}
-                          {(() => {
-                            const operatingPsi = advisorResult.staticLoadPsi;
-                            const hasOperating =
-                              Number.isFinite(operatingPsi) &&
-                              operatingPsi > 0;
-
-                            if (!hasOperating) return null;
-
-                            const sorted = [...curvePoints].sort(
-                              (a, b) => a.static_psi - b.static_psi,
-                            );
-                            const nearest =
-                              sorted.reduce<{
-                                best: CushionPoint | null;
-                                dist: number;
-                              }>(
-                                (acc, p) => {
-                                  const d = Math.abs(
-                                    p.static_psi - operatingPsi,
-                                  );
-                                  if (acc.best === null || d < acc.dist) {
-                                    return { best: p, dist: d };
-                                  }
-                                  return acc;
-                                },
-                                { best: null, dist: Infinity },
-                              ).best ?? null;
-
-                            if (!nearest) return null;
-
-                            return (
-                              <div className="mt-3 text-[10px] text-slate-300">
-                                <div>
-                                  <span className="font-semibold text-slate-200">
-                                    Nearest tested point:
-                                  </span>{" "}
-                                  <span className="font-mono text-sky-200">
-                                    {nearest.static_psi.toFixed(3)} psi
-                                  </span>
-                                  <span className="text-slate-500"> · </span>
-                                  <span className="font-mono text-sky-200">
-                                    {nearest.deflect_pct.toFixed(1)}%
-                                  </span>
-                                  <span className="text-slate-500"> · </span>
-                                  <span className="font-mono text-sky-200">
-                                    {nearest.g_level.toFixed(1)} G
-                                  </span>
-                                </div>
-                                <div className="mt-1 text-[9px] text-slate-500">
-                                  Lab curves are a guide, not a guarantee.
-                                  Always verify with real-world testing.
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
+                        )}
                     </div>
                   </div>
                 )}
