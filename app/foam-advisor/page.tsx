@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v9
+// Foam Advisor · Path A layout v10
 // - Inputs on the LEFT
 // - Center: cushion-curve canvas that shows the selected recommendation’s curve
 //   from /api/cushion/curves/{material_id}, with the operating point marked.
@@ -9,12 +9,12 @@
 //   • Highlights it on the graph
 //   • Shows a small numeric readout: psi / % deflection / G
 //   • Operating band gauge with 0 / 1 / 2 / 3 psi ticks and segment labels
-//   • Bright gradient band colors so the range “pops” (soft → typical → firm/red)
-//   • Dashed operating-line marker inside the band, aligned with chart line
-//   • Subtle but visible grid behind the curve
+//   • Stronger gradient band (soft → typical → firm / red) so it pops
+//   • Dashed operating-line marker inside the band (matches chart vibe)
+//   • Subtle but visible grid behind the curve, with axis ticks aligned
 //   • Hover tooltips on tested data points
-//   • Axis ticks on psi and G that line up with the grid
 //   • Short explanation of the operating band for non-experts
+//   • Sticky inputs per quote number via localStorage
 // - RIGHT: analysis summary + recommended materials (clickable to drive the canvas)
 //
 // No changes to pricing, quotes, or existing core logic.
@@ -80,6 +80,13 @@ type CushionCurvesApiResponse =
       detail?: any;
     };
 
+type FoamAdvisorStoredState = {
+  weightLb?: string;
+  contactAreaIn2?: string;
+  environment?: EnvironmentOption;
+  fragility?: FragilityOption;
+};
+
 function parseBlockDims(
   raw: string | null,
 ): { L: number; W: number; H: number } | null {
@@ -94,6 +101,11 @@ function parseBlockDims(
   const H = Number(m[3]) || 0;
   if (!L || !W || !H) return null;
   return { L, W, H };
+}
+
+function storageKeyForQuote(quoteNo: string): string {
+  const key = quoteNo && quoteNo.trim().length > 0 ? quoteNo.trim() : "demo";
+  return `foamAdvisorState:${key}`;
 }
 
 export default function FoamAdvisorPage({
@@ -213,6 +225,8 @@ export default function FoamAdvisorPage({
     y: number;
   } | null>(null);
 
+  const hasQuote = !!effectiveQuoteNo;
+
   // Prefill contact area from block L×W if available
   React.useEffect(() => {
     if (!parsedBlock) return;
@@ -224,6 +238,50 @@ export default function FoamAdvisorPage({
       );
     }
   }, [parsedBlock]);
+
+  // Load stored form state per quote (sticky inputs)
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = storageKeyForQuote(effectiveQuoteNo);
+
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as FoamAdvisorStoredState;
+
+      if (parsed.weightLb != null) {
+        setWeightLb(String(parsed.weightLb));
+      }
+      if (parsed.contactAreaIn2 != null) {
+        setContactAreaIn2(String(parsed.contactAreaIn2));
+      }
+      if (parsed.environment) {
+        setEnvironment(parsed.environment);
+      }
+      if (parsed.fragility) {
+        setFragility(parsed.fragility);
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }, [effectiveQuoteNo]);
+
+  // Persist form state per quote when values change
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = storageKeyForQuote(effectiveQuoteNo);
+    const payload: FoamAdvisorStoredState = {
+      weightLb,
+      contactAreaIn2,
+      environment,
+      fragility,
+    };
+    try {
+      window.localStorage.setItem(key, JSON.stringify(payload));
+    } catch {
+      // ignore storage errors
+    }
+  }, [effectiveQuoteNo, weightLb, contactAreaIn2, environment, fragility]);
 
   // Load materials list from existing API (same one the editor uses)
   React.useEffect(() => {
@@ -280,6 +338,11 @@ export default function FoamAdvisorPage({
       cancelled = true;
     };
   }, []);
+
+  // Clear hover tooltip when curve data changes
+  React.useEffect(() => {
+    setHoverPoint(null);
+  }, [curvePoints]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -382,13 +445,6 @@ export default function FoamAdvisorPage({
       setSubmitting(false);
     }
   };
-
-  const hasQuote = !!effectiveQuoteNo;
-
-  // Clear hover tooltip when curve data changes
-  React.useEffect(() => {
-    setHoverPoint(null);
-  }, [curvePoints]);
 
   // Helper: find best catalog matches for a recommendation
   const findMaterialsForRecommendation = React.useCallback(
@@ -785,9 +841,9 @@ export default function FoamAdvisorPage({
                       <div className="text-[11px] text-slate-300 mb-1">
                         Operating band preview
                       </div>
-                      <div className="relative h-12 rounded-full overflow-hidden border border-slate-600 bg-slate-950">
+                      <div className="relative h-12 rounded-full overflow-hidden border border-slate-700 bg-slate-950">
                         {/* Bright gradient band (soft → typical → firm/red) */}
-                        <div className="absolute inset-0 bg-gradient-to-r from-emerald-400/60 via-sky-400/80 to-rose-500/80" />
+                        <div className="absolute inset-0 bg-gradient-to-r from-emerald-400/65 via-sky-400/90 to-rose-600/95" />
 
                         {/* Content overlay (ticks, labels, marker) */}
                         <div className="absolute inset-0">
@@ -830,12 +886,12 @@ export default function FoamAdvisorPage({
                                   <div className="relative h-full w-full">
                                     {/* Soft glow column */}
                                     <div
-                                      className="absolute top-0 bottom-0 w-[6px] -ml-[3px] bg-slate-50/25 shadow-[0_0_14px_rgba(15,23,42,0.9)]"
+                                      className="absolute top-0 bottom-0 w-[8px] -ml-[4px] bg-slate-50/22 shadow-[0_0_18px_rgba(15,23,42,1)]"
                                       style={{ left: `${pct}%` }}
                                     />
                                     {/* Dashed operating line */}
                                     <div
-                                      className="absolute top-1 bottom-1 border-l border-dashed border-slate-50 shadow-[0_0_10px_rgba(15,23,42,0.8)]"
+                                      className="absolute top-1 bottom-1 border-l-2 border-dashed border-slate-50 shadow-[0_0_10px_rgba(15,23,42,0.9)]"
                                       style={{ left: `${pct}%` }}
                                     />
                                   </div>
@@ -1099,6 +1155,8 @@ export default function FoamAdvisorPage({
                                         y1={VIEW_H - PAD_Y}
                                         x2={VIEW_W - PAD_X}
                                         y2={VIEW_H - PAD_Y}
+                                        stroke="#64748b"
+                                        strokeWidth={1}
                                       />
                                       <line
                                         x1={PAD_X}
@@ -1212,9 +1270,10 @@ export default function FoamAdvisorPage({
                                         );
                                       })}
 
-                                      {/* Operating point marker */}
+                                      {/* Operating point marker on chart */}
                                       {opX != null && (
                                         <>
+                                          {/* Glow behind line */}
                                           <line
                                             x1={opX}
                                             y1={PAD_Y}
@@ -1224,6 +1283,7 @@ export default function FoamAdvisorPage({
                                             strokeWidth={4}
                                             strokeOpacity={0.2}
                                           />
+                                          {/* Main dashed line */}
                                           <line
                                             x1={opX}
                                             y1={PAD_Y}
@@ -1244,6 +1304,8 @@ export default function FoamAdvisorPage({
                                             cy={nearestY}
                                             r={4.2}
                                             fill="#22c55e"
+                                            stroke="#022c22"
+                                            strokeWidth={1}
                                           />
                                           <circle
                                             cx={nearestX}
