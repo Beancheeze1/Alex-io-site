@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v5 (polished, no inner scroll on recs)
+// Foam Advisor · Path A layout v5 (polished, grid behind curve)
 //
 // - Inputs on the LEFT
 // - Center: cushion-curve canvas that shows the selected recommendation’s curve
@@ -11,6 +11,7 @@
 //   • Shows a small numeric readout: psi / % deflection / G
 //   • Operating band gauge with 0 / 1 / 2 / 3 psi ticks
 //   • Gradient curve stroke + glow on operating line
+//   • NEW: subtle grid behind the curve for readability
 // - RIGHT: analysis summary + recommended materials (clickable to drive the canvas)
 //
 // No changes to pricing, quotes, or existing core logic.
@@ -899,7 +900,7 @@ export default function FoamAdvisorPage({
                               )}
                             </div>
 
-                            {/* Simple SVG chart with nearest-point highlight */}
+                            {/* Simple SVG chart with nearest-point highlight + grid */}
                             <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2">
                               {(() => {
                                 const sorted = [...curvePoints].sort(
@@ -937,6 +938,21 @@ export default function FoamAdvisorPage({
                                   ((g - minG) / spanG) *
                                     (VIEW_H - 2 * PAD_Y);
 
+                                // Grid lines (data-aware)
+                                const xGridCount = 4;
+                                const xGridValues = Array.from(
+                                  { length: xGridCount + 1 },
+                                  (_, i) =>
+                                    minPsi +
+                                    (spanPsi * i) / xGridCount,
+                                );
+                                const yGridCount = 4;
+                                const yGridValues = Array.from(
+                                  { length: yGridCount + 1 },
+                                  (_, i) =>
+                                    minG + (spanG * i) / yGridCount,
+                                );
+
                                 const pathD = sorted
                                   .map((p, idx) => {
                                     const x = mapX(p.static_psi);
@@ -963,7 +979,7 @@ export default function FoamAdvisorPage({
                                     ? mapX(operatingPsi)
                                     : null;
 
-                                // NEW: find nearest tested point on the curve
+                                // Nearest tested point on the curve
                                 const nearestPoint: CushionPoint | null =
                                   hasOperating
                                     ? sorted.reduce<{
@@ -1033,6 +1049,38 @@ export default function FoamAdvisorPage({
                                           />
                                         </linearGradient>
                                       </defs>
+
+                                      {/* Grid lines (behind axes + curve) */}
+                                      {xGridValues.map((v, idx) => {
+                                        const x = mapX(v);
+                                        return (
+                                          <line
+                                            key={`gx-${idx}`}
+                                            x1={x}
+                                            y1={PAD_Y}
+                                            x2={x}
+                                            y2={VIEW_H - PAD_Y}
+                                            stroke="#0f172a"
+                                            strokeWidth={0.5}
+                                            strokeDasharray="3 5"
+                                          />
+                                        );
+                                      })}
+                                      {yGridValues.map((v, idx) => {
+                                        const y = mapY(v);
+                                        return (
+                                          <line
+                                            key={`gy-${idx}`}
+                                            x1={PAD_X}
+                                            y1={y}
+                                            x2={VIEW_W - PAD_X}
+                                            y2={y}
+                                            stroke="#0f172a"
+                                            strokeWidth={0.5}
+                                            strokeDasharray="3 5"
+                                          />
+                                        );
+                                      })}
 
                                       {/* Axes */}
                                       <line
@@ -1275,7 +1323,7 @@ export default function FoamAdvisorPage({
                     )}
                   </div>
 
-                  {/* NOTE: removed max-h/overflow so customer doesn't have to scroll inside this card */}
+                  {/* No inner scroll: let this card grow with content */}
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-semibold text-slate-100">
