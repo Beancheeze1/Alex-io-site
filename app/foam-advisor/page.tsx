@@ -874,31 +874,27 @@ export default function FoamAdvisorPage({
                           </div>
 
                           {/* Operating point marker (normalized 0–3 psi) */}
-                          {advisorResult.staticLoadPsi > 0 && (
-                            <div className="absolute inset-y-0 flex items-center">
-                              {(() => {
-                                const psi =
-                                  advisorResult.staticLoadPsi || 0;
-                                const clamped =
-                                  psi <= 0 ? 0 : psi >= 3 ? 3 : psi;
-                                const pct = (clamped / 3) * 100;
-                                return (
-                                  <div className="relative h-full w-full">
-                                    {/* Soft glow column */}
-                                    <div
-                                      className="absolute top-0 bottom-0 w-[8px] -ml-[4px] bg-slate-50/22 shadow-[0_0_18px_rgba(15,23,42,1)]"
-                                      style={{ left: `${pct}%` }}
-                                    />
-                                    {/* Dashed operating line */}
-                                    <div
-                                      className="absolute top-1 bottom-1 border-l-2 border-dashed border-slate-50 shadow-[0_0_10px_rgba(15,23,42,0.9)]"
-                                      style={{ left: `${pct}%` }}
-                                    />
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          )}
+{advisorResult.staticLoadPsi > 0 && (() => {
+  const psi = advisorResult.staticLoadPsi || 0;
+  const clamped = psi <= 0 ? 0 : psi >= 3 ? 3 : psi;
+  const pct = (clamped / 3) * 100;
+
+  return (
+    <>
+      {/* Glow column behind the line */}
+      <div
+        className="pointer-events-none absolute top-0 bottom-0 w-[10px] bg-slate-50/18 shadow-[0_0_16px_rgba(15,23,42,1)]"
+        style={{ left: `calc(${pct}% - 5px)` }}
+      />
+      {/* Dashed operating line */}
+      <div
+        className="pointer-events-none absolute top-1 bottom-1 border-l-2 border-dashed border-slate-50 shadow-[0_0_10px_rgba(15,23,42,0.9)]"
+        style={{ left: `${pct}%` }}
+      />
+    </>
+  );
+})()}
+
                         </div>
                       </div>
                       <p className="mt-1 text-[10px] text-slate-500">
