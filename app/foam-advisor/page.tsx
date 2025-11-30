@@ -101,6 +101,50 @@ export default function FoamAdvisorPage({
   const quoteNo = Array.isArray(quoteParam)
     ? (quoteParam[0] ?? "").trim()
     : (quoteParam ?? "").trim();
+  const [effectiveQuoteNo, setEffectiveQuoteNo] =
+    React.useState<string>(() => {
+      if (quoteNo && quoteNo.trim().length > 0) {
+        return quoteNo.trim();
+      }
+
+      if (typeof window !== "undefined") {
+        try {
+          const url = new URL(window.location.href);
+          const q =
+            url.searchParams.get("quote_no") ||
+            url.searchParams.get("quote") ||
+            "";
+          return (q ?? "").trim();
+        } catch {
+          // ignore
+        }
+      }
+
+      return "";
+    });
+
+  React.useEffect(() => {
+    if (quoteNo && quoteNo.trim()) {
+      setEffectiveQuoteNo(quoteNo.trim());
+      return;
+    }
+
+    if (typeof window === "undefined") return;
+
+    try {
+      const url = new URL(window.location.href);
+      const q =
+        url.searchParams.get("quote_no") ||
+        url.searchParams.get("quote") ||
+        "";
+      if (q && q.trim()) {
+        setEffectiveQuoteNo(q.trim());
+      }
+    } catch {
+      // ignore
+    }
+  }, [quoteNo]);
+
 
   const blockParamRaw = searchParams?.block ?? null;
   const blockParam = Array.isArray(blockParamRaw)
@@ -257,7 +301,7 @@ export default function FoamAdvisorPage({
           contactAreaIn2: a,
           environment,
           fragility,
-          quoteNo: quoteNo || null,
+          quoteNo: effectiveQuoteNo || null,
           block: blockParam || null,
         }),
       });
@@ -325,7 +369,7 @@ export default function FoamAdvisorPage({
     }
   };
 
-  const hasQuote = !!quoteNo;
+  const hasQuote = !!effectiveQuoteNo;
 
   // Helper: find best catalog matches for a recommendation
   const findMaterialsForRecommendation = React.useCallback(
@@ -500,7 +544,7 @@ export default function FoamAdvisorPage({
                     <>
                       Quote{" "}
                       <span className="font-mono font-semibold text-slate-50">
-                        {quoteNo}
+                        {effectiveQuoteNo}
                       </span>
                     </>
                   ) : (
@@ -1311,7 +1355,7 @@ export default function FoamAdvisorPage({
     className="mt-2 inline-flex items-center rounded-full border border-emerald-500/70 bg-emerald-500/20 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/30 transition"
     onClick={(e) => {
       e.stopPropagation();
-      const q = quoteNo || "";
+      const q = effectiveQuoteNo || "";
       const blk = blockParam || "";
       const mid = firstMatched.id;
       window.location.href = `/quote/layout?quote_no=${encodeURIComponent(q)}&block=${encodeURIComponent(blk)}&material_id=${mid}`;
