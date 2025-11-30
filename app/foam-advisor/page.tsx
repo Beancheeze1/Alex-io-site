@@ -108,6 +108,7 @@ function storageKeyForQuote(quoteNo: string): string {
   return `foamAdvisorState:${key}`;
 }
 
+// Shared helper: 0–1 fraction of operating psi across the curve’s psi span
 function computeOperatingFraction(
   points: CushionPoint[] | null | undefined,
   operatingPsi: number | null | undefined,
@@ -128,10 +129,8 @@ function computeOperatingFraction(
   if (normalized < 0) normalized = 0;
   if (normalized > 1) normalized = 1;
 
-  return normalized; // 0–1 across the actual curve range
+  return normalized; // 0–1 across the actual curve psi range
 }
-
-
 
 export default function FoamAdvisorPage({
   searchParams,
@@ -249,6 +248,45 @@ export default function FoamAdvisorPage({
     x: number;
     y: number;
   } | null>(null);
+
+  // Shared operating psi + fraction + nearest-point for both band + chart
+  const operatingPsi = advisorResult?.staticLoadPsi ?? null;
+
+  const operatingFraction = React.useMemo(
+    () => computeOperatingFraction(curvePoints, operatingPsi),
+    [curvePoints, operatingPsi],
+  );
+
+  const hasOperating = React.useMemo(
+    () =>
+      operatingPsi != null &&
+      Number.isFinite(operatingPsi) &&
+      operatingPsi > 0,
+    [operatingPsi],
+  );
+
+  const nearestCurvePoint = React.useMemo(() => {
+    if (!hasOperating || operatingPsi == null || !curvePoints.length) {
+      return null;
+    }
+
+    const sorted = [...curvePoints].sort(
+      (a, b) => a.static_psi - b.static_psi,
+    );
+
+    return (
+      sorted.reduce<{ best: CushionPoint | null; dist: number }>(
+        (acc, p) => {
+          const d = Math.abs(p.static_psi - operatingPsi);
+          if (acc.best === null || d < acc.dist) {
+            return { best: p, dist: d };
+          }
+          return acc;
+        },
+        { best: null, dist: Infinity },
+      ).best ?? null
+    );
+  }, [hasOperating, operatingPsi, curvePoints]);
 
   const hasQuote = !!effectiveQuoteNo;
 
@@ -898,48 +936,38 @@ export default function FoamAdvisorPage({
                             </span>
                           </div>
 
-{/* Operating point marker
-    - If curve data is loaded, align with the chart's psi range (min→max)
-    - Otherwise fall back to a 0–3 psi band */}
-{advisorResult.staticLoadPsi > 0 && (() => {
-  let pct: number;
+                          {/* Operating point marker – shares fraction with chart */}
+                          {advisorResult.staticLoadPsi > 0 && (() => {
+                            let pct: number;
 
-  const fraction = computeOperatingFraction(
-    curvePoints,
-    advisorResult.staticLoadPsi,
-  );
+                            if (operatingFraction != null) {
+                              // Match the chart exactly
+                              pct = operatingFraction * 100;
+                            } else {
+                              // Fallback: simple 0–3 psi band if we ever don't have curves
+                              const psi = advisorResult.staticLoadPsi || 0;
+                              const clamped =
+                                psi <= 0 ? 0 : psi >= 3 ? 3 : psi;
+                              pct = (clamped / 3) * 100;
+                            }
 
-  if (fraction != null) {
-    // Match the chart exactly
-    pct = fraction * 100;
-  } else {
-    // Fallback: simple 0–3 psi band if we ever don't have curves
-    const psi = advisorResult.staticLoadPsi || 0;
-    const clamped = psi <= 0 ? 0 : psi >= 3 ? 3 : psi;
-    pct = (clamped / 3) * 100;
-  }
-
-  return (
-    <div className="pointer-events-none absolute inset-y-0 inset-x-6">
-      <div
-        className="absolute inset-y-0"
-        style={{
-          left: `${pct}%`,
-          transform: "translateX(-50%)",
-        }}
-      >
-        {/* Glow column behind the line (same vibe as chart) */}
-        <div className="absolute inset-y-0 w-[10px] bg-sky-300/30 shadow-[0_0_18px_rgba(56,189,248,0.95)]" />
-        {/* Dashed operating line to match curve canvas */}
-        <div className="absolute top-1 bottom-1 border-l-2 border-dashed border-slate-50 shadow-[0_0_10px_rgba(15,23,42,0.9)]" />
-      </div>
-    </div>
-  );
-})()}
-
-
-
-
+                            return (
+                              <div className="pointer-events-none absolute inset-y-0 inset-x-6">
+                                <div
+                                  className="absolute inset-y-0"
+                                  style={{
+                                    left: `${pct}%`,
+                                    transform: "translateX(-50%)",
+                                  }}
+                                >
+                                  {/* Glow column behind the line (same vibe as chart) */}
+                                  <div className="absolute inset-y-0 w-[10px] bg-sky-300/30 shadow-[0_0_18px_rgba(56,189,248,0.95)]" />
+                                  {/* Dashed operating line to match curve canvas */}
+                                  <div className="absolute top-1 bottom-1 border-l-2 border-dashed border-slate-50 shadow-[0_0_10px_rgba(15,23,42,0.9)]" />
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                       <p className="mt-1 text-[10px] text-slate-500">
@@ -948,7 +976,6 @@ export default function FoamAdvisorPage({
                         your product sits within that range.
                       </p>
                     </div>
-
                     {/* Curve loading / error / chart */}
                     <div className="mt-3 flex-1 flex flex-col">
                       <div className="flex items-center justify-between mb-1">
@@ -1074,45 +1101,33 @@ export default function FoamAdvisorPage({
                                   })
                                   .join(" ");
 
-                                // Operating load we’re using for both the chart + band
-const operatingPsi = advisorResult.staticLoadPsi;
-const hasOperating =
-  Number.isFinite(operatingPsi) && operatingPsi > 0;
+                                // X position of the operating line on the chart,
+                                // using the same operatingFraction that drives the band.
+                                let opX: number | null = null;
+                                if (operatingFraction != null) {
+                                  opX =
+                                    PAD_X +
+                                    operatingFraction *
+                                      (VIEW_W - 2 * PAD_X);
+                                } else if (hasOperating && operatingPsi != null) {
+                                  // Fallback: same 0–3 psi clamp used by the band
+                                  const psi = operatingPsi;
+                                  const clamped =
+                                    psi <= 0 ? 0 : psi >= 3 ? 3 : psi;
+                                  const frac = clamped / 3;
+                                  opX =
+                                    PAD_X + frac * (VIEW_W - 2 * PAD_X);
+                                }
 
-// Use the shared helper to get 0–1 fraction across the curve
-const operatingFraction = computeOperatingFraction(
-  sorted,
-  operatingPsi,
-);
-
-// X position of the operating line on the chart
-const opX =
-  operatingFraction != null
-    ? PAD_X + operatingFraction * (VIEW_W - 2 * PAD_X)
-    : null;
-
-// Nearest tested point on the curve (for highlight + readout)
-const nearestPoint: CushionPoint | null = hasOperating
-  ? sorted.reduce<{
-      best: CushionPoint | null;
-      dist: number;
-    }>(
-      (acc, p) => {
-        const d = Math.abs(p.static_psi - (operatingPsi as number));
-        if (acc.best === null || d < acc.dist) {
-          return { best: p, dist: d };
-        }
-        return acc;
-      },
-      { best: null, dist: Infinity },
-    ).best
-  : null;
-
-const nearestX =
-  nearestPoint != null ? mapX(nearestPoint.static_psi) : null;
-const nearestY =
-  nearestPoint != null ? mapY(nearestPoint.g_level) : null;
-
+                                // Nearest highlighted point coordinates
+                                const nearestX =
+                                  nearestCurvePoint != null
+                                    ? mapX(nearestCurvePoint.static_psi)
+                                    : null;
+                                const nearestY =
+                                  nearestCurvePoint != null
+                                    ? mapY(nearestCurvePoint.g_level)
+                                    : null;
 
                                 return (
                                   <>
@@ -1410,71 +1425,36 @@ const nearestY =
                             </div>
 
                             {/* Nearest-point numeric readout + disclaimer */}
-                            {(() => {
-                              const operatingPsi =
-                                advisorResult.staticLoadPsi;
-                              const hasOperating =
-                                Number.isFinite(operatingPsi) &&
-                                operatingPsi > 0;
-
-                              if (!hasOperating) return null;
-
-                              const sorted = [...curvePoints].sort(
-                                (a, b) => a.static_psi - b.static_psi,
-                              );
-                              const nearest =
-                                sorted.reduce<{
-                                  best: CushionPoint | null;
-                                  dist: number;
-                                }>(
-                                  (acc, p) => {
-                                    const d = Math.abs(
-                                      p.static_psi - operatingPsi,
-                                    );
-                                    if (
-                                      acc.best === null ||
-                                      d < acc.dist
-                                    ) {
-                                      return { best: p, dist: d };
-                                    }
-                                    return acc;
-                                  },
-                                  { best: null, dist: Infinity },
-                                ).best ?? null;
-
-                              if (!nearest) return null;
-
-                              return (
-                                <div className="mt-3 text-[10px] text-slate-300">
-                                  <div>
-                                    <span className="font-semibold text-slate-200">
-                                      Nearest tested point:
-                                    </span>{" "}
-                                    <span className="font-mono text-sky-200">
-                                      {nearest.static_psi.toFixed(3)} psi
-                                    </span>
-                                    <span className="text-slate-500">
-                                      {" "}
-                                      ·{" "}
-                                    </span>
-                                    <span className="font-mono text-sky-200">
-                                      {nearest.deflect_pct.toFixed(1)}%
-                                    </span>
-                                    <span className="text-slate-500">
-                                      {" "}
-                                      ·{" "}
-                                    </span>
-                                    <span className="font-mono text-sky-200">
-                                      {nearest.g_level.toFixed(1)} G
-                                    </span>
-                                  </div>
-                                  <div className="mt-1 text-[9px] text-slate-500">
-                                    Lab curves are a guide, not a guarantee.
-                                    Always verify with real-world testing.
-                                  </div>
+                            {nearestCurvePoint && hasOperating && (
+                              <div className="mt-3 text-[10px] text-slate-300">
+                                <div>
+                                  <span className="font-semibold text-slate-200">
+                                    Nearest tested point:
+                                  </span>{" "}
+                                  <span className="font-mono text-sky-200">
+                                    {nearestCurvePoint.static_psi.toFixed(3)} psi
+                                  </span>
+                                  <span className="text-slate-500">
+                                    {" "}
+                                    ·{" "}
+                                  </span>
+                                  <span className="font-mono text-sky-200">
+                                    {nearestCurvePoint.deflect_pct.toFixed(1)}%
+                                  </span>
+                                  <span className="text-slate-500">
+                                    {" "}
+                                    ·{" "}
+                                  </span>
+                                  <span className="font-mono text-sky-200">
+                                    {nearestCurvePoint.g_level.toFixed(1)} G
+                                  </span>
                                 </div>
-                              );
-                            })()}
+                                <div className="mt-1 text-[9px] text-slate-500">
+                                  Lab curves are a guide, not a guarantee.
+                                  Always verify with real-world testing.
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                     </div>
@@ -1482,7 +1462,6 @@ const nearestY =
                 )}
               </div>
             </section>
-
             {/* RIGHT: Summary + recommendations (clickable) */}
             <aside className="w-80 shrink-0 flex flex-col gap-3">
               {!advisorResult && (
