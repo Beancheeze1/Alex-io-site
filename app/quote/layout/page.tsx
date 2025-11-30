@@ -983,7 +983,7 @@ function LayoutEditorHost(props: {
 
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
-      <div className="w-full max-w-6xl mx-auto">
+      <div className="w-full max-w-none mx-auto">
         <div className="relative rounded-2xl border border-slate-800/80 bg-slate-950/90 shadow-[0_26px_60px_rgba(15,23,42,0.95)] overflow-hidden">
           {/* global grid/glow overlay */}
           <div
@@ -1076,19 +1076,17 @@ function LayoutEditorHost(props: {
                     Cavity palette
                   </div>
                   <p className="text-[11px] text-slate-400 mb-2">
-                    Click a style to add a new pocket, then drag and resize it
-                    in the block.
+                    Click a style to add a new pocket, then drag and resize it in
+                    the block.
                   </p>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => handleAddPreset("rect")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition shadow-[0_8px_20px_rgba(15,23,42,0.8)]"
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
-                  <div className="font-semibold text-slate-50">
-                    Rectangle
-                  </div>
+                  <div className="font-semibold text-slate-50">Rectangle</div>
                   <div className="text-[11px] text-slate-400">
                     Rectangular pocket (4&quot; × 2&quot;)
                   </div>
@@ -1097,7 +1095,7 @@ function LayoutEditorHost(props: {
                 <button
                   type="button"
                   onClick={() => handleAddPreset("circle")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition shadow-[0_8px_20px_rgba(15,23,42,0.8)]"
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
                   <div className="font-semibold text-slate-50">Circle</div>
                   <div className="text-[11px] text-slate-400">
@@ -1108,7 +1106,7 @@ function LayoutEditorHost(props: {
                 <button
                   type="button"
                   onClick={() => handleAddPreset("roundedRect")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition shadow-[0_8px_20px_rgba(15,23,42,0.8)]"
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
                   <div className="font-semibold text-slate-50">
                     Rounded rectangle
@@ -1169,7 +1167,7 @@ function LayoutEditorHost(props: {
                 </div>
 
                 {/* Notes / special instructions */}
-                <div className="mt-2 bg-slate-900/90 rounded-2xl border border-slate-700 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.95)]">
+                <div className="mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
                   <div className="text-xs font-semibold text-slate-100 mb-1">
                     Notes / special instructions
                   </div>
@@ -1187,15 +1185,14 @@ function LayoutEditorHost(props: {
                 </div>
 
                 <div className="mt-1 border-t border-slate-800 pt-2 text-[11px] text-slate-500">
-                  Cavities snap to 0.125&quot; and keep 0.5&quot; walls to
-                  block edges and between pockets.
+                  Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block
+                  edges and between pockets.
                 </div>
 
                 {!hasRealQuoteNo && (
-                  <div className="mt-3 rounded-xl border border-amber-500/70 bg-amber-900/60 px-3 py-2 text-[11px] text-amber-50 shadow-[0_10px_25px_rgba(120,53,15,0.8)]">
+                  <div className="mt-3 rounded-xl border border-amber-500/70 bg-amber-900/50 px-3 py-2 text-[11px] text-amber-50">
                     No quote is linked yet. Open this page from an emailed quote
-                    or the /quote print view to save layouts back to a real
-                    quote.
+                    or the /quote print view to save layouts back to a real quote.
                   </div>
                 )}
               </aside>
@@ -1208,7 +1205,7 @@ function LayoutEditorHost(props: {
                       <span className="font-semibold">
                         Foam layout preview
                       </span>
-                      <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium shadow-[0_0_18px_rgba(56,189,248,0.55)]">
+                      <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium">
                         Interactive layout
                       </span>
                     </div>
@@ -1221,8 +1218,7 @@ function LayoutEditorHost(props: {
                     </div>
                     {!hasRealQuoteNo && (
                       <div className="text-[11px] text-amber-300 mt-0.5">
-                        Demo only – link from a real quote email to apply
-                        layouts.
+                        Demo only – link from a real quote email to apply layouts.
                       </div>
                     )}
                   </div>
@@ -1237,9 +1233,7 @@ function LayoutEditorHost(props: {
                         max={1.4}
                         step={0.05}
                         value={zoom}
-                        onChange={(e) =>
-                          setZoom(Number(e.target.value))
-                        }
+                        onChange={(e) => setZoom(Number(e.target.value))}
                         className="w-28 accent-sky-400"
                       />
                     </div>
@@ -1269,7 +1263,7 @@ function LayoutEditorHost(props: {
                     <button
                       type="button"
                       onClick={handleGoToFoamAdvisor}
-                      className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition shadow-[0_0_18px_rgba(56,189,248,0.35)]"
+                      className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition"
                     >
                       Recommend my foam
                     </button>
@@ -1278,7 +1272,7 @@ function LayoutEditorHost(props: {
                       type="button"
                       onClick={handleApplyToQuote}
                       disabled={!canApplyButton}
-                      className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60 shadow-[0_0_25px_rgba(56,189,248,0.7)]"
+                      className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
                     >
                       {!hasRealQuoteNo
                         ? "Link to a quote first"
@@ -1296,40 +1290,32 @@ function LayoutEditorHost(props: {
                 </div>
 
                 <p className="text-[11px] text-slate-400 leading-snug">
-                  Drag cavities to adjust placement. Use the square handle at
-                  the bottom-right of each cavity to resize. Cavities are placed
+                  Drag cavities to adjust placement. Use the square handle at the
+                  bottom-right of each cavity to resize. Cavities are placed
                   inside a 0.5&quot; wall on all sides. When a cavity is
                   selected, the nearest horizontal and vertical gaps to other
                   cavities and to the block edges are dimensioned.
                 </p>
 
-                {/* canvas wrapper with engineering grid */}
-                <div className="flex-1">
-                  <div className="relative h-full rounded-2xl border border-slate-800/80 bg-slate-950/95 overflow-hidden shadow-[0_22px_50px_rgba(15,23,42,0.9)]">
-                    <div
-                      aria-hidden="true"
-                      className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.22),transparent_55%),linear-gradient(to_right,rgba(30,64,175,0.55)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.55)_1px,transparent_1px)] [background-size:520px_520px,26px_26px,26px_26px]"
-                    />
-                    <div className="relative p-4 overflow-auto">
-                      <InteractiveCanvas
-                        layout={layout}
-                        selectedId={selectedId}
-                        selectAction={selectCavity}
-                        moveAction={updateCavityPosition}
-                        resizeAction={(id, lengthIn, widthIn) =>
-                          updateCavityDims(id, { lengthIn, widthIn })
-                        }
-                        zoom={zoom}
-                      />
-                    </div>
-                  </div>
+                {/* canvas wrapper */}
+                <div className="flex-1 bg-slate-900 rounded-2xl border border-slate-800 p-4 overflow-auto">
+                  <InteractiveCanvas
+                    layout={layout}
+                    selectedId={selectedId}
+                    selectAction={selectCavity}
+                    moveAction={updateCavityPosition}
+                    resizeAction={(id, lengthIn, widthIn) =>
+                      updateCavityDims(id, { lengthIn, widthIn })
+                    }
+                    zoom={zoom}
+                  />
                 </div>
               </section>
 
               {/* RIGHT: Inspector + customer info */}
-              <aside className="w-70 shrink-0 flex flex-col gap-3">
+              <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
                 {/* Block editor */}
-                <div className="bg-slate-900/95 rounded-2xl border border-slate-800 p-3 shadow-[0_10px_26px_rgba(15,23,42,0.9)]">
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                   <div className="text-xs font-semibold text-slate-100 mb-1">
                     Block
                   </div>
@@ -1393,7 +1379,7 @@ function LayoutEditorHost(props: {
                 </div>
 
                 {/* Customer info card (now prefilled when quote has data) */}
-                <div className="bg-slate-900/95 rounded-2xl border border-slate-800 p-3 shadow-[0_10px_26px_rgba(15,23,42,0.9)]">
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                   <div className="text-xs font-semibold text-slate-100 mb-1">
                     Customer info
                   </div>
@@ -1413,9 +1399,7 @@ function LayoutEditorHost(props: {
                       <input
                         type="text"
                         value={customerName}
-                        onChange={(e) =>
-                          setCustomerName(e.target.value)
-                        }
+                        onChange={(e) => setCustomerName(e.target.value)}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                       />
                     </label>
@@ -1427,9 +1411,7 @@ function LayoutEditorHost(props: {
                       <input
                         type="text"
                         value={customerCompany}
-                        onChange={(e) =>
-                          setCustomerCompany(e.target.value)
-                        }
+                        onChange={(e) => setCustomerCompany(e.target.value)}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                       />
                     </label>
@@ -1441,9 +1423,7 @@ function LayoutEditorHost(props: {
                       <input
                         type="email"
                         value={customerEmail}
-                        onChange={(e) =>
-                          setCustomerEmail(e.target.value)
-                        }
+                        onChange={(e) => setCustomerEmail(e.target.value)}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                       />
                     </label>
@@ -1455,9 +1435,7 @@ function LayoutEditorHost(props: {
                       <input
                         type="tel"
                         value={customerPhone}
-                        onChange={(e) =>
-                          setCustomerPhone(e.target.value)
-                        }
+                        onChange={(e) => setCustomerPhone(e.target.value)}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                       />
                     </label>
@@ -1472,7 +1450,7 @@ function LayoutEditorHost(props: {
                 </div>
 
                 {/* Cavities list + editor */}
-                <div className="bg-slate-900/95 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col shadow-[0_10px_26px_rgba(15,23,42,0.9)]">
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
                   <div className="text-xs font-semibold text-slate-100 mb-1">
                     Cavities
                   </div>
@@ -1502,9 +1480,9 @@ function LayoutEditorHost(props: {
                             >
                               <span
                                 className={[
-                                  "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold transition-shadow",
+                                  "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold",
                                   isActive
-                                    ? "bg-sky-500 text-slate-950 shadow-[0_0_0_1px_rgba(56,189,248,0.95),0_0_20px_rgba(56,189,248,0.9)]"
+                                    ? "bg-sky-500 text-slate-950"
                                     : "bg-sky-900/70 text-sky-100",
                                 ].join(" ")}
                               >
@@ -1513,7 +1491,7 @@ function LayoutEditorHost(props: {
                               <span
                                 className={
                                   isActive
-                                    ? "text-slate-50 font-medium drop-shadow-[0_0_12px_rgba(56,189,248,0.85)]"
+                                    ? "text-slate-50 font-medium"
                                     : "text-slate-200"
                                 }
                               >
@@ -1541,14 +1519,10 @@ function LayoutEditorHost(props: {
                         <strong className="text-slate-100">
                           {selectedCavity.label}
                         </strong>
-                        <span className="ml-1 text-slate-500">
-                          · adjust dims + depth, then drag in canvas
-                        </span>
                       </span>
                     ) : (
                       <span>
-                        Select a cavity above to edit its size, depth, and
-                        corner radius.
+                        Select a cavity above to edit its size and depth.
                       </span>
                     )}
                   </div>
