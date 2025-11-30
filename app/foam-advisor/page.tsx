@@ -912,12 +912,7 @@ export default function FoamAdvisorPage({
                             </div>
 
                             {/* Simple SVG chart with nearest-point highlight */}
-                            <div
-  className={
-    "flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2 transition-[min-height] duration-200 ease-out" +
-    (curveExpanded ? " min-h-[320px]" : " min-h-[240px]")
-  }
->
+<div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2">
                               {(() => {
                                 const sorted = [...curvePoints].sort(
                                   (a, b) =>
@@ -940,9 +935,9 @@ export default function FoamAdvisorPage({
                                 const spanG = maxG - minG || 1;
 
                                 const VIEW_W = 420;
-                                const VIEW_H = 260; // taller chart for more visual impact
-                                const PAD_X = 40;
-                                const PAD_Y = 30;
+const VIEW_H = curveExpanded ? 340 : 240; // taller in full view
+const PAD_X = 40;
+const PAD_Y = 30;
 
                                 const mapX = (psi: number) =>
                                   PAD_X +
