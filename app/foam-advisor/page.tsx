@@ -199,6 +199,8 @@ export default function FoamAdvisorPage({
     React.useState<boolean>(false);
   const [curveError, setCurveError] =
     React.useState<string | null>(null);
+     // NEW: allow expanding the chart vertically
+  const [curveExpanded, setCurveExpanded] = React.useState(false);
 
   // Prefill contact area from block L×W if available
   React.useEffect(() => {
@@ -830,15 +832,27 @@ export default function FoamAdvisorPage({
                     {/* Curve loading / error / chart */}
                     <div className="mt-3 flex-1 flex flex-col">
                       <div className="flex items-center justify-between mb-1">
-                        <div className="text-[11px] font-semibold text-slate-100">
-                          {selectedRecommendation
-                            ? `Curve preview: ${selectedRecommendation.label}`
-                            : "Primary curve preview"}
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          Source: public.cushion_curves
-                        </div>
-                      </div>
+  <div className="text-[11px] font-semibold text-slate-100">
+    {selectedRecommendation
+      ? `Curve preview: ${selectedRecommendation.label}`
+      : "Primary curve preview"}
+  </div>
+  <div className="flex items-center gap-3">
+    <div className="text-[10px] text-slate-500">
+      Source: public.cushion_curves
+    </div>
+    {curvePoints && curvePoints.length > 0 && (
+      <button
+        type="button"
+        className="rounded-full border border-slate-600 bg-slate-900/80 px-2 py-0.5 text-[10px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-slate-900 transition"
+        onClick={() => setCurveExpanded((prev) => !prev)}
+      >
+        {curveExpanded ? "Collapse view" : "Full view"}
+      </button>
+    )}
+  </div>
+</div>
+
 
                       {curveLoading && (
                         <div className="flex-1 flex items-center justify-center">
@@ -898,7 +912,12 @@ export default function FoamAdvisorPage({
                             </div>
 
                             {/* Simple SVG chart with nearest-point highlight */}
-                            <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2">
+                            <div
+  className={
+    "flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2 transition-[min-height] duration-200 ease-out" +
+    (curveExpanded ? " min-h-[320px]" : " min-h-[240px]")
+  }
+>
                               {(() => {
                                 const sorted = [...curvePoints].sort(
                                   (a, b) =>
