@@ -1306,6 +1306,20 @@ export default function FoamAdvisorPage({
                                   </div>
                                 )}
 
+{firstMatched && (
+  <button
+    className="mt-2 inline-flex items-center rounded-full border border-emerald-500/70 bg-emerald-500/20 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/30 transition"
+    onClick={(e) => {
+      e.stopPropagation();
+      const q = quoteNo || "";
+      const blk = blockParam || "";
+      const mid = firstMatched.id;
+      window.location.href = `/quote/layout?quote_no=${encodeURIComponent(q)}&block=${encodeURIComponent(blk)}&material_id=${mid}`;
+    }}
+  >
+    Use this in layout
+  </button>
+)}
                                 {materialsLoading && (
                                   <div className="mt-1 text-[10px] text-slate-500">
                                     Loading materials…
