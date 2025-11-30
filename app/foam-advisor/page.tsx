@@ -1,14 +1,15 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v5
+// Foam Advisor · Path A layout v6
 //
 // - Inputs on the LEFT
 // - Center: cushion-curve canvas that shows the selected recommendation’s curve
 //   from /api/cushion/curves/{material_id}, with the operating point marked.
-// - NEW in this step:
-//   • Finds the nearest tested cushion-curve point to your operating psi
-//   • Highlights it on the graph
-//   • Shows a small numeric readout: psi / % deflection / G
+// - NEW in this step (visual only):
+//   • Taller, more “instrument-like” center canvas
+//   • More prominent operating band strip
+//   • Right-hand “Suggested foam” column no longer hard-capped at 420px
+//     so more of it is visible without scrolling on typical screens.
 // - RIGHT: analysis summary + recommended materials (clickable to drive the canvas)
 //
 // No changes to pricing, quotes, or existing core logic.
@@ -144,7 +145,6 @@ export default function FoamAdvisorPage({
       // ignore
     }
   }, [quoteNo]);
-
 
   const blockParamRaw = searchParams?.block ?? null;
   const blockParam = Array.isArray(blockParamRaw)
@@ -503,16 +503,6 @@ export default function FoamAdvisorPage({
     curvePoints.length,
   ]);
 
-  // Simple helper for the center band text label
-  const operatingBandLabel = React.useMemo(() => {
-    if (!advisorResult) return null;
-    const psi = advisorResult.staticLoadPsi;
-    if (!Number.isFinite(psi) || psi <= 0) return null;
-    if (psi < 0.5) return "Soft / low psi band";
-    if (psi < 1.5) return "Typical 0–1.5 psi band";
-    return "Firm / high psi band";
-  }, [advisorResult]);
-
   // Helper to find the currently selected recommendation
   const selectedRecommendation: AdvisorRecommendation | null =
     React.useMemo(() => {
@@ -527,7 +517,7 @@ export default function FoamAdvisorPage({
     }, [advisorResult, selectedRecKey]);
 
   return (
-    <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
+    <main className="min-h-screen bg-slate-950 flex items-stretch py-4 px-4">
       <div className="w-full max-w-6xl mx-auto">
         <div className="rounded-2xl border border-slate-800 bg-slate-950/90 shadow-[0_22px_45px_rgba(15,23,42,0.85)] overflow-hidden">
           {/* Header – match layout editor vibe */}
@@ -572,7 +562,7 @@ export default function FoamAdvisorPage({
           </div>
 
           {/* Body – three-column layout */}
-          <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100">
+          <div className="flex flex-row gap-4 p-4 bg-slate-950/90 text-slate-100">
             {/* LEFT: Inputs + context */}
             <aside className="w-72 shrink-0 flex flex-col gap-3">
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
@@ -775,7 +765,7 @@ export default function FoamAdvisorPage({
                       <div className="text-[11px] text-slate-300 mb-1">
                         Operating band preview
                       </div>
-                      <div className="relative h-10 rounded-full overflow-hidden border border-slate-700 bg-slate-950">
+                      <div className="relative h-14 rounded-full overflow-hidden border border-slate-700 bg-slate-950">
                         {/* Soft band */}
                         <div className="absolute inset-y-0 left-0 w-1/3 bg-emerald-500/25" />
                         {/* Typical band */}
@@ -919,7 +909,7 @@ export default function FoamAdvisorPage({
                                 const spanG = maxG - minG || 1;
 
                                 const VIEW_W = 420;
-                                const VIEW_H = 220;
+                                const VIEW_H = 260; // taller chart for more visual impact
                                 const PAD_X = 40;
                                 const PAD_Y = 30;
 
@@ -959,7 +949,7 @@ export default function FoamAdvisorPage({
                                     ? mapX(operatingPsi)
                                     : null;
 
-                                // NEW: find nearest tested point on the curve
+                                // Nearest tested point on the curve
                                 const nearestPoint: CushionPoint | null =
                                   hasOperating
                                     ? sorted.reduce<{
@@ -1101,7 +1091,7 @@ export default function FoamAdvisorPage({
                                         </>
                                       )}
 
-                                      {/* NEW: Nearest tested curve point highlight */}
+                                      {/* Nearest tested curve point highlight */}
                                       {nearestX != null &&
                                         nearestY != null && (
                                           <>
@@ -1164,7 +1154,7 @@ export default function FoamAdvisorPage({
                                       </text>
                                     </svg>
 
-                                    {/* NEW: nearest-point numeric readout */}
+                                    {/* Nearest-point numeric readout */}
                                     {nearestPoint && (
                                       <div className="mt-2 text-[10px] text-slate-300">
                                         Nearest tested point to your load:{" "}
@@ -1203,7 +1193,7 @@ export default function FoamAdvisorPage({
               </div>
             </section>
 
-            {/* RIGHT: Summary + recommendations (now clickable) */}
+            {/* RIGHT: Summary + recommendations (clickable) */}
             <aside className="w-80 shrink-0 flex flex-col gap-3">
               {!advisorResult && (
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 text-[11px] text-slate-400">
@@ -1241,7 +1231,7 @@ export default function FoamAdvisorPage({
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200 max-h-[420px] overflow-auto">
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-semibold text-slate-100">
                         Suggested foam families
@@ -1350,20 +1340,25 @@ export default function FoamAdvisorPage({
                                   </div>
                                 )}
 
-{firstMatched && (
-  <button
-    className="mt-2 inline-flex items-center rounded-full border border-emerald-500/70 bg-emerald-500/20 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/30 transition"
-    onClick={(e) => {
-      e.stopPropagation();
-      const q = effectiveQuoteNo || "";
-      const blk = blockParam || "";
-      const mid = firstMatched.id;
-      window.location.href = `/quote/layout?quote_no=${encodeURIComponent(q)}&block=${encodeURIComponent(blk)}&material_id=${mid}`;
-    }}
-  >
-    Use this in layout
-  </button>
-)}
+                                {firstMatched && (
+                                  <button
+                                    className="mt-2 inline-flex items-center rounded-full border border-emerald-500/70 bg-emerald-500/20 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/30 transition"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const q = effectiveQuoteNo || "";
+                                      const blk = blockParam || "";
+                                      const mid = firstMatched.id;
+                                      window.location.href = `/quote/layout?quote_no=${encodeURIComponent(
+                                        q,
+                                      )}&block=${encodeURIComponent(
+                                        blk,
+                                      )}&material_id=${mid}`;
+                                    }}
+                                  >
+                                    Use this in layout
+                                  </button>
+                                )}
+
                                 {materialsLoading && (
                                   <div className="mt-1 text-[10px] text-slate-500">
                                     Loading materials…
