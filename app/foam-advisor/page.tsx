@@ -873,11 +873,30 @@ export default function FoamAdvisorPage({
                             </span>
                           </div>
 
-{/* Operating point marker (normalized 0–3 psi) */}
+{/* Operating point marker
+    - If curve data is loaded, align with the chart's psi range (min→max)
+    - Otherwise fall back to a 0–3 psi band */}
 {advisorResult.staticLoadPsi > 0 && (() => {
   const psi = advisorResult.staticLoadPsi || 0;
-  const clamped = psi <= 0 ? 0 : psi >= 3 ? 3 : psi;
-  const pct = (clamped / 3) * 100;
+  let pct: number;
+
+  if (curvePoints && curvePoints.length > 1) {
+    // Match the chart: position within the curve's psi span
+    const psis = curvePoints.map((p) => p.static_psi);
+    const minPsi = Math.min(...psis);
+    const maxPsi = Math.max(...psis);
+    const span = maxPsi - minPsi || 1;
+
+    let normalized = (psi - minPsi) / span;
+    if (normalized < 0) normalized = 0;
+    if (normalized > 1) normalized = 1;
+
+    pct = normalized * 100;
+  } else {
+    // Fallback: simple 0–3 psi band
+    const clamped = psi <= 0 ? 0 : psi >= 3 ? 3 : psi;
+    pct = (clamped / 3) * 100;
+  }
 
   return (
     <div
@@ -891,6 +910,7 @@ export default function FoamAdvisorPage({
     </div>
   );
 })()}
+
 
 
                         </div>
