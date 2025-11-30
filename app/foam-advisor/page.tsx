@@ -1,15 +1,16 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v6
+// Foam Advisor · Path A layout v5 (polished)
 //
 // - Inputs on the LEFT
 // - Center: cushion-curve canvas that shows the selected recommendation’s curve
 //   from /api/cushion/curves/{material_id}, with the operating point marked.
-// - NEW in this step (visual only):
-//   • Taller, more “instrument-like” center canvas
-//   • More prominent operating band strip
-//   • Right-hand “Suggested foam” column no longer hard-capped at 420px
-//     so more of it is visible without scrolling on typical screens.
+// - Extras in this version:
+//   • Finds the nearest tested cushion-curve point to your operating psi
+//   • Highlights it on the graph
+//   • Shows a small numeric readout: psi / % deflection / G
+//   • Operating band gauge with 0 / 1 / 2 / 3 psi ticks
+//   • Gradient curve stroke + glow on operating line
 // - RIGHT: analysis summary + recommended materials (clickable to drive the canvas)
 //
 // No changes to pricing, quotes, or existing core logic.
@@ -102,6 +103,7 @@ export default function FoamAdvisorPage({
   const quoteNo = Array.isArray(quoteParam)
     ? (quoteParam[0] ?? "").trim()
     : (quoteParam ?? "").trim();
+
   const [effectiveQuoteNo, setEffectiveQuoteNo] =
     React.useState<string>(() => {
       if (quoteNo && quoteNo.trim().length > 0) {
@@ -199,8 +201,6 @@ export default function FoamAdvisorPage({
     React.useState<boolean>(false);
   const [curveError, setCurveError] =
     React.useState<string | null>(null);
-     // NEW: allow expanding the chart vertically
-  const [curveExpanded, setCurveExpanded] = React.useState(false);
 
   // Prefill contact area from block L×W if available
   React.useEffect(() => {
@@ -519,7 +519,7 @@ export default function FoamAdvisorPage({
     }, [advisorResult, selectedRecKey]);
 
   return (
-    <main className="min-h-screen bg-slate-950 flex items-stretch py-4 px-4">
+    <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
       <div className="w-full max-w-6xl mx-auto">
         <div className="rounded-2xl border border-slate-800 bg-slate-950/90 shadow-[0_22px_45px_rgba(15,23,42,0.85)] overflow-hidden">
           {/* Header – match layout editor vibe */}
@@ -564,7 +564,7 @@ export default function FoamAdvisorPage({
           </div>
 
           {/* Body – three-column layout */}
-          <div className="flex flex-row gap-4 p-4 bg-slate-950/90 text-slate-100">
+          <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100">
             {/* LEFT: Inputs + context */}
             <aside className="w-72 shrink-0 flex flex-col gap-3">
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
@@ -730,9 +730,8 @@ export default function FoamAdvisorPage({
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 flex-1 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-[15px] font-semibold text-slate-100 tracking-tight">
-  Cushion curve canvas
-</div>
-
+                    Cushion curve canvas
+                  </div>
                   <div className="text-[10px] text-slate-500">
                     Choose a recommendation on the right to drive this view.
                   </div>
@@ -768,7 +767,7 @@ export default function FoamAdvisorPage({
                       <div className="text-[11px] text-slate-300 mb-1">
                         Operating band preview
                       </div>
-                      <div className="relative h-14 rounded-full overflow-hidden border border-slate-700 bg-slate-950">
+                      <div className="relative h-10 rounded-full overflow-hidden border border-slate-700 bg-slate-950">
                         {/* Soft band */}
                         <div className="absolute inset-y-0 left-0 w-1/3 bg-emerald-500/25" />
                         {/* Typical band */}
@@ -777,15 +776,17 @@ export default function FoamAdvisorPage({
                         <div className="absolute inset-y-0 left-2/3 w-1/3 bg-amber-500/25" />
 
                         {/* Tick marks at 0, 1, 2, 3 psi */}
-<div className="absolute inset-0 flex items-end justify-between px-5 pb-1 text-[9px] text-slate-200/80 pointer-events-none">
-  {[0, 1, 2, 3].map((v) => (
-    <div key={v} className="flex flex-col items-center">
-      <div className="h-2 w-px bg-slate-100/80" />
-      <span className="mt-0.5">{v}</span>
-    </div>
-  ))}
-</div>
-
+                        <div className="absolute inset-0 flex items-end justify-between px-5 pb-1 text-[9px] text-slate-200/80 pointer-events-none">
+                          {[0, 1, 2, 3].map((v) => (
+                            <div
+                              key={v}
+                              className="flex flex-col items-center"
+                            >
+                              <div className="h-2 w-px bg-slate-100/80" />
+                              <span className="mt-0.5">{v}</span>
+                            </div>
+                          ))}
+                        </div>
 
                         {/* Operating point marker (normalized 0–3 psi) */}
                         {advisorResult.staticLoadPsi > 0 && (
@@ -813,46 +814,34 @@ export default function FoamAdvisorPage({
                         )}
                       </div>
                       {(() => {
-                        const label = (() => {
-                          if (!advisorResult) return null;
-                          const psi = advisorResult.staticLoadPsi;
-                          if (!Number.isFinite(psi) || psi <= 0) return null;
-                          if (psi < 0.5) return "Soft / low psi band";
-                          if (psi < 1.5) return "Typical 0–1.5 psi band";
-                          return "Firm / high psi band";
-                        })();
-                        return label ? (
+                        const psi = advisorResult.staticLoadPsi;
+                        if (!Number.isFinite(psi) || psi <= 0) return null;
+                        const label =
+                          psi < 0.5
+                            ? "Soft / low psi band"
+                            : psi < 1.5
+                            ? "Typical 0–1.5 psi band"
+                            : "Firm / high psi band";
+                        return (
                           <div className="mt-1 text-[10px] text-slate-400">
                             {label}
                           </div>
-                        ) : null;
+                        );
                       })()}
                     </div>
 
                     {/* Curve loading / error / chart */}
                     <div className="mt-3 flex-1 flex flex-col">
                       <div className="flex items-center justify-between mb-1">
-  <div className="text-[11px] font-semibold text-slate-100">
-    {selectedRecommendation
-      ? `Curve preview: ${selectedRecommendation.label}`
-      : "Primary curve preview"}
-  </div>
-  <div className="flex items-center gap-3">
-    <div className="text-[10px] text-slate-500">
-      Source: public.cushion_curves
-    </div>
-    {curvePoints && curvePoints.length > 0 && (
-      <button
-        type="button"
-        className="rounded-full border border-slate-600 bg-slate-900/80 px-2 py-0.5 text-[10px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-slate-900 transition"
-        onClick={() => setCurveExpanded((prev) => !prev)}
-      >
-        {curveExpanded ? "Collapse view" : "Full view"}
-      </button>
-    )}
-  </div>
-</div>
-
+                        <div className="text-[11px] font-semibold text-slate-100">
+                          {selectedRecommendation
+                            ? `Curve preview: ${selectedRecommendation.label}`
+                            : "Primary curve preview"}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          Source: public.cushion_curves
+                        </div>
+                      </div>
 
                       {curveLoading && (
                         <div className="flex-1 flex items-center justify-center">
@@ -912,7 +901,7 @@ export default function FoamAdvisorPage({
                             </div>
 
                             {/* Simple SVG chart with nearest-point highlight */}
-<div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2">
+                            <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2">
                               {(() => {
                                 const sorted = [...curvePoints].sort(
                                   (a, b) =>
@@ -935,9 +924,9 @@ export default function FoamAdvisorPage({
                                 const spanG = maxG - minG || 1;
 
                                 const VIEW_W = 420;
-const VIEW_H = curveExpanded ? 340 : 240; // taller in full view
-const PAD_X = 40;
-const PAD_Y = 30;
+                                const VIEW_H = 260;
+                                const PAD_X = 40;
+                                const PAD_Y = 30;
 
                                 const mapX = (psi: number) =>
                                   PAD_X +
@@ -975,7 +964,7 @@ const PAD_Y = 30;
                                     ? mapX(operatingPsi)
                                     : null;
 
-                                // Nearest tested point on the curve
+                                // NEW: find nearest tested point on the curve
                                 const nearestPoint: CushionPoint | null =
                                   hasOperating
                                     ? sorted.reduce<{
@@ -1018,16 +1007,6 @@ const PAD_Y = 30;
                                       height={VIEW_H}
                                       viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
                                     >
-
-<defs>
-  <linearGradient id="curveStroke" x1="0" y1="0" x2="1" y2="0">
-    <stop offset="0%" stopColor="#7dd3fc" />
-    <stop offset="100%" stopColor="#38bdf8" />
-  </linearGradient>
-</defs>
-
-
-
                                       {/* Background */}
                                       <rect
                                         x={0}
@@ -1036,6 +1015,25 @@ const PAD_Y = 30;
                                         height={VIEW_H}
                                         fill="#020617"
                                       />
+
+                                      <defs>
+                                        <linearGradient
+                                          id="curveStroke"
+                                          x1="0"
+                                          y1="0"
+                                          x2="1"
+                                          y2="0"
+                                        >
+                                          <stop
+                                            offset="0%"
+                                            stopColor="#7dd3fc"
+                                          />
+                                          <stop
+                                            offset="100%"
+                                            stopColor="#38bdf8"
+                                          />
+                                        </linearGradient>
+                                      </defs>
 
                                       {/* Axes */}
                                       <line
@@ -1080,12 +1078,11 @@ const PAD_Y = 30;
 
                                       {/* Curve path */}
                                       <path
-  d={pathD}
-  fill="none"
-  stroke="url(#curveStroke)"
-  strokeWidth={1.5}
-/>
-
+                                        d={pathD}
+                                        fill="none"
+                                        stroke="url(#curveStroke)"
+                                        strokeWidth={1.5}
+                                      />
 
                                       {/* Curve points */}
                                       {sorted.map((p, idx) => {
@@ -1104,41 +1101,40 @@ const PAD_Y = 30;
                                         );
                                       })}
 
-                                      {/* Operating point marker (vertical line) */}
-                                    {opX != null && (
-  <>
-    {/* Soft glow behind the operating line */}
-    <line
-      x1={opX}
-      y1={PAD_Y}
-      x2={opX}
-      y2={VIEW_H - PAD_Y}
-      stroke="#0ea5e9"
-      strokeWidth={4}
-      strokeOpacity={0.18}
-    />
-    {/* Main dashed operating line */}
-    <line
-      x1={opX}
-      y1={PAD_Y}
-      x2={opX}
-      y2={VIEW_H - PAD_Y}
-      stroke="#f9fafb"
-      strokeWidth={1}
-      strokeDasharray="4 4"
-    />
-    <text
-      x={opX}
-      y={PAD_Y - 6}
-      textAnchor="middle"
-      fontSize={9}
-      fill="#f9fafb"
-    >
-      Operating load
-    </text>
-  </>
-)}
-
+                                      {/* Operating point marker (vertical line with glow) */}
+                                      {opX != null && (
+                                        <>
+                                          {/* Glow behind line */}
+                                          <line
+                                            x1={opX}
+                                            y1={PAD_Y}
+                                            x2={opX}
+                                            y2={VIEW_H - PAD_Y}
+                                            stroke="#0ea5e9"
+                                            strokeWidth={4}
+                                            strokeOpacity={0.18}
+                                          />
+                                          {/* Main dashed line */}
+                                          <line
+                                            x1={opX}
+                                            y1={PAD_Y}
+                                            x2={opX}
+                                            y2={VIEW_H - PAD_Y}
+                                            stroke="#f9fafb"
+                                            strokeWidth={1}
+                                            strokeDasharray="4 4"
+                                          />
+                                          <text
+                                            x={opX}
+                                            y={PAD_Y - 6}
+                                            textAnchor="middle"
+                                            fontSize={9}
+                                            fill="#f9fafb"
+                                          >
+                                            Operating load
+                                          </text>
+                                        </>
+                                      )}
 
                                       {/* Nearest tested curve point highlight */}
                                       {nearestX != null &&
@@ -1207,7 +1203,6 @@ const PAD_Y = 30;
                                     {nearestPoint && (
                                       <div className="mt-3 text-[10px] text-slate-300">
                                         Nearest tested point to your load:{" "}
-
                                         <span className="font-mono text-sky-200">
                                           {nearestPoint.static_psi.toFixed(
                                             3,
@@ -1243,7 +1238,7 @@ const PAD_Y = 30;
               </div>
             </section>
 
-            {/* RIGHT: Summary + recommendations (clickable) */}
+            {/* RIGHT: Summary + recommendations (now clickable) */}
             <aside className="w-80 shrink-0 flex flex-col gap-3">
               {!advisorResult && (
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 text-[11px] text-slate-400">
@@ -1281,7 +1276,7 @@ const PAD_Y = 30;
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200 max-h-[420px] overflow-auto">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-semibold text-slate-100">
                         Suggested foam families
@@ -1377,36 +1372,38 @@ const PAD_Y = 30;
                                 </ul>
 
                                 {firstMatched && (
-                                  <div className="mt-2">
+                                  <div className="mt-2 flex flex-wrap gap-2">
                                     <a
                                       href={`/admin/cushion/curves/${firstMatched.id}`}
                                       target="_blank"
                                       rel="noreferrer"
                                       className="inline-flex items-center rounded-full border border-sky-500/70 px-3 py-1 text-[10px] font-medium text-sky-100 hover:bg-sky-500/15 transition"
-                                      onClick={(e) => e.stopPropagation()}
+                                      onClick={(e) =>
+                                        e.stopPropagation()
+                                      }
                                     >
                                       View cushion curve
                                     </a>
-                                  </div>
-                                )}
 
-                                {firstMatched && (
-                                  <button
-                                    className="mt-2 inline-flex items-center rounded-full border border-emerald-500/70 bg-emerald-500/20 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/30 transition"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const q = effectiveQuoteNo || "";
-                                      const blk = blockParam || "";
-                                      const mid = firstMatched.id;
-                                      window.location.href = `/quote/layout?quote_no=${encodeURIComponent(
-                                        q,
-                                      )}&block=${encodeURIComponent(
-                                        blk,
-                                      )}&material_id=${mid}`;
-                                    }}
-                                  >
-                                    Use this in layout
-                                  </button>
+                                    <button
+                                      type="button"
+                                      className="inline-flex items-center rounded-full border border-emerald-500/70 bg-emerald-500/20 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/30 transition"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const q =
+                                          effectiveQuoteNo || "";
+                                        const blk = blockParam || "";
+                                        const mid = firstMatched.id;
+                                        window.location.href = `/quote/layout?quote_no=${encodeURIComponent(
+                                          q,
+                                        )}&block=${encodeURIComponent(
+                                          blk,
+                                        )}&material_id=${mid}`;
+                                      }}
+                                    >
+                                      Use this in layout
+                                    </button>
+                                  </div>
                                 )}
 
                                 {materialsLoading && (
