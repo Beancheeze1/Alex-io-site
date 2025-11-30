@@ -523,12 +523,16 @@ export default function LayoutPage({
             materialIdFromUrl ?? materialIdFromItems;
 
           if (!cancelled) {
-            setInitialLayout(layoutFromDb);
-            setInitialNotes(notesFromDb);
-            setInitialQty(qtyFromItems);
-            setInitialMaterialId(effectiveMaterialId ?? null);
-            setLoadingLayout(false);
-          }
+  const effectiveMaterialId =
+    materialIdFromUrl ?? materialIdFromItems;
+
+  setInitialLayout(layoutFromDb);
+  setInitialNotes(notesFromDb);
+  setInitialQty(qtyFromItems);
+  setInitialMaterialId(effectiveMaterialId ?? null);
+  setLoadingLayout(false);
+}
+
 
           return;
         }
