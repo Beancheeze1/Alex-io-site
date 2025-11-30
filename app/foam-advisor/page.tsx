@@ -901,10 +901,14 @@ export default function FoamAdvisorPage({
     return (
     // Outer container matches the tick strip padding (px-6)
     <div className="pointer-events-none absolute inset-y-0 inset-x-6">
-      <div
-        className="absolute inset-y-0"
-        style={{ left: `${pct}%`, transform: "translateX(-50%)" }}
-      >
+          <div
+      className="absolute inset-y-0"
+      style={{
+        left: `${pct}%`,
+        transform: "translateX(-50%) translateX(1px)",
+      }}
+    >
+
         {/* Glow column behind the line (same vibe as chart) */}
         <div className="absolute inset-y-0 w-[10px] bg-sky-300/30 shadow-[0_0_18px_rgba(56,189,248,0.95)]" />
         {/* Dashed operating line to match curve canvas */}
