@@ -873,27 +873,25 @@ export default function FoamAdvisorPage({
                             </span>
                           </div>
 
-                          {/* Operating point marker (normalized 0–3 psi) */}
+{/* Operating point marker (normalized 0–3 psi) */}
 {advisorResult.staticLoadPsi > 0 && (() => {
   const psi = advisorResult.staticLoadPsi || 0;
   const clamped = psi <= 0 ? 0 : psi >= 3 ? 3 : psi;
   const pct = (clamped / 3) * 100;
 
   return (
-    <>
-      {/* Glow column behind the line */}
-      <div
-        className="pointer-events-none absolute top-0 bottom-0 w-[10px] bg-slate-50/18 shadow-[0_0_16px_rgba(15,23,42,1)]"
-        style={{ left: `calc(${pct}% - 5px)` }}
-      />
-      {/* Dashed operating line */}
-      <div
-        className="pointer-events-none absolute top-1 bottom-1 border-l-2 border-dashed border-slate-50 shadow-[0_0_10px_rgba(15,23,42,0.9)]"
-        style={{ left: `${pct}%` }}
-      />
-    </>
+    <div
+      className="pointer-events-none absolute inset-y-0"
+      style={{ left: `${pct}%`, transform: "translateX(-50%)" }}
+    >
+      {/* Glow column behind the line (same vibe as chart) */}
+      <div className="absolute inset-y-0 w-[10px] bg-sky-300/30 shadow-[0_0_18px_rgba(56,189,248,0.95)]" />
+      {/* Dashed operating line to match curve canvas */}
+      <div className="absolute top-1 bottom-1 border-l-2 border-dashed border-slate-50 shadow-[0_0_10px_rgba(15,23,42,0.9)]" />
+    </div>
   );
 })()}
+
 
                         </div>
                       </div>
