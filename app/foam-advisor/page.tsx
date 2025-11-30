@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v5 (polished)
+// Foam Advisor · Path A layout v5 (polished, no inner scroll on recs)
 //
 // - Inputs on the LEFT
 // - Center: cushion-curve canvas that shows the selected recommendation’s curve
@@ -724,10 +724,9 @@ export default function FoamAdvisorPage({
                 )}
               </form>
             </aside>
-
             {/* CENTER: Graphical cushion canvas */}
             <section className="flex-1 flex flex-col">
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 flex-1 flex flex-col">
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 flex-1 flex flex-col shadow-[0_18px_45px_rgba(15,23,42,0.9)]">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-[15px] font-semibold text-slate-100 tracking-tight">
                     Cushion curve canvas
@@ -1276,7 +1275,8 @@ export default function FoamAdvisorPage({
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200 max-h-[420px] overflow-auto">
+                  {/* NOTE: removed max-h/overflow so customer doesn't have to scroll inside this card */}
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-semibold text-slate-100">
                         Suggested foam families
