@@ -871,7 +871,7 @@ function LayoutEditorHost(props: {
       return;
     }
 
-    try {
+  try {
       setApplyStatus("saving");
 
       // Build a friendly material/notes footer + header data for the SVG
@@ -1068,7 +1068,7 @@ function LayoutEditorHost(props: {
             </div>
 
             {/* Body: three-column layout */}
-            <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100">
+            <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
               {/* LEFT: Cavity palette + material + notes */}
               <aside className="w-52 shrink-0 flex flex-col gap-3">
                 <div>
@@ -1086,7 +1086,10 @@ function LayoutEditorHost(props: {
                   onClick={() => handleAddPreset("rect")}
                   className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
-                  <div className="font-semibold text-slate-50">Rectangle</div>
+                  <div className="font-semibold text-slate-50 flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-slate-400/70 bg-slate-900/80" />
+                    Rectangle
+                  </div>
                   <div className="text-[11px] text-slate-400">
                     Rectangular pocket (4&quot; × 2&quot;)
                   </div>
@@ -1097,7 +1100,10 @@ function LayoutEditorHost(props: {
                   onClick={() => handleAddPreset("circle")}
                   className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
-                  <div className="font-semibold text-slate-50">Circle</div>
+                  <div className="font-semibold text-slate-50 flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 bg-slate-900/80" />
+                    Circle
+                  </div>
                   <div className="text-[11px] text-slate-400">
                     Round pocket (3&quot; Ø)
                   </div>
@@ -1108,7 +1114,8 @@ function LayoutEditorHost(props: {
                   onClick={() => handleAddPreset("roundedRect")}
                   className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
-                  <div className="font-semibold text-slate-50">
+                  <div className="font-semibold text-slate-50 flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-md border border-slate-400/70 bg-slate-900/80" />
                     Rounded rectangle
                   </div>
                   <div className="text-[11px] text-slate-400">
@@ -1225,67 +1232,76 @@ function LayoutEditorHost(props: {
 
                   {/* zoom + qty + advisor + apply button */}
                   <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1 text-[11px] text-slate-400">
-                      <span>Zoom</span>
-                      <input
-                        type="range"
-                        min={0.7}
-                        max={1.4}
-                        step={0.05}
-                        value={zoom}
-                        onChange={(e) => setZoom(Number(e.target.value))}
-                        className="w-28 accent-sky-400"
-                      />
+                    <div className="hidden md:flex items-center text-[11px] text-slate-400 mr-1">
+                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80 mr-1.5" />
+                      <span>Layout controls</span>
                     </div>
+                    <div className="inline-flex items-center gap-3 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 shadow-[0_0_16px_rgba(15,23,42,0.8)]">
+                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                        <span>Zoom</span>
+                        <input
+                          type="range"
+                          min={0.7}
+                          max={1.4}
+                          step={0.05}
+                          value={zoom}
+                          onChange={(e) => setZoom(Number(e.target.value))}
+                          className="w-28 accent-sky-400"
+                        />
+                        <span className="ml-1 text-sky-200 font-mono">
+                          {Math.round(zoom * 100)}%
+                        </span>
+                      </div>
 
-                    <div className="flex items-center gap-1 text-[11px] text-slate-400">
-                      <span>Qty</span>
-                      <input
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={qty}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (!v) {
-                            setQty("");
-                            return;
-                          }
-                          const num = Number(v);
-                          if (!Number.isFinite(num) || num <= 0) return;
-                          setQty(num);
-                        }}
-                        disabled={!hasRealQuoteNo}
-                        className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
-                      />
+                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                        <span>Qty</span>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={qty}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (!v) {
+                              setQty("");
+                              return;
+                            }
+                            const num = Number(v);
+                            if (!Number.isFinite(num) || num <= 0) return;
+                            setQty(num);
+                          }}
+                          disabled={!hasRealQuoteNo}
+                          className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleGoToFoamAdvisor}
+                        className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition"
+                      >
+                        Recommend my foam
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleApplyToQuote}
+                        disabled={!canApplyButton}
+                        className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
+                      >
+                        {!hasRealQuoteNo
+                          ? "Link to a quote first"
+                          : missingCustomerInfo
+                          ? "Add name + email"
+                          : applyStatus === "saving"
+                          ? "Applying…"
+                          : applyStatus === "done"
+                          ? "Applied!"
+                          : applyStatus === "error"
+                          ? "Error – retry"
+                          : "Apply to quote"}
+                      </button>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={handleGoToFoamAdvisor}
-                      className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition"
-                    >
-                      Recommend my foam
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleApplyToQuote}
-                      disabled={!canApplyButton}
-                      className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
-                    >
-                      {!hasRealQuoteNo
-                        ? "Link to a quote first"
-                        : missingCustomerInfo
-                        ? "Add name + email"
-                        : applyStatus === "saving"
-                        ? "Applying…"
-                        : applyStatus === "done"
-                        ? "Applied!"
-                        : applyStatus === "error"
-                        ? "Error – retry"
-                        : "Apply to quote"}
-                    </button>
                   </div>
                 </div>
 
@@ -1298,17 +1314,23 @@ function LayoutEditorHost(props: {
                 </p>
 
                 {/* canvas wrapper */}
-                <div className="flex-1 bg-slate-900 rounded-2xl border border-slate-800 p-4 overflow-auto">
-                  <InteractiveCanvas
-                    layout={layout}
-                    selectedId={selectedId}
-                    selectAction={selectCavity}
-                    moveAction={updateCavityPosition}
-                    resizeAction={(id, lengthIn, widthIn) =>
-                      updateCavityDims(id, { lengthIn, widthIn })
-                    }
-                    zoom={zoom}
+                <div className="relative flex-1 rounded-2xl border border-slate-800 bg-slate-950/95 overflow-hidden">
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 opacity-60 bg-[radial-gradient(circle_at_center,_rgba(148,163,184,0.32),transparent_55%),linear-gradient(to_right,rgba(30,64,175,0.28)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.28)_1px,transparent_1px)] [background-size:520px_520px,26px_26px,26px_26px]"
                   />
+                  <div className="relative p-4 overflow-auto">
+                    <InteractiveCanvas
+                      layout={layout}
+                      selectedId={selectedId}
+                      selectAction={selectCavity}
+                      moveAction={updateCavityPosition}
+                      resizeAction={(id, lengthIn, widthIn) =>
+                        updateCavityDims(id, { lengthIn, widthIn })
+                      }
+                      zoom={zoom}
+                    />
+                  </div>
                 </div>
               </section>
 
@@ -1316,8 +1338,13 @@ function LayoutEditorHost(props: {
               <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
                 {/* Block editor */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                  <div className="text-xs font-semibold text-slate-100 mb-1">
-                    Block
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-slate-100">
+                      Block
+                    </div>
+                    <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-300">
+                      Foam blank
+                    </span>
                   </div>
                   <div className="text-[11px] text-slate-400 mb-2">
                     Edit the foam blank size. Values snap to 0.125&quot;
@@ -1380,8 +1407,18 @@ function LayoutEditorHost(props: {
 
                 {/* Customer info card (now prefilled when quote has data) */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                  <div className="text-xs font-semibold text-slate-100 mb-1">
-                    Customer info
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-slate-100">
+                      Customer info
+                    </div>
+                    <span
+                      className={
+                        "inline-flex h-1.5 w-1.5 rounded-full " +
+                        (missingCustomerInfo && hasRealQuoteNo
+                          ? "bg-rose-400 shadow-[0_0_8px_rgba(248,113,113,0.9)]"
+                          : "bg-emerald-400/70 shadow-[0_0_7px_rgba(52,211,153,0.85)]")
+                      }
+                    />
                   </div>
                   <div className="text-[11px] text-slate-400 mb-2">
                     Add who this foam layout is for.{" "}
@@ -1451,8 +1488,14 @@ function LayoutEditorHost(props: {
 
                 {/* Cavities list + editor */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
-                  <div className="text-xs font-semibold text-slate-100 mb-1">
-                    Cavities
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-slate-100">
+                      Cavities
+                    </div>
+                    <div className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] text-slate-300">
+                      {cavities.length || 0}{" "}
+                      {cavities.length === 1 ? "pocket" : "pockets"}
+                    </div>
                   </div>
 
                   {cavities.length === 0 ? (
@@ -1467,7 +1510,11 @@ function LayoutEditorHost(props: {
                         return (
                           <li
                             key={cav.id}
-                            className="flex items-center justify-between gap-2"
+                            className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
+                              isActive
+                                ? "bg-slate-800/80"
+                                : "bg-slate-900/40 hover:bg-slate-800/50"
+                            }`}
                           >
                             <button
                               type="button"
@@ -1757,9 +1804,7 @@ function buildSvgFromLayout(
   const headerLines: string[] = [];
   headerLines.push("NOT TO SCALE");
   if (T > 0) {
-    headerLines.push(
-      `BLOCK: ${L}" × ${W}" × ${T}"`,
-    );
+    headerLines.push(`BLOCK: ${L}" × ${W}" × ${T}"`);
   } else {
     headerLines.push(`BLOCK: ${L}" × ${W}" (thickness see quote)`);
   }
