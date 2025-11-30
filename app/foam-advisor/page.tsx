@@ -1,6 +1,6 @@
 // app/foam-advisor/page.tsx
 //
-// Foam Advisor · Path A layout v5 (polished, grid behind curve)
+// Foam Advisor · Path A layout v6 (polished chart + band gauge)
 //
 // - Inputs on the LEFT
 // - Center: cushion-curve canvas that shows the selected recommendation’s curve
@@ -9,9 +9,8 @@
 //   • Finds the nearest tested cushion-curve point to your operating psi
 //   • Highlights it on the graph
 //   • Shows a small numeric readout: psi / % deflection / G
-//   • Operating band gauge with 0 / 1 / 2 / 3 psi ticks
-//   • Gradient curve stroke + glow on operating line
-//   • NEW: subtle grid behind the curve for readability
+//   • Operating band gauge with 0 / 1 / 2 / 3 psi ticks and segment labels
+//   • Subtle but visible grid behind the curve
 // - RIGHT: analysis summary + recommended materials (clickable to drive the canvas)
 //
 // No changes to pricing, quotes, or existing core logic.
@@ -767,7 +766,7 @@ export default function FoamAdvisorPage({
                       <div className="text-[11px] text-slate-300 mb-1">
                         Operating band preview
                       </div>
-                      <div className="relative h-10 rounded-full overflow-hidden border border-slate-700 bg-slate-950">
+                      <div className="relative h-12 rounded-full overflow-hidden border border-slate-700 bg-slate-950">
                         {/* Soft band */}
                         <div className="absolute inset-y-0 left-0 w-1/3 bg-emerald-500/25" />
                         {/* Typical band */}
@@ -776,7 +775,7 @@ export default function FoamAdvisorPage({
                         <div className="absolute inset-y-0 left-2/3 w-1/3 bg-amber-500/25" />
 
                         {/* Tick marks at 0, 1, 2, 3 psi */}
-                        <div className="absolute inset-0 flex items-end justify-between px-5 pb-1 text-[9px] text-slate-200/80 pointer-events-none">
+                        <div className="absolute inset-0 flex items-end justify-between px-6 pb-3 text-[9px] text-slate-100/80 pointer-events-none">
                           {[0, 1, 2, 3].map((v) => (
                             <div
                               key={v}
@@ -786,6 +785,15 @@ export default function FoamAdvisorPage({
                               <span className="mt-0.5">{v}</span>
                             </div>
                           ))}
+                        </div>
+
+                        {/* Segment labels (soft / typical / firm) */}
+                        <div className="absolute inset-x-6 bottom-1 flex justify-between text-[9px] text-slate-200/90 pointer-events-none">
+                          <span>Soft</span>
+                          <span className="text-center flex-1">
+                            Typical 0–1.5 psi
+                          </span>
+                          <span className="text-right">Firm / high</span>
                         </div>
 
                         {/* Operating point marker (normalized 0–3 psi) */}
@@ -804,7 +812,7 @@ export default function FoamAdvisorPage({
                               return (
                                 <div className="relative h-full w-full">
                                   <div
-                                    className="absolute top-0 bottom-0 w-[2px] bg-slate-50 shadow-[0_0_6px_rgba(248,250,252,0.9)]"
+                                    className="absolute top-0 bottom-0 w-[3px] bg-slate-50 shadow-[0_0_10px_rgba(248,250,252,0.9)]"
                                     style={{ left: `${pct}%` }}
                                   />
                                 </div>
@@ -813,21 +821,6 @@ export default function FoamAdvisorPage({
                           </div>
                         )}
                       </div>
-                      {(() => {
-                        const psi = advisorResult.staticLoadPsi;
-                        if (!Number.isFinite(psi) || psi <= 0) return null;
-                        const label =
-                          psi < 0.5
-                            ? "Soft / low psi band"
-                            : psi < 1.5
-                            ? "Typical 0–1.5 psi band"
-                            : "Firm / high psi band";
-                        return (
-                          <div className="mt-1 text-[10px] text-slate-400">
-                            {label}
-                          </div>
-                        );
-                      })()}
                     </div>
 
                     {/* Curve loading / error / chart */}
@@ -900,7 +893,7 @@ export default function FoamAdvisorPage({
                               )}
                             </div>
 
-                            {/* Simple SVG chart with nearest-point highlight + grid */}
+                            {/* SVG chart with nearest-point highlight + grid */}
                             <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2">
                               {(() => {
                                 const sorted = [...curvePoints].sort(
@@ -1015,6 +1008,9 @@ export default function FoamAdvisorPage({
                                     ? mapY(nearestPoint.g_level)
                                     : null;
 
+                                // Helper for mid-psi label
+                                const midPsi = minPsi + spanPsi / 2;
+
                                 return (
                                   <>
                                     <svg
@@ -1060,8 +1056,8 @@ export default function FoamAdvisorPage({
                                             y1={PAD_Y}
                                             x2={x}
                                             y2={VIEW_H - PAD_Y}
-                                            stroke="#0f172a"
-                                            strokeWidth={0.5}
+                                            stroke="#1e293b"
+                                            strokeWidth={0.6}
                                             strokeDasharray="3 5"
                                           />
                                         );
@@ -1075,8 +1071,8 @@ export default function FoamAdvisorPage({
                                             y1={y}
                                             x2={VIEW_W - PAD_X}
                                             y2={y}
-                                            stroke="#0f172a"
-                                            strokeWidth={0.5}
+                                            stroke="#1e293b"
+                                            strokeWidth={0.6}
                                             strokeDasharray="3 5"
                                           />
                                         );
@@ -1105,7 +1101,7 @@ export default function FoamAdvisorPage({
                                         x={VIEW_W / 2}
                                         y={VIEW_H - 6}
                                         textAnchor="middle"
-                                        fontSize={10}
+                                        fontSize={11}
                                         fill="#e5e7eb"
                                       >
                                         Static load (psi)
@@ -1114,7 +1110,7 @@ export default function FoamAdvisorPage({
                                         x={12}
                                         y={VIEW_H / 2}
                                         textAnchor="middle"
-                                        fontSize={10}
+                                        fontSize={11}
                                         fill="#e5e7eb"
                                         transform={`rotate(-90 12 ${
                                           VIEW_H / 2
@@ -1128,7 +1124,7 @@ export default function FoamAdvisorPage({
                                         d={pathD}
                                         fill="none"
                                         stroke="url(#curveStroke)"
-                                        strokeWidth={1.5}
+                                        strokeWidth={1.6}
                                       />
 
                                       {/* Curve points */}
@@ -1159,7 +1155,7 @@ export default function FoamAdvisorPage({
                                             y2={VIEW_H - PAD_Y}
                                             stroke="#0ea5e9"
                                             strokeWidth={4}
-                                            strokeOpacity={0.18}
+                                            strokeOpacity={0.2}
                                           />
                                           {/* Main dashed line */}
                                           <line
@@ -1207,7 +1203,7 @@ export default function FoamAdvisorPage({
                                           </>
                                         )}
 
-                                      {/* Min/max tick labels */}
+                                      {/* Min / mid / max tick labels on x-axis */}
                                       <text
                                         x={PAD_X}
                                         y={VIEW_H - PAD_Y + 12}
@@ -1218,6 +1214,15 @@ export default function FoamAdvisorPage({
                                         {minPsi.toFixed(3)}
                                       </text>
                                       <text
+                                        x={mapX(midPsi)}
+                                        y={VIEW_H - PAD_Y + 12}
+                                        textAnchor="middle"
+                                        fontSize={9}
+                                        fill="#cbd5f5"
+                                      >
+                                        {midPsi.toFixed(3)}
+                                      </text>
+                                      <text
                                         x={VIEW_W - PAD_X}
                                         y={VIEW_H - PAD_Y + 12}
                                         textAnchor="middle"
@@ -1226,6 +1231,8 @@ export default function FoamAdvisorPage({
                                       >
                                         {maxPsi.toFixed(3)}
                                       </text>
+
+                                      {/* Min / max tick labels on y-axis */}
                                       <text
                                         x={PAD_X - 8}
                                         y={VIEW_H - PAD_Y}
@@ -1246,31 +1253,43 @@ export default function FoamAdvisorPage({
                                       </text>
                                     </svg>
 
-                                    {/* Nearest-point numeric readout */}
+                                    {/* Nearest-point numeric readout + disclaimer */}
                                     {nearestPoint && (
                                       <div className="mt-3 text-[10px] text-slate-300">
-                                        Nearest tested point to your load:{" "}
-                                        <span className="font-mono text-sky-200">
-                                          {nearestPoint.static_psi.toFixed(
-                                            3,
-                                          )}{" "}
-                                          psi
-                                        </span>{" "}
-                                        at{" "}
-                                        <span className="font-mono text-sky-200">
-                                          {nearestPoint.deflect_pct.toFixed(
-                                            1,
-                                          )}
-                                          % deflection
-                                        </span>{" "}
-                                        ≈{" "}
-                                        <span className="font-mono text-sky-200">
-                                          {nearestPoint.g_level.toFixed(
-                                            1,
-                                          )}{" "}
-                                          G
-                                        </span>
-                                        .
+                                        <div>
+                                          <span className="font-semibold text-slate-200">
+                                            Nearest tested point:
+                                          </span>{" "}
+                                          <span className="font-mono text-sky-200">
+                                            {nearestPoint.static_psi.toFixed(
+                                              3,
+                                            )}{" "}
+                                            psi
+                                          </span>{" "}
+                                          <span className="text-slate-500">
+                                            ·
+                                          </span>{" "}
+                                          <span className="font-mono text-sky-200">
+                                            {nearestPoint.deflect_pct.toFixed(
+                                              1,
+                                            )}
+                                            % deflection
+                                          </span>{" "}
+                                          <span className="text-slate-500">
+                                            ·
+                                          </span>{" "}
+                                          <span className="font-mono text-sky-200">
+                                            {nearestPoint.g_level.toFixed(
+                                              1,
+                                            )}{" "}
+                                            G
+                                          </span>
+                                        </div>
+                                        <div className="mt-1 text-[9px] text-slate-500">
+                                          Lab curves are a guide, not a
+                                          guarantee. Always verify performance
+                                          with real-world testing.
+                                        </div>
                                       </div>
                                     )}
                                   </>
@@ -1323,7 +1342,7 @@ export default function FoamAdvisorPage({
                     )}
                   </div>
 
-                  {/* No inner scroll: let this card grow with content */}
+                  {/* Let this card grow with content (no inner scroll) */}
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-semibold text-slate-100">
