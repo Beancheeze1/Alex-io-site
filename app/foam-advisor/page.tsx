@@ -1074,48 +1074,45 @@ export default function FoamAdvisorPage({
                                   })
                                   .join(" ");
 
-                                const operatingFraction = computeOperatingFraction(
+                                // Operating load we’re using for both the chart + band
+const operatingPsi = advisorResult.staticLoadPsi;
+const hasOperating =
+  Number.isFinite(operatingPsi) && operatingPsi > 0;
+
+// Use the shared helper to get 0–1 fraction across the curve
+const operatingFraction = computeOperatingFraction(
   sorted,
-  advisorResult.staticLoadPsi,
+  operatingPsi,
 );
 
+// X position of the operating line on the chart
 const opX =
   operatingFraction != null
     ? PAD_X + operatingFraction * (VIEW_W - 2 * PAD_X)
     : null;
 
+// Nearest tested point on the curve (for highlight + readout)
+const nearestPoint: CushionPoint | null = hasOperating
+  ? sorted.reduce<{
+      best: CushionPoint | null;
+      dist: number;
+    }>(
+      (acc, p) => {
+        const d = Math.abs(p.static_psi - (operatingPsi as number));
+        if (acc.best === null || d < acc.dist) {
+          return { best: p, dist: d };
+        }
+        return acc;
+      },
+      { best: null, dist: Infinity },
+    ).best
+  : null;
 
-                                // Nearest tested point to operating psi
-                                const nearestPoint: CushionPoint | null =
-                                  hasOperating
-                                    ? sorted.reduce<{
-                                        best: CushionPoint | null;
-                                        dist: number;
-                                      }>(
-                                        (acc, p) => {
-                                          const d = Math.abs(
-                                            p.static_psi - operatingPsi,
-                                          );
-                                          if (
-                                            acc.best === null ||
-                                            d < acc.dist
-                                          ) {
-                                            return { best: p, dist: d };
-                                          }
-                                          return acc;
-                                        },
-                                        { best: null, dist: Infinity },
-                                      ).best
-                                    : null;
+const nearestX =
+  nearestPoint != null ? mapX(nearestPoint.static_psi) : null;
+const nearestY =
+  nearestPoint != null ? mapY(nearestPoint.g_level) : null;
 
-                                const nearestX =
-                                  nearestPoint != null
-                                    ? mapX(nearestPoint.static_psi)
-                                    : null;
-                                const nearestY =
-                                  nearestPoint != null
-                                    ? mapY(nearestPoint.g_level)
-                                    : null;
 
                                 return (
                                   <>
