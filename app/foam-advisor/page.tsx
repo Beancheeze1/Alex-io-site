@@ -905,7 +905,7 @@ export default function FoamAdvisorPage({
       className="absolute inset-y-0"
       style={{
         left: `${pct}%`,
-        transform: "translateX(-50%) translateX(1px)",
+        transform: "translateX(-50%) translateX(3px)",
       }}
     >
 
