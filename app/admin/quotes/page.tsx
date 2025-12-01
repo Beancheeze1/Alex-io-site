@@ -184,7 +184,7 @@ export default function AdminQuotesPage() {
 
       try {
         // Take a small sample of the latest quotes to avoid hammering the API
-        const sample = (quotes ?? []).slice(0, 10); // <-- TS-safe
+        const sample = (quotes ?? []).slice(0, 10);
 
         const counts = new Map<string, number>();
 
@@ -293,7 +293,6 @@ export default function AdminQuotesPage() {
             </Link>
           </div>
         </header>
-
         {/* Jump to quote + summary */}
         <section className="mb-6 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           {/* Jump to quote */}
@@ -433,7 +432,7 @@ export default function AdminQuotesPage() {
             </div>
           </div>
 
-          {/* NEW: Materials used recently widget */}
+          {/* Materials used recently widget */}
           <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-200">
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
               Materials used recently
@@ -550,8 +549,15 @@ export default function AdminQuotesPage() {
                         key={q.id}
                         className="border-t border-slate-800/60 hover:bg-slate-900/70"
                       >
-                        <td className="px-3 py-2 font-mono text-[11px] text-sky-300">
-                          {q.quote_no}
+                        <td className="px-3 py-2 font-mono text-[11px]">
+                          <Link
+                            href={`/admin/quotes/${encodeURIComponent(
+                              q.quote_no,
+                            )}`}
+                            className="text-sky-300 hover:text-sky-200 hover:underline underline-offset-2"
+                          >
+                            {q.quote_no}
+                          </Link>
                         </td>
                         <td className="px-3 py-2 text-xs text-slate-100">
                           {q.customer_name || (
