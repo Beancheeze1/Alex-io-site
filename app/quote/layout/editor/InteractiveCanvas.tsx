@@ -289,6 +289,9 @@ export default function InteractiveCanvas({
             fill="transparent"
           />
 
+          {/* rulers + block label ABOVE the top ruler */}
+          {drawRulersWithLabel(block, blockPx, blockOffset)}
+
           {/* block */}
           <rect
             x={blockOffset.x}
@@ -327,16 +330,6 @@ export default function InteractiveCanvas({
             strokeDasharray="4 3"
             strokeWidth={1}
           />
-
-          {/* block label – moved down inside the block to clear the top ruler */}
-          <text
-            x={blockOffset.x + blockPx.width / 2}
-            y={blockOffset.y + 16}
-            textAnchor="middle"
-            className="fill-slate-700 text-[10px]"
-          >
-            Block: {block.lengthIn}×{block.widthIn}×{block.thicknessIn}" thick
-          </text>
 
           {/* cavities */}
           {cavities.map((cavity, index) => {
@@ -527,6 +520,129 @@ function drawInchGrid(
       {hLines}
     </g>
   );
+}
+
+// Top + left rulers and block label above ruler
+function drawRulersWithLabel(
+  block: LayoutModel["block"],
+  blockPx: { width: number; height: number },
+  blockOffset: { x: number; y: number },
+) {
+  const group = [];
+
+  // Positions
+  const rulerTopY = blockOffset.y - 18; // baseline of top ruler ticks
+  const labelY = rulerTopY - 12; // block text above ruler
+  const leftRulerX = blockOffset.x - 22; // vertical ruler just left of block
+
+  // Block label (centered, above ruler)
+  group.push(
+    <text
+      key="block-label"
+      x={blockOffset.x + blockPx.width / 2}
+      y={labelY}
+      textAnchor="middle"
+      className="fill-slate-300 text-[10px]"
+    >
+      Block {block.lengthIn}" × {block.widthIn}" × {block.thicknessIn}" thick
+    </text>,
+  );
+
+  // Horizontal ruler (top)
+  const maxL = Math.max(0, Math.floor(block.lengthIn));
+  for (let i = 0; i <= maxL; i++) {
+    const x = blockOffset.x + (i / block.lengthIn) * blockPx.width;
+    const isMajor = i % 1 === 0;
+    const tickHeight = isMajor ? 8 : 4;
+
+    group.push(
+      <line
+        key={`hrule-${i}`}
+        x1={x}
+        y1={rulerTopY}
+        x2={x}
+        y2={rulerTopY + tickHeight}
+        stroke="#9ca3af"
+        strokeWidth={1}
+      />,
+    );
+
+    if (isMajor) {
+      group.push(
+        <text
+          key={`hrule-label-${i}`}
+          x={x}
+          y={rulerTopY - 4}
+          textAnchor="middle"
+          className="fill-slate-400 text-[9px]"
+        >
+          {i}
+        </text>,
+      );
+    }
+  }
+
+  // Horizontal baseline
+  group.push(
+    <line
+      key="hrule-base"
+      x1={blockOffset.x}
+      y1={rulerTopY}
+      x2={blockOffset.x + blockPx.width}
+      y2={rulerTopY}
+      stroke="#6b7280"
+      strokeWidth={1}
+    />,
+  );
+
+  // Vertical ruler (left)
+  const maxW = Math.max(0, Math.floor(block.widthIn));
+  for (let i = 0; i <= maxW; i++) {
+    const y = blockOffset.y + (i / block.widthIn) * blockPx.height;
+    const isMajor = i % 1 === 0;
+    const tickWidth = isMajor ? 8 : 4;
+
+    group.push(
+      <line
+        key={`vrule-${i}`}
+        x1={leftRulerX}
+        y1={y}
+        x2={leftRulerX + tickWidth}
+        y2={y}
+        stroke="#9ca3af"
+        strokeWidth={1}
+      />,
+    );
+
+    if (isMajor) {
+      group.push(
+        <text
+          key={`vrule-label-${i}`}
+          x={leftRulerX - 4}
+          y={y + 3}
+          textAnchor="end"
+          className="fill-slate-400 text-[9px]"
+        >
+          {i}
+        </text>,
+      );
+    }
+  }
+
+  // Vertical baseline
+  group.push(
+    <line
+      key="vrule-base"
+      x1={leftRulerX + 0.5}
+      y1={blockOffset.y}
+      x2={leftRulerX + 0.5}
+      y2={blockOffset.y + blockPx.height}
+      stroke="#6b7280"
+      strokeWidth={1}
+    />,
+  );
+
+  return <g>{group}</g>;
 }
 
 // ===== spacing calcs (edges + nearest neighbor) =====
