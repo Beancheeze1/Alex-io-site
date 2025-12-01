@@ -1,17 +1,86 @@
 // app/admin/materials/page.tsx
 //
 // Materials & densities admin landing page.
-// Path A / Straight Path safe: UI-only, read-only.
-// - No DB calls, no writes.
-// - Static sample data + layout to demonstrate the catalog.
+// Path A / Straight Path safe:
+//  - UI-only, read-only.
+//  - Uses GET /api/materials to show live materials.
+//  - No writes, no pricing or layout changes.
 //
 // IMPORTANT:
 //  - Polyethylene and Expanded Polyethylene are shown as separate families,
 //    matching the real rule used elsewhere in the system.
 
+"use client";
+
+import * as React from "react";
 import Link from "next/link";
 
+type MaterialRow = {
+  id: number;
+  material_name: string;
+  material_family: string | null;
+  density_lb_ft3: number | null;
+  is_active: boolean | null;
+};
+
+type MaterialsResponse = {
+  ok: boolean;
+  materials?: MaterialRow[];
+  error?: string;
+  message?: string;
+};
+
 export default function AdminMaterialsPage() {
+  const [materials, setMaterials] = React.useState<MaterialRow[] | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let active = true;
+
+    async function loadMaterials() {
+      try {
+        const res = await fetch("/api/materials", {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data: MaterialsResponse = await res.json();
+        if (!data.ok || !data.materials) {
+          throw new Error(data.message || "API returned an error.");
+        }
+        if (active) {
+          setMaterials(data.materials);
+          setError(null);
+        }
+      } catch (err) {
+        console.error("Failed to load materials:", err);
+        if (active) {
+          setError("Unable to load materials list.");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadMaterials();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const totalCount = materials?.length ?? 0;
+  const activeCount = materials?.filter((m) => m.is_active)?.length ?? 0;
+  const familyCount = materials
+    ? new Set(
+        materials.map((m) => (m.material_family ? m.material_family : "Unassigned")),
+      ).size
+    : 0;
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-5xl px-4 py-8 lg:py-10">
@@ -37,10 +106,10 @@ export default function AdminMaterialsPage() {
 
         {/* Summary row */}
         <section className="mb-6 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          {/* Families summary (sample) */}
+          {/* Families summary */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
             <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Material families (sample)
+              Material families
             </div>
             <ul className="space-y-1 text-xs text-slate-300">
               <li>
@@ -69,46 +138,66 @@ export default function AdminMaterialsPage() {
               </li>
             </ul>
             <p className="mt-3 text-[11px] text-slate-500">
-              Counts below are static placeholders for demo purposes.
+              Family labels are driven directly from the{" "}
+              <span className="font-mono text-[11px] text-sky-300">
+                material_family
+              </span>{" "}
+              column in the database.
             </p>
           </div>
 
-          {/* Totals & notes */}
+          {/* Totals & notes (live counts) */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
             <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Catalog overview (sample)
+              Catalog overview
             </div>
-            <ul className="space-y-1 text-xs text-slate-300">
-              <li>
-                <span className="font-semibold text-slate-100">18</span> active
-                materials.
-              </li>
-              <li>
-                <span className="font-semibold text-slate-100">4</span> material
-                families in use.
-              </li>
-              <li>
-                <span className="font-semibold text-slate-100">3</span>{" "}
-                materials currently inactive (legacy / deprecated).
-              </li>
-            </ul>
+
+            {error ? (
+              <p className="text-xs text-rose-300">{error}</p>
+            ) : (
+              <ul className="space-y-1 text-xs text-slate-300">
+                <li>
+                  <span className="font-semibold text-slate-100">
+                    {loading ? "…" : totalCount}
+                  </span>{" "}
+                  materials in the catalog.
+                </li>
+                <li>
+                  <span className="font-semibold text-slate-100">
+                    {loading ? "…" : activeCount}
+                  </span>{" "}
+                  marked active for quoting.
+                </li>
+                <li>
+                  <span className="font-semibold text-slate-100">
+                    {loading ? "…" : familyCount}
+                  </span>{" "}
+                  material families (including &quot;Unassigned&quot;).
+                </li>
+              </ul>
+            )}
+
             <p className="mt-3 text-[11px] text-slate-500">
-              Future: filters by family, density, and active status; inline
-              edit controls guarded behind admin roles.
+              Data above is live from the{" "}
+              <span className="font-mono text-[11px] text-sky-300">
+                materials
+              </span>{" "}
+              table via <span className="font-mono text-[11px] text-sky-300">/api/materials</span>. Edits will
+              remain admin-only in future phases.
             </p>
           </div>
         </section>
 
-        {/* Materials table (sample) */}
+        {/* Materials table (live data) */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                Materials catalog (sample rows)
+                Materials catalog
               </div>
               <p className="mt-1 text-xs text-slate-300">
-                Static sample entries showing how materials, families, densities
-                and active status will be displayed.
+                Live materials from the database: names, families, densities, and
+                active status used for quoting.
               </p>
             </div>
             <div className="text-[11px] text-slate-500">
@@ -128,47 +217,82 @@ export default function AdminMaterialsPage() {
                 </tr>
               </thead>
               <tbody>
-                {sampleMaterials.map((m) => (
-                  <tr
-                    key={m.materialName}
-                    className="border-t border-slate-800/60 hover:bg-slate-900/70"
-                  >
-                    <td className="px-3 py-2 text-xs text-slate-100">
-                      {m.materialName}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-200">
-                      {m.materialFamily}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-200">
-                      {m.density}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
-                          m.isActive
-                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
-                            : "bg-slate-500/20 text-slate-200 border border-slate-500/40"
-                        }`}
-                      >
-                        {m.isActive ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-[11px] text-slate-400">
-                      {m.notes}
+                {loading && !error && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-xs text-slate-400"
+                    >
+                      Loading materials…
                     </td>
                   </tr>
-                ))}
+                )}
+
+                {!loading && error && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-xs text-rose-300"
+                    >
+                      Unable to load materials list.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading && !error && materials && materials.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-xs text-slate-400"
+                    >
+                      No materials found in the catalog.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading &&
+                  !error &&
+                  materials &&
+                  materials.map((m) => (
+                    <tr
+                      key={m.id}
+                      className="border-t border-slate-800/60 hover:bg-slate-900/70"
+                    >
+                      <td className="px-3 py-2 text-xs text-slate-100">
+                        {m.material_name}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-200">
+                        {m.material_family ?? <span className="text-slate-500">Unassigned</span>}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-200">
+                        {m.density_lb_ft3 != null
+                          ? `${m.density_lb_ft3.toFixed(2)} pcf`
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
+                            m.is_active
+                              ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
+                              : "bg-slate-500/20 text-slate-200 border border-slate-500/40"
+                          }`}
+                        >
+                          {m.is_active ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-slate-400">
+                        {getMaterialNotes(m)}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
 
           <p className="mt-3 text-[11px] text-slate-500">
-            Rows above mirror the structure we&apos;ll use when wiring this page
-            to the real{" "}
-            <span className="font-mono text-[11px] text-sky-300">
-              materials
-            </span>{" "}
-            table in the database. Edits will remain admin-only.
+            These rows are now backed by real data. Polyethylene and Expanded
+            Polyethylene remain separate families; any incorrect family labels
+            should be fixed in the database, not in code.
           </p>
           <p className="mt-1 text-[11px] text-slate-500">
             Admin only – not visible to customers.
@@ -179,48 +303,20 @@ export default function AdminMaterialsPage() {
   );
 }
 
-type SampleMaterial = {
-  materialName: string;
-  materialFamily: string;
-  density: string;
-  isActive: boolean;
-  notes: string;
-};
+function getMaterialNotes(m: MaterialRow): string {
+  const fam = (m.material_family || "").toLowerCase();
 
-const sampleMaterials: SampleMaterial[] = [
-  {
-    materialName: "1.7# Black PE",
-    materialFamily: "Polyethylene",
-    density: "1.7 pcf",
-    isActive: true,
-    notes: "Workhorse closed-cell PE for general packaging.",
-  },
-  {
-    materialName: "2.2# White PE",
-    materialFamily: "Polyethylene",
-    density: "2.2 pcf",
-    isActive: true,
-    notes: "Higher density PE for heavier components.",
-  },
-  {
-    materialName: "EPE Type III",
-    materialFamily: "Expanded Polyethylene",
-    density: "approx. 1.9 pcf",
-    isActive: true,
-    notes: "Expanded Polyethylene — separate family from PE.",
-  },
-  {
-    materialName: "1030 Char",
-    materialFamily: "Polyurethane Foam",
-    density: "nominal PU",
-    isActive: true,
-    notes: "Charcoal PU, good for instrument cases.",
-  },
-  {
-    materialName: "Retired PE Grade X",
-    materialFamily: "Polyethylene",
-    density: "2.0 pcf",
-    isActive: false,
-    notes: "Inactive legacy material kept for historical quotes.",
-  },
-];
+  if (fam.includes("polyurethane")) {
+    return "Open-cell PU, commonly used for inserts and instrument cases.";
+  }
+  if (fam === "polyethylene" || fam.includes(" polyethylene")) {
+    return "Closed-cell PE for general protective packaging.";
+  }
+  if (fam.includes("expanded polyethylene") || fam.startsWith("epe")) {
+    return "Expanded Polyethylene; keep separate from standard PE.";
+  }
+  if (!m.material_family) {
+    return "Family not assigned yet – consider updating in the materials table.";
+  }
+  return "Material family managed in DB; review in admin if this looks off.";
+}

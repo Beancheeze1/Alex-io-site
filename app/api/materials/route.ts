@@ -1,3 +1,20 @@
+// app/api/materials/route.ts
+//
+// Read-only materials list for admin + other consumers.
+// Path A safe: small SELECT-only query, no writes.
+//
+// Returns:
+// {
+//   ok: true,
+//   materials: Array<{
+//     id: number;
+//     material_name: string;
+//     material_family: string | null;
+//     density_lb_ft3: number | null;
+//     is_active: boolean | null;
+//   }>
+// }
+
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
 
@@ -11,12 +28,14 @@ export async function GET(req: NextRequest) {
       material_name: string;
       material_family: string | null;
       density_lb_ft3: number | null;
+      is_active: boolean | null;
     }>(`
       select
         id,
-        name as material_name,          -- FIXED: your DB has 'name', not 'material_name'
+        name as material_name,      -- DB column 'name' mapped to 'material_name'
         material_family,
-        density_lb_ft3
+        density_lb_ft3,
+        is_active
       from materials
       order by material_family, material_name;
     `);

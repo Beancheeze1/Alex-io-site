@@ -1,9 +1,14 @@
 // app/admin/quotes/page.tsx
 //
 // Quotes & layouts admin landing page.
-// Path A / Straight Path safe: UI-only, read-only.
-// - No DB calls, no pricing changes, no layout/editor changes.
-// - Static sample data + navigation shell for future wiring.
+// Path A / Straight Path safe:
+//  - UI-only, read-only.
+//  - Uses GET /api/quotes (existing route) to show recent quotes.
+//  - Does NOT modify pricing, parsing, layout editor, or any write paths.
+//
+// Notes:
+//  - "Jump to quote" still navigates to /admin/quotes/[quote_no] (future detail view).
+//  - Summary counts + table are now driven by real data from /api/quotes.
 
 "use client";
 
@@ -11,18 +16,84 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+type QuoteRow = {
+  id: number;
+  quote_no: string;
+  customer_name: string | null;
+  email: string | null;
+  phone: string | null;
+  status: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type QuotesResponse = {
+  ok: boolean;
+  quotes?: QuoteRow[];
+  error?: string;
+};
+
 export default function AdminQuotesPage() {
   const router = useRouter();
   const [quoteNoInput, setQuoteNoInput] = React.useState("");
+  const [quotes, setQuotes] = React.useState<QuoteRow[] | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
   function handleJumpSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = quoteNoInput.trim();
     if (!trimmed) return;
 
-    // Future target: /admin/quotes/[quote_no]
+    // Target: /admin/quotes/[quote_no] (detail view wired later)
     router.push(`/admin/quotes/${encodeURIComponent(trimmed)}`);
   }
+
+  React.useEffect(() => {
+    let active = true;
+
+    async function loadQuotes() {
+      try {
+        const res = await fetch("/api/quotes?limit=50", {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data: QuotesResponse = await res.json();
+        if (!data.ok || !data.quotes) {
+          throw new Error(data.error || "API returned an error.");
+        }
+        if (active) {
+          setQuotes(data.quotes);
+          setError(null);
+        }
+      } catch (err) {
+        console.error("Failed to load quotes:", err);
+        if (active) {
+          setError("Unable to load quote list.");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadQuotes();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const totalCount = quotes?.length ?? 0;
+  const recentCount = quotes
+    ? quotes.filter((q) => isWithinLast24Hours(q.updated_at || q.created_at)).length
+    : 0;
+  const engineeringCount = quotes
+    ? quotes.filter((q) => normalizeStatus(q.status) === "engineering").length
+    : 0;
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -58,12 +129,12 @@ export default function AdminQuotesPage() {
             </div>
             <p className="mb-3 text-xs text-slate-300">
               Type a quote number to open its internal engineering view
-              (layouts + CAD). This is a shell for the upcoming
+              (layouts + CAD). This uses the future
               <span className="font-mono text-[11px] text-sky-300">
                 {" "}
                 /admin/quotes/[quote_no]
               </span>{" "}
-              page.
+              detail page.
             </p>
             <form
               onSubmit={handleJumpSubmit}
@@ -88,42 +159,61 @@ export default function AdminQuotesPage() {
             </p>
           </div>
 
-          {/* Summary card */}
+          {/* Summary card (live counts) */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
             <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Summary (sample data)
+              Summary
             </div>
-            <ul className="space-y-1 text-xs text-slate-300">
-              <li>
-                <span className="font-semibold text-slate-100">128</span>{" "}
-                quotes total (sample).
-              </li>
-              <li>
-                <span className="font-semibold text-slate-100">8</span> quotes
-                updated in the last 24 hours (sample).
-              </li>
-              <li>
-                <span className="font-semibold text-slate-100">3</span> quotes
-                awaiting engineering review (sample).
-              </li>
-            </ul>
+
+            {error ? (
+              <p className="text-xs text-rose-300">{error}</p>
+            ) : (
+              <ul className="space-y-1 text-xs text-slate-300">
+                <li>
+                  <span className="font-semibold text-slate-100">
+                    {loading ? "…" : totalCount}
+                  </span>{" "}
+                  quotes returned (latest from{" "}
+                  <span className="font-mono text-[11px] text-sky-300">
+                    /api/quotes
+                  </span>
+                  ).
+                </li>
+                <li>
+                  <span className="font-semibold text-slate-100">
+                    {loading ? "…" : recentCount}
+                  </span>{" "}
+                  updated in the last 24 hours.
+                </li>
+                <li>
+                  <span className="font-semibold text-slate-100">
+                    {loading ? "…" : engineeringCount}
+                  </span>{" "}
+                  marked as engineering / in-progress.
+                </li>
+              </ul>
+            )}
+
             <p className="mt-3 text-[11px] text-slate-500">
-              All counts are static placeholders for now — wiring to real data
-              will come later.
+              Live data source:{" "}
+              <span className="font-mono text-[11px] text-sky-300">
+                /api/quotes?limit=50
+              </span>
+              . No changes are made to the quotes here — this view is read-only.
             </p>
           </div>
         </section>
 
-        {/* Recent quotes (sample table) */}
+        {/* Recent quotes (live table) */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                Recent quotes (sample)
+                Recent quotes
               </div>
               <p className="mt-1 text-xs text-slate-300">
-                Static sample rows to show how the internal quotes list will
-                look once connected.
+                Live quote list from the database: numbers, customers, status,
+                and last update timestamp.
               </p>
             </div>
             <div className="text-[11px] text-slate-500">
@@ -137,58 +227,109 @@ export default function AdminQuotesPage() {
                 <tr>
                   <th className="px-3 py-2 font-semibold">Quote #</th>
                   <th className="px-3 py-2 font-semibold">Customer</th>
-                  <th className="px-3 py-2 font-semibold">Job</th>
-                  <th className="px-3 py-2 font-semibold">Material</th>
                   <th className="px-3 py-2 font-semibold">Status</th>
+                  <th className="px-3 py-2 font-semibold">Email / Phone</th>
                   <th className="px-3 py-2 font-semibold text-right">
                     Updated
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {sampleQuotes.map((q) => (
-                  <tr
-                    key={q.quoteNo}
-                    className="border-t border-slate-800/60 hover:bg-slate-900/70"
-                  >
-                    <td className="px-3 py-2 font-mono text-[11px] text-sky-300">
-                      {q.quoteNo}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-100">
-                      {q.customer}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-200">
-                      {q.job}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-200">
-                      {q.material}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
-                          q.status === "Engineering"
-                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                            : q.status === "Sent"
-                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
-                            : "bg-slate-500/20 text-slate-200 border border-slate-500/40"
-                        }`}
-                      >
-                        {q.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right text-[11px] text-slate-400">
-                      {q.updated}
+                {loading && !error && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-xs text-slate-400"
+                    >
+                      Loading quotes…
                     </td>
                   </tr>
-                ))}
+                )}
+
+                {!loading && error && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-xs text-rose-300"
+                    >
+                      Unable to load quote list.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading && !error && quotes && quotes.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-xs text-slate-400"
+                    >
+                      No quotes found.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading &&
+                  !error &&
+                  quotes &&
+                  quotes.map((q) => {
+                    const statusLabel = displayStatus(q.status);
+                    const statusStyle = chipClassForStatus(q.status);
+                    const updated = formatDateTime(
+                      q.updated_at || q.created_at,
+                    );
+
+                    return (
+                      <tr
+                        key={q.id}
+                        className="border-t border-slate-800/60 hover:bg-slate-900/70"
+                      >
+                        <td className="px-3 py-2 font-mono text-[11px] text-sky-300">
+                          {q.quote_no}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-slate-100">
+                          {q.customer_name || <span className="text-slate-500">Unknown</span>}
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${statusStyle}`}
+                          >
+                            {statusLabel}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-slate-300">
+                          {q.email && (
+                            <span className="block truncate">{q.email}</span>
+                          )}
+                          {q.phone && (
+                            <span className="block text-slate-400">
+                              {q.phone}
+                            </span>
+                          )}
+                          {!q.email && !q.phone && (
+                            <span className="text-slate-500">No contact info</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right text-[11px] text-slate-400">
+                          {updated}
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
 
           <p className="mt-3 text-[11px] text-slate-500">
-            Rows above are static examples only. In a later phase, this table
-            will be backed by real quote data, with filters, search, and direct
-            links into engineering layouts &amp; CAD downloads.
+            All rows above are live from the{" "}
+            <span className="font-mono text-[11px] text-sky-300">
+              quotes
+            </span>{" "}
+            table via <span className="font-mono text-[11px] text-sky-300">/api/quotes</span>. This view remains
+            read-only; any status changes still flow through your existing
+            pipelines.
+          </p>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Admin only – not visible to customers.
           </p>
         </section>
       </div>
@@ -196,46 +337,62 @@ export default function AdminQuotesPage() {
   );
 }
 
-type SampleQuote = {
-  quoteNo: string;
-  customer: string;
-  job: string;
-  material: string;
-  status: "Draft" | "Engineering" | "Sent";
-  updated: string;
-};
+/* ---------- Helpers ---------- */
 
-const sampleQuotes: SampleQuote[] = [
-  {
-    quoteNo: "2025-00123",
-    customer: "Acme Medical Devices",
-    job: '10" x 10" x 3" PE set',
-    material: '1.7# Black Polyethylene',
-    status: "Engineering",
-    updated: "Today • 3:24 PM",
-  },
-  {
-    quoteNo: "2025-00122",
-    customer: "Riverstone Electronics",
-    job: "Foam tray for sensor module",
-    material: "EPE Type III",
-    status: "Sent",
-    updated: "Today • 10:41 AM",
-  },
-  {
-    quoteNo: "2025-00121",
-    customer: "Summit Instruments",
-    job: "Reusable shipping set",
-    material: "1030 Char Polyurethane",
-    status: "Draft",
-    updated: "Yesterday • 4:12 PM",
-  },
-  {
-    quoteNo: "2025-00120",
-    customer: "Northline Packaging",
-    job: "Corner blocks for crate",
-    material: "2.2# White Polyethylene",
-    status: "Sent",
-    updated: "Yesterday • 9:05 AM",
-  },
-];
+function normalizeStatus(status: string | null | undefined): string {
+  if (!status) return "";
+  return status.toLowerCase().trim();
+}
+
+function displayStatus(status: string | null | undefined): string {
+  const s = normalizeStatus(status);
+  if (!s) return "Unknown";
+
+  if (s === "draft") return "Draft";
+  if (s === "engineering" || s === "in_progress") return "Engineering";
+  if (s === "sent") return "Sent";
+  if (s === "approved") return "Approved";
+  if (s === "rejected") return "Rejected";
+
+  // Fallback: show raw status text capitalized
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function chipClassForStatus(status: string | null | undefined): string {
+  const s = normalizeStatus(status);
+
+  if (s === "engineering" || s === "in_progress") {
+    return "bg-amber-500/20 text-amber-300 border border-amber-500/40";
+  }
+  if (s === "sent" || s === "approved") {
+    return "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40";
+  }
+  if (s === "rejected") {
+    return "bg-rose-500/15 text-rose-300 border border-rose-500/40";
+  }
+  if (s === "draft") {
+    return "bg-slate-500/20 text-slate-200 border border-slate-500/40";
+  }
+  return "bg-slate-600/20 text-slate-200 border border-slate-600/40";
+}
+
+function isWithinLast24Hours(iso: string | null): boolean {
+  if (!iso) return false;
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return false;
+  const now = Date.now();
+  const diffMs = now - ts;
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  return diffMs >= 0 && diffMs <= oneDayMs;
+}
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "Unknown";
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return "Unknown";
+  const d = new Date(ts);
+  return d.toLocaleString("en-US", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
