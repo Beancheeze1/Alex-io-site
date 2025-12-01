@@ -1,11 +1,11 @@
-// app/admin/materials/page.tsx
+// app/admin/quotes/page.tsx
 //
-// Materials & densities admin landing page.
-// NEW FILE — read-only placeholder. No DB calls, no writes.
+// Quotes & layouts admin landing page.
+// NEW FILE — read-only placeholder. No DB calls, no CAD yet.
 
 import Link from "next/link";
 
-export default function AdminMaterialsPage() {
+export default function AdminQuotesPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-5xl px-4 py-8 lg:py-10">
@@ -13,11 +13,11 @@ export default function AdminMaterialsPage() {
         <header className="mb-6 flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-sky-300">
-              Materials &amp; densities
+              Quotes &amp; layouts
             </h1>
             <p className="mt-2 text-sm text-slate-300">
-              Internal catalog of foam materials, families, densities, and
-              active status used for quoting.
+              Engineering-focused view of quotes, foam layouts, and CAD
+              downloads for internal use.
             </p>
           </div>
 
@@ -32,12 +32,12 @@ export default function AdminMaterialsPage() {
         {/* Placeholder content */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
           <p>
-            This page will become the control center for materials and densities:
+            In the next phases, this section will:
           </p>
           <ul className="mt-3 list-disc pl-5 text-xs text-slate-300 space-y-1">
-            <li>View all foam materials and their families.</li>
-            <li>See densities and whether a material is active for quoting.</li>
-            <li>Eventually: add/edit/deactivate materials (no writes yet).</li>
+            <li>List recent quotes with quick filters and search.</li>
+            <li>Open an internal quote detail view with layout previews.</li>
+            <li>Provide CAD downloads (DXF / STEP) for engineering.</li>
           </ul>
           <p className="mt-4 text-[11px] text-slate-500">
             Admin only – not visible to customers.
