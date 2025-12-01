@@ -38,6 +38,11 @@ type ItemRow = {
   qty: number;
   material_id: number;
   material_name: string | null;
+
+  // NEW: carry-through from /api/quote/print
+  material_family?: string | null;
+  density_lb_ft3?: number | null;
+
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
 
@@ -114,7 +119,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [notFound, setNotFound] = React.useState<string | null>(null);
   const [quoteState, setQuoteState] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
-  const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
+  const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(
+    null,
+  );
 
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -175,7 +182,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             if (!json.ok && json.error === "NOT_FOUND") {
               setNotFound(json.message || "Quote not found.");
             } else if (!json.ok) {
-              setError(json.message || "There was a problem loading this quote.");
+              setError(
+                json.message || "There was a problem loading this quote.",
+              );
             } else {
               setError("There was a problem loading this quote.");
             }
@@ -340,6 +349,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     marginBottom: 2,
   };
 
+  // NEW: derived material fields for the explorer card
+  const primaryMaterialName =
+    primaryItem?.material_name ||
+    (primaryItem ? `Material #${primaryItem.material_id}` : null);
+  const primaryMaterialFamily = primaryItem?.material_family || null;
+  const primaryDensity = primaryItem?.density_lb_ft3 ?? null;
+
+  const customerQuoteUrl =
+    quoteState?.quote_no && typeof window === "undefined"
+      ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
+      : quoteState?.quote_no
+      ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
+      : null;
+
   return (
     <div
       style={{
@@ -360,6 +383,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
           boxShadow: "0 16px 40px rgba(15,23,42,0.45)",
         }}
       >
+        {/* Back link to quotes list */}
+        <div style={{ marginBottom: 8 }}>
+          <a
+            href="/admin/quotes"
+            style={{
+              fontSize: 11,
+              color: "#0284c7",
+              textDecoration: "none",
+            }}
+          >
+            ← Back to quotes list
+          </a>
+        </div>
+
         {/* Header: Admin badge + quote ID */}
         <div
           style={{
@@ -639,6 +676,154 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               </div>
             </div>
 
+            {/* NEW: Materials explorer + "view customer quote" */}
+            {primaryItem && (
+              <div
+                style={{
+                  ...cardBase,
+                  background: "#ffffff",
+                  marginBottom: 20,
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0,2.2fr) minmax(0,1.8fr)",
+                  gap: 16,
+                }}
+              >
+                <div>
+                  <div style={cardTitleStyle}>Materials explorer</div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: "#111827",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                    }}
+                  >
+                    <div>
+                      <div style={labelStyle}>Primary material</div>
+                      <div>{primaryMaterialName}</div>
+                    </div>
+                    <div>
+                      <div style={labelStyle}>Family</div>
+                      <div>
+                        {primaryMaterialFamily || (
+                          <span style={{ color: "#9ca3af" }}>
+                            Unassigned (set in materials admin)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={labelStyle}>Density</div>
+                      <div>
+                        {primaryDensity != null
+                          ? `${primaryDensity.toFixed(2)} pcf`
+                          : "—"}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#6b7280" }}>
+                      Family + density come directly from the{" "}
+                      <span
+                        style={{
+                          fontFamily: "ui-monospace, SFMono-Regular, monospace",
+                          fontSize: 11,
+                          color: "#0369a1",
+                        }}
+                      >
+                        materials
+                      </span>{" "}
+                      table. Polyethylene and Expanded Polyethylene remain
+                      separate families.
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    fontSize: 12,
+                    color: "#111827",
+                  }}
+                >
+                  <div>
+                    <div style={labelStyle}>Admin shortcuts</div>
+                    <ul
+                      style={{
+                        listStyle: "disc",
+                        paddingLeft: 18,
+                        marginTop: 4,
+                        marginBottom: 4,
+                        color: "#1f2937",
+                        fontSize: 12,
+                      }}
+                    >
+                      <li>
+                        <a
+                          href="/admin/materials"
+                          style={{
+                            color: "#0369a1",
+                            textDecoration: "none",
+                          }}
+                        >
+                          Open materials catalog
+                        </a>{" "}
+                        to confirm family / density.
+                      </li>
+                      <li>
+                        <a
+                          href={`/admin/cushion-curves/${primaryItem.material_id}`}
+                          style={{
+                            color: "#0369a1",
+                            textDecoration: "none",
+                          }}
+                        >
+                          View cushion curves for this material
+                        </a>{" "}
+                        (foam advisor data).
+                      </li>
+                    </ul>
+                  </div>
+
+                  {customerQuoteUrl && (
+                    <div
+                      style={{
+                        marginTop: 4,
+                        paddingTop: 6,
+                        borderTop: "1px dashed #e5e7eb",
+                      }}
+                    >
+                      <div style={labelStyle}>Customer-facing view</div>
+                      <a
+                        href={customerQuoteUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          marginTop: 2,
+                          padding: "4px 10px",
+                          borderRadius: 999,
+                          border: "1px solid #0ea5e9",
+                          background: "#e0f2fe",
+                          color: "#0369a1",
+                          fontSize: 11,
+                          fontWeight: 500,
+                          textDecoration: "none",
+                        }}
+                      >
+                        View customer quote in new tab
+                        <span aria-hidden="true">↗</span>
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* layout + CAD downloads */}
             <div
               style={{
@@ -850,6 +1035,39 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   </>
                 )}
               </div>
+
+              {/* NEW: lightweight layout activity panel (latest package) */}
+              {layoutPkg && (
+                <div
+                  style={{
+                    ...cardBase,
+                    background: "#ffffff",
+                    marginTop: 12,
+                  }}
+                >
+                  <div style={cardTitleStyle}>Layout activity</div>
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "#4b5563",
+                      marginBottom: 4,
+                    }}
+                  >
+                    Latest layout package is{" "}
+                    <strong>#{layoutPkg.id}</strong>, saved on{" "}
+                    {new Date(layoutPkg.created_at).toLocaleString()}.
+                  </p>
+                  <p
+                    style={{
+                      fontSize: 11,
+                      color: "#9ca3af",
+                    }}
+                  >
+                    Future upgrade: once a history API is wired, this panel
+                    will list multiple layout revisions with timestamps.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* optional: quick line items table (admin view) */}
