@@ -19,8 +19,9 @@ type MaterialRow = {
   id: number;
   material_name: string;
   material_family: string | null;
-  density_lb_ft3: number | null;
-  is_active: boolean | null;
+  // NOTE: backend may send this as number OR string depending on column type
+  density_lb_ft3: number | string | null;
+  is_active?: boolean | null;
 };
 
 type MaterialsResponse = {
@@ -77,7 +78,9 @@ export default function AdminMaterialsPage() {
   const activeCount = materials?.filter((m) => m.is_active)?.length ?? 0;
   const familyCount = materials
     ? new Set(
-        materials.map((m) => (m.material_family ? m.material_family : "Unassigned")),
+        materials.map((m) =>
+          m.material_family ? m.material_family : "Unassigned",
+        ),
       ).size
     : 0;
 
@@ -182,8 +185,11 @@ export default function AdminMaterialsPage() {
               <span className="font-mono text-[11px] text-sky-300">
                 materials
               </span>{" "}
-              table via <span className="font-mono text-[11px] text-sky-300">/api/materials</span>. Edits will
-              remain admin-only in future phases.
+              table via{" "}
+              <span className="font-mono text-[11px] text-sky-300">
+                /api/materials
+              </span>
+              . Edits will remain admin-only in future phases.
             </p>
           </div>
         </section>
@@ -196,8 +202,8 @@ export default function AdminMaterialsPage() {
                 Materials catalog
               </div>
               <p className="mt-1 text-xs text-slate-300">
-                Live materials from the database: names, families, densities, and
-                active status used for quoting.
+                Live materials from the database: names, families, densities,
+                and active status used for quoting.
               </p>
             </div>
             <div className="text-[11px] text-slate-500">
@@ -239,16 +245,19 @@ export default function AdminMaterialsPage() {
                   </tr>
                 )}
 
-                {!loading && !error && materials && materials.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-3 py-4 text-center text-xs text-slate-400"
-                    >
-                      No materials found in the catalog.
-                    </td>
-                  </tr>
-                )}
+                {!loading &&
+                  !error &&
+                  materials &&
+                  materials.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="px-3 py-4 text-center text-xs text-slate-400"
+                      >
+                        No materials found in the catalog.
+                      </td>
+                    </tr>
+                  )}
 
                 {!loading &&
                   !error &&
@@ -262,12 +271,12 @@ export default function AdminMaterialsPage() {
                         {m.material_name}
                       </td>
                       <td className="px-3 py-2 text-xs text-slate-200">
-                        {m.material_family ?? <span className="text-slate-500">Unassigned</span>}
+                        {m.material_family ?? (
+                          <span className="text-slate-500">Unassigned</span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-xs text-slate-200">
-                        {m.density_lb_ft3 != null
-                          ? `${m.density_lb_ft3.toFixed(2)} pcf`
-                          : "—"}
+                        {formatDensity(m.density_lb_ft3)}
                       </td>
                       <td className="px-3 py-2 text-xs">
                         <span
@@ -301,6 +310,19 @@ export default function AdminMaterialsPage() {
       </div>
     </main>
   );
+}
+
+function formatDensity(raw: number | string | null): string {
+  if (raw == null) return "—";
+
+  // Allow numeric strings from Postgres (e.g. "1.70")
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) {
+    // Fallback: just show the raw value if we can't parse it safely
+    return String(raw);
+  }
+
+  return `${n.toFixed(2)} pcf`;
 }
 
 function getMaterialNotes(m: MaterialRow): string {
