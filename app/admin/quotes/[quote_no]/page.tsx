@@ -1,24 +1,22 @@
 // app/admin/quotes/[quote_no]/page.tsx
 //
-// Admin quote detail page (internal engineering view).
+// Admin quote detail host page.
 // Path A / Straight Path safe:
-//  - Thin server wrapper around the existing AdminQuoteClient.
-//  - No changes to pricing, cavity parsing, or quote print behavior.
-//  - Uses the route param quote_no and passes it into the client component.
+//  - Server component wrapper around AdminQuoteClient.
+//  - Uses the [quote_no] route param and passes it down.
+//  - No DB changes, no pricing/layout logic changes.
 
+import React from "react";
 import AdminQuoteClient from "./AdminQuoteClient";
 
-type AdminQuotePageProps = {
+type PageProps = {
   params: {
     quote_no: string;
   };
 };
 
-export default function AdminQuotePage({ params }: AdminQuotePageProps) {
-  // Decode in case the quote number contains URL-encoded characters.
-  const quoteNo = params?.quote_no
-    ? decodeURIComponent(params.quote_no)
-    : "";
+export default function AdminQuotePage({ params }: PageProps) {
+  const quoteNo = decodeURIComponent(params.quote_no || "");
 
   return <AdminQuoteClient quoteNo={quoteNo} />;
 }
