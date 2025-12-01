@@ -7,8 +7,9 @@
 //  - Does NOT modify pricing, parsing, layout editor, or any write paths.
 //
 // Notes:
-//  - "Jump to quote" still navigates to /admin/quotes/[quote_no] (future detail view).
-//  - Summary counts + table are now driven by real data from /api/quotes.
+//  - "Jump to quote" navigates to /admin/quotes/[quote_no] (detail view).
+//  - Summary counts + table are driven by real data from /api/quotes.
+//  - Adds client-side filters + search for status and basic text matching.
 
 "use client";
 
@@ -33,6 +34,8 @@ type QuotesResponse = {
   error?: string;
 };
 
+type StatusFilter = "all" | "draft" | "engineering" | "sent";
+
 export default function AdminQuotesPage() {
   const router = useRouter();
   const [quoteNoInput, setQuoteNoInput] = React.useState("");
@@ -40,12 +43,17 @@ export default function AdminQuotesPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
+  // NEW: client-side filters
+  const [statusFilter, setStatusFilter] =
+    React.useState<StatusFilter>("all");
+  const [searchTerm, setSearchTerm] = React.useState("");
+
   function handleJumpSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = quoteNoInput.trim();
     if (!trimmed) return;
 
-    // Target: /admin/quotes/[quote_no] (detail view wired later)
+    // Target: /admin/quotes/[quote_no] (detail view)
     router.push(`/admin/quotes/${encodeURIComponent(trimmed)}`);
   }
 
@@ -89,11 +97,59 @@ export default function AdminQuotesPage() {
 
   const totalCount = quotes?.length ?? 0;
   const recentCount = quotes
-    ? quotes.filter((q) => isWithinLast24Hours(q.updated_at || q.created_at)).length
+    ? quotes.filter((q) =>
+        isWithinLast24Hours(q.updated_at || q.created_at),
+      ).length
     : 0;
   const engineeringCount = quotes
-    ? quotes.filter((q) => normalizeStatus(q.status) === "engineering").length
+    ? quotes.filter(
+        (q) => normalizeStatus(q.status) === "engineering",
+      ).length
     : 0;
+
+  // NEW: filtered list for the table (status + text search)
+  const filteredQuotes: QuoteRow[] = React.useMemo(() => {
+    if (!quotes) return [];
+
+    const term = searchTerm.trim().toLowerCase();
+    const hasSearch = term.length > 0;
+
+    return quotes.filter((q) => {
+      // Status filter
+      const normalized = normalizeStatus(q.status);
+      if (statusFilter === "draft" && normalized !== "draft") {
+        return false;
+      }
+      if (
+        statusFilter === "engineering" &&
+        normalized !== "engineering" &&
+        normalized !== "in_progress"
+      ) {
+        return false;
+      }
+      if (statusFilter === "sent" && normalized !== "sent") {
+        return false;
+      }
+      // "all" passes everything
+
+      if (!hasSearch) return true;
+
+      // Basic text search: quote_no, customer_name, email, phone
+      const haystack =
+        [
+          q.quote_no,
+          q.customer_name ?? "",
+          q.email ?? "",
+          q.phone ?? "",
+        ]
+          .join(" ")
+          .toLowerCase() || "";
+
+      return haystack.includes(term);
+    });
+  }, [quotes, statusFilter, searchTerm]);
+
+  const showingCount = filteredQuotes.length;
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -129,12 +185,11 @@ export default function AdminQuotesPage() {
             </div>
             <p className="mb-3 text-xs text-slate-300">
               Type a quote number to open its internal engineering view
-              (layouts + CAD). This uses the future
+              (layouts + CAD) at{" "}
               <span className="font-mono text-[11px] text-sky-300">
-                {" "}
                 /admin/quotes/[quote_no]
-              </span>{" "}
-              detail page.
+              </span>
+              .
             </p>
             <form
               onSubmit={handleJumpSubmit}
@@ -144,7 +199,7 @@ export default function AdminQuotesPage() {
                 type="text"
                 value={quoteNoInput}
                 onChange={(e) => setQuoteNoInput(e.target.value)}
-                placeholder="e.g. 2025-00123"
+                placeholder="e.g. Q-AI-20251129-123456"
                 className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none ring-0 placeholder:text-slate-500 focus:border-sky-400"
               />
               <button
@@ -199,25 +254,64 @@ export default function AdminQuotesPage() {
               <span className="font-mono text-[11px] text-sky-300">
                 /api/quotes?limit=50
               </span>
-              . No changes are made to the quotes here — this view is read-only.
+              . This view is read-only; status changes still flow through your
+              existing pipelines.
             </p>
           </div>
         </section>
 
-        {/* Recent quotes (live table) */}
+        {/* Recent quotes (live table with filters) */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                 Recent quotes
               </div>
               <p className="mt-1 text-xs text-slate-300">
-                Live quote list from the database: numbers, customers, status,
-                and last update timestamp.
+                Live quote list from the database. Use the filters and search to
+                focus on specific statuses or customers.
               </p>
             </div>
-            <div className="text-[11px] text-slate-500">
-              Future: filters, search &amp; status chips.
+
+            <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+              {/* Status filter chips */}
+              <div className="flex flex-wrap gap-1.5">
+                <StatusChip
+                  label="All"
+                  active={statusFilter === "all"}
+                  onClick={() => setStatusFilter("all")}
+                />
+                <StatusChip
+                  label="Draft"
+                  active={statusFilter === "draft"}
+                  onClick={() => setStatusFilter("draft")}
+                />
+                <StatusChip
+                  label="Engineering"
+                  active={statusFilter === "engineering"}
+                  onClick={() => setStatusFilter("engineering")}
+                />
+                <StatusChip
+                  label="Sent"
+                  active={statusFilter === "sent"}
+                  onClick={() => setStatusFilter("sent")}
+                />
+              </div>
+
+              {/* Text search */}
+              <div className="w-full sm:w-48">
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search quotes..."
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[11px] text-slate-100 outline-none ring-0 placeholder:text-slate-500 focus:border-sky-400"
+                />
+                <div className="mt-0.5 text-[10px] text-slate-500 text-right">
+                  Showing {loading ? "…" : showingCount} of{" "}
+                  {loading ? "…" : totalCount}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -257,21 +351,24 @@ export default function AdminQuotesPage() {
                   </tr>
                 )}
 
-                {!loading && !error && quotes && quotes.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-3 py-4 text-center text-xs text-slate-400"
-                    >
-                      No quotes found.
-                    </td>
-                  </tr>
-                )}
+                {!loading &&
+                  !error &&
+                  filteredQuotes &&
+                  filteredQuotes.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="px-3 py-4 text-center text-xs text-slate-400"
+                      >
+                        No quotes match the current filters.
+                      </td>
+                    </tr>
+                  )}
 
                 {!loading &&
                   !error &&
-                  quotes &&
-                  quotes.map((q) => {
+                  filteredQuotes &&
+                  filteredQuotes.map((q) => {
                     const statusLabel = displayStatus(q.status);
                     const statusStyle = chipClassForStatus(q.status);
                     const updated = formatDateTime(
@@ -287,7 +384,9 @@ export default function AdminQuotesPage() {
                           {q.quote_no}
                         </td>
                         <td className="px-3 py-2 text-xs text-slate-100">
-                          {q.customer_name || <span className="text-slate-500">Unknown</span>}
+                          {q.customer_name || (
+                            <span className="text-slate-500">Unknown</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-xs">
                           <span
@@ -298,7 +397,9 @@ export default function AdminQuotesPage() {
                         </td>
                         <td className="px-3 py-2 text-[11px] text-slate-300">
                           {q.email && (
-                            <span className="block truncate">{q.email}</span>
+                            <span className="block truncate">
+                              {q.email}
+                            </span>
                           )}
                           {q.phone && (
                             <span className="block text-slate-400">
@@ -306,7 +407,9 @@ export default function AdminQuotesPage() {
                             </span>
                           )}
                           {!q.email && !q.phone && (
-                            <span className="text-slate-500">No contact info</span>
+                            <span className="text-slate-500">
+                              No contact info
+                            </span>
                           )}
                         </td>
                         <td className="px-3 py-2 text-right text-[11px] text-slate-400">
@@ -324,9 +427,12 @@ export default function AdminQuotesPage() {
             <span className="font-mono text-[11px] text-sky-300">
               quotes
             </span>{" "}
-            table via <span className="font-mono text-[11px] text-sky-300">/api/quotes</span>. This view remains
-            read-only; any status changes still flow through your existing
-            pipelines.
+            table via{" "}
+            <span className="font-mono text-[11px] text-sky-300">
+              /api/quotes
+            </span>
+            . This view remains read-only; any status changes still flow
+            through your existing pipelines.
           </p>
           <p className="mt-1 text-[11px] text-slate-500">
             Admin only – not visible to customers.
@@ -395,4 +501,28 @@ function formatDateTime(iso: string | null): string {
     dateStyle: "short",
     timeStyle: "short",
   });
+}
+
+/* ---------- Small UI pieces ---------- */
+
+type StatusChipProps = {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+};
+
+function StatusChip({ label, active, onClick }: StatusChipProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] transition ${
+        active
+          ? "border-sky-400 bg-sky-500/20 text-sky-200"
+          : "border-slate-700 bg-slate-900/60 text-slate-300 hover:border-sky-500/60 hover:text-sky-200"
+      }`}
+    >
+      {label}
+    </button>
+  );
 }
