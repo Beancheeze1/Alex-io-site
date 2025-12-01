@@ -44,23 +44,23 @@ export async function GET(_req: NextRequest) {
     const rows = await q<SummaryRow>(
       `
       SELECT
-        m.id               AS material_id,
-        m.material_name    AS material_name,
-        m.material_family  AS material_family,
-        m.density_lb_ft3   AS density_lb_ft3,
-        COUNT(c.*)         AS point_count
+        m.id              AS material_id,
+        m.name            AS material_name,       -- <-- was material_name
+        m.material_family AS material_family,
+        m.density_lb_ft3  AS density_lb_ft3,
+        COUNT(c.*)        AS point_count
       FROM materials m
       LEFT JOIN cushion_curves c
         ON c.material_id = m.id
       WHERE m.is_active = TRUE
       GROUP BY
         m.id,
-        m.material_name,
+        m.name,
         m.material_family,
         m.density_lb_ft3
       ORDER BY
         m.material_family NULLS LAST,
-        m.material_name;
+        m.name;
       `,
       [],
     );
