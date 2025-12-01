@@ -10,6 +10,8 @@
 //  - "Jump to quote" navigates to /admin/quotes/[quote_no] (detail view).
 //  - Summary counts + table are driven by real data from /api/quotes.
 //  - Adds client-side filters + search for status and basic text matching.
+//  - Adds a "Materials used recently" widget powered by /api/quote/print
+//    for a small sample of the latest quotes.
 
 "use client";
 
@@ -36,6 +38,11 @@ type QuotesResponse = {
 
 type StatusFilter = "all" | "draft" | "engineering" | "sent";
 
+type MaterialUsage = {
+  name: string;
+  count: number;
+};
+
 export default function AdminQuotesPage() {
   const router = useRouter();
   const [quoteNoInput, setQuoteNoInput] = React.useState("");
@@ -43,10 +50,18 @@ export default function AdminQuotesPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
-  // NEW: client-side filters
+  // Client-side filters
   const [statusFilter, setStatusFilter] =
     React.useState<StatusFilter>("all");
   const [searchTerm, setSearchTerm] = React.useState("");
+
+  // NEW: recent materials widget state
+  const [materialStats, setMaterialStats] =
+    React.useState<MaterialUsage[] | null>(null);
+  const [materialStatsLoading, setMaterialStatsLoading] =
+    React.useState<boolean>(false);
+  const [materialStatsError, setMaterialStatsError] =
+    React.useState<string | null>(null);
 
   function handleJumpSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -107,7 +122,7 @@ export default function AdminQuotesPage() {
       ).length
     : 0;
 
-  // NEW: filtered list for the table (status + text search)
+  // Filtered list for the table (status + text search)
   const filteredQuotes: QuoteRow[] = React.useMemo(() => {
     if (!quotes) return [];
 
@@ -150,6 +165,109 @@ export default function AdminQuotesPage() {
   }, [quotes, statusFilter, searchTerm]);
 
   const showingCount = filteredQuotes.length;
+
+  // NEW: "Materials used recently" widget logic
+  React.useEffect(() => {
+    if (!quotes || quotes.length === 0) {
+      setMaterialStats(null);
+      setMaterialStatsLoading(false);
+      setMaterialStatsError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function analyzeMaterials() {
+      setMaterialStatsLoading(true);
+      setMaterialStatsError(null);
+      setMaterialStats(null);
+
+      try {
+        // Take a small sample of the latest quotes to avoid hammering the API
+        const sample = (quotes ?? []).slice(0, 10); // <-- TS-safe
+
+        const counts = new Map<string, number>();
+
+        for (const q of sample) {
+          if (!q.quote_no) continue;
+
+          const url =
+            "/api/quote/print?quote_no=" +
+            encodeURIComponent(q.quote_no);
+
+          let res: Response;
+          try {
+            res = await fetch(url, { cache: "no-store" });
+          } catch (e) {
+            console.warn("Materials widget: fetch failed for", q.quote_no);
+            continue;
+          }
+
+          if (!res.ok) {
+            // 404 or other error, skip this quote
+            continue;
+          }
+
+          let json: any;
+          try {
+            json = await res.json();
+          } catch (e) {
+            continue;
+          }
+
+          if (!json || !json.ok || !json.items || !Array.isArray(json.items)) {
+            continue;
+          }
+
+          const items = json.items as any[];
+          if (items.length === 0) continue;
+
+          const primary = items[0];
+          const matName: string | null =
+            primary.material_name ||
+            (primary.material_id != null
+              ? `Material #${primary.material_id}`
+              : null);
+
+          if (!matName) continue;
+
+          const current = counts.get(matName) ?? 0;
+          counts.set(matName, current + 1);
+
+          if (cancelled) return;
+        }
+
+        const list: MaterialUsage[] = Array.from(counts.entries()).map(
+          ([name, count]) => ({ name, count }),
+        );
+
+        list.sort(
+          (a, b) => b.count - a.count || a.name.localeCompare(b.name),
+        );
+
+        if (!cancelled) {
+          setMaterialStats(list);
+        }
+      } catch (err) {
+        console.error("Materials widget: analysis failed:", err);
+        if (!cancelled) {
+          setMaterialStatsError(
+            "Unable to analyze recent material usage.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setMaterialStatsLoading(false);
+        }
+      }
+    }
+
+    analyzeMaterials();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [quotes]);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -260,7 +378,7 @@ export default function AdminQuotesPage() {
           </div>
         </section>
 
-        {/* Recent quotes (live table with filters) */}
+        {/* Recent quotes section (filters + materials widget + table) */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -313,6 +431,58 @@ export default function AdminQuotesPage() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* NEW: Materials used recently widget */}
+          <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-200">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              Materials used recently
+            </div>
+            {materialStatsLoading && (
+              <p className="text-[11px] text-slate-400">
+                Analyzing the latest quotes…
+              </p>
+            )}
+            {!materialStatsLoading && materialStatsError && (
+              <p className="text-[11px] text-rose-300">
+                {materialStatsError}
+              </p>
+            )}
+            {!materialStatsLoading &&
+              !materialStatsError &&
+              materialStats &&
+              materialStats.length === 0 && (
+                <p className="text-[11px] text-slate-400">
+                  No material information found in the latest quotes.
+                </p>
+              )}
+            {!materialStatsLoading &&
+              !materialStatsError &&
+              materialStats &&
+              materialStats.length > 0 && (
+                <ul className="mt-1 space-y-1">
+                  {materialStats.slice(0, 4).map((m) => (
+                    <li
+                      key={m.name}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="truncate text-[11px] text-slate-100">
+                        {m.name}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {m.count} quote{m.count === 1 ? "" : "s"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            <p className="mt-2 text-[10px] text-slate-500">
+              Sample based on the latest quotes returned by{" "}
+              <span className="font-mono text-[10px] text-sky-300">
+                /api/quote/print
+              </span>{" "}
+              for a small batch of recent quote numbers.
+            </p>
           </div>
 
           <div className="overflow-hidden rounded-lg border border-slate-800/80 bg-slate-950/40">
