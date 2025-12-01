@@ -1,30 +1,24 @@
 // app/admin/quotes/[quote_no]/page.tsx
 //
-// Admin quote detail view (read-only).
+// Admin quote detail page (internal engineering view).
 // Path A / Straight Path safe:
-//  - NEW FILE ONLY.
-//  - Uses existing AdminQuoteClient for engineering/CAD view.
-//  - No changes to pricing, parsing, /api/quote/print, or layout editor.
-//  - No writes; purely read-only.
-//
-// Route: /admin/quotes/[quote_no]
-//  - Example: /admin/quotes/2025-00123
+//  - Thin server wrapper around the existing AdminQuoteClient.
+//  - No changes to pricing, cavity parsing, or quote print behavior.
+//  - Uses the route param quote_no and passes it into the client component.
 
 import AdminQuoteClient from "./AdminQuoteClient";
 
-type PageProps = {
+type AdminQuotePageProps = {
   params: {
     quote_no: string;
   };
 };
 
-export default function AdminQuotePage({ params }: PageProps) {
-  const quoteNoRaw = params.quote_no ?? "";
-  const quoteNo = decodeURIComponent(quoteNoRaw);
+export default function AdminQuotePage({ params }: AdminQuotePageProps) {
+  // Decode in case the quote number contains URL-encoded characters.
+  const quoteNo = params?.quote_no
+    ? decodeURIComponent(params.quote_no)
+    : "";
 
-  // AdminQuoteClient:
-  //  - Accepts quoteNo prop (optional).
-  //  - Also falls back to window.location.pathname (/admin/quotes/<quote_no>).
-  // To keep things explicit and Path A safe, we pass quoteNo in as a prop.
   return <AdminQuoteClient quoteNo={quoteNo} />;
 }
