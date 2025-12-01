@@ -47,9 +47,7 @@ type MaterialOption = {
  * - Uses the first non-empty entry when an array is provided
  * - Falls back to 10x10x2 if nothing usable is present
  */
-function normalizeDimsParam(
-  raw: string | string[] | undefined,
-): string {
+function normalizeDimsParam(raw: string | string[] | undefined): string {
   if (!raw) return "10x10x2";
   if (Array.isArray(raw)) {
     const first = raw.find((s) => s && s.trim());
@@ -66,9 +64,7 @@ function normalizeDimsParam(
  * - NEW: de-duplicate identical strings so
  *   "cavities=1x1x1&cavity=1x1x1" → "1x1x1" (one pocket)
  */
-function normalizeCavitiesParam(
-  raw: string | string[] | undefined,
-): string {
+function normalizeCavitiesParam(raw: string | string[] | undefined): string {
   if (!raw) return "";
   if (Array.isArray(raw)) {
     const cleaned = raw
@@ -108,16 +104,12 @@ function parseDimsTriple(
 
 // Simple parser for cavity dims; if only LxW, assume depth = 1"
 // IMPORTANT: accepts both "0.5" and ".5" style numbers.
-function parseCavityDims(
-  raw: string,
-): { L: number; W: number; D: number } | null {
+function parseCavityDims(raw: string): { L: number; W: number; D: number } | null {
   const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
 
   // allow "1", "1.5", ".5" etc.
   const num = String.raw`(?:\d+(?:\.\d+)?|\.\d+)`;
-  const tripleRe = new RegExp(
-    `(${num})\\s*[x×]\\s*(${num})\\s*[x×]\\s*(${num})`,
-  );
+  const tripleRe = new RegExp(`(${num})\\s*[x×]\\s*(${num})\\s*[x×]\\s*(${num})`);
   const doubleRe = new RegExp(`(${num})\\s*[x×]\\s*(${num})`);
 
   let m = t.match(tripleRe);
@@ -200,28 +192,20 @@ export default function LayoutPage({
       searchParams?.cavity) as string | string[] | undefined,
   );
 
-  const hasExplicitCavities =
-    hasCavitiesFromUrl && serverCavityStr.length > 0;
+  const hasExplicitCavities = hasCavitiesFromUrl && serverCavityStr.length > 0;
 
-  const hasRealQuoteNo =
-    !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
+  const hasRealQuoteNo = !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
 
-  const quoteNo = hasRealQuoteNo
-    ? quoteNoFromUrl.trim()
-    : "Q-AI-EXAMPLE";
-  const [materialIdFromUrl, setMaterialIdFromUrl] =
-    React.useState<number | null>(() => {
-      const raw = searchParams?.material_id as
-        | string
-        | string[]
-        | undefined;
+  const quoteNo = hasRealQuoteNo ? quoteNoFromUrl.trim() : "Q-AI-EXAMPLE";
+  const [materialIdFromUrl, setMaterialIdFromUrl] = React.useState<number | null>(
+    () => {
+      const raw = searchParams?.material_id as string | string[] | undefined;
       if (!raw) return null;
       const first = Array.isArray(raw) ? raw[0] : raw;
       const parsed = Number(first);
-      return Number.isFinite(parsed) && parsed > 0
-        ? parsed
-        : null;
-    });
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    },
+  );
 
   React.useEffect(() => {
     try {
@@ -231,9 +215,7 @@ export default function LayoutPage({
       if (!midRaw) return;
       const parsed = Number(midRaw);
       if (!Number.isFinite(parsed) || parsed <= 0) return;
-      setMaterialIdFromUrl((prev) =>
-        prev === parsed ? prev : parsed,
-      );
+      setMaterialIdFromUrl((prev) => (prev === parsed ? prev : parsed));
     } catch {
       // ignore
     }
@@ -242,12 +224,11 @@ export default function LayoutPage({
 
   /* ---------- Build initial layout (from DB if available) ---------- */
 
-  const [initialLayout, setInitialLayout] =
-    React.useState<LayoutModel | null>(null);
-  const [initialNotes, setInitialNotes] = React.useState<string>("");
-  const [initialQty, setInitialQty] = React.useState<number | null>(
+  const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(
     null,
   );
+  const [initialNotes, setInitialNotes] = React.useState<string>("");
+  const [initialQty, setInitialQty] = React.useState<number | null>(null);
   const [initialMaterialId, setInitialMaterialId] =
     React.useState<number | null>(null);
 
@@ -261,8 +242,7 @@ export default function LayoutPage({
   const [initialCustomerPhone, setInitialCustomerPhone] =
     React.useState<string>("");
 
-  const [loadingLayout, setLoadingLayout] =
-    React.useState<boolean>(true);
+  const [loadingLayout, setLoadingLayout] = React.useState<boolean>(true);
 
   /**
    * Fallback layout builder, driven by arbitrary dims/cavities strings.
@@ -304,11 +284,9 @@ export default function LayoutPage({
           const rows = Math.ceil(count / cols);
 
           const availW =
-            Math.max(block.lengthIn - 2 * WALL_IN, 1) ||
-            block.lengthIn;
+            Math.max(block.lengthIn - 2 * WALL_IN, 1) || block.lengthIn;
           const availH =
-            Math.max(block.widthIn - 2 * WALL_IN, 1) ||
-            block.widthIn;
+            Math.max(block.widthIn - 2 * WALL_IN, 1) || block.widthIn;
 
           const cellW = availW / cols;
           const cellH = availH / rows;
@@ -317,10 +295,8 @@ export default function LayoutPage({
             const col = idx % cols;
             const row = Math.floor(idx / cols);
 
-            const rawX =
-              WALL_IN + col * cellW + (cellW - c.L) / 2;
-            const rawY =
-              WALL_IN + row * cellH + (cellH - c.W) / 2;
+            const rawX = WALL_IN + col * cellW + (cellW - c.L) / 2;
+            const rawY = WALL_IN + row * cellH + (cellH - c.W) / 2;
 
             const clamp = (v: number, min: number, max: number) =>
               v < min ? min : v > max ? max : v;
@@ -330,21 +306,11 @@ export default function LayoutPage({
             const minY = WALL_IN;
             const maxY = block.widthIn - WALL_IN - c.W;
 
-            const xIn = clamp(
-              rawX,
-              minX,
-              Math.max(minX, maxX),
-            );
-            const yIn = clamp(
-              rawY,
-              minY,
-              Math.max(minY, maxY),
-            );
+            const xIn = clamp(rawX, minX, Math.max(minX, maxX));
+            const yIn = clamp(rawY, minY, Math.max(minY, maxY));
 
-            const xNorm =
-              block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
-            const yNorm =
-              block.widthIn > 0 ? yIn / block.widthIn : 0.1;
+            const xNorm = block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
+            const yNorm = block.widthIn > 0 ? yIn / block.widthIn : 0.1;
 
             cavities.push({
               id: `cav-${idx + 1}`,
@@ -403,15 +369,11 @@ export default function LayoutPage({
           cavityParts.push(...cavitiesParams, ...cavityParams);
 
           if (dimsCandidates.length > 0) {
-            effectiveBlockStr = normalizeDimsParam(
-              dimsCandidates[0],
-            );
+            effectiveBlockStr = normalizeDimsParam(dimsCandidates[0]);
           }
 
           if (cavityParts.length > 0) {
-            effectiveCavityStr = normalizeCavitiesParam(
-              cavityParts,
-            );
+            effectiveCavityStr = normalizeCavitiesParam(cavityParts);
           }
         }
       } catch {
@@ -492,17 +454,11 @@ export default function LayoutPage({
           };
 
           if (!cancelled) {
-            setInitialCustomerName(
-              (qh.customer_name ?? "").toString(),
-            );
-            setInitialCustomerEmail(
-              (qh.email ?? "").toString(),
-            );
+            setInitialCustomerName((qh.customer_name ?? "").toString());
+            setInitialCustomerEmail((qh.email ?? "").toString());
             // Company isn’t stored on quotes table yet; keep blank for now.
             setInitialCustomerCompany("");
-            setInitialCustomerPhone(
-              (qh.phone ?? "").toString(),
-            );
+            setInitialCustomerPhone((qh.phone ?? "").toString());
           }
         } else if (!cancelled) {
           // No header → clear initial customer fields
@@ -522,8 +478,7 @@ export default function LayoutPage({
           !hasDimsFromUrl &&
           !hasCavitiesFromUrl
         ) {
-          const layoutFromDb = json.layoutPkg
-            .layout_json as LayoutModel;
+          const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
           const notesFromDb =
             (json.layoutPkg.notes as string | null) ?? "";
 
@@ -531,9 +486,7 @@ export default function LayoutPage({
             setInitialLayout(layoutFromDb);
             setInitialNotes(notesFromDb);
             setInitialQty(qtyFromItems);
-            setInitialMaterialId(
-              materialIdOverride ?? materialIdFromItems,
-            );
+            setInitialMaterialId(materialIdOverride ?? materialIdFromItems);
             setLoadingLayout(false);
           }
           return;
@@ -548,9 +501,7 @@ export default function LayoutPage({
           setInitialLayout(fallback);
           setInitialNotes("");
           setInitialQty(qtyFromItems);
-          setInitialMaterialId(
-            materialIdOverride ?? materialIdFromItems,
-          );
+          setInitialMaterialId(materialIdOverride ?? materialIdFromItems);
           setLoadingLayout(false);
         }
       } catch (err) {
@@ -600,9 +551,6 @@ export default function LayoutPage({
     );
   }
 
-
-
-
   return (
     <LayoutEditorHost
       quoteNo={quoteNo}
@@ -619,17 +567,7 @@ export default function LayoutPage({
   );
 }
 
-const CAVITY_COLORS = [
-  "#38bdf8",
-  "#a855f7",
-  "#f97316",
-  "#22c55e",
-  "#eab308",
-  "#ec4899",
-];
-
-
-
+const CAVITY_COLORS = ["#38bdf8", "#a855f7", "#f97316", "#22c55e", "#eab308", "#ec4899"];
 /* ---------- Layout editor host (main body) ---------- */
 
 function LayoutEditorHost(props: {
@@ -683,10 +621,9 @@ function LayoutEditorHost(props: {
     initialQty != null ? initialQty : "",
   );
 
-  // NEW: customer info (Option A — Name + Email required), now prefills from quote header
-  const [customerName, setCustomerName] = React.useState<string>(
-    initialCustomerName || "",
-  );
+  // Customer info
+  const [customerName, setCustomerName] =
+    React.useState<string>(initialCustomerName || "");
   const [customerEmail, setCustomerEmail] =
     React.useState<string>(initialCustomerEmail || "");
   const [customerCompany, setCustomerCompany] =
@@ -698,9 +635,8 @@ function LayoutEditorHost(props: {
     React.useState<MaterialOption[]>([]);
   const [materialsLoading, setMaterialsLoading] =
     React.useState<boolean>(true);
-  const [materialsError, setMaterialsError] = React.useState<
-    string | null
-  >(null);
+  const [materialsError, setMaterialsError] =
+    React.useState<string | null>(null);
   const [selectedMaterialId, setSelectedMaterialId] =
     React.useState<number | null>(initialMaterialId);
 
@@ -763,7 +699,7 @@ function LayoutEditorHost(props: {
     };
   }, []);
 
-  // 🔧 SAFE MATERIAL GROUPING + SORT (no localeCompare crashes, no PE/EPE remap)
+  // ---- Safe Family Grouping (no PE/EPE remap) ----
   const materialsByFamily = React.useMemo(() => {
     const map = new Map<string, MaterialOption[]>();
 
@@ -812,15 +748,15 @@ function LayoutEditorHost(props: {
     }
   };
 
-  /* ---------- Center selected cavity in block ---------- */
-
+  /* ---------- Center selected cavity ---------- */
   const handleCenterSelectedCavity = () => {
     if (!selectedCavity) return;
 
     const len = selectedCavity.lengthIn;
     const wid = selectedCavity.widthIn;
 
-    if (!block.lengthIn || !block.widthIn || !len || !wid) return;
+    if (!block.lengthIn || !block.widthIn || !len || !wid)
+      return;
 
     let xIn = (block.lengthIn - len) / 2;
     let yIn = (block.widthIn - wid) / 2;
@@ -836,8 +772,16 @@ function LayoutEditorHost(props: {
     const clamp = (v: number, min: number, max: number) =>
       v < min ? min : v > max ? max : v;
 
-    xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
-    yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+    xIn = clamp(
+      xIn,
+      Math.min(minXIn, maxXIn),
+      Math.max(minXIn, maxXIn),
+    );
+    yIn = clamp(
+      yIn,
+      Math.min(minYIn, maxYIn),
+      Math.max(minYIn, maxYIn),
+    );
 
     const xNorm = xIn / block.lengthIn;
     const yNorm = yIn / block.widthIn;
@@ -868,19 +812,19 @@ function LayoutEditorHost(props: {
     router.push(url);
   };
 
-  /* ---------- Apply to quote ---------- */
+  /* ---------- Apply-to-Quote ---------- */
 
   const handleApplyToQuote = async () => {
     if (!hasRealQuoteNo) {
       alert(
-        "This layout preview isn’t linked to a quote yet.\n\nOpen this page from an emailed quote or from the /quote print view so Alex-IO knows which quote to save it against.",
+        "This layout isn’t linked to a quote.\nOpen from a real quote email.",
       );
       return;
     }
 
     if (missingCustomerInfo) {
       alert(
-        "Please add at least a customer name and email before applying this layout to the quote.",
+        "Add customer name + email before applying to quote.",
       );
       return;
     }
@@ -888,7 +832,6 @@ function LayoutEditorHost(props: {
     try {
       setApplyStatus("saving");
 
-      // Build a friendly material/notes footer + header data for the SVG
       const selectedMaterial =
         selectedMaterialId != null
           ? materials.find((m) => m.id === selectedMaterialId) ||
@@ -897,7 +840,6 @@ function LayoutEditorHost(props: {
 
       let materialLabel: string | null = null;
       if (selectedMaterial) {
-        // Use DB-provided family/name as-is (no PE/EPE remap)
         const familyLabel =
           (selectedMaterial.family &&
             selectedMaterial.family.trim()) ||
@@ -945,7 +887,6 @@ function LayoutEditorHost(props: {
       if (Number.isFinite(nQty) && nQty > 0) {
         payload.qty = nQty;
       }
-
       if (selectedMaterialId != null) {
         payload.materialId = selectedMaterialId;
       }
@@ -961,17 +902,11 @@ function LayoutEditorHost(props: {
         try {
           payloadJson = await res.json();
           if (payloadJson?.error === "quote_not_found") {
-            console.error(
-              "layout apply quote_not_found",
-              payloadJson,
-            );
             alert(
-              `Couldn’t find a quote header for ${quoteNo}.\n\nMake sure this layout link came from a real quote email or print view so the header exists in the database.`,
+              `Couldn’t find a quote header for ${quoteNo}.\nOpen this link from a real quote email.`,
             );
           }
-        } catch {
-          // ignore
-        }
+        } catch {}
         throw new Error(`HTTP ${res.status}`);
       }
 
@@ -1052,7 +987,7 @@ function LayoutEditorHost(props: {
               </div>
             </div>
 
-            {/* Hint / How this works bar */}
+            {/* How this works */}
             <div className="border-b border-slate-800/80 bg-slate-950/95 px-6 py-3 text-[11px] text-slate-200 flex flex-wrap items-start gap-4">
               <div className="flex items-center gap-2 font-semibold text-sky-200">
                 <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-sky-400/70 bg-sky-500/20 text-[10px] font-bold shadow-[0_0_14px_rgba(56,189,248,0.7)]">
@@ -1060,6 +995,7 @@ function LayoutEditorHost(props: {
                 </span>
                 How this layout editor works
               </div>
+
               <ul className="flex flex-wrap gap-x-4 gap-y-1">
                 <li>
                   <span className="text-sky-300 mr-1">1.</span>
@@ -1067,11 +1003,11 @@ function LayoutEditorHost(props: {
                 </li>
                 <li>
                   <span className="text-sky-300 mr-1">2.</span>
-                  Drag / resize in the center canvas to fine-tune clearances.
+                  Drag / resize in the center canvas to fine-tune placement.
                 </li>
                 <li>
                   <span className="text-sky-300 mr-1">3.</span>
-                  Fill in customer + (optional) material, then{" "}
+                  Fill in customer + material, then{" "}
                   <span className="font-semibold text-sky-200">
                     Apply to quote
                   </span>
@@ -1128,10 +1064,7 @@ function LayoutEditorHost(props: {
                   className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
                   <div className="font-semibold text-slate-50 flex items-center gap-2">
-                        <span
-      className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80"
-    />
-
+                    <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
                     Rounded rectangle
                   </div>
                   <div className="text-[11px] text-slate-400">
@@ -1421,7 +1354,7 @@ function LayoutEditorHost(props: {
                   </div>
                 </div>
 
-                {/* Customer info card (now prefilled when quote has data) */}
+                {/* Customer info card */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-xs font-semibold text-slate-100">
@@ -1522,60 +1455,61 @@ function LayoutEditorHost(props: {
                   ) : (
                     <ul className="space-y-1.5 mb-3 max-h-40 overflow-auto">
                       {cavities.map((cav, cavIndex) => {
-  const isActive = cav.id === selectedId;
+                        const isActive = cav.id === selectedId;
 
-  const color =
-    CAVITY_COLORS[cavIndex % CAVITY_COLORS.length];
-  const inactiveBg = `${color}33`; // same color, light alpha
-  const chipStyle = {
-    backgroundColor: isActive ? color : inactiveBg,
-    color: isActive ? "#020617" : "#e5e7eb",
-  } as React.CSSProperties;
+                        const color =
+                          CAVITY_COLORS[cavIndex % CAVITY_COLORS.length];
+                        const inactiveBg = `${color}33`;
+                        const chipStyle = {
+                          backgroundColor: isActive ? color : inactiveBg,
+                          color: isActive ? "#020617" : "#e5e7eb",
+                        } as React.CSSProperties;
 
-  return (
-    <li
-      key={cav.id}
-      className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
-        isActive
-          ? "bg-slate-800/80"
-          : "bg-slate-900/40 hover:bg-slate-800/50"
-      }`}
-    >
-      <button
-        type="button"
-        onClick={() =>
-          isActive ? selectCavity(null) : selectCavity(cav.id)
-        }
-        className="flex-1 flex items-center gap-2 text-xs text-left"
-      >
-        <span
-          style={chipStyle}
-          className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
-        >
-          {cav.id.replace("cav-", "C")}
-        </span>
-        <span
-          className={
-            isActive
-              ? "text-slate-50 font-medium"
-              : "text-slate-200"
-          }
-        >
-          {cav.label}
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={() => deleteCavity(cav.id)}
-        className="text-[11px] text-slate-500 hover:text-red-400"
-        title="Delete cavity"
-      >
-        ✕
-      </button>
-    </li>
-  );
-})}
-
+                        return (
+                          <li
+                            key={cav.id}
+                            className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
+                              isActive
+                                ? "bg-slate-800/80"
+                                : "bg-slate-900/40 hover:bg-slate-800/50"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                isActive
+                                  ? selectCavity(null)
+                                  : selectCavity(cav.id)
+                              }
+                              className="flex-1 flex items-center gap-2 text-xs text-left"
+                            >
+                              <span
+                                style={chipStyle}
+                                className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
+                              >
+                                {cav.id.replace("cav-", "C")}
+                              </span>
+                              <span
+                                className={
+                                  isActive
+                                    ? "text-slate-50 font-medium"
+                                    : "text-slate-200"
+                                }
+                              >
+                                {cav.label}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteCavity(cav.id)}
+                              className="text-[11px] text-slate-500 hover:text-red-400"
+                              title="Delete cavity"
+                            >
+                              ✕
+                            </button>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
 
@@ -1737,7 +1671,6 @@ function buildSvgFromLayout(
 ): string {
   const { block, cavities } = layout;
 
-  // Basic guard so we don't divide by zero
   const L = Number(block.lengthIn) || 0;
   const W = Number(block.widthIn) || 0;
   const T = Number(block.thicknessIn) || 0;
@@ -1747,7 +1680,6 @@ function buildSvgFromLayout(
   const PADDING = 40;
 
   if (L <= 0 || W <= 0) {
-    // Fallback: just return an empty SVG rather than throwing
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}"></svg>`;
   }
 
@@ -1763,7 +1695,6 @@ function buildSvgFromLayout(
   const escapeText = (s: string): string =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  // ----- Cavities -----
   const cavects: string[] = [];
 
   for (const c of cavities) {
@@ -1799,7 +1730,9 @@ function buildSvgFromLayout(
       cavects.push(
         [
           `<g>`,
-          `  <rect x="${x.toFixed(2)}" y="${y.toFixed(
+          `  <rect x="${x.toFixed(
+            2,
+          )}" y="${y.toFixed(
             2,
           )}" width="${cavW.toFixed(
             2,
@@ -1821,7 +1754,6 @@ function buildSvgFromLayout(
 
   const cavRects = cavects.join("\n");
 
-  // ----- Header block: NOT TO SCALE, BLOCK, MATERIAL -----
   const headerLines: string[] = [];
   headerLines.push("NOT TO SCALE");
   if (T > 0) {
@@ -1852,7 +1784,6 @@ function buildSvgFromLayout(
     ${headerTexts}
   </g>`;
 
-  // ----- Notes at bottom (strip old scaffold lines) -----
   const metaLines: string[] = [];
 
   if (meta?.notes && meta.notes.trim().length > 0) {
@@ -1896,7 +1827,6 @@ function buildSvgFromLayout(
   </g>`;
   }
 
-  // ----- Full SVG -----
   const svgParts: string[] = [];
 
   svgParts.push(
