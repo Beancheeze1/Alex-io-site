@@ -1,7 +1,7 @@
 // app/admin/cushion-curves/page.tsx
 //
 // Cushion curves admin landing page.
-// Now wired to /api/cushion-curves for live data.
+// Wired to /api/cushion-curves for live data.
 //
 // Path A / Straight Path safe:
 //  - Read-only, admin-only.
@@ -16,7 +16,8 @@ type MaterialRow = {
   material_id: number;
   material_name: string;
   material_family: string | null;
-  density_lb_ft3: number | null;
+  // Comes back from JSON as number | string | null
+  density_lb_ft3: number | string | null;
   has_curve: boolean;
   point_count: number;
 };
@@ -30,6 +31,16 @@ type CushionCurvesResponse = {
     distinct_families_with_curves: number;
   };
 };
+
+function formatDensity(value: number | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const n =
+    typeof value === "number"
+      ? value
+      : Number(value);
+  if (Number.isNaN(n)) return null;
+  return n.toFixed(2);
+}
 
 export default function AdminCushionCurvesPage() {
   const [materials, setMaterials] = React.useState<MaterialRow[]>([]);
@@ -264,46 +275,52 @@ export default function AdminCushionCurvesPage() {
                   {!loading &&
                     !error &&
                     hasData &&
-                    materials.map((m) => (
-                      <tr
-                        key={m.material_id}
-                        className="border-t border-slate-800/60 hover:bg-slate-900/70"
-                      >
-                        <td className="px-3 py-2 text-xs text-slate-100">
-                          <Link
-                            href={`/admin/cushion/curves/${m.material_id}`}
-                            className="underline-offset-2 hover:underline text-sky-300"
-                          >
-                            {m.material_name}
-                          </Link>
-                        </td>
-                        <td className="px-3 py-2 text-xs text-slate-200">
-                          {m.material_family || (
-                            <span className="text-slate-500">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-slate-200">
-                          {m.density_lb_ft3 != null ? (
-                            <span>{m.density_lb_ft3.toFixed(2)} pcf</span>
-                          ) : (
-                            <span className="text-slate-500">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-xs">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
-                              m.has_curve
-                                ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
-                                : "bg-rose-500/15 text-rose-300 border border-rose-500/40"
-                            }`}
-                          >
-                            {m.has_curve
-                              ? `${m.point_count} pt curve`
-                              : "Missing curve"}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    materials.map((m) => {
+                      const formattedDensity = formatDensity(
+                        m.density_lb_ft3,
+                      );
+
+                      return (
+                        <tr
+                          key={m.material_id}
+                          className="border-t border-slate-800/60 hover:bg-slate-900/70"
+                        >
+                          <td className="px-3 py-2 text-xs text-slate-100">
+                            <Link
+                              href={`/admin/cushion/curves/${m.material_id}`}
+                              className="underline-offset-2 hover:underline text-sky-300"
+                            >
+                              {m.material_name}
+                            </Link>
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-200">
+                            {m.material_family || (
+                              <span className="text-slate-500">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-200">
+                            {formattedDensity ? (
+                              <span>{formattedDensity} pcf</span>
+                            ) : (
+                              <span className="text-slate-500">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-xs">
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
+                                m.has_curve
+                                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
+                                  : "bg-rose-500/15 text-rose-300 border border-rose-500/40"
+                              }`}
+                            >
+                              {m.has_curve
+                                ? `${m.point_count} pt curve`
+                                : "Missing curve"}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
