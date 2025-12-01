@@ -1,18 +1,88 @@
 // app/admin/logs/page.tsx
 //
 // Logs & events admin landing page.
-// Path A / Straight Path safe: UI-only, read-only.
-// - No log queries, no writes.
-// - Static sample event list for webhooks, orchestrator, and email.
+// Path A / Straight Path safe:
+//  - Client-side fetch to /api/admin/logs (read-only).
+//  - No writes, no changes to pricing, parsing, or layout/editor behavior.
+//  - If the DB table doesn't exist yet, shows a synthetic "backend not wired"
+//    log entry from the API.
+//
+// Route: /admin/logs
 
+"use client";
+
+import * as React from "react";
 import Link from "next/link";
 
+type LogEntry = {
+  id: number | string;
+  created_at: string;
+  level: string;
+  source: string;
+  summary: string;
+  detail?: string;
+};
+
+type LogsResponse = {
+  ok: boolean;
+  source: "db" | "fallback" | string;
+  logs: LogEntry[];
+};
+
 export default function AdminLogsPage() {
+  const [logs, setLogs] = React.useState<LogEntry[]>([]);
+  const [source, setSource] = React.useState<string>("unknown");
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [expandedId, setExpandedId] = React.useState<string | number | null>(
+    null,
+  );
+
+  React.useEffect(() => {
+    let active = true;
+
+    async function loadLogs() {
+      try {
+        const res = await fetch("/api/admin/logs", { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const json: LogsResponse = await res.json();
+        if (!active) return;
+
+        if (!json.ok) {
+          throw new Error("Logs API returned ok=false.");
+        }
+
+        setLogs(json.logs || []);
+        setSource(json.source || "unknown");
+        setError(null);
+      } catch (err) {
+        console.error("Failed to load admin logs:", err);
+        if (!active) return;
+        setError("Unable to load logs.");
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadLogs();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const hasLogs = logs && logs.length > 0;
+  const isFallback = source === "fallback";
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-5xl px-4 py-8 lg:py-10">
         {/* Header */}
-        <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <header className="mb-6 flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-sky-300">
               Logs &amp; events
@@ -31,72 +101,72 @@ export default function AdminLogsPage() {
           </Link>
         </header>
 
-        {/* Summary row */}
-        <section className="mb-6 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          {/* Status summary (sample) */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Event overview (sample)
-            </div>
-            <ul className="space-y-1 text-xs text-slate-300">
-              <li>
-                <span className="font-semibold text-slate-100">42</span> recent
-                events across all systems.
-              </li>
-              <li>
-                <span className="font-semibold text-slate-100">37</span>{" "}
-                succeeded,{" "}
-                <span className="font-semibold text-slate-100">5</span> flagged
-                with warnings or errors.
-              </li>
-              <li>
-                Sources include HubSpot webhooks, AI orchestrator, and email
-                (Graph).
-              </li>
-            </ul>
-            <p className="mt-3 text-[11px] text-slate-500">
-              Numbers shown here are static placeholders. In a later phase,
-              this will connect to real log storage.
-            </p>
-          </div>
+        {/* Summary / status */}
+        <section className="mb-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
+          {(loading || error) && (
+            <>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Logs overview
+              </div>
+              {loading && (
+                <p className="text-xs text-slate-300">
+                  Loading logs from the backend…
+                </p>
+              )}
+              {error && !loading && (
+                <p className="text-xs text-rose-300">{error}</p>
+              )}
+            </>
+          )}
 
-          {/* Debugging notes */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Debugging workflow
-            </div>
-            <p className="text-xs text-slate-300">
-              This view is meant to be the first stop when something feels off:
-            </p>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-slate-300">
-              <li>Confirm HubSpot webhooks are arriving cleanly.</li>
-              <li>
-                Check AI orchestrator responses and any parsing or pricing
-                errors.
-              </li>
-              <li>Verify outbound email (Graph) sends and loop protection.</li>
-            </ul>
-            <p className="mt-3 text-[11px] text-slate-500">
-              Future: filters by source, status, and quote number to jump
-              directly from logs into related quotes.
-            </p>
-          </div>
+          {!loading && !error && (
+            <>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Logs overview
+              </div>
+              <p className="text-xs text-slate-300">
+                Showing{" "}
+                <span className="font-semibold text-slate-100">
+                  {hasLogs ? logs.length : 0}
+                </span>{" "}
+                event{hasLogs && logs.length !== 1 ? "s" : ""} from{" "}
+                <span className="font-mono text-[11px] text-sky-300">
+                  {source === "db" ? "event_logs (database)" : source}
+                </span>
+                .
+              </p>
+              {isFallback && (
+                <p className="mt-2 text-[11px] text-amber-300">
+                  Backend note: the{" "}
+                  <span className="font-mono text-[11px] text-sky-300">
+                    event_logs
+                  </span>{" "}
+                  table is not wired yet. The entry below is a synthetic
+                  placeholder. Once the table exists, this view will switch to
+                  real webhook/error events automatically.
+                </p>
+              )}
+              <p className="mt-2 text-[11px] text-slate-500">
+                Admin only – not visible to customers.
+              </p>
+            </>
+          )}
         </section>
 
-        {/* Event list (sample) */}
+        {/* Logs table */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                Recent events (sample rows)
+                Recent events
               </div>
               <p className="mt-1 text-xs text-slate-300">
-                Static example log entries for webhooks, orchestrator, and
-                email send flow.
+                Read-only view of recent events: webhooks, errors, and system
+                diagnostics. Click a row to expand full details.
               </p>
             </div>
             <div className="text-[11px] text-slate-500">
-              Future: time range picker &amp; advanced filters.
+              Future: filters by level, source, and date range.
             </div>
           </div>
 
@@ -105,120 +175,135 @@ export default function AdminLogsPage() {
               <thead className="bg-slate-900/80 text-slate-400">
                 <tr>
                   <th className="px-3 py-2 font-semibold">Time</th>
+                  <th className="px-3 py-2 font-semibold">Level</th>
                   <th className="px-3 py-2 font-semibold">Source</th>
-                  <th className="px-3 py-2 font-semibold">Type</th>
-                  <th className="px-3 py-2 font-semibold">Quote #</th>
-                  <th className="px-3 py-2 font-semibold">Status</th>
-                  <th className="px-3 py-2 font-semibold">Details</th>
+                  <th className="px-3 py-2 font-semibold">Summary</th>
                 </tr>
               </thead>
               <tbody>
-                {sampleEvents.map((ev) => (
-                  <tr
-                    key={ev.id}
-                    className="border-t border-slate-800/60 hover:bg-slate-900/70"
-                  >
-                    <td className="px-3 py-2 text-[11px] text-slate-400">
-                      {ev.time}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-200">
-                      {ev.source}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-200">
-                      {ev.type}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-100">
-                      {ev.quoteNo ?? "-"}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
-                          ev.status === "OK"
-                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
-                            : ev.status === "Warning"
-                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                            : "bg-rose-500/15 text-rose-300 border border-rose-500/40"
-                        }`}
-                      >
-                        {ev.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-[11px] text-slate-300">
-                      {ev.details}
+                {loading && !error && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-3 py-4 text-center text-xs text-slate-400"
+                    >
+                      Loading logs…
                     </td>
                   </tr>
-                ))}
+                )}
+
+                {!loading && error && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-3 py-4 text-center text-xs text-rose-300"
+                    >
+                      Unable to load logs.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading && !error && !hasLogs && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-3 py-4 text-center text-xs text-slate-400"
+                    >
+                      No logs available.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading &&
+                  !error &&
+                  hasLogs &&
+                  logs.map((log) => {
+                    const isExpanded = expandedId === log.id;
+                    const dt = formatDateTime(log.created_at);
+                    const levelChip = chipForLevel(log.level);
+
+                    return (
+                      <React.Fragment key={log.id}>
+                        <tr
+                          className="cursor-pointer border-t border-slate-800/60 hover:bg-slate-900/70"
+                          onClick={() =>
+                            setExpandedId(
+                              isExpanded ? null : (log.id as string | number),
+                            )
+                          }
+                        >
+                          <td className="px-3 py-2 text-[11px] text-slate-400">
+                            {dt}
+                          </td>
+                          <td className="px-3 py-2 text-[11px]">
+                            <span className={levelChip.className}>
+                              {levelChip.label}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-200">
+                            {log.source}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-100">
+                            {log.summary}
+                          </td>
+                        </tr>
+                        {isExpanded && log.detail && (
+                          <tr className="border-t border-slate-800/60 bg-slate-950/70">
+                            <td
+                              colSpan={4}
+                              className="px-3 py-3 text-[11px] text-slate-300"
+                            >
+                              <div className="mb-1 font-semibold text-slate-200">
+                                Details
+                              </div>
+                              <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-slate-900/80 p-2 text-[11px] text-slate-200">
+                                {log.detail}
+                              </pre>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
-
-          <p className="mt-3 text-[11px] text-slate-500">
-            These rows show the structure we&apos;ll use when logs are wired to
-            real storage. Each event will be linkable to deeper drill-downs
-            (quote, webhook payload, orchestrator response, etc.).
-          </p>
-          <p className="mt-1 text-[11px] text-slate-500">
-            Admin only – not visible to customers.
-          </p>
         </section>
       </div>
     </main>
   );
 }
 
-type SampleEvent = {
-  id: string;
-  time: string;
-  source: string;
-  type: string;
-  quoteNo?: string;
-  status: "OK" | "Warning" | "Error";
-  details: string;
-};
+function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "Unknown";
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return iso;
+  const d = new Date(ts);
+  return d.toLocaleString("en-US", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
 
-const sampleEvents: SampleEvent[] = [
-  {
-    id: "1",
-    time: "Today • 3:24 PM",
-    source: "HubSpot webhook",
-    type: "New conversation",
-    quoteNo: "2025-00123",
-    status: "OK",
-    details: "Inbound email parsed, quote created, layout editor ready.",
-  },
-  {
-    id: "2",
-    time: "Today • 3:25 PM",
-    source: "AI orchestrator",
-    type: "Quote pipeline",
-    quoteNo: "2025-00123",
-    status: "Warning",
-    details: "Parsed dims with low confidence on cavity depth.",
-  },
-  {
-    id: "3",
-    time: "Today • 3:26 PM",
-    source: "Email (Graph)",
-    type: "Send reply",
-    quoteNo: "2025-00123",
-    status: "OK",
-    details: "First-response quote email sent to customer.",
-  },
-  {
-    id: "4",
-    time: "Today • 2:02 PM",
-    source: "Pricing engine",
-    type: "Price calc",
-    quoteNo: "2025-00121",
-    status: "Error",
-    details: "Material not found in active price book (sample error).",
-  },
-  {
-    id: "5",
-    time: "Yesterday • 5:18 PM",
-    source: "HubSpot webhook",
-    type: "Ping",
-    status: "OK",
-    details: "Test webhook received and acknowledged.",
-  },
-];
+function chipForLevel(levelRaw: string | null | undefined) {
+  const level = (levelRaw || "info").toLowerCase();
+  if (level === "error") {
+    return {
+      label: "ERROR",
+      className:
+        "inline-flex items-center rounded-full border border-rose-500/40 bg-rose-500/15 px-2 py-0.5 text-[10px] text-rose-300",
+    };
+  }
+  if (level === "warn" || level === "warning") {
+    return {
+      label: "WARN",
+      className:
+        "inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-200",
+    };
+  }
+  return {
+    label: "INFO",
+    className:
+      "inline-flex items-center rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-200",
+  };
+}

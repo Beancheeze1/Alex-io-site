@@ -2,17 +2,9 @@
 //
 // Admin home dashboard (read-only navigation hub).
 // Path A / Straight Path safe.
-// - NEW-ish: System Health row now calls /api/health/* endpoints.
+// - System Health row uses /api/health/* endpoints.
+// - HubSpot + Email (Graph) cards each have a "Run deep check" button.
 // - Still read-only: no writes, no changes to parsing/pricing/layout behavior.
-//
-// Sections:
-//  - Header: "Alex-IO Admin" + subtitle
-//  - System health row: Database / HubSpot / Email (Graph)
-//  - Main tiles: links to key admin areas
-//
-// Style:
-//  - Dark slate background, sky accents
-//  - Simple, clean cards aligned with existing brand tone
 
 "use client";
 
@@ -100,7 +92,7 @@ export default function AdminHomePage() {
               flavor="db"
             />
 
-            {/* HubSpot card */}
+            {/* HubSpot card (with deep check) */}
             <HealthCard
               title="HubSpot"
               description="Conversations & CRM integration driving inbound quote requests."
@@ -108,7 +100,7 @@ export default function AdminHomePage() {
               flavor="hubspot"
             />
 
-            {/* Email (Graph) card */}
+            {/* Email (Graph) card (with deep check) */}
             <HealthCard
               title="Email (Graph)"
               description="Outbound quote replies from the dedicated alex-io.com mailbox."
@@ -180,6 +172,10 @@ type HealthCardProps = {
 function HealthCard({ title, description, flavor, state }: HealthCardProps) {
   const { data, loading, error } = state;
 
+  const [deepLoading, setDeepLoading] = React.useState(false);
+  const [deepResult, setDeepResult] = React.useState<string | null>(null);
+  const [deepError, setDeepError] = React.useState<string | null>(null);
+
   let statusLabel = "Unknown";
   let statusClass =
     "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-slate-700/40 text-slate-200 border border-slate-600/60";
@@ -195,7 +191,6 @@ function HealthCard({ title, description, flavor, state }: HealthCardProps) {
       "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-rose-500/15 text-rose-300 border border-rose-500/40";
     detailText = error;
   } else if (data) {
-    // Base label from status
     if (flavor === "db") {
       if (data.ok && data.status === "up") {
         statusLabel = "Up";
@@ -237,6 +232,45 @@ function HealthCard({ title, description, flavor, state }: HealthCardProps) {
     }
   }
 
+  async function runDeepCheck() {
+    // DB has no deep check button.
+    if (flavor === "db") return;
+
+    setDeepLoading(true);
+    setDeepResult(null);
+    setDeepError(null);
+
+    const endpoint =
+      flavor === "hubspot"
+        ? "/api/health/hubspot/deep"
+        : "/api/health/email/deep";
+
+    try {
+      const res = await fetch(endpoint, { cache: "no-store" });
+      const json: any = await res.json().catch(() => null);
+
+      if (res.ok && json && json.ok) {
+        setDeepResult(
+          json.detail ||
+            "Deep check OK – integration responded successfully.",
+        );
+        setDeepError(null);
+      } else {
+        setDeepResult(null);
+        setDeepError(
+          (json && (json.message || json.error)) ||
+            "Deep check failed. See logs for details.",
+        );
+      }
+    } catch (err) {
+      console.error(`Deep health check failed for ${flavor}:`, err);
+      setDeepResult(null);
+      setDeepError("Deep check failed due to an unexpected error.");
+    } finally {
+      setDeepLoading(false);
+    }
+  }
+
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -249,6 +283,26 @@ function HealthCard({ title, description, flavor, state }: HealthCardProps) {
       <div className="mt-2 text-[11px] text-slate-400">{detailText}</div>
       {extraLine && (
         <div className="mt-1 text-[11px] text-slate-500">{extraLine}</div>
+      )}
+
+      {/* Deep check UI for HubSpot + Graph */}
+      {(flavor === "hubspot" || flavor === "email") && (
+        <div className="mt-3 border-t border-slate-800 pt-2">
+          <button
+            type="button"
+            onClick={runDeepCheck}
+            disabled={deepLoading}
+            className="inline-flex items-center rounded-full border border-sky-500/60 bg-sky-600/20 px-3 py-1 text-[11px] font-medium text-sky-200 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deepLoading ? "Running deep check…" : "Run deep check"}
+          </button>
+          {deepResult && !deepError && (
+            <p className="mt-2 text-[11px] text-emerald-300">{deepResult}</p>
+          )}
+          {deepError && (
+            <p className="mt-2 text-[11px] text-rose-300">{deepError}</p>
+          )}
+        </div>
       )}
     </div>
   );
