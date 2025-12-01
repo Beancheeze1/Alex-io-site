@@ -1,124 +1,85 @@
 // app/api/admin/logs/route.ts
 //
-// Admin logs API (read-only).
-// Path A / Straight Path safe:
-//  - NEW FILE ONLY.
-//  - Attempts to read from an event_logs table.
-//  - On any DB error (including table not existing), falls back to a
-//    synthetic "backend not wired" log entry so the UI still works.
+// Logs & events admin API.
+// URL: /api/admin/logs
 //
-// Expected (optional) DB table shape:
+// Path A safe:
+//  - Read-only SELECT from event_logs.
+//  - On error / missing table, returns the same-style synthetic fallback
+//    entry your admin/logs page already understands.
 //
-//   create table event_logs (
-//     id          serial primary key,
-//     created_at  timestamptz not null default now(),
-//     source      text,
-//     level       text,          -- e.g. info, warn, error
-//     event_type  text,          -- e.g. webhook, health, email
-//     status_code integer,
-//     message     text
-//   );
-//
-// If this table isn't present yet, the fallback path will be used.
+// Does NOT change any quoting, pricing, or advisor logic.
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-type DbLogRow = {
+type EventLogRow = {
   id: number;
   created_at: string;
-  source: string | null;
   level: string | null;
-  event_type: string | null;
-  status_code: number | null;
-  message: string | null;
+  source: string | null;
+  summary: string | null;
+  detail: string | null;
 };
 
-type LogEntry = {
-  id: number | string;
-  created_at: string;
-  level: string;
-  source: string;
-  summary: string;
-  detail?: string;
-};
+function ok(extra: Record<string, any> = {}, status = 200) {
+  return NextResponse.json({ ok: true, ...extra }, { status });
+}
 
-export async function GET() {
+export async function GET(_req: NextRequest) {
   try {
-    const rows = await q<DbLogRow>(`
-      select
+    const rows = await q<EventLogRow>(
+      `
+      SELECT
         id,
         created_at,
-        source,
-        level,
-        event_type,
-        status_code,
-        message
-      from event_logs
-      order by created_at desc
-      limit 50;
-    `);
-
-    const logs: LogEntry[] = rows.map((row) => {
-      const level = (row.level || "info").toLowerCase();
-      const source =
-        row.source ||
-        (row.event_type ? row.event_type.toUpperCase() : "SYSTEM");
-
-      const statusSuffix =
-        row.status_code != null ? ` [${row.status_code}]` : "";
-
-      const summary =
-        row.message && row.message.length > 120
-          ? row.message.slice(0, 120) + "…"
-          : row.message || "Log entry";
-
-      return {
-        id: row.id,
-        created_at: row.created_at,
         level,
         source,
-        summary: summary + statusSuffix,
-        detail: row.message || undefined,
-      };
+        summary,
+        detail
+      FROM event_logs
+      ORDER BY created_at DESC, id DESC
+      LIMIT 50;
+      `,
+      [],
+    );
+
+    const logs = rows.map((r) => ({
+      id: r.id,
+      created_at: r.created_at,
+      level: (r.level || "info").toLowerCase(),
+      source: r.source || "SYSTEM",
+      summary: r.summary || "",
+      detail: r.detail || "",
+    }));
+
+    return ok({
+      source: "db",
+      logs,
     });
-
-    return NextResponse.json(
-      {
-        ok: true,
-        source: "db",
-        logs,
-      },
-      { status: 200 },
-    );
   } catch (err: any) {
-    console.error("GET /api/admin/logs failed – using fallback:", err);
+    console.error("admin logs GET error, using fallback:", err);
 
-    const nowIso = new Date().toISOString();
-    const logs: LogEntry[] = [
-      {
-        id: "fallback-1",
-        created_at: nowIso,
-        level: "info",
-        source: "SYSTEM",
-        summary:
-          "Logs backend not wired yet – event_logs table missing or query failed.",
-        detail:
-          "Once an event_logs table is in place, this endpoint will start returning real webhook/error events. Current error: " +
-          String(err?.message ?? err),
-      },
-    ];
+    // Preserve the existing "fallback" behavior so the UI keeps working
+    // even if the table isn't ready yet.
+    const now = new Date().toISOString();
 
-    return NextResponse.json(
-      {
-        ok: true,
-        source: "fallback",
-        logs,
-      },
-      { status: 200 },
-    );
+    return ok({
+      source: "fallback",
+      logs: [
+        {
+          id: "fallback-1",
+          created_at: now,
+          level: "info",
+          source: "SYSTEM",
+          summary:
+            "event_logs table not found or not ready yet. Once created, this view will show real webhook / error events.",
+          detail: String(err?.message || err),
+        },
+      ],
+    });
   }
 }

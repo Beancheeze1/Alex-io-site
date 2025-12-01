@@ -1,15 +1,124 @@
 // app/admin/pricing/page.tsx
 //
 // Pricing / price books admin landing page.
-// Path A / Straight Path safe: UI-only, read-only.
-// - No DB calls, no writes.
-// - Static sample data + layout for price books & sandbox.
+// Now wired to /api/admin/price-books for live data.
 //
-// NOTE: This does NOT touch any live pricing math. Purely a shell.
+// Path A / Straight Path safe:
+//  - Read-only, admin-only.
+//  - Does NOT change any pricing math or live quote behavior.
 
+"use client";
+
+import * as React from "react";
 import Link from "next/link";
 
+type PriceBook = {
+  id: number;
+  name: string;
+  scope: string;
+  isActive: boolean;
+  breaks: string;
+  effective: string;
+};
+
+type PriceBooksResponse = {
+  ok: boolean;
+  priceBooks: {
+    id: number;
+    name: string;
+    version: string;
+    currency: string;
+    created_at: string;
+    notes: string | null;
+    isActive: boolean;
+    scope: string;
+    breaks: string;
+  }[];
+  stats: {
+    total: number;
+    active: number;
+    archived: number;
+  };
+};
+
 export default function AdminPricingPage() {
+  const [priceBooks, setPriceBooks] = React.useState<PriceBook[]>([]);
+  const [stats, setStats] = React.useState<
+    PriceBooksResponse["stats"] | null
+  >(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let active = true;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const res = await fetch("/api/admin/price-books", {
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const json: PriceBooksResponse = await res.json();
+
+        if (!active) return;
+
+        if (!json.ok) {
+          throw new Error("API returned ok=false");
+        }
+
+        const mapped: PriceBook[] = (json.priceBooks || []).map((pb) => {
+          const created = pb.created_at
+            ? new Date(pb.created_at)
+            : null;
+
+          const effective =
+            created && !Number.isNaN(created.getTime())
+              ? created.toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })
+              : "—";
+
+          return {
+            id: pb.id,
+            name: pb.name,
+            scope: pb.scope,
+            isActive: pb.isActive,
+            breaks: pb.breaks,
+            effective,
+          };
+        });
+
+        setPriceBooks(mapped);
+        setStats(json.stats || null);
+      } catch (err: any) {
+        console.error("Admin pricing load error:", err);
+        if (!active) return;
+        setError(String(err?.message || "Unable to load price books."));
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    load();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const hasBooks = priceBooks.length > 0;
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-5xl px-4 py-8 lg:py-10">
@@ -35,31 +144,65 @@ export default function AdminPricingPage() {
 
         {/* Summary row */}
         <section className="mb-6 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          {/* Price books summary (sample) */}
+          {/* Price books summary */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
             <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Price books (sample)
+              Price books
             </div>
-            <ul className="space-y-1 text-xs text-slate-300">
-              <li>
-                <span className="font-semibold text-slate-100">3</span> sample
-                price books configured.
-              </li>
-              <li>
-                <span className="font-semibold text-slate-100">2</span> active
-                for quoting;{" "}
-                <span className="font-semibold text-slate-100">1</span> legacy /
-                archived.
-              </li>
-              <li>
-                Breaks by order volume and density handled inside the pricing
-                engine (not touched here).
-              </li>
-            </ul>
-            <p className="mt-3 text-[11px] text-slate-500">
-              Counts above are static placeholders to illustrate how this page
-              will summarize pricing configuration.
-            </p>
+
+            {loading && !error && (
+              <p className="text-xs text-slate-300">
+                Loading price book summary…
+              </p>
+            )}
+
+            {error && (
+              <p className="text-xs text-rose-300">
+                Error loading price books:{" "}
+                <span className="font-mono text-[11px]">{error}</span>
+              </p>
+            )}
+
+            {!loading && !error && stats && (
+              <>
+                <ul className="space-y-1 text-xs text-slate-300">
+                  <li>
+                    <span className="font-semibold text-slate-100">
+                      {stats.total}
+                    </span>{" "}
+                    price book{stats.total === 1 ? "" : "s"} configured.
+                  </li>
+                  <li>
+                    <span className="font-semibold text-slate-100">
+                      {stats.active}
+                    </span>{" "}
+                    active for quoting;{" "}
+                    <span className="font-semibold text-slate-100">
+                      {stats.archived}
+                    </span>{" "}
+                    archived.
+                  </li>
+                  <li>
+                    Breaks by order volume and density remain handled inside the
+                    pricing engine (not touched here).
+                  </li>
+                </ul>
+                <p className="mt-3 text-[11px] text-slate-500">
+                  Counts above are pulled directly from{" "}
+                  <span className="font-mono text-sky-300">
+                    price_books
+                  </span>
+                  . Actual price-per-cubic-inch math stays in the existing
+                  engine.
+                </p>
+              </>
+            )}
+
+            {!loading && !error && !stats && (
+              <p className="text-xs text-slate-300">
+                No price book summary is available yet.
+              </p>
+            )}
           </div>
 
           {/* Sandbox notes */}
@@ -86,16 +229,17 @@ export default function AdminPricingPage() {
           </div>
         </section>
 
-        {/* Price books table (sample) */}
+        {/* Price books table */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                Price books (sample rows)
+                Price books
               </div>
               <p className="mt-1 text-xs text-slate-300">
-                Static sample entries showing how price books and their scopes
-                will be displayed.
+                Live entries showing how price books and their scopes are
+                displayed. This is metadata only; pricing calculations stay in
+                the engine.
               </p>
             </div>
             <div className="text-[11px] text-slate-500">
@@ -117,42 +261,78 @@ export default function AdminPricingPage() {
                 </tr>
               </thead>
               <tbody>
-                {samplePriceBooks.map((pb) => (
-                  <tr
-                    key={pb.name}
-                    className="border-t border-slate-800/60 hover:bg-slate-900/70"
-                  >
-                    <td className="px-3 py-2 text-xs text-slate-100">
-                      {pb.name}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-200">
-                      {pb.scope}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
-                          pb.isActive
-                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
-                            : "bg-slate-500/20 text-slate-200 border border-slate-500/40"
-                        }`}
-                      >
-                        {pb.isActive ? "Active" : "Archived"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-200">
-                      {pb.breaks}
-                    </td>
-                    <td className="px-3 py-2 text-right text-[11px] text-slate-400">
-                      {pb.effective}
+                {loading && !error && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-xs text-slate-400"
+                    >
+                      Loading price books…
                     </td>
                   </tr>
-                ))}
+                )}
+
+                {!loading && error && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-xs text-rose-300"
+                    >
+                      Unable to load price books.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading && !error && !hasBooks && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-3 py-4 text-center text-xs text-slate-400"
+                    >
+                      No price books configured yet.
+                    </td>
+                  </tr>
+                )}
+
+                {!loading &&
+                  !error &&
+                  hasBooks &&
+                  priceBooks.map((pb) => (
+                    <tr
+                      key={pb.id}
+                      className="border-t border-slate-800/60 hover:bg-slate-900/70"
+                    >
+                      <td className="px-3 py-2 text-xs text-slate-100">
+                        {pb.name}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-200">
+                        {pb.scope}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
+                            pb.isActive
+                              ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
+                              : "bg-slate-500/20 text-slate-200 border border-slate-500/40"
+                          }`}
+                        >
+                          {pb.isActive ? "Active" : "Archived"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-200">
+                        {pb.breaks}
+                      </td>
+                      <td className="px-3 py-2 text-right text-[11px] text-slate-400">
+                        {pb.effective}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
 
           <p className="mt-3 text-[11px] text-slate-500">
-            These rows represent how we&apos;ll surface price book metadata.
+            These rows represent how we&apos;re surfacing price book metadata.
             Actual price-per-cubic-inch calculations stay in the existing
             pricing engine.
           </p>
@@ -164,35 +344,3 @@ export default function AdminPricingPage() {
     </main>
   );
 }
-
-type SamplePriceBook = {
-  name: string;
-  scope: string;
-  isActive: boolean;
-  breaks: string;
-  effective: string;
-};
-
-const samplePriceBooks: SamplePriceBook[] = [
-  {
-    name: "Standard Foam Price Book",
-    scope: "PE, EPE, PU — standard jobs",
-    isActive: true,
-    breaks: "≤ 500 pcs, 501–2,500, 2,501+",
-    effective: "Jan 1, 2025",
-  },
-  {
-    name: "Medical / Cleanroom",
-    scope: "PE & PU — medical accounts",
-    isActive: true,
-    breaks: "≤ 250 pcs, 251–1,000, 1,001+",
-    effective: "Mar 15, 2025",
-  },
-  {
-    name: "Legacy 2023 Price Book",
-    scope: "Archived – historical quotes only",
-    isActive: false,
-    breaks: "Mixed legacy breaks",
-    effective: "Jan 1, 2023",
-  },
-];
