@@ -600,6 +600,9 @@ export default function LayoutPage({
     );
   }
 
+
+
+
   return (
     <LayoutEditorHost
       quoteNo={quoteNo}
@@ -615,6 +618,17 @@ export default function LayoutPage({
     />
   );
 }
+
+const CAVITY_COLORS = [
+  "#38bdf8",
+  "#a855f7",
+  "#f97316",
+  "#22c55e",
+  "#eab308",
+  "#ec4899",
+];
+
+
 
 /* ---------- Layout editor host (main body) ---------- */
 
@@ -1114,7 +1128,10 @@ function LayoutEditorHost(props: {
                   className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
                   <div className="font-semibold text-slate-50 flex items-center gap-2">
-                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-md border border-slate-400/70 bg-slate-900/80" />
+                        <span
+      className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80"
+    />
+
                     Rounded rectangle
                   </div>
                   <div className="text-[11px] text-slate-400">
@@ -1504,57 +1521,61 @@ function LayoutEditorHost(props: {
                     </div>
                   ) : (
                     <ul className="space-y-1.5 mb-3 max-h-40 overflow-auto">
-                      {cavities.map((cav) => {
-                        const isActive = cav.id === selectedId;
-                        return (
-                          <li
-                            key={cav.id}
-                            className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
-                              isActive
-                                ? "bg-slate-800/80"
-                                : "bg-slate-900/40 hover:bg-slate-800/50"
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              onClick={() =>
-                                isActive
-                                  ? selectCavity(null)
-                                  : selectCavity(cav.id)
-                              }
-                              className="flex-1 flex items-center gap-2 text-xs text-left"
-                            >
-                              <span
-                                className={[
-                                  "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold",
-                                  isActive
-                                    ? "bg-sky-500 text-slate-950"
-                                    : "bg-sky-900/70 text-sky-100",
-                                ].join(" ")}
-                              >
-                                {cav.id.replace("cav-", "C")}
-                              </span>
-                              <span
-                                className={
-                                  isActive
-                                    ? "text-slate-50 font-medium"
-                                    : "text-slate-200"
-                                }
-                              >
-                                {cav.label}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteCavity(cav.id)}
-                              className="text-[11px] text-slate-500 hover:text-red-400"
-                              title="Delete cavity"
-                            >
-                              ✕
-                            </button>
-                          </li>
-                        );
-                      })}
+                      {cavities.map((cav, cavIndex) => {
+  const isActive = cav.id === selectedId;
+
+  const color =
+    CAVITY_COLORS[cavIndex % CAVITY_COLORS.length];
+  const inactiveBg = `${color}33`; // same color, light alpha
+  const chipStyle = {
+    backgroundColor: isActive ? color : inactiveBg,
+    color: isActive ? "#020617" : "#e5e7eb",
+  } as React.CSSProperties;
+
+  return (
+    <li
+      key={cav.id}
+      className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
+        isActive
+          ? "bg-slate-800/80"
+          : "bg-slate-900/40 hover:bg-slate-800/50"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={() =>
+          isActive ? selectCavity(null) : selectCavity(cav.id)
+        }
+        className="flex-1 flex items-center gap-2 text-xs text-left"
+      >
+        <span
+          style={chipStyle}
+          className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
+        >
+          {cav.id.replace("cav-", "C")}
+        </span>
+        <span
+          className={
+            isActive
+              ? "text-slate-50 font-medium"
+              : "text-slate-200"
+          }
+        >
+          {cav.label}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => deleteCavity(cav.id)}
+        className="text-[11px] text-slate-500 hover:text-red-400"
+        title="Delete cavity"
+      >
+        ✕
+      </button>
+    </li>
+  );
+})}
+
                     </ul>
                   )}
 

@@ -42,7 +42,6 @@ const CANVAS_WIDTH = 1200;
 const CANVAS_HEIGHT = 620;
 
 // Reserved band at the top of the SVG for auto notes (QUOTE / NOT TO SCALE / BLOCK / MATERIAL)
-// The foam block + cavities are always drawn below this Y, so notes never overlap the block.
 const HEADER_BAND = 80;
 
 const PADDING = 32;
@@ -50,6 +49,16 @@ const WALL_IN = 0.5;
 // Snap for movement / resize = 1/16"
 const SNAP_IN = 0.0625;
 const MIN_GAP_IN = 0.5;
+
+// Color palette used for cavity outlines + list chips (fills stay gray)
+const CAVITY_COLORS = [
+  "#38bdf8", // sky
+  "#a855f7", // purple
+  "#f97316", // orange
+  "#22c55e", // green
+  "#eab308", // yellow
+  "#ec4899", // pink
+];
 
 export default function InteractiveCanvas({
   layout,
@@ -66,9 +75,6 @@ export default function InteractiveCanvas({
 
   // ==== Block scaling / centering (with zoom) ====
   const innerW = CANVAS_WIDTH - PADDING * 2;
-
-  // For vertical space, we reserve HEADER_BAND at the top for the legend,
-  // and use the remaining space for the foam block.
   const innerH = CANVAS_HEIGHT - PADDING * 2 - HEADER_BAND;
 
   const sx = innerW / (block.lengthIn || 1);
@@ -81,9 +87,7 @@ export default function InteractiveCanvas({
     height: block.widthIn * scale,
   };
 
-  // Horizontally center the block within the canvas.
-  // Vertically, center it within the region BELOW the header band so that
-  // the block's top is always >= HEADER_BAND and never collides with the notes.
+  // Center the block below the header band
   const blockOffset = {
     x: (CANVAS_WIDTH - blockPx.width) / 2,
     y: HEADER_BAND + (CANVAS_HEIGHT - HEADER_BAND - blockPx.height) / 2,
@@ -263,7 +267,6 @@ export default function InteractiveCanvas({
           ref={svgRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
-          // Keep CSS width tied to the internal canvas size so drag math stays correct
           className="block"
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -278,7 +281,7 @@ export default function InteractiveCanvas({
             fill="#020617" // slate-950 style
           />
 
-          {/* block */}
+          {/* block: light gray on dark background */}
           <rect
             x={blockOffset.x}
             y={blockOffset.y}
@@ -286,12 +289,12 @@ export default function InteractiveCanvas({
             height={blockPx.height}
             rx={0}
             ry={0}
-            fill="#020617"
-            stroke="#334155"
+            fill="#e5e7eb"        // light gray block
+            stroke="#94a3b8"     // slate-ish outline
             strokeWidth={2}
           />
 
-          {/* 0.5" grid (now darker lines on dark bg) */}
+          {/* 0.5" grid (slightly darker lines than block) */}
           {drawInchGrid(block, blockPx, blockOffset)}
 
           {/* 0.5" inner wall (dashed) */}
@@ -301,7 +304,8 @@ export default function InteractiveCanvas({
               (innerWall.leftIn / block.lengthIn) * blockPx.width
             }
             y={
-              blockOffset.y + (innerWall.topIn / block.widthIn) * blockPx.height
+              blockOffset.y +
+              (innerWall.topIn / block.widthIn) * blockPx.height
             }
             width={
               blockPx.width *
@@ -353,8 +357,16 @@ export default function InteractiveCanvas({
             const handleX = cavX + cavWidthPx - handleSize / 2;
             const handleY = cavY + cavHeightPx - handleSize / 2;
 
-            const cavFill = isSelected ? "#1e293b" : "#020617";
-            const cavStroke = isSelected ? "#38bdf8" : "#64748b";
+            // Per-cavity color (for outline + handle, not fill)
+            const index = cavities.findIndex((c) => c.id === cavity.id);
+            const color =
+              CAVITY_COLORS[
+                (index >= 0 ? index : 0) % CAVITY_COLORS.length
+              ];
+
+            const fillColor = isSelected ? "#e5e7eb" : "#d1d5db"; // slightly darker gray than block
+            const strokeColor = color;
+            const strokeWidth = isSelected ? 2 : 1;
 
             return (
               <g key={cavity.id}>
@@ -363,9 +375,9 @@ export default function InteractiveCanvas({
                     cx={cavX + cavWidthPx / 2}
                     cy={cavY + cavHeightPx / 2}
                     r={Math.min(cavWidthPx, cavHeightPx) / 2}
-                    fill={cavFill}
-                    stroke={cavStroke}
-                    strokeWidth={isSelected ? 2 : 1}
+                    fill={fillColor}
+                    stroke={strokeColor}
+                    strokeWidth={strokeWidth}
                     onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
                   />
                 ) : (
@@ -376,9 +388,9 @@ export default function InteractiveCanvas({
                     height={cavHeightPx}
                     rx={cornerRadiusPx}
                     ry={cornerRadiusPx}
-                    fill={cavFill}
-                    stroke={cavStroke}
-                    strokeWidth={isSelected ? 2 : 1}
+                    fill={fillColor}
+                    stroke={strokeColor}
+                    strokeWidth={strokeWidth}
                     onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
                   />
                 )}
@@ -389,13 +401,13 @@ export default function InteractiveCanvas({
                   y={cavY + cavHeightPx / 2}
                   textAnchor="middle"
                   dominantBaseline="central"
-                  className="fill-slate-100 text-[9px]"
+                  className="fill-slate-800 text-[9px]"
                   onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
                 >
                   {formatCavityLabel(cavity)}
                 </text>
 
-                {/* resize handle */}
+                {/* resize handle (color-coded) */}
                 <rect
                   x={handleX}
                   y={handleY}
@@ -403,7 +415,7 @@ export default function InteractiveCanvas({
                   height={handleSize}
                   rx={2}
                   ry={2}
-                  fill={isSelected ? "#38bdf8" : "#1f2937"}
+                  fill={color}
                   stroke="#e5e7eb"
                   strokeWidth={1}
                   onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
@@ -469,7 +481,7 @@ function violatesMinGap(
   return false;
 }
 
-// 0.5" grid inside block
+// 0.5" grid inside block (slightly darker than block fill)
 function drawInchGrid(
   block: LayoutModel["block"],
   blockPx: { width: number; height: number },
@@ -485,7 +497,7 @@ function drawInchGrid(
         y1={blockOffset.y}
         x2={x}
         y2={blockOffset.y + blockPx.height}
-        stroke="#1e293b"
+        stroke="#cbd5f5"
         strokeWidth={0.5}
       />,
     );
@@ -501,7 +513,7 @@ function drawInchGrid(
         y1={y}
         x2={blockOffset.x + blockPx.width}
         y2={y}
-        stroke="#1e293b"
+        stroke="#cbd5f5"
         strokeWidth={0.5}
       />,
     );
@@ -565,17 +577,23 @@ function computeSpacing(
   const topIn = cavTopIn - WALL_IN;
   const bottomIn = block.widthIn - WALL_IN - cavBottomIn;
 
-  const cavLeftPx = blockOffset.x + (cavLeftIn / block.lengthIn) * blockPx.width;
+  const cavLeftPx =
+    blockOffset.x + (cavLeftIn / block.lengthIn) * blockPx.width;
   const cavRightPx =
     blockOffset.x + (cavRightIn / block.lengthIn) * blockPx.width;
-  const cavTopPx = blockOffset.y + (cavTopIn / block.widthIn) * blockPx.height;
+  const cavTopPx =
+    blockOffset.y + (cavTopIn / block.widthIn) * blockPx.height;
   const cavBottomPx =
     blockOffset.y + (cavBottomIn / block.widthIn) * blockPx.height;
 
-  const leftWallPx = blockOffset.x + (WALL_IN / block.lengthIn) * blockPx.width;
+  const leftWallPx =
+    blockOffset.x + (WALL_IN / block.lengthIn) * blockPx.width;
   const rightWallPx =
-    blockOffset.x + blockPx.width - (WALL_IN / block.lengthIn) * blockPx.width;
-  const topWallPx = blockOffset.y + (WALL_IN / block.widthIn) * blockPx.height;
+    blockOffset.x +
+    blockPx.width -
+    (WALL_IN / block.lengthIn) * blockPx.width;
+  const topWallPx =
+    blockOffset.y + (WALL_IN / block.widthIn) * blockPx.height;
   const bottomWallPx =
     blockOffset.y +
     blockPx.height -
@@ -594,10 +612,12 @@ function computeSpacing(
     const oRightIn = oLeftIn + other.lengthIn;
     const oBottomIn = oTopIn + other.widthIn;
 
-    const oLeftPx = blockOffset.x + (oLeftIn / block.lengthIn) * blockPx.width;
+    const oLeftPx =
+      blockOffset.x + (oLeftIn / block.lengthIn) * blockPx.width;
     const oRightPx =
       blockOffset.x + (oRightIn / block.lengthIn) * blockPx.width;
-    const oTopPx = blockOffset.y + (oTopIn / block.widthIn) * blockPx.height;
+    const oTopPx =
+      blockOffset.y + (oTopIn / block.widthIn) * blockPx.height;
     const oBottomPx =
       blockOffset.y + (oBottomIn / block.widthIn) * blockPx.height;
 
@@ -625,7 +645,8 @@ function computeSpacing(
           toPx,
           yPx:
             (Math.max(cavTopPx, oTopPx) +
-              Math.min(cavBottomPx, oBottomPx)) / 2,
+              Math.min(cavBottomPx, oBottomPx)) /
+            2,
           gapIn,
         };
       }
@@ -655,7 +676,8 @@ function computeSpacing(
           toPx,
           xPx:
             (Math.max(cavLeftPx, oLeftPx) +
-              Math.min(cavRightPx, oRightPx)) / 2,
+              Math.min(cavRightPx, oRightPx)) /
+            2,
           gapIn,
         };
       }
