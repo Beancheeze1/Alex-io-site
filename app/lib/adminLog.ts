@@ -1,48 +1,80 @@
 // app/lib/adminLog.ts
 //
-// Small helper for writing to event_logs in a Path A safe way.
-// - Swallows its own errors (logging must never break main flows).
-// - Intended for use by admin-only / diagnostic routes and internal
-//   server-side code (webhooks, orchestrator, Graph send, etc.).
+// Path A / Straight Path safe logging helper.
 //
-// Usage (server-side only):
-//   await safeLogEvent({ level: "info", source: "WEBHOOK", summary: "..." });
+// - Writes to event_logs using the same q() DB helper as /api/admin/logs.
+// - NEVER throws: errors are caught and only logged to console.
+// - Minimal, generic shape so it can be used from webhook/orchestrate/Graph
+//   without pulling in any quoting or pricing logic.
 
 import { q } from "@/lib/db";
 
-export type LogLevel = "info" | "warn" | "error";
+export type LogLevel = "info" | "warn" | "warning" | "error";
 
-export type LogSource =
-  | "SYSTEM"
-  | "WEBHOOK"
-  | "ORCHESTRATE"
-  | "GRAPH"
-  | "ADMIN"
-  | string;
-
-type LogOptions = {
-  level?: LogLevel;
-  source?: LogSource;
+export type SafeLogEventInput = {
+  level?: LogLevel | string | null;
+  source?: string | null;
   summary: string;
-  detail?: string | null;
+  detail?: unknown;
 };
 
-/**
- * Path A safe logger:
- *  - No throws (ever).
- *  - Best effort insert into event_logs.
- */
-export async function safeLogEvent(opts: LogOptions): Promise<void> {
-  const { summary } = opts;
-  if (!summary || !summary.trim()) {
-    // Nothing to log; silently ignore.
-    return;
+function normalizeLevel(raw: LogLevel | string | null | undefined): string {
+  const level = (raw || "info").toString().toLowerCase();
+  if (level === "warning") return "warn";
+  if (level !== "info" && level !== "warn" && level !== "error") {
+    return "info";
+  }
+  return level;
+}
+
+function normalizeSource(raw: string | null | undefined): string {
+  const src = (raw || "SYSTEM").toString();
+  // Keep it short-ish so it fits nicely in the UI.
+  return src.length > 64 ? src.slice(0, 64) : src;
+}
+
+function toDetailText(detail: unknown): string | null {
+  if (detail == null) return null;
+
+  if (typeof detail === "string") {
+    return detail;
   }
 
-  const level: LogLevel = (opts.level || "info") as LogLevel;
-  const source: string = (opts.source || "SYSTEM").toString();
-  const detail: string | null =
-    opts.detail != null ? String(opts.detail) : null;
+  try {
+    return JSON.stringify(detail, null, 2);
+  } catch {
+    try {
+      // Last resort: toString
+      // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+      return String(detail);
+    } catch {
+      return "Unserializable detail payload";
+    }
+  }
+}
+
+/**
+ * Safe, non-throwing log writer.
+ *
+ * Usage:
+ *   await safeLogEvent({
+ *     level: "info",
+ *     source: "hubspot.webhook",
+ *     summary: "Received HubSpot webhook",
+ *     detail: { headers, bodyPreview },
+ *   });
+ */
+export async function safeLogEvent(input: SafeLogEventInput): Promise<void> {
+  const level = normalizeLevel(input.level);
+  const source = normalizeSource(input.source);
+  const summary = input.summary || "";
+
+  const detailText = toDetailText(input.detail);
+
+  // Hard stop: don't log completely empty summaries.
+  if (!summary.trim()) {
+    return;
+  }
 
   try {
     await q(
@@ -50,10 +82,10 @@ export async function safeLogEvent(opts: LogOptions): Promise<void> {
       INSERT INTO event_logs (level, source, summary, detail)
       VALUES ($1, $2, $3, $4);
       `,
-      [level, source, summary.trim(), detail],
+      [level, source, summary, detailText],
     );
-  } catch (err: any) {
-    // Logging must never break the main flow.
-    console.error("safeLogEvent insert failed (ignored):", err);
+  } catch (err) {
+    // Never throw – logging is best-effort only.
+    console.error("safeLogEvent failed (non-fatal):", err);
   }
 }
