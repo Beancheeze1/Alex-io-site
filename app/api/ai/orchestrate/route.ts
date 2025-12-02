@@ -214,23 +214,13 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     // We are NOT renaming families; we’re just making sure we only ever
     // pull from the correct bucket.
     let familyFilter = "";
-
-    // Handle real-world phrases like:
-    // "1.7# black pe", "pe foam", "Polyethylene", "EPE Type III",
-    // "expanded polyethylene", etc.
-    const hasEpe =
-      materialToken.includes("expanded polyethylene") ||
-      /\bepe\b/.test(materialToken);
-
-    const hasPe =
-      /\bpe\b/.test(materialToken) ||
-      materialToken.includes("pe foam") ||
-      materialToken.includes("polyethylene");
-
-    if (hasEpe) {
-      familyFilter = "AND material_family = 'Expanded Polyethylene'";
-    } else if (hasPe) {
+    if (materialToken === "pe" || materialToken === "polyethylene") {
       familyFilter = "AND material_family = 'Polyethylene'";
+    } else if (
+      materialToken === "epe" ||
+      materialToken === "expanded polyethylene"
+    ) {
+      familyFilter = "AND material_family = 'Expanded Polyethylene'";
     }
 
     // 1) First pass: LIKE + density (what we had before, but with is_active)
@@ -322,7 +312,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     return f;
   }
 }
-
 
 
 
