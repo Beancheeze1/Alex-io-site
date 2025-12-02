@@ -199,49 +199,31 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
   // ---------- Material / family labels (email + viewer alignment) ----------
 
-  // Pull a foam family from: parsed specs -> pricing.raw.material_family -> DB name.
-  const rawFamily =
-    (specs.foam_family && specs.foam_family.trim()) ||
-    (pricing.raw?.material_family &&
-      String(pricing.raw.material_family).trim()) ||
-    (material.name && material.name.trim()) ||
-    "";
+  // IMPORTANT: We do NOT guess or normalize PE/EPE here.
+  // We simply surface the material_family string coming from upstream/DB.
+  const rawFamilyFromPricing =
+    pricing.raw?.material_family != null
+      ? String(pricing.raw.material_family).trim()
+      : "";
+  const rawFamilyFromSpecs =
+    specs.foam_family != null
+      ? String(specs.foam_family).trim()
+      : "";
 
-  let foamFamily = rawFamily;
-  const lowerFamily = rawFamily.toLowerCase();
-
-  // FIRST: treat EPE / Expanded Polyethylene as its own family.
-  if (
-    lowerFamily.startsWith("epe") ||
-    lowerFamily.includes("expanded polyethylene")
-  ) {
-    foamFamily = "Expanded Polyethylene";
-  }
-  // THEN: normalize plain PE / Polyethylene variants.
-  else if (
-    lowerFamily === "pe" ||
-    lowerFamily === "pe foam" ||
-    lowerFamily === "polyethylene" ||
-    lowerFamily === "polyethylene foam"
-  ) {
-    foamFamily = "Polyethylene";
-  }
-
-  if (!foamFamily) {
-    foamFamily = "—";
-  }
+  // DB truth: prefer material_family from pricing.raw, then specs.foam_family.
+  const foamFamily =
+    rawFamilyFromPricing || rawFamilyFromSpecs || "";
 
   // Grade / specific material name from DB (e.g. "EPE Type III").
   const gradeName =
-    (material.name && material.name.trim()) ||
-    (foamFamily !== "—" ? foamFamily : "");
+    (material.name && material.name.trim()) || "";
 
-  // Specs card: family ("Polyethylene", "Expanded Polyethylene", etc.)
+  // Specs card: show the foam family if present; otherwise fall back to grade.
   const specsMaterialLabel =
-    foamFamily !== "—" ? foamFamily : gradeName || "—";
+    foamFamily || gradeName || "—";
 
-  // Pricing card: use the same customer-facing family label as Specs.
-  const matName = specsMaterialLabel || gradeName || "—";
+  // Pricing card: use the same customer-facing label.
+  const matName = specsMaterialLabel;
 
   const cavityLabel = buildCavityLabel(specs);
   const minThicknessUnderVal = computeMinThicknessUnder(specs);
@@ -278,15 +260,15 @@ export function renderQuoteEmail(input: TemplateInput): string {
   );
 
   const orderTotal = fmtMoney(
-    pricing.total ??
-      pricing.raw?.price_total ??
-      pricing.raw?.total ??
+    pricing.total ?? 
+      pricing.raw?.price_total ?? 
+      pricing.raw?.total ?? 
       pricing.raw?.order_total,
   );
 
   const usedMinCharge =
-    pricing.used_min_charge ??
-    pricing.raw?.min_charge_applied ??
+    pricing.used_min_charge ?? 
+    pricing.raw?.min_charge_applied ?? 
     false;
 
   const priceBreaks: PriceBreak[] = pricing.price_breaks ?? [];
