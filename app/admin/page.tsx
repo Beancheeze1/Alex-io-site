@@ -138,6 +138,13 @@ export default function AdminHomePage() {
               description="View price books and run pricing sandbox tests without affecting real quotes."
             />
 
+            {/* NEW: Pricing settings & knobs */}
+            <NavCard
+              href="/admin/settings"
+              title="Pricing settings & knobs"
+              description="Tune machine rates, markup, skiving upcharge, and material-family preferences used by the engine."
+            />
+
             {/* Quotes & layouts */}
             <NavCard
               href="/admin/quotes"
@@ -150,13 +157,6 @@ export default function AdminHomePage() {
               href="/admin/logs"
               title="Logs & events"
               description="Inspect webhook events, error logs, and other system diagnostics."
-            />
-
-            {/* NEW: Pricing settings (global extras) */}
-            <NavCard
-              href="/admin/settings"
-              title="Pricing settings"
-              description="Tune global knobs like skive upcharge, default rates, kerf %, min charges, and cushion family priority."
             />
           </div>
         </section>
