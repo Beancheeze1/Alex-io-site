@@ -1,10 +1,11 @@
 // app/admin/materials/page.tsx
 //
 // Materials admin landing page.
-// Path A / Straight Path safe:
-//  - Client-only, read-only.
-//  - Uses /api/admin/materials for data.
-//  - No writes, no edits, no changes to pricing behavior.
+// Path A / Straight Path:
+//  - Client-only.
+//  - Primarily read-only, but now supports safe inline edits
+//    of price_per_cuin and min_charge_usd via /api/admin/materials (PATCH).
+//  - Does NOT change any pricing math; only updates DB inputs.
 //
 // Shows:
 //  - Summary counts (total / active / by family).
@@ -45,10 +46,19 @@ function formatNumber(
   decimals: number,
 ): string | null {
   if (value === null || value === undefined) return null;
-  const n =
-    typeof value === "number" ? value : Number(value);
+  const n = typeof value === "number" ? value : Number(value);
   if (Number.isNaN(n)) return null;
   return n.toFixed(decimals);
+}
+
+function toEditableString(
+  value: number | string | null | undefined,
+): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return value.toString();
+  const n = Number(value);
+  if (Number.isNaN(n)) return "";
+  return n.toString();
 }
 
 export default function AdminMaterialsPage() {
@@ -61,6 +71,13 @@ export default function AdminMaterialsPage() {
   const [familyFilter, setFamilyFilter] = React.useState<string>("all");
   const [showInactive, setShowInactive] = React.useState(false);
   const [search, setSearch] = React.useState("");
+
+  // Inline edit state (price & minimum)
+  const [editingId, setEditingId] = React.useState<number | null>(null);
+  const [editPrice, setEditPrice] = React.useState<string>("");
+  const [editMinCharge, setEditMinCharge] = React.useState<string>("");
+  const [savingId, setSavingId] = React.useState<number | null>(null);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let active = true;
@@ -84,7 +101,7 @@ export default function AdminMaterialsPage() {
         setMaterials(
           (json.materials || []).map((m) => ({
             ...m,
-            is_active: m.is_active ?? true,
+            is_active: (m as any).is_active ?? true,
           })),
         );
         setStats(json.stats || null);
@@ -139,6 +156,101 @@ export default function AdminMaterialsPage() {
 
   const hasData = filteredMaterials.length > 0;
 
+  function beginEdit(row: MaterialRow) {
+    setEditingId(row.id);
+    setEditPrice(toEditableString(row.price_per_cuin));
+    setEditMinCharge(toEditableString(row.min_charge_usd));
+    setSaveError(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditPrice("");
+    setEditMinCharge("");
+    setSavingId(null);
+    setSaveError(null);
+  }
+
+  async function saveRow(row: MaterialRow) {
+    if (savingId) return;
+    setSaveError(null);
+
+    const trimmedPrice = editPrice.trim();
+    const trimmedMin = editMinCharge.trim();
+
+    let priceValue: number | null = null;
+    let minValue: number | null = null;
+
+    if (trimmedPrice !== "") {
+      const n = Number(trimmedPrice);
+      if (!Number.isFinite(n) || n < 0) {
+        setSaveError("Price per cu in must be a non-negative number.");
+        return;
+      }
+      priceValue = n;
+    }
+
+    if (trimmedMin !== "") {
+      const n = Number(trimmedMin);
+      if (!Number.isFinite(n) || n < 0) {
+        setSaveError("Min charge must be a non-negative number.");
+        return;
+      }
+      minValue = n;
+    }
+
+    // If both are blank and match existing blanks, nothing to do.
+    if (
+      priceValue === null &&
+      minValue === null &&
+      (row.price_per_cuin === null || row.price_per_cuin === "") &&
+      (row.min_charge_usd === null || row.min_charge_usd === "")
+    ) {
+      cancelEdit();
+      return;
+    }
+
+    try {
+      setSavingId(row.id);
+
+      const res = await fetch("/api/admin/materials", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: row.id,
+          price_per_cuin: priceValue,
+          min_charge_usd: minValue,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json.ok) {
+        throw new Error(
+          json?.message ||
+            json?.error ||
+            `HTTP ${res.status} saving material`,
+        );
+      }
+
+      const updated = json.material as MaterialRow | undefined;
+      if (updated) {
+        setMaterials((prev) =>
+          prev.map((m) => (m.id === row.id ? { ...m, ...updated } : m)),
+        );
+      }
+
+      cancelEdit();
+    } catch (err: any) {
+      console.error("Admin materials save error:", err);
+      setSaveError(
+        String(err?.message || "Unable to save material changes."),
+      );
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-6xl px-4 py-8 lg:py-10">
@@ -149,9 +261,9 @@ export default function AdminMaterialsPage() {
               Materials (admin)
             </h1>
             <p className="mt-2 text-sm text-slate-300">
-              Read-only view of materials that drive quoting and the foam
-              advisor. This is your source of truth for material families,
-              densities, and baseline pricing.
+              View and adjust the material records that drive quoting and the
+              foam advisor. Families, densities, and baseline pricing all live
+              here as your source of truth.
             </p>
           </div>
 
@@ -204,7 +316,7 @@ export default function AdminMaterialsPage() {
                     inactive.
                   </li>
                   <li>
-                    {families.length} material families configured.
+                    {stats.families.length} material families configured.
                   </li>
                 </ul>
                 <p className="mt-3 text-[11px] text-slate-500">
@@ -231,16 +343,19 @@ export default function AdminMaterialsPage() {
               Material notes
             </div>
             <p className="text-xs text-slate-300">
-              This view is read-only and admin-only. Future iterations can add:
+              This view now supports safe inline edits of base pricing:
             </p>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-slate-300">
-              <li>Inline editing of min charges and price-per-cubic-inch.</li>
-              <li>Flags for &quot;advisor-ready&quot; vs. &quot;experimental&quot; materials.</li>
-              <li>Direct links into cushion curves and recent quotes per material.</li>
+              <li>Update price-per-cubic-inch and minimum charges in place.</li>
+              <li>
+                All changes flow into the existing pricing engine without
+                touching any math.
+              </li>
+              <li>Future: flags, links to cushion curves, and more.</li>
             </ul>
             <p className="mt-3 text-[11px] text-slate-500">
-              For now, this is a clean window into the existing material data
-              driving your quoting engine.
+              Use this area for admin-only pricing inputs. Customers never see
+              this page.
             </p>
           </div>
         </section>
@@ -253,8 +368,8 @@ export default function AdminMaterialsPage() {
                 Materials
               </div>
               <p className="mt-1 text-xs text-slate-300">
-                Live read-only view. Use filters to focus by family or search by
-                name / SKU.
+                Live view backed by the database. Use filters to focus by family
+                or search by name / SKU. Click Edit on a row to adjust pricing.
               </p>
             </div>
 
@@ -292,6 +407,12 @@ export default function AdminMaterialsPage() {
             </div>
           </div>
 
+          {saveError && (
+            <div className="mb-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-100">
+              {saveError}
+            </div>
+          )}
+
           <div className="overflow-hidden rounded-lg border border-slate-800/80 bg-slate-950/40">
             <table className="min-w-full text-left text-xs">
               <thead className="bg-slate-900/80 text-slate-400">
@@ -303,13 +424,16 @@ export default function AdminMaterialsPage() {
                   <th className="px-3 py-2 font-semibold">Price/cu in</th>
                   <th className="px-3 py-2 font-semibold">Min charge</th>
                   <th className="px-3 py-2 font-semibold">Status</th>
+                  <th className="px-3 py-2 font-semibold text-right">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {loading && !error && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-3 py-4 text-center text-xs text-slate-400"
                     >
                       Loading materials…
@@ -320,7 +444,7 @@ export default function AdminMaterialsPage() {
                 {!loading && error && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-3 py-4 text-center text-xs text-rose-300"
                     >
                       Unable to load materials.
@@ -331,7 +455,7 @@ export default function AdminMaterialsPage() {
                 {!loading && !error && !hasData && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-3 py-4 text-center text-xs text-slate-400"
                     >
                       No materials match the current filters.
@@ -355,6 +479,9 @@ export default function AdminMaterialsPage() {
                       m.min_charge_usd,
                       2,
                     );
+
+                    const isEditing = editingId === m.id;
+                    const rowSaving = savingId === m.id;
 
                     return (
                       <tr
@@ -382,14 +509,34 @@ export default function AdminMaterialsPage() {
                           )}
                         </td>
                         <td className="px-3 py-2 text-xs text-slate-200">
-                          {pricePerCuIn ? (
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              step="0.0001"
+                              className="w-24 rounded-md border border-slate-600 bg-slate-950/80 px-1 py-0.5 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                              value={editPrice}
+                              onChange={(e) =>
+                                setEditPrice(e.target.value)
+                              }
+                            />
+                          ) : pricePerCuIn ? (
                             <span>${pricePerCuIn}</span>
                           ) : (
                             <span className="text-slate-500">—</span>
                           )}
                         </td>
                         <td className="px-3 py-2 text-xs text-slate-200">
-                          {minCharge ? (
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="w-24 rounded-md border border-slate-600 bg-slate-950/80 px-1 py-0.5 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                              value={editMinCharge}
+                              onChange={(e) =>
+                                setEditMinCharge(e.target.value)
+                              }
+                            />
+                          ) : minCharge ? (
                             <span>${minCharge}</span>
                           ) : (
                             <span className="text-slate-500">—</span>
@@ -406,6 +553,36 @@ export default function AdminMaterialsPage() {
                             {m.is_active ? "Active" : "Inactive"}
                           </span>
                         </td>
+                        <td className="px-3 py-2 text-right text-[11px]">
+                          {isEditing ? (
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={rowSaving}
+                                onClick={() => saveRow(m)}
+                                className="rounded-full border border-emerald-500/60 bg-emerald-500/20 px-3 py-0.5 font-semibold text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-60"
+                              >
+                                {rowSaving ? "Saving…" : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={rowSaving}
+                                onClick={cancelEdit}
+                                className="rounded-full border border-slate-600 bg-slate-800/60 px-3 py-0.5 font-semibold text-slate-200 hover:bg-slate-800/80 disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => beginEdit(m)}
+                              className="rounded-full border border-slate-600 bg-slate-800/60 px-3 py-0.5 font-semibold text-slate-200 hover:bg-slate-800/80"
+                            >
+                              Edit
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -414,9 +591,10 @@ export default function AdminMaterialsPage() {
           </div>
 
           <p className="mt-3 text-[11px] text-slate-500">
-            This page is read-only and admin-only. All values reflect the
-            current state of the{" "}
-            <span className="font-mono text-sky-300">materials</span> table.
+            Changes made here update the{" "}
+            <span className="font-mono text-sky-300">materials</span> table and
+            flow into the pricing engine as inputs. The underlying math and
+            quoting logic remain unchanged.
           </p>
         </section>
       </div>
