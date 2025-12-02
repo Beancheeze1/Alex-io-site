@@ -151,6 +151,13 @@ export default function AdminHomePage() {
               title="Logs & events"
               description="Inspect webhook events, error logs, and other system diagnostics."
             />
+
+            {/* NEW: Pricing settings (global extras) */}
+            <NavCard
+              href="/admin/settings"
+              title="Pricing settings"
+              description="Tune global knobs like skive upcharge, default rates, kerf %, min charges, and cushion family priority."
+            />
           </div>
         </section>
       </div>
