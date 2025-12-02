@@ -208,20 +208,43 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     const like = `%${materialToken}%`;
     const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
 
-    // Family guard:
+      // Family guard:
     // - If the email says PE → only allow Polyethylene rows.
     // - If the email says EPE → only allow Expanded Polyethylene rows.
+    // - If it clearly says polyurethane or EPS → strongly prefer those families.
     // We are NOT renaming families; we’re just making sure we only ever
     // pull from the correct bucket.
     let familyFilter = "";
-    if (materialToken === "pe" || materialToken === "polyethylene") {
-      familyFilter = "AND material_family = 'Polyethylene'";
-    } else if (
-      materialToken === "epe" ||
-      materialToken === "expanded polyethylene"
-    ) {
+
+    const hasEpe =
+      materialToken.includes("expanded polyethylene") ||
+      /\bepe\b/.test(materialToken);
+
+    const hasPe =
+      /\bpe\b/.test(materialToken) ||
+      materialToken.includes("pe foam") ||
+      materialToken.includes("polyethylene");
+
+    const hasPolyurethane =
+      materialToken.includes("polyurethane") ||
+      /\bpu\b/.test(materialToken) ||
+      /\burethane\b/.test(materialToken);
+
+    const hasPolystyrene =
+      materialToken.includes("polystyrene") || /\beps\b/.test(materialToken);
+
+    if (hasEpe) {
       familyFilter = "AND material_family = 'Expanded Polyethylene'";
+    } else if (hasPe) {
+      familyFilter = "AND material_family = 'Polyethylene'";
+    } else if (hasPolyurethane) {
+      // Your DB uses names like "Polyurethane Foam" as the family;
+      // this keeps us in that bucket without renaming anything.
+      familyFilter = "AND material_family ILIKE 'Polyurethane%'";
+    } else if (hasPolystyrene) {
+      familyFilter = "AND material_family ILIKE 'Polystyrene%'";
     }
+
 
     // 1) First pass: LIKE + density (what we had before, but with is_active)
     let row = await one<any>(
@@ -312,6 +335,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     return f;
   }
 }
+
 
 
 
@@ -646,25 +670,66 @@ function grabDensity(raw: string): string | undefined {
 
 function grabMaterial(raw: string): string | undefined {
   const t = raw.toLowerCase();
-  const materials = [
-    "polyethylene",
-    "pe",
-    "epe",
-    "xlpe",
-    "polyurethane",
-    "urethane",
-    "pu",
-    "kaizen",
-    "pp",
-    "polystyrene",
-    "eps",
-  ];
 
-  for (const name of materials) {
-    if (t.includes(name)) return name;
+  // IMPORTANT: check more specific families first so EPE
+  // doesn't get swallowed by the generic "polyethylene" match.
+
+  // Expanded Polyethylene / EPE
+  if (
+    /\bepe\b/.test(t) ||
+    /\bepe\s+foam\b/.test(t) ||
+    t.includes("expanded polyethylene")
+  ) {
+    return "epe";
   }
+
+  // XLPE / cross-linked PE
+  if (
+    /\bxlpe\b/.test(t) ||
+    t.includes("cross-linked polyethylene") ||
+    t.includes("cross linked polyethylene") ||
+    t.includes("crosslinked polyethylene")
+  ) {
+    return "xlpe";
+  }
+
+  // Polyurethane family
+  if (
+    t.includes("polyurethane") ||
+    /\bpu\b/.test(t) ||
+    /\burethane\b/.test(t) ||
+    t.includes("urethane foam")
+  ) {
+    return "polyurethane";
+  }
+
+  // Kaizen inserts
+  if (/\bkaizen\b/.test(t)) {
+    return "kaizen";
+  }
+
+  // Polystyrene / EPS
+  if (t.includes("polystyrene") || /\beps\b/.test(t)) {
+    return "eps";
+  }
+
+  // Polypropylene
+  if (/\bpp\b/.test(t)) {
+    return "pp";
+  }
+
+  // Plain Polyethylene / PE
+  if (
+    t.includes("polyethylene") ||
+    t.includes("pe foam") ||
+    /\bpe\b/.test(t)
+  ) {
+    return "pe";
+  }
+
   return undefined;
 }
+
 
 function extractCavities(raw: string): {
   cavityCount?: number;
