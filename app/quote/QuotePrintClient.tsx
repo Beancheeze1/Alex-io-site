@@ -50,7 +50,7 @@ type ItemRow = {
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
 
-  // NEW: richer pricing metadata from /api/quote/print
+  // richer pricing metadata from /api/quote/print
   pricing_meta?: {
     min_charge?: number | null;
     used_min_charge?: boolean;
@@ -58,7 +58,7 @@ type ItemRow = {
     kerf_pct?: number | null;
   } | null;
 
-  // NEW: high-level pricing breakdown blob from /api/quote/print
+  // high-level pricing breakdown blob from /api/quote/print
   pricing_breakdown?: {
     volumeIn3: number;
     materialWeightLb: number;
@@ -326,7 +326,7 @@ export default function QuotePrintClient() {
       ? primaryPricing.kerf_pct
       : null;
 
-  // NEW: material display lines for primary item
+  // material display lines for primary item
   const primaryMaterialName =
     primaryItem?.material_name ||
     (primaryItem ? `Material #${primaryItem.material_id}` : "");
@@ -352,7 +352,7 @@ export default function QuotePrintClient() {
     }
   }
 
-  // NEW: high-level breakdown from server, if available
+  // high-level breakdown from server, if available
   const primaryBreakdown = primaryItem?.pricing_breakdown || null;
 
   const breakdownUnitPrice =
@@ -410,8 +410,30 @@ export default function QuotePrintClient() {
     marginBottom: 2,
   };
 
-  // ===================== RENDER =====================
+  // Dark card variant to match admin/foam advisor feel
+  const darkCardBase: React.CSSProperties = {
+    borderRadius: 16,
+    border: "1px solid #1f2937",
+    background: "#020617",
+    padding: "12px 14px",
+  };
 
+  const darkCardTitleStyle: React.CSSProperties = {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#e5e7eb",
+    marginBottom: 6,
+  };
+
+  const darkLabelStyle: React.CSSProperties = {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    color: "#9ca3af",
+    marginBottom: 2,
+  };
+
+  // ===================== RENDER =====================
 
   return (
     <div
@@ -419,6 +441,8 @@ export default function QuotePrintClient() {
         fontFamily:
           "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
         background: "#020617", // dark page background to match editor
+        backgroundImage:
+          "radial-gradient(circle at top, rgba(56,189,248,0.18), transparent 55%)",
         minHeight: "100vh",
         padding: "24px",
       }}
@@ -499,7 +523,7 @@ export default function QuotePrintClient() {
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 16,
-                color: "#e5e7eb", // palette text color
+                color: "#e5e7eb",
               }}
             >
               <div>
@@ -649,7 +673,7 @@ export default function QuotePrintClient() {
                   marginBottom: 20,
                 }}
               >
-                {/* Specs card */}
+                {/* Specs card – stays light for print clarity */}
                 <div style={cardBase}>
                   <div style={cardTitleStyle}>Specs</div>
                   <div
@@ -692,7 +716,7 @@ export default function QuotePrintClient() {
                   </div>
                 </div>
 
-                {/* Pricing card (now with breakdown when present) */}
+                {/* Pricing card – stays light */}
                 <div style={cardBase}>
                   <div style={cardTitleStyle}>Pricing</div>
                   {anyPricing ? (
@@ -720,7 +744,6 @@ export default function QuotePrintClient() {
                         </div>
                       </div>
 
-                      {/* NEW: show material / machine / markup slices when breakdown is present */}
                       {primaryBreakdown && (
                         <>
                           <div
@@ -865,9 +888,9 @@ export default function QuotePrintClient() {
                   )}
                 </div>
 
-                {/* Layout & next steps card */}
-                <div style={cardBase}>
-                  <div style={cardTitleStyle}>Layout & next steps</div>
+                {/* Layout & next steps card – dark themed */}
+                <div style={darkCardBase}>
+                  <div style={darkCardTitleStyle}>Layout & next steps</div>
                   <div
                     style={{
                       marginBottom: 8,
@@ -875,8 +898,8 @@ export default function QuotePrintClient() {
                       alignItems: "center",
                       padding: "2px 8px",
                       borderRadius: 999,
-                      background: "#eef2ff", // pill bg from palette
-                      color: "#1d4ed8", // pill text from palette
+                      background: "#1f2937",
+                      color: "#e5e7eb",
                       fontSize: 11,
                       fontWeight: 600,
                       textTransform: "uppercase",
@@ -891,7 +914,7 @@ export default function QuotePrintClient() {
                       <div
                         style={{
                           fontSize: 13,
-                          color: "#111827",
+                          color: "#e5e7eb",
                           marginBottom: 4,
                         }}
                       >
@@ -900,7 +923,7 @@ export default function QuotePrintClient() {
                       <div
                         style={{
                           fontSize: 12,
-                          color: "#6b7280",
+                          color: "#9ca3af",
                           marginBottom: 8,
                           lineHeight: 1.4,
                         }}
@@ -913,8 +936,8 @@ export default function QuotePrintClient() {
                         <div
                           style={{
                             fontSize: 11,
-                            color: "#4b5563",
-                            background: "#eef2ff",
+                            color: "#e5e7eb",
+                            background: "#111827",
                             borderRadius: 10,
                             padding: "6px 8px",
                           }}
@@ -928,7 +951,7 @@ export default function QuotePrintClient() {
                     <div
                       style={{
                         fontSize: 13,
-                        color: "#6b7280",
+                        color: "#9ca3af",
                         lineHeight: 1.5,
                       }}
                     >
@@ -943,7 +966,7 @@ export default function QuotePrintClient() {
               </div>
             )}
 
-            {/* LINE ITEMS CARD */}
+            {/* LINE ITEMS CARD – still light */}
             <div
               style={{
                 ...cardBase,
@@ -1187,7 +1210,7 @@ export default function QuotePrintClient() {
               )}
             </div>
 
-            {/* Foam layout package section (cardified to match email) */}
+            {/* Foam layout package – dark themed card */}
             <div
               style={{
                 marginTop: 4,
@@ -1204,14 +1227,9 @@ export default function QuotePrintClient() {
                 Foam layout package
               </div>
 
-              <div
-                style={{
-                  ...cardBase,
-                  background: "#ffffff",
-                }}
-              >
+              <div style={darkCardBase}>
                 {!layoutPkg ? (
-                  <p style={{ color: "#6b7280", fontSize: 13 }}>
+                  <p style={{ color: "#9ca3af", fontSize: 13 }}>
                     No foam layout has been saved for this quote yet. Use the{" "}
                     <strong>Open layout preview</strong> button in the emailed
                     quote to arrange cavities, then click{" "}
@@ -1230,7 +1248,7 @@ export default function QuotePrintClient() {
                         <div
                           style={{
                             fontWeight: 600,
-                            color: "#111827",
+                            color: "#e5e7eb",
                             marginBottom: 2,
                           }}
                         >
@@ -1238,7 +1256,7 @@ export default function QuotePrintClient() {
                         </div>
                         <div
                           style={{
-                            color: "#6b7280",
+                            color: "#9ca3af",
                             fontSize: 12,
                           }}
                         >
@@ -1263,9 +1281,9 @@ export default function QuotePrintClient() {
                             display: "inline-block",
                             padding: "4px 10px",
                             borderRadius: 999,
-                            border: "1px solid #c7d2fe",
-                            background: "#eef2ff",
-                            color: "#1d4ed8",
+                            border: "1px solid #4b5563",
+                            background: "#111827",
+                            color: "#e5e7eb",
                             textDecoration: "none",
                             fontWeight: 500,
                           }}
@@ -1279,7 +1297,7 @@ export default function QuotePrintClient() {
                       <div
                         style={{
                           marginTop: 6,
-                          color: "#4b5563",
+                          color: "#e5e7eb",
                           fontSize: 12,
                         }}
                       >
@@ -1295,15 +1313,15 @@ export default function QuotePrintClient() {
                             marginTop: 10,
                             padding: 8,
                             borderRadius: 10,
-                            border: "1px solid #e5e7eb",
-                            background: "#ffffff",
+                            border: "1px solid #1f2937",
+                            background: "#020617",
                           }}
                         >
                           <div
                             style={{
                               fontSize: 12,
                               fontWeight: 500,
-                              color: "#374151",
+                              color: "#e5e7eb",
                               marginBottom: 6,
                             }}
                           >
@@ -1318,8 +1336,8 @@ export default function QuotePrintClient() {
                               alignItems: "center",
                               justifyContent: "center",
                               borderRadius: 8,
-                              border: "1px solid #e5e7eb",
-                              background: "#f3f4f6",
+                              border: "1px solid #1f2937",
+                              background: "#0b1120",
                               overflow: "hidden",
                             }}
                             dangerouslySetInnerHTML={{
