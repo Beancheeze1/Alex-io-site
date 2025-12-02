@@ -2,7 +2,7 @@
 //
 // Centralized pricing breakdown calculator (non-destructive).
 // Pure functions only — no DB writes, no side effects.
-// Safe under Path A and does not modify any existing logic.
+// Safe under Path A and does not modify any existing logic shape.
 //
 // This produces a breakdown object consumed by:
 //  - /api/quote/print (to attach pricing_breakdown)
@@ -13,6 +13,8 @@
 // Formulas are simple v1 and can be upgraded later.
 //
 // ------------------------------------------------------------
+
+import { getPricingSettings } from "../../lib/pricing/settings";
 
 export type PricingBreakdown = {
   volumeIn3: number;
@@ -35,60 +37,10 @@ export type PricingBreakdown = {
   }[];
 };
 
-// Previous hard-coded defaults.
-// Now treated as fallbacks if runtime settings are missing.
-const DEFAULT_MACHINE_RATE_IN3_PER_MIN = 3000; // in³ per minute
-const DEFAULT_MACHINE_COST_PER_MIN = 0.65; // USD
-const DEFAULT_MARKUP_FACTOR = 1.45; // 45% markup baseline
-
-type RuntimePricingSettings = {
-  machine_rate_in3_per_min?: number;
-  machine_cost_per_min?: number;
-  default_markup_factor?: number;
-};
-
-/**
- * Read runtime pricing knobs from the same global container
- * used by /api/admin/settings, with safe fallbacks.
- */
-function getRuntimePricingSettings(): {
-  machineRateIn3PerMin: number;
-  machineCostPerMin: number;
-  markupFactor: number;
-} {
-  const g = globalThis as any;
-  const s = (g.__ALEXIO_PRICING_SETTINGS__ ??
-    {}) as RuntimePricingSettings;
-
-  const toPosNumber = (
-    v: unknown,
-    fallback: number,
-  ): number => {
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : fallback;
-  };
-
-  const machineRateIn3PerMin = toPosNumber(
-    s.machine_rate_in3_per_min,
-    DEFAULT_MACHINE_RATE_IN3_PER_MIN,
-  );
-
-  const machineCostPerMin = toPosNumber(
-    s.machine_cost_per_min,
-    DEFAULT_MACHINE_COST_PER_MIN,
-  );
-
-  const markupFactor = toPosNumber(
-    s.default_markup_factor,
-    DEFAULT_MARKUP_FACTOR,
-  );
-
-  return {
-    machineRateIn3PerMin,
-    machineCostPerMin,
-    markupFactor,
-  };
-}
+// Fallbacks used if settings are missing or invalid
+const FALLBACK_MACHINE_RATE_IN3_PER_MIN = 3000; // in³ per minute
+const FALLBACK_MACHINE_COST_PER_MIN = 0.65;     // USD
+const FALLBACK_MARKUP = 1.45;                   // 45% markup baseline
 
 export function computePricingBreakdown(args: {
   length_in: number;
@@ -106,22 +58,33 @@ export function computePricingBreakdown(args: {
   const density = Number(args.density_lbft3);
   const costPerLb = Number(args.cost_per_lb);
 
-  const runtime = getRuntimePricingSettings();
+  // Pull live knobs from admin settings (with safe fallbacks)
+  const settings = getPricingSettings();
 
-  // Use explicit arg markupFactor if provided, otherwise runtime default.
-  const markup = Number(
-    args.markupFactor ?? runtime.markupFactor,
-  );
+  const machineRateIn3PerMin =
+    Number(settings.machining_in3_per_min) > 0
+      ? Number(settings.machining_in3_per_min)
+      : FALLBACK_MACHINE_RATE_IN3_PER_MIN;
+
+  const machineCostPerMin =
+    Number(settings.machine_cost_per_min) > 0
+      ? Number(settings.machine_cost_per_min)
+      : FALLBACK_MACHINE_COST_PER_MIN;
+
+  const markup =
+    args.markupFactor != null && Number(args.markupFactor) > 0
+      ? Number(args.markupFactor)
+      : Number(settings.markup_factor_default) > 0
+      ? Number(settings.markup_factor_default)
+      : FALLBACK_MARKUP;
 
   const volumeIn3 = L * W * H;
   const densityLbIn3 = density / 1728; // convert ft³ to in³
   const materialWeightLb = volumeIn3 * densityLbIn3;
   const materialCost = materialWeightLb * costPerLb;
 
-  const machineMinutes =
-    volumeIn3 / runtime.machineRateIn3PerMin;
-  const machineCost =
-    machineMinutes * runtime.machineCostPerMin;
+  const machineMinutes = volumeIn3 / machineRateIn3PerMin;
+  const machineCost = machineMinutes * machineCostPerMin;
 
   const rawCost = materialCost + machineCost;
   const sellPrice = rawCost * markup;
