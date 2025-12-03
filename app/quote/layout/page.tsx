@@ -598,33 +598,36 @@ function LayoutEditorHost(props: {
 
   const router = useRouter();
 
-    const {
+      const {
     layout,
     selectedId,
+    activeLayerId,
     selectCavity,
+    setActiveLayerId,
     updateCavityPosition,
     updateBlockDims,
     updateCavityDims,
     addCavity,
     deleteCavity,
-    activeLayerId,
-    setActiveLayerId,
+    addLayer,
+    renameLayer,
+    deleteLayer,
   } = useLayoutModel(initialLayout);
 
 
-    const { block, cavities, stack } = layout;
 
-  // Active layer label (for UI chips / headers)
-  const activeLayerLabel = React.useMemo(() => {
-    if (!stack || stack.length === 0) return null;
-    const active = activeLayerId
-      ? stack.find((layer) => layer.id === activeLayerId)
-      : stack[0];
-    return active?.label ?? null;
-  }, [stack, activeLayerId]);
+   const { block, cavities, stack } = layout as LayoutModel & { stack?: { id: string; label: string; cavities: any[] }[] };
+
+  const activeLayer =
+    stack && stack.length > 0
+      ? (stack.find((layer) => layer.id === activeLayerId) ?? stack[0])
+      : null;
+
+  const activeLayerLabel = activeLayer?.label ?? null;
 
   const selectedCavity =
     cavities.find((c) => c.id === selectedId) || null;
+
 
 
   // Multi-layer: derive layers view if stack exists
@@ -1502,6 +1505,70 @@ function LayoutEditorHost(props: {
                         </span>
                       )}
                     </div>
+
+                    {/* Layer manager (demo) */}
+{stack && stack.length > 0 && (
+  <div className="mb-3 space-y-1">
+    <div className="flex items-center justify-between">
+      <span className="text-[11px] text-slate-400">
+        Layers
+      </span>
+
+      <button
+        type="button"
+        onClick={addLayer}
+        className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+      >
+        + Add layer
+      </button>
+    </div>
+
+    <div className="flex flex-wrap gap-1">
+      {stack.map((layer) => {
+        const isActive = activeLayer?.id === layer.id;
+        return (
+          <button
+            key={layer.id}
+            type="button"
+            onClick={() => setActiveLayerId(layer.id)}
+            className={
+              "px-2 py-0.5 rounded-full text-[11px] border " +
+              (isActive
+                ? "bg-sky-500 text-slate-950 border-sky-400"
+                : "bg-slate-800/80 text-slate-200 border-slate-700 hover:border-sky-400 hover:text-sky-100")
+            }
+          >
+            {layer.label}
+          </button>
+        );
+      })}
+    </div>
+
+    {activeLayer && (
+      <div className="flex items-center gap-2 text-[11px]">
+        <input
+          type="text"
+          value={activeLayer.label}
+          onChange={(e) => renameLayer(activeLayer.id, e.target.value)}
+          className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-100"
+          placeholder="Layer name"
+        />
+
+        {stack.length > 1 && (
+          <button
+            type="button"
+            onClick={() => deleteLayer(activeLayer.id)}
+            className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300 hover:text-red-300 hover:border-red-400 transition"
+            title="Delete this layer"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    )}
+  </div>
+)}
+
 
 
                   {cavities.length === 0 ? (

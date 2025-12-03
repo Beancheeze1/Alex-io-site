@@ -1,6 +1,13 @@
 // app/quote/layout/editor/useLayoutModel.ts
 //
 // React hook for managing the layout model in the browser.
+// Now multi-layer aware, but still Path A safe:
+//  - Legacy layouts (block + cavities only) still work.
+//  - We seed a simple 3-layer stack for a nicer demo:
+//      Bottom pad  / Center layer / Top pad
+//  - New cavities go into the *active* layer.
+//  - layout.cavities always reflects the active layer.
+//
 // Client-only module.
 
 "use client";
@@ -8,15 +15,25 @@
 import { useState, useCallback } from "react";
 import type { BlockDims, LayoutModel, Cavity, CavityShape } from "./layoutTypes";
 
-export type UseLayoutModelResult = {
-  layout: LayoutModel;
-  selectedId: string | null;
+type LayoutLayerLike = {
+  id: string;
+  label: string;
+  cavities: Cavity[];
+};
 
-  // Multi-layer: active layer tracking (non-breaking addition)
+type LayoutState = {
+  layout: LayoutModel & { stack?: LayoutLayerLike[] };
   activeLayerId: string | null;
-  setActiveLayerId: (id: string | null) => void;
+};
 
+export type UseLayoutModelResult = {
+  layout: LayoutModel & { stack?: LayoutLayerLike[] };
+  selectedId: string | null;
+  activeLayerId: string | null;
   selectCavity: (id: string | null) => void;
+  setActiveLayerId: (id: string) => void;
+
+  // cavity operations (target the active layer)
   updateCavityPosition: (id: string, x: number, y: number) => void;
   updateBlockDims: (patch: Partial<BlockDims>) => void;
   updateCavityDims: (
@@ -30,61 +47,110 @@ export type UseLayoutModelResult = {
     size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
   ) => void;
   deleteCavity: (id: string) => void;
+
+  // layer management for the demo
+  addLayer: () => void;
+  renameLayer: (id: string, label: string) => void;
+  deleteLayer: (id: string) => void;
 };
 
 export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
-  const [layout, setLayout] = useState<LayoutModel>(() => {
-    // If a multi-layer stack is present, mirror the first layer’s cavities
-    // into the legacy `cavities` field so existing consumers keep working.
-    if (initial.stack && initial.stack.length > 0) {
-      const first = initial.stack[0];
-      return {
-        ...initial,
-        cavities: first.cavities,
-      };
-    }
-    return initial;
-  });
-
+  const [state, setState] = useState<LayoutState>(() => normalizeInitialLayout(initial));
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // When a stack exists, default to the first layer as active.
-  const [activeLayerId, setActiveLayerId] = useState<string | null>(() => {
-    if (initial.stack && initial.stack.length > 0) {
-      return initial.stack[0].id;
-    }
-    return null;
-  });
+  const { layout, activeLayerId } = state;
 
   const selectCavity = useCallback((id: string | null) => {
     setSelectedId(id);
   }, []);
 
+  const setActiveLayerId = useCallback((id: string) => {
+    setState((prev) => {
+      const stack = getStack(prev.layout);
+      if (!stack || stack.length === 0) return prev;
+
+      const nextLayer =
+        stack.find((layer) => layer.id === id) ?? stack[0];
+
+      return {
+        layout: {
+          ...prev.layout,
+          stack,
+          cavities: [...nextLayer.cavities],
+        },
+        activeLayerId: nextLayer.id,
+      };
+    });
+    setSelectedId(null);
+  }, []);
+
   const updateCavityPosition = useCallback(
     (id: string, x: number, y: number) => {
-      setLayout((prev) =>
-        withUpdatedCavities(prev, activeLayerId, (cavs) =>
-          cavs.map((c) =>
-            c.id === id
-              ? {
-                  ...c,
-                  x: clamp01(x),
-                  y: clamp01(y),
-                }
-              : c
-          )
-        )
-      );
+      setState((prev) => {
+        const { layout, activeLayerId } = prev;
+        const stack = getStack(layout);
+
+        // No stack → legacy single-layer behavior
+        if (!stack || stack.length === 0) {
+          return {
+            ...prev,
+            layout: {
+              ...layout,
+              cavities: layout.cavities.map((c) =>
+                c.id === id
+                  ? {
+                      ...c,
+                      x: clamp01(x),
+                      y: clamp01(y),
+                    }
+                  : c
+              ),
+            },
+          };
+        }
+
+        const currentId = activeLayerId ?? stack[0].id;
+        const nextStack = stack.map((layer) => {
+          if (layer.id !== currentId) return layer;
+          return {
+            ...layer,
+            cavities: layer.cavities.map((c) =>
+              c.id === id
+                ? {
+                    ...c,
+                    x: clamp01(x),
+                    y: clamp01(y),
+                  }
+                : c
+            ),
+          };
+        });
+
+        const activeLayer =
+          nextStack.find((l) => l.id === currentId) ?? nextStack[0];
+
+        return {
+          layout: {
+            ...layout,
+            stack: nextStack,
+            cavities: [...activeLayer.cavities],
+          },
+          activeLayerId: activeLayer.id,
+        };
+      });
     },
-    [activeLayerId]
+    []
   );
 
   const updateBlockDims = useCallback((patch: Partial<BlockDims>) => {
-    setLayout((prev) => ({
+    setState((prev) => ({
       ...prev,
-      block: {
-        ...prev.block,
-        ...normalizeBlockPatch(patch),
+      layout: {
+        ...prev.layout,
+        block: {
+          ...prev.layout.block,
+          ...normalizeBlockPatch(patch),
+        },
       },
     }));
   }, []);
@@ -96,9 +162,13 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
       >
     ) => {
-      setLayout((prev) =>
-        withUpdatedCavities(prev, activeLayerId, (cavs) =>
-          cavs.map((c) => {
+      setState((prev) => {
+        const { layout, activeLayerId } = prev;
+        const stack = getStack(layout);
+
+        // Helper to apply dims update to one cavity list
+        const applyDims = (list: Cavity[]): Cavity[] =>
+          list.map((c) => {
             if (c.id !== id) return c;
 
             const norm = normalizeCavityPatch(patch);
@@ -112,11 +182,42 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
               ...updated,
               label: formatCavityLabel(updated),
             };
-          })
-        )
-      );
+          });
+
+        if (!stack || stack.length === 0) {
+          const nextCavities = applyDims(layout.cavities);
+          return {
+            ...prev,
+            layout: {
+              ...layout,
+              cavities: nextCavities,
+            },
+          };
+        }
+
+        const currentId = activeLayerId ?? stack[0].id;
+        const nextStack = stack.map((layer) => {
+          if (layer.id !== currentId) return layer;
+          return {
+            ...layer,
+            cavities: applyDims(layer.cavities),
+          };
+        });
+
+        const activeLayer =
+          nextStack.find((l) => l.id === currentId) ?? nextStack[0];
+
+        return {
+          layout: {
+            ...layout,
+            stack: nextStack,
+            cavities: [...activeLayer.cavities],
+          },
+          activeLayerId: activeLayer.id,
+        };
+      });
     },
-    [activeLayerId]
+    []
   );
 
   const addCavity = useCallback(
@@ -124,10 +225,16 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       shape: CavityShape,
       size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
     ) => {
-      setLayout((prev) => {
-        // Use the currently visible set (legacy mirror) for layout of new cavities.
-        const idx = prev.cavities.length;
-        const id = `cav-${idx + 1}`;
+      setState((prev) => {
+        const { layout, activeLayerId } = prev;
+        const stack = getStack(layout);
+
+        // Compute a global cavity index (across all layers) for a stable ID
+        const totalCavities = stack && stack.length > 0
+          ? stack.reduce((sum, layer) => sum + layer.cavities.length, 0)
+          : layout.cavities.length;
+
+        const id = `cav-${totalCavities + 1}`;
 
         const lengthIn = safeInch(size.lengthIn, 0.5);
         const widthIn = safeInch(size.widthIn, 0.5);
@@ -135,9 +242,12 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         const cornerRadiusIn =
           shape === "roundedRect" ? safeInch(size.cornerRadiusIn ?? 0.25, 0) : 0;
 
-        // Drop new cavities roughly centered
-        const x = 0.3 + (idx % 2) * 0.2;
-        const y = 0.25 + Math.floor(idx / 2) * 0.2;
+        // Try to place new cavities roughly in "dead space"
+        const col = totalCavities % 3;
+        const row = Math.floor(totalCavities / 3);
+
+        const xBase = 0.2 + col * 0.25;
+        const yBase = 0.2 + row * 0.2;
 
         const base: Cavity = {
           id,
@@ -147,8 +257,8 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           lengthIn,
           widthIn,
           depthIn,
-          x: clamp01(x),
-          y: clamp01(y),
+          x: clamp01(xBase),
+          y: clamp01(yBase),
         };
 
         const newCavity: Cavity = {
@@ -156,72 +266,229 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           label: formatCavityLabel(base),
         };
 
-        return withUpdatedCavities(prev, activeLayerId, (cavs) => [...cavs, newCavity]);
+        // Legacy single-layer behavior
+        if (!stack || stack.length === 0) {
+          return {
+            ...prev,
+            layout: {
+              ...layout,
+              cavities: [...layout.cavities, newCavity],
+            },
+          };
+        }
+
+        // Multi-layer: add to active layer
+        const currentId = activeLayerId ?? stack[0].id;
+        const nextStack = stack.map((layer) => {
+          if (layer.id !== currentId) return layer;
+          return {
+            ...layer,
+            cavities: [...layer.cavities, newCavity],
+          };
+        });
+
+        const activeLayer =
+          nextStack.find((l) => l.id === currentId) ?? nextStack[0];
+
+        return {
+          layout: {
+            ...layout,
+            stack: nextStack,
+            cavities: [...activeLayer.cavities],
+          },
+          activeLayerId: activeLayer.id,
+        };
       });
     },
-    [activeLayerId]
+    []
   );
 
   const deleteCavity = useCallback((id: string) => {
-    setLayout((prev) =>
-      withUpdatedCavities(prev, activeLayerId, (cavs) => cavs.filter((c) => c.id !== id))
-    );
-    setSelectedId((prev) => (prev === id ? null : prev));
-  }, [activeLayerId]);
+    setState((prev) => {
+      const { layout, activeLayerId } = prev;
+      const stack = getStack(layout);
+
+      if (!stack || stack.length === 0) {
+        return {
+          ...prev,
+          layout: {
+            ...layout,
+            cavities: layout.cavities.filter((c) => c.id !== id),
+          },
+        };
+      }
+
+      const nextStack = stack.map((layer) => ({
+        ...layer,
+        cavities: layer.cavities.filter((c) => c.id !== id),
+      }));
+
+      const currentId = activeLayerId ?? nextStack[0]?.id ?? null;
+      const activeLayer =
+        (currentId &&
+          nextStack.find((l) => l.id === currentId)) ??
+        nextStack[0] ??
+        null;
+
+      return {
+        layout: {
+          ...layout,
+          stack: nextStack,
+          cavities: activeLayer ? [...activeLayer.cavities] : [],
+        },
+        activeLayerId: activeLayer ? activeLayer.id : null,
+      };
+    });
+
+    setSelectedId((prevId) => (prevId === id ? null : prevId));
+  }, []);
+
+  // ---- Layer management (demo) ----
+
+  const addLayer = useCallback(() => {
+    setState((prev) => {
+      const { layout, activeLayerId } = prev;
+      const stack = getStack(layout) ?? [];
+
+      const nextIndex = stack.length + 1;
+      const newId = `layer-${nextIndex}`;
+      const newLayer: LayoutLayerLike = {
+        id: newId,
+        label: `Layer ${nextIndex}`,
+        cavities: [],
+      };
+
+      const nextStack = [...stack, newLayer];
+
+      return {
+        layout: {
+          ...layout,
+          stack: nextStack,
+          cavities: [], // new layer is empty
+        },
+        activeLayerId: newId,
+      };
+    });
+    setSelectedId(null);
+  }, []);
+
+  const renameLayer = useCallback((id: string, label: string) => {
+    setState((prev) => {
+      const { layout } = prev;
+      const stack = getStack(layout);
+      if (!stack || stack.length === 0) return prev;
+
+      const nextStack = stack.map((layer) =>
+        layer.id === id
+          ? { ...layer, label: label.trim() || layer.label }
+          : layer
+      );
+
+      return {
+        ...prev,
+        layout: {
+          ...layout,
+          stack: nextStack,
+        },
+      };
+    });
+  }, []);
+
+  const deleteLayer = useCallback((id: string) => {
+    setState((prev) => {
+      const { layout, activeLayerId } = prev;
+      const stack = getStack(layout);
+      if (!stack || stack.length <= 1) {
+        // never delete the last layer
+        return prev;
+      }
+
+      const filtered = stack.filter((layer) => layer.id !== id);
+      if (filtered.length === stack.length) return prev;
+
+      const nextActiveId =
+        activeLayerId === id ? filtered[0].id : activeLayerId;
+      const activeLayer =
+        filtered.find((l) => l.id === nextActiveId) ?? filtered[0];
+
+      return {
+        layout: {
+          ...layout,
+          stack: filtered,
+          cavities: [...activeLayer.cavities],
+        },
+        activeLayerId: activeLayer.id,
+      };
+    });
+    setSelectedId(null);
+  }, []);
 
   return {
     layout,
     selectedId,
     activeLayerId,
-    setActiveLayerId,
     selectCavity,
+    setActiveLayerId,
     updateCavityPosition,
     updateBlockDims,
     updateCavityDims,
     addCavity,
     deleteCavity,
+    addLayer,
+    renameLayer,
+    deleteLayer,
   };
 }
 
-/* Helpers */
+/* ---------- Helpers ---------- */
 
-/**
- * Helper to apply a cavity update in a stack-aware way.
- *
- * - If there is NO stack or NO active layer, behaves like legacy:
- *   updates `layout.cavities` only.
- * - If stack + activeLayerId exist, updates that layer’s cavities AND
- *   keeps `layout.cavities` as a mirror of the active layer.
- */
-function withUpdatedCavities(
-  prev: LayoutModel,
-  activeLayerId: string | null,
-  updater: (cavities: Cavity[]) => Cavity[]
-): LayoutModel {
-  if (!prev.stack || prev.stack.length === 0 || !activeLayerId) {
-    const nextCavities = updater(prev.cavities);
+function getStack(layout: LayoutModel & { stack?: LayoutLayerLike[] }): LayoutLayerLike[] | undefined {
+  const raw = (layout as any).stack as LayoutLayerLike[] | undefined;
+  if (!raw) return undefined;
+  return raw;
+}
+
+// Normalize legacy layouts into a simple 3-layer stack
+function normalizeInitialLayout(initial: LayoutModel): LayoutState {
+  const base: LayoutModel & { stack?: LayoutLayerLike[] } = {
+    block: { ...initial.block },
+    cavities: Array.isArray(initial.cavities) ? [...initial.cavities] : [],
+    stack: getStack(initial as any) ?? undefined,
+  };
+
+  const existingStack = base.stack;
+  if (existingStack && existingStack.length > 0) {
+    const first = existingStack[0];
     return {
-      ...prev,
-      cavities: nextCavities,
+      layout: {
+        ...base,
+        stack: existingStack.map((layer) => ({
+          id: layer.id,
+          label: layer.label,
+          cavities: [...layer.cavities],
+        })),
+        cavities: [...first.cavities],
+      },
+      activeLayerId: first.id,
     };
   }
 
-  const nextStack = prev.stack.map((layer) => {
-    if (layer.id !== activeLayerId) return layer;
-    const updatedCavities = updater(layer.cavities);
-    return {
-      ...layer,
-      cavities: updatedCavities,
-    };
-  });
-
-  const activeLayer =
-    nextStack.find((layer) => layer.id === activeLayerId) ?? nextStack[0];
+  // No stack yet → seed a simple 3-layer demo:
+  // Bottom pad (empty), Center layer (legacy cavities), Top pad (empty)
+  const centerId = "layer-center";
+  const seededStack: LayoutLayerLike[] = [
+    { id: "layer-bottom", label: "Bottom pad", cavities: [] },
+    { id: centerId, label: "Center layer", cavities: [...base.cavities] },
+    { id: "layer-top", label: "Top pad", cavities: [] },
+  ];
 
   return {
-    ...prev,
-    stack: nextStack,
-    cavities: activeLayer ? activeLayer.cavities : prev.cavities,
+    layout: {
+      ...base,
+      stack: seededStack,
+      cavities: [...base.cavities], // mirrors active (center) layer
+    },
+    activeLayerId: centerId,
   };
 }
 
