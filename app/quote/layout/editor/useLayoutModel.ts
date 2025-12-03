@@ -11,6 +11,11 @@ import type { BlockDims, LayoutModel, Cavity, CavityShape } from "./layoutTypes"
 export type UseLayoutModelResult = {
   layout: LayoutModel;
   selectedId: string | null;
+
+  // Multi-layer: active layer tracking (non-breaking addition)
+  activeLayerId: string | null;
+  setActiveLayerId: (id: string | null) => void;
+
   selectCavity: (id: string | null) => void;
   updateCavityPosition: (id: string, x: number, y: number) => void;
   updateBlockDims: (patch: Partial<BlockDims>) => void;
@@ -28,8 +33,28 @@ export type UseLayoutModelResult = {
 };
 
 export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
-  const [layout, setLayout] = useState<LayoutModel>(initial);
+  const [layout, setLayout] = useState<LayoutModel>(() => {
+    // If a multi-layer stack is present, mirror the first layer’s cavities
+    // into the legacy `cavities` field so existing consumers keep working.
+    if (initial.stack && initial.stack.length > 0) {
+      const first = initial.stack[0];
+      return {
+        ...initial,
+        cavities: first.cavities,
+      };
+    }
+    return initial;
+  });
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // When a stack exists, default to the first layer as active.
+  const [activeLayerId, setActiveLayerId] = useState<string | null>(() => {
+    if (initial.stack && initial.stack.length > 0) {
+      return initial.stack[0].id;
+    }
+    return null;
+  });
 
   const selectCavity = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -37,20 +62,21 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
   const updateCavityPosition = useCallback(
     (id: string, x: number, y: number) => {
-      setLayout((prev) => ({
-        ...prev,
-        cavities: prev.cavities.map((c) =>
-          c.id === id
-            ? {
-                ...c,
-                x: clamp01(x),
-                y: clamp01(y),
-              }
-            : c
-        ),
-      }));
+      setLayout((prev) =>
+        withUpdatedCavities(prev, activeLayerId, (cavs) =>
+          cavs.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  x: clamp01(x),
+                  y: clamp01(y),
+                }
+              : c
+          )
+        )
+      );
     },
-    []
+    [activeLayerId]
   );
 
   const updateBlockDims = useCallback((patch: Partial<BlockDims>) => {
@@ -70,26 +96,27 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
       >
     ) => {
-      setLayout((prev) => ({
-        ...prev,
-        cavities: prev.cavities.map((c) => {
-          if (c.id !== id) return c;
+      setLayout((prev) =>
+        withUpdatedCavities(prev, activeLayerId, (cavs) =>
+          cavs.map((c) => {
+            if (c.id !== id) return c;
 
-          const norm = normalizeCavityPatch(patch);
-          const updated: Cavity = {
-            ...c,
-            ...norm,
-          };
+            const norm = normalizeCavityPatch(patch);
+            const updated: Cavity = {
+              ...c,
+              ...norm,
+            };
 
-          // Always keep the label in sync with dims
-          return {
-            ...updated,
-            label: formatCavityLabel(updated),
-          };
-        }),
-      }));
+            // Always keep the label in sync with dims
+            return {
+              ...updated,
+              label: formatCavityLabel(updated),
+            };
+          })
+        )
+      );
     },
-    []
+    [activeLayerId]
   );
 
   const addCavity = useCallback(
@@ -98,6 +125,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
     ) => {
       setLayout((prev) => {
+        // Use the currently visible set (legacy mirror) for layout of new cavities.
         const idx = prev.cavities.length;
         const id = `cav-${idx + 1}`;
 
@@ -128,26 +156,24 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           label: formatCavityLabel(base),
         };
 
-        return {
-          ...prev,
-          cavities: [...prev.cavities, newCavity],
-        };
+        return withUpdatedCavities(prev, activeLayerId, (cavs) => [...cavs, newCavity]);
       });
     },
-    []
+    [activeLayerId]
   );
 
   const deleteCavity = useCallback((id: string) => {
-    setLayout((prev) => ({
-      ...prev,
-      cavities: prev.cavities.filter((c) => c.id !== id),
-    }));
+    setLayout((prev) =>
+      withUpdatedCavities(prev, activeLayerId, (cavs) => cavs.filter((c) => c.id !== id))
+    );
     setSelectedId((prev) => (prev === id ? null : prev));
-  }, []);
+  }, [activeLayerId]);
 
   return {
     layout,
     selectedId,
+    activeLayerId,
+    setActiveLayerId,
     selectCavity,
     updateCavityPosition,
     updateBlockDims,
@@ -158,6 +184,46 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 }
 
 /* Helpers */
+
+/**
+ * Helper to apply a cavity update in a stack-aware way.
+ *
+ * - If there is NO stack or NO active layer, behaves like legacy:
+ *   updates `layout.cavities` only.
+ * - If stack + activeLayerId exist, updates that layer’s cavities AND
+ *   keeps `layout.cavities` as a mirror of the active layer.
+ */
+function withUpdatedCavities(
+  prev: LayoutModel,
+  activeLayerId: string | null,
+  updater: (cavities: Cavity[]) => Cavity[]
+): LayoutModel {
+  if (!prev.stack || prev.stack.length === 0 || !activeLayerId) {
+    const nextCavities = updater(prev.cavities);
+    return {
+      ...prev,
+      cavities: nextCavities,
+    };
+  }
+
+  const nextStack = prev.stack.map((layer) => {
+    if (layer.id !== activeLayerId) return layer;
+    const updatedCavities = updater(layer.cavities);
+    return {
+      ...layer,
+      cavities: updatedCavities,
+    };
+  });
+
+  const activeLayer =
+    nextStack.find((layer) => layer.id === activeLayerId) ?? nextStack[0];
+
+  return {
+    ...prev,
+    stack: nextStack,
+    cavities: activeLayer ? activeLayer.cavities : prev.cavities,
+  };
+}
 
 function clamp01(v: number): number {
   if (Number.isNaN(v)) return 0;

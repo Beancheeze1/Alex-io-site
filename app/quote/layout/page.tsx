@@ -568,6 +568,7 @@ export default function LayoutPage({
 }
 
 const CAVITY_COLORS = ["#38bdf8", "#a855f7", "#f97316", "#22c55e", "#eab308", "#ec4899"];
+
 /* ---------- Layout editor host (main body) ---------- */
 
 function LayoutEditorHost(props: {
@@ -597,7 +598,7 @@ function LayoutEditorHost(props: {
 
   const router = useRouter();
 
-  const {
+    const {
     layout,
     selectedId,
     selectCavity,
@@ -606,11 +607,46 @@ function LayoutEditorHost(props: {
     updateCavityDims,
     addCavity,
     deleteCavity,
+    activeLayerId,
+    setActiveLayerId,
   } = useLayoutModel(initialLayout);
 
-  const { block, cavities } = layout;
+
+    const { block, cavities, stack } = layout;
+
+  // Active layer label (for UI chips / headers)
+  const activeLayerLabel = React.useMemo(() => {
+    if (!stack || stack.length === 0) return null;
+    const active = activeLayerId
+      ? stack.find((layer) => layer.id === activeLayerId)
+      : stack[0];
+    return active?.label ?? null;
+  }, [stack, activeLayerId]);
+
   const selectedCavity =
     cavities.find((c) => c.id === selectedId) || null;
+
+
+  // Multi-layer: derive layers view if stack exists
+  const layers = layout.stack && layout.stack.length > 0 ? layout.stack : null;
+  const effectiveActiveLayerId =
+    layers && layers.length > 0
+      ? activeLayerId ?? layers[0].id
+      : null;
+
+  // Ensure the hook actually has an active layer when a stack exists
+  React.useEffect(() => {
+    if (layers && layers.length > 0 && !activeLayerId) {
+      setActiveLayerId(layers[0].id);
+    }
+  }, [layers, activeLayerId, setActiveLayerId]);
+
+  // Clear selection when switching layers so we don't edit a cavity from a different layer
+  const layerCount = layers?.length ?? 0;
+  React.useEffect(() => {
+    if (!layers || layers.length === 0) return;
+    selectCavity(null);
+  }, [effectiveActiveLayerId, layerCount, selectCavity, layers]);
 
   const [zoom, setZoom] = React.useState(1);
   const [notes, setNotes] = React.useState(initialNotes || "");
@@ -1154,6 +1190,7 @@ function LayoutEditorHost(props: {
               </aside>
 
               {/* CENTER: Big visualizer */}
+                  {/* CENTER: Big visualizer */}
               <section className="flex-1 flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -1165,18 +1202,38 @@ function LayoutEditorHost(props: {
                         Interactive layout
                       </span>
                     </div>
-                    <div className="text-xs text-slate-400 mt-1">
+                                        <div className="text-xs text-slate-400 mt-1">
                       Block{" "}
                       <span className="font-mono font-semibold text-slate-100">
                         {block.lengthIn}" × {block.widthIn}" ×{" "}
                         {block.thicknessIn || 0}"
                       </span>
                     </div>
+
+                    {/* Layer selector (only when a stack is present) */}
+                    {stack && stack.length > 0 && (
+                      <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-300">
+                        <span className="text-slate-400">Layer</span>
+                        <select
+                          value={activeLayerId ?? (stack[0]?.id ?? "")}
+                          onChange={(e) => setActiveLayerId(e.target.value)}
+                          className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-100"
+                        >
+                          {stack.map((layer) => (
+                            <option key={layer.id} value={layer.id}>
+                              {layer.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     {!hasRealQuoteNo && (
                       <div className="text-[11px] text-amber-300 mt-0.5">
                         Demo only – link from a real quote email to apply layouts.
                       </div>
                     )}
+
                   </div>
 
                   {/* zoom + qty + advisor + apply button */}
@@ -1437,15 +1494,15 @@ function LayoutEditorHost(props: {
 
                 {/* Cavities list + editor */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-xs font-semibold text-slate-100">
+                                      <div className="text-xs font-semibold text-slate-100">
                       Cavities
+                      {activeLayerLabel && (
+                        <span className="ml-1 text-[11px] font-normal text-slate-400">
+                          — {activeLayerLabel}
+                        </span>
+                      )}
                     </div>
-                    <div className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] text-slate-300">
-                      {cavities.length || 0}{" "}
-                      {cavities.length === 1 ? "pocket" : "pockets"}
-                    </div>
-                  </div>
+
 
                   {cavities.length === 0 ? (
                     <div className="text-xs text-slate-400">
@@ -1859,3 +1916,4 @@ function buildSvgFromLayout(
 
   return svgParts.join("\n");
 }
+          

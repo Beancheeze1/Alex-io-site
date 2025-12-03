@@ -27,12 +27,44 @@ export type Cavity = {
   y: number;
 };
 
-export type LayoutModel = {
-  block: BlockDims;
-  cavities: Cavity[];
+/**
+ * A single foam layer in a multi-layer stack.
+ *
+ * NOTE (Path A):
+ * - This is additive; existing single-layer flows that only use
+ *   LayoutModel.cavities remain valid.
+ * - Multi-layer layouts will populate `stack`, and each layer has its own
+ *   cavities array.
+ */
+export type LayoutLayer = {
+  id: string;          // e.g. "bottom", "center", "top" or a GUID
+  label: string;       // e.g. "Bottom pad", "Center layer", "Top pad"
+  cavities: Cavity[];  // cavities belonging to this layer
 };
 
-/** Format human-readable cavity label */
+export type LayoutModel = {
+  block: BlockDims;
+
+  /**
+   * Legacy single-layer cavities.
+   *
+   * - Existing editor code and older layouts rely on this.
+   * - For new multi-layer behavior, this can represent the "active" layer’s
+   *   cavities, while the full stack lives in `stack`.
+   */
+  cavities: Cavity[];
+
+  /**
+   * Optional multi-layer stack.
+   *
+   * - When present, this is the source of truth for all layers.
+   * - `block` is shared for the whole stack.
+   * - Backend app/api/quote/layout/apply/route.ts is already aware of this
+   *   shape and will flatten stack[].cavities when needed.
+   */
+  stack?: LayoutLayer[];
+};
+
 /**
  * Format a label for a cavity, based on its dimensions + shape.
  * - Keeps decimals like .5 instead of rounding to whole inches.
@@ -138,6 +170,11 @@ export function parseCavity(spec: string, index: number): Cavity | null {
 /**
  * Build LayoutModel from block + cavity strings.
  * This version returns clean dims only.
+ *
+ * NOTE (Path A):
+ * - For now, this seeds a legacy single-layer LayoutModel (block + cavities).
+ * - Multi-layer stacks (`stack`) will be managed by the editor state and
+ *   backend; no behavior change here.
  */
 export function buildLayoutFromStrings(
   blockDims: string,
