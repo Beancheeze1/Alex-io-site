@@ -71,6 +71,68 @@ function bad(body: any, status = 400) {
   return NextResponse.json(body, { status });
 }
 
+/* ===================== Multi-layer-safe cavity flattener ===================== */
+
+type FlatCavity = {
+  lengthIn: number;
+  widthIn: number;
+  depthIn: number;
+  x: number;
+  y: number;
+};
+
+/**
+ * Gather all cavities from a layout in a backward-compatible way.
+ *
+ * Supports:
+ *  - Legacy single-layer layouts:
+ *      layout.cavities = [...]
+ *  - Future multi-layer layouts:
+ *      layout.stack = [{ cavities: [...] }, ...]
+ *
+ * If both are present, we include both sets (defensive).
+ */
+function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
+  const out: FlatCavity[] = [];
+
+  if (!layout || typeof layout !== "object") return out;
+
+  const pushFrom = (cavs: any[]) => {
+    for (const cav of cavs) {
+      if (!cav) continue;
+
+      const lengthIn = Number(cav.lengthIn);
+      const widthIn = Number(cav.widthIn);
+      const depthIn = Number(cav.depthIn);
+      const x = Number(cav.x);
+      const y = Number(cav.y);
+
+      if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
+      if (!Number.isFinite(widthIn) || widthIn <= 0) continue;
+      if (!Number.isFinite(depthIn) || depthIn <= 0) continue;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+      out.push({ lengthIn, widthIn, depthIn, x, y });
+    }
+  };
+
+  // Legacy single-layer layouts
+  if (Array.isArray(layout.cavities)) {
+    pushFrom(layout.cavities);
+  }
+
+  // Multi-layer layouts: stack[].cavities[]
+  if (Array.isArray(layout.stack)) {
+    for (const layer of layout.stack) {
+      if (layer && Array.isArray((layer as any).cavities)) {
+        pushFrom((layer as any).cavities);
+      }
+    }
+  }
+
+  return out;
+}
+
 /* ===================== DXF builder from layout (LINES + full header) ===================== */
 
 /**
@@ -82,9 +144,10 @@ function bad(body: any, status = 400) {
  *
  * Layout assumptions (matches editor types, but we DO NOT change them):
  *  - layout.block: { lengthIn, widthIn, thicknessIn }
- *  - layout.cavities: [{ lengthIn, widthIn, depthIn, x, y }, ...]
- *      where x,y are normalized 0–1 coordinates for the top-left of the cavity
- *      relative to the block footprint.
+ *  - Primary cavity geometry comes from:
+ *      - layout.cavities (legacy single-layer), or
+ *      - layout.stack[].cavities (future multi-layer)
+ *    All cavities are flattened for DXF purposes.
  */
 function buildDxfFromLayout(layout: any): string | null {
   if (!layout || !layout.block) return null;
@@ -129,14 +192,15 @@ function buildDxfFromLayout(layout: any): string | null {
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // 2) Cavities as inner rectangles
-  if (Array.isArray(layout.cavities)) {
-    for (const cav of layout.cavities as any[]) {
-      if (!cav) continue;
-      let cL = Number(cav.lengthIn);
-      let cW = Number(cav.widthIn);
-      const nx = Number(cav.x);
-      const ny = Number(cav.y);
+  // 2) Cavities as inner rectangles (flattened across all layers)
+  const allCavities = getAllCavitiesFromLayout(layout);
+
+  if (allCavities.length > 0) {
+    for (const cav of allCavities) {
+      let cL = cav.lengthIn;
+      let cW = cav.widthIn;
+      const nx = cav.x;
+      const ny = cav.y;
 
       if (!Number.isFinite(cL) || cL <= 0) continue;
       if (!Number.isFinite(cW) || cW <= 0) {
@@ -640,14 +704,14 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Cavities from the saved layout (LxWxD for each pocket)
-      if (layout && Array.isArray(layout.cavities)) {
+      // Cavities from the saved layout (LxWxD for each pocket), across all layers
+      const allCavities = getAllCavitiesFromLayout(layout);
+      if (allCavities.length > 0) {
         const cavDims: string[] = [];
-        for (const cav of layout.cavities as any[]) {
-          if (!cav) continue;
-          const Lc = Number(cav.lengthIn) || 0;
-          const Wc = Number(cav.widthIn) || 0;
-          const Dc = Number(cav.depthIn) || 0;
+        for (const cav of allCavities) {
+          const Lc = cav.lengthIn || 0;
+          const Wc = cav.widthIn || 0;
+          const Dc = cav.depthIn || 0;
           if (Lc > 0 && Wc > 0 && Dc > 0) {
             cavDims.push(`${Lc}x${Wc}x${Dc}`);
           }
@@ -660,6 +724,9 @@ export async function POST(req: NextRequest) {
           delete nextFacts.cavityDims;
           delete nextFacts.cavityCount;
         }
+      } else {
+        delete nextFacts.cavityDims;
+        delete nextFacts.cavityCount;
       }
 
       if (updatedQty != null) {
