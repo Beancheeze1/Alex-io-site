@@ -764,6 +764,7 @@ function LayoutEditorHost(props: {
   }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
 
   const [zoom, setZoom] = React.useState(1);
+  const [cropCorners, setCropCorners] = React.useState(false);
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
@@ -1501,80 +1502,103 @@ function LayoutEditorHost(props: {
                     )}
                   </div>
 
-                  {/* zoom + qty + advisor + apply button */}
-                  <div className="flex items-center gap-3">
-                    <div className="hidden md:flex items-center text-[11px] text-slate-400 mr-1">
-                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80 mr-1.5" />
-                      <span>Layout controls</span>
-                    </div>
-                    <div className="inline-flex items-center gap-3 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 shadow-[0_0_16px_rgba(15,23,42,0.8)]">
-                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
-                        <span>Zoom</span>
-                        <input
-                          type="range"
-                          min={0.7}
-                          max={1.4}
-                          step={0.05}
-                          value={zoom}
-                          onChange={(e) => setZoom(Number(e.target.value))}
-                          className="w-28 accent-sky-400"
-                        />
-                        <span className="ml-1 text-sky-200 font-mono">
-                          {Math.round(zoom * 100)}%
-                        </span>
-                      </div>
+                  {/* zoom + corners + qty + advisor + apply button */}
+<div className="flex items-center gap-3">
+  {/* small label on the left */}
+  <div className="hidden md:flex items-center text-[11px] text-slate-400 mr-1">
+    <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80 mr-1.5" />
+    <span>Layout controls</span>
+  </div>
 
-                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
-                        <span>Qty</span>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={qty}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (!v) {
-                              setQty("");
-                              return;
-                            }
-                            const num = Number(v);
-                            if (!Number.isFinite(num) || num <= 0) return;
-                            setQty(num);
-                          }}
-                          disabled={!hasRealQuoteNo}
-                          className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
-                        />
-                      </div>
+  {/* pill with all controls */}
+  <div className="inline-flex items-center gap-3 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 shadow-[0_0_16px_rgba(15,23,42,0.8)]">
+    {/* Zoom */}
+    <div className="flex items-center gap-1 text-[11px] text-slate-400">
+      <span>Zoom</span>
+      <input
+        type="range"
+        min={0.7}
+        max={1.4}
+        step={0.05}
+        value={zoom}
+        onChange={(e) => setZoom(Number(e.target.value))}
+        className="w-28 accent-sky-400"
+      />
+      <span className="ml-1 text-sky-200 font-mono">
+        {Math.round(zoom * 100)}%
+      </span>
+    </div>
 
-                      <button
-                        type="button"
-                        onClick={handleGoToFoamAdvisor}
-                        disabled={missingCustomerInfo}
-                        className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        Recommend my foam
-                      </button>
+    {/* Crop corners toggle */}
+    <button
+      type="button"
+      onClick={() => setCropCorners((prev) => !prev)}
+      className={
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition " +
+        (cropCorners
+          ? "border-sky-400 bg-sky-500/15 text-sky-100"
+          : "border-slate-700 bg-slate-900 text-slate-300 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10")
+      }
+      title='Toggle 1" 45° chamfers on two opposite corners'
+    >
+      {cropCorners ? 'Corners: 1" chamfer' : "Corners: square"}
+    </button>
 
-                      <button
-                        type="button"
-                        onClick={handleApplyToQuote}
-                        disabled={!canApplyButton}
-                        className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
-                      >
-                        {!hasRealQuoteNo
-                          ? "Link to a quote first"
-                          : missingCustomerInfo
-                          ? "Add name + email"
-                          : applyStatus === "saving"
-                          ? "Applying…"
-                          : applyStatus === "done"
-                          ? "Applied!"
-                          : applyStatus === "error"
-                          ? "Error – retry"
-                          : "Apply to quote"}
-                      </button>
-                    </div>
-                  </div>
+    {/* Qty */}
+    <div className="flex items-center gap-1 text-[11px] text-slate-400">
+      <span>Qty</span>
+      <input
+        type="number"
+        min={1}
+        step={1}
+        value={qty}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (!v) {
+            setQty("");
+            return;
+          }
+          const num = Number(v);
+          if (!Number.isFinite(num) || num <= 0) return;
+          setQty(num);
+        }}
+        disabled={!hasRealQuoteNo}
+        className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
+      />
+    </div>
+
+    {/* Foam advisor */}
+    <button
+      type="button"
+      onClick={handleGoToFoamAdvisor}
+      disabled={missingCustomerInfo}
+      className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
+    >
+      Recommend my foam
+    </button>
+
+    {/* Apply to quote */}
+    <button
+      type="button"
+      onClick={handleApplyToQuote}
+      disabled={!canApplyButton}
+      className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
+    >
+      {!hasRealQuoteNo
+        ? "Link to a quote first"
+        : missingCustomerInfo
+        ? "Add name + email"
+        : applyStatus === "saving"
+        ? "Applying…"
+        : applyStatus === "done"
+        ? "Applied!"
+        : applyStatus === "error"
+        ? "Error – retry"
+        : "Apply to quote"}
+    </button>
+  </div>
+</div>
+
                 </div>
 
                 <p className="text-[11px] text-slate-400 leading-snug">
@@ -1592,16 +1616,18 @@ function LayoutEditorHost(props: {
                     className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,rgba(30,64,175,0.3)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.3)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
                   />
                   <div className="relative p-4 overflow-auto">
-                    <InteractiveCanvas
-                      layout={layout}
-                      selectedId={selectedId}
-                      selectAction={selectCavity}
-                      moveAction={updateCavityPosition}
-                      resizeAction={(id, lengthIn, widthIn) =>
-                        updateCavityDims(id, { lengthIn, widthIn })
-                      }
-                      zoom={zoom}
-                    />
+                   <InteractiveCanvas
+  layout={layout}
+  selectedId={selectedId}
+  selectAction={selectCavity}
+  moveAction={updateCavityPosition}
+  resizeAction={(id, lengthIn, widthIn) =>
+    updateCavityDims(id, { lengthIn, widthIn })
+  }
+  zoom={zoom}
+  croppedCorners={cropCorners}
+/>
+
                   </div>
                 </div>
               </section>
