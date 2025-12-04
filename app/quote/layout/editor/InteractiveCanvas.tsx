@@ -12,7 +12,8 @@
 
 "use client";
 
-import { useRef, useState, MouseEvent } from "react";
+import { useRef, useState, useEffect, MouseEvent } from "react";
+
 import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
 
 type Props = {
@@ -22,6 +23,7 @@ type Props = {
   moveAction: (id: string, xNorm: number, yNorm: number) => void;
   resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
   zoom: number;
+  croppedCorners?: boolean;
 };
 
 type DragState =
@@ -69,6 +71,7 @@ export default function InteractiveCanvas({
   moveAction,
   resizeAction,
   zoom,
+  croppedCorners = false,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
@@ -100,7 +103,154 @@ export default function InteractiveCanvas({
     y: HEADER_BAND + (CANVAS_HEIGHT - HEADER_BAND - blockPx.height) / 2,
   };
 
+  // 1.0" chamfer at upper-left and lower-right corners (45°)
+  const CHAMFER_IN = 1;
+
+  const canChamfer =
+    croppedCorners &&
+    block.lengthIn > CHAMFER_IN * 2 &&
+    block.widthIn > CHAMFER_IN * 2;
+
+  // Pixel distance for a 1" run along X and Y (respects physical inches)
+  const chamferPxX = (CHAMFER_IN / (block.lengthIn || 1)) * blockPx.width;
+  const chamferPxY = (CHAMFER_IN / (block.widthIn || 1)) * blockPx.height;
+
+  const x0 = blockOffset.x;
+  const y0 = blockOffset.y;
+  const w = blockPx.width;
+  const h = blockPx.height;
+
+  // Outer block path (UL & LR corners chamfered)
+  const outerBlockPathD = canChamfer
+    ? [
+        `M ${x0 + chamferPxX},${y0}`, // top edge after UL chamfer
+        `L ${x0 + w},${y0}`, // top-right
+        `L ${x0 + w},${y0 + h - chamferPxY}`, // right edge before LR chamfer
+        `L ${x0 + w - chamferPxX},${y0 + h}`, // LR chamfer
+        `L ${x0},${y0 + h}`, // bottom-left
+        `L ${x0},${y0 + chamferPxY}`, // left edge before UL chamfer
+        "Z",
+      ].join(" ")
+    : [
+        `M ${x0},${y0}`,
+        `L ${x0 + w},${y0}`,
+        `L ${x0 + w},${y0 + h}`,
+        `L ${x0},${y0 + h}`,
+        "Z",
+      ].join(" ");
+
+  // Inner 0.5" safety wall (also chamfered, but still used as a rectangular
+  // spacing reference for movement / gap checks)
+  const L = block.lengthIn || 1;
+  const W = block.widthIn || 1;
+
+  const usableLenIn = Math.max(L - 2 * WALL_IN, 0);
+  const usableWidIn = Math.max(W - 2 * WALL_IN, 0);
+
+  const innerX0 = x0 + (WALL_IN / L) * w;
+  const innerY0 = y0 + (WALL_IN / W) * h;
+  const innerWallWidthPx = w * (usableLenIn / L);
+  const innerWallHeightPx = h * (usableWidIn / W);
+
+  const canInnerChamfer =
+    canChamfer &&
+    usableLenIn > CHAMFER_IN * 2 &&
+    usableWidIn > CHAMFER_IN * 2;
+
+  const innerWallPathD = canInnerChamfer
+    ? [
+        `M ${innerX0 + chamferPxX},${innerY0}`, // top edge after UL chamfer
+        `L ${innerX0 + innerWallWidthPx},${innerY0}`, // top-right
+        `L ${
+          innerX0 + innerWallWidthPx
+        },${innerY0 + innerWallHeightPx - chamferPxY}`, // right edge before LR chamfer
+        `L ${
+          innerX0 + innerWallWidthPx - chamferPxX
+        },${innerY0 + innerWallHeightPx}`, // LR chamfer
+        `L ${innerX0},${innerY0 + innerWallHeightPx}`, // bottom-left
+        `L ${innerX0},${innerY0 + chamferPxY}`, // left edge before UL chamfer
+        "Z",
+      ].join(" ")
+    : [
+        `M ${innerX0},${innerY0}`,
+        `L ${innerX0 + innerWallWidthPx},${innerY0}`,
+        `L ${innerX0 + innerWallWidthPx},${innerY0 + innerWallHeightPx}`,
+        `L ${innerX0},${innerY0 + innerWallHeightPx}`,
+        "Z",
+      ].join(" ");
+
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
+  // === Pan state + refs live INSIDE the component (no top-level hooks) ===
+  const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
+  const lastPanRef = useRef<{ x: number; y: number } | null>(null);
+  const [panMode, setPanMode] = useState(false);
+  const isSpacebarHeldRef = useRef(false);
+
+  // Spacebar toggles pan mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !isSpacebarHeldRef.current) {
+        isSpacebarHeldRef.current = true;
+        setPanMode(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        isSpacebarHeldRef.current = false;
+        setPanMode(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+
+  // Pointer-based panning for the outer wrapper
+  const handlePointerDownPan = (
+    e: React.PointerEvent<HTMLDivElement>,
+  ): void => {
+    if (!panMode) return;
+    const target = canvasWrapperRef.current;
+    if (!target) return;
+
+    target.setPointerCapture(e.pointerId);
+    lastPanRef.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handlePointerMovePan = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!panMode) return;
+
+    const wrap = canvasWrapperRef.current;
+    if (!wrap || !lastPanRef.current) return;
+
+    const parent = wrap.parentElement;
+    if (!parent) return;
+
+    const dx = e.clientX - lastPanRef.current.x;
+    const dy = e.clientY - lastPanRef.current.y;
+
+    parent.scrollLeft -= dx;
+    parent.scrollTop -= dy;
+
+    lastPanRef.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!panMode) return;
+    lastPanRef.current = null;
+
+    try {
+      canvasWrapperRef.current?.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+  };
 
   // ==== Mouse handlers ====
 
@@ -143,7 +293,7 @@ export default function InteractiveCanvas({
   };
 
   const handleMouseMove = (e: MouseEvent<SVGSVGElement>) => {
-    if (!drag || !svgRef.current) return;
+    if (panMode || !drag || !svgRef.current) return;
 
     const svgRect = svgRef.current.getBoundingClientRect();
     const ptX = e.clientX - svgRect.left;
@@ -207,7 +357,6 @@ export default function InteractiveCanvas({
 
       const newWidthPx = ptX - cavX;
       const newHeightPx = ptY - cavY;
-
       let newLenIn = newWidthPx / scale;
       let newWidIn = newHeightPx / scale;
 
@@ -267,8 +416,13 @@ export default function InteractiveCanvas({
 
   return (
     // outer wrapper stays neutral – the dark grid comes from the parent
-    <div className="rounded-2xl">
-      {/* Allow scrolling when zooming in so the whole block is always accessible */}
+    <div
+      ref={canvasWrapperRef}
+      className={`rounded-2xl ${panMode ? "cursor-grabbing" : ""}`}
+      onPointerDown={handlePointerDownPan}
+      onPointerMove={handlePointerMovePan}
+      onPointerUp={handlePointerUpPan}
+    >
       <div className="overflow-auto rounded-xl">
         <svg
           ref={svgRef}
@@ -292,14 +446,9 @@ export default function InteractiveCanvas({
           {/* rulers + block label ABOVE the top ruler */}
           {drawRulersWithLabel(block, blockPx, blockOffset)}
 
-          {/* block */}
-          <rect
-            x={blockOffset.x}
-            y={blockOffset.y}
-            width={blockPx.width}
-            height={blockPx.height}
-            rx={0}
-            ry={0}
+          {/* block with optional 1" 45° chamfers at upper-left and lower-right */}
+          <path
+            d={outerBlockPathD}
             fill="#e5e7eb" // light foam block
             stroke="#cbd5f5"
             strokeWidth={2}
@@ -308,23 +457,9 @@ export default function InteractiveCanvas({
           {/* 0.5" grid *inside* the block */}
           {drawInchGrid(block, blockPx, blockOffset)}
 
-          {/* 0.5" inner wall (dashed) */}
-          <rect
-            x={
-              blockOffset.x +
-              (innerWall.leftIn / block.lengthIn) * blockPx.width
-            }
-            y={
-              blockOffset.y + (innerWall.topIn / block.widthIn) * blockPx.height
-            }
-            width={
-              blockPx.width *
-              ((innerWall.rightIn - innerWall.leftIn) / block.lengthIn)
-            }
-            height={
-              blockPx.height *
-              ((innerWall.bottomIn - innerWall.topIn) / block.widthIn)
-            }
+          {/* 0.5" inner wall (dashed, matches chamfer shape where possible) */}
+          <path
+            d={innerWallPathD}
             fill="none"
             stroke="#94a3b8"
             strokeDasharray="4 3"
@@ -426,7 +561,6 @@ export default function InteractiveCanvas({
     </div>
   );
 }
-
 // ===== helpers =====
 
 function snapInches(v: number): number {
@@ -644,7 +778,6 @@ function drawRulersWithLabel(
 
   return <g>{group}</g>;
 }
-
 // ===== spacing calcs (edges + nearest neighbor) =====
 
 type SpacingInfo = {
@@ -822,14 +955,25 @@ function drawSpacing(info: SpacingInfo) {
 
   return (
     <g>
-      {/* left wall */}
+      {/* left edge of foam block */}
       {edgeDims.leftIn > 0 && (
         <g>
+          {/* vertical dimension line on the foam edge */}
           <line
             x1={edgeDims.leftPx}
             y1={edgeDims.cavTopPx}
             x2={edgeDims.leftPx}
             y2={edgeDims.cavBottomPx}
+            stroke="#64748b"
+            strokeDasharray="4 3"
+            strokeWidth={1}
+          />
+          {/* horizontal reference line from foam edge to cavity */}
+          <line
+            x1={edgeDims.leftPx}
+            y1={(edgeDims.cavTopPx + edgeDims.cavBottomPx) / 2}
+            x2={edgeDims.cavLeftPx}
+            y2={(edgeDims.cavTopPx + edgeDims.cavBottomPx) / 2}
             stroke="#64748b"
             strokeDasharray="4 3"
             strokeWidth={1}
@@ -845,14 +989,25 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* right wall */}
+      {/* right edge of foam block */}
       {edgeDims.rightIn > 0 && (
         <g>
+          {/* vertical dimension line on the foam edge */}
           <line
             x1={edgeDims.rightPx}
             y1={edgeDims.cavTopPx}
             x2={edgeDims.rightPx}
             y2={edgeDims.cavBottomPx}
+            stroke="#64748b"
+            strokeDasharray="4 3"
+            strokeWidth={1}
+          />
+          {/* horizontal reference line from cavity to foam edge */}
+          <line
+            x1={edgeDims.cavRightPx}
+            y1={(edgeDims.cavTopPx + edgeDims.cavBottomPx) / 2}
+            x2={edgeDims.rightPx}
+            y2={(edgeDims.cavTopPx + edgeDims.cavBottomPx) / 2}
             stroke="#64748b"
             strokeDasharray="4 3"
             strokeWidth={1}
@@ -868,14 +1023,25 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* top wall */}
+      {/* top edge of foam block */}
       {edgeDims.topIn > 0 && (
         <g>
+          {/* horizontal dimension line along the foam edge */}
           <line
             x1={edgeDims.cavLeftPx}
             y1={edgeDims.topPx}
             x2={edgeDims.cavRightPx}
             y2={edgeDims.topPx}
+            stroke="#64748b"
+            strokeDasharray="4 3"
+            strokeWidth={1}
+          />
+          {/* vertical reference line from foam edge down to cavity */}
+          <line
+            x1={(edgeDims.cavLeftPx + edgeDims.cavRightPx) / 2}
+            y1={edgeDims.topPx}
+            x2={(edgeDims.cavLeftPx + edgeDims.cavRightPx) / 2}
+            y2={edgeDims.cavTopPx}
             stroke="#64748b"
             strokeDasharray="4 3"
             strokeWidth={1}
@@ -891,13 +1057,24 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* bottom wall */}
+      {/* bottom edge of foam block */}
       {edgeDims.bottomIn > 0 && (
         <g>
+          {/* horizontal dimension line along the foam edge */}
           <line
             x1={edgeDims.cavLeftPx}
             y1={edgeDims.bottomPx}
             x2={edgeDims.cavRightPx}
+            y2={edgeDims.bottomPx}
+            stroke="#64748b"
+            strokeDasharray="4 3"
+            strokeWidth={1}
+          />
+          {/* vertical reference line from cavity down to foam edge */}
+          <line
+            x1={(edgeDims.cavLeftPx + edgeDims.cavRightPx) / 2}
+            y1={edgeDims.cavBottomPx}
+            x2={(edgeDims.cavLeftPx + edgeDims.cavRightPx) / 2}
             y2={edgeDims.bottomPx}
             stroke="#64748b"
             strokeDasharray="4 3"
