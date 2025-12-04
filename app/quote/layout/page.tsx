@@ -20,7 +20,6 @@
 //   email → layout always reflects the latest cavity dims instead of an
 //   old 3x2x1 test layout.
 //
-
 "use client";
 
 import * as React from "react";
@@ -335,7 +334,6 @@ export default function LayoutPage({
     },
     [],
   );
-
 
   React.useEffect(() => {
     let cancelled = false;
@@ -654,6 +652,117 @@ function LayoutEditorHost(props: {
     selectCavity(null);
   }, [effectiveActiveLayerId, layerCount, selectCavity, layers]);
 
+  // When a new cavity is added, try to drop it into "dead space"
+  const prevCavityCountRef = React.useRef<number>(cavities.length);
+  React.useEffect(() => {
+    const prevCount = prevCavityCountRef.current;
+
+    if (
+      cavities.length > prevCount &&
+      block.lengthIn &&
+      block.widthIn &&
+      Number.isFinite(block.lengthIn) &&
+      Number.isFinite(block.widthIn)
+    ) {
+      const newCavity = cavities[cavities.length - 1];
+      if (newCavity) {
+        const existing = cavities.slice(0, -1);
+
+        const cavLen = Number(newCavity.lengthIn) || 1;
+        const cavWid = Number(newCavity.widthIn) || 1;
+
+        const usableLen = Math.max(block.lengthIn - 2 * WALL_IN, cavLen);
+        const usableWid = Math.max(block.widthIn - 2 * WALL_IN, cavWid);
+
+        const isOverlapping = (xIn: number, yIn: number) => {
+          return existing.some((c) => {
+            const cxIn = (Number(c.x) || 0) * block.lengthIn;
+            const cyIn = (Number(c.y) || 0) * block.widthIn;
+            const cLen = Number(c.lengthIn) || 0;
+            const cWid = Number(c.widthIn) || 0;
+
+            // Simple AABB overlap check
+            return !(
+              xIn + cavLen <= cxIn ||
+              cxIn + cLen <= xIn ||
+              yIn + cavWid <= cyIn ||
+              cyIn + cWid <= yIn
+            );
+          });
+        };
+
+        let chosenXIn: number | null = null;
+        let chosenYIn: number | null = null;
+
+        const cols = 3;
+        const rows = 3;
+        const cellW = usableLen / cols;
+        const cellH = usableWid / rows;
+
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            const centerXIn = WALL_IN + cellW * (col + 0.5);
+            const centerYIn = WALL_IN + cellH * (row + 0.5);
+
+            let xIn = centerXIn - cavLen / 2;
+            let yIn = centerYIn - cavWid / 2;
+
+            const minXIn = WALL_IN;
+            const maxXIn = block.lengthIn - WALL_IN - cavLen;
+            const minYIn = WALL_IN;
+            const maxYIn = block.widthIn - WALL_IN - cavWid;
+
+            const clamp = (v: number, min: number, max: number) =>
+              v < min ? min : v > max ? max : v;
+
+            xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+            yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+            if (!isOverlapping(xIn, yIn)) {
+              chosenXIn = xIn;
+              chosenYIn = yIn;
+              break;
+            }
+          }
+          if (chosenXIn != null) break;
+        }
+
+        // Fallback: center placement inside walls
+        if (chosenXIn == null || chosenYIn == null) {
+          let xIn = (block.lengthIn - cavLen) / 2;
+          let yIn = (block.widthIn - cavWid) / 2;
+
+          const minXIn = WALL_IN;
+          const maxXIn = block.lengthIn - WALL_IN - cavLen;
+          const minYIn = WALL_IN;
+          const maxYIn = block.widthIn - WALL_IN - cavWid;
+
+          const clamp = (v: number, min: number, max: number) =>
+            v < min ? min : v > max ? max : v;
+
+          xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+          yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+          chosenXIn = xIn;
+          chosenYIn = yIn;
+        }
+
+        if (
+          chosenXIn != null &&
+          chosenYIn != null &&
+          block.lengthIn > 0 &&
+          block.widthIn > 0
+        ) {
+          const xNorm = chosenXIn / block.lengthIn;
+          const yNorm = chosenYIn / block.widthIn;
+          updateCavityPosition(newCavity.id, xNorm, yNorm);
+        }
+      }
+    }
+
+    prevCavityCountRef.current = cavities.length;
+  }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
+
   const [zoom, setZoom] = React.useState(1);
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
@@ -685,6 +794,117 @@ function LayoutEditorHost(props: {
   );
   const [selectedMaterialId, setSelectedMaterialId] =
     React.useState<number | null>(initialMaterialId);
+
+  // Local input state for selected cavity dims (to avoid "wonky" inputs)
+  const [cavityInputs, setCavityInputs] = React.useState<{
+    id: string | null;
+    length: string;
+    width: string;
+    depth: string;
+    cornerRadius: string;
+  }>({
+    id: null,
+    length: "",
+    width: "",
+    depth: "",
+    cornerRadius: "",
+  });
+
+  React.useEffect(() => {
+    if (!selectedCavity) {
+      setCavityInputs({
+        id: null,
+        length: "",
+        width: "",
+        depth: "",
+        cornerRadius: "",
+      });
+      return;
+    }
+
+    setCavityInputs({
+      id: selectedCavity.id,
+      length:
+        selectedCavity.lengthIn != null
+          ? String(selectedCavity.lengthIn)
+          : "",
+      width:
+        selectedCavity.widthIn != null ? String(selectedCavity.widthIn) : "",
+      depth:
+        selectedCavity.depthIn != null ? String(selectedCavity.depthIn) : "",
+      cornerRadius:
+        selectedCavity.cornerRadiusIn != null
+          ? String(selectedCavity.cornerRadiusIn)
+          : "",
+    });
+  }, [selectedCavity]);
+
+  const commitCavityField = React.useCallback(
+    (field: "length" | "width" | "depth" | "cornerRadius") => {
+      if (!selectedCavity || !cavityInputs.id || cavityInputs.id !== selectedCavity.id) {
+        return;
+      }
+
+      const raw = cavityInputs[field];
+      const parsed = Number(raw);
+
+      const resetToCurrent = () => {
+        setCavityInputs((prev) => ({
+          ...prev,
+          [field]:
+            field === "length"
+              ? String(selectedCavity.lengthIn ?? "")
+              : field === "width"
+              ? String(selectedCavity.widthIn ?? "")
+              : field === "depth"
+              ? String(selectedCavity.depthIn ?? "")
+              : String(selectedCavity.cornerRadiusIn ?? ""),
+        }));
+      };
+
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        resetToCurrent();
+        return;
+      }
+
+      const snapped = snapInches(parsed);
+
+      // Circles keep length/width as the same "diameter"
+      if (selectedCavity.shape === "circle" && (field === "length" || field === "width")) {
+        updateCavityDims(selectedCavity.id, {
+          lengthIn: snapped,
+          widthIn: snapped,
+        });
+        setCavityInputs((prev) => ({
+          ...prev,
+          length: String(snapped),
+          width: String(snapped),
+        }));
+        return;
+      }
+
+      if (field === "length") {
+        updateCavityDims(selectedCavity.id, { lengthIn: snapped });
+        setCavityInputs((prev) => ({ ...prev, length: String(snapped) }));
+      } else if (field === "width") {
+        updateCavityDims(selectedCavity.id, { widthIn: snapped });
+        setCavityInputs((prev) => ({ ...prev, width: String(snapped) }));
+      } else if (field === "depth") {
+        updateCavityDims(selectedCavity.id, { depthIn: snapped });
+        setCavityInputs((prev) => ({ ...prev, depth: String(snapped) }));
+      } else {
+        updateCavityDims(selectedCavity.id, {
+          cornerRadiusIn: snapped,
+        });
+        setCavityInputs((prev) => ({
+          ...prev,
+          cornerRadius: String(snapped),
+        }));
+      }
+    },
+    [cavityInputs, selectedCavity, updateCavityDims],
+  );
+
   React.useEffect(() => {
     let cancelled = false;
 
@@ -1175,6 +1395,7 @@ function LayoutEditorHost(props: {
                   </div>
                 )}
               </aside>
+
               {/* CENTER: Big visualizer */}
               <section className="flex-1 flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
@@ -1195,21 +1416,79 @@ function LayoutEditorHost(props: {
                       </span>
                     </div>
 
-                    {/* Layer selector (only when a stack is present) */}
+                    {/* Layer selector + layer manager (only when a stack is present) */}
                     {stack && stack.length > 0 && (
-                      <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-300">
-                        <span className="text-slate-400">Layer</span>
-                        <select
-                          value={activeLayerId ?? (stack[0]?.id ?? "")}
-                          onChange={(e) => setActiveLayerId(e.target.value)}
-                          className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-100"
-                        >
-                          {stack.map((layer) => (
-                            <option key={layer.id} value={layer.id}>
-                              {layer.label}
-                            </option>
-                          ))}
-                        </select>
+                      <div className="mt-2 space-y-1 text-[11px] text-slate-300">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-400">Layer</span>
+                            <select
+                              value={activeLayerId ?? (stack[0]?.id ?? "")}
+                              onChange={(e) =>
+                                setActiveLayerId(e.target.value)
+                              }
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-100"
+                            >
+                              {stack.map((layer) => (
+                                <option key={layer.id} value={layer.id}>
+                                  {layer.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={addLayer}
+                            className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                          >
+                            + Add layer
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1">
+                          {stack.map((layer) => {
+                            const isActive = activeLayer?.id === layer.id;
+                            return (
+                              <button
+                                key={layer.id}
+                                type="button"
+                                onClick={() => setActiveLayerId(layer.id)}
+                                className={
+                                  "px-2 py-0.5 rounded-full text-[11px] border " +
+                                  (isActive
+                                    ? "bg-sky-500 text-slate-950 border-sky-400"
+                                    : "bg-slate-800/80 text-slate-200 border-slate-700 hover:border-sky-400 hover:text-sky-100")
+                                }
+                              >
+                                {layer.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {activeLayer && (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={activeLayer.label}
+                              onChange={(e) =>
+                                renameLayer(activeLayer.id, e.target.value)
+                              }
+                              className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-100"
+                              placeholder="Layer name"
+                            />
+                            {stack.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => deleteLayer(activeLayer.id)}
+                                className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300 hover:text-red-300 hover:border-red-400 transition"
+                                title="Delete this layer"
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1488,78 +1767,13 @@ function LayoutEditorHost(props: {
                     )}
                   </div>
 
-                  {/* Layer manager (demo) */}
-                  {stack && stack.length > 0 && (
-                    <div className="mb-3 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] text-slate-400">
-                          Layers
-                        </span>
-
-                        <button
-                          type="button"
-                          onClick={addLayer}
-                          className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
-                        >
-                          + Add layer
-                        </button>
-                      </div>
-
-                      <div className="flex flex-wrap gap-1">
-                        {stack.map((layer) => {
-                          const isActive = activeLayer?.id === layer.id;
-                          return (
-                            <button
-                              key={layer.id}
-                              type="button"
-                              onClick={() => setActiveLayerId(layer.id)}
-                              className={
-                                "px-2 py-0.5 rounded-full text-[11px] border " +
-                                (isActive
-                                  ? "bg-sky-500 text-slate-950 border-sky-400"
-                                  : "bg-slate-800/80 text-slate-200 border-slate-700 hover:border-sky-400 hover:text-sky-100")
-                              }
-                            >
-                              {layer.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {activeLayer && (
-                        <div className="flex items-center gap-2 text-[11px]">
-                          <input
-                            type="text"
-                            value={activeLayer.label}
-                            onChange={(e) =>
-                              renameLayer(activeLayer.id, e.target.value)
-                            }
-                            className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-100"
-                            placeholder="Layer name"
-                          />
-
-                          {stack.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => deleteLayer(activeLayer.id)}
-                              className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300 hover:text-red-300 hover:border-red-400 transition"
-                              title="Delete this layer"
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   {cavities.length === 0 ? (
-                    <div className="text-xs text-slate-400">
+                    <div className="mt-2 text-xs text-slate-400">
                       No cavities yet. Use the palette on the left to add a
                       pocket.
                     </div>
                   ) : (
-                    <ul className="space-y-1.5 mb-3 max-h-40 overflow-auto">
+                    <ul className="mt-2 space-y-1.5 mb-3 max-h-40 overflow-auto">
                       {cavities.map((cav, cavIndex) => {
                         const isActive = cav.id === selectedId;
 
@@ -1645,16 +1859,14 @@ function LayoutEditorHost(props: {
                             <input
                               type="number"
                               step={0.125}
-                              value={selectedCavity.lengthIn}
-                              onChange={(e) => {
-                                const d = snapInches(
-                                  Number(e.target.value),
-                                );
-                                updateCavityDims(selectedCavity.id, {
-                                  lengthIn: d,
-                                  widthIn: d,
-                                });
-                              }}
+                              value={cavityInputs.length}
+                              onChange={(e) =>
+                                setCavityInputs((prev) => ({
+                                  ...prev,
+                                  length: e.target.value,
+                                }))
+                              }
+                              onBlur={() => commitCavityField("length")}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1665,12 +1877,14 @@ function LayoutEditorHost(props: {
                             <input
                               type="number"
                               step={0.125}
-                              value={selectedCavity.depthIn}
+                              value={cavityInputs.depth}
                               onChange={(e) =>
-                                updateCavityDims(selectedCavity.id, {
-                                  depthIn: Number(e.target.value),
-                                })
+                                setCavityInputs((prev) => ({
+                                  ...prev,
+                                  depth: e.target.value,
+                                }))
                               }
+                              onBlur={() => commitCavityField("depth")}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1684,14 +1898,14 @@ function LayoutEditorHost(props: {
                             <input
                               type="number"
                               step={0.125}
-                              value={selectedCavity.lengthIn}
+                              value={cavityInputs.length}
                               onChange={(e) =>
-                                updateCavityDims(selectedCavity.id, {
-                                  lengthIn: snapInches(
-                                    Number(e.target.value),
-                                  ),
-                                })
+                                setCavityInputs((prev) => ({
+                                  ...prev,
+                                  length: e.target.value,
+                                }))
                               }
+                              onBlur={() => commitCavityField("length")}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1702,14 +1916,14 @@ function LayoutEditorHost(props: {
                             <input
                               type="number"
                               step={0.125}
-                              value={selectedCavity.widthIn}
+                              value={cavityInputs.width}
                               onChange={(e) =>
-                                updateCavityDims(selectedCavity.id, {
-                                  widthIn: snapInches(
-                                    Number(e.target.value),
-                                  ),
-                                })
+                                setCavityInputs((prev) => ({
+                                  ...prev,
+                                  width: e.target.value,
+                                }))
                               }
+                              onBlur={() => commitCavityField("width")}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1720,12 +1934,14 @@ function LayoutEditorHost(props: {
                             <input
                               type="number"
                               step={0.125}
-                              value={selectedCavity.depthIn}
+                              value={cavityInputs.depth}
                               onChange={(e) =>
-                                updateCavityDims(selectedCavity.id, {
-                                  depthIn: Number(e.target.value),
-                                })
+                                setCavityInputs((prev) => ({
+                                  ...prev,
+                                  depth: e.target.value,
+                                }))
                               }
+                              onBlur={() => commitCavityField("depth")}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1736,13 +1952,15 @@ function LayoutEditorHost(props: {
                             <input
                               type="number"
                               step={0.125}
-                              value={selectedCavity.cornerRadiusIn}
+                              value={cavityInputs.cornerRadius}
                               onChange={(e) =>
-                                updateCavityDims(selectedCavity.id, {
-                                  cornerRadiusIn: snapInches(
-                                    Number(e.target.value),
-                                  ),
-                                })
+                                setCavityInputs((prev) => ({
+                                  ...prev,
+                                  cornerRadius: e.target.value,
+                                }))
+                              }
+                              onBlur={() =>
+                                commitCavityField("cornerRadius")
                               }
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
