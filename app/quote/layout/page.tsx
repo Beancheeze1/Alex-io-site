@@ -19,7 +19,7 @@
 //   and ignore any saved DB layout geometry for the initial load, so
 //   email → layout always reflects the latest cavity dims instead of an
 //   old 3x2x1 test layout.
-//
+
 "use client";
 
 import * as React from "react";
@@ -60,7 +60,7 @@ function normalizeDimsParam(raw: string | string[] | undefined): string {
  * Normalize cavity dims from searchParams (cavities= / cavity=).
  * - Accepts string or string[]
  * - When multiple values are present, join them with ";"
- * - NEW: de-duplicate identical strings so
+ * - De-duplicate identical strings so
  *   "cavities=1x1x1&cavity=1x1x1" → "1x1x1" (one pocket)
  */
 function normalizeCavitiesParam(raw: string | string[] | undefined): string {
@@ -764,7 +764,7 @@ function LayoutEditorHost(props: {
   }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
 
   const [zoom, setZoom] = React.useState(1);
-  const [cropCorners, setCropCorners] = React.useState(false);
+  const [croppedCorners, setCroppedCorners] = React.useState(false);
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
@@ -772,7 +772,6 @@ function LayoutEditorHost(props: {
   const [qty, setQty] = React.useState<number | "">(
     initialQty != null ? initialQty : "",
   );
-
   // Customer info
   const [customerName, setCustomerName] = React.useState<string>(
     initialCustomerName || "",
@@ -842,7 +841,11 @@ function LayoutEditorHost(props: {
 
   const commitCavityField = React.useCallback(
     (field: "length" | "width" | "depth" | "cornerRadius") => {
-      if (!selectedCavity || !cavityInputs.id || cavityInputs.id !== selectedCavity.id) {
+      if (
+        !selectedCavity ||
+        !cavityInputs.id ||
+        cavityInputs.id !== selectedCavity.id
+      ) {
         return;
       }
 
@@ -871,7 +874,10 @@ function LayoutEditorHost(props: {
       const snapped = snapInches(parsed);
 
       // Circles keep length/width as the same "diameter"
-      if (selectedCavity.shape === "circle" && (field === "length" || field === "width")) {
+      if (
+        selectedCavity.shape === "circle" &&
+        (field === "length" || field === "width")
+      ) {
         updateCavityDims(selectedCavity.id, {
           lengthIn: snapped,
           widthIn: snapped,
@@ -1502,103 +1508,90 @@ function LayoutEditorHost(props: {
                     )}
                   </div>
 
-                  {/* zoom + corners + qty + advisor + apply button */}
-<div className="flex items-center gap-3">
-  {/* small label on the left */}
-  <div className="hidden md:flex items-center text-[11px] text-slate-400 mr-1">
-    <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80 mr-1.5" />
-    <span>Layout controls</span>
-  </div>
+                  {/* zoom + crop corners + qty + advisor + apply button */}
+                  <div className="flex items-center gap-3">
+                    <div className="hidden md:flex items-center text-[11px] text-slate-400 mr-1">
+                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80 mr-1.5" />
+                      <span>Layout controls</span>
+                    </div>
+                    <div className="inline-flex items-center gap-3 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 shadow-[0_0_16px_rgba(15,23,42,0.8)]">
+                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                        <span>Zoom</span>
+                        <input
+                          type="range"
+                          min={0.7}
+                          max={1.4}
+                          step={0.05}
+                          value={zoom}
+                          onChange={(e) => setZoom(Number(e.target.value))}
+                          className="w-28 accent-sky-400"
+                        />
+                        <span className="ml-1 text-sky-200 font-mono">
+                          {Math.round(zoom * 100)}%
+                        </span>
+                      </div>
 
-  {/* pill with all controls */}
-  <div className="inline-flex items-center gap-3 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 shadow-[0_0_16px_rgba(15,23,42,0.8)]">
-    {/* Zoom */}
-    <div className="flex items-center gap-1 text-[11px] text-slate-400">
-      <span>Zoom</span>
-      <input
-        type="range"
-        min={0.7}
-        max={1.4}
-        step={0.05}
-        value={zoom}
-        onChange={(e) => setZoom(Number(e.target.value))}
-        className="w-28 accent-sky-400"
-      />
-      <span className="ml-1 text-sky-200 font-mono">
-        {Math.round(zoom * 100)}%
-      </span>
-    </div>
+                      <label className="inline-flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={croppedCorners}
+                          onChange={(e) => setCroppedCorners(e.target.checked)}
+                          className="h-3 w-3 rounded border-slate-600 bg-slate-900 text-sky-400"
+                        />
+                        <span>Crop corners 1&quot;</span>
+                      </label>
 
-    {/* Crop corners toggle */}
-    <button
-      type="button"
-      onClick={() => setCropCorners((prev) => !prev)}
-      className={
-        "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium transition " +
-        (cropCorners
-          ? "border-sky-400 bg-sky-500/15 text-sky-100"
-          : "border-slate-700 bg-slate-900 text-slate-300 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10")
-      }
-      title='Toggle 1" 45° chamfers on two opposite corners'
-    >
-      {cropCorners ? 'Corners: 1" chamfer' : "Corners: square"}
-    </button>
+                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                        <span>Qty</span>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={qty}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (!v) {
+                              setQty("");
+                              return;
+                            }
+                            const num = Number(v);
+                            if (!Number.isFinite(num) || num <= 0) return;
+                            setQty(num);
+                          }}
+                          disabled={!hasRealQuoteNo}
+                          className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
+                        />
+                      </div>
 
-    {/* Qty */}
-    <div className="flex items-center gap-1 text-[11px] text-slate-400">
-      <span>Qty</span>
-      <input
-        type="number"
-        min={1}
-        step={1}
-        value={qty}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (!v) {
-            setQty("");
-            return;
-          }
-          const num = Number(v);
-          if (!Number.isFinite(num) || num <= 0) return;
-          setQty(num);
-        }}
-        disabled={!hasRealQuoteNo}
-        className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
-      />
-    </div>
+                      <button
+                        type="button"
+                        onClick={handleGoToFoamAdvisor}
+                        disabled={missingCustomerInfo}
+                        className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        Recommend my foam
+                      </button>
 
-    {/* Foam advisor */}
-    <button
-      type="button"
-      onClick={handleGoToFoamAdvisor}
-      disabled={missingCustomerInfo}
-      className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
-    >
-      Recommend my foam
-    </button>
-
-    {/* Apply to quote */}
-    <button
-      type="button"
-      onClick={handleApplyToQuote}
-      disabled={!canApplyButton}
-      className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
-    >
-      {!hasRealQuoteNo
-        ? "Link to a quote first"
-        : missingCustomerInfo
-        ? "Add name + email"
-        : applyStatus === "saving"
-        ? "Applying…"
-        : applyStatus === "done"
-        ? "Applied!"
-        : applyStatus === "error"
-        ? "Error – retry"
-        : "Apply to quote"}
-    </button>
-  </div>
-</div>
-
+                      <button
+                        type="button"
+                        onClick={handleApplyToQuote}
+                        disabled={!canApplyButton}
+                        className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
+                      >
+                        {!hasRealQuoteNo
+                          ? "Link to a quote first"
+                          : missingCustomerInfo
+                          ? "Add name + email"
+                          : applyStatus === "saving"
+                          ? "Applying…"
+                          : applyStatus === "done"
+                          ? "Applied!"
+                          : applyStatus === "error"
+                          ? "Error – retry"
+                          : "Apply to quote"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 <p className="text-[11px] text-slate-400 leading-snug">
@@ -1616,18 +1609,17 @@ function LayoutEditorHost(props: {
                     className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,rgba(30,64,175,0.3)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.3)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
                   />
                   <div className="relative p-4 overflow-auto">
-                   <InteractiveCanvas
-  layout={layout}
-  selectedId={selectedId}
-  selectAction={selectCavity}
-  moveAction={updateCavityPosition}
-  resizeAction={(id, lengthIn, widthIn) =>
-    updateCavityDims(id, { lengthIn, widthIn })
-  }
-  zoom={zoom}
-  croppedCorners={cropCorners}
-/>
-
+                    <InteractiveCanvas
+                      layout={layout}
+                      selectedId={selectedId}
+                      selectAction={selectCavity}
+                      moveAction={updateCavityPosition}
+                      resizeAction={(id, lengthIn, widthIn) =>
+                        updateCavityDims(id, { lengthIn, widthIn })
+                      }
+                      zoom={zoom}
+                      croppedCorners={croppedCorners}
+                    />
                   </div>
                 </div>
               </section>
@@ -2052,202 +2044,199 @@ function LayoutEditorHost(props: {
     </main>
   );
 }
+// ===== SVG export helper =====
 
-/* ---------- SVG export helper ---------- */
+function escapeXml(str: string): string {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
-function buildSvgFromLayout(
-  layout: LayoutModel,
-  meta?: { notes?: string; materialLabel?: string | null },
-): string {
+type SvgOpts = {
+  notes?: string;
+  materialLabel?: string;
+};
+
+/**
+ * Build an SVG string for saving with the quote.
+ * Mirrors the on-screen layout:
+ *  - Same overall canvas size
+ *  - Block scaled + centered
+ *  - Cavities drawn with labels
+ *  - Optional notes + material line in the header band
+ */
+function buildSvgFromLayout(layout: LayoutModel, opts: SvgOpts = {}): string {
   const { block, cavities } = layout;
+  const notes = opts.notes ?? "";
+  const materialLabel = opts.materialLabel ?? "";
 
-  const L = Number(block.lengthIn) || 0;
-  const W = Number(block.widthIn) || 0;
-  const T = Number(block.thicknessIn) || 0;
+  const SVG_W = 1200;
+  const SVG_H = 620;
+  const HEADER_BAND = 80;
+  const PADDING = 32;
+  const WALL_IN = 0.5;
 
-  const VIEW_W = 1000;
-  const VIEW_H = 700;
-  const PADDING = 40;
-
-  if (L <= 0 || W <= 0) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}"></svg>`;
+  if (!block.lengthIn || !block.widthIn) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${SVG_W}" height="${SVG_H}" viewBox="0 0 ${SVG_W} ${SVG_H}">
+  <rect width="100%" height="100%" fill="#020617" />
+  <text x="${SVG_W / 2}" y="${SVG_H / 2}" fill="#e5e7eb" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16" text-anchor="middle">
+    No block dimensions
+  </text>
+</svg>`;
   }
 
-  const scaleX = (VIEW_W - 2 * PADDING) / L;
-  const scaleY = (VIEW_H - 2 * PADDING) / W;
-  const scale = Math.min(scaleX, scaleY);
+  const innerW = SVG_W - PADDING * 2;
+  const innerH = SVG_H - PADDING * 2 - HEADER_BAND;
 
-  const blockW = L * scale;
-  const blockH = W * scale;
-  const blockX = (VIEW_W - blockW) / 2;
-  const blockY = (VIEW_H - blockH) / 2;
+  const sx = innerW / (block.lengthIn || 1);
+  const sy = innerH / (block.widthIn || 1);
+  const scale = Math.min(sx, sy);
 
-  const escapeText = (s: string): string =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const blockPxWidth = block.lengthIn * scale;
+  const blockPxHeight = block.widthIn * scale;
 
-  const cavects: string[] = [];
+  const blockOffsetX = (SVG_W - blockPxWidth) / 2;
+  const blockOffsetY = HEADER_BAND + (SVG_H - HEADER_BAND - blockPxHeight) / 2;
 
-  for (const c of cavities) {
-    const cavW = c.lengthIn * scale;
-    const cavH = c.widthIn * scale;
-    const x = blockX + c.x * blockW;
-    const y = blockY + c.y * blockH;
+  const wallPxX = (WALL_IN / block.lengthIn) * blockPxWidth;
+  const wallPxY = (WALL_IN / block.widthIn) * blockPxHeight;
 
-    const label =
-      c.label ?? `${c.lengthIn}×${c.widthIn}×${c.depthIn}"`;
+  const lines: string[] = [];
 
-    if (c.shape === "circle") {
+  lines.push(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${SVG_W}" height="${SVG_H}" viewBox="0 0 ${SVG_W} ${SVG_H}">`,
+  );
+  lines.push(`<rect width="100%" height="100%" fill="#020617" />`);
+
+  // Header band
+  lines.push(
+    `<rect x="0" y="0" width="${SVG_W}" height="${HEADER_BAND}" fill="#020617" />`,
+  );
+
+  const headerTitle = "FOAM LAYOUT — NOT TO SCALE";
+  const headerBlockLine = `Block ${block.lengthIn.toFixed(
+    3,
+  )}" × ${block.widthIn.toFixed(3)}" × ${
+    block.thicknessIn != null ? block.thicknessIn.toFixed(3) : "?"
+  }" thick`;
+
+  lines.push(
+    `<text x="${SVG_W / 2}" y="24" fill="#e5e7eb" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" text-anchor="middle" font-weight="600">${escapeXml(
+      headerTitle,
+    )}</text>`,
+  );
+  lines.push(
+    `<text x="${SVG_W / 2}" y="44" fill="#9ca3af" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="middle">${escapeXml(
+      headerBlockLine,
+    )}</text>`,
+  );
+
+  if (materialLabel) {
+    lines.push(
+      `<text x="${SVG_W / 2}" y="62" fill="#a5b4fc" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" text-anchor="middle">${escapeXml(
+        materialLabel,
+      )}</text>`,
+    );
+  }
+
+  // Notes block (if present)
+  if (notes.trim().length > 0) {
+    const noteLines = notes.trim().split(/\r?\n/).slice(0, 6); // cap a bit
+    const baseY = HEADER_BAND + 18;
+    const x = PADDING;
+    const w = SVG_W - PADDING * 2;
+    const h = noteLines.length * 14 + 12;
+
+    lines.push(
+      `<rect x="${x}" y="${baseY - 16}" width="${w}" height="${h}" fill="#020617" stroke="#1f2937" stroke-width="1" />`,
+    );
+    lines.push(
+      `<text x="${x + 8}" y="${baseY - 4}" fill="#9ca3af" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10" font-weight="600">Notes / special instructions</text>`,
+    );
+
+    let offset = 0;
+    for (const ln of noteLines) {
+      lines.push(
+        `<text x="${x + 8}" y="${baseY + 12 + offset}" fill="#e5e7eb" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="10">${escapeXml(
+          ln,
+        )}</text>`,
+      );
+      offset += 14;
+    }
+  }
+
+  // Block body (simple rectangle; cropping is currently a visual-only toggle in the editor)
+  const blockX = blockOffsetX;
+  const blockY = blockOffsetY;
+
+  lines.push(
+    `<rect x="${blockX}" y="${blockY}" width="${blockPxWidth}" height="${blockPxHeight}" fill="#020617" stroke="#e5e7eb" stroke-width="1.5" />`,
+  );
+
+  // Inner usable area (0.5" wall)
+  lines.push(
+    `<rect x="${blockX + wallPxX}" y="${
+      blockY + wallPxY
+    }" width="${blockPxWidth - wallPxX * 2}" height="${
+      blockPxHeight - wallPxY * 2
+    }" fill="none" stroke="#4b5563" stroke-dasharray="4 3" stroke-width="1" />`,
+  );
+
+  // Cavities
+  cavities.forEach((cav, idx) => {
+    const cavLeftIn = cav.x * block.lengthIn;
+    const cavTopIn = cav.y * block.widthIn;
+    const cavRightIn = cavLeftIn + cav.lengthIn;
+    const cavBottomIn = cavTopIn + cav.widthIn;
+
+    const cavX =
+      blockX + (cavLeftIn / block.lengthIn) * blockPxWidth;
+    const cavY = blockY + (cavTopIn / block.widthIn) * blockPxHeight;
+    const cavW =
+      ((cavRightIn - cavLeftIn) / block.lengthIn) * blockPxWidth;
+    const cavH =
+      ((cavBottomIn - cavTopIn) / block.widthIn) * blockPxHeight;
+
+    const color = CAVITY_COLORS[idx % CAVITY_COLORS.length];
+
+    if (cav.shape === "circle") {
+      const cx = cavX + cavW / 2;
+      const cy = cavY + cavH / 2;
       const r = Math.min(cavW, cavH) / 2;
-      const cx = x + cavW / 2;
-      const cy = y + cavH / 2;
-      cavects.push(
-        [
-          `<g>`,
-          `  <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(
-            2,
-          )}" r="${r.toFixed(
-            2,
-          )}" fill="none" stroke="#111827" stroke-width="1" />`,
-          `  <text x="${cx.toFixed(
-            2,
-          )}" y="${cy.toFixed(
-            2,
-          )}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#111827">${escapeText(
-            label,
-          )}</text>`,
-          `</g>`,
-        ].join("\n"),
+
+      lines.push(
+        `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="1.4" />`,
+      );
+    } else if (cav.shape === "roundedRect") {
+      // simple rounded rect using cavity.cornerRadiusIn
+      const rIn = cav.cornerRadiusIn ?? 0.25;
+      const rx = (rIn / block.lengthIn) * blockPxWidth;
+      const ry = (rIn / block.widthIn) * blockPxHeight;
+
+      lines.push(
+        `<rect x="${cavX}" y="${cavY}" width="${cavW}" height="${cavH}" rx="${rx}" ry="${ry}" fill="none" stroke="${color}" stroke-width="1.4" />`,
       );
     } else {
-      cavects.push(
-        [
-          `<g>`,
-          `  <rect x="${x.toFixed(
-            2,
-          )}" y="${y.toFixed(
-            2,
-          )}" width="${cavW.toFixed(
-            2,
-          )}" height="${cavH.toFixed(
-            2,
-          )}" rx="0" ry="0" fill="none" stroke="#111827" stroke-width="1" />`,
-          `  <text x="${(x + cavW / 2).toFixed(
-            2,
-          )}" y="${(y + cavH / 2).toFixed(
-            2,
-          )}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#111827">${escapeText(
-            label,
-          )}</text>`,
-          `</g>`,
-        ].join("\n"),
+      lines.push(
+        `<rect x="${cavX}" y="${cavY}" width="${cavW}" height="${cavH}" fill="none" stroke="${color}" stroke-width="1.4" />`,
       );
     }
-  }
 
-  const cavRects = cavects.join("\n");
-
-  const headerLines: string[] = [];
-  headerLines.push("NOT TO SCALE");
-  if (T > 0) {
-    headerLines.push(`BLOCK: ${L}" × ${W}" × ${T}"`);
-  } else {
-    headerLines.push(`BLOCK: ${L}" × ${W}" (thickness see quote)`);
-  }
-
-  if (meta?.materialLabel) {
-    headerLines.push(`MATERIAL: ${meta.materialLabel}`);
-  }
-
-  const headerTexts = headerLines
-    .map((line, idx) => {
-      const y = PADDING + idx * 14;
-      const fontSize = idx === 0 ? 11 : 10;
-      return `<text x="${PADDING.toFixed(
-        2,
-      )}" y="${y.toFixed(
-        2,
-      )}" font-size="${fontSize}" fill="#111827">${escapeText(
-        line,
-      )}</text>`;
-    })
-    .join("\n    ");
-
-  const headerSection = `<g>
-    ${headerTexts}
-  </g>`;
-
-  const metaLines: string[] = [];
-
-  if (meta?.notes && meta.notes.trim().length > 0) {
-    const rawNotes = meta.notes.trim();
-
-    const cleaned = rawNotes
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(
-        (line) =>
-          line &&
-          !/^FOAM(?:\s+BLOCK)?:/i.test(line) &&
-          !/^BLOCK:/i.test(line) &&
-          !/^CAVITY/i.test(line) &&
-          !/^FOAM:/i.test(line) &&
-          !/^MATERIAL:/i.test(line),
+    // Label
+    const label = cav.label || "";
+    if (label) {
+      lines.push(
+        `<text x="${cavX + cavW / 2}" y="${
+          cavY + cavH / 2 + 4
+        }" fill="#e5e7eb" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" text-anchor="middle">${escapeXml(
+          label,
+        )}</text>`,
       );
-
-    if (cleaned.length > 0) {
-      metaLines.push(`Notes: ${cleaned.join("  ")}`);
     }
-  }
+  });
 
-  let metaSection = "";
-  if (metaLines.length > 0) {
-    const notesTexts = metaLines
-      .map((line, idx) => {
-        const y = VIEW_H - PADDING + idx * 14;
-        return `<text x="${PADDING.toFixed(
-          2,
-        )}" y="${y.toFixed(
-          2,
-        )}" font-size="10" fill="#111827">${escapeText(
-          line,
-        )}</text>`;
-      })
-      .join("\n    ");
-
-    metaSection = `<g>
-    ${notesTexts}
-  </g>`;
-  }
-
-  const svgParts: string[] = [];
-
-  svgParts.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}">`,
-  );
-
-  svgParts.push(`  ${headerSection}`);
-
-  svgParts.push(
-    `  <rect x="${blockX.toFixed(
-      2,
-    )}" y="${blockY.toFixed(
-      2,
-    )}" width="${blockW.toFixed(
-      2,
-    )}" height="${blockH.toFixed(
-      2,
-    )}" rx="0" ry="0" fill="#e5e7eb" stroke="#111827" stroke-width="2" />`,
-  );
-
-  if (cavRects) {
-    svgParts.push(cavRects);
-  }
-
-  if (metaSection) {
-    svgParts.push(metaSection);
-  }
-
-  svgParts.push(`</svg>`);
-
-  return svgParts.join("\n");
+  lines.push(`</svg>`);
+  return lines.join("\n");
 }
