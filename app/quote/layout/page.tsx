@@ -648,9 +648,9 @@ function LayoutEditorHost(props: {
   // Clear selection when switching layers so we don't edit a cavity from a different layer
   const layerCount = layers?.length ?? 0;
   React.useEffect(() => {
-    if (!layers || layers.length === 0) return;
+    if (!layers || layerCount === 0) return;
     selectCavity(null);
-  }, [effectiveActiveLayerId, layerCount, selectCavity, layers]);
+  }, [effectiveActiveLayerId, layerCount, selectCavity]);
 
   // When a new cavity is added, try to drop it into "dead space"
   const prevCavityCountRef = React.useRef<number>(cavities.length);
@@ -905,16 +905,6 @@ function LayoutEditorHost(props: {
     [cavityInputs, selectedCavity, updateCavityDims],
   );
 
-  // If selection gets cleared while editing, snap it back to the active cavity
-  React.useEffect(() => {
-    if (!selectedCavity && cavityInputs.id) {
-      const stillThere = cavities.find((c) => c.id === cavityInputs.id);
-      if (stillThere) {
-        selectCavity(cavityInputs.id);
-      }
-    }
-  }, [selectedCavity, cavityInputs.id, cavities, selectCavity]);
-
   React.useEffect(() => {
     let cancelled = false;
 
@@ -999,10 +989,6 @@ function LayoutEditorHost(props: {
   const missingCustomerInfo =
     !customerName.trim() || !customerEmail.trim();
 
-  const canUseFoamAdvisor = !missingCustomerInfo;
-  const canApplyButton =
-    hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
-
   /* ---------- Palette interactions ---------- */
 
   const handleAddPreset = (shape: CavityShape) => {
@@ -1055,7 +1041,7 @@ function LayoutEditorHost(props: {
   /* ---------- Foam Advisor navigation ---------- */
 
   const handleGoToFoamAdvisor = () => {
-    if (!canUseFoamAdvisor) return;
+    if (missingCustomerInfo) return;
 
     const params = new URLSearchParams();
 
@@ -1184,6 +1170,9 @@ function LayoutEditorHost(props: {
   };
 
   /* ---------- Layout ---------- */
+
+  const canApplyButton =
+    hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
 
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
@@ -1327,7 +1316,7 @@ function LayoutEditorHost(props: {
                   </div>
                 </button>
 
-                {/* Foam material (moved back into left bar) */}
+                {/* Foam material (in left bar) */}
                 <div className="mt-2">
                   <div className="text-xs font-semibold text-slate-100 mb-1">
                     Foam material
@@ -1422,12 +1411,38 @@ function LayoutEditorHost(props: {
                       </span>
                     </div>
 
-                    {/* Layer selector + layer manager (more horizontal) */}
+                    {/* Layer selector + manager (horizontal style) */}
                     {stack && stack.length > 0 && (
-                      <div className="mt-2 text-[11px] text-slate-300 space-y-1.5">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-slate-400">Layer</span>
+                            <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+                              Layers
+                            </span>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {stack.map((layer) => {
+                                const isActive = activeLayer?.id === layer.id;
+                                return (
+                                  <button
+                                    key={layer.id}
+                                    type="button"
+                                    onClick={() =>
+                                      setActiveLayerId(layer.id)
+                                    }
+                                    className={
+                                      "px-2 py-0.5 rounded-full border text-[11px] " +
+                                      (isActive
+                                        ? "bg-sky-500 text-slate-950 border-sky-400"
+                                        : "bg-slate-800/80 text-slate-200 border-slate-700 hover:border-sky-400 hover:text-sky-100")
+                                    }
+                                  >
+                                    {layer.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
                             <select
                               value={activeLayerId ?? (stack[0]?.id ?? "")}
                               onChange={(e) =>
@@ -1444,38 +1459,14 @@ function LayoutEditorHost(props: {
                             <button
                               type="button"
                               onClick={addLayer}
-                              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
                             >
                               + Add layer
                             </button>
                           </div>
-                          <div className="flex flex-wrap gap-1">
-                            {stack.map((layer, layerIdx) => {
-                              const isActive =
-                                activeLayer?.id === layer.id;
-                              return (
-                                <button
-                                  key={layer.id}
-                                  type="button"
-                                  onClick={() =>
-                                    setActiveLayerId(layer.id)
-                                  }
-                                  className={
-                                    "px-2 py-0.5 rounded-full text-[11px] border " +
-                                    (isActive
-                                      ? "bg-sky-500 text-slate-950 border-sky-400"
-                                      : "bg-slate-800/80 text-slate-200 border-slate-700 hover:border-sky-400 hover:text-sky-100")
-                                  }
-                                >
-                                  {layer.label || `Layer ${layerIdx + 1}`}
-                                </button>
-                              );
-                            })}
-                          </div>
                         </div>
-
                         {activeLayer && (
-                          <div className="flex items-center gap-2">
+                          <div className="mt-2 flex items-center gap-2">
                             <input
                               type="text"
                               value={activeLayer.label}
@@ -1503,7 +1494,7 @@ function LayoutEditorHost(props: {
                     )}
 
                     {!hasRealQuoteNo && (
-                      <div className="text-[11px] text-amber-300 mt-0.5">
+                      <div className="text-[11px] text-amber-300 mt-1">
                         Demo only – link from a real quote email to apply
                         layouts.
                       </div>
@@ -1558,7 +1549,7 @@ function LayoutEditorHost(props: {
                       <button
                         type="button"
                         onClick={handleGoToFoamAdvisor}
-                        disabled={!canUseFoamAdvisor}
+                        disabled={missingCustomerInfo}
                         className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         Recommend my foam
@@ -1704,7 +1695,8 @@ function LayoutEditorHost(props: {
                   <div className="text-[11px] text-slate-400 mb-2">
                     Add who this foam layout is for.{" "}
                     <span className="text-sky-300">
-                      Name + email are required before applying.
+                      Name + email are required before recommending foam or
+                      applying to the quote.
                     </span>
                   </div>
 
@@ -1762,12 +1754,8 @@ function LayoutEditorHost(props: {
                   {missingCustomerInfo && hasRealQuoteNo && (
                     <div className="mt-2 text-[11px] text-amber-300">
                       Enter a name and email to enable{" "}
-                      <span className="font-semibold">Apply to quote</span>{" "}
-                      and{" "}
-                      <span className="font-semibold">
-                        Recommend my foam
-                      </span>
-                      .
+                      <span className="font-semibold">Recommend my foam</span>{" "}
+                      and <span className="font-semibold">Apply to quote</span>.
                     </div>
                   )}
                 </div>
@@ -1886,7 +1874,6 @@ function LayoutEditorHost(props: {
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  e.stopPropagation();
                                   commitCavityField("length");
                                 }
                               }}
@@ -1911,7 +1898,6 @@ function LayoutEditorHost(props: {
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  e.stopPropagation();
                                   commitCavityField("depth");
                                 }
                               }}
@@ -1939,7 +1925,6 @@ function LayoutEditorHost(props: {
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  e.stopPropagation();
                                   commitCavityField("length");
                                 }
                               }}
@@ -1964,7 +1949,6 @@ function LayoutEditorHost(props: {
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  e.stopPropagation();
                                   commitCavityField("width");
                                 }
                               }}
@@ -1989,7 +1973,6 @@ function LayoutEditorHost(props: {
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  e.stopPropagation();
                                   commitCavityField("depth");
                                 }
                               }}
@@ -2016,7 +1999,6 @@ function LayoutEditorHost(props: {
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  e.stopPropagation();
                                   commitCavityField("cornerRadius");
                                 }
                               }}
