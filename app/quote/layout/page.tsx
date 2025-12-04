@@ -454,13 +454,18 @@ export default function LayoutPage({
             phone?: string | null;
           };
 
-          if (!cancelled) {
-            setInitialCustomerName((qh.customer_name ?? "").toString());
-            setInitialCustomerEmail((qh.email ?? "").toString());
-            // Company isn’t stored on quotes table yet; keep blank for now.
-            setInitialCustomerCompany("");
-            setInitialCustomerPhone((qh.phone ?? "").toString());
-          }
+            if (!cancelled) {
+    const rawName = (qh.customer_name ?? "").toString().trim();
+    const cleanedName =
+      rawName.toLowerCase() === "customer" ? "" : rawName;
+
+    setInitialCustomerName(cleanedName);
+    setInitialCustomerEmail((qh.email ?? "").toString());
+    // Company isn’t stored on quotes table yet; keep blank for now.
+    setInitialCustomerCompany("");
+    setInitialCustomerPhone((qh.phone ?? "").toString());
+  }
+
         } else if (!cancelled) {
           // No header → clear initial customer fields
           setInitialCustomerName("");

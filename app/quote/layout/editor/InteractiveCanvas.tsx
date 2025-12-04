@@ -220,40 +220,39 @@ export default function InteractiveCanvas({
   
 
   // ==== Pan handlers (spacebar = hand tool) ====
-  const handlePointerDownPan = (e: PointerEvent<HTMLDivElement>) => {
-    if (!panMode) return;
-    const target = canvasWrapperRef.current;
-    if (!target) return;
+const handlePointerDownPan = (e: React.PointerEvent<HTMLDivElement>) => {
+  if (!panMode) return;
+  const wrap = canvasWrapperRef.current;
+  if (!wrap) return;
 
-    target.setPointerCapture(e.pointerId);
-    lastPanRef.current = { x: e.clientX, y: e.clientY };
-  };
+  wrap.setPointerCapture(e.pointerId);
+  lastPanRef.current = { x: e.clientX, y: e.clientY };
+};
 
-  const handlePointerMovePan = (e: PointerEvent<HTMLDivElement>) => {
-    if (!panMode) return;
-    const wrap = canvasWrapperRef.current;
-    if (!wrap || !lastPanRef.current) return;
-    const parent = wrap.parentElement;
-    if (!parent) return;
+const handlePointerMovePan = (e: React.PointerEvent<HTMLDivElement>) => {
+  if (!panMode) return;
+  const wrap = canvasWrapperRef.current;
+  if (!wrap || !lastPanRef.current) return;
 
-    const dx = e.clientX - lastPanRef.current.x;
-    const dy = e.clientY - lastPanRef.current.y;
+  const dx = e.clientX - lastPanRef.current.x;
+  const dy = e.clientY - lastPanRef.current.y;
 
-    parent.scrollLeft -= dx;
-    parent.scrollTop -= dy;
+  // Scroll the overflow-auto div itself
+  wrap.scrollLeft -= dx;
+  wrap.scrollTop -= dy;
 
-    lastPanRef.current = { x: e.clientX, y: e.clientY };
-  };
+  lastPanRef.current = { x: e.clientX, y: e.clientY };
+};
 
-  const handlePointerUpPan = (e: PointerEvent<HTMLDivElement>) => {
-    if (!panMode) return;
-    lastPanRef.current = null;
-    try {
-      canvasWrapperRef.current?.releasePointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
-  };
+const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
+  if (!panMode) return;
+  lastPanRef.current = null;
+  const wrap = canvasWrapperRef.current;
+  if (!wrap) return;
+  try {
+    wrap.releasePointerCapture(e.pointerId);
+  } catch {}
+};
 
   // Helper: check chamfer keep-out in block inches
   const isInsideChamferKeepout = (
@@ -439,24 +438,23 @@ export default function InteractiveCanvas({
 
   return (
     // outer wrapper stays neutral – the dark grid comes from the parent
+      <div className={`rounded-2xl ${panMode ? "cursor-grabbing" : ""}`}>
     <div
       ref={canvasWrapperRef}
-      className={`rounded-2xl ${panMode ? "cursor-grabbing" : ""}`}
+      className="overflow-auto rounded-xl"
       onPointerDown={handlePointerDownPan}
       onPointerMove={handlePointerMovePan}
       onPointerUp={handlePointerUpPan}
     >
-      <div className="overflow-auto rounded-xl">
-        <svg
-          ref={svgRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          // Keep CSS width tied to the internal canvas size so drag math stays correct
-          className="block"
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-        >
+      <svg
+        ref={svgRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        className="block"
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
           {/* background – transparent so the page-level dark grid shows through */}
           <rect
             x={0}
@@ -853,10 +851,12 @@ function computeSpacing(
   const cavRightIn = cavLeftIn + cav.lengthIn;
   const cavBottomIn = cavTopIn + cav.widthIn;
 
-  const leftIn = cavLeftIn - WALL_IN;
-  const rightIn = block.lengthIn - WALL_IN - cavRightIn;
-  const topIn = cavTopIn - WALL_IN;
-  const bottomIn = block.widthIn - WALL_IN - cavBottomIn;
+  // Distances from cavity edges to *outer* foam edges
+  const leftIn = cavLeftIn;
+  const rightIn = block.lengthIn - cavRightIn;
+  const topIn = cavTopIn;
+  const bottomIn = block.widthIn - cavBottomIn;
+
 
   const cavLeftPx =
     blockOffset.x + (cavLeftIn / block.lengthIn) * blockPx.width;
@@ -867,18 +867,12 @@ function computeSpacing(
   const cavBottomPx =
     blockOffset.y + (cavBottomIn / block.widthIn) * blockPx.height;
 
-  const leftWallPx =
-    blockOffset.x + (WALL_IN / block.lengthIn) * blockPx.width;
-  const rightWallPx =
-    blockOffset.x +
-    blockPx.width -
-    (WALL_IN / block.lengthIn) * blockPx.width;
-  const topWallPx =
-    blockOffset.y + (WALL_IN / block.widthIn) * blockPx.height;
-  const bottomWallPx =
-    blockOffset.y +
-    blockPx.height -
-    (WALL_IN / block.widthIn) * blockPx.height;
+    // Pixel positions of the *outer* foam edges
+  const leftWallPx = blockOffset.x;
+  const rightWallPx = blockOffset.x + blockPx.width;
+  const topWallPx = blockOffset.y;
+  const bottomWallPx = blockOffset.y + blockPx.height;
+
 
   let bestHorizGapIn = Infinity;
   let bestHoriz: SpacingInfo["neighborDims"]["horiz"] | undefined;
