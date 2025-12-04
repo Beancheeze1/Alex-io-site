@@ -9,12 +9,10 @@
 //   - dimensions from selected cavity to walls + nearest neighbor
 //   - minimum ~0.5" gap between cavities
 //   - zoom handled via scale prop
-//   - pan: hold Spacebar for hand tool, drag to pan
 
 "use client";
 
-import { useRef, useState, useEffect, MouseEvent } from "react";
-
+import { useRef, useState, MouseEvent } from "react";
 import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
 
 type Props = {
@@ -24,7 +22,6 @@ type Props = {
   moveAction: (id: string, xNorm: number, yNorm: number) => void;
   resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
   zoom: number;
-  croppedCorners?: boolean; // currently visual-only (outer chamfer)
 };
 
 type DragState =
@@ -72,40 +69,9 @@ export default function InteractiveCanvas({
   moveAction,
   resizeAction,
   zoom,
-  croppedCorners = false, // NEW (default off, still visual-only)
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
-
-  // Pan state + refs live INSIDE the component (no top-level hooks)
-  const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
-  const lastPanRef = useRef<{ x: number; y: number } | null>(null);
-  const [panMode, setPanMode] = useState(false);
-  const isSpacebarHeldRef = useRef(false);
-
-  // Spacebar toggles pan mode (hand tool)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !isSpacebarHeldRef.current) {
-        isSpacebarHeldRef.current = true;
-        setPanMode(true);
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space") {
-        isSpacebarHeldRef.current = false;
-        setPanMode(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, []);
 
   const { block, cavities } = layout;
 
@@ -134,125 +100,14 @@ export default function InteractiveCanvas({
     y: HEADER_BAND + (CANVAS_HEIGHT - HEADER_BAND - blockPx.height) / 2,
   };
 
-  // 1.0" chamfer at upper-left and lower-right corners (45°)
-  const CHAMFER_IN = 1;
+  const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
 
-  const canChamfer =
-    block.lengthIn > CHAMFER_IN * 2 && block.widthIn > CHAMFER_IN * 2;
-
-  // Pixel distance for a 1" run along X and Y (respects physical inches)
-  const chamferPxX = (CHAMFER_IN / (block.lengthIn || 1)) * blockPx.width;
-  const chamferPxY = (CHAMFER_IN / (block.widthIn || 1)) * blockPx.height;
-
-  const x0 = blockOffset.x;
-  const y0 = blockOffset.y;
-  const w = blockPx.width;
-  const h = blockPx.height;
-
-  // Outer block path (UL & LR corners chamfered)
-  const outerBlockPathD = canChamfer
-    ? [
-        `M ${x0 + chamferPxX},${y0}`, // top edge after UL chamfer
-        `L ${x0 + w},${y0}`, // top-right
-        `L ${x0 + w},${y0 + h - chamferPxY}`, // right edge before LR chamfer
-        `L ${x0 + w - chamferPxX},${y0 + h}`, // LR chamfer
-        `L ${x0},${y0 + h}`, // bottom-left
-        `L ${x0},${y0 + chamferPxY}`, // left edge before UL chamfer
-        "Z",
-      ].join(" ")
-    : [
-        `M ${x0},${y0}`,
-        `L ${x0 + w},${y0}`,
-        `L ${x0 + w},${y0 + h}`,
-        `L ${x0},${y0 + h}`,
-        "Z",
-      ].join(" ");
-
-  // Inner 0.5" safety wall (also chamfered, but still used as a rectangular
-  // spacing reference for movement / gap checks)
-  const L = block.lengthIn || 1;
-  const W = block.widthIn || 1;
-
-  const usableLenIn = Math.max(L - 2 * WALL_IN, 0);
-  const usableWidIn = Math.max(W - 2 * WALL_IN, 0);
-
-  const innerX0 = x0 + (WALL_IN / L) * w;
-  const innerY0 = y0 + (WALL_IN / W) * h;
-  const innerWallWidthPx = w * (usableLenIn / L);
-  const innerWallHeightPx = h * (usableWidIn / W);
-
-  const canInnerChamfer =
-    canChamfer && usableLenIn > CHAMFER_IN * 2 && usableWidIn > CHAMFER_IN * 2;
-
-  const innerWallPathD = canInnerChamfer
-    ? [
-        `M ${innerX0 + chamferPxX},${innerY0}`, // top edge after UL chamfer
-        `L ${innerX0 + innerWallWidthPx},${innerY0}`, // top-right
-        `L ${
-          innerX0 + innerWallWidthPx
-        },${innerY0 + innerWallHeightPx - chamferPxY}`, // right edge before LR chamfer
-        `L ${
-          innerX0 + innerWallWidthPx - chamferPxX
-        },${innerY0 + innerWallHeightPx}`, // LR chamfer
-        `L ${innerX0},${innerY0 + innerWallHeightPx}`, // bottom-left
-        `L ${innerX0},${innerY0 + chamferPxY}`, // left edge before UL chamfer
-        "Z",
-      ].join(" ")
-    : [
-        `M ${innerX0},${innerY0}`,
-        `L ${innerX0 + innerWallWidthPx},${innerY0}`,
-        `L ${innerX0 + innerWallWidthPx},${innerY0 + innerWallHeightPx}`,
-        `L ${innerX0},${innerY0 + innerWallHeightPx}`,
-        "Z",
-      ].join(" ");
-
-  const selectedCavity =
-    cavities.find((c) => c.id === selectedId) || null;
-  // Pan pointer handlers (scroll the parent while space is held)
-  const handlePointerDownPan = (e: any) => {
-    if (!panMode) return;
-    const target = canvasWrapperRef.current;
-    if (!target) return;
-
-    target.setPointerCapture(e.pointerId);
-    lastPanRef.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handlePointerMovePan = (e: any) => {
-    if (!panMode) return;
-    const wrap = canvasWrapperRef.current;
-    if (!wrap || !lastPanRef.current) return;
-    const parent = wrap.parentElement;
-    if (!parent) return;
-
-    const dx = e.clientX - lastPanRef.current.x;
-    const dy = e.clientY - lastPanRef.current.y;
-
-    parent.scrollLeft -= dx;
-    parent.scrollTop -= dy;
-
-    lastPanRef.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handlePointerUpPan = (e: any) => {
-    if (!panMode) return;
-    lastPanRef.current = null;
-    try {
-      canvasWrapperRef.current?.releasePointerCapture(e.pointerId);
-    } catch {
-      // ignore if pointer capture isn't set
-    }
-  };
-
-  // ==== Mouse handlers for cavities ====
+  // ==== Mouse handlers ====
 
   const handleCavityMouseDown = (
     e: MouseEvent<SVGGraphicsElement>,
     cavity: Cavity,
   ) => {
-    // If we’re in pan mode, don’t start a drag on the cavity
-    if (panMode) return;
-
     e.stopPropagation();
     e.preventDefault();
     if (!svgRef.current) return;
@@ -278,8 +133,6 @@ export default function InteractiveCanvas({
     e: MouseEvent<SVGGraphicsElement>,
     cavity: Cavity,
   ) => {
-    if (panMode) return;
-
     e.stopPropagation();
     e.preventDefault();
     setDrag({
@@ -290,8 +143,7 @@ export default function InteractiveCanvas({
   };
 
   const handleMouseMove = (e: MouseEvent<SVGSVGElement>) => {
-    // Don’t move / resize cavities while panning
-    if (panMode || !drag || !svgRef.current) return;
+    if (!drag || !svgRef.current) return;
 
     const svgRect = svgRef.current.getBoundingClientRect();
     const ptX = e.clientX - svgRect.left;
@@ -412,15 +264,11 @@ export default function InteractiveCanvas({
   const spacing = selectedCavity
     ? computeSpacing(selectedCavity, block, cavities, blockPx, blockOffset)
     : null;
+
   return (
     // outer wrapper stays neutral – the dark grid comes from the parent
-    <div
-      ref={canvasWrapperRef}
-      className={`rounded-2xl ${panMode ? "cursor-grabbing" : ""}`}
-      onPointerDown={handlePointerDownPan}
-      onPointerMove={handlePointerMovePan}
-      onPointerUp={handlePointerUpPan}
-    >
+    <div className="rounded-2xl">
+      {/* Allow scrolling when zooming in so the whole block is always accessible */}
       <div className="overflow-auto rounded-xl">
         <svg
           ref={svgRef}
@@ -444,9 +292,14 @@ export default function InteractiveCanvas({
           {/* rulers + block label ABOVE the top ruler */}
           {drawRulersWithLabel(block, blockPx, blockOffset)}
 
-          {/* block with 1" 45° chamfers at upper-left and lower-right */}
-          <path
-            d={outerBlockPathD}
+          {/* block */}
+          <rect
+            x={blockOffset.x}
+            y={blockOffset.y}
+            width={blockPx.width}
+            height={blockPx.height}
+            rx={0}
+            ry={0}
             fill="#e5e7eb" // light foam block
             stroke="#cbd5f5"
             strokeWidth={2}
@@ -455,9 +308,23 @@ export default function InteractiveCanvas({
           {/* 0.5" grid *inside* the block */}
           {drawInchGrid(block, blockPx, blockOffset)}
 
-          {/* 0.5" inner wall (dashed, matches chamfer shape where possible) */}
-          <path
-            d={innerWallPathD}
+          {/* 0.5" inner wall (dashed) */}
+          <rect
+            x={
+              blockOffset.x +
+              (innerWall.leftIn / block.lengthIn) * blockPx.width
+            }
+            y={
+              blockOffset.y + (innerWall.topIn / block.widthIn) * blockPx.height
+            }
+            width={
+              blockPx.width *
+              ((innerWall.rightIn - innerWall.leftIn) / block.lengthIn)
+            }
+            height={
+              blockPx.height *
+              ((innerWall.bottomIn - innerWall.topIn) / block.widthIn)
+            }
             fill="none"
             stroke="#94a3b8"
             strokeDasharray="4 3"
@@ -495,6 +362,7 @@ export default function InteractiveCanvas({
             const strokeColor = isSelected ? color : `${color}cc`;
             const handleColor = color;
             const cavityFill = "#d4d4d8"; // slightly darker than block
+
             return (
               <g key={cavity.id}>
                 {isCircle ? (
@@ -572,6 +440,7 @@ function clamp(v: number, min: number, max: number): number {
   if (v > max) return max;
   return v;
 }
+
 // simple “keep at least MIN_GAP_IN between cavities” check
 function violatesMinGap(
   id: string,
@@ -678,39 +547,38 @@ function drawRulersWithLabel(
       Block {block.lengthIn}" × {block.widthIn}" × {block.thicknessIn}" thick
     </text>,
   );
+
   // Horizontal ruler (top)
-  const maxL = Math.max(0, Math.floor(block.lengthIn || 0));
-  if (block.lengthIn > 0) {
-    for (let i = 0; i <= maxL; i++) {
-      const x = blockOffset.x + (i / block.lengthIn) * blockPx.width;
-      const isMajor = i % 1 === 0;
-      const tickHeight = isMajor ? 8 : 4;
+  const maxL = Math.max(0, Math.floor(block.lengthIn));
+  for (let i = 0; i <= maxL; i++) {
+    const x = blockOffset.x + (i / block.lengthIn) * blockPx.width;
+    const isMajor = i % 1 === 0;
+    const tickHeight = isMajor ? 8 : 4;
 
+    group.push(
+      <line
+        key={`hrule-${i}`}
+        x1={x}
+        y1={rulerTopY}
+        x2={x}
+        y2={rulerTopY + tickHeight}
+        stroke="#9ca3af"
+        strokeWidth={1}
+      />,
+    );
+
+    if (isMajor) {
       group.push(
-        <line
-          key={`hrule-${i}`}
-          x1={x}
-          y1={rulerTopY}
-          x2={x}
-          y2={rulerTopY + tickHeight}
-          stroke="#9ca3af"
-          strokeWidth={1}
-        />,
+        <text
+          key={`hrule-label-${i}`}
+          x={x}
+          y={rulerTopY - 4}
+          textAnchor="middle"
+          className="fill-slate-400 text-[9px]"
+        >
+          {i}
+        </text>,
       );
-
-      if (isMajor) {
-        group.push(
-          <text
-            key={`hrule-label-${i}`}
-            x={x}
-            y={rulerTopY - 4}
-            textAnchor="middle"
-            className="fill-slate-400 text-[9px]"
-          >
-            {i}
-          </text>,
-        );
-      }
     }
   }
 
@@ -728,38 +596,36 @@ function drawRulersWithLabel(
   );
 
   // Vertical ruler (left)
-  const maxW = Math.max(0, Math.floor(block.widthIn || 0));
-  if (block.widthIn > 0) {
-    for (let i = 0; i <= maxW; i++) {
-      const y = blockOffset.y + (i / block.widthIn) * blockPx.height;
-      const isMajor = i % 1 === 0;
-      const tickWidth = isMajor ? 8 : 4;
+  const maxW = Math.max(0, Math.floor(block.widthIn));
+  for (let i = 0; i <= maxW; i++) {
+    const y = blockOffset.y + (i / block.widthIn) * blockPx.height;
+    const isMajor = i % 1 === 0;
+    const tickWidth = isMajor ? 8 : 4;
 
+    group.push(
+      <line
+        key={`vrule-${i}`}
+        x1={leftRulerX}
+        y1={y}
+        x2={leftRulerX + tickWidth}
+        y2={y}
+        stroke="#9ca3af"
+        strokeWidth={1}
+      />,
+    );
+
+    if (isMajor) {
       group.push(
-        <line
-          key={`vrule-${i}`}
-          x1={leftRulerX}
-          y1={y}
-          x2={leftRulerX + tickWidth}
-          y2={y}
-          stroke="#9ca3af"
-          strokeWidth={1}
-        />,
+        <text
+          key={`vrule-label-${i}`}
+          x={leftRulerX - 4}
+          y={y + 3}
+          textAnchor="end"
+          className="fill-slate-400 text-[9px]"
+        >
+          {i}
+        </text>,
       );
-
-      if (isMajor) {
-        group.push(
-          <text
-            key={`vrule-label-${i}`}
-            x={leftRulerX - 4}
-            y={y + 3}
-            textAnchor="end"
-            className="fill-slate-400 text-[9px]"
-          >
-            {i}
-          </text>,
-        );
-      }
     }
   }
 
@@ -812,11 +678,6 @@ type SpacingInfo = {
   };
 };
 
-/**
- * Compute spacing from the selected cavity to:
- *  - the foam block edges (with dotted lines + dimensions)
- *  - the nearest neighbor cavity horizontally + vertically
- */
 function computeSpacing(
   cav: Cavity,
   block: LayoutModel["block"],
@@ -824,35 +685,32 @@ function computeSpacing(
   blockPx: { width: number; height: number },
   blockOffset: { x: number; y: number },
 ): SpacingInfo {
-  // Cavity edges in inches
   const cavLeftIn = cav.x * block.lengthIn;
   const cavTopIn = cav.y * block.widthIn;
   const cavRightIn = cavLeftIn + cav.lengthIn;
   const cavBottomIn = cavTopIn + cav.widthIn;
 
-  // Distances from cavity to OUTER foam edges (what you want to see)
-  const leftIn = cavLeftIn;
-  const rightIn = block.lengthIn - cavRightIn;
-  const topIn = cavTopIn;
-  const bottomIn = block.widthIn - cavBottomIn;
+  const leftIn = cavLeftIn - WALL_IN;
+  const rightIn = block.lengthIn - WALL_IN - cavRightIn;
+  const topIn = cavTopIn - WALL_IN;
+  const bottomIn = block.widthIn - WALL_IN - cavBottomIn;
 
-  // Cavity edges in pixels
-  const cavLeftPx =
-    blockOffset.x + (cavLeftIn / block.lengthIn) * blockPx.width;
+  const cavLeftPx = blockOffset.x + (cavLeftIn / block.lengthIn) * blockPx.width;
   const cavRightPx =
     blockOffset.x + (cavRightIn / block.lengthIn) * blockPx.width;
-  const cavTopPx =
-    blockOffset.y + (cavTopIn / block.widthIn) * blockPx.height;
+  const cavTopPx = blockOffset.y + (cavTopIn / block.widthIn) * blockPx.height;
   const cavBottomPx =
     blockOffset.y + (cavBottomIn / block.widthIn) * blockPx.height;
 
-  // Foam block outer edges in pixels
-  const leftWallPx = blockOffset.x;
-  const rightWallPx = blockOffset.x + blockPx.width;
-  const topWallPx = blockOffset.y;
-  const bottomWallPx = blockOffset.y + blockPx.height;
+  const leftWallPx = blockOffset.x + (WALL_IN / block.lengthIn) * blockPx.width;
+  const rightWallPx =
+    blockOffset.x + blockPx.width - (WALL_IN / block.lengthIn) * blockPx.width;
+  const topWallPx = blockOffset.y + (WALL_IN / block.widthIn) * blockPx.height;
+  const bottomWallPx =
+    blockOffset.y +
+    blockPx.height -
+    (WALL_IN / block.widthIn) * blockPx.height;
 
-  // Nearest neighbor cavity gaps
   let bestHorizGapIn = Infinity;
   let bestHoriz: SpacingInfo["neighborDims"]["horiz"] | undefined;
   let bestVertGapIn = Infinity;
@@ -866,12 +724,10 @@ function computeSpacing(
     const oRightIn = oLeftIn + other.lengthIn;
     const oBottomIn = oTopIn + other.widthIn;
 
-    const oLeftPx =
-      blockOffset.x + (oLeftIn / block.lengthIn) * blockPx.width;
+    const oLeftPx = blockOffset.x + (oLeftIn / block.lengthIn) * blockPx.width;
     const oRightPx =
       blockOffset.x + (oRightIn / block.lengthIn) * blockPx.width;
-    const oTopPx =
-      blockOffset.y + (oTopIn / block.widthIn) * blockPx.height;
+    const oTopPx = blockOffset.y + (oTopIn / block.widthIn) * blockPx.height;
     const oBottomPx =
       blockOffset.y + (oBottomIn / block.widthIn) * blockPx.height;
 
@@ -966,7 +822,7 @@ function drawSpacing(info: SpacingInfo) {
 
   return (
     <g>
-      {/* left edge of foam block */}
+      {/* left wall */}
       {edgeDims.leftIn > 0 && (
         <g>
           <line
@@ -989,7 +845,7 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* right edge of foam block */}
+      {/* right wall */}
       {edgeDims.rightIn > 0 && (
         <g>
           <line
@@ -1012,7 +868,7 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* top edge of foam block */}
+      {/* top wall */}
       {edgeDims.topIn > 0 && (
         <g>
           <line
@@ -1035,7 +891,7 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* bottom edge of foam block */}
+      {/* bottom wall */}
       {edgeDims.bottomIn > 0 && (
         <g>
           <line
@@ -1058,7 +914,7 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* nearest horizontal neighbor (dotted line between cavities) */}
+      {/* nearest horizontal neighbor */}
       {neighborDims.horiz && (
         <g>
           <line
@@ -1081,7 +937,7 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* nearest vertical neighbor (dotted line between cavities) */}
+      {/* nearest vertical neighbor */}
       {neighborDims.vert && (
         <g>
           <line
