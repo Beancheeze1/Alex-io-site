@@ -104,11 +104,7 @@ function parseDimsTriple(
 
 // Simple parser for cavity dims; if only LxW, assume depth = 1"
 // IMPORTANT: accepts both "0.5" and ".5" style numbers.
-function parseCavityDims(raw: string): {
-  L: number;
-  W: number;
-  D: number;
-} | null {
+function parseCavityDims(raw: string): { L: number; W: number; D: number } | null {
   const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
 
   // allow "1", "1.5", ".5" etc.
@@ -339,6 +335,7 @@ export default function LayoutPage({
     },
     [],
   );
+
 
   React.useEffect(() => {
     let cancelled = false;
@@ -571,8 +568,14 @@ export default function LayoutPage({
   );
 }
 
-const CAVITY_COLORS = ["#38bdf8", "#a855f7", "#f97316", "#22c55e", "#eab308", "#ec4899"];
-
+const CAVITY_COLORS = [
+  "#38bdf8",
+  "#a855f7",
+  "#f97316",
+  "#22c55e",
+  "#eab308",
+  "#ec4899",
+];
 
 /* ---------- Layout editor host (main body) ---------- */
 
@@ -625,11 +628,10 @@ function LayoutEditorHost(props: {
 
   const activeLayer =
     stack && stack.length > 0
-      ? (stack.find((layer) => layer.id === activeLayerId) ?? stack[0])
+      ? stack.find((layer) => layer.id === activeLayerId) ?? stack[0]
       : null;
 
   const activeLayerLabel = activeLayer?.label ?? null;
-
   const selectedCavity =
     cavities.find((c) => c.id === selectedId) || null;
 
@@ -683,7 +685,6 @@ function LayoutEditorHost(props: {
   );
   const [selectedMaterialId, setSelectedMaterialId] =
     React.useState<number | null>(initialMaterialId);
-
   React.useEffect(() => {
     let cancelled = false;
 
@@ -744,8 +745,9 @@ function LayoutEditorHost(props: {
 
     for (const m of materials) {
       const safeName =
-        (m.name && m.name.trim().length > 0 ? m.name : `Material #${m.id}`) ||
-        `Material #${m.id}`;
+        (m.name && m.name.trim().length > 0
+          ? m.name
+          : `Material #${m.id}`) || `Material #${m.id}`;
       const key = m.family || "Other";
 
       const entry: MaterialOption = {
@@ -924,7 +926,9 @@ function LayoutEditorHost(props: {
               `Couldn’t find a quote header for ${quoteNo}.\nOpen this link from a real quote email.`,
             );
           }
-        } catch {}
+        } catch {
+          // ignore
+        }
         throw new Error(`HTTP ${res.status}`);
       }
 
@@ -1036,7 +1040,7 @@ function LayoutEditorHost(props: {
 
             {/* Body: three-column layout */}
             <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
-              {/* LEFT: Cavity palette + notes */}
+              {/* LEFT: Cavity palette + material + notes */}
               <aside className="w-52 shrink-0 flex flex-col gap-3">
                 <div>
                   <div className="text-xs font-semibold text-slate-100 mb-1">
@@ -1090,26 +1094,58 @@ function LayoutEditorHost(props: {
                   </div>
                 </button>
 
-                {/* Selected cavity chip (demo / edit chip) */}
+                {/* Foam material (moved back into left bar) */}
                 <div className="mt-2">
-                  {selectedCavity ? (
-                    <div className="inline-flex items-center rounded-full border border-sky-500/60 bg-sky-500/10 px-3 py-1 text-[11px] text-sky-100">
-                      <span className="mr-2 text-[10px] uppercase tracking-[0.16em] text-sky-300">
-                        Editing cavity
-                      </span>
-                      <span className="font-mono text-xs text-sky-50">
-                        {selectedCavity.label}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-slate-500">
-                      Select a cavity in the canvas to see its details.
+                  <div className="text-xs font-semibold text-slate-100 mb-1">
+                    Foam material
+                  </div>
+                  <div className="text-[11px] text-slate-400 mb-2">
+                    Choose the foam family and grade used for this layout.
+                  </div>
+                  <select
+                    value={selectedMaterialId ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) {
+                        setSelectedMaterialId(null);
+                      } else {
+                        const parsed = Number(v);
+                        if (Number.isFinite(parsed)) {
+                          setSelectedMaterialId(parsed);
+                        }
+                      }
+                    }}
+                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                  >
+                    <option value="">
+                      {materialsLoading
+                        ? "Loading materials…"
+                        : "Select material (optional)"}
+                    </option>
+                    {materialsByFamily.map(([family, list]) => (
+                      <optgroup key={family} label={family}>
+                        {list.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                            {m.density_lb_ft3 != null
+                              ? ` · ${m.density_lb_ft3.toFixed(
+                                  1,
+                                )} lb/ft³`
+                              : ""}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  {materialsError && (
+                    <div className="mt-1 text-[11px] text-amber-300">
+                      {materialsError}
                     </div>
                   )}
                 </div>
 
                 {/* Notes / special instructions */}
-                <div className="mt-3 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
+                <div className="mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
                   <div className="text-xs font-semibold text-slate-100 mb-1">
                     Notes / special instructions
                   </div>
@@ -1139,15 +1175,10 @@ function LayoutEditorHost(props: {
                   </div>
                 )}
               </aside>
-
-
-              {/* CENTER: Big visualizer */}
               {/* CENTER: Big visualizer */}
               <section className="flex-1 flex flex-col gap-3">
-                {/* Top bar: preview + material selector + layout tools */}
-                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
-                  {/* Left: preview title + block dims + layer selector */}
-                  <div className="flex-1 min-w-[220px]">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
                     <div className="flex items-center gap-2 text-sm text-slate-50">
                       <span className="font-semibold">
                         Foam layout preview
@@ -1190,58 +1221,8 @@ function LayoutEditorHost(props: {
                     )}
                   </div>
 
-                  {/* Middle: foam material selector (moved up top) */}
-                  <div className="w-full max-w-xs lg:w-64">
-                    <div className="text-[11px] font-semibold text-slate-200 mb-1 uppercase tracking-[0.14em]">
-                      Foam material
-                    </div>
-                    <div className="text-[11px] text-slate-400 mb-1.5">
-                      Choose the foam family and grade used for this layout.
-                    </div>
-                    <select
-                      value={selectedMaterialId ?? ""}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (!v) {
-                          setSelectedMaterialId(null);
-                        } else {
-                          const parsed = Number(v);
-                          if (Number.isFinite(parsed)) {
-                            setSelectedMaterialId(parsed);
-                          }
-                        }
-                      }}
-                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-[11px] text-slate-100"
-                    >
-                      <option value="">
-                        {materialsLoading
-                          ? "Loading materials…"
-                          : "Select material (optional)"}
-                      </option>
-                      {materialsByFamily.map(([family, list]) => (
-                        <optgroup key={family} label={family}>
-                          {list.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.name}
-                              {m.density_lb_ft3 != null
-                                ? ` · ${m.density_lb_ft3.toFixed(
-                                    1,
-                                  )} lb/ft³`
-                                : ""}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                    {materialsError && (
-                      <div className="mt-1 text-[11px] text-amber-300">
-                        {materialsError}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Right: layout controls / zoom / qty / actions */}
-                  <div className="flex items-center justify-end gap-3">
+                  {/* zoom + qty + advisor + apply button */}
+                  <div className="flex items-center gap-3">
                     <div className="hidden md:flex items-center text-[11px] text-slate-400 mr-1">
                       <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80 mr-1.5" />
                       <span>Layout controls</span>
@@ -1346,7 +1327,76 @@ function LayoutEditorHost(props: {
 
               {/* RIGHT: Inspector + customer info */}
               <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
-                {/* Customer info card (moved up) */}
+                {/* Block editor */}
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-slate-100">
+                      Block
+                    </div>
+                    <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-300">
+                      Foam blank
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mb-2">
+                    Edit the foam blank size. Values snap to 0.125&quot;
+                    increments.
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-400">
+                        Length (in)
+                      </span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={block.lengthIn}
+                        onChange={(e) => {
+                          const snapped = snapInches(
+                            Number(e.target.value),
+                          );
+                          updateBlockDims({ lengthIn: snapped });
+                        }}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-400">
+                        Width (in)
+                      </span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={block.widthIn}
+                        onChange={(e) => {
+                          const snapped = snapInches(
+                            Number(e.target.value),
+                          );
+                          updateBlockDims({ widthIn: snapped });
+                        }}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-400">
+                        Thickness
+                      </span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={block.thicknessIn}
+                        onChange={(e) => {
+                          const snapped = snapInches(
+                            Number(e.target.value),
+                          );
+                          updateBlockDims({ thicknessIn: snapped });
+                        }}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Customer info card */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-xs font-semibold text-slate-100">
@@ -1389,9 +1439,7 @@ function LayoutEditorHost(props: {
                       <input
                         type="text"
                         value={customerCompany}
-                        onChange={(e) =>
-                          setCustomerCompany(e.target.value)
-                        }
+                        onChange={(e) => setCustomerCompany(e.target.value)}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                       />
                     </label>
@@ -1429,74 +1477,10 @@ function LayoutEditorHost(props: {
                   )}
                 </div>
 
-                                {/* Block editor */}
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-xs font-semibold text-slate-100">
-                      Block
-                    </div>
-                    <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-300">
-                      Foam blank
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-400 mb-2">
-                    Edit the foam blank size. Values snap to 0.125&quot;
-                    increments.
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-400">
-                        Length (in)
-                      </span>
-                      <input
-                        type="number"
-                        step={0.125}
-                        value={block.lengthIn}
-                        onChange={(e) => {
-                          const snapped = snapInches(Number(e.target.value));
-                          updateBlockDims({ lengthIn: snapped });
-                        }}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-400">
-                        Width (in)
-                      </span>
-                      <input
-                        type="number"
-                        step={0.125}
-                        value={block.widthIn}
-                        onChange={(e) => {
-                          const snapped = snapInches(Number(e.target.value));
-                          updateBlockDims({ widthIn: snapped });
-                        }}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-400">
-                        Thickness
-                      </span>
-                      <input
-                        type="number"
-                        step={0.125}
-                        value={block.thicknessIn}
-                        onChange={(e) => {
-                          const snapped = snapInches(Number(e.target.value));
-                          updateBlockDims({ thicknessIn: snapped });
-                        }}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                               {/* Layers + cavities list + editor */}
+                {/* Cavities list + editor */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
                   <div className="text-xs font-semibold text-slate-100">
-                    Layers
+                    Cavities
                     {activeLayerLabel && (
                       <span className="ml-1 text-[11px] font-normal text-slate-400">
                         — {activeLayerLabel}
@@ -1504,13 +1488,14 @@ function LayoutEditorHost(props: {
                     )}
                   </div>
 
-                  {/* Layer manager */}
+                  {/* Layer manager (demo) */}
                   {stack && stack.length > 0 && (
                     <div className="mb-3 space-y-1">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] text-slate-400">
-                          Manage layers
+                          Layers
                         </span>
+
                         <button
                           type="button"
                           onClick={addLayer}
@@ -1552,6 +1537,7 @@ function LayoutEditorHost(props: {
                             className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-100"
                             placeholder="Layer name"
                           />
+
                           {stack.length > 1 && (
                             <button
                               type="button"
@@ -1567,7 +1553,6 @@ function LayoutEditorHost(props: {
                     </div>
                   )}
 
-                  {/* Cavities list */}
                   {cavities.length === 0 ? (
                     <div className="text-xs text-slate-400">
                       No cavities yet. Use the palette on the left to add a
@@ -1644,8 +1629,7 @@ function LayoutEditorHost(props: {
                       </span>
                     ) : (
                       <span>
-                        Select a cavity from the top-left palette to edit its
-                        size and depth.
+                        Select a cavity above to edit its size and depth.
                       </span>
                     )}
                   </div>
@@ -1776,7 +1760,6 @@ function LayoutEditorHost(props: {
                     </>
                   )}
                 </div>
-
               </aside>
             </div>
           </div>
@@ -1785,7 +1768,6 @@ function LayoutEditorHost(props: {
     </main>
   );
 }
-
 
 /* ---------- SVG export helper ---------- */
 
@@ -1839,7 +1821,9 @@ function buildSvgFromLayout(
           `<g>`,
           `  <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(
             2,
-          )}" r="${r.toFixed(2)}" fill="none" stroke="#111827" stroke-width="1" />`,
+          )}" r="${r.toFixed(
+            2,
+          )}" fill="none" stroke="#111827" stroke-width="1" />`,
           `  <text x="${cx.toFixed(
             2,
           )}" y="${cy.toFixed(
@@ -1983,4 +1967,3 @@ function buildSvgFromLayout(
 
   return svgParts.join("\n");
 }
-          
