@@ -905,6 +905,16 @@ function LayoutEditorHost(props: {
     [cavityInputs, selectedCavity, updateCavityDims],
   );
 
+  // If selection gets cleared while editing, snap it back to the active cavity
+  React.useEffect(() => {
+    if (!selectedCavity && cavityInputs.id) {
+      const stillThere = cavities.find((c) => c.id === cavityInputs.id);
+      if (stillThere) {
+        selectCavity(cavityInputs.id);
+      }
+    }
+  }, [selectedCavity, cavityInputs.id, cavities, selectCavity]);
+
   React.useEffect(() => {
     let cancelled = false;
 
@@ -989,6 +999,10 @@ function LayoutEditorHost(props: {
   const missingCustomerInfo =
     !customerName.trim() || !customerEmail.trim();
 
+  const canUseFoamAdvisor = !missingCustomerInfo;
+  const canApplyButton =
+    hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
+
   /* ---------- Palette interactions ---------- */
 
   const handleAddPreset = (shape: CavityShape) => {
@@ -1041,6 +1055,8 @@ function LayoutEditorHost(props: {
   /* ---------- Foam Advisor navigation ---------- */
 
   const handleGoToFoamAdvisor = () => {
+    if (!canUseFoamAdvisor) return;
+
     const params = new URLSearchParams();
 
     if (hasRealQuoteNo && quoteNo) {
@@ -1168,9 +1184,6 @@ function LayoutEditorHost(props: {
   };
 
   /* ---------- Layout ---------- */
-
-  const canApplyButton =
-    hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
 
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
@@ -1408,19 +1421,12 @@ function LayoutEditorHost(props: {
                         Interactive layout
                       </span>
                     </div>
-                    <div className="text-xs text-slate-400 mt-1">
-                      Block{" "}
-                      <span className="font-mono font-semibold text-slate-100">
-                        {block.lengthIn}" × {block.widthIn}" ×{" "}
-                        {block.thicknessIn || 0}"
-                      </span>
-                    </div>
 
-                    {/* Layer selector + layer manager (only when a stack is present) */}
+                    {/* Layer selector + layer manager (more horizontal) */}
                     {stack && stack.length > 0 && (
-                      <div className="mt-2 space-y-1 text-[11px] text-slate-300">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
+                      <div className="mt-2 text-[11px] text-slate-300 space-y-1.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="text-slate-400">Layer</span>
                             <select
                               value={activeLayerId ?? (stack[0]?.id ?? "")}
@@ -1435,35 +1441,37 @@ function LayoutEditorHost(props: {
                                 </option>
                               ))}
                             </select>
+                            <button
+                              type="button"
+                              onClick={addLayer}
+                              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                            >
+                              + Add layer
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={addLayer}
-                            className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
-                          >
-                            + Add layer
-                          </button>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1">
-                          {stack.map((layer) => {
-                            const isActive = activeLayer?.id === layer.id;
-                            return (
-                              <button
-                                key={layer.id}
-                                type="button"
-                                onClick={() => setActiveLayerId(layer.id)}
-                                className={
-                                  "px-2 py-0.5 rounded-full text-[11px] border " +
-                                  (isActive
-                                    ? "bg-sky-500 text-slate-950 border-sky-400"
-                                    : "bg-slate-800/80 text-slate-200 border-slate-700 hover:border-sky-400 hover:text-sky-100")
-                                }
-                              >
-                                {layer.label}
-                              </button>
-                            );
-                          })}
+                          <div className="flex flex-wrap gap-1">
+                            {stack.map((layer, layerIdx) => {
+                              const isActive =
+                                activeLayer?.id === layer.id;
+                              return (
+                                <button
+                                  key={layer.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setActiveLayerId(layer.id)
+                                  }
+                                  className={
+                                    "px-2 py-0.5 rounded-full text-[11px] border " +
+                                    (isActive
+                                      ? "bg-sky-500 text-slate-950 border-sky-400"
+                                      : "bg-slate-800/80 text-slate-200 border-slate-700 hover:border-sky-400 hover:text-sky-100")
+                                  }
+                                >
+                                  {layer.label || `Layer ${layerIdx + 1}`}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
 
                         {activeLayer && (
@@ -1480,7 +1488,9 @@ function LayoutEditorHost(props: {
                             {stack.length > 1 && (
                               <button
                                 type="button"
-                                onClick={() => deleteLayer(activeLayer.id)}
+                                onClick={() =>
+                                  deleteLayer(activeLayer.id)
+                                }
                                 className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300 hover:text-red-300 hover:border-red-400 transition"
                                 title="Delete this layer"
                               >
@@ -1548,7 +1558,8 @@ function LayoutEditorHost(props: {
                       <button
                         type="button"
                         onClick={handleGoToFoamAdvisor}
-                        className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition"
+                        disabled={!canUseFoamAdvisor}
+                        className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         Recommend my foam
                       </button>
@@ -1751,7 +1762,12 @@ function LayoutEditorHost(props: {
                   {missingCustomerInfo && hasRealQuoteNo && (
                     <div className="mt-2 text-[11px] text-amber-300">
                       Enter a name and email to enable{" "}
-                      <span className="font-semibold">Apply to quote</span>.
+                      <span className="font-semibold">Apply to quote</span>{" "}
+                      and{" "}
+                      <span className="font-semibold">
+                        Recommend my foam
+                      </span>
+                      .
                     </div>
                   )}
                 </div>
@@ -1867,6 +1883,13 @@ function LayoutEditorHost(props: {
                                 }))
                               }
                               onBlur={() => commitCavityField("length")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  commitCavityField("length");
+                                }
+                              }}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1885,6 +1908,13 @@ function LayoutEditorHost(props: {
                                 }))
                               }
                               onBlur={() => commitCavityField("depth")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  commitCavityField("depth");
+                                }
+                              }}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1906,6 +1936,13 @@ function LayoutEditorHost(props: {
                                 }))
                               }
                               onBlur={() => commitCavityField("length")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  commitCavityField("length");
+                                }
+                              }}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1924,6 +1961,13 @@ function LayoutEditorHost(props: {
                                 }))
                               }
                               onBlur={() => commitCavityField("width")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  commitCavityField("width");
+                                }
+                              }}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1942,6 +1986,13 @@ function LayoutEditorHost(props: {
                                 }))
                               }
                               onBlur={() => commitCavityField("depth")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  commitCavityField("depth");
+                                }
+                              }}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
@@ -1962,6 +2013,13 @@ function LayoutEditorHost(props: {
                               onBlur={() =>
                                 commitCavityField("cornerRadius")
                               }
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  commitCavityField("cornerRadius");
+                                }
+                              }}
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
