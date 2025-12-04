@@ -12,7 +12,13 @@
 
 "use client";
 
-import { useRef, useState, useEffect, MouseEvent } from "react";
+import {
+  useRef,
+  useState,
+  useEffect,
+  MouseEvent,
+  PointerEvent,
+} from "react";
 
 import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
 
@@ -25,7 +31,6 @@ type Props = {
   zoom: number;
   croppedCorners?: boolean; // NEW
 };
-
 
 type DragState =
   | {
@@ -54,6 +59,10 @@ const WALL_IN = 0.5;
 const SNAP_IN = 0.0625;
 const MIN_GAP_IN = 0.5;
 
+// Chamfer geometry: 1" 45° crop at UL + LR, and a keep-out band 0.5" from that edge.
+const CHAMFER_IN = 1;
+const CHAMFER_KEEPOUT_OFFSET_IN = 0.5 * Math.SQRT2; // ≈ 0.707", perpendicular to the 45° edge
+
 // Color palette used for cavity outlines / handles.
 // These are intentionally bright enough to read on the slate background.
 const CAVITY_COLORS = [
@@ -65,39 +74,6 @@ const CAVITY_COLORS = [
   "#ec4899", // pink
 ];
 
-// === New Pan Mode State ===
-// We do NOT include this in Props — state lives locally to avoid SSR warnings.
-const [panMode, setPanMode] = useState(false);
-
-// Track whether Spacebar is held down
-const isSpacebarHeldRef = useRef(false);
-
-// Handle global key events to toggle panning
-useEffect(() => {
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.code === "Space" && !isSpacebarHeldRef.current) {
-      isSpacebarHeldRef.current = true;
-      setPanMode(true);
-    }
-  };
-
-  const handleKeyUp = (e: KeyboardEvent) => {
-    if (e.code === "Space") {
-      isSpacebarHeldRef.current = false;
-      setPanMode(false);
-    }
-  };
-
-  window.addEventListener("keydown", handleKeyDown);
-  window.addEventListener("keyup", handleKeyUp);
-  return () => {
-    window.removeEventListener("keydown", handleKeyDown);
-    window.removeEventListener("keyup", handleKeyUp);
-  };
-}, []);
-
-
-
 export default function InteractiveCanvas({
   layout,
   selectedId,
@@ -107,15 +83,43 @@ export default function InteractiveCanvas({
   zoom,
   croppedCorners = false, // NEW (default off)
 }: Props) {
-
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
+
+ // Pan state + refs live INSIDE the component (no top-level hooks)
+  const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
+  const lastPanRef = useRef<{ x: number; y: number } | null>(null);
+  const [panMode, setPanMode] = useState(false);
+  const isSpacebarHeldRef = useRef(false);
+
+  // Spacebar toggles pan mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !isSpacebarHeldRef.current) {
+        isSpacebarHeldRef.current = true;
+        setPanMode(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        isSpacebarHeldRef.current = false;
+        setPanMode(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
 
   const { block, cavities } = layout;
 
   // ==== Block scaling / centering (with zoom) ====
   const innerW = CANVAS_WIDTH - PADDING * 2;
-
   // For vertical space, we reserve HEADER_BAND at the top for the legend,
   // and use the remaining space for the foam block.
   const innerH = CANVAS_HEIGHT - PADDING * 2 - HEADER_BAND;
@@ -138,32 +142,32 @@ export default function InteractiveCanvas({
     y: HEADER_BAND + (CANVAS_HEIGHT - HEADER_BAND - blockPx.height) / 2,
   };
 
-  // 1.0" chamfer at upper-left and lower-right corners (45°)
-  const CHAMFER_IN = 1;
+  // Chamfer geometry (physical inches)
+  const L = block.lengthIn || 1;
+  const W = block.widthIn || 1;
 
-  const canChamfer =
-    block.lengthIn > CHAMFER_IN * 2 && block.widthIn > CHAMFER_IN * 2;
+  const canChamfer = L > CHAMFER_IN * 2 && W > CHAMFER_IN * 2;
 
   // Pixel distance for a 1" run along X and Y (respects physical inches)
-  const chamferPxX =
-    (CHAMFER_IN / (block.lengthIn || 1)) * blockPx.width;
-  const chamferPxY =
-    (CHAMFER_IN / (block.widthIn || 1)) * blockPx.height;
+  const chamferPxX = (CHAMFER_IN / L) * blockPx.width;
+  const chamferPxY = (CHAMFER_IN / W) * blockPx.height;
 
   const x0 = blockOffset.x;
   const y0 = blockOffset.y;
   const w = blockPx.width;
   const h = blockPx.height;
 
-  // Outer block path (UL & LR corners chamfered)
-  const outerBlockPathD = canChamfer
+  const doChamfer = croppedCorners && canChamfer;
+
+  // Outer block path (UL & LR corners chamfered when enabled)
+  const outerBlockPathD = doChamfer
     ? [
-        `M ${x0 + chamferPxX},${y0}`,                 // top edge after UL chamfer
-        `L ${x0 + w},${y0}`,                          // top-right
-        `L ${x0 + w},${y0 + h - chamferPxY}`,         // right edge before LR chamfer
-        `L ${x0 + w - chamferPxX},${y0 + h}`,         // LR chamfer
-        `L ${x0},${y0 + h}`,                          // bottom-left
-        `L ${x0},${y0 + chamferPxY}`,                 // left edge before UL chamfer
+        `M ${x0 + chamferPxX},${y0}`, // top edge after UL chamfer
+        `L ${x0 + w},${y0}`, // top-right
+        `L ${x0 + w},${y0 + h - chamferPxY}`, // right edge before LR chamfer
+        `L ${x0 + w - chamferPxX},${y0 + h}`, // LR chamfer
+        `L ${x0},${y0 + h}`, // bottom-left
+        `L ${x0},${y0 + chamferPxY}`, // left edge before UL chamfer
         "Z",
       ].join(" ")
     : [
@@ -174,36 +178,34 @@ export default function InteractiveCanvas({
         "Z",
       ].join(" ");
 
-  // Inner 0.5" safety wall (also chamfered, but still used as a rectangular
-  // spacing reference for movement / gap checks)
-  const L = block.lengthIn || 1;
-  const W = block.widthIn || 1;
-
+  // Inner 0.5" safety wall (used for dims + visual dashed line).
+  // We draw a chamfered version when cropping is on, but still treat it as
+  // a simple rectangular reference for most spacing math.
   const usableLenIn = Math.max(L - 2 * WALL_IN, 0);
   const usableWidIn = Math.max(W - 2 * WALL_IN, 0);
 
-    const innerX0 = x0 + (WALL_IN / L) * w;
+  const innerX0 = x0 + (WALL_IN / L) * w;
   const innerY0 = y0 + (WALL_IN / W) * h;
   const innerWallWidthPx = w * (usableLenIn / L);
   const innerWallHeightPx = h * (usableWidIn / W);
 
   const canInnerChamfer =
-    canChamfer &&
-    usableLenIn > CHAMFER_IN * 2 &&
-    usableWidIn > CHAMFER_IN * 2;
+    canChamfer && usableLenIn > CHAMFER_IN * 2 && usableWidIn > CHAMFER_IN * 2;
 
-  const innerWallPathD = canInnerChamfer
+  const doInnerChamfer = croppedCorners && canInnerChamfer;
+
+  const innerWallPathD = doInnerChamfer
     ? [
-        `M ${innerX0 + chamferPxX},${innerY0}`,                          // top edge after UL chamfer
-        `L ${innerX0 + innerWallWidthPx},${innerY0}`,                    // top-right
+        `M ${innerX0 + chamferPxX},${innerY0}`, // top edge after UL chamfer
+        `L ${innerX0 + innerWallWidthPx},${innerY0}`, // top-right
         `L ${
           innerX0 + innerWallWidthPx
-        },${innerY0 + innerWallHeightPx - chamferPxY}`,                  // right edge before LR chamfer
+        },${innerY0 + innerWallHeightPx - chamferPxY}`, // right edge before LR chamfer
         `L ${
           innerX0 + innerWallWidthPx - chamferPxX
-        },${innerY0 + innerWallHeightPx}`,                               // LR chamfer
-        `L ${innerX0},${innerY0 + innerWallHeightPx}`,                   // bottom-left
-        `L ${innerX0},${innerY0 + chamferPxY}`,                          // left edge before UL chamfer
+        },${innerY0 + innerWallHeightPx}`, // LR chamfer
+        `L ${innerX0},${innerY0 + innerWallHeightPx}`, // bottom-left
+        `L ${innerX0},${innerY0 + chamferPxY}`, // left edge before UL chamfer
         "Z",
       ].join(" ")
     : [
@@ -214,52 +216,68 @@ export default function InteractiveCanvas({
         "Z",
       ].join(" ");
 
-
-
-
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
+  
 
-// === Pointer Pan Helpers ===
-const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
-const lastPanRef = useRef<{ x: number; y: number } | null>(null);
+  // ==== Pan handlers (spacebar = hand tool) ====
+  const handlePointerDownPan = (e: PointerEvent<HTMLDivElement>) => {
+    if (!panMode) return;
+    const target = canvasWrapperRef.current;
+    if (!target) return;
 
-const handlePointerDownPan = (e: React.PointerEvent<HTMLDivElement>) => {
-  if (!panMode) return;
-  const target = canvasWrapperRef.current;
-  if (!target) return;
+    target.setPointerCapture(e.pointerId);
+    lastPanRef.current = { x: e.clientX, y: e.clientY };
+  };
 
-  target.setPointerCapture(e.pointerId);
-  lastPanRef.current = { x: e.clientX, y: e.clientY };
-};
+  const handlePointerMovePan = (e: PointerEvent<HTMLDivElement>) => {
+    if (!panMode) return;
+    const wrap = canvasWrapperRef.current;
+    if (!wrap || !lastPanRef.current) return;
+    const parent = wrap.parentElement;
+    if (!parent) return;
 
-const handlePointerMovePan = (e: React.PointerEvent<HTMLDivElement>) => {
-  if (!panMode) return;
-  const wrap = canvasWrapperRef.current;
-  if (!wrap || !lastPanRef.current) return;
-  const parent = wrap.parentElement;
-  if (!parent) return;
+    const dx = e.clientX - lastPanRef.current.x;
+    const dy = e.clientY - lastPanRef.current.y;
 
-  const dx = e.clientX - lastPanRef.current.x;
-  const dy = e.clientY - lastPanRef.current.y;
+    parent.scrollLeft -= dx;
+    parent.scrollTop -= dy;
 
-  parent.scrollLeft -= dx;
-  parent.scrollTop -= dy;
+    lastPanRef.current = { x: e.clientX, y: e.clientY };
+  };
 
-  lastPanRef.current = { x: e.clientX, y: e.clientY };
-};
+  const handlePointerUpPan = (e: PointerEvent<HTMLDivElement>) => {
+    if (!panMode) return;
+    lastPanRef.current = null;
+    try {
+      canvasWrapperRef.current?.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+  };
 
-const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
-  if (!panMode) return;
-  lastPanRef.current = null;
-  try {
-    canvasWrapperRef.current?.releasePointerCapture(e.pointerId);
-  } catch {}
-};
+  // Helper: check chamfer keep-out in block inches
+  const isInsideChamferKeepout = (
+    xIn: number,
+    yIn: number,
+    lenIn: number,
+    widIn: number,
+  ): boolean => {
+    if (!croppedCorners || !canChamfer) return true;
 
+    // UL keep-out: require min corner to lie "below" the offset line x + y = CHAMFER_IN + offset
+    const ulLimit = CHAMFER_IN + CHAMFER_KEEPOUT_OFFSET_IN;
+    if (xIn + yIn < ulLimit) return false;
 
+    // LR keep-out: work in distances from LR corner; require max corner to lie
+    // "above" the offset line (L - x) + (W - y) = CHAMFER_IN + offset
+    const lrLimit = L + W - (CHAMFER_IN + CHAMFER_KEEPOUT_OFFSET_IN);
+    const maxSum = xIn + lenIn + (yIn + widIn);
+    if (maxSum > lrLimit) return false;
 
+    return true;
+  };
 
-  // ==== Mouse handlers ====
+  // ==== Mouse handlers for cavities ====
 
   const handleCavityMouseDown = (
     e: MouseEvent<SVGGraphicsElement>,
@@ -302,7 +320,6 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
   const handleMouseMove = (e: MouseEvent<SVGSVGElement>) => {
     if (panMode || !drag || !svgRef.current) return;
 
-
     const svgRect = svgRef.current.getBoundingClientRect();
     const ptX = e.clientX - svgRect.left;
     const ptY = e.clientY - svgRect.top;
@@ -312,8 +329,8 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
 
     if (drag.mode === "move") {
       // move whole cavity, keep size fixed
-      const cavWidthPx = (cav.lengthIn / block.lengthIn) * blockPx.width;
-      const cavHeightPx = (cav.widthIn / block.widthIn) * blockPx.height;
+      const len = cav.lengthIn;
+      const wid = cav.widthIn;
 
       const cavX = ptX - drag.offsetX;
       const cavY = ptY - drag.offsetY;
@@ -321,19 +338,21 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
       let xNorm = (cavX - blockOffset.x) / blockPx.width;
       let yNorm = (cavY - blockOffset.y) / blockPx.height;
 
-      const len = cav.lengthIn;
-      const wid = cav.widthIn;
+      let xIn = snapInches(xNorm * L);
+      let yIn = snapInches(yNorm * W);
 
       const minXIn = WALL_IN;
-      const maxXIn = block.lengthIn - WALL_IN - len;
+      const maxXIn = L - WALL_IN - len;
       const minYIn = WALL_IN;
-      const maxYIn = block.widthIn - WALL_IN - wid;
-
-      let xIn = snapInches(xNorm * block.lengthIn);
-      let yIn = snapInches(yNorm * block.widthIn);
+      const maxYIn = W - WALL_IN - wid;
 
       xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
       yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+      // enforce chamfer keep-out when corners are cropped
+      if (!isInsideChamferKeepout(xIn, yIn, len, wid)) {
+        return;
+      }
 
       // enforce 0.5" min gap to other cavities
       if (
@@ -351,14 +370,14 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
         return;
       }
 
-      xNorm = xIn / block.lengthIn;
-      yNorm = yIn / block.widthIn;
+      xNorm = xIn / L;
+      yNorm = yIn / W;
 
       moveAction(drag.id, xNorm, yNorm);
     } else if (drag.mode === "resize") {
       // resize from bottom-right, top-left fixed
-      const startXIn = cav.x * block.lengthIn;
-      const startYIn = cav.y * block.widthIn;
+      const startXIn = cav.x * L;
+      const startYIn = cav.y * W;
 
       const cavX = blockOffset.x + cav.x * blockPx.width;
       const cavY = blockOffset.y + cav.y * blockPx.height;
@@ -366,11 +385,8 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
       const newWidthPx = ptX - cavX;
       const newHeightPx = ptY - cavY;
 
-      let newLenIn = newWidthPx / scale;
-      let newWidIn = newHeightPx / scale;
-
-      newLenIn = snapInches(newLenIn);
-      newWidIn = snapInches(newWidIn);
+      let newLenIn = snapInches(newWidthPx / scale);
+      let newWidIn = snapInches(newHeightPx / scale);
 
       const minSize = SNAP_IN * 2;
       newLenIn = Math.max(minSize, newLenIn);
@@ -383,11 +399,16 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
         newWidIn = d;
       }
 
-      const maxLenIn = block.lengthIn - WALL_IN - startXIn;
-      const maxWidIn = block.widthIn - WALL_IN - startYIn;
+      const maxLenIn = L - WALL_IN - startXIn;
+      const maxWidIn = W - WALL_IN - startYIn;
 
       newLenIn = clamp(newLenIn, minSize, Math.max(minSize, maxLenIn));
       newWidIn = clamp(newWidIn, minSize, Math.max(minSize, maxWidIn));
+
+      // chamfer keep-out with new size
+      if (!isInsideChamferKeepout(startXIn, startYIn, newLenIn, newWidIn)) {
+        return;
+      }
 
       if (
         violatesMinGap(
@@ -412,13 +433,6 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
     setDrag(null);
   };
 
-  const innerWall = {
-    leftIn: WALL_IN,
-    rightIn: block.lengthIn - WALL_IN,
-    topIn: WALL_IN,
-    bottomIn: block.widthIn - WALL_IN,
-  };
-
   const spacing = selectedCavity
     ? computeSpacing(selectedCavity, block, cavities, blockPx, blockOffset)
     : null;
@@ -426,14 +440,13 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
   return (
     // outer wrapper stays neutral – the dark grid comes from the parent
     <div
-  ref={canvasWrapperRef}
-  className={`rounded-2xl ${panMode ? "cursor-grabbing" : ""}`}
-  onPointerDown={handlePointerDownPan}
-  onPointerMove={handlePointerMovePan}
-  onPointerUp={handlePointerUpPan}
->
-  <div className="overflow-auto rounded-xl">
-
+      ref={canvasWrapperRef}
+      className={`rounded-2xl ${panMode ? "cursor-grabbing" : ""}`}
+      onPointerDown={handlePointerDownPan}
+      onPointerMove={handlePointerMovePan}
+      onPointerUp={handlePointerUpPan}
+    >
+      <div className="overflow-auto rounded-xl">
         <svg
           ref={svgRef}
           width={CANVAS_WIDTH}
@@ -456,7 +469,7 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
           {/* rulers + block label ABOVE the top ruler */}
           {drawRulersWithLabel(block, blockPx, blockOffset)}
 
-                    {/* block with 1" 45° chamfers at upper-left and lower-right */}
+          {/* block with optional 1" 45° chamfers at upper-left and lower-right */}
           <path
             d={outerBlockPathD}
             fill="#e5e7eb" // light foam block
@@ -464,11 +477,10 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
             strokeWidth={2}
           />
 
-
           {/* 0.5" grid *inside* the block */}
           {drawInchGrid(block, blockPx, blockOffset)}
 
-                  {/* 0.5" inner wall (dashed, matches chamfer shape where possible) */}
+          {/* 0.5" inner wall (dashed, matches chamfer shape where possible) */}
           <path
             d={innerWallPathD}
             fill="none"
@@ -477,13 +489,12 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
             strokeWidth={1}
           />
 
-
           {/* cavities */}
           {cavities.map((cavity, index) => {
             const cavWidthPx =
-              (cavity.lengthIn / block.lengthIn) * blockPx.width;
+              (cavity.lengthIn / L) * blockPx.width;
             const cavHeightPx =
-              (cavity.widthIn / block.widthIn) * blockPx.height;
+              (cavity.widthIn / W) * blockPx.height;
 
             const cavX = blockOffset.x + cavity.x * blockPx.width;
             const cavY = blockOffset.y + cavity.y * blockPx.height;
@@ -573,8 +584,13 @@ const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>) => {
     </div>
   );
 }
-
 // ===== helpers =====
+
+// Local alias so our PointerEvent<> type works without extra imports
+
+
+// Extra keep-out behind the chamfer line so cavities stay 0.5" off the cropped edge
+
 
 function snapInches(v: number): number {
   if (!Number.isFinite(v)) return 0;
@@ -842,17 +858,23 @@ function computeSpacing(
   const topIn = cavTopIn - WALL_IN;
   const bottomIn = block.widthIn - WALL_IN - cavBottomIn;
 
-  const cavLeftPx = blockOffset.x + (cavLeftIn / block.lengthIn) * blockPx.width;
+  const cavLeftPx =
+    blockOffset.x + (cavLeftIn / block.lengthIn) * blockPx.width;
   const cavRightPx =
     blockOffset.x + (cavRightIn / block.lengthIn) * blockPx.width;
-  const cavTopPx = blockOffset.y + (cavTopIn / block.widthIn) * blockPx.height;
+  const cavTopPx =
+    blockOffset.y + (cavTopIn / block.widthIn) * blockPx.height;
   const cavBottomPx =
     blockOffset.y + (cavBottomIn / block.widthIn) * blockPx.height;
 
-  const leftWallPx = blockOffset.x + (WALL_IN / block.lengthIn) * blockPx.width;
+  const leftWallPx =
+    blockOffset.x + (WALL_IN / block.lengthIn) * blockPx.width;
   const rightWallPx =
-    blockOffset.x + blockPx.width - (WALL_IN / block.lengthIn) * blockPx.width;
-  const topWallPx = blockOffset.y + (WALL_IN / block.widthIn) * blockPx.height;
+    blockOffset.x +
+    blockPx.width -
+    (WALL_IN / block.lengthIn) * blockPx.width;
+  const topWallPx =
+    blockOffset.y + (WALL_IN / block.widthIn) * blockPx.height;
   const bottomWallPx =
     blockOffset.y +
     blockPx.height -
@@ -871,10 +893,12 @@ function computeSpacing(
     const oRightIn = oLeftIn + other.lengthIn;
     const oBottomIn = oTopIn + other.widthIn;
 
-    const oLeftPx = blockOffset.x + (oLeftIn / block.lengthIn) * blockPx.width;
+    const oLeftPx =
+      blockOffset.x + (oLeftIn / block.lengthIn) * blockPx.width;
     const oRightPx =
       blockOffset.x + (oRightIn / block.lengthIn) * blockPx.width;
-    const oTopPx = blockOffset.y + (oTopIn / block.widthIn) * blockPx.height;
+    const oTopPx =
+      blockOffset.y + (oTopIn / block.widthIn) * blockPx.height;
     const oBottomPx =
       blockOffset.y + (oBottomIn / block.widthIn) * blockPx.height;
 
