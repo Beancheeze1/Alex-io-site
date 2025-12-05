@@ -23,7 +23,7 @@
 // Behaviour:
 //   - Looks up quotes.id by quote_no
 //   - Inserts a row into quote_layout_packages with layout_json + notes +
-//     svg_text + dxf_text (STEP left nullable for now).
+//     svg_text + dxf_text + step_text.
 //   - If qty is a positive number, updates the PRIMARY quote_items row for that
 //     quote to use the new qty.
 //   - If materialId is a positive number, updates the PRIMARY quote_items row
@@ -43,6 +43,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
+import { getCurrentUserFromRequest } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -264,35 +265,6 @@ function buildDxfFromLayout(layout: any): string | null {
 
 /* ===================== SVG annotator from layout ===================== */
 
-/**
- * SVG legend behavior:
- *
- * 1) Strip any old legends:
- *    - <g id="alex-io-notes">...</g>
- *    - <text> nodes whose contents look like our legacy labels:
- *      NOT TO SCALE / FOAM BLOCK: / FOAM: / BLOCK: / MATERIAL:
- *
- * 2) Wrap the existing geometry in a translated group:
- *
- *    <g id="alex-io-geometry" transform="translate(0, 80)"> ...original children... </g>
- *
- *    This pushes the entire foam drawing down by 80 units, regardless of block size.
- *
- * 3) Increase the SVG's height / viewBox height by the same 80 units so the
- *    shifted block is never clipped at the bottom.
- *
- * 4) Inject a fresh legend group at the top, centered:
- *
- *   <g id="alex-io-notes">
- *     <text>QUOTE: ...</text>
- *     <text>NOT TO SCALE</text>
- *     <text>BLOCK: L x W x T in</text>
- *     <text>MATERIAL: ...</text>   // only if materialLegend is present
- *   </g>
- *
- * - Geometry + cavity labels from the editor remain intact, just shifted down.
- * - Typed notes stay with the quote (quote_layout_packages.notes), not in the SVG.
- */
 function buildSvgWithAnnotations(
   layout: any,
   svgRaw: string | null,
@@ -333,10 +305,6 @@ function buildSvgWithAnnotations(
     return svg;
   }
 
-  // 4) Split SVG into:
-  //    <svg ...> [children...] </svg>
-  //    We'll wrap the children in a translated <g>, bump height/viewBox,
-  //    and inject notes just after <svg ...>.
   const closeIdx = svg.lastIndexOf("</svg");
   if (closeIdx === -1) {
     return svg;
@@ -353,7 +321,6 @@ function buildSvgWithAnnotations(
   const svgChildren = svg.slice(firstTagEnd + 1, closeIdx); // inner content
   const svgClose = svg.slice(closeIdx); // </svg ...>
 
-  // 4a) Helper to bump a numeric length attribute (e.g., height="400" or "400px").
   function bumpLengthAttr(tag: string, attrName: string, delta: number): string {
     const re = new RegExp(`${attrName}\\s*=\\s*"([^"]+)"`);
     const m = tag.match(re);
@@ -368,7 +335,6 @@ function buildSvgWithAnnotations(
     return tag.replace(re, `${attrName}="${updated}"`);
   }
 
-  // 4b) Bump viewBox height.
   const vbRe = /viewBox\s*=\s*"([^"]+)"/;
   const vbMatch = svgOpen.match(vbRe);
   if (vbMatch) {
@@ -382,10 +348,8 @@ function buildSvgWithAnnotations(
     }
   }
 
-  // 4c) Bump height attribute, if present.
   svgOpen = bumpLengthAttr(svgOpen, "height", GEOMETRY_SHIFT_Y);
 
-  // 5) Build the lines we want in the legend band.
   const lines: string[] = [];
 
   const safeQuoteNo = quoteNo && quoteNo.trim().length > 0 ? quoteNo.trim() : "";
@@ -406,12 +370,10 @@ function buildSvgWithAnnotations(
   }
 
   if (!lines.length) {
-    // No legend lines → just return SVG with geometry only (but still shifted & taller).
     const geometryGroupOnly = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
     return `${svgOpen}\n${geometryGroupOnly}\n${svgClose}`;
   }
 
-  // 6) Build the note texts, centered at the top of the SVG.
   const textYStart = 20;
   const textYStep = 14;
 
@@ -423,7 +385,6 @@ function buildSvgWithAnnotations(
     .join("");
 
   const notesGroup = `<g id="alex-io-notes">${notesTexts}</g>`;
-
   const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
 
   const rebuilt = `${svgOpen}\n${notesGroup}\n${geometryGroup}\n${svgClose}`;
@@ -467,6 +428,16 @@ export async function POST(req: NextRequest) {
       },
       400,
     );
+  }
+
+  // Current user (if logged in). We fail soft here: layout save still works
+  // even if auth is misconfigured; user_id columns just stay null.
+  let currentUserId: number | null = null;
+  try {
+    const user = await getCurrentUserFromRequest(req);
+    if (user) currentUserId = user.id;
+  } catch (e) {
+    console.error("getCurrentUserFromRequest failed in layout/apply:", e);
   }
 
   // Optional customer info from the layout editor
@@ -564,10 +535,18 @@ export async function POST(req: NextRequest) {
             customer_name = coalesce($2, customer_name),
             email = coalesce($3, email),
             phone = coalesce($4, phone),
-            company = coalesce($5, company)
+            company = coalesce($5, company),
+            updated_by_user_id = coalesce($6, updated_by_user_id)
           where id = $1
         `,
-        [quote.id, customerName, customerEmail, customerPhone, customerCompany],
+        [
+          quote.id,
+          customerName,
+          customerEmail,
+          customerPhone,
+          customerCompany,
+          currentUserId,
+        ],
       );
     }
 
@@ -650,18 +629,26 @@ export async function POST(req: NextRequest) {
       quoteNo,
     );
 
-    // Insert layout package (now including annotated svg_text, dxf_text, step_text).
+    // Insert layout package (now including annotated svg_text, dxf_text, step_text, and user ids).
     const pkg = await one<LayoutPkgRow>(
       `
-      insert into quote_layout_packages (quote_id, layout_json, notes, svg_text, dxf_text, step_text)
-      values ($1, $2, $3, $4, $5, $6)
+      insert into quote_layout_packages (
+        quote_id,
+        layout_json,
+        notes,
+        svg_text,
+        dxf_text,
+        step_text,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $7)
       returning id, quote_id, layout_json, notes, svg_text, dxf_text, step_text, created_at
       `,
-      [quote.id, layout, notes, svgAnnotated, dxf, step],
+      [quote.id, layout, notes, svgAnnotated, dxf, step, currentUserId],
     );
 
     // Optional: update qty on the PRIMARY quote item for this quote.
-    // We treat the "first" item (by id asc) as the primary line.
     let updatedQty: number | null = null;
 
     if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
@@ -687,14 +674,12 @@ export async function POST(req: NextRequest) {
     }
 
     // Sync layout dims, cavities, qty, material, and customer into the facts store
-    // so follow-up emails + layout links stay in sync with the editor.
     try {
       const factsKey = quoteNo;
       const prevFacts = await loadFacts(factsKey);
       const nextFacts: any =
         prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
 
-      // Outside size from the saved block
       if (layout && layout.block) {
         const Lb = Number(layout.block.lengthIn) || 0;
         const Wb = Number(layout.block.widthIn) || 0;
@@ -704,7 +689,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Cavities from the saved layout (LxWxD for each pocket), across all layers
       const allCavities = getAllCavitiesFromLayout(layout);
       if (allCavities.length > 0) {
         const cavDims: string[] = [];
@@ -746,7 +730,6 @@ export async function POST(req: NextRequest) {
         nextFacts.material_density_lb_ft3 = materialDensityForFacts;
       }
 
-      // Mirror customer info into facts if present
       if (customerName) {
         nextFacts.customer_name = customerName;
       }
