@@ -12,7 +12,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const next = searchParams.get("next") || "/quote";
+  const next = searchParams.get("next") || "/admin";
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
