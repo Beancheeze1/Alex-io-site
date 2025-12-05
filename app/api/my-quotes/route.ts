@@ -33,15 +33,23 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const { searchParams } = new URL(req.url);
+    const url = new URL(req.url);
+    const limitParam = url.searchParams.get("limit");
     const limit = Math.min(
-      parseInt(searchParams.get("limit") || "50", 10),
+      Number.isFinite(Number(limitParam)) ? Number(limitParam) : 100,
       200,
     );
 
     const rows = await q<QuoteRow>(
       `
-      SELECT id, quote_no, customer_name, email, phone, status, created_at, updated_at
+      SELECT id,
+             quote_no,
+             customer_name,
+             email,
+             phone,
+             status,
+             created_at,
+             updated_at
       FROM public."quotes"
       WHERE sales_rep_id = $1
       ORDER BY created_at DESC
