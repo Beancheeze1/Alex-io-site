@@ -205,7 +205,6 @@ export default function LayoutPage({
       return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     },
   );
-
   React.useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -652,6 +651,7 @@ function LayoutEditorHost(props: {
     selectCavity(null);
   }, [effectiveActiveLayerId, layerCount, selectCavity]);
 
+  
   // When a new cavity is added, try to drop it into "dead space"
   const prevCavityCountRef = React.useRef<number>(cavities.length);
   React.useEffect(() => {
@@ -764,6 +764,7 @@ function LayoutEditorHost(props: {
   }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
 
   const [zoom, setZoom] = React.useState(1);
+  const [croppedCorners, setCroppedCorners] = React.useState(false);
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
@@ -904,7 +905,6 @@ function LayoutEditorHost(props: {
     },
     [cavityInputs, selectedCavity, updateCavityDims],
   );
-
   React.useEffect(() => {
     let cancelled = false;
 
@@ -1287,7 +1287,6 @@ function LayoutEditorHost(props: {
                     Rectangular pocket (4&quot; × 2&quot;)
                   </div>
                 </button>
-
                 <button
                   type="button"
                   onClick={() => handleAddPreset("circle")}
@@ -1350,9 +1349,7 @@ function LayoutEditorHost(props: {
                           <option key={m.id} value={m.id}>
                             {m.name}
                             {m.density_lb_ft3 != null
-                              ? ` · ${m.density_lb_ft3.toFixed(
-                                  1,
-                                )} lb/ft³`
+                              ? ` · ${m.density_lb_ft3.toFixed(1)} lb/ft³`
                               : ""}
                           </option>
                         ))}
@@ -1501,7 +1498,7 @@ function LayoutEditorHost(props: {
                     )}
                   </div>
 
-                  {/* zoom + qty + advisor + apply button */}
+                  {/* zoom + qty + advisor + crop + apply button */}
                   <div className="flex items-center gap-3">
                     <div className="hidden md:flex items-center text-[11px] text-slate-400 mr-1">
                       <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80 mr-1.5" />
@@ -1546,6 +1543,30 @@ function LayoutEditorHost(props: {
                         />
                       </div>
 
+                      {/* Crop corners toggle */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCroppedCorners((prev) => !prev)
+                        }
+                        className={
+                          "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] transition " +
+                          (croppedCorners
+                            ? "border-sky-400 bg-sky-500/15 text-sky-100"
+                            : "border-slate-700 bg-slate-900 text-slate-300 hover:border-sky-400 hover:text-sky-100")
+                        }
+                      >
+                        <span
+                          className={
+                            "inline-flex h-1.5 w-1.5 rounded-full " +
+                            (croppedCorners
+                              ? "bg-sky-400 shadow-[0_0_6px_rgba(56,189,248,0.9)]"
+                              : "bg-slate-500")
+                          }
+                        />
+                        <span>Crop corners</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={handleGoToFoamAdvisor}
@@ -1584,7 +1605,6 @@ function LayoutEditorHost(props: {
                   selected, the nearest horizontal and vertical gaps to other
                   cavities and to the block edges are dimensioned.
                 </p>
-
                 {/* canvas wrapper */}
                 <div className="relative flex-1 rounded-2xl border border-slate-800/90 bg-slate-950 overflow-hidden shadow-[0_22px_55px_rgba(15,23,42,0.95)]">
                   <div
@@ -1601,6 +1621,7 @@ function LayoutEditorHost(props: {
                         updateCavityDims(id, { lengthIn, widthIn })
                       }
                       zoom={zoom}
+                      croppedCorners={croppedCorners}
                     />
                   </div>
                 </div>
@@ -1632,9 +1653,7 @@ function LayoutEditorHost(props: {
                         step={0.125}
                         value={block.lengthIn}
                         onChange={(e) => {
-                          const snapped = snapInches(
-                            Number(e.target.value),
-                          );
+                          const snapped = snapInches(Number(e.target.value));
                           updateBlockDims({ lengthIn: snapped });
                         }}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
@@ -1649,9 +1668,7 @@ function LayoutEditorHost(props: {
                         step={0.125}
                         value={block.widthIn}
                         onChange={(e) => {
-                          const snapped = snapInches(
-                            Number(e.target.value),
-                          );
+                          const snapped = snapInches(Number(e.target.value));
                           updateBlockDims({ widthIn: snapped });
                         }}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
@@ -1666,9 +1683,7 @@ function LayoutEditorHost(props: {
                         step={0.125}
                         value={block.thicknessIn}
                         onChange={(e) => {
-                          const snapped = snapInches(
-                            Number(e.target.value),
-                          );
+                          const snapped = snapInches(Number(e.target.value));
                           updateBlockDims({ thicknessIn: snapped });
                         }}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"

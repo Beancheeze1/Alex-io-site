@@ -180,77 +180,14 @@ export default function InteractiveCanvas({
       ].join(" ");
 
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
-  // === Pan state + refs live INSIDE the component (no top-level hooks) ===
+  // === Pan state disabled (we keep the API but do nothing) ===
   const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
-  const lastPanRef = useRef<{ x: number; y: number } | null>(null);
-  const [panMode, setPanMode] = useState(false);
-  const isSpacebarHeldRef = useRef(false);
+  const panMode = false;
 
-  // Spacebar toggles pan mode
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !isSpacebarHeldRef.current) {
-        isSpacebarHeldRef.current = true;
-        setPanMode(true);
-      }
-    };
+  const handlePointerDownPan = () => {};
+  const handlePointerMovePan = () => {};
+  const handlePointerUpPan = () => {};
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space") {
-        isSpacebarHeldRef.current = false;
-        setPanMode(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, []);
-
-  // Pointer-based panning for the outer wrapper
-  const handlePointerDownPan = (
-    e: React.PointerEvent<HTMLDivElement>,
-  ): void => {
-    if (!panMode) return;
-    const target = canvasWrapperRef.current;
-    if (!target) return;
-
-    target.setPointerCapture(e.pointerId);
-    lastPanRef.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handlePointerMovePan = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (!panMode) return;
-
-    const wrap = canvasWrapperRef.current;
-    if (!wrap || !lastPanRef.current) return;
-
-    const parent = wrap.parentElement;
-    if (!parent) return;
-
-    const dx = e.clientX - lastPanRef.current.x;
-    const dy = e.clientY - lastPanRef.current.y;
-
-    parent.scrollLeft -= dx;
-    parent.scrollTop -= dy;
-
-    lastPanRef.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handlePointerUpPan = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (!panMode) return;
-    lastPanRef.current = null;
-
-    try {
-      canvasWrapperRef.current?.releasePointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
-  };
 
   // ==== Mouse handlers ====
 
