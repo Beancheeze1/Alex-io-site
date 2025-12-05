@@ -87,6 +87,15 @@ function extractQuoteNo(text: string): string | null {
   return m ? m[0] : null;
 }
 
+// Detect sales rep slug in subject, e.g. "Packaging Quote Request [sales-demo]"
+function extractRepSlugFromSubject(subject: string): string | null {
+  if (!subject) return null;
+  // Simple pattern: first [slug] token, allow letters / numbers / - / _
+  const m = subject.match(/\[([a-z0-9_-]+)\]/i);
+  if (!m) return null;
+  return m[1].toLowerCase();
+}
+
 /* ============================================================
    Cavity normalization
    ============================================================ */
@@ -208,7 +217,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     const like = `%${materialToken}%`;
     const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
 
-      // Family guard:
+    // Family guard:
     // - If the email says PE → only allow Polyethylene rows.
     // - If the email says EPE → only allow Expanded Polyethylene rows.
     // - If it clearly says polyurethane or EPS → strongly prefer those families.
@@ -244,7 +253,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     } else if (hasPolystyrene) {
       familyFilter = "AND material_family ILIKE 'Polystyrene%'";
     }
-
 
     // 1) First pass: LIKE + density (what we had before, but with is_active)
     let row = await one<any>(
@@ -335,9 +343,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     return f;
   }
 }
-
-
-
 
 /* ============================================================
    NEW: hydrateFromDBByQuoteNo
@@ -630,7 +635,6 @@ function grabOutsideDims(raw: string): string | undefined {
   return `${m[1]}x${m[2]}x${m[3]}`;
 }
 
-
 function grabQty(raw: string): number | undefined {
   const t = raw.toLowerCase();
 
@@ -730,16 +734,15 @@ function grabMaterial(raw: string): string | undefined {
   return undefined;
 }
 
-
 function extractCavities(raw: string): {
   cavityCount?: number;
   cavityDims?: string[];
 } {
   const t = raw.toLowerCase();
   const lines = raw.split(/\r?\n/);
-  
+
   // PROTECT DECIMALS: convert "1x1x.5" → "1x1x0.5" so the '.' never splits the token
-raw = raw.replace(/x\.(\d+)/g, "x0.$1").replace(/\.([0-9]+)/g, "0.$1");
+  raw = raw.replace(/x\.(\d+)/g, "x0.$1").replace(/\.([0-9]+)/g, "0.$1");
 
   const cavityDims: string[] = [];
   let cavityCount: number | undefined;
@@ -1053,6 +1056,9 @@ export async function POST(req: NextRequest) {
     // pull sketch facts stored under that key.
     const subjectQuoteNo = extractQuoteNo(subject);
 
+    // NEW: detect rep slug in subject ([sales-demo], [chuck], etc.)
+    const salesRepSlugFromSubject = extractRepSlugFromSubject(subject);
+
     /* ------------------- Parse new turn ------------------- */
 
     let newly = extractAllFromTextAndSubject(lastText, subject);
@@ -1108,6 +1114,12 @@ export async function POST(req: NextRequest) {
     // (which now reflect the latest layout/apply) should override older
     // thread-level memory so we don't keep showing stale "3x2x1 in 10x10x2".
     let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
+
+    // If we picked up a rep slug from the subject and we don't already
+    // have one in facts, keep it so future turns also know the rep.
+    if (salesRepSlugFromSubject && !merged.sales_rep_slug) {
+      merged.sales_rep_slug = salesRepSlugFromSubject;
+    }
 
     // Fallback: if we know there are cavities but no sizes yet, try to
     // recover cavity dims directly from the email text (subject + body).
@@ -1254,6 +1266,13 @@ export async function POST(req: NextRequest) {
 
     // Header: store whenever we have dims + qty + quoteNumber
     let quoteId = merged.quote_id;
+
+    // Rep slug we will send along to /api/quotes
+    const salesRepSlugForHeader: string | undefined =
+      (merged.sales_rep_slug as string | undefined) ||
+      salesRepSlugFromSubject ||
+      undefined;
+
     if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
       try {
         const customerName =
@@ -1275,6 +1294,7 @@ export async function POST(req: NextRequest) {
             email: customerEmail,
             phone,
             status,
+            sales_rep_slug: salesRepSlugForHeader,
           }),
         });
 
@@ -1283,6 +1303,11 @@ export async function POST(req: NextRequest) {
           quoteId = headerJson.quote.id;
           merged.quote_id = quoteId;
           merged.status = headerJson.quote.status || merged.status;
+
+          // NEW: capture sales_rep_id from header for future turns
+          if (headerJson.quote.sales_rep_id != null) {
+            merged.sales_rep_id = headerJson.quote.sales_rep_id;
+          }
 
           if (threadKey) await saveFacts(threadKey, merged);
           if (merged.quote_no) await saveFacts(merged.quote_no, merged);
