@@ -1,4 +1,4 @@
-//app/login/page.tsx
+// app/login/page.tsx
 "use client";
 
 import { useState, FormEvent } from "react";
@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Default landing after login is /admin, but ?next=... overrides it.
   const next = searchParams.get("next") || "/admin";
 
   async function handleSubmit(e: FormEvent) {
@@ -41,12 +42,6 @@ export default function LoginPage() {
         setSubmitting(false);
         return;
       }
-
-
-<p className="mt-4 text-xs text-neutral-400">
-  Build: 2025-12-05 login-debug
-</p>
-
 
       // Logged in → send them to the main area (or ?next=...)
       router.push(next);
@@ -119,6 +114,11 @@ export default function LoginPage() {
             {submitting ? "Signing in..." : "Sign in"}
           </button>
         </form>
+
+        {/* Optional build marker – now in the JSX where it belongs */}
+        <p className="mt-4 text-center text-xs text-neutral-400">
+          Build: 2025-12-05 login-debug
+        </p>
       </div>
     </div>
   );
