@@ -1,8 +1,8 @@
 // app/quote/layout.tsx
 //
-// Auth-guarded layout for all /quote* pages.
-// - If not logged in, redirect to /login?next=/quote
-// - If logged in, render the quote pages as normal.
+// Auth guard for all /quote* pages.
+// - Requires a valid session
+// - If not logged in, redirects to /login first
 
 import { ReactNode } from "react";
 import { redirect } from "next/navigation";
@@ -19,8 +19,6 @@ export default async function QuoteSectionLayout({ children }: Props) {
   const user = await getCurrentUserFromCookies();
 
   if (!user) {
-    // Path A minimal: we send them to /quote after login,
-    // not yet preserving specific quote_no or sub-path.
     redirect("/login?next=/quote");
   }
 
