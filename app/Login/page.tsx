@@ -42,6 +42,12 @@ export default function LoginPage() {
         return;
       }
 
+
+<p className="mt-4 text-xs text-neutral-400">
+  Build: 2025-12-05 login-debug
+</p>
+
+
       // Logged in → send them to the main area (or ?next=...)
       router.push(next);
       router.refresh();
