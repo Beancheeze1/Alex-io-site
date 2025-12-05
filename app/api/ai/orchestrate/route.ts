@@ -90,11 +90,11 @@ function extractQuoteNo(text: string): string | null {
 // Detect sales rep slug in subject, e.g. "Packaging Quote Request [sales-demo]"
 function extractRepSlugFromSubject(subject: string): string | null {
   if (!subject) return null;
-  // Simple pattern: first [slug] token, allow letters / numbers / - / _
   const m = subject.match(/\[([a-z0-9_-]+)\]/i);
-  if (!m) return null;
-  return m[1].toLowerCase();
+  return m ? m[1].toLowerCase() : null;
 }
+
+
 
 /* ============================================================
    Cavity normalization
@@ -1041,13 +1041,17 @@ export async function POST(req: NextRequest) {
       return err("unsupported_mode", { mode });
     }
 
-    const lastText = String(p.text || "");
-    const subject = String(p.subject || "");
-    const providedThreadId = String(p.threadId || "").trim();
+   const lastText = String(p.text || "");
+const subject = String(p.subject || "");
+const providedThreadId = String(p.threadId || "").trim();
 
-    const threadKey =
-      providedThreadId ||
-      (subject ? `sub:${subject.toLowerCase().replace(/\s+/g, " ")}` : "");
+// NEW: detect rep slug in subject ([sales-demo], [chuck], etc.)
+const salesRepSlugFromSubject = extractRepSlugFromSubject(subject);
+
+const threadKey =
+  providedThreadId ||
+  (subject ? `sub:${subject.toLowerCase().replace(/\s+/g, " ")}` : "");
+
 
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
     const dryRun = !!p.dryRun;
@@ -1056,8 +1060,7 @@ export async function POST(req: NextRequest) {
     // pull sketch facts stored under that key.
     const subjectQuoteNo = extractQuoteNo(subject);
 
-    // NEW: detect rep slug in subject ([sales-demo], [chuck], etc.)
-    const salesRepSlugFromSubject = extractRepSlugFromSubject(subject);
+    
 
     /* ------------------- Parse new turn ------------------- */
 
@@ -1113,29 +1116,30 @@ export async function POST(req: NextRequest) {
     // For shared keys like dims / cavityDims / qty, the quote-level facts
     // (which now reflect the latest layout/apply) should override older
     // thread-level memory so we don't keep showing stale "3x2x1 in 10x10x2".
-    let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
+   let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
 
-    // If we picked up a rep slug from the subject and we don't already
-    // have one in facts, keep it so future turns also know the rep.
-    if (salesRepSlugFromSubject && !merged.sales_rep_slug) {
-      merged.sales_rep_slug = salesRepSlugFromSubject;
-    }
+// If we picked up a rep slug from the subject and we don't already
+// have one in facts, keep it so future turns also know the rep.
+if (salesRepSlugFromSubject && !merged.sales_rep_slug) {
+  merged.sales_rep_slug = salesRepSlugFromSubject;
+}
 
-    // Fallback: if we know there are cavities but no sizes yet, try to
-    // recover cavity dims directly from the email text (subject + body).
-    if (
-      merged.cavityCount &&
-      (!Array.isArray(merged.cavityDims) ||
-        merged.cavityDims.length === 0)
-    ) {
-      const recovered = recoverCavityDimsFromText(
-        `${subject}\n\n${lastText}`,
-        merged.dims,
-      );
-      if (recovered.length > 0) {
-        merged.cavityDims = recovered;
-      }
-    }
+// Fallback: if we know there are cavities but no sizes yet, try to
+// recover cavity dims directly from the email text (subject + body).
+if (
+  merged.cavityCount &&
+  (!Array.isArray(merged.cavityDims) ||
+    merged.cavityDims.length === 0)
+) {
+  const recovered = recoverCavityDimsFromText(
+    `${subject}\n\n${lastText}`,
+    merged.dims,
+  );
+  if (recovered.length > 0) {
+    merged.cavityDims = recovered;
+  }
+}
+
 
     merged = applyCavityNormalization(merged);
 
@@ -1262,60 +1266,61 @@ export async function POST(req: NextRequest) {
       merged.price_breaks = priceBreaks;
     }
 
-    const hasDimsQty = !!(specs.dims && specs.qty);
+ const hasDimsQty = !!(specs.dims && specs.qty);
 
-    // Header: store whenever we have dims + qty + quoteNumber
-    let quoteId = merged.quote_id;
+// Header: store whenever we have dims + qty + quoteNumber
+let quoteId = merged.quote_id;
 
-    // Rep slug we will send along to /api/quotes
-    const salesRepSlugForHeader: string | undefined =
-      (merged.sales_rep_slug as string | undefined) ||
-      salesRepSlugFromSubject ||
-      undefined;
+// Decide what slug to send to /api/quotes
+const salesRepSlugForHeader: string | undefined =
+  (merged.sales_rep_slug as string | undefined) ||
+  salesRepSlugFromSubject ||
+  undefined;
 
-    if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
-      try {
-        const customerName =
-          merged.customerName ||
-          merged.customer_name ||
-          merged.name ||
-          "Customer";
-        const customerEmail =
-          merged.customerEmail || merged.email || null;
-        const phone = merged.phone || null;
-        const status = merged.status || "draft";
+if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
+  try {
+    const customerName =
+      merged.customerName ||
+      merged.customer_name ||
+      merged.name ||
+      "Customer";
+    const customerEmail =
+      merged.customerEmail || merged.email || null;
+    const phone = merged.phone || null;
+    const status = merged.status || "draft";
 
-        const headerRes = await fetch(`${base}/api/quotes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            quote_no: String(merged.quoteNumber),
-            customer_name: String(customerName),
-            email: customerEmail,
-            phone,
-            status,
-            sales_rep_slug: salesRepSlugForHeader,
-          }),
-        });
+    const headerRes = await fetch(`${base}/api/quotes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        quote_no: String(merged.quoteNumber),
+        customer_name: String(customerName),
+        email: customerEmail,
+        phone,
+        status,
+        sales_rep_slug: salesRepSlugForHeader,
+      }),
+    });
 
-        const headerJson = await headerRes.json().catch(() => ({} as any));
-        if (headerRes.ok && headerJson?.ok && headerJson.quote?.id) {
-          quoteId = headerJson.quote.id;
-          merged.quote_id = quoteId;
-          merged.status = headerJson.quote.status || merged.status;
+    const headerJson = await headerRes.json().catch(() => ({} as any));
+    if (headerRes.ok && headerJson?.ok && headerJson.quote?.id) {
+      quoteId = headerJson.quote.id;
+      merged.quote_id = quoteId;
+      merged.status = headerJson.quote.status || merged.status;
 
-          // NEW: capture sales_rep_id from header for future turns
-          if (headerJson.quote.sales_rep_id != null) {
-            merged.sales_rep_id = headerJson.quote.sales_rep_id;
-          }
-
-          if (threadKey) await saveFacts(threadKey, merged);
-          if (merged.quote_no) await saveFacts(merged.quote_no, merged);
-        }
-      } catch (err) {
-        console.error("quote header store error:", err);
+      // NEW: capture sales_rep_id from header for future turns / debug
+      if (headerJson.quote.sales_rep_id != null) {
+        merged.sales_rep_id = headerJson.quote.sales_rep_id;
       }
+
+      if (threadKey) await saveFacts(threadKey, merged);
+      if (merged.quote_no) await saveFacts(merged.quote_no, merged);
     }
+  } catch (err) {
+    console.error("quote header store error:", err);
+  }
+}
+
 
     // Primary item: only when we have material_id, and only once
     if (

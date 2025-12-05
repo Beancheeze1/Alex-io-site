@@ -9,10 +9,21 @@ import { q, one } from "@/lib/db";
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const limit = Math.min(parseInt(searchParams.get("limit") || "50", 10), 200);
+    const limit = Math.min(
+      parseInt(searchParams.get("limit") || "50", 10),
+      200,
+    );
     const rows = await q(
       `
-      SELECT id, quote_no, customer_name, email, phone, status, sales_rep_id, created_at, updated_at
+      SELECT id,
+             quote_no,
+             customer_name,
+             email,
+             phone,
+             status,
+             sales_rep_id,
+             created_at,
+             updated_at
       FROM public."quotes"
       ORDER BY created_at DESC
       LIMIT $1
@@ -29,25 +40,29 @@ export async function GET(req: Request) {
 }
 
 // POST /api/quotes
+// Request shape (now supports rep attribution):
 // {
 //   "quote_no": "Q-API-001",
 //   "customer_name": "Acme",
 //   "email": "a@b.com",
-//   "sales_rep_slug": "sales-demo" // optional
-//   "sales_rep_id": 2              // optional (admin tooling)
+//   "phone": "555-1234",
+//   "status": "draft",
+//   "sales_rep_id": 2,          // optional, direct id (admin tools)
+//   "sales_rep_slug": "chuck"   // optional, looked up via users.sales_slug
 // }
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = (await req.json().catch(() => ({}))) || {};
+
     const {
       quote_no,
       customer_name,
       email = null,
       phone = null,
       status = "draft",
-      sales_rep_slug = null,
-      sales_rep_id = null,
-    } = body || {};
+      sales_rep_id: rawSalesRepId,
+      sales_rep_slug: rawSalesRepSlug,
+    } = body;
 
     if (!quote_no || !customer_name) {
       return NextResponse.json(
@@ -57,51 +72,70 @@ export async function POST(req: Request) {
     }
 
     // Resolve sales_rep_id:
-    //  - If caller passed a numeric sales_rep_id, trust it.
-    //  - Else if sales_rep_slug is provided, look up users.id where sales_slug = $1.
-    let resolvedSalesRepId: number | null = null;
+    // 1) If a numeric id was provided, trust it.
+    // 2) Else, if a slug was provided, look up users.id where sales_slug = slug.
+    let salesRepId: number | null = null;
 
-    if (typeof sales_rep_id === "number" && Number.isFinite(sales_rep_id)) {
-      resolvedSalesRepId = sales_rep_id;
-    } else if (
-      typeof sales_rep_id === "string" &&
-      sales_rep_id.trim() &&
-      !Number.isNaN(Number(sales_rep_id))
+    if (
+      rawSalesRepId !== undefined &&
+      rawSalesRepId !== null &&
+      Number.isFinite(Number(rawSalesRepId))
     ) {
-      resolvedSalesRepId = Number(sales_rep_id);
-    } else if (sales_rep_slug && typeof sales_rep_slug === "string") {
-      try {
-        const u = await one<any>(
-          `
-          SELECT id
-          FROM public."users"
-          WHERE sales_slug = $1
-          LIMIT 1;
-        `,
-          [sales_rep_slug.trim()],
-        );
-        if (u && typeof u.id === "number") {
-          resolvedSalesRepId = u.id;
+      salesRepId = Number(rawSalesRepId);
+    } else if (rawSalesRepSlug) {
+      const slug = String(rawSalesRepSlug).trim();
+      if (slug) {
+        try {
+          const userRow = await one<any>(
+            `
+            SELECT id
+            FROM public."users"
+            WHERE sales_slug = $1
+            LIMIT 1;
+          `,
+            [slug],
+          );
+          if (userRow && userRow.id) {
+            salesRepId = Number(userRow.id);
+          }
+        } catch {
+          // If lookup fails, we just proceed without assigning a rep.
+          salesRepId = null;
         }
-      } catch {
-        // If the lookup fails for any reason, just leave resolvedSalesRepId as null.
       }
     }
 
     const row = await one(
       `
-      INSERT INTO public."quotes"(quote_no, customer_name, email, phone, status, sales_rep_id)
-      VALUES ($1,$2,$3,$4,$5,$6)
+      INSERT INTO public."quotes"(
+        quote_no,
+        customer_name,
+        email,
+        phone,
+        status,
+        sales_rep_id
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (quote_no) DO UPDATE
         SET customer_name = EXCLUDED.customer_name,
             email         = EXCLUDED.email,
             phone         = EXCLUDED.phone,
             status        = EXCLUDED.status,
-            sales_rep_id  = EXCLUDED.sales_rep_id,
+            -- Only update sales_rep_id if a new non-null value was provided;
+            -- otherwise keep the existing assignment.
+            sales_rep_id  = COALESCE(EXCLUDED.sales_rep_id, public."quotes".sales_rep_id),
             updated_at    = now()
-      RETURNING id, quote_no, customer_name, email, phone, status, sales_rep_id, created_at, updated_at
+      RETURNING id,
+                quote_no,
+                customer_name,
+                email,
+                phone,
+                status,
+                sales_rep_id,
+                created_at,
+                updated_at
     `,
-      [quote_no, customer_name, email, phone, status, resolvedSalesRepId],
+      [quote_no, customer_name, email, phone, status, salesRepId],
     );
 
     return NextResponse.json({ ok: true, quote: row }, { status: 201 });
