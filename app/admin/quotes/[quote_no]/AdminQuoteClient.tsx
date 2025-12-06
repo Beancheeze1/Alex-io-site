@@ -85,6 +85,31 @@ type Props = {
   quoteNo?: string;
 };
 
+// NEW: requested cartons (quote_box_selections + boxes join) for this quote
+
+type RequestedBoxRow = {
+  id: number; // row id from quote_box_selections
+  quote_id: number;
+  box_id: number;
+  sku: string;
+  vendor: string | null;
+  style: string | null;
+  description: string | null;
+  qty: number;
+};
+
+type BoxesForQuoteOk = {
+  ok: true;
+  selections: RequestedBoxRow[];
+};
+
+type BoxesForQuoteErr = {
+  ok: false;
+  error: string;
+};
+
+type BoxesForQuoteResponse = BoxesForQuoteOk | BoxesForQuoteErr;
+
 function parsePriceField(
   raw: string | number | null | undefined,
 ): number | null {
@@ -124,6 +149,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   );
 
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
+
+  // NEW: requested cartons for this quote (from quote_box_selections)
+  const [boxSelections, setBoxSelections] = React.useState<
+    RequestedBoxRow[] | null
+  >(null);
+  const [boxSelectionsLoading, setBoxSelectionsLoading] =
+    React.useState<boolean>(false);
+  const [boxSelectionsError, setBoxSelectionsError] =
+    React.useState<string | null>(null);
 
   // 🔁 Rescue quote_no from URL path if prop is missing/empty.
   // Expected path: /admin/quotes/<quote_no>
@@ -216,6 +250,63 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
 
     load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteNoValue]);
+
+  // NEW: Fetch requested cartons (quote_box_selections) for this quote
+  React.useEffect(() => {
+    if (!quoteNoValue) return;
+
+    let cancelled = false;
+
+    async function loadRequestedBoxes() {
+      setBoxSelectionsLoading(true);
+      setBoxSelectionsError(null);
+      setBoxSelections(null);
+
+      try {
+        const res = await fetch(
+          "/api/boxes/for-quote?quote_no=" +
+            encodeURIComponent(quoteNoValue),
+          { cache: "no-store" },
+        );
+
+        const json = (await res.json()) as BoxesForQuoteResponse;
+
+        if (!res.ok || !json.ok) {
+          if (!cancelled) {
+            const msg =
+              (!json.ok && (json as BoxesForQuoteErr).error) ||
+              "Unable to load requested cartons for this quote.";
+            setBoxSelectionsError(msg);
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setBoxSelections(json.selections || []);
+        }
+      } catch (err) {
+        console.error(
+          "Error fetching /api/boxes/for-quote (admin view):",
+          err,
+        );
+        if (!cancelled) {
+          setBoxSelectionsError(
+            "Unable to load requested cartons for this quote.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setBoxSelectionsLoading(false);
+        }
+      }
+    }
+
+    loadRequestedBoxes();
 
     return () => {
       cancelled = true;
@@ -684,7 +775,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   background: "#ffffff",
                   marginBottom: 20,
                   display: "grid",
-                  gridTemplateColumns: "minmax(0,2.2fr) minmax(0,1.8fr)",
+                  gridTemplateColumns:
+                    "minmax(0,2.2fr) minmax(0,1.8fr)",
                   gap: 16,
                 }}
               >
@@ -725,7 +817,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       Family + density come directly from the{" "}
                       <span
                         style={{
-                          fontFamily: "ui-monospace, SFMono-Regular, monospace",
+                          fontFamily:
+                            "ui-monospace, SFMono-Regular, monospace",
                           fontSize: 11,
                           color: "#0369a1",
                         }}
@@ -823,6 +916,111 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 </div>
               </div>
             )}
+
+            {/* NEW: Customer requested cartons (admin-only view) */}
+            <div
+              style={{
+                ...cardBase,
+                background: "#ffffff",
+                marginBottom: 20,
+              }}
+            >
+              <div style={cardTitleStyle}>Customer requested cartons</div>
+              {boxSelectionsLoading && (
+                <p style={{ fontSize: 12, color: "#6b7280" }}>
+                  Looking up any cartons the customer marked as{" "}
+                  <strong>Requested</strong> from the quote viewer…
+                </p>
+              )}
+              {!boxSelectionsLoading && boxSelectionsError && (
+                <p style={{ fontSize: 12, color: "#b91c1c" }}>
+                  {boxSelectionsError}
+                </p>
+              )}
+              {!boxSelectionsLoading &&
+                !boxSelectionsError &&
+                (!boxSelections || boxSelections.length === 0) && (
+                  <p style={{ fontSize: 12, color: "#6b7280" }}>
+                    No cartons have been requested on this quote yet from
+                    the customer-facing /quote page.
+                  </p>
+                )}
+              {!boxSelectionsLoading &&
+                !boxSelectionsError &&
+                boxSelections &&
+                boxSelections.length > 0 && (
+                  <>
+                    <p
+                      style={{
+                        fontSize: 12,
+                        color: "#4b5563",
+                        marginBottom: 6,
+                      }}
+                    >
+                      These selections come from the public quote viewer
+                      when the customer clicks{" "}
+                      <strong>&ldquo;Add this carton to my quote&rdquo;</strong>.
+                      Use this list as a heads-up when finalizing packaging
+                      and placing box orders.
+                    </p>
+                    <ul
+                      style={{
+                        listStyle: "disc",
+                        paddingLeft: 18,
+                        margin: 0,
+                        fontSize: 12,
+                        color: "#111827",
+                      }}
+                    >
+                      {boxSelections.map((sel) => {
+                        const metaParts: string[] = [];
+                        if (sel.vendor) metaParts.push(sel.vendor);
+                        if (sel.style) metaParts.push(sel.style);
+                        if (sel.sku) metaParts.push(sel.sku);
+
+                        return (
+                          <li
+                            key={sel.id}
+                            style={{ marginBottom: 4 }}
+                          >
+                            <div style={{ fontWeight: 500 }}>
+                              {sel.description || sel.sku}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: "#6b7280",
+                              }}
+                            >
+                              {metaParts.join(" • ")} — Qty{" "}
+                              {sel.qty.toLocaleString()}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <p
+                      style={{
+                        marginTop: 6,
+                        fontSize: 11,
+                        color: "#9ca3af",
+                      }}
+                    >
+                      Read-only mirror of{" "}
+                      <span
+                        style={{
+                          fontFamily:
+                            "ui-monospace, SFMono-Regular, monospace",
+                        }}
+                      >
+                        quote_box_selections
+                      </span>
+                      . Changing cartons or quantities still happens via
+                      your normal quoting workflow.
+                    </p>
+                  </>
+                )}
+            </div>
 
             {/* layout + CAD downloads */}
             <div
