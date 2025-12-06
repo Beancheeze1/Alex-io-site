@@ -105,6 +105,50 @@ type ApiErr = {
 
 type ApiResponse = ApiOk | ApiErr;
 
+// ===== Box suggestion API types =====
+
+type BoxSuggestion = {
+  id: number;
+  vendor: string;
+  style: string;
+  sku: string;
+  description: string;
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
+  min_order_qty: number | null;
+  bundle_qty: number | null;
+  notes: string | null;
+  volume: number;
+};
+
+type BoxesBlock = {
+  length_in: number;
+  width_in: number;
+  height_in: number;
+  clearance_in: number;
+  required_inside: {
+    length_in: number;
+    width_in: number;
+    height_in: number;
+  };
+};
+
+type BoxesOk = {
+  ok: true;
+  block: BoxesBlock;
+  style_mode: "rsc" | "mailer" | "both" | string;
+  rsc: BoxSuggestion[]; // from API
+  mailer: BoxSuggestion[]; // from API
+};
+
+type BoxesErr = {
+  ok: false;
+  error: string;
+};
+
+type BoxesResponse = BoxesOk | BoxesErr;
+
 function parsePriceField(
   raw: string | number | null | undefined,
 ): number | null {
@@ -142,6 +186,17 @@ export default function QuotePrintClient() {
   const [quote, setQuote] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
+
+  // NEW: box suggestion state
+  const [boxesLoading, setBoxesLoading] = React.useState<boolean>(false);
+  const [boxesError, setBoxesError] = React.useState<string | null>(null);
+  const [boxesBlock, setBoxesBlock] = React.useState<BoxesBlock | null>(null);
+  const [rscSuggestions, setRscSuggestions] = React.useState<BoxSuggestion[]>(
+    [],
+  );
+  const [mailerSuggestions, setMailerSuggestions] = React.useState<
+    BoxSuggestion[]
+  >([]);
 
   // Ref to the SVG preview container so we can scale/center the inner <svg>
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -232,10 +287,13 @@ export default function QuotePrintClient() {
 
         if (!res.ok) {
           if (!cancelled) {
-            if (!json.ok && json.error === "NOT_FOUND") {
-              setNotFound(json.message || "Quote not found.");
+            if (!json.ok && (json as ApiErr).error === "NOT_FOUND") {
+              setNotFound((json as ApiErr).message || "Quote not found.");
             } else if (!json.ok) {
-              setError(json.message || "There was a problem loading this quote.");
+              setError(
+                (json as ApiErr).message ||
+                  "There was a problem loading this quote.",
+              );
             } else {
               setError("There was a problem loading this quote.");
             }
@@ -267,6 +325,64 @@ export default function QuotePrintClient() {
     }
 
     load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteNo]);
+
+  // Fetch box suggestions (based on quote_no)
+  React.useEffect(() => {
+    if (!quoteNo) return;
+
+    let cancelled = false;
+
+    async function loadBoxes() {
+      setBoxesLoading(true);
+      setBoxesError(null);
+      setBoxesBlock(null);
+      setRscSuggestions([]);
+      setMailerSuggestions([]);
+
+      try {
+        const res = await fetch(
+          "/api/boxes/suggest?quote_no=" +
+            encodeURIComponent(quoteNo) +
+            "&style=both",
+          { cache: "no-store" },
+        );
+
+        const json = (await res.json()) as BoxesResponse;
+
+        if (!res.ok || !json.ok) {
+          if (!cancelled) {
+            const msg =
+              (!json.ok && (json as BoxesErr).error) ||
+              "Unable to fetch box suggestions right now.";
+            setBoxesError(msg);
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          const ok = json as BoxesOk;
+          setBoxesBlock(ok.block);
+          setRscSuggestions(ok.rsc || []);
+          setMailerSuggestions(ok.mailer || []);
+        }
+      } catch (err) {
+        console.error("Error fetching /api/boxes/suggest:", err);
+        if (!cancelled) {
+          setBoxesError("Unable to fetch box suggestions right now.");
+        }
+      } finally {
+        if (!cancelled) {
+          setBoxesLoading(false);
+        }
+      }
+    }
+
+    loadBoxes();
 
     return () => {
       cancelled = true;
@@ -412,12 +528,10 @@ export default function QuotePrintClient() {
 
   // ===================== RENDER =====================
 
-
   return (
     <div
       style={{
-        fontFamily:
-          "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
+        fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
         background: "#020617", // dark page background to match editor
         minHeight: "100vh",
         padding: "24px",
@@ -574,8 +688,7 @@ export default function QuotePrintClient() {
                     opacity: 0.9,
                   }}
                 >
-                  Created:{" "}
-                  {new Date(quote.created_at).toLocaleString()}
+                  Created: {new Date(quote.created_at).toLocaleString()}
                 </p>
                 <div
                   style={{
@@ -707,11 +820,7 @@ export default function QuotePrintClient() {
                     >
                       <div>
                         <div style={labelStyle}>Primary unit price</div>
-                        <div>
-                          {formatUsd(
-                            breakdownUnitPrice ?? null,
-                          )}
-                        </div>
+                        <div>{formatUsd(breakdownUnitPrice ?? null)}</div>
                       </div>
                       <div>
                         <div style={labelStyle}>Estimated subtotal</div>
@@ -729,8 +838,7 @@ export default function QuotePrintClient() {
                               paddingTop: 6,
                               borderTop: "1px dashed #e5e7eb",
                               display: "grid",
-                              gridTemplateColumns:
-                                "repeat(2,minmax(0,1fr))",
+                              gridTemplateColumns: "repeat(2,minmax(0,1fr))",
                               gap: 8,
                             }}
                           >
@@ -757,16 +865,11 @@ export default function QuotePrintClient() {
                               <div style={{ fontSize: 13 }}>
                                 {markupFactor != null
                                   ? (() => {
-                                      const over =
-                                        (markupFactor - 1) * 100;
+                                      const over = (markupFactor - 1) * 100;
                                       if (over > 0) {
-                                        return `${over.toFixed(
-                                          0,
-                                        )}% over cost`;
+                                        return `${over.toFixed(0)}% over cost`;
                                       }
-                                      return `${markupFactor.toFixed(
-                                        2,
-                                      )}×`;
+                                      return `${markupFactor.toFixed(2)}×`;
                                     })()
                                   : "—"}
                               </div>
@@ -786,10 +889,7 @@ export default function QuotePrintClient() {
                                 Example price breaks:{" "}
                               </span>
                               {priceBreaks
-                                .filter(
-                                  (b) =>
-                                    b.qty === 10 || b.qty === 50,
-                                )
+                                .filter((b) => b.qty === 10 || b.qty === 50)
                                 .map(
                                   (b) =>
                                     `${b.qty} pcs – ${formatUsd(
@@ -818,8 +918,7 @@ export default function QuotePrintClient() {
                               {typeof kerfPct === "number"
                                 ? ` (~${kerfPct}% kerf)`
                                 : ""}.
-                              {materialCost != null &&
-                              machineCost != null
+                              {materialCost != null && machineCost != null
                                 ? ` In this estimate, material is approximately ${formatUsd(
                                     materialCost,
                                   )} and machine time approximately ${formatUsd(
@@ -942,6 +1041,197 @@ export default function QuotePrintClient() {
                 </div>
               </div>
             )}
+
+            {/* SUGGESTED CARTONS CARD */}
+            <div
+              style={{
+                ...cardBase,
+                background: "#ffffff",
+                marginBottom: 24,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#0f172a",
+                  marginBottom: 4,
+                }}
+              >
+                Suggested shipping cartons
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#6b7280",
+                  marginBottom: 8,
+                  lineHeight: 1.4,
+                }}
+              >
+                These are stock corrugated cartons and mailers that should fit
+                this foam block, based on the current quote dimensions.
+              </div>
+
+              {boxesLoading && (
+                <p style={{ fontSize: 13, color: "#6b7280" }}>
+                  Looking up catalog carton sizes for this foam…
+                </p>
+              )}
+
+              {!boxesLoading && boxesError && (
+                <p style={{ fontSize: 13, color: "#b91c1c" }}>
+                  {boxesError}
+                </p>
+              )}
+
+              {!boxesLoading &&
+                !boxesError &&
+                (!rscSuggestions.length && !mailerSuggestions.length) && (
+                  <p style={{ fontSize: 13, color: "#6b7280" }}>
+                    We didn&apos;t find any matching stock cartons in the
+                    current box catalog for this foam size yet.
+                  </p>
+                )}
+
+              {!boxesLoading &&
+                !boxesError &&
+                (rscSuggestions.length > 0 || mailerSuggestions.length > 0) && (
+                  <>
+                    {boxesBlock && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#4b5563",
+                          marginBottom: 8,
+                        }}
+                      >
+                        Based on block{" "}
+                        <strong>
+                          {boxesBlock.length_in.toFixed(1)} ×{" "}
+                          {boxesBlock.width_in.toFixed(1)} ×{" "}
+                          {boxesBlock.height_in.toFixed(1)} in
+                        </strong>{" "}
+                        (with{" "}
+                        {boxesBlock.clearance_in.toFixed(2)}&quot; clearance).
+                      </div>
+                    )}
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(2,minmax(0,1fr))",
+                        gap: 12,
+                        marginTop: 4,
+                      }}
+                    >
+                      <div>
+                        <div style={labelStyle}>RSC cartons</div>
+                        {rscSuggestions.length === 0 ? (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#9ca3af",
+                            }}
+                          >
+                            No RSC matches in catalog for this size yet.
+                          </div>
+                        ) : (
+                          <ul
+                            style={{
+                              listStyle: "none",
+                              padding: 0,
+                              margin: 0,
+                              fontSize: 12,
+                              color: "#111827",
+                            }}
+                          >
+                            {rscSuggestions.map((b) => (
+                              <li
+                                key={b.id}
+                                style={{ marginBottom: 4 }}
+                              >
+                                <div style={{ fontWeight: 500 }}>
+                                  {b.description}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    color: "#6b7280",
+                                  }}
+                                >
+                                  Inside: {b.inside_length_in} ×{" "}
+                                  {b.inside_width_in} ×{" "}
+                                  {b.inside_height_in} in •{" "}
+                                  {b.vendor} SKU {b.sku}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+
+                      <div>
+                        <div style={labelStyle}>Mailers</div>
+                        {mailerSuggestions.length === 0 ? (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#9ca3af",
+                            }}
+                          >
+                            No mailer matches in catalog for this size
+                            yet.
+                          </div>
+                        ) : (
+                          <ul
+                            style={{
+                              listStyle: "none",
+                              padding: 0,
+                              margin: 0,
+                              fontSize: 12,
+                              color: "#111827",
+                            }}
+                          >
+                            {mailerSuggestions.map((b) => (
+                              <li
+                                key={b.id}
+                                style={{ marginBottom: 4 }}
+                              >
+                                <div style={{ fontWeight: 500 }}>
+                                  {b.description}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    color: "#6b7280",
+                                  }}
+                                >
+                                  Inside: {b.inside_length_in} ×{" "}
+                                  {b.inside_width_in} ×{" "}
+                                  {b.inside_height_in} in •{" "}
+                                  {b.vendor} SKU {b.sku}
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 8,
+                        fontSize: 11,
+                        color: "#6b7280",
+                      }}
+                    >
+                      These are suggestions only. Final packaging choice and
+                      ordering remain up to you.
+                    </div>
+                  </>
+                )}
+            </div>
 
             {/* LINE ITEMS CARD */}
             <div
