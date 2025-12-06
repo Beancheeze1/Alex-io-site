@@ -138,8 +138,8 @@ type BoxesOk = {
   ok: true;
   block: BoxesBlock;
   style_mode: "rsc" | "mailer" | "both" | string;
-  rsc: BoxSuggestion[]; // from API
-  mailer: BoxSuggestion[]; // from API
+  rsc: BoxSuggestion[];
+  mailer: BoxSuggestion[];
 };
 
 type BoxesErr = {
@@ -187,7 +187,7 @@ export default function QuotePrintClient() {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
-  // NEW: box suggestion state
+  // Box suggestion state
   const [boxesLoading, setBoxesLoading] = React.useState<boolean>(false);
   const [boxesError, setBoxesError] = React.useState<string | null>(null);
   const [boxesBlock, setBoxesBlock] = React.useState<BoxesBlock | null>(null);
@@ -197,6 +197,13 @@ export default function QuotePrintClient() {
   const [mailerSuggestions, setMailerSuggestions] = React.useState<
     BoxSuggestion[]
   >([]);
+
+  // "Add to quote" state
+  const [addingBoxId, setAddingBoxId] = React.useState<number | null>(null);
+  const [addedBoxIds, setAddedBoxIds] = React.useState<Record<number, boolean>>(
+    {},
+  );
+  const [addBoxError, setAddBoxError] = React.useState<string | null>(null);
 
   // Ref to the SVG preview container so we can scale/center the inner <svg>
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -442,7 +449,7 @@ export default function QuotePrintClient() {
       ? primaryPricing.kerf_pct
       : null;
 
-  // NEW: material display lines for primary item
+  // material display lines for primary item
   const primaryMaterialName =
     primaryItem?.material_name ||
     (primaryItem ? `Material #${primaryItem.material_id}` : "");
@@ -468,7 +475,7 @@ export default function QuotePrintClient() {
     }
   }
 
-  // NEW: high-level breakdown from server, if available
+  // breakdown from server, if available
   const primaryBreakdown = primaryItem?.pricing_breakdown || null;
 
   const breakdownUnitPrice =
@@ -503,7 +510,7 @@ export default function QuotePrintClient() {
 
   const priceBreaks = primaryBreakdown?.breaks ?? [];
 
-  // Shared card styles to feel like the email blocks
+  // Shared card styles
   const cardBase: React.CSSProperties = {
     borderRadius: 16,
     border: "1px solid #e5e7eb",
@@ -526,13 +533,66 @@ export default function QuotePrintClient() {
     marginBottom: 2,
   };
 
+  // ===== "Add this carton to my quote" handler =====
+
+  const handleAddBoxToQuote = React.useCallback(
+    async (boxId: number) => {
+      if (!quoteNo && !quote) return;
+      const effectiveQuoteNo = quote?.quote_no || quoteNo;
+      if (!effectiveQuoteNo) return;
+
+      const qty = primaryItem?.qty ?? 1;
+
+      try {
+        setAddBoxError(null);
+        setAddingBoxId(boxId);
+
+        const res = await fetch("/api/boxes/add-to-quote", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            quote_no: effectiveQuoteNo,
+            box_id: boxId,
+            qty,
+          }),
+        });
+
+        const json = await res.json();
+
+        if (!res.ok || !json?.ok) {
+          const msg =
+            json?.error ||
+            "We couldn’t record this carton selection right now.";
+          setAddBoxError(msg);
+          return;
+        }
+
+        // mark this box as "requested"
+        setAddedBoxIds((prev) => ({
+          ...prev,
+          [boxId]: true,
+        }));
+      } catch (err: any) {
+        console.error("Error calling /api/boxes/add-to-quote:", err);
+        setAddBoxError(
+          "We couldn’t record this carton selection right now. Please try again.",
+        );
+      } finally {
+        setAddingBoxId(null);
+      }
+    },
+    [quoteNo, quote, primaryItem],
+  );
+
   // ===================== RENDER =====================
 
   return (
     <div
       style={{
         fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        background: "#020617", // dark page background to match editor
+        background: "#020617",
         minHeight: "100vh",
         padding: "24px",
       }}
@@ -601,7 +661,7 @@ export default function QuotePrintClient() {
         {/* Happy path */}
         {!loading && quote && (
           <>
-            {/* Gradient header: powered by Alex-IO + quote info + actions */}
+            {/* Gradient header */}
             <div
               style={{
                 margin: "-24px -24px 20px -24px",
@@ -613,7 +673,7 @@ export default function QuotePrintClient() {
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 16,
-                color: "#e5e7eb", // palette text color
+                color: "#e5e7eb",
               }}
             >
               <div>
@@ -752,7 +812,7 @@ export default function QuotePrintClient() {
               </div>
             </div>
 
-            {/* TOP ROW: Specs / Pricing / Layout & next steps */}
+            {/* TOP ROW: Specs / Pricing / Layout */}
             {primaryItem && (
               <div
                 style={{
@@ -805,7 +865,7 @@ export default function QuotePrintClient() {
                   </div>
                 </div>
 
-                {/* Pricing card (now with breakdown when present) */}
+                {/* Pricing card */}
                 <div style={cardBase}>
                   <div style={cardTitleStyle}>Pricing</div>
                   {anyPricing ? (
@@ -829,7 +889,6 @@ export default function QuotePrintClient() {
                         </div>
                       </div>
 
-                      {/* NEW: show material / machine / markup slices when breakdown is present */}
                       {primaryBreakdown && (
                         <>
                           <div
@@ -867,7 +926,9 @@ export default function QuotePrintClient() {
                                   ? (() => {
                                       const over = (markupFactor - 1) * 100;
                                       if (over > 0) {
-                                        return `${over.toFixed(0)}% over cost`;
+                                        return `${over.toFixed(
+                                          0,
+                                        )}% over cost`;
                                       }
                                       return `${markupFactor.toFixed(2)}×`;
                                     })()
@@ -974,8 +1035,8 @@ export default function QuotePrintClient() {
                       alignItems: "center",
                       padding: "2px 8px",
                       borderRadius: 999,
-                      background: "#eef2ff", // pill bg from palette
-                      color: "#1d4ed8", // pill text from palette
+                      background: "#eef2ff",
+                      color: "#1d4ed8",
                       fontSize: 11,
                       fontWeight: 600,
                       textTransform: "uppercase",
@@ -1072,6 +1133,18 @@ export default function QuotePrintClient() {
                 this foam block, based on the current quote dimensions.
               </div>
 
+              {addBoxError && (
+                <div
+                  style={{
+                    marginBottom: 8,
+                    fontSize: 12,
+                    color: "#b91c1c",
+                  }}
+                >
+                  {addBoxError}
+                </div>
+              )}
+
               {boxesLoading && (
                 <p style={{ fontSize: 13, color: "#6b7280" }}>
                   Looking up catalog carton sizes for this foam…
@@ -1111,20 +1184,20 @@ export default function QuotePrintClient() {
                           {boxesBlock.width_in.toFixed(1)} ×{" "}
                           {boxesBlock.height_in.toFixed(1)} in
                         </strong>{" "}
-                        (with{" "}
-                        {boxesBlock.clearance_in.toFixed(2)}&quot; clearance).
+                        (with {boxesBlock.clearance_in.toFixed(2)}
+                        &quot; clearance).
                       </div>
                     )}
 
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns:
-                          "repeat(2,minmax(0,1fr))",
+                        gridTemplateColumns: "repeat(2,minmax(0,1fr))",
                         gap: 12,
                         marginTop: 4,
                       }}
                     >
+                      {/* RSC column */}
                       <div>
                         <div style={labelStyle}>RSC cartons</div>
                         {rscSuggestions.length === 0 ? (
@@ -1146,31 +1219,76 @@ export default function QuotePrintClient() {
                               color: "#111827",
                             }}
                           >
-                            {rscSuggestions.map((b) => (
-                              <li
-                                key={b.id}
-                                style={{ marginBottom: 4 }}
-                              >
-                                <div style={{ fontWeight: 500 }}>
-                                  {b.description}
-                                </div>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    color: "#6b7280",
-                                  }}
+                            {rscSuggestions.map((b) => {
+                              const isAdded = !!addedBoxIds[b.id];
+                              const isBusy = addingBoxId === b.id;
+                              return (
+                                <li
+                                  key={b.id}
+                                  style={{ marginBottom: 6 }}
                                 >
-                                  Inside: {b.inside_length_in} ×{" "}
-                                  {b.inside_width_in} ×{" "}
-                                  {b.inside_height_in} in •{" "}
-                                  {b.vendor} SKU {b.sku}
-                                </div>
-                              </li>
-                            ))}
+                                  <div style={{ fontWeight: 500 }}>
+                                    {b.description}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      color: "#6b7280",
+                                      marginBottom: 4,
+                                    }}
+                                  >
+                                    Inside: {b.inside_length_in} ×{" "}
+                                    {b.inside_width_in} ×{" "}
+                                    {b.inside_height_in} in • {b.vendor} SKU{" "}
+                                    {b.sku}
+                                  </div>
+                                  {!isAdded ? (
+                                    <button
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={() =>
+                                        handleAddBoxToQuote(b.id)
+                                      }
+                                      style={{
+                                        padding: "4px 10px",
+                                        borderRadius: 999,
+                                        border:
+                                          "1px solid rgba(15,23,42,0.1)",
+                                        background: "#f3f4f6",
+                                        fontSize: 11,
+                                        fontWeight: 500,
+                                        cursor: isBusy
+                                          ? "default"
+                                          : "pointer",
+                                      }}
+                                    >
+                                      {isBusy
+                                        ? "Adding…"
+                                        : "Add this carton to my quote"}
+                                    </button>
+                                  ) : (
+                                    <span
+                                      style={{
+                                        display: "inline-block",
+                                        padding: "3px 9px",
+                                        borderRadius: 999,
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                        background: "#dcfce7",
+                                        color: "#15803d",
+                                      }}
+                                    >
+                                      Requested
+                                    </span>
+                                  )}
+                                </li>
+                              );
+                            })}
                           </ul>
                         )}
                       </div>
 
+                      {/* Mailer column */}
                       <div>
                         <div style={labelStyle}>Mailers</div>
                         {mailerSuggestions.length === 0 ? (
@@ -1180,8 +1298,7 @@ export default function QuotePrintClient() {
                               color: "#9ca3af",
                             }}
                           >
-                            No mailer matches in catalog for this size
-                            yet.
+                            No mailer matches in catalog for this size yet.
                           </div>
                         ) : (
                           <ul
@@ -1193,27 +1310,71 @@ export default function QuotePrintClient() {
                               color: "#111827",
                             }}
                           >
-                            {mailerSuggestions.map((b) => (
-                              <li
-                                key={b.id}
-                                style={{ marginBottom: 4 }}
-                              >
-                                <div style={{ fontWeight: 500 }}>
-                                  {b.description}
-                                </div>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    color: "#6b7280",
-                                  }}
+                            {mailerSuggestions.map((b) => {
+                              const isAdded = !!addedBoxIds[b.id];
+                              const isBusy = addingBoxId === b.id;
+                              return (
+                                <li
+                                  key={b.id}
+                                  style={{ marginBottom: 6 }}
                                 >
-                                  Inside: {b.inside_length_in} ×{" "}
-                                  {b.inside_width_in} ×{" "}
-                                  {b.inside_height_in} in •{" "}
-                                  {b.vendor} SKU {b.sku}
-                                </div>
-                              </li>
-                            ))}
+                                  <div style={{ fontWeight: 500 }}>
+                                    {b.description}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      color: "#6b7280",
+                                      marginBottom: 4,
+                                    }}
+                                  >
+                                    Inside: {b.inside_length_in} ×{" "}
+                                    {b.inside_width_in} ×{" "}
+                                    {b.inside_height_in} in • {b.vendor} SKU{" "}
+                                    {b.sku}
+                                  </div>
+                                  {!isAdded ? (
+                                    <button
+                                      type="button"
+                                      disabled={isBusy}
+                                      onClick={() =>
+                                        handleAddBoxToQuote(b.id)
+                                      }
+                                      style={{
+                                        padding: "4px 10px",
+                                        borderRadius: 999,
+                                        border:
+                                          "1px solid rgba(15,23,42,0.1)",
+                                        background: "#f3f4f6",
+                                        fontSize: 11,
+                                        fontWeight: 500,
+                                        cursor: isBusy
+                                          ? "default"
+                                          : "pointer",
+                                      }}
+                                    >
+                                      {isBusy
+                                        ? "Adding…"
+                                        : "Add this carton to my quote"}
+                                    </button>
+                                  ) : (
+                                    <span
+                                      style={{
+                                        display: "inline-block",
+                                        padding: "3px 9px",
+                                        borderRadius: 999,
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                        background: "#dcfce7",
+                                        color: "#15803d",
+                                      }}
+                                    >
+                                      Requested
+                                    </span>
+                                  )}
+                                </li>
+                              );
+                            })}
                           </ul>
                         )}
                       </div>
@@ -1227,7 +1388,8 @@ export default function QuotePrintClient() {
                       }}
                     >
                       These are suggestions only. Final packaging choice and
-                      ordering remain up to you.
+                      ordering remain up to you. Your sales rep will confirm
+                      any requested cartons before finalizing.
                     </div>
                   </>
                 )}
@@ -1280,7 +1442,6 @@ export default function QuotePrintClient() {
                     }}
                   >
                     <thead>
-                      {/* header row with soft indigo tint */}
                       <tr style={{ background: "#eef2ff" }}>
                         <th
                           style={{
@@ -1477,7 +1638,7 @@ export default function QuotePrintClient() {
               )}
             </div>
 
-            {/* Foam layout package section (cardified to match email) */}
+            {/* Foam layout package section */}
             <div
               style={{
                 marginTop: 4,
@@ -1544,24 +1705,24 @@ export default function QuotePrintClient() {
                           fontSize: 12,
                         }}
                       >
-                        <a
-                          href={
-                            "/quote/layout?quote_no=" +
-                            encodeURIComponent(quote.quote_no)
-                          }
-                          style={{
-                            display: "inline-block",
-                            padding: "4px 10px",
-                            borderRadius: 999,
-                            border: "1px solid #c7d2fe",
-                            background: "#eef2ff",
-                            color: "#1d4ed8",
-                            textDecoration: "none",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Open layout editor
-                        </a>
+                          <a
+                            href={
+                              "/quote/layout?quote_no=" +
+                              encodeURIComponent(quote.quote_no)
+                            }
+                            style={{
+                              display: "inline-block",
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              border: "1px solid #c7d2fe",
+                              background: "#eef2ff",
+                              color: "#1d4ed8",
+                              textDecoration: "none",
+                              fontWeight: 500,
+                            }}
+                          >
+                            Open layout editor
+                          </a>
                       </div>
                     </div>
 
