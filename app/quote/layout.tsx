@@ -1,9 +1,8 @@
 // app/quote/layout.tsx
 //
-// Public layout shell for all /quote* pages.
-// - No auth guard here so customer-facing quote links
-//   (e.g. /quote?quote_no=Q-...) work without login.
-// - Admin / sales protections live under /admin and /my-quotes.
+// Public shell for all /quote* pages.
+// - Customer-facing quote links must NOT require login.
+// - Admin / rep tools are protected separately under /admin and via APIs.
 
 import { ReactNode } from "react";
 
@@ -15,5 +14,6 @@ type Props = {
 };
 
 export default function QuoteSectionLayout({ children }: Props) {
+  // No auth guard here on purpose: quote links in emails are public.
   return <>{children}</>;
 }
