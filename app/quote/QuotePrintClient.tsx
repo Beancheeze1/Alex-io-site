@@ -215,22 +215,56 @@ export default function QuotePrintClient() {
     }
   }, []);
 
-  // Forward-to-sales handler (mailto with quote number + link)
+  // Forward-to-sales handler (mailto with quote number + link + requested cartons)
   const handleForwardToSales = React.useCallback(() => {
-    if (typeof window === "undefined" || !quoteNo) return;
+    if (typeof window === "undefined") return;
+
+    const effectiveQuoteNo = quote?.quote_no || quoteNo;
+    if (!effectiveQuoteNo) return;
 
     const salesEmail =
       (process.env.NEXT_PUBLIC_SALES_FORWARD_TO as string | undefined) ||
       "sales@example.com";
 
-    const subject = "Quote " + quoteNo;
-    const bodyLines = [
-      "Quote number: " + quoteNo,
+    const subject = "Quote " + effectiveQuoteNo;
+
+    const bodyLines: string[] = [
+      "Quote number: " + effectiveQuoteNo,
       "",
       "View this quote:",
       window.location.href,
-      "",
     ];
+
+    // Build "Customer-requested cartons" section from current Requested selections
+    const primaryQty = items[0]?.qty ?? 1;
+    const requestedLines: string[] = [];
+
+    const allSuggestions: BoxSuggestion[] = [
+      ...rscSuggestions,
+      ...mailerSuggestions,
+    ];
+
+    for (const b of allSuggestions) {
+      if (!addedBoxIds[b.id]) continue;
+      const label =
+        b.description && b.description.trim().length > 0
+          ? b.description.trim()
+          : `${b.vendor} ${b.sku}`;
+      requestedLines.push(
+        `- ${label} (${b.vendor} SKU ${b.sku}) – Qty ${primaryQty}`,
+      );
+    }
+
+    if (requestedLines.length > 0) {
+      bodyLines.push(
+        "",
+        "Customer-requested cartons:",
+        ...requestedLines,
+      );
+    }
+
+    bodyLines.push("", "Thanks!");
+
     const body = encodeURIComponent(bodyLines.join("\n"));
 
     const mailto =
@@ -242,7 +276,7 @@ export default function QuotePrintClient() {
       body;
 
     window.location.href = mailto;
-  }, [quoteNo]);
+  }, [quoteNo, quote, items, rscSuggestions, mailerSuggestions, addedBoxIds]);
 
   // Schedule call handler (Calendly or Google Calendar URL)
   const handleScheduleCall = React.useCallback(() => {
@@ -1388,8 +1422,9 @@ export default function QuotePrintClient() {
                       }}
                     >
                       These are suggestions only. Final packaging choice and
-                      ordering remain up to you. Your sales rep will confirm
-                      any requested cartons before finalizing.
+                      ordering remain up to you. Any cartons you mark as{" "}
+                      <strong>Requested</strong> will be reviewed and confirmed
+                      by your sales rep before finalizing your order.
                     </div>
                   </>
                 )}
