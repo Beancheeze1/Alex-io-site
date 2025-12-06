@@ -87,12 +87,68 @@ function extractQuoteNo(text: string): string | null {
   return m ? m[0] : null;
 }
 
-// Detect sales rep slug in subject, e.g. "Packaging Quote Request [sales-demo]"
-function extractRepSlugFromSubject(subject: string): string | null {
-  if (!subject) return null;
-  const m = subject.match(/\[([a-z0-9_-]+)\]/i);
-  return m ? m[1].toLowerCase() : null;
+// Detect sales rep slug from subject and/or body.
+// Priority:
+//   1) [sales-demo] style tag in subject
+//   2) "rep link: sales-demo" in body
+//   3) "rep=sales-demo" anywhere
+function extractRepSlugFromSubject(subject: string, body?: string): string | null {
+  const subj = subject || "";
+  const txt = `${subject || ""}\n\n${body || ""}`;
+
+  // 1) Classic [slug] in subject
+  const mBracket = subj.match(/\[([a-z0-9_-]+)\]/i);
+  if (mBracket) return mBracket[1].toLowerCase();
+
+  // 2) "rep link: sales-demo" in body text
+  const mRepLink = txt.match(/rep\s+link\s*:\s*([a-z0-9_-]+)/i);
+  if (mRepLink) return mRepLink[1].toLowerCase();
+
+  // 3) "rep=sales-demo" anywhere
+  const mRepEq = txt.match(/rep\s*=\s*([a-z0-9_-]+)/i);
+  if (mRepEq) return mRepEq[1].toLowerCase();
+
+  return null;
 }
+
+// Infer rep slug from thread messages (mailbox / "to" address).
+// Option C behavior: if no explicit subject tag, we look at which
+// mailbox the customer emailed.
+//
+// You can extend this map as you add more seats.
+function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
+  if (!Array.isArray(threadMsgs) || !threadMsgs.length) return null;
+
+  const emailToSlug: Record<string, string> = {
+    "sales@alex-io.com": "sales-demo",
+    "25thhourdesign@gmail.com": "chuck",
+    "viewer@alex-io.com": "viewer-demo",
+  };
+
+  // Walk from most recent back to oldest
+  for (let i = threadMsgs.length - 1; i >= 0; i--) {
+    const m = threadMsgs[i];
+
+    // Most providers: "to" is an array of { email, name }
+    const tos = m?.to;
+    if (Array.isArray(tos)) {
+      for (const t of tos) {
+        const addr = String(t?.email || t || "").toLowerCase();
+        if (emailToSlug[addr]) return emailToSlug[addr];
+      }
+    }
+
+    // Fallback fields some providers use
+    const mailbox = m?.mailbox || m?.toEmail;
+    if (mailbox) {
+      const addr = String(mailbox).toLowerCase();
+      if (emailToSlug[addr]) return emailToSlug[addr];
+    }
+  }
+
+  return null;
+}
+
 
 
 
@@ -1041,20 +1097,28 @@ export async function POST(req: NextRequest) {
       return err("unsupported_mode", { mode });
     }
 
-   const lastText = String(p.text || "");
+ const lastText = String(p.text || "");
 const subject = String(p.subject || "");
 const providedThreadId = String(p.threadId || "").trim();
 
-// NEW: detect rep slug in subject ([sales-demo], [chuck], etc.)
-const salesRepSlugFromSubject = extractRepSlugFromSubject(subject);
+const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
+const dryRun = !!p.dryRun;
+
+// NEW: Option C rep resolution
+//  1) Subject/body tag   → [sales-demo], "rep link: sales-demo", etc.
+//  2) Mailbox heuristic  → which address the customer emailed
+//  3) DEFAULT_SALES_REP_SLUG env (optional fallback)
+const salesRepSlugFromSubject = extractRepSlugFromSubject(subject, lastText);
+const salesRepSlugFromThread = inferRepSlugFromThreadMsgs(threadMsgs);
+const salesRepSlugResolved =
+  salesRepSlugFromSubject ||
+  salesRepSlugFromThread ||
+  (process.env.DEFAULT_SALES_REP_SLUG || undefined);
 
 const threadKey =
   providedThreadId ||
   (subject ? `sub:${subject.toLowerCase().replace(/\s+/g, " ")}` : "");
 
-
-    const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
-    const dryRun = !!p.dryRun;
 
     // See if we can detect a quote_no in the subject so we can
     // pull sketch facts stored under that key.
@@ -1116,13 +1180,14 @@ const threadKey =
     // For shared keys like dims / cavityDims / qty, the quote-level facts
     // (which now reflect the latest layout/apply) should override older
     // thread-level memory so we don't keep showing stale "3x2x1 in 10x10x2".
-   let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
+let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
 
-// If we picked up a rep slug from the subject and we don't already
-// have one in facts, keep it so future turns also know the rep.
-if (salesRepSlugFromSubject && !merged.sales_rep_slug) {
-  merged.sales_rep_slug = salesRepSlugFromSubject;
+// If we resolved a rep slug (subject, mailbox, or env) and we don't
+// already have one in facts, keep it so future turns also know the rep.
+if (salesRepSlugResolved && !merged.sales_rep_slug) {
+  merged.sales_rep_slug = salesRepSlugResolved;
 }
+
 
 // Fallback: if we know there are cavities but no sizes yet, try to
 // recover cavity dims directly from the email text (subject + body).
@@ -1266,15 +1331,18 @@ if (
       merged.price_breaks = priceBreaks;
     }
 
- const hasDimsQty = !!(specs.dims && specs.qty);
+const hasDimsQty = !!(specs.dims && specs.qty);
 
 // Header: store whenever we have dims + qty + quoteNumber
 let quoteId = merged.quote_id;
 
-// Decide what slug to send to /api/quotes
+// Decide what slug to send to /api/quotes (Option C)
+// Priority:
+//   1) Whatever is already on facts (e.g. from a prior turn/layout)
+//   2) Newly resolved from subject/body/mailbox
 const salesRepSlugForHeader: string | undefined =
   (merged.sales_rep_slug as string | undefined) ||
-  salesRepSlugFromSubject ||
+  salesRepSlugResolved ||
   undefined;
 
 if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
@@ -1308,7 +1376,7 @@ if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
       merged.quote_id = quoteId;
       merged.status = headerJson.quote.status || merged.status;
 
-      // NEW: capture sales_rep_id from header for future turns / debug
+      // Capture sales_rep_id from header for future turns / debug
       if (headerJson.quote.sales_rep_id != null) {
         merged.sales_rep_id = headerJson.quote.sales_rep_id;
       }
@@ -1320,6 +1388,7 @@ if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
     console.error("quote header store error:", err);
   }
 }
+
 
 
     // Primary item: only when we have material_id, and only once
