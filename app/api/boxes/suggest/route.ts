@@ -13,19 +13,21 @@
 //   - Sorts by volume (L*W*H asc) as a proxy for "cheapest / most efficient"
 //   - Limit per style with ?limit=3 (max 20)
 //
-// NEW: Also supports quote_no lookup by calling /api/quote/print internally:
+// NEW: Also supports quote_no lookup by calling the existing
+//      /api/quote/print handler directly (no network hop):
+//
 //   GET /api/boxes/suggest?quote_no=Q-...&style=both
-//   - Fetches quote JSON from /api/quote/print
+//   - Calls quote-print GET handler in-process
 //   - Pulls block dims from quote.layout_json.block
 //
-// NOTE: For now, we *reuse* the existing /api/quote/print endpoint instead of
-//       guessing DB schema. This is safer and Path A friendly.
+// This keeps us Path A safe and avoids guessing DB schema.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
+import { GET as quotePrintGET } from "@/app/api/quote/print/route";
 
 type BoxRow = {
   id: number;
@@ -148,24 +150,25 @@ async function fetchBoxesForStyle(
 
 // ---- Block dimension resolver -------------------------------------------
 
-async function resolveBlockDims(
-  searchParams: URLSearchParams,
-  origin: string,
-): Promise<BlockDims> {
+async function resolveBlockDims(searchParams: URLSearchParams): Promise<BlockDims> {
   const quoteNo = searchParams.get("quote_no");
 
   if (quoteNo) {
-    // Reuse /api/quote/print to avoid guessing DB schema.
-    const url = `${origin}/api/quote/print?quote_no=${encodeURIComponent(quoteNo)}`;
-    const resp = await fetch(url, { cache: "no-store" });
+    // Call existing /api/quote/print handler in-process.
+    const internalUrl = new URL(
+      `/api/quote/print?quote_no=${encodeURIComponent(quoteNo)}`,
+      "http://internal",
+    );
+    const quoteReq = new NextRequest(internalUrl.toString());
+    const quoteRes = await quotePrintGET(quoteReq);
 
-    if (!resp.ok) {
+    if (!quoteRes.ok) {
       throw new Error(
-        `Failed to fetch quote for quote_no=${quoteNo} (status ${resp.status})`,
+        `quote/print failed for quote_no=${quoteNo} (status ${quoteRes.status})`,
       );
     }
 
-    const data: any = await resp.json();
+    const data: any = await quoteRes.json();
     const block = data?.quote?.layout_json?.block;
 
     if (!block) {
@@ -208,10 +211,9 @@ export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const { searchParams } = url;
-    const origin = url.origin;
 
-    // Block dims (from quote_no via /api/quote/print, or direct dims)
-    const block = await resolveBlockDims(searchParams, origin);
+    // Block dims (from quote_no via quote-print, or direct dims)
+    const block = await resolveBlockDims(searchParams);
 
     // Optional params
     const clearanceIn = parseNonNegativeFloat(searchParams.get("clearance_in"), 0.5);
