@@ -26,9 +26,9 @@ export default async function AdminLayout({ children }: Props) {
     redirect("/login?next=/admin");
   }
 
-  // Logged in but not an admin → push them to quote area instead
+  // Logged in but not an admin → push them to *My Quotes* instead of /quote
   if (user.role && user.role !== "admin") {
-    redirect("/quote");
+    redirect("/my-quotes");
   }
 
   return (
