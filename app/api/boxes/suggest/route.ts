@@ -2,25 +2,14 @@
 //
 // Box suggestion helper.
 //
-// GET /api/boxes/suggest?length_in=10&width_in=8&height_in=3&style=both
-//   - Uses raw foam block dims from query params (length_in, width_in, height_in)
-//   - Adds clearance_in (default 0.5") to each dimension
-//   - Queries public.boxes for active boxes that fit
-//   - Supports style modes:
-//       style=rsc    -> only RSC boxes
-//       style=mailer -> only Mailers
-//       style=both   -> both (default)
-//   - Sorts by volume (L*W*H asc) as a proxy for "cheapest / most efficient"
-//   - Limit per style with ?limit=3 (max 20)
+// Supports:
+//   - GET /api/boxes/suggest?length_in=10&width_in=8&height_in=3&style=both
+//       Uses raw dims from query params.
+//   - GET /api/boxes/suggest?quote_no=Q-...&style=both
+//       Calls existing /api/quote/print handler in-process and pulls block dims.
 //
-// NEW: Also supports quote_no lookup by calling the existing
-//      /api/quote/print handler directly (no network hop):
-//
-//   GET /api/boxes/suggest?quote_no=Q-...&style=both
-//   - Calls quote-print GET handler in-process
-//   - Pulls block dims from quote.layout_json.block
-//
-// This keeps us Path A safe and avoids guessing DB schema.
+// Uses public.boxes table for RSC/Mailer suggestions.
+// Path A safe: no changes to existing quote logic, only a bolt-on helper.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -169,31 +158,45 @@ async function resolveBlockDims(searchParams: URLSearchParams): Promise<BlockDim
     }
 
     const data: any = await quoteRes.json();
-    const block = data?.quote?.layout_json?.block;
 
-    if (!block) {
-      throw new Error(
-        `Quote ${quoteNo} has no layout_json.block in /api/quote/print response`,
-      );
+    // Preferred source: layout_json.block
+    const layoutBlock = data?.quote?.layout_json?.block;
+    const layoutLen = layoutBlock ? toNumber(layoutBlock.lengthIn) : null;
+    const layoutWid = layoutBlock ? toNumber(layoutBlock.widthIn) : null;
+    const layoutHt = layoutBlock ? toNumber(layoutBlock.thicknessIn) : null;
+
+    if (layoutLen && layoutWid && layoutHt) {
+      return {
+        length_in: layoutLen,
+        width_in: layoutWid,
+        height_in: layoutHt,
+      };
     }
 
-    const lengthIn = toNumber(block.lengthIn);
-    const widthIn = toNumber(block.widthIn);
-    const heightIn = toNumber(block.thicknessIn);
+    // Fallback: first item dims (items[0].length_in/width_in/height_in)
+    const firstItem =
+      (Array.isArray(data?.items) && data.items[0]) ||
+      (Array.isArray(data?.quote?.items) && data.quote.items[0]) ||
+      null;
 
-    if (!lengthIn || !widthIn || !heightIn) {
-      throw new Error(
-        `Quote ${quoteNo} missing block dims (lengthIn,widthIn,thicknessIn): ${JSON.stringify(
-          block,
-        )}`,
-      );
+    if (firstItem) {
+      const itemLen = toNumber(firstItem.length_in);
+      const itemWid = toNumber(firstItem.width_in);
+      const itemHt = toNumber(firstItem.height_in);
+
+      if (itemLen && itemWid && itemHt) {
+        return {
+          length_in: itemLen,
+          width_in: itemWid,
+          height_in: itemHt,
+        };
+      }
     }
 
-    return {
-      length_in: lengthIn,
-      width_in: widthIn,
-      height_in: heightIn,
-    };
+    // If both are missing, bail with a clear error.
+    throw new Error(
+      `Quote ${quoteNo} has no usable block dims (no layout_json.block and no items[0].length_in/width_in/height_in)`,
+    );
   }
 
   // Fallback: explicit dims via query params
