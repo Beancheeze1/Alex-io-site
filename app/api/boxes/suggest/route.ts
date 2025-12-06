@@ -13,16 +13,19 @@
 //   - Sorts by volume (L*W*H asc) as a proxy for "cheapest / most efficient"
 //   - Limit per style with ?limit=3 (max 20)
 //
-// NOTE: There is a stub for quote_no support; for now, you must pass dims
-//       via length_in/width_in/height_in. In the next step we’ll wire
-//       quote_no -> block dimensions based on your existing DB schema.
+// NEW: Also supports quote_no lookup by calling /api/quote/print internally:
+//   GET /api/boxes/suggest?quote_no=Q-...&style=both
+//   - Fetches quote JSON from /api/quote/print
+//   - Pulls block dims from quote.layout_json.block
+//
+// NOTE: For now, we *reuse* the existing /api/quote/print endpoint instead of
+//       guessing DB schema. This is safer and Path A friendly.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
-import { one } from "@/lib/db";
 
 type BoxRow = {
   id: number;
@@ -36,6 +39,12 @@ type BoxRow = {
   min_order_qty: number | null;
   bundle_qty: number | null;
   notes: string | null;
+};
+
+type BlockDims = {
+  length_in: number;
+  width_in: number;
+  height_in: number;
 };
 
 function toNumber(v: string | number | null | undefined): number | null {
@@ -139,33 +148,32 @@ async function fetchBoxesForStyle(
 
 // ---- Block dimension resolver -------------------------------------------
 
-type BlockDims = {
-  length_in: number;
-  width_in: number;
-  height_in: number;
-};
-
-async function resolveBlockDims(searchParams: URLSearchParams): Promise<BlockDims> {
+async function resolveBlockDims(
+  searchParams: URLSearchParams,
+  origin: string,
+): Promise<BlockDims> {
   const quoteNo = searchParams.get("quote_no");
 
   if (quoteNo) {
-    const row = await one(
-      `
-      SELECT layout_json
-      FROM public."quotes"
-      WHERE quote_no = $1
-      `,
-      [quoteNo],
-    );
+    // Reuse /api/quote/print to avoid guessing DB schema.
+    const url = `${origin}/api/quote/print?quote_no=${encodeURIComponent(quoteNo)}`;
+    const resp = await fetch(url, { cache: "no-store" });
 
-    if (!row) {
-      throw new Error(`No quote found for quote_no=${quoteNo}`);
-    }
-    if (!row.layout_json?.block) {
-      throw new Error(`Quote ${quoteNo} has no layout_json.block`);
+    if (!resp.ok) {
+      throw new Error(
+        `Failed to fetch quote for quote_no=${quoteNo} (status ${resp.status})`,
+      );
     }
 
-    const block = row.layout_json.block;
+    const data: any = await resp.json();
+    const block = data?.quote?.layout_json?.block;
+
+    if (!block) {
+      throw new Error(
+        `Quote ${quoteNo} has no layout_json.block in /api/quote/print response`,
+      );
+    }
+
     const lengthIn = toNumber(block.lengthIn);
     const widthIn = toNumber(block.widthIn);
     const heightIn = toNumber(block.thicknessIn);
@@ -185,7 +193,7 @@ async function resolveBlockDims(searchParams: URLSearchParams): Promise<BlockDim
     };
   }
 
-  // Otherwise fall back to explicit dims in query
+  // Fallback: explicit dims via query params
   const lengthIn = parsePositiveFloat(searchParams.get("length_in"), "length_in");
   const widthIn = parsePositiveFloat(searchParams.get("width_in"), "width_in");
   const heightIn = parsePositiveFloat(searchParams.get("height_in"), "height_in");
@@ -193,16 +201,17 @@ async function resolveBlockDims(searchParams: URLSearchParams): Promise<BlockDim
   return { length_in: lengthIn, width_in: widthIn, height_in: heightIn };
 }
 
-
 // ---- GET handler ---------------------------------------------------------
 
 // GET /api/boxes/suggest
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
+    const url = new URL(req.url);
+    const { searchParams } = url;
+    const origin = url.origin;
 
-    // Block dims (from either dims params, or quote_no once wired)
-    const block = await resolveBlockDims(searchParams);
+    // Block dims (from quote_no via /api/quote/print, or direct dims)
+    const block = await resolveBlockDims(searchParams, origin);
 
     // Optional params
     const clearanceIn = parseNonNegativeFloat(searchParams.get("clearance_in"), 0.5);
