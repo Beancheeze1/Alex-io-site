@@ -1,22 +1,21 @@
 // app/api/boxes/suggest/route.ts
 //
-// Box suggestion helper:
+// Box suggestion helper.
 //
-//   GET /api/boxes/suggest?length_in=10&width_in=8&height_in=3&style=both
-//
-// MVP behavior (Path A safe):
-//   - Uses raw dims from query params (length_in, width_in, height_in).
-//   - Adds clearance_in (default 0.5") to each dimension.
-//   - Queries public.boxes for active boxes that fit.
+// GET /api/boxes/suggest?length_in=10&width_in=8&height_in=3&style=both
+//   - Uses raw foam block dims from query params (length_in, width_in, height_in)
+//   - Adds clearance_in (default 0.5") to each dimension
+//   - Queries public.boxes for active boxes that fit
 //   - Supports style modes:
 //       style=rsc    -> only RSC boxes
 //       style=mailer -> only Mailers
-//       style=both   -> both, returned as separate arrays.
-//   - Sorts by volume (L*W*H ascending) as a proxy for "cheapest / most efficient".
-//   - Limit per style (default 3).
+//       style=both   -> both (default)
+//   - Sorts by volume (L*W*H asc) as a proxy for "cheapest / most efficient"
+//   - Limit per style with ?limit=3 (max 20)
 //
-// Later (separate step):
-//   - Add quote_no support by looking up block dims from quote/layout facts.
+// NOTE: There is a stub for quote_no support; for now, you must pass dims
+//       via length_in/width_in/height_in. In the next step we’ll wire
+//       quote_no -> block dimensions based on your existing DB schema.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -137,24 +136,53 @@ async function fetchBoxesForStyle(
   return mapped.slice(0, limit);
 }
 
+// ---- Block dimension resolver -------------------------------------------
+
+type BlockDims = {
+  length_in: number;
+  width_in: number;
+  height_in: number;
+};
+
+// For now this only supports raw dims from query params.
+// quote_no support will be wired once we hook into your quote/layout schema.
+async function resolveBlockDims(searchParams: URLSearchParams): Promise<BlockDims> {
+  const quoteNo = searchParams.get("quote_no");
+
+  if (quoteNo) {
+    // Placeholder: we’ll replace this with a real DB lookup in the next step.
+    // Keeping this explicit so if someone hits it now, they get a clear error
+    // instead of a silent bad guess.
+    throw new Error(
+      "quote_no-based lookup is not wired yet; please call /api/boxes/suggest with length_in, width_in, and height_in query params for now.",
+    );
+  }
+
+  const lengthIn = parsePositiveFloat(searchParams.get("length_in"), "length_in");
+  const widthIn = parsePositiveFloat(searchParams.get("width_in"), "width_in");
+  const heightIn = parsePositiveFloat(searchParams.get("height_in"), "height_in");
+
+  return { length_in: lengthIn, width_in: widthIn, height_in: heightIn };
+}
+
+// ---- GET handler ---------------------------------------------------------
+
 // GET /api/boxes/suggest
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
 
-    // Required dims (foam block)
-    const lengthIn = parsePositiveFloat(searchParams.get("length_in"), "length_in");
-    const widthIn = parsePositiveFloat(searchParams.get("width_in"), "width_in");
-    const heightIn = parsePositiveFloat(searchParams.get("height_in"), "height_in");
+    // Block dims (from either dims params, or quote_no once wired)
+    const block = await resolveBlockDims(searchParams);
 
     // Optional params
     const clearanceIn = parseNonNegativeFloat(searchParams.get("clearance_in"), 0.5);
     const styleMode = normalizeStyleParam(searchParams.get("style"));
     const limitPerStyle = parseLimit(searchParams.get("limit"), 3, 20);
 
-    const L_req = lengthIn + clearanceIn;
-    const W_req = widthIn + clearanceIn;
-    const H_req = heightIn + clearanceIn;
+    const L_req = block.length_in + clearanceIn;
+    const W_req = block.width_in + clearanceIn;
+    const H_req = block.height_in + clearanceIn;
 
     const [rsc, mailer] = await Promise.all([
       styleMode === "rsc" || styleMode === "both"
@@ -168,9 +196,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       block: {
-        length_in: lengthIn,
-        width_in: widthIn,
-        height_in: heightIn,
+        length_in: block.length_in,
+        width_in: block.width_in,
+        height_in: block.height_in,
         clearance_in: clearanceIn,
         required_inside: {
           length_in: L_req,
