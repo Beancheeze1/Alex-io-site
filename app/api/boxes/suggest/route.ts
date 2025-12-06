@@ -22,6 +22,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
+import { one } from "@/lib/db";
 
 type BoxRow = {
   id: number;
@@ -144,26 +145,54 @@ type BlockDims = {
   height_in: number;
 };
 
-// For now this only supports raw dims from query params.
-// quote_no support will be wired once we hook into your quote/layout schema.
 async function resolveBlockDims(searchParams: URLSearchParams): Promise<BlockDims> {
   const quoteNo = searchParams.get("quote_no");
 
   if (quoteNo) {
-    // Placeholder: we’ll replace this with a real DB lookup in the next step.
-    // Keeping this explicit so if someone hits it now, they get a clear error
-    // instead of a silent bad guess.
-    throw new Error(
-      "quote_no-based lookup is not wired yet; please call /api/boxes/suggest with length_in, width_in, and height_in query params for now.",
+    const row = await one(
+      `
+      SELECT layout_json
+      FROM public."quotes"
+      WHERE quote_no = $1
+      `,
+      [quoteNo],
     );
+
+    if (!row) {
+      throw new Error(`No quote found for quote_no=${quoteNo}`);
+    }
+    if (!row.layout_json?.block) {
+      throw new Error(`Quote ${quoteNo} has no layout_json.block`);
+    }
+
+    const block = row.layout_json.block;
+    const lengthIn = toNumber(block.lengthIn);
+    const widthIn = toNumber(block.widthIn);
+    const heightIn = toNumber(block.thicknessIn);
+
+    if (!lengthIn || !widthIn || !heightIn) {
+      throw new Error(
+        `Quote ${quoteNo} missing block dims (lengthIn,widthIn,thicknessIn): ${JSON.stringify(
+          block,
+        )}`,
+      );
+    }
+
+    return {
+      length_in: lengthIn,
+      width_in: widthIn,
+      height_in: heightIn,
+    };
   }
 
+  // Otherwise fall back to explicit dims in query
   const lengthIn = parsePositiveFloat(searchParams.get("length_in"), "length_in");
   const widthIn = parsePositiveFloat(searchParams.get("width_in"), "width_in");
   const heightIn = parsePositiveFloat(searchParams.get("height_in"), "height_in");
 
   return { length_in: lengthIn, width_in: widthIn, height_in: heightIn };
 }
+
 
 // ---- GET handler ---------------------------------------------------------
 
