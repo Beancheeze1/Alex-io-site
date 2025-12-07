@@ -171,10 +171,7 @@ export default function LayoutPage({
   const quoteNo = hasRealQuoteNo ? quoteNoFromUrl.trim() : "Q-AI-EXAMPLE";
   const [materialIdFromUrl, setMaterialIdFromUrl] =
     React.useState<number | null>(() => {
-      const raw = searchParams?.material_id as
-        | string
-        | string[]
-        | undefined;
+      const raw = searchParams?.material_id as string | string[] | undefined;
       if (!raw) return null;
       const first = Array.isArray(raw) ? raw[0] : raw;
       const parsed = Number(first);
@@ -545,6 +542,7 @@ const CAVITY_COLORS = [
   "#eab308",
   "#ec4899",
 ];
+
 /* ---------- Layout editor host (main body) ---------- */
 
 function LayoutEditorHost(props: {
@@ -599,6 +597,20 @@ function LayoutEditorHost(props: {
     }[];
   };
 
+  // Local per-layer thicknesses (used for stack depth + UI).
+  const [layerThickness, setLayerThickness] =
+    React.useState<Record<string, number>>({});
+
+  const blockThicknessIn = Number(block.thicknessIn) || 0;
+
+  const getLayerThickness = (layerId: string): number => {
+    const raw = layerThickness[layerId];
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      return raw;
+    }
+    return blockThicknessIn;
+  };
+
   const activeLayer =
     stack && stack.length > 0
       ? stack.find((layer) => layer.id === activeLayerId) ?? stack[0]
@@ -608,20 +620,28 @@ function LayoutEditorHost(props: {
   const selectedCavity =
     cavities.find((c) => c.id === selectedId) || null;
 
-  // Total stack thickness used for box/carton suggestions.
-  // For now, treat each layer as one full block thickness.
-  const blockThicknessIn = Number(block.thicknessIn) || 0;
-  const totalStackThicknessIn =
-    stack && stack.length > 0
-      ? blockThicknessIn * stack.length
-      : blockThicknessIn;
-
-
   // Multi-layer: derive layers view if stack exists
   const layers = layout.stack && layout.stack.length > 0 ? layout.stack : null;
 
   const effectiveActiveLayerId =
     layers && layers.length > 0 ? activeLayerId ?? layers[0].id : null;
+
+  // Total stack thickness used for box/carton suggestions.
+  // Rule:
+  // - No stack or 1 layer => use block thickness.
+  // - 2+ layers => sum of per-layer thicknesses.
+  let totalStackThicknessIn = blockThicknessIn;
+  if (stack && stack.length > 1) {
+    const sum = stack.reduce(
+      (acc, layer) => acc + getLayerThickness(layer.id),
+      0,
+    );
+    if (sum > 0) {
+      totalStackThicknessIn = sum;
+    }
+  } else if (stack && stack.length === 1) {
+    totalStackThicknessIn = blockThicknessIn || getLayerThickness(stack[0].id);
+  }
 
   // Ensure the hook actually has an active layer when a stack exists
   React.useEffect(() => {
@@ -635,7 +655,7 @@ function LayoutEditorHost(props: {
   React.useEffect(() => {
     if (!layers || layerCount === 0) return;
     selectCavity(null);
-  }, [effectiveActiveLayerId, layerCount, selectCavity]);
+  }, [effectiveActiveLayerId, layerCount, selectCavity, layers]);
 
   // When a new cavity is added, try to drop it into "dead space"
   const prevCavityCountRef = React.useRef<number>(cavities.length);
@@ -747,6 +767,24 @@ function LayoutEditorHost(props: {
 
     prevCavityCountRef.current = cavities.length;
   }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
+
+  // Handle edits to the active layer's thickness
+  const handleActiveLayerThicknessChange = (value: string) => {
+    if (!activeLayer) return;
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return;
+
+    const snapped = snapInches(num);
+    setLayerThickness((prev) => ({
+      ...prev,
+      [activeLayer.id]: snapped,
+    }));
+
+    // Single-layer rule: keep block thickness in sync when only one layer exists.
+    if (stack && stack.length === 1) {
+      updateBlockDims({ thicknessIn: snapped });
+    }
+  };
 
   const [zoom, setZoom] = React.useState(1);
   const [croppedCorners, setCroppedCorners] = React.useState(false);
@@ -1527,26 +1565,50 @@ function LayoutEditorHost(props: {
                         </div>
 
                         {activeLayer && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={activeLayer.label}
-                              onChange={(e) =>
-                                renameLayer(activeLayer.id, e.target.value)
-                              }
-                              className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-100"
-                              placeholder="Layer name"
-                            />
-                            {stack.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => deleteLayer(activeLayer.id)}
-                                className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300 hover:text-red-300 hover:border-red-400 transition"
-                                title="Delete this layer"
-                              >
-                                Remove
-                              </button>
-                            )}
+                          <div className="mt-2 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={activeLayer.label}
+                                onChange={(e) =>
+                                  renameLayer(activeLayer.id, e.target.value)
+                                }
+                                className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-100"
+                                placeholder="Layer name"
+                              />
+                              {stack.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => deleteLayer(activeLayer.id)}
+                                  className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300 hover:text-red-300 hover:border-red-400 transition"
+                                  title="Delete this layer"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 max-w-xs text-xs">
+                              <label className="flex flex-col gap-1">
+                                <span className="text-[11px] text-slate-400">
+                                  Layer thickness (in)
+                                </span>
+                                <input
+                                  type="number"
+                                  step={0.125}
+                                  value={getLayerThickness(activeLayer.id)}
+                                  onChange={(e) =>
+                                    handleActiveLayerThicknessChange(
+                                      e.target.value,
+                                    )
+                                  }
+                                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                                />
+                              </label>
+                              <div className="flex items-end text-[11px] text-slate-400">
+                                Stack depth adds up all layer thicknesses. Single
+                                layer layouts use the block thickness.
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1776,19 +1838,20 @@ function LayoutEditorHost(props: {
               </section>
               {/* RIGHT: Inspector + customer info + cavities list */}
               <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
-                {/* Block editor */}
+                {/* Current layer / block dimensions */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-xs font-semibold text-slate-100">
-                      Block
+                      Current layer dimensions
                     </div>
                     <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-300">
-                      Foam blank
+                      Footprint + thickness
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-400 mb-2">
-                    Edit the foam blank size. Values snap to 0.125&quot;
-                    increments.
+                    Length and width control the overall foam footprint. Thickness
+                    here is read-only and reflects the active layer’s thickness
+                    (or the single-layer block thickness).
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-xs">
                     <label className="flex flex-col gap-1">
@@ -1823,17 +1886,18 @@ function LayoutEditorHost(props: {
                     </label>
                     <label className="flex flex-col gap-1">
                       <span className="text-[11px] text-slate-400">
-                        Thickness
+                        Thickness (in)
                       </span>
                       <input
                         type="number"
                         step={0.125}
-                        value={block.thicknessIn}
-                        onChange={(e) => {
-                          const snapped = snapInches(Number(e.target.value));
-                          updateBlockDims({ thicknessIn: snapped });
-                        }}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                        value={
+                          activeLayer
+                            ? getLayerThickness(activeLayer.id)
+                            : blockThicknessIn
+                        }
+                        readOnly
+                        className="rounded-md border border-slate-800 bg-slate-950/80 px-2 py-1 text-xs text-slate-400 cursor-not-allowed"
                       />
                     </label>
                   </div>
@@ -2155,7 +2219,9 @@ function LayoutEditorHost(props: {
                                   cornerRadius: e.target.value,
                                 }))
                               }
-                              onBlur={() => commitCavityField("cornerRadius")}
+                              onBlur={() =>
+                                commitCavityField("cornerRadius")
+                              }
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
