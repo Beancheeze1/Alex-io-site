@@ -13,13 +13,14 @@
 //   - Quote overview (specs from primary line item) in a "Specs" card
 //   - Pricing summary in a "Pricing" card
 //   - Layout status in a "Layout & next steps" card
-//   - Line items table (with pricing columns if present) in a card
+//   - Line items table (foam items + carton selections + layer lines)
 //   - Foam layout package summary + inline SVG preview
-//   - Suggested cartons block backed by /api/boxes/suggest + /api/boxes/add-to-quote
 //
 // Important:
 //   - No SVG/DXF/STEP download links here (client shouldn’t be able to download CAD files).
 //   - Layout file downloads can be added later on an internal/admin-only page.
+//   - Carton suggestions + selection will live in the editor; this page just *shows*
+//     any cartons already attached to the quote via DB.
 
 "use client";
 
@@ -51,7 +52,6 @@ type ItemRow = {
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
 
-  // richer pricing metadata from /api/quote/print
   pricing_meta?: {
     min_charge?: number | null;
     used_min_charge?: boolean;
@@ -59,7 +59,6 @@ type ItemRow = {
     kerf_pct?: number | null;
   } | null;
 
-  // high-level pricing breakdown blob from /api/quote/print
   pricing_breakdown?: {
     volumeIn3: number;
     materialWeightLb: number;
@@ -105,50 +104,6 @@ type ApiErr = {
 };
 
 type ApiResponse = ApiOk | ApiErr;
-
-// ===== Box suggestion API types =====
-
-type BoxSuggestion = {
-  id: number;
-  vendor: string;
-  style: string;
-  sku: string;
-  description: string;
-  inside_length_in: number;
-  inside_width_in: number;
-  inside_height_in: number;
-  min_order_qty: number | null;
-  bundle_qty: number | null;
-  notes: string | null;
-  volume: number;
-};
-
-type BoxesBlock = {
-  length_in: number;
-  width_in: number;
-  height_in: number;
-  clearance_in: number;
-  required_inside: {
-    length_in: number;
-    width_in: number;
-    height_in: number;
-  };
-};
-
-type BoxesOk = {
-  ok: true;
-  block: BoxesBlock;
-  style_mode: "rsc" | "mailer" | "both" | string;
-  rsc: BoxSuggestion[];
-  mailer: BoxSuggestion[];
-};
-
-type BoxesErr = {
-  ok: false;
-  error: string;
-};
-
-type BoxesResponse = BoxesOk | BoxesErr;
 
 // ===== Requested cartons API (for-quote) =====
 
@@ -216,25 +171,10 @@ export default function QuotePrintClient() {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
-  // Box suggestion state (from /api/boxes/suggest)
-  const [boxesLoading, setBoxesLoading] = React.useState<boolean>(false);
-  const [boxesError, setBoxesError] = React.useState<string | null>(null);
-  const [boxesBlock, setBoxesBlock] = React.useState<BoxesBlock | null>(null);
-  const [rscSuggestions, setRscSuggestions] = React.useState<BoxSuggestion[]>(
-    [],
-  );
-  const [mailerSuggestions, setMailerSuggestions] = React.useState<
-    BoxSuggestion[]
-  >([]);
-
   // Requested cartons stored in DB (from /api/boxes/for-quote)
   const [requestedBoxes, setRequestedBoxes] = React.useState<RequestedBox[]>(
     [],
   );
-
-  // "Add to quote" state
-  const [addingBoxId, setAddingBoxId] = React.useState<number | null>(null);
-  const [addBoxError, setAddBoxError] = React.useState<string | null>(null);
 
   // Ref to the SVG preview container so we can scale/center the inner <svg>
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -438,70 +378,6 @@ export default function QuotePrintClient() {
     };
   }, [quoteNo]);
 
-  // Fetch box suggestions (based on quote_no) – we keep only the top 1 RSC + top 1 mailer
-  React.useEffect(() => {
-    if (!quoteNo) return;
-
-    let cancelled = false;
-
-    async function loadBoxes() {
-      setBoxesLoading(true);
-      setBoxesError(null);
-      setBoxesBlock(null);
-      setRscSuggestions([]);
-      setMailerSuggestions([]);
-
-      try {
-        const res = await fetch(
-          "/api/boxes/suggest?quote_no=" +
-            encodeURIComponent(quoteNo) +
-            "&style=both",
-          { cache: "no-store" },
-        );
-
-        const json = (await res.json()) as BoxesResponse;
-
-        if (!res.ok || !json.ok) {
-          if (!cancelled) {
-            const msg =
-              (!json.ok && (json as BoxesErr).error) ||
-              "Unable to fetch box suggestions right now.";
-            setBoxesError(msg);
-          }
-          return;
-        }
-
-        if (!cancelled) {
-          const ok = json as BoxesOk;
-          setBoxesBlock(ok.block);
-
-          // Option B behavior: just the best RSC + best mailer
-          const bestRsc = ok.rsc && ok.rsc.length > 0 ? [ok.rsc[0]] : [];
-          const bestMailer =
-            ok.mailer && ok.mailer.length > 0 ? [ok.mailer[0]] : [];
-
-          setRscSuggestions(bestRsc);
-          setMailerSuggestions(bestMailer);
-        }
-      } catch (err) {
-        console.error("Error fetching /api/boxes/suggest:", err);
-        if (!cancelled) {
-          setBoxesError("Unable to fetch box suggestions right now.");
-        }
-      } finally {
-        if (!cancelled) {
-          setBoxesLoading(false);
-        }
-      }
-    }
-
-    loadBoxes();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [quoteNo]);
-
   // Load requested cartons from DB whenever quoteNo changes
   React.useEffect(() => {
     if (!quoteNo) return;
@@ -645,54 +521,68 @@ export default function QuotePrintClient() {
     marginBottom: 2,
   };
 
-  // ===== "Add this carton to my quote" handler =====
+  // ===== Layer rows derived from layout_json (display only, no pricing) =====
+  const layerDisplayRows = React.useMemo(
+    () => {
+      if (!layoutPkg || !layoutPkg.layout_json) return [];
 
-  const handleAddBoxToQuote = React.useCallback(
-    async (boxId: number) => {
-      if (!quoteNo && !quote) return;
-      const effectiveQuoteNo = quote?.quote_no || quoteNo;
-      if (!effectiveQuoteNo) return;
-
-      const qty = primaryItem?.qty ?? 1;
-
-      try {
-        setAddBoxError(null);
-        setAddingBoxId(boxId);
-
-        const res = await fetch("/api/boxes/add-to-quote", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            quote_no: effectiveQuoteNo,
-            box_id: boxId,
-            qty,
-          }),
-        });
-
-        const json = await res.json();
-
-        if (!res.ok || !json?.ok) {
-          const msg =
-            json?.error ||
-            "We couldn’t record this carton selection right now.";
-          setAddBoxError(msg);
-          return;
+      let json: any = layoutPkg.layout_json;
+      if (typeof json === "string") {
+        try {
+          json = JSON.parse(json);
+        } catch {
+          return [];
         }
-
-        // Refresh requested cartons from DB so UI + email summary stay in sync
-        await refreshRequestedBoxes();
-      } catch (err: any) {
-        console.error("Error calling /api/boxes/add-to-quote:", err);
-        setAddBoxError(
-          "We couldn’t record this carton selection right now. Please try again.",
-        );
-      } finally {
-        setAddingBoxId(null);
       }
+
+      const layers = Array.isArray(json.layers) ? json.layers : [];
+      if (!layers.length) return [];
+
+      const block = json.block || json.outerBlock || {};
+      const rawL = block.lengthIn ?? block.length_in;
+      const rawW = block.widthIn ?? block.width_in;
+
+      const L = Number(rawL);
+      const W = Number(rawW);
+
+      if (!Number.isFinite(L) || !Number.isFinite(W) || L <= 0 || W <= 0) {
+        return [];
+      }
+
+      const result: {
+        key: string;
+        name: string;
+        dims: string;
+        qty: number;
+      }[] = [];
+
+      layers.forEach((layer: any, index: number) => {
+        const tRaw =
+          layer.thicknessIn ??
+          layer.thickness_in ??
+          block.heightIn ??
+          block.height_in;
+        const T = Number(tRaw);
+        if (!Number.isFinite(T) || T <= 0) return;
+
+        const name =
+          (typeof layer.name === "string" && layer.name.trim()) ||
+          `Layer ${index + 1}`;
+
+        const dimsStr = `${L} × ${W} × ${T}`;
+        const qty = primaryItem?.qty ?? 1;
+
+        result.push({
+          key: `layer-${layer.id ?? index}`,
+          name,
+          dims: dimsStr,
+          qty,
+        });
+      });
+
+      return result;
     },
-    [quoteNo, quote, primaryItem, refreshRequestedBoxes],
+    [layoutPkg, primaryItem],
   );
 
   // ===================== RENDER =====================
@@ -1212,302 +1102,7 @@ export default function QuotePrintClient() {
               </div>
             )}
 
-            {/* SUGGESTED CARTONS CARD */}
-            <div
-              style={{
-                ...cardBase,
-                background: "#ffffff",
-                marginBottom: 24,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "#0f172a",
-                  marginBottom: 4,
-                }}
-              >
-                Suggested shipping cartons
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "#6b7280",
-                  marginBottom: 8,
-                  lineHeight: 1.4,
-                }}
-              >
-                These are stock corrugated cartons and mailers that should fit
-                this foam block, based on the current quote dimensions.
-              </div>
-
-              {addBoxError && (
-                <div
-                  style={{
-                    marginBottom: 8,
-                    fontSize: 12,
-                    color: "#b91c1c",
-                  }}
-                >
-                  {addBoxError}
-                </div>
-              )}
-
-              {boxesLoading && (
-                <p style={{ fontSize: 13, color: "#6b7280" }}>
-                  Looking up catalog carton sizes for this foam…
-                </p>
-              )}
-
-              {!boxesLoading && boxesError && (
-                <p style={{ fontSize: 13, color: "#b91c1c" }}>{boxesError}</p>
-              )}
-
-              {!boxesLoading &&
-                !boxesError &&
-                (!rscSuggestions.length && !mailerSuggestions.length) && (
-                  <p style={{ fontSize: 13, color: "#6b7280" }}>
-                    We didn&apos;t find any matching stock cartons in the
-                    current box catalog for this foam size yet.
-                  </p>
-                )}
-
-              {!boxesLoading &&
-                !boxesError &&
-                (rscSuggestions.length > 0 || mailerSuggestions.length > 0) && (
-                  <>
-                    {boxesBlock && (
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "#4b5563",
-                          marginBottom: 8,
-                        }}
-                      >
-                        Based on block{" "}
-                        <strong>
-                          {boxesBlock.length_in.toFixed(1)} ×{" "}
-                          {boxesBlock.width_in.toFixed(1)} ×{" "}
-                          {boxesBlock.height_in.toFixed(1)} in
-                        </strong>{" "}
-                        (with {boxesBlock.clearance_in.toFixed(2)}
-                        &quot; clearance).
-                      </div>
-                    )}
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(2,minmax(0,1fr))",
-                        gap: 12,
-                        marginTop: 4,
-                      }}
-                    >
-                      {/* RSC column */}
-                      <div>
-                        <div style={labelStyle}>RSC cartons</div>
-                        {rscSuggestions.length === 0 ? (
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "#9ca3af",
-                            }}
-                          >
-                            No RSC matches in catalog for this size yet.
-                          </div>
-                        ) : (
-                          <ul
-                            style={{
-                              listStyle: "none",
-                              padding: 0,
-                              margin: 0,
-                              fontSize: 12,
-                              color: "#111827",
-                            }}
-                          >
-                            {rscSuggestions.map((b) => {
-                              const isRequested = requestedBoxes.some(
-                                (rb) => rb.box_id === b.id,
-                              );
-                              const isBusy = addingBoxId === b.id;
-                              return (
-                                <li
-                                  key={b.id}
-                                  style={{ marginBottom: 6 }}
-                                >
-                                  <div style={{ fontWeight: 500 }}>
-                                    {b.description}
-                                  </div>
-                                  <div
-                                    style={{
-                                      fontSize: 11,
-                                      color: "#6b7280",
-                                      marginBottom: 4,
-                                    }}
-                                  >
-                                    Inside: {b.inside_length_in} ×{" "}
-                                    {b.inside_width_in} ×{" "}
-                                    {b.inside_height_in} in • {b.vendor} SKU{" "}
-                                    {b.sku}
-                                  </div>
-                                  {!isRequested ? (
-                                    <button
-                                      type="button"
-                                      disabled={isBusy}
-                                      onClick={() =>
-                                        handleAddBoxToQuote(b.id)
-                                      }
-                                      style={{
-                                        padding: "4px 10px",
-                                        borderRadius: 999,
-                                        border:
-                                          "1px solid rgba(15,23,42,0.1)",
-                                        background: "#f3f4f6",
-                                        fontSize: 11,
-                                        fontWeight: 500,
-                                        cursor: isBusy
-                                          ? "default"
-                                          : "pointer",
-                                      }}
-                                    >
-                                      {isBusy
-                                        ? "Adding…"
-                                        : "Add this carton to my quote"}
-                                    </button>
-                                  ) : (
-                                    <span
-                                      style={{
-                                        display: "inline-block",
-                                        padding: "3px 9px",
-                                        borderRadius: 999,
-                                        fontSize: 11,
-                                        fontWeight: 600,
-                                        background: "#dcfce7",
-                                        color: "#15803d",
-                                      }}
-                                    >
-                                      Requested
-                                    </span>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                      </div>
-
-                      {/* Mailer column */}
-                      <div>
-                        <div style={labelStyle}>Mailers</div>
-                        {mailerSuggestions.length === 0 ? (
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "#9ca3af",
-                            }}
-                          >
-                            No mailer matches in catalog for this size yet.
-                          </div>
-                        ) : (
-                          <ul
-                            style={{
-                              listStyle: "none",
-                              padding: 0,
-                              margin: 0,
-                              fontSize: 12,
-                              color: "#111827",
-                            }}
-                          >
-                            {mailerSuggestions.map((b) => {
-                              const isRequested = requestedBoxes.some(
-                                (rb) => rb.box_id === b.id,
-                              );
-                              const isBusy = addingBoxId === b.id;
-                              return (
-                                <li
-                                  key={b.id}
-                                  style={{ marginBottom: 6 }}
-                                >
-                                  <div style={{ fontWeight: 500 }}>
-                                    {b.description}
-                                  </div>
-                                  <div
-                                    style={{
-                                      fontSize: 11,
-                                      color: "#6b7280",
-                                      marginBottom: 4,
-                                    }}
-                                  >
-                                    Inside: {b.inside_length_in} ×{" "}
-                                    {b.inside_width_in} ×{" "}
-                                    {b.inside_height_in} in • {b.vendor} SKU{" "}
-                                    {b.sku}
-                                  </div>
-                                  {!isRequested ? (
-                                    <button
-                                      type="button"
-                                      disabled={isBusy}
-                                      onClick={() =>
-                                        handleAddBoxToQuote(b.id)
-                                      }
-                                      style={{
-                                        padding: "4px 10px",
-                                        borderRadius: 999,
-                                        border:
-                                          "1px solid rgba(15,23,42,0.1)",
-                                        background: "#f3f4f6",
-                                        fontSize: 11,
-                                        fontWeight: 500,
-                                        cursor: isBusy
-                                          ? "default"
-                                          : "pointer",
-                                      }}
-                                    >
-                                      {isBusy
-                                        ? "Adding…"
-                                        : "Add this carton to my quote"}
-                                    </button>
-                                  ) : (
-                                    <span
-                                      style={{
-                                        display: "inline-block",
-                                        padding: "3px 9px",
-                                        borderRadius: 999,
-                                        fontSize: 11,
-                                        fontWeight: 600,
-                                        background: "#dcfce7",
-                                        color: "#15803d",
-                                      }}
-                                    >
-                                      Requested
-                                    </span>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: 8,
-                        fontSize: 11,
-                        color: "#6b7280",
-                      }}
-                    >
-                      These are suggestions only. Final packaging choice and
-                      ordering remain up to you. Any cartons you mark as{" "}
-                      <strong>Requested</strong> will be reviewed and confirmed
-                      by your sales rep before finalizing your order.
-                    </div>
-                  </>
-                )}
-            </div>
-
-            {/* LINE ITEMS CARD */}
+            {/* LINE ITEMS CARD (foam items + layers + carton selections) */}
             <div
               style={{
                 ...cardBase,
@@ -1536,7 +1131,9 @@ export default function QuotePrintClient() {
                 quote.
               </div>
 
-              {items.length === 0 && requestedBoxes.length === 0 ? (
+              {items.length === 0 &&
+              requestedBoxes.length === 0 &&
+              layerDisplayRows.length === 0 ? (
                 <p style={{ color: "#6b7280", fontSize: 13 }}>
                   No line items stored for this quote yet. Once the material and
                   details are finalized, the primary line will appear here.
@@ -1603,7 +1200,7 @@ export default function QuotePrintClient() {
                       </tr>
                     </thead>
                     <tbody>
-                      {/* Foam / core quote items */}
+                      {/* Foam / core quote items (priced) */}
                       {items.map((item, idx) => {
                         const dims =
                           item.length_in +
@@ -1704,7 +1301,68 @@ export default function QuotePrintClient() {
                         );
                       })}
 
-                      {/* Requested cartons appended as additional lines */}
+                      {/* Foam layers (display only, not priced separately) */}
+                      {layerDisplayRows.map((layer) => (
+                        <tr key={layer.key}>
+                          <td
+                            style={{
+                              padding: 8,
+                              borderBottom: "1px solid #f3f4f6",
+                            }}
+                          >
+                            <div style={{ fontWeight: 500 }}>
+                              Foam layer: {layer.name}
+                            </div>
+                            <div
+                              style={{
+                                color: "#6b7280",
+                                fontSize: 11,
+                                marginTop: 2,
+                              }}
+                            >
+                              Layer details from saved layout (for reference;
+                              included in foam pricing above).
+                            </div>
+                          </td>
+                          <td
+                            style={{
+                              padding: 8,
+                              borderBottom: "1px solid #f3f4f6",
+                            }}
+                          >
+                            {layer.dims}
+                          </td>
+                          <td
+                            style={{
+                              padding: 8,
+                              borderBottom: "1px solid #f3f4f6",
+                              textAlign: "right",
+                            }}
+                          >
+                            {layer.qty}
+                          </td>
+                          <td
+                            style={{
+                              padding: 8,
+                              borderBottom: "1px solid #f3f4f6",
+                              textAlign: "right",
+                            }}
+                          >
+                            {formatUsd(null)}
+                          </td>
+                          <td
+                            style={{
+                              padding: 8,
+                              borderBottom: "1px solid #f3f4f6",
+                              textAlign: "right",
+                            }}
+                          >
+                            {formatUsd(null)}
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* Requested cartons appended as additional lines (display only for now) */}
                       {requestedBoxes.map((rb) => {
                         const baseLabel =
                           (rb.description && rb.description.trim().length > 0
