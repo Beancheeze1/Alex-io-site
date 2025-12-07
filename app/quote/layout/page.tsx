@@ -644,8 +644,14 @@ function LayoutEditorHost(props: {
   const selectedCavity =
     cavities.find((c) => c.id === selectedId) || null;
 
+  // Total stack thickness used for box suggestions.
+  // For now this is the foam block thickness; if layers later carry their own
+  // thickness values, we can evolve this to sum those instead.
+  const totalStackThicknessIn = Number(block.thicknessIn) || 0;
+
   // Multi-layer: derive layers view if stack exists
   const layers = layout.stack && layout.stack.length > 0 ? layout.stack : null;
+
   const effectiveActiveLayerId =
     layers && layers.length > 0 ? activeLayerId ?? layers[0].id : null;
 
@@ -1186,6 +1192,11 @@ function LayoutEditorHost(props: {
   const canApplyButton =
     hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
 
+      // Qty used for box suggestions (null when not set)
+  const effectiveQty =
+    typeof qty === "number" && Number.isFinite(qty) && qty > 0 ? qty : null;
+
+
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
       <div className="w-full max-w-none mx-auto">
@@ -1421,15 +1432,22 @@ function LayoutEditorHost(props: {
                     </div>
 
                     {/* Layer selector + manager (horizontal style) */}
-                    {stack && stack.length > 0 && (
-                      <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300">
-                        <div className="flex flex-wrap items-center justify_between gap-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
-                              Layers
-                            </span>
-                            <div className="flex flex-wrap items-center gap-1">
-                              {stack.map((layer) => {
+                       {stack && stack.length > 0 && (
+  <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+          Layers
+        </span>
+        <span className="ml-2 rounded-full border border-slate-700 bg-slate-900/80 px-2 py-0.5 text-[10px] text-slate-300">
+          Stack depth{" "}
+          <span className="font-mono text-slate-50">
+            {totalStackThicknessIn.toFixed(2)}"
+          </span>
+        </span>
+        <div className="flex flex-wrap items-center gap-1">
+          {stack.map((layer) => {
+
                                 const isActive = activeLayer?.id === layer.id;
                                 return (
                                   <button
@@ -1621,6 +1639,84 @@ function LayoutEditorHost(props: {
                     />
                   </div>
                 </div>
+
+                {/* Box suggester preview (UI only for now) */}
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-xs font-semibold text-slate-100">
+                        Box suggester inputs
+                      </div>
+                      <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                        Preview only
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                      These are the dimensions and quantity the box suggester
+                      will use. Next step is wiring this into the real Box
+                      Partners lookup.
+                    </p>
+                    <div className="space-y-1.5 text-[11px]">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">
+                          Foam footprint (L × W)
+                        </span>
+                        <span className="font-mono text-slate-50">
+                          {Number(block.lengthIn).toFixed(2)}" ×{" "}
+                          {Number(block.widthIn).toFixed(2)}"
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Stack depth</span>
+                        <span className="font-mono text-slate-50">
+                          {totalStackThicknessIn.toFixed(2)}"
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Quoted quantity</span>
+                        <span className="font-mono text-slate-50">
+                          {effectiveQty != null
+                            ? effectiveQty.toLocaleString()
+                            : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+                    <div className="text-xs font-semibold text-slate-100 mb-1">
+                      Closest matching cartons (coming soon)
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                      This panel will show the best fit{" "}
+                      <span className="text-sky-300 font-medium">RSC</span> and{" "}
+                      <span className="text-sky-300 font-medium">mailer</span>{" "}
+                      for the foam stack above, based on the Box Partners
+                      catalog. The selection will be saved back to the quote
+                      when you apply.
+                    </p>
+                    <div className="grid grid-cols-1 gap-2">
+                      <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                        <div className="text-[11px] font-semibold text-slate-100">
+                          Best RSC match
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Will show: part number, inside dims, and fit score.
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                        <div className="text-[11px] font-semibold text-slate-100">
+                          Best Mailer match
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Will show: part number, inside dims, and fit score.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+
               </section>
 
               {/* RIGHT: Inspector + customer info + cavities list */}
