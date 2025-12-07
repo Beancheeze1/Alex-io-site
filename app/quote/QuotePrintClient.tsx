@@ -50,6 +50,9 @@ type ItemRow = {
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
 
+  // NEW: optional notes from quote_items (used for carton lines)
+  notes?: string | null;
+
   // NEW: richer pricing metadata from /api/quote/print
   pricing_meta?: {
     min_charge?: number | null;
@@ -1186,9 +1189,7 @@ export default function QuotePrintClient() {
               )}
 
               {!boxesLoading && boxesError && (
-                <p style={{ fontSize: 13, color: "#b91c1c" }}>
-                  {boxesError}
-                </p>
+                <p style={{ fontSize: 13, color: "#b91c1c" }}>{boxesError}</p>
               )}
 
               {!boxesLoading &&
@@ -1533,28 +1534,52 @@ export default function QuotePrintClient() {
                           item.width_in +
                           " × " +
                           item.height_in;
-                        const baseLabel =
-                          item.material_name ||
-                          "Material #" + item.material_id;
 
-                        const subParts: string[] = [];
-                        if (item.material_family) {
-                          subParts.push(item.material_family);
+                        // Detect carton lines based on our standardized notes prefix
+                        const rawNotes =
+                          typeof item.notes === "string"
+                            ? item.notes.trim()
+                            : "";
+                        const cartonNotes = rawNotes.startsWith(
+                          "Requested shipping carton:",
+                        )
+                          ? rawNotes
+                          : null;
+                        const isCarton = !!cartonNotes;
+
+                        const lineLabel = isCarton
+                          ? `Carton ${idx + 1}`
+                          : `Line ${idx + 1}`;
+
+                        const baseLabel = isCarton
+                          ? cartonNotes
+                              .replace(
+                                "Requested shipping carton:",
+                                "Requested carton:",
+                              )
+                              .trim()
+                          : item.material_name ||
+                            "Material #" + item.material_id;
+
+                        let subLabel: string | null = null;
+                        if (!isCarton) {
+                          const subParts: string[] = [];
+                          if (item.material_family) {
+                            subParts.push(item.material_family);
+                          }
+                          const densRaw = (item as any).density_lb_ft3;
+                          const densNum =
+                            typeof densRaw === "number"
+                              ? densRaw
+                              : densRaw != null
+                              ? Number(densRaw)
+                              : NaN;
+                          if (Number.isFinite(densNum) && densNum > 0) {
+                            subParts.push(`${densNum.toFixed(1)} lb/ft³`);
+                          }
+                          subLabel =
+                            subParts.length > 0 ? subParts.join(" · ") : null;
                         }
-                        const densRaw = (item as any).density_lb_ft3;
-                        const densNum =
-                          typeof densRaw === "number"
-                            ? densRaw
-                            : densRaw != null
-                            ? Number(densRaw)
-                            : NaN;
-                        if (Number.isFinite(densNum) && densNum > 0) {
-                          subParts.push(`${densNum.toFixed(1)} lb/ft³`);
-                        }
-                        const subLabel =
-                          subParts.length > 0
-                            ? subParts.join(" · ")
-                            : null;
 
                         const unit = parsePriceField(
                           item.price_unit_usd ?? null,
@@ -1562,6 +1587,7 @@ export default function QuotePrintClient() {
                         const total = parsePriceField(
                           item.price_total_usd ?? null,
                         );
+
                         return (
                           <tr key={item.id}>
                             <td
@@ -1570,9 +1596,7 @@ export default function QuotePrintClient() {
                                 borderBottom: "1px solid #f3f4f6",
                               }}
                             >
-                              <div style={{ fontWeight: 500 }}>
-                                Line {idx + 1}
-                              </div>
+                              <div style={{ fontWeight: 500 }}>{lineLabel}</div>
                               <div style={{ color: "#6b7280" }}>
                                 {baseLabel}
                                 {subLabel && (
@@ -1740,24 +1764,24 @@ export default function QuotePrintClient() {
                           fontSize: 12,
                         }}
                       >
-                          <a
-                            href={
-                              "/quote/layout?quote_no=" +
-                              encodeURIComponent(quote.quote_no)
-                            }
-                            style={{
-                              display: "inline-block",
-                              padding: "4px 10px",
-                              borderRadius: 999,
-                              border: "1px solid #c7d2fe",
-                              background: "#eef2ff",
-                              color: "#1d4ed8",
-                              textDecoration: "none",
-                              fontWeight: 500,
-                            }}
-                          >
-                            Open layout editor
-                          </a>
+                        <a
+                          href={
+                            "/quote/layout?quote_no=" +
+                            encodeURIComponent(quote.quote_no)
+                          }
+                          style={{
+                            display: "inline-block",
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            border: "1px solid #c7d2fe",
+                            background: "#eef2ff",
+                            color: "#1d4ed8",
+                            textDecoration: "none",
+                            fontWeight: 500,
+                          }}
+                        >
+                          Open layout editor
+                        </a>
                       </div>
                     </div>
 
