@@ -834,6 +834,10 @@ function LayoutEditorHost(props: {
     bestMailer: null,
   });
 
+    const [selectedCartonKind, setSelectedCartonKind] =
+    React.useState<"RSC" | "MAILER" | null>(null);
+
+
 
   // Local input state for selected cavity dims (to avoid "wonky" inputs)
   const [cavityInputs, setCavityInputs] = React.useState<{
@@ -1169,6 +1173,37 @@ function LayoutEditorHost(props: {
           phone: customerPhone.trim() || null,
         },
       };
+
+            // Attach chosen carton (if any) so the backend can add a box line item
+      if (selectedCartonKind && (boxSuggest.bestRsc || boxSuggest.bestMailer)) {
+        const chosen =
+          selectedCartonKind === "RSC"
+            ? boxSuggest.bestRsc
+            : boxSuggest.bestMailer;
+
+        if (chosen) {
+          payload.selectedCarton = {
+            style: chosen.style,
+            sku: chosen.sku,
+            description: chosen.description,
+            inside_length_in: chosen.inside_length_in,
+            inside_width_in: chosen.inside_width_in,
+            inside_height_in: chosen.inside_height_in,
+            fit_score: chosen.fit_score,
+            notes: chosen.notes ?? null,
+          };
+        }
+      }
+
+      // Attach foam layers summary so the backend can add each pad as a line item
+      if (layers && layers.length > 0) {
+        payload.foamLayers = layers.map((layer) => ({
+          id: layer.id,
+          label: layer.label,
+          thicknessIn: getLayerThickness(layer.id),
+        }));
+      }
+
 
       const nQty = Number(qty);
       if (Number.isFinite(nQty) && nQty > 0) {
@@ -1858,6 +1893,18 @@ function LayoutEditorHost(props: {
                     <span className="text-sky-300 font-medium">mailer</span>.
                   </p>
 
+                                    {selectedCartonKind && (
+                    <div className="mb-2 text-[11px] text-sky-200">
+                      Selected carton:{" "}
+                      <span className="font-mono">
+                        {selectedCartonKind === "RSC"
+                          ? boxSuggest.bestRsc?.sku
+                          : boxSuggest.bestMailer?.sku}
+                      </span>
+                    </div>
+                  )}
+
+
                   {!suggesterReady ? (
                     <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
                       <div className="font-semibold text-slate-100 mb-1">
@@ -1916,6 +1963,24 @@ function LayoutEditorHost(props: {
                               {boxSuggest.bestRsc.notes}
                             </div>
                           )}
+
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCartonKind("RSC")}
+                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+                                selectedCartonKind === "RSC"
+                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
+                                  : "border-slate-600 bg-slate-900 text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+                              }`}
+                            >
+                              {selectedCartonKind === "RSC"
+                                ? "Selected carton"
+                                : "Pick this box"}
+                            </button>
+                          </div>
+
+
                         </div>
                       )}
 
@@ -1950,6 +2015,24 @@ function LayoutEditorHost(props: {
                               {boxSuggest.bestMailer.notes}
                             </div>
                           )}
+
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCartonKind("MAILER")}
+                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+                                selectedCartonKind === "MAILER"
+                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
+                                  : "border-slate-600 bg-slate-900 text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+                              }`}
+                            >
+                              {selectedCartonKind === "MAILER"
+                                ? "Selected carton"
+                                : "Pick this box"}
+                            </button>
+                          </div>
+
+
                         </div>
                       )}
                     </div>
