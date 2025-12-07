@@ -1,11 +1,11 @@
 // app/api/boxes/for-quote/route.ts
 //
-// Read-only helper for admin views.
+// Read-only helper for admin views and quote viewer.
 //
 // Given a quote_no (e.g. ?quote_no=Q-AI-20251206-021028) this returns
 // any cartons the customer has "requested" from the public quote viewer.
 //
-// Shape matches AdminQuoteClient expectations:
+// Shape matches AdminQuoteClient / QuotePrintClient expectations:
 //   {
 //     ok: true,
 //     selections: [
@@ -18,6 +18,9 @@
 //         style: string | null;
 //         description: string | null;
 //         qty: number;
+//         inside_length_in: number;
+//         inside_width_in: number;
+//         inside_height_in: number;
 //       },
 //       ...
 //     ]
@@ -42,6 +45,9 @@ type Row = {
   style: string | null;
   description: string | null;
   qty: number;
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
 };
 
 type Ok = {
@@ -78,7 +84,10 @@ export async function GET(req: NextRequest) {
         b.vendor,
         b.style,
         b.description,
-        qbs.qty
+        qbs.qty,
+        b.inside_length_in,
+        b.inside_width_in,
+        b.inside_height_in
       FROM public.quote_box_selections AS qbs
       JOIN public."quotes" AS q
         ON q.id = qbs.quote_id

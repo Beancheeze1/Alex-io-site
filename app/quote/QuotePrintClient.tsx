@@ -15,6 +15,7 @@
 //   - Layout status in a "Layout & next steps" card
 //   - Line items table (with pricing columns if present) in a card
 //   - Foam layout package summary + inline SVG preview
+//   - Suggested cartons block backed by /api/boxes/suggest + /api/boxes/add-to-quote
 //
 // Important:
 //   - No SVG/DXF/STEP download links here (client shouldn’t be able to download CAD files).
@@ -50,10 +51,7 @@ type ItemRow = {
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
 
-  // NEW: optional notes from quote_items (used for carton lines)
-  notes?: string | null;
-
-  // NEW: richer pricing metadata from /api/quote/print
+  // richer pricing metadata from /api/quote/print
   pricing_meta?: {
     min_charge?: number | null;
     used_min_charge?: boolean;
@@ -61,7 +59,7 @@ type ItemRow = {
     kerf_pct?: number | null;
   } | null;
 
-  // NEW: high-level pricing breakdown blob from /api/quote/print
+  // high-level pricing breakdown blob from /api/quote/print
   pricing_breakdown?: {
     volumeIn3: number;
     materialWeightLb: number;
@@ -152,6 +150,34 @@ type BoxesErr = {
 
 type BoxesResponse = BoxesOk | BoxesErr;
 
+// ===== Requested cartons API (for-quote) =====
+
+type RequestedBox = {
+  id: number; // quote_box_selections.id
+  quote_id: number;
+  box_id: number;
+  sku: string;
+  vendor: string | null;
+  style: string | null;
+  description: string | null;
+  qty: number;
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
+};
+
+type RequestedBoxesOk = {
+  ok: true;
+  selections: RequestedBox[];
+};
+
+type RequestedBoxesErr = {
+  ok: false;
+  error: string;
+};
+
+type RequestedBoxesResponse = RequestedBoxesOk | RequestedBoxesErr;
+
 function parsePriceField(
   raw: string | number | null | undefined,
 ): number | null {
@@ -190,7 +216,7 @@ export default function QuotePrintClient() {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
-  // Box suggestion state
+  // Box suggestion state (from /api/boxes/suggest)
   const [boxesLoading, setBoxesLoading] = React.useState<boolean>(false);
   const [boxesError, setBoxesError] = React.useState<string | null>(null);
   const [boxesBlock, setBoxesBlock] = React.useState<BoxesBlock | null>(null);
@@ -201,11 +227,13 @@ export default function QuotePrintClient() {
     BoxSuggestion[]
   >([]);
 
+  // Requested cartons stored in DB (from /api/boxes/for-quote)
+  const [requestedBoxes, setRequestedBoxes] = React.useState<RequestedBox[]>(
+    [],
+  );
+
   // "Add to quote" state
   const [addingBoxId, setAddingBoxId] = React.useState<number | null>(null);
-  const [addedBoxIds, setAddedBoxIds] = React.useState<Record<number, boolean>>(
-    {},
-  );
   const [addBoxError, setAddBoxError] = React.useState<string | null>(null);
 
   // Ref to the SVG preview container so we can scale/center the inner <svg>
@@ -217,6 +245,29 @@ export default function QuotePrintClient() {
       window.print();
     }
   }, []);
+
+  // Helper: refresh requested cartons from /api/boxes/for-quote
+  const refreshRequestedBoxes = React.useCallback(async () => {
+    if (!quoteNo) return;
+    try {
+      const res = await fetch(
+        "/api/boxes/for-quote?quote_no=" + encodeURIComponent(quoteNo),
+        { cache: "no-store" },
+      );
+      const json = (await res.json()) as RequestedBoxesResponse;
+
+      if (!res.ok || !json.ok) {
+        console.error("Error loading requested cartons:", json);
+        setRequestedBoxes([]);
+        return;
+      }
+
+      setRequestedBoxes(json.selections || []);
+    } catch (err) {
+      console.error("Error fetching /api/boxes/for-quote:", err);
+      setRequestedBoxes([]);
+    }
+  }, [quoteNo]);
 
   // Forward-to-sales handler (mailto with quote number + link + requested cartons)
   const handleForwardToSales = React.useCallback(() => {
@@ -238,32 +289,44 @@ export default function QuotePrintClient() {
       window.location.href,
     ];
 
-    // Build "Customer-requested cartons" section from current Requested selections
     const primaryQty = items[0]?.qty ?? 1;
+
+    // Build "Customer-requested cartons" section from requestedBoxes
     const requestedLines: string[] = [];
 
-    const allSuggestions: BoxSuggestion[] = [
-      ...rscSuggestions,
-      ...mailerSuggestions,
-    ];
+    for (const sel of requestedBoxes) {
+      const labelParts: string[] = [];
 
-    for (const b of allSuggestions) {
-      if (!addedBoxIds[b.id]) continue;
-      const label =
-        b.description && b.description.trim().length > 0
-          ? b.description.trim()
-          : `${b.vendor} ${b.sku}`;
+      if (sel.description && sel.description.trim().length > 0) {
+        labelParts.push(sel.description.trim());
+      } else {
+        const styleLabel = sel.style ? sel.style : "Carton";
+        labelParts.push(`${styleLabel} ${sel.sku}`);
+      }
+
+      if (sel.vendor) {
+        labelParts.push(`Vendor: ${sel.vendor}`);
+      }
+
+      const dimsOk =
+        Number.isFinite(sel.inside_length_in) &&
+        Number.isFinite(sel.inside_width_in) &&
+        Number.isFinite(sel.inside_height_in);
+
+      const dimsLabel = dimsOk
+        ? `Inside ${sel.inside_length_in} × ${sel.inside_width_in} × ${sel.inside_height_in} in`
+        : null;
+
+      const labelMain = labelParts.join(" · ");
+      const qty = sel.qty || primaryQty;
+
       requestedLines.push(
-        `- ${label} (${b.vendor} SKU ${b.sku}) – Qty ${primaryQty}`,
+        `- ${labelMain}${dimsLabel ? ` (${dimsLabel})` : ""} – Qty ${qty}`,
       );
     }
 
     if (requestedLines.length > 0) {
-      bodyLines.push(
-        "",
-        "Customer-requested cartons:",
-        ...requestedLines,
-      );
+      bodyLines.push("", "Customer-requested cartons:", ...requestedLines);
     }
 
     bodyLines.push("", "Thanks!");
@@ -279,7 +342,7 @@ export default function QuotePrintClient() {
       body;
 
     window.location.href = mailto;
-  }, [quoteNo, quote, items, rscSuggestions, mailerSuggestions, addedBoxIds]);
+  }, [quoteNo, quote, items, requestedBoxes]);
 
   // Schedule call handler (Calendly or Google Calendar URL)
   const handleScheduleCall = React.useCallback(() => {
@@ -375,7 +438,7 @@ export default function QuotePrintClient() {
     };
   }, [quoteNo]);
 
-  // Fetch box suggestions (based on quote_no)
+  // Fetch box suggestions (based on quote_no) – we keep only the top 1 RSC + top 1 mailer
   React.useEffect(() => {
     if (!quoteNo) return;
 
@@ -411,8 +474,14 @@ export default function QuotePrintClient() {
         if (!cancelled) {
           const ok = json as BoxesOk;
           setBoxesBlock(ok.block);
-          setRscSuggestions(ok.rsc || []);
-          setMailerSuggestions(ok.mailer || []);
+
+          // Option B behavior: just the best RSC + best mailer
+          const bestRsc = ok.rsc && ok.rsc.length > 0 ? [ok.rsc[0]] : [];
+          const bestMailer =
+            ok.mailer && ok.mailer.length > 0 ? [ok.mailer[0]] : [];
+
+          setRscSuggestions(bestRsc);
+          setMailerSuggestions(bestMailer);
         }
       } catch (err) {
         console.error("Error fetching /api/boxes/suggest:", err);
@@ -432,6 +501,12 @@ export default function QuotePrintClient() {
       cancelled = true;
     };
   }, [quoteNo]);
+
+  // Load requested cartons from DB whenever quoteNo changes
+  React.useEffect(() => {
+    if (!quoteNo) return;
+    refreshRequestedBoxes();
+  }, [quoteNo, refreshRequestedBoxes]);
 
   const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
 
@@ -606,11 +681,8 @@ export default function QuotePrintClient() {
           return;
         }
 
-        // mark this box as "requested"
-        setAddedBoxIds((prev) => ({
-          ...prev,
-          [boxId]: true,
-        }));
+        // Refresh requested cartons from DB so UI + email summary stay in sync
+        await refreshRequestedBoxes();
       } catch (err: any) {
         console.error("Error calling /api/boxes/add-to-quote:", err);
         setAddBoxError(
@@ -620,7 +692,7 @@ export default function QuotePrintClient() {
         setAddingBoxId(null);
       }
     },
-    [quoteNo, quote, primaryItem],
+    [quoteNo, quote, primaryItem, refreshRequestedBoxes],
   );
 
   // ===================== RENDER =====================
@@ -1255,7 +1327,9 @@ export default function QuotePrintClient() {
                             }}
                           >
                             {rscSuggestions.map((b) => {
-                              const isAdded = !!addedBoxIds[b.id];
+                              const isRequested = requestedBoxes.some(
+                                (rb) => rb.box_id === b.id,
+                              );
                               const isBusy = addingBoxId === b.id;
                               return (
                                 <li
@@ -1277,7 +1351,7 @@ export default function QuotePrintClient() {
                                     {b.inside_height_in} in • {b.vendor} SKU{" "}
                                     {b.sku}
                                   </div>
-                                  {!isAdded ? (
+                                  {!isRequested ? (
                                     <button
                                       type="button"
                                       disabled={isBusy}
@@ -1346,7 +1420,9 @@ export default function QuotePrintClient() {
                             }}
                           >
                             {mailerSuggestions.map((b) => {
-                              const isAdded = !!addedBoxIds[b.id];
+                              const isRequested = requestedBoxes.some(
+                                (rb) => rb.box_id === b.id,
+                              );
                               const isBusy = addingBoxId === b.id;
                               return (
                                 <li
@@ -1368,7 +1444,7 @@ export default function QuotePrintClient() {
                                     {b.inside_height_in} in • {b.vendor} SKU{" "}
                                     {b.sku}
                                   </div>
-                                  {!isAdded ? (
+                                  {!isRequested ? (
                                     <button
                                       type="button"
                                       disabled={isBusy}
@@ -1460,7 +1536,7 @@ export default function QuotePrintClient() {
                 quote.
               </div>
 
-              {items.length === 0 ? (
+              {items.length === 0 && requestedBoxes.length === 0 ? (
                 <p style={{ color: "#6b7280", fontSize: 13 }}>
                   No line items stored for this quote yet. Once the material and
                   details are finalized, the primary line will appear here.
@@ -1527,6 +1603,7 @@ export default function QuotePrintClient() {
                       </tr>
                     </thead>
                     <tbody>
+                      {/* Foam / core quote items */}
                       {items.map((item, idx) => {
                         const dims =
                           item.length_in +
@@ -1534,52 +1611,28 @@ export default function QuotePrintClient() {
                           item.width_in +
                           " × " +
                           item.height_in;
+                        const baseLabel =
+                          item.material_name ||
+                          "Material #" + item.material_id;
 
-                        // Detect carton lines based on our standardized notes prefix
-                        const rawNotes =
-                          typeof item.notes === "string"
-                            ? item.notes.trim()
-                            : "";
-                        const cartonNotes = rawNotes.startsWith(
-                          "Requested shipping carton:",
-                        )
-                          ? rawNotes
-                          : null;
-                        const isCarton = !!cartonNotes;
-
-                        const lineLabel = isCarton
-                          ? `Carton ${idx + 1}`
-                          : `Line ${idx + 1}`;
-
-                        const baseLabel = isCarton
-                          ? cartonNotes
-                              .replace(
-                                "Requested shipping carton:",
-                                "Requested carton:",
-                              )
-                              .trim()
-                          : item.material_name ||
-                            "Material #" + item.material_id;
-
-                        let subLabel: string | null = null;
-                        if (!isCarton) {
-                          const subParts: string[] = [];
-                          if (item.material_family) {
-                            subParts.push(item.material_family);
-                          }
-                          const densRaw = (item as any).density_lb_ft3;
-                          const densNum =
-                            typeof densRaw === "number"
-                              ? densRaw
-                              : densRaw != null
-                              ? Number(densRaw)
-                              : NaN;
-                          if (Number.isFinite(densNum) && densNum > 0) {
-                            subParts.push(`${densNum.toFixed(1)} lb/ft³`);
-                          }
-                          subLabel =
-                            subParts.length > 0 ? subParts.join(" · ") : null;
+                        const subParts: string[] = [];
+                        if (item.material_family) {
+                          subParts.push(item.material_family);
                         }
+                        const densRaw = (item as any).density_lb_ft3;
+                        const densNum =
+                          typeof densRaw === "number"
+                            ? densRaw
+                            : densRaw != null
+                            ? Number(densRaw)
+                            : NaN;
+                        if (Number.isFinite(densNum) && densNum > 0) {
+                          subParts.push(`${densNum.toFixed(1)} lb/ft³`);
+                        }
+                        const subLabel =
+                          subParts.length > 0
+                            ? subParts.join(" · ")
+                            : null;
 
                         const unit = parsePriceField(
                           item.price_unit_usd ?? null,
@@ -1587,7 +1640,6 @@ export default function QuotePrintClient() {
                         const total = parsePriceField(
                           item.price_total_usd ?? null,
                         );
-
                         return (
                           <tr key={item.id}>
                             <td
@@ -1596,7 +1648,9 @@ export default function QuotePrintClient() {
                                 borderBottom: "1px solid #f3f4f6",
                               }}
                             >
-                              <div style={{ fontWeight: 500 }}>{lineLabel}</div>
+                              <div style={{ fontWeight: 500 }}>
+                                Line {idx + 1}
+                              </div>
                               <div style={{ color: "#6b7280" }}>
                                 {baseLabel}
                                 {subLabel && (
@@ -1645,6 +1699,100 @@ export default function QuotePrintClient() {
                               }}
                             >
                               {formatUsd(total)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {/* Requested cartons appended as additional lines */}
+                      {requestedBoxes.map((rb) => {
+                        const baseLabel =
+                          (rb.description && rb.description.trim().length > 0
+                            ? rb.description.trim()
+                            : `${rb.style || "Carton"} ${rb.sku}`) || rb.sku;
+
+                        const subParts: string[] = [];
+                        if (rb.vendor) subParts.push(rb.vendor);
+                        const dimsOk =
+                          Number.isFinite(rb.inside_length_in) &&
+                          Number.isFinite(rb.inside_width_in) &&
+                          Number.isFinite(rb.inside_height_in);
+                        if (dimsOk) {
+                          subParts.push(
+                            `Inside ${rb.inside_length_in} × ${rb.inside_width_in} × ${rb.inside_height_in} in`,
+                          );
+                        }
+                        const subLabel =
+                          subParts.length > 0
+                            ? subParts.join(" · ")
+                            : null;
+
+                        const dimsDisplay = dimsOk
+                          ? `${rb.inside_length_in} × ${rb.inside_width_in} × ${rb.inside_height_in}`
+                          : "—";
+
+                        const qty = rb.qty || primaryItem?.qty || 1;
+
+                        return (
+                          <tr key={`carton-${rb.id}`}>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                              }}
+                            >
+                              <div style={{ fontWeight: 500 }}>
+                                Carton selection
+                              </div>
+                              <div style={{ color: "#6b7280" }}>
+                                {baseLabel}
+                                {subLabel && (
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      marginTop: 2,
+                                    }}
+                                  >
+                                    {subLabel}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                              }}
+                            >
+                              {dimsDisplay}
+                            </td>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                                textAlign: "right",
+                              }}
+                            >
+                              {qty}
+                            </td>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                                textAlign: "right",
+                              }}
+                            >
+                              {/* Cartons not priced yet */}
+                              {formatUsd(null)}
+                            </td>
+                            <td
+                              style={{
+                                padding: 8,
+                                borderBottom: "1px solid #f3f4f6",
+                                textAlign: "right",
+                              }}
+                            >
+                              {formatUsd(null)}
                             </td>
                           </tr>
                         );
