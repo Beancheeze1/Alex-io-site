@@ -86,11 +86,7 @@ function parseDimsTriple(
 }
 
 /* "LxW" or "LxWxD" parser (depth default 1") */
-function parseCavityDims(raw: string): {
-  L: number;
-  W: number;
-  D: number;
-} | null {
+function parseCavityDims(raw: string): { L: number; W: number; D: number } | null {
   const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
   const num = String.raw`(?:\d+(?:\.\d+)?|\.\d+)`;
   const tripleRe = new RegExp(`(${num})\\s*[x×]\\s*(${num})\\s*[x×]\\s*(${num})`);
@@ -119,14 +115,11 @@ function snapInches(v: number): number {
   return Math.round(v / SNAP_IN) * SNAP_IN;
 }
 
-export default function LayoutPage({
-  searchParams,
-}: {
-  searchParams?: SearchParams;
-}) {
-  const initialQuoteNoParam = (searchParams?.quote_no ??
-    searchParams?.quote ??
-    "") as string | string[] | undefined;
+export default function LayoutPage({ searchParams }: { searchParams?: SearchParams }) {
+  const initialQuoteNoParam = (searchParams?.quote_no ?? searchParams?.quote ?? "") as
+    | string
+    | string[]
+    | undefined;
   const [quoteNoFromUrl, setQuoteNoFromUrl] = React.useState<string>(
     Array.isArray(initialQuoteNoParam)
       ? initialQuoteNoParam[0]?.trim() || ""
@@ -137,8 +130,7 @@ export default function LayoutPage({
     try {
       if (typeof window === "undefined") return;
       const url = new URL(window.location.href);
-      const q =
-        url.searchParams.get("quote_no") || url.searchParams.get("quote") || "";
+      const q = url.searchParams.get("quote_no") || url.searchParams.get("quote") || "";
       if (q && q !== quoteNoFromUrl) setQuoteNoFromUrl(q);
     } catch {}
   }, []);
@@ -155,8 +147,7 @@ export default function LayoutPage({
 
   // Server-side / initial guesses from Next searchParams
   const serverBlockStr = normalizeDimsParam(
-    (searchParams?.dims ??
-      searchParams?.block) as string | string[] | undefined,
+    (searchParams?.dims ?? searchParams?.block) as string | string[] | undefined,
   );
 
   const serverCavityStr = normalizeCavitiesParam(
@@ -169,17 +160,15 @@ export default function LayoutPage({
   const hasRealQuoteNo = !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
 
   const quoteNo = hasRealQuoteNo ? quoteNoFromUrl.trim() : "Q-AI-EXAMPLE";
-  const [materialIdFromUrl, setMaterialIdFromUrl] =
-    React.useState<number | null>(() => {
-      const raw = searchParams?.material_id as
-        | string
-        | string[]
-        | undefined;
+  const [materialIdFromUrl, setMaterialIdFromUrl] = React.useState<number | null>(
+    () => {
+      const raw = searchParams?.material_id as string | string[] | undefined;
       if (!raw) return null;
       const first = Array.isArray(raw) ? raw[0] : raw;
       const parsed = Number(first);
       return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-    });
+    },
+  );
   React.useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -196,9 +185,7 @@ export default function LayoutPage({
 
   /* ---------- Build initial layout (from DB if available) ---------- */
 
-  const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(
-    null,
-  );
+  const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(null);
   const [initialNotes, setInitialNotes] = React.useState<string>("");
   const [initialQty, setInitialQty] = React.useState<number | null>(null);
   const [initialMaterialId, setInitialMaterialId] =
@@ -449,8 +436,7 @@ export default function LayoutPage({
           !hasCavitiesFromUrl
         ) {
           const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
-          const notesFromDb =
-            (json.layoutPkg.notes as string | null) ?? "";
+          const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
 
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
@@ -591,12 +577,7 @@ function LayoutEditorHost(props: {
   } = useLayoutModel(initialLayout);
 
   const { block, cavities, stack } = layout as LayoutModel & {
-    stack?: {
-      id: string;
-      label: string;
-      cavities: any[];
-      thicknessIn?: number;
-    }[];
+    stack?: { id: string; label: string; cavities: any[] }[];
   };
 
   const activeLayer =
@@ -605,17 +586,16 @@ function LayoutEditorHost(props: {
       : null;
 
   const activeLayerLabel = activeLayer?.label ?? null;
-  const selectedCavity =
-    cavities.find((c) => c.id === selectedId) || null;
+  const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
 
   // Total stack thickness used for box/carton suggestions.
-  // For now, treat each layer as one full block thickness.
+  // Combined thickness = block thickness * number of layers (1 layer = block thickness).
   const blockThicknessIn = Number(block.thicknessIn) || 0;
-  const totalStackThicknessIn =
-    stack && stack.length > 0
-      ? blockThicknessIn * stack.length
-      : blockThicknessIn;
+  let totalStackThicknessIn = blockThicknessIn;
 
+  if (stack && stack.length > 0) {
+    totalStackThicknessIn = blockThicknessIn * stack.length;
+  }
 
   // Multi-layer: derive layers view if stack exists
   const layers = layout.stack && layout.stack.length > 0 ? layout.stack : null;
@@ -811,9 +791,7 @@ function LayoutEditorHost(props: {
     setCavityInputs({
       id: selectedCavity.id,
       length:
-        selectedCavity.lengthIn != null
-          ? String(selectedCavity.lengthIn)
-          : "",
+        selectedCavity.lengthIn != null ? String(selectedCavity.lengthIn) : "",
       width:
         selectedCavity.widthIn != null ? String(selectedCavity.widthIn) : "",
       depth:
@@ -827,11 +805,7 @@ function LayoutEditorHost(props: {
 
   const commitCavityField = React.useCallback(
     (field: "length" | "width" | "depth" | "cornerRadius") => {
-      if (
-        !selectedCavity ||
-        !cavityInputs.id ||
-        cavityInputs.id !== selectedCavity.id
-      ) {
+      if (!selectedCavity || !cavityInputs.id || cavityInputs.id !== selectedCavity.id) {
         return;
       }
 
@@ -860,10 +834,7 @@ function LayoutEditorHost(props: {
       const snapped = snapInches(parsed);
 
       // Circles keep length/width as the same "diameter"
-      if (
-        selectedCavity.shape === "circle" &&
-        (field === "length" || field === "width")
-      ) {
+      if (selectedCavity.shape === "circle" && (field === "length" || field === "width")) {
         updateCavityDims(selectedCavity.id, {
           lengthIn: snapped,
           widthIn: snapped,
@@ -982,6 +953,15 @@ function LayoutEditorHost(props: {
   const missingCustomerInfo =
     !customerName.trim() || !customerEmail.trim();
 
+  // Box suggester Option B: always visible, but “disabled” until
+  // customer info + a valid quoted qty are present.
+  const boxSuggesterDisabled =
+    missingCustomerInfo ||
+    !(
+      typeof qty === "number" &&
+      Number.isFinite(qty) &&
+      qty > 0
+    );
   /* ---------- Palette interactions ---------- */
 
   const handleAddPreset = (shape: CavityShape) => {
@@ -1100,8 +1080,7 @@ function LayoutEditorHost(props: {
       }
 
       const svg = buildSvgFromLayout(layout, {
-        notes:
-          notes && notes.trim().length > 0 ? notes.trim() : undefined,
+        notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
         materialLabel: materialLabel || undefined,
       });
 
@@ -1182,8 +1161,9 @@ function LayoutEditorHost(props: {
   const stackDepthLabel =
     totalStackThicknessIn > 0 ? `${totalStackThicknessIn.toFixed(2)}"` : "—";
 
-  const qtyLabel =
-    effectiveQty != null ? effectiveQty.toLocaleString() : "—";
+    const qtyLabel =
+    effectiveQty != null ? effectiveQty!.toLocaleString() : "—";
+
 
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
@@ -1280,8 +1260,8 @@ function LayoutEditorHost(props: {
                     Cavity palette
                   </div>
                   <p className="text-[11px] text-slate-400 mb-2">
-                    Click a style to add a new pocket, then drag and resize it
-                    in the block.
+                    Click a style to add a new pocket, then drag and resize it in
+                    the block.
                   </p>
                 </div>
 
@@ -1374,8 +1354,13 @@ function LayoutEditorHost(props: {
                   )}
                 </div>
 
-                {/* Closest matching cartons preview (moved from bottom row) */}
-                <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3">
+                {/* Closest matching cartons preview (Option B behavior) */}
+                <div
+                  className={
+                    "mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3 transition-opacity" +
+                    (boxSuggesterDisabled ? " opacity-60" : "")
+                  }
+                >
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-xs font-semibold text-slate-100">
                       Closest matching cartons
@@ -1391,7 +1376,7 @@ function LayoutEditorHost(props: {
                     for the foam footprint and stack depth above. The chosen
                     carton will be saved back to the quote once wired.
                   </p>
-                  <div className="space-y-2">
+                  <div className="space-y-2 pointer-events-none">
                     <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
                       <div className="text-[11px] font-semibold text-slate-100">
                         Best RSC match
@@ -1408,6 +1393,23 @@ function LayoutEditorHost(props: {
                         Will show: part number, inside dims, and fit score.
                       </div>
                     </div>
+                  </div>
+                  <div className="mt-2 text-[10px] text-slate-400">
+                    {boxSuggesterDisabled ? (
+                      <>
+                        Enter customer{" "}
+                        <span className="font-semibold">name</span> and{" "}
+                        <span className="font-semibold">email</span>, plus a
+                        valid <span className="font-semibold">quantity</span>{" "}
+                        to enable real box suggestions in a future update.
+                      </>
+                    ) : (
+                      <>
+                        Box suggestions will use this layout’s footprint, stack depth,
+                        and quoted quantity. Results will save back to the quote once
+                        wired.
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1444,7 +1446,7 @@ function LayoutEditorHost(props: {
               </aside>
               {/* CENTER: Big visualizer */}
               <section className="flex-1 flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div>
                     <div className="flex items-center gap-2 text-sm text-slate-50">
                       <span className="font-semibold">
@@ -1561,12 +1563,12 @@ function LayoutEditorHost(props: {
                   </div>
 
                   {/* zoom + qty + advisor + apply button */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap justify-end md:justify-start">
                     <div className="hidden md:flex items-center text-[11px] text-slate-400 mr-1">
                       <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80 mr-1.5" />
                       <span>Layout controls</span>
                     </div>
-                    <div className="inline-flex items-center gap-3 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 shadow-[0_0_16px_rgba(15,23,42,0.8)]">
+                    <div className="inline-flex items-center gap-3 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 shadow-[0_0_16px_rgba(15,23,42,0.8)] flex-wrap">
                       <div className="flex items-center gap-1 text-[11px] text-slate-400">
                         <span>Zoom</span>
                         <input
@@ -1664,7 +1666,7 @@ function LayoutEditorHost(props: {
                   </div>
                 </div>
 
-                <p className="text-[11px] text-slate-400 leading-snug">
+                <p className="text-[11px] text-slate-300 leading-snug">
                   Drag cavities to adjust placement. Use the square handle at the
                   bottom-right of each cavity to resize. Cavities are placed
                   inside a 0.5&quot; wall on all sides. When a cavity is
@@ -1692,7 +1694,6 @@ function LayoutEditorHost(props: {
                     />
                   </div>
                 </div>
-
                 {/* Box suggester preview + bottom cartons row (hidden for now, JSX preserved) */}
                 {false && (
                   <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
@@ -1731,8 +1732,11 @@ function LayoutEditorHost(props: {
                             Quoted quantity
                           </span>
                           <span className="font-mono text-slate-50">
-                            {qtyLabel}
-                          </span>
+  {effectiveQty != null
+    ? effectiveQty!.toLocaleString()
+    : "—"}
+</span>
+
                         </div>
                       </div>
                     </div>
@@ -1921,7 +1925,6 @@ function LayoutEditorHost(props: {
                     </div>
                   )}
                 </div>
-
                 {/* Cavities list + editor */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
                   <div className="text-xs font-semibold text-slate-100">
@@ -2155,7 +2158,9 @@ function LayoutEditorHost(props: {
                                   cornerRadius: e.target.value,
                                 }))
                               }
-                              onBlur={() => commitCavityField("cornerRadius")}
+                              onBlur={() =>
+                                commitCavityField("cornerRadius")
+                              }
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
@@ -2186,7 +2191,6 @@ function LayoutEditorHost(props: {
     </main>
   );
 }
-
 /* ---------- SVG export helper ---------- */
 
 function buildSvgFromLayout(
@@ -2227,8 +2231,7 @@ function buildSvgFromLayout(
     const x = blockX + c.x * blockW;
     const y = blockY + c.y * blockH;
 
-    const label =
-      c.label ?? `${c.lengthIn}×${c.widthIn}×${c.depthIn}"`;
+    const label = c.label ?? `${c.lengthIn}×${c.widthIn}×${c.depthIn}"`;
 
     if (c.shape === "circle") {
       const r = Math.min(cavW, cavH) / 2;
@@ -2237,6 +2240,7 @@ function buildSvgFromLayout(
       cavects.push(
         [
           `<g>`,
+
           `  <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(
             2,
           )}" r="${r.toFixed(
