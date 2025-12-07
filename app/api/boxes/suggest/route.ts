@@ -247,6 +247,10 @@ type QuoteDimsRow = {
   qty: any;
 };
 
+type LayoutJsonRow = {
+  layout_json: any;
+};
+
 type BoxDbRow = {
   id: number;
   sku: string;
@@ -317,13 +321,13 @@ function coerceBoxSuggestion(row: BoxDbRow): BoxSuggestion | null {
     return null;
   }
 
-  const vendor = row.vendor && row.vendor.trim().length > 0
-    ? row.vendor.trim()
-    : "Box vendor";
+  const vendor =
+    row.vendor && row.vendor.trim().length > 0
+      ? row.vendor.trim()
+      : "Box vendor";
 
-  const style = row.style && row.style.trim().length > 0
-    ? row.style.trim()
-    : "RSC";
+  const style =
+    row.style && row.style.trim().length > 0 ? row.style.trim() : "RSC";
 
   const volume = L * W * H;
 
@@ -387,6 +391,48 @@ async function fetchBoxesForStyle(
   return out;
 }
 
+// Fallback: if we can't find dims from quote_items, try the latest layout_json
+async function deriveDimsFromLayout(quoteNo: string): Promise<QuoteDimsRow | null> {
+  const layoutRow = await one<LayoutJsonRow>(
+    `
+      select layout_json
+      from public.quote_layout_packages
+      where quote_id = (
+        select id from public."quotes" where quote_no = $1 limit 1
+      )
+      order by created_at desc
+      limit 1
+    `,
+    [quoteNo],
+  );
+
+  if (!layoutRow || !layoutRow.layout_json) return null;
+
+  const layout = layoutRow.layout_json;
+  const block = layout.block || layout.block_in || layout.block_dims || null;
+  if (!block) return null;
+
+  // support both camelCase and snake_case, just in case
+  const L =
+    toNumberOrNull((block as any).lengthIn) ??
+    toNumberOrNull((block as any).length_in);
+  const W =
+    toNumberOrNull((block as any).widthIn) ??
+    toNumberOrNull((block as any).width_in);
+  const H =
+    toNumberOrNull((block as any).thicknessIn) ??
+    toNumberOrNull((block as any).height_in);
+
+  if (L === null || W === null || H === null) return null;
+
+  return {
+    length_in: L,
+    width_in: W,
+    height_in: H,
+    qty: 1,
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const url = req.nextUrl;
@@ -408,8 +454,8 @@ export async function GET(req: NextRequest) {
         ? styleParam
         : "both";
 
-    // Primary line item dims for this quote
-    const dims = await one<QuoteDimsRow>(
+    // First try: primary line item dims for this quote
+    let dims = await one<QuoteDimsRow>(
       `
         select
           qi.length_in,
@@ -426,12 +472,18 @@ export async function GET(req: NextRequest) {
       [quoteNo],
     );
 
+    // Fallback: derive from latest layout_json.block if we didn't find a line item
+    if (!dims) {
+      dims = await deriveDimsFromLayout(quoteNo);
+    }
+
     if (!dims) {
       const body: BoxesErr = {
         ok: false,
-        error: `No line items found for quote ${quoteNo}.`,
+        error:
+          "Unable to derive foam block dimensions for this quote yet. Save a layout or primary line item first.",
       };
-      return NextResponse.json(body, { status: 404 });
+      return NextResponse.json(body, { status: 400 });
     }
 
     const L = toNumberOrNull(dims.length_in) ?? 0;
@@ -441,7 +493,8 @@ export async function GET(req: NextRequest) {
     if (!(L > 0 && W > 0 && H > 0)) {
       const body: BoxesErr = {
         ok: false,
-        error: "Quote dimensions are missing or invalid for box suggestions.",
+        error:
+          "Quote dimensions are missing or invalid for box suggestions.",
       };
       return NextResponse.json(body, { status: 400 });
     }
