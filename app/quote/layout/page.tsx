@@ -533,7 +533,6 @@ export default function LayoutPage({
     />
   );
 }
-
 const CAVITY_COLORS = [
   "#38bdf8",
   "#a855f7",
@@ -768,20 +767,19 @@ function LayoutEditorHost(props: {
     prevCavityCountRef.current = cavities.length;
   }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
 
-  // Handle edits to the active layer's thickness
-  const handleActiveLayerThicknessChange = (value: string) => {
-    if (!activeLayer) return;
+  // Generic handler for edits to a layer's thickness
+  const handleLayerThicknessChange = (layerId: string, value: string) => {
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return;
 
     const snapped = snapInches(num);
     setLayerThickness((prev) => ({
       ...prev,
-      [activeLayer.id]: snapped,
+      [layerId]: snapped,
     }));
 
     // Single-layer rule: keep block thickness in sync when only one layer exists.
-    if (stack && stack.length === 1) {
+    if (stack && stack.length === 1 && stack[0].id === layerId) {
       updateBlockDims({ thicknessIn: snapped });
     }
   };
@@ -833,7 +831,6 @@ function LayoutEditorHost(props: {
     depth: "",
     cornerRadius: "",
   });
-
   React.useEffect(() => {
     if (!selectedCavity) {
       setCavityInputs({
@@ -1222,7 +1219,6 @@ function LayoutEditorHost(props: {
 
   const qtyLabel =
     effectiveQty != null ? effectiveQty.toLocaleString() : "—";
-
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
       <div className="w-full max-w-none mx-auto">
@@ -1480,249 +1476,343 @@ function LayoutEditorHost(props: {
                   </div>
                 )}
               </aside>
-              {/* CENTER: Big visualizer */}
+
+              {/* CENTER: Big visualizer + compact controls row */}
               <section className="flex-1 flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm text-slate-50">
-                      <span className="font-semibold">
-                        Foam layout preview
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium">
-                        Interactive layout
-                      </span>
+                {/* Top row: Layers summary (left) / Zoom+Qty (center) / Layer details (right) */}
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col lg:flex-row gap-3 items-stretch">
+                    {/* LEFT: Foam layout preview + compact layers summary */}
+                    <div className="flex-1 min-w-[0]">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2 text-sm text-slate-50">
+                            <span className="font-semibold">
+                              Foam layout preview
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium">
+                              Interactive layout
+                            </span>
+                          </div>
+                          {!hasRealQuoteNo && (
+                            <div className="text-[11px] text-amber-300 mt-1">
+                              Demo only – link from a real quote email to apply
+                              layouts.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Compact layers summary – thinned out */}
+                      <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex flex-col gap-0.5">
+                            <div className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+                              Layers
+                            </div>
+                            {stack && stack.length > 0 ? (
+                              <div className="text-slate-200">
+                                <span className="font-semibold">
+                                  {stack.length}{" "}
+                                  {stack.length === 1 ? "layer" : "layers"}
+                                </span>
+                                {activeLayer && (
+                                  <span className="ml-1 text-slate-400">
+                                    · Active:{" "}
+                                    <span className="text-slate-100">
+                                      {activeLayer.label}
+                                    </span>
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="text-slate-200">
+                                <span className="font-semibold">
+                                  Single layer
+                                </span>{" "}
+                                layout using block thickness.
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={addLayer}
+                            className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                          >
+                            + Add layer
+                          </button>
+                        </div>
+                        <div className="mt-1 text-[10px] text-slate-500">
+                          Use layers to represent multiple foam plies or
+                          sub-assemblies in the same carton.
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Layer selector + manager (horizontal style) */}
-                    {stack && stack.length > 0 && (
-                      <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
-                              Layers
+                    {/* CENTER: Zoom + Qty (stacked) */}
+                    <div className="w-full lg:w-60 xl:w-64 self-stretch">
+                      <div className="h-full rounded-2xl border border-slate-800 bg-slate-950/80 px-3 py-3 flex flex-col justify-between gap-3 shadow-[0_0_16px_rgba(15,23,42,0.8)]">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80" />
+                            <span className="text-[11px] uppercase tracking-[0.14em] text-slate-400">
+                              Layout controls
                             </span>
-                            <span className="ml-2 rounded-full border border-slate-700 bg-slate-900/80 px-2 py-0.5 text-[10px] text-slate-300">
-                              Stack depth{" "}
-                              <span className="font-mono text-slate-50">
-                                {totalStackThicknessIn.toFixed(2)}"
-                              </span>
-                            </span>
-                            <div className="flex flex-wrap items-center gap-1">
-                              {stack.map((layer) => {
-                                const isActive = activeLayer?.id === layer.id;
-                                return (
-                                  <button
-                                    key={layer.id}
-                                    type="button"
-                                    onClick={() => setActiveLayerId(layer.id)}
-                                    className={
-                                      "px-2 py-0.5 rounded-full border text-[11px] " +
-                                      (isActive
-                                        ? "bg-sky-500 text-slate-950 border-sky-400"
-                                        : "bg-slate-800/80 text-slate-200 border-slate-700 hover:border-sky-400 hover:text-sky-100")
-                                    }
-                                  >
-                                    {layer.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
                           </div>
-
-                          <div className="flex items-center gap-3">
-                            {/* Crop corners toggle as a small checkbox */}
-                            <label className="inline-flex items-center gap-1 text-[11px] text-slate-300">
-                              <input
-                                type="checkbox"
-                                checked={croppedCorners}
-                                onChange={(e) =>
-                                  setCroppedCorners(e.target.checked)
-                                }
-                                className="h-3 w-3 rounded border-slate-600 bg-slate-950"
-                              />
-                              <span>Crop corners 1&quot;</span>
+                          <div className="flex flex-col gap-2 text-[11px] text-slate-300">
+                            <label className="flex flex-col gap-1">
+                              <span className="text-slate-400">Zoom</span>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="range"
+                                  min={0.7}
+                                  max={1.4}
+                                  step={0.05}
+                                  value={zoom}
+                                  onChange={(e) =>
+                                    setZoom(Number(e.target.value))
+                                  }
+                                  className="w-full accent-sky-400"
+                                />
+                                <span className="text-sky-200 font-mono">
+                                  {Math.round(zoom * 100)}%
+                                </span>
+                              </div>
                             </label>
-
-                            <select
-                              value={activeLayerId ?? (stack[0]?.id ?? "")}
-                              onChange={(e) => setActiveLayerId(e.target.value)}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-100"
-                            >
-                              {stack.map((layer) => (
-                                <option key={layer.id} value={layer.id}>
-                                  {layer.label}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="button"
-                              onClick={addLayer}
-                              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
-                            >
-                              + Add layer
-                            </button>
                           </div>
                         </div>
 
-                        {activeLayer && (
-                          <div className="mt-2 space-y-2">
+                        <div className="border-t border-slate-800 pt-2 mt-1">
+                          <label className="flex flex-col gap-1 text-[11px] text-slate-300">
+                            <span className="text-slate-400">
+                              Quoted quantity
+                            </span>
                             <div className="flex items-center gap-2">
                               <input
-                                type="text"
-                                value={activeLayer.label}
-                                onChange={(e) =>
-                                  renameLayer(activeLayer.id, e.target.value)
-                                }
-                                className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[11px] text-slate-100"
-                                placeholder="Layer name"
-                              />
-                              {stack.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => deleteLayer(activeLayer.id)}
-                                  className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-300 hover:text-red-300 hover:border-red-400 transition"
-                                  title="Delete this layer"
-                                >
-                                  Remove
-                                </button>
-                              )}
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 max-w-xs text-xs">
-                              <label className="flex flex-col gap-1">
-                                <span className="text-[11px] text-slate-400">
-                                  Layer thickness (in)
-                                </span>
-                                <input
-                                  type="number"
-                                  step={0.125}
-                                  value={getLayerThickness(activeLayer.id)}
-                                  onChange={(e) =>
-                                    handleActiveLayerThicknessChange(
-                                      e.target.value,
-                                    )
+                                type="number"
+                                min={1}
+                                step={1}
+                                value={qty}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  if (!v) {
+                                    setQty("");
+                                    return;
                                   }
-                                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                                />
-                              </label>
-                              <div className="flex items-end text-[11px] text-slate-400">
-                                Stack depth adds up all layer thicknesses. Single
-                                layer layouts use the block thickness.
-                              </div>
+                                  const num = Number(v);
+                                  if (!Number.isFinite(num) || num <= 0) return;
+                                  setQty(num);
+                                }}
+                                disabled={!hasRealQuoteNo}
+                                className="w-24 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
+                              />
+                              <span className="text-[10px] text-slate-500">
+                                Pulled from primary line item when available.
+                              </span>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* RIGHT: Layer details list / block footprint / stack depth */}
+                    <div className="w-full lg:w-80 xl:w-80 self-stretch">
+                      <div className="h-full rounded-2xl border border-slate-800 bg-slate-950/80 px-3 py-3 flex flex-col gap-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-[11px] uppercase tracking-[0.14em] text-slate-400">
+                            Layer details
+                          </div>
+                          <label className="inline-flex items-center gap-1 text-[11px] text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={croppedCorners}
+                              onChange={(e) =>
+                                setCroppedCorners(e.target.checked)
+                              }
+                              className="h-3 w-3 rounded border-slate-600 bg-slate-950"
+                            />
+                            <span>Crop corners 1&quot;</span>
+                          </label>
+                        </div>
+
+                        {/* Block footprint + stack depth (tightly tied to Box suggester) */}
+                        <div className="grid grid-cols-2 gap-2 text-[11px] mb-1">
+                          <div className="rounded-lg border border-slate-800 bg-slate-950/80 px-2 py-1.5">
+                            <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                              Footprint (L × W)
+                            </div>
+                            <div className="flex items-center justify-between gap-1 mt-1">
+                              <span className="font-mono text-slate-50">
+                                {footprintLabel}
+                              </span>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    )}
+                          <div className="rounded-lg border border-slate-800 bg-slate-950/80 px-2 py-1.5">
+                            <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                              Stack depth
+                            </div>
+                            <div className="flex items-center justify-between gap-1 mt-1">
+                              <span className="font-mono text-slate-50">
+                                {stackDepthLabel}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
 
-                    {!hasRealQuoteNo && (
-                      <div className="text-[11px] text-amber-300 mt-1">
-                        Demo only – link from a real quote email to apply
-                        layouts.
-                      </div>
-                    )}
-                  </div>
+                        {/* Editable block length/width (keep footprint control) */}
+                        <div className="grid grid-cols-2 gap-2 text-[11px] mb-1">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-slate-400">
+                              Length (in)
+                            </span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={block.lengthIn}
+                              onChange={(e) => {
+                                const snapped = snapInches(
+                                  Number(e.target.value),
+                                );
+                                updateBlockDims({ lengthIn: snapped });
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-slate-400">Width (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={block.widthIn}
+                              onChange={(e) => {
+                                const snapped = snapInches(
+                                  Number(e.target.value),
+                                );
+                                updateBlockDims({ widthIn: snapped });
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                        </div>
 
-                  {/* zoom + qty + advisor + apply button */}
-                  <div className="flex items-center gap-3">
-                    <div className="hidden md:flex items-center text-[11px] text-slate-400 mr-1">
-                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80 mr-1.5" />
-                      <span>Layout controls</span>
+                        {/* CAD-style layer list */}
+                        <div className="mt-1 flex-1 flex flex-col text-[11px]">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-slate-400">
+                              Layers in stack
+                            </span>
+                            <span className="text-slate-500">
+                              Total:{" "}
+                              <span className="font-mono text-slate-100">
+                                {stackDepthLabel}
+                              </span>
+                            </span>
+                          </div>
+                          {stack && stack.length > 0 ? (
+                            <ul className="space-y-1 max-h-32 overflow-auto">
+                              {stack.map((layer) => {
+                                const isActive =
+                                  activeLayer && activeLayer.id === layer.id;
+                                return (
+                                  <li
+                                    key={layer.id}
+                                    className={`flex items-center gap-2 rounded-lg px-2 py-1 cursor-pointer ${
+                                      isActive
+                                        ? "bg-sky-500/15 border border-sky-400/60"
+                                        : "bg-slate-950/60 border border-slate-800 hover:border-sky-400/50"
+                                    }`}
+                                    onClick={() => setActiveLayerId(layer.id)}
+                                  >
+                                    <div className="flex-1 flex flex-col gap-0.5">
+                                      <input
+                                        type="text"
+                                        value={layer.label}
+                                        onChange={(e) =>
+                                          renameLayer(layer.id, e.target.value)
+                                        }
+                                        className="w-full rounded-sm border border-slate-700/70 bg-slate-950 px-1 py-0.5 text-[11px] text-slate-100"
+                                      />
+                                      <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                                        <span>
+                                          Layer ID:{" "}
+                                          <span className="font-mono text-slate-300">
+                                            {layer.id}
+                                          </span>
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-1">
+                                      <label className="flex flex-col gap-0.5">
+                                        <span className="text-[10px] text-slate-400">
+                                          Thick (in)
+                                        </span>
+                                        <input
+                                          type="number"
+                                          step={0.125}
+                                          value={getLayerThickness(layer.id)}
+                                          onChange={(e) =>
+                                            handleLayerThicknessChange(
+                                              layer.id,
+                                              e.target.value,
+                                            )
+                                          }
+                                          className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100"
+                                        />
+                                      </label>
+                                      {stack.length > 1 && (
+                                        <button
+                                          type="button"
+                                          onClick={(ev) => {
+                                            ev.stopPropagation();
+                                            deleteLayer(layer.id);
+                                          }}
+                                          className="text-[10px] text-slate-500 hover:text-red-400"
+                                        >
+                                          Remove
+                                        </button>
+                                      )}
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          ) : (
+                            <div className="text-[11px] text-slate-400">
+                              Single-layer layout. Thickness comes from the
+                              block thickness above.
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="inline-flex items-center gap-3 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 shadow-[0_0_16px_rgba(15,23,42,0.8)]">
-                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
-                        <span>Zoom</span>
-                        <input
-                          type="range"
-                          min={0.7}
-                          max={1.4}
-                          step={0.05}
-                          value={zoom}
-                          onChange={(e) => setZoom(Number(e.target.value))}
-                          className="w-28 accent-sky-400"
-                        />
-                        <span className="ml-1 text-sky-200 font-mono">
-                          {Math.round(zoom * 100)}%
-                        </span>
-                      </div>
+                  </div>
 
-                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
-                        <span>Qty</span>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={qty}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (!v) {
-                              setQty("");
-                              return;
-                            }
-                            const num = Number(v);
-                            if (!Number.isFinite(num) || num <= 0) return;
-                            setQty(num);
-                          }}
-                          disabled={!hasRealQuoteNo}
-                          className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
-                        />
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleGoToFoamAdvisor}
-                        disabled={missingCustomerInfo}
-                        className="inline-flex items-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        Recommend my foam
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleApplyToQuote}
-                        disabled={!canApplyButton}
-                        className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
-                      >
-                        {!hasRealQuoteNo
-                          ? "Link to a quote first"
-                          : missingCustomerInfo
-                          ? "Add name + email"
-                          : applyStatus === "saving"
-                          ? "Applying…"
-                          : applyStatus === "done"
-                          ? "Applied!"
-                          : applyStatus === "error"
-                          ? "Error – retry"
-                          : "Apply to quote"}
-                      </button>
+                  {/* Layout metrics row: footprint / stack depth / qty */}
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-slate-300">
+                    <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5">
+                      <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+                        Foam footprint
+                      </span>
+                      <span className="font-mono text-slate-50">
+                        {footprintLabel}
+                      </span>
                     </div>
-                  </div>
-                </div>
-
-                {/* Layout metrics row: footprint / stack depth / qty */}
-                <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-slate-300">
-                  <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5">
-                    <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
-                      Foam footprint
-                    </span>
-                    <span className="font-mono text-slate-50">
-                      {footprintLabel}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5">
-                    <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
-                      Stack depth
-                    </span>
-                    <span className="font-mono text-slate-50">
-                      {stackDepthLabel}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5">
-                    <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
-                      Quoted quantity
-                    </span>
-                    <span className="font-mono text-slate-50">
-                      {qtyLabel}
-                    </span>
+                    <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5">
+                      <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+                        Stack depth
+                      </span>
+                      <span className="font-mono text-slate-50">
+                        {stackDepthLabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-1.5">
+                      <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+                        Quoted quantity
+                      </span>
+                      <span className="font-mono text-slate-50">
+                        {qtyLabel}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -1731,7 +1821,8 @@ function LayoutEditorHost(props: {
                   bottom-right of each cavity to resize. Cavities are placed
                   inside a 0.5&quot; wall on all sides. When a cavity is
                   selected, the nearest horizontal and vertical gaps to other
-                  cavities and to the block edges are dimensioned.
+                  cavities and to the block edges are dimensioned and stay
+                  visible as you drag.
                 </p>
 
                 {/* canvas wrapper */}
@@ -1838,68 +1929,75 @@ function LayoutEditorHost(props: {
               </section>
               {/* RIGHT: Inspector + customer info + cavities list */}
               <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
-                {/* Current layer / block dimensions */}
+                {/* Quote actions (moved buttons) */}
                 <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-xs font-semibold text-slate-100">
-                      Current layer dimensions
+                      Quote actions
                     </div>
-                    <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-300">
-                      Footprint + thickness
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-300">
+                      <span
+                        className={
+                          "h-1.5 w-1.5 rounded-full " +
+                          (!hasRealQuoteNo
+                            ? "bg-amber-300 shadow-[0_0_7px_rgba(252,211,77,0.9)]"
+                            : missingCustomerInfo
+                            ? "bg-rose-400 shadow-[0_0_8px_rgba(248,113,113,0.9)]"
+                            : "bg-emerald-400/80 shadow-[0_0_7px_rgba(52,211,153,0.9)]")
+                        }
+                      />
+                      <span>
+                        {(!hasRealQuoteNo && "Demo only") ||
+                          (missingCustomerInfo && "Add name + email") ||
+                          "Ready"}
+                      </span>
                     </span>
                   </div>
-                  <div className="text-[11px] text-slate-400 mb-2">
-                    Length and width control the overall foam footprint. Thickness
-                    here is read-only and reflects the active layer’s thickness
-                    (or the single-layer block thickness).
+                  <div className="text-[11px] text-slate-400 mb-3">
+                    These actions update the{" "}
+                    <span className="font-semibold text-sky-200">
+                      live quote
+                    </span>{" "}
+                    and send the latest foam layout back into the email + print
+                    view.
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-400">
-                        Length (in)
-                      </span>
-                      <input
-                        type="number"
-                        step={0.125}
-                        value={block.lengthIn}
-                        onChange={(e) => {
-                          const snapped = snapInches(Number(e.target.value));
-                          updateBlockDims({ lengthIn: snapped });
-                        }}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-400">
-                        Width (in)
-                      </span>
-                      <input
-                        type="number"
-                        step={0.125}
-                        value={block.widthIn}
-                        onChange={(e) => {
-                          const snapped = snapInches(Number(e.target.value));
-                          updateBlockDims({ widthIn: snapped });
-                        }}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-400">
-                        Thickness (in)
-                      </span>
-                      <input
-                        type="number"
-                        step={0.125}
-                        value={
-                          activeLayer
-                            ? getLayerThickness(activeLayer.id)
-                            : blockThicknessIn
-                        }
-                        readOnly
-                        className="rounded-md border border-slate-800 bg-slate-950/80 px-2 py-1 text-xs text-slate-400 cursor-not-allowed"
-                      />
-                    </label>
+
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={handleGoToFoamAdvisor}
+                      disabled={missingCustomerInfo}
+                      className="w-full inline-flex items-center justify-center rounded-full border border-sky-500/60 bg-slate-950 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Recommend my foam
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleApplyToQuote}
+                      disabled={!canApplyButton}
+                      className="w-full inline-flex items-center justify-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
+                    >
+                      {!hasRealQuoteNo
+                        ? "Link to a quote first"
+                        : missingCustomerInfo
+                        ? "Add name + email"
+                        : applyStatus === "saving"
+                        ? "Applying…"
+                        : applyStatus === "done"
+                        ? "Applied!"
+                        : applyStatus === "error"
+                        ? "Error – retry"
+                        : "Apply to quote"}
+                    </button>
+                  </div>
+
+                  <div className="mt-2 text-[10px] text-slate-500">
+                    Opens the{" "}
+                    <span className="font-mono text-slate-300">
+                      /quote?quote_no={quoteNo}
+                    </span>{" "}
+                    view after applying, so you can print or forward.
                   </div>
                 </div>
 
