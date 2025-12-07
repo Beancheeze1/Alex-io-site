@@ -28,15 +28,24 @@ type MaterialOption = {
 
 // NEW: suggested box types for the box suggester panel
 type SuggestedBox = {
-  id: number;
-  sku: string | null;
-  description: string | null;
-  style: string | null;
+  sku: string;
+  description: string;
+  style: string;
   vendor_name?: string | null;
-  inside_length_in?: number | string | null;
-  inside_width_in?: number | string | null;
-  inside_height_in?: number | string | null;
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
+  fit_score: number;
+  notes?: string | null;
 };
+
+type BoxSuggestState = {
+  loading: boolean;
+  error: string | null;
+  bestRsc: SuggestedBox | null;
+  bestMailer: SuggestedBox | null;
+};
+
 
 /**
  * Normalize block dims from searchParams (dims= / block=)
@@ -817,6 +826,15 @@ function LayoutEditorHost(props: {
   const [selectedMaterialId, setSelectedMaterialId] =
     React.useState<number | null>(initialMaterialId);
 
+      // Box suggester state (RSC + mailer suggestions)
+  const [boxSuggest, setBoxSuggest] = React.useState<BoxSuggestState>({
+    loading: false,
+    error: null,
+    bestRsc: null,
+    bestMailer: null,
+  });
+
+
   // Local input state for selected cavity dims (to avoid "wonky" inputs)
   const [cavityInputs, setCavityInputs] = React.useState<{
     id: string | null;
@@ -1201,9 +1219,105 @@ function LayoutEditorHost(props: {
   const canApplyButton =
     hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
 
-  // Qty used for box/carton suggestions (null when not set)
+    // Qty used for box/carton suggestions (null when not set)
   const effectiveQty =
     typeof qty === "number" && Number.isFinite(qty) && qty > 0 ? qty : null;
+
+  // Call /api/boxes/suggest whenever the layout + customer info are ready
+  React.useEffect(() => {
+    const lengthIn = Number(block.lengthIn) || 0;
+    const widthIn = Number(block.widthIn) || 0;
+    const stackDepthIn = totalStackThicknessIn || 0;
+
+    // If we don't have enough info yet, reset state and bail.
+    if (
+      !hasRealQuoteNo ||
+      missingCustomerInfo ||
+      lengthIn <= 0 ||
+      widthIn <= 0 ||
+      stackDepthIn <= 0
+    ) {
+      setBoxSuggest({
+        loading: false,
+        error: null,
+        bestRsc: null,
+        bestMailer: null,
+      });
+      return;
+    }
+
+    let cancelled = false;
+
+    const run = async () => {
+      try {
+        setBoxSuggest((prev) => ({
+          ...prev,
+          loading: true,
+          error: null,
+        }));
+
+        const res = await fetch("/api/boxes/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            footprint_length_in: lengthIn,
+            footprint_width_in: widthIn,
+            stack_depth_in: stackDepthIn,
+            qty: effectiveQty ?? null,
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const json = await res.json();
+
+        if (cancelled) return;
+
+        if (!json || json.ok !== true) {
+          setBoxSuggest({
+            loading: false,
+            error:
+              (json && typeof json.error === "string" && json.error) ||
+              "No carton suggestion returned.",
+            bestRsc: null,
+            bestMailer: null,
+          });
+          return;
+        }
+
+        setBoxSuggest({
+          loading: false,
+          error: null,
+          bestRsc: json.bestRsc ?? null,
+          bestMailer: json.bestMailer ?? null,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Box suggester call failed", err);
+        setBoxSuggest({
+          loading: false,
+          error: "Couldn’t calculate cartons right now.",
+          bestRsc: null,
+          bestMailer: null,
+        });
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasRealQuoteNo,
+    missingCustomerInfo,
+    block.lengthIn,
+    block.widthIn,
+    totalStackThicknessIn,
+    effectiveQty,
+  ]);
 
   // Derived labels used in multiple spots
   const footprintLabel =
@@ -1218,6 +1332,14 @@ function LayoutEditorHost(props: {
 
   const qtyLabel =
     effectiveQty != null ? effectiveQty.toLocaleString() : "—";
+
+  const suggesterReady =
+    hasRealQuoteNo &&
+    !missingCustomerInfo &&
+    Number(block.lengthIn) > 0 &&
+    Number(block.widthIn) > 0 &&
+    totalStackThicknessIn > 0;
+
 
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
@@ -1708,42 +1830,132 @@ function LayoutEditorHost(props: {
                   )}
                 </div>
 
-                {/* Closest matching cartons preview (left bar) */}
+                              {/* Closest matching cartons (live suggester, always visible) */}
                 <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3">
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-xs font-semibold text-slate-100">
                       Closest matching cartons
                     </div>
                     <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
-                      Coming soon
+                      Box suggester · BETA
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-400 mb-2">
-                    This panel will recommend a best-fit{" "}
+                    Uses the foam footprint{" "}
+                    <span className="font-mono text-sky-200">
+                      {footprintLabel}
+                    </span>
+                    , stack depth{" "}
+                    <span className="font-mono text-sky-200">
+                      {stackDepthLabel}
+                    </span>{" "}
+                    and quoted qty{" "}
+                    <span className="font-mono text-sky-200">
+                      {qtyLabel}
+                    </span>{" "}
+                    to suggest a best-fit{" "}
                     <span className="text-sky-300 font-medium">RSC</span> and{" "}
-                    <span className="text-sky-300 font-medium">mailer</span> for
-                    the foam footprint and stack depth above. The chosen carton
-                    will be saved back to the quote once wired.
+                    <span className="text-sky-300 font-medium">mailer</span>.
                   </p>
-                  <div className="space-y-2">
-                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-                      <div className="text-[11px] font-semibold text-slate-100">
-                        Best RSC match
+
+                  {!suggesterReady ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+                      <div className="font-semibold text-slate-100 mb-1">
+                        Waiting for layout &amp; customer info…
                       </div>
-                      <div className="text-[11px] text-slate-500">
-                        Will show: part number, inside dims, and fit score.
-                      </div>
+                      <ul className="list-disc list-inside space-y-0.5">
+                        <li>Set block length, width and stack depth.</li>
+                        <li>Enter customer name + email.</li>
+                        {hasRealQuoteNo ? null : (
+                          <li>Link this layout to a real quote.</li>
+                        )}
+                      </ul>
                     </div>
-                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-                      <div className="text-[11px] font-semibold text-slate-100">
-                        Best mailer match
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Will show: part number, inside dims, and fit score.
-                      </div>
+                  ) : boxSuggest.loading ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-200">
+                      Calculating best-fit cartons…
                     </div>
-                  </div>
+                  ) : boxSuggest.error ? (
+                    <div className="rounded-xl border border-amber-500/70 bg-amber-900/40 px-3 py-2 text-[11px] text-amber-50">
+                      {boxSuggest.error}
+                    </div>
+                  ) : !boxSuggest.bestRsc && !boxSuggest.bestMailer ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+                      No good carton matches found in the current stub catalog.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 text-[11px]">
+                      {boxSuggest.bestRsc && (
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <div className="font-semibold text-slate-100">
+                              Best RSC match
+                            </div>
+                            <span className="font-mono text-sky-300 text-[10px]">
+                              {boxSuggest.bestRsc.sku}
+                            </span>
+                          </div>
+                          <div className="text-slate-300">
+                            {boxSuggest.bestRsc.description}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                            <span>
+                              Inside{" "}
+                              <span className="font-mono text-slate-50">
+                                {boxSuggest.bestRsc.inside_length_in}" ×{" "}
+                                {boxSuggest.bestRsc.inside_width_in}" ×{" "}
+                                {boxSuggest.bestRsc.inside_height_in}"
+                              </span>
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                              Fit score: {boxSuggest.bestRsc.fit_score}
+                            </span>
+                          </div>
+                          {boxSuggest.bestRsc.notes && (
+                            <div className="mt-0.5 text-slate-400">
+                              {boxSuggest.bestRsc.notes}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {boxSuggest.bestMailer && (
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <div className="font-semibold text-slate-100">
+                              Best mailer match
+                            </div>
+                            <span className="font-mono text-sky-300 text-[10px]">
+                              {boxSuggest.bestMailer.sku}
+                            </span>
+                          </div>
+                          <div className="text-slate-300">
+                            {boxSuggest.bestMailer.description}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                            <span>
+                              Inside{" "}
+                              <span className="font-mono text-slate-50">
+                                {boxSuggest.bestMailer.inside_length_in}" ×{" "}
+                                {boxSuggest.bestMailer.inside_width_in}" ×{" "}
+                                {boxSuggest.bestMailer.inside_height_in}"
+                              </span>
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                              Fit score: {boxSuggest.bestMailer.fit_score}
+                            </span>
+                          </div>
+                          {boxSuggest.bestMailer.notes && (
+                            <div className="mt-0.5 text-slate-400">
+                              {boxSuggest.bestMailer.notes}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
+
 
                 {/* Notes / special instructions */}
                 <div className="mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
