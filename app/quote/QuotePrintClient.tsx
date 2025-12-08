@@ -1323,7 +1323,7 @@ export default function QuotePrintClient() {
                         </th>
                       </tr>
                     </thead>
-                    <tbody>
+                    
                                           <tbody>
                       {/* Foam / core quote items (priced) */}
                       {items.length > 0 && (
