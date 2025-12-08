@@ -123,7 +123,11 @@ type RequestedBox = {
   inside_length_in: number;
   inside_width_in: number;
   inside_height_in: number;
+  // Optional pricing fields from quote_box_selections
+  unit_price_usd?: number | string | null;
+  extended_price_usd?: number | string | null;
 };
+
 
 type RequestedBoxesOk = {
   ok: true;
@@ -1563,6 +1567,15 @@ export default function QuotePrintClient() {
 
                         const qty = rb.qty || primaryItem?.qty || 1;
 
+                                                const unitPrice = parsePriceField(
+                          (rb as any).unit_price_usd ?? null,
+                        );
+                        const lineTotal = parsePriceField(
+                          (rb as any).extended_price_usd ??
+                            (unitPrice != null ? unitPrice * qty : null),
+                        );
+
+
                         const isRemoving = removingBoxId === rb.id;
 
                         return (
@@ -1650,15 +1663,14 @@ export default function QuotePrintClient() {
                             >
                               {qty}
                             </td>
-                            <td
+                                                       <td
                               style={{
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
                                 textAlign: "right",
                               }}
                             >
-                              {/* Cartons not priced yet */}
-                              {formatUsd(null)}
+                              {formatUsd(unitPrice)}
                             </td>
                             <td
                               style={{
@@ -1667,8 +1679,9 @@ export default function QuotePrintClient() {
                                 textAlign: "right",
                               }}
                             >
-                              {formatUsd(null)}
+                              {formatUsd(lineTotal)}
                             </td>
+
                           </tr>
                         );
                       })}
