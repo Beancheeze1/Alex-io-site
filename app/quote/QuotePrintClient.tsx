@@ -1651,29 +1651,52 @@ export default function QuotePrintClient() {
                       >
                         {overallQty}
                       </div>
-                              {anyPricing && (
-                        <>
-                          <div
-                            style={{
-                              marginTop: 4,
-                              fontSize: 12,
-                              color: "#6b7280",
-                            }}
-                          >
-                            Estimated subtotal (foam + packaging)
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 16,
-                              fontWeight: 600,
-                            }}
-                          >
-                            {formatUsd(
-                              grandSubtotal > 0 ? grandSubtotal : foamSubtotal,
-                            )}
-                          </div>
-                        </>
-                      )}
+                 {anyPricing && (
+  <>
+    {/* Always show foam subtotal explicitly */}
+    <div
+      style={{
+        marginTop: 4,
+        fontSize: 12,
+        color: "#6b7280",
+      }}
+    >
+      Foam subtotal
+    </div>
+    <div
+      style={{
+        fontSize: 14,
+        fontWeight: 600,
+      }}
+    >
+      {formatUsd(foamSubtotal)}
+    </div>
+
+    {/* Only show combined subtotal when packaging has a non-zero price */}
+    {packagingSubtotal > 0 && (
+      <>
+        <div
+          style={{
+            marginTop: 4,
+            fontSize: 12,
+            color: "#6b7280",
+          }}
+        >
+          Estimated subtotal (foam + packaging)
+        </div>
+        <div
+          style={{
+            fontSize: 16,
+            fontWeight: 600,
+          }}
+        >
+          {formatUsd(grandSubtotal)}
+        </div>
+      </>
+    )}
+  </>
+)}
+
 
                     </div>
                   </div>
