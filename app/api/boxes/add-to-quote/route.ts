@@ -1,26 +1,70 @@
 // app/api/boxes/add-to-quote/route.ts
 //
-// Attach a selected carton to a quote.
-// Called from the layout editor when the user clicks "Pick this box".
+// POST /api/boxes/add-to-quote
 //
-// POST JSON:
+// Body JSON:
 //   {
-//     "quote_no": "Q-AI-20251208-032309",
-//     "sku": "BP-RSC-16x12x6",
-//     "qty": 250
+//     "quote_no": "Q-AI-2025...",
+//     "box_id": 123,         // preferred
+//     "sku": "BP-RSC-16x12x6", // optional if box_id omitted
+//     "qty": 250             // optional, defaults to 1
 //   }
 //
-// Behaviour (Path A, DB-safe):
-//   - Looks up quotes.id by quote_no
-//   - Does NOT require a row in public.boxes
-//   - Inserts a row into quote_box_selections (quote_id, quote_no, sku, qty)
-//   - Inserts a simple carton row into quote_items so it shows on the quote print.
+// Behavior (Path A):
+//   - Looks up the quote by quote_no.
+//   - Looks up the box in public.boxes (by id or sku).
+//   - Upserts a row into public.quote_box_selections:
+//       * If (quote_id, box_id) exists, updates qty.
+//       * Otherwise inserts a new selection row.
+//   - Best-effort: inserts a carton line into public.quote_items using the
+//     box inside dimensions and the primary line's material_id.
+//   - Returns ok:true + the selection row, and optionally box_item_id.
+//
+// Notes:
+//   - Does NOT change existing foam items or pricing logic.
+//   - Carton quote_items rows are inserted with NULL pricing fields so they
+//     don't affect existing calculations.
 
 import { NextRequest, NextResponse } from "next/server";
-import { one, q } from "@/lib/db";
+import { q, one } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+type BodyIn = {
+  quote_no?: string;
+  box_id?: number | string | null;
+  sku?: string | null;
+  qty?: number | string | null;
+};
+
+type QuoteRow = {
+  id: number;
+  quote_no: string;
+};
+
+type BoxRow = {
+  id: number;
+  vendor: string | null;
+  style: string | null;
+  sku: string;
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
+};
+
+type PrimaryItemRow = {
+  id: number;
+  material_id: number | null;
+};
+
+// Helpers
+
+function parseQty(raw: any, fallback: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.round(n);
+}
 
 function ok(body: any, status = 200) {
   return NextResponse.json(body, { status });
@@ -30,93 +74,252 @@ function bad(body: any, status = 400) {
   return NextResponse.json(body, { status });
 }
 
+// POST /api/boxes/add-to-quote
 export async function POST(req: NextRequest) {
-  let body: any;
   try {
-    body = await req.json();
-  } catch {
-    return bad({ ok: false, error: "INVALID_JSON" }, 400);
-  }
+    const body = (await req.json()) as BodyIn;
 
-  const quoteNo = String(body.quote_no ?? "").trim();
-  const sku = String(body.sku ?? "").trim();
-  const qtyNum = Number(body.qty ?? 1);
+    const quote_no = (body.quote_no || "").trim();
+    if (!quote_no) {
+      return bad({ ok: false, error: "MISSING_QUOTE_NO" }, 400);
+    }
 
-  if (!quoteNo || !sku || !Number.isFinite(qtyNum) || qtyNum <= 0) {
-    return bad({
-      ok: false,
-      error: "MISSING_FIELDS",
-      message: "quote_no, sku and a positive qty are required.",
-    });
-  }
+    const hasBoxId = body.box_id !== undefined && body.box_id !== null;
+    const hasSku =
+      typeof body.sku === "string" && body.sku.trim().length > 0;
 
-  try {
-    // 1) Look up the quote by quote_no
-    const quote = await one<{ id: number }>(
+    if (!hasBoxId && !hasSku) {
+      return bad(
+        {
+          ok: false,
+          error: "MISSING_BOX",
+          message: "You must provide either box_id or sku.",
+        },
+        400,
+      );
+    }
+
+    const qty = parseQty(body.qty, 1);
+
+    // 1) Look up quote
+    const quote = (await one<QuoteRow>(
       `
-      select id
-      from quotes
-      where quote_no = $1
+      SELECT id, quote_no
+      FROM public."quotes"
+      WHERE quote_no = $1
       `,
-      [quoteNo],
-    );
+      [quote_no],
+    )) as QuoteRow | null;
 
     if (!quote) {
       return bad(
         {
           ok: false,
           error: "QUOTE_NOT_FOUND",
-          message: `No quote for ${quoteNo}`,
+          message: `No quote found with number ${quote_no}.`,
         },
         404,
       );
     }
 
-    // 2) Record the selection (no box_id required for now)
-    await q(
+    // 2) Look up box
+    let box: BoxRow | null = null;
+
+    if (hasBoxId) {
+      const idNum = Number(body.box_id);
+      if (Number.isFinite(idNum) && idNum > 0) {
+        box = (await one<BoxRow>(
+          `
+          SELECT
+            id,
+            vendor,
+            style,
+            sku,
+            inside_length_in,
+            inside_width_in,
+            inside_height_in
+          FROM public.boxes
+          WHERE id = $1
+          `,
+          [idNum],
+        )) as BoxRow | null;
+      }
+    } else if (hasSku) {
+      const sku = (body.sku || "").trim();
+      // We don't filter on vendor; sku is unique enough for now.
+      box = (await one<BoxRow>(
+        `
+        SELECT
+          id,
+          vendor,
+          style,
+          sku,
+          inside_length_in,
+          inside_width_in,
+          inside_height_in
+        FROM public.boxes
+        WHERE sku = $1
+        `,
+        [sku],
+      )) as BoxRow | null;
+    }
+
+    if (!box) {
+      const sku = (body.sku || "").trim();
+      return bad(
+        {
+          ok: false,
+          error: "BOX_NOT_FOUND",
+          message: sku
+            ? `No box with sku ${sku} found in boxes catalog.`
+            : "Box not found in boxes catalog.",
+        },
+        404,
+      );
+    }
+
+    // 3) Upsert into quote_box_selections
+    let selection: {
+      id: number;
+      quote_id: number;
+      quote_no: string;
+      box_id: number;
+      sku: string;
+      qty: number;
+      created_at: string;
+    } | null = null;
+
+    const existingSelection = (await one<{ id: number }>(
       `
-      insert into quote_box_selections (
-        quote_id,
-        quote_no,
-        sku,
-        qty
-      )
-      values ($1, $2, $3, $4)
+      SELECT id
+      FROM public.quote_box_selections
+      WHERE quote_id = $1
+        AND box_id = $2
+      ORDER BY id ASC
+      LIMIT 1
       `,
-      [quote.id, quoteNo, sku, qtyNum],
-    );
+      [quote.id, box.id],
+    )) as { id: number } | null;
 
-    // 3) Add a simple carton line item so it shows in the quote viewer.
-    //    Keep dims/material null for now; use notes to explain.
-    const notes = `[CARTON] SKU ${sku}`;
+    if (existingSelection) {
+      const rows = await q(
+        `
+        UPDATE public.quote_box_selections
+        SET qty = $1
+        WHERE id = $2
+        RETURNING id, quote_id, quote_no, box_id, sku, qty, created_at
+        `,
+        [qty, existingSelection.id],
+      );
+      selection = (rows[0] ?? null) as any;
+    } else {
+      const rows = await q(
+        `
+        INSERT INTO public.quote_box_selections
+          (quote_id, quote_no, box_id, sku, qty)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, quote_id, quote_no, box_id, sku, qty, created_at
+        `,
+        [quote.id, quote.quote_no, box.id, box.sku, qty],
+      );
+      selection = (rows[0] ?? null) as any;
+    }
 
-    await q(
+    // 4) Best-effort: also insert a carton line into quote_items
+    let boxItemId: number | null = null;
+
+    const primaryItem = (await one<PrimaryItemRow>(
       `
-      insert into quote_items (
-        quote_id,
-        product_id,
-        length_in,
-        width_in,
-        height_in,
-        material_id,
-        qty,
-        notes
-      )
-      values ($1, null, null, null, null, null, $2, $3)
+      SELECT id, material_id
+      FROM public.quote_items
+      WHERE quote_id = $1
+      ORDER BY id ASC
+      LIMIT 1
       `,
-      [quote.id, qtyNum, notes],
-    );
+      [quote.id],
+    )) as PrimaryItemRow | null;
 
-    return ok({ ok: true }, 200);
-  } catch (err) {
+    if (primaryItem && primaryItem.material_id != null) {
+      const L = Number(box.inside_length_in);
+      const W = Number(box.inside_width_in);
+      const H = Number(box.inside_height_in);
+
+      if (L > 0 && W > 0 && H > 0) {
+        const labelParts: string[] = [];
+
+        labelParts.push(`${L} x ${W} x ${H} in`);
+        labelParts.push(box.sku);
+
+        if (box.style && box.style.trim().length > 0) {
+          labelParts.push(`(${box.style.trim()})`);
+        }
+
+        const notes = `Requested shipping carton: ${labelParts.join(" ")}`;
+
+        const rows = await q(
+          `
+          INSERT INTO public.quote_items
+            (
+              quote_id,
+              product_id,
+              length_in,
+              width_in,
+              height_in,
+              material_id,
+              qty,
+              notes,
+              price_unit_usd,
+              price_total_usd,
+              calc_snapshot
+            )
+          VALUES
+            (
+              $1,
+              NULL,
+              $2,
+              $3,
+              $4,
+              $5,
+              $6,
+              $7,
+              NULL,
+              NULL,
+              NULL
+            )
+          RETURNING id
+          `,
+          [
+            quote.id,
+            L,
+            W,
+            H,
+            primaryItem.material_id,
+            qty,
+            notes,
+          ],
+        );
+
+        if (rows && rows[0] && typeof rows[0].id === "number") {
+          boxItemId = rows[0].id as number;
+        }
+      }
+    }
+
+    return ok({
+      ok: true,
+      selection,
+      box_item_id: boxItemId,
+    });
+  } catch (err: any) {
     console.error("Error in /api/boxes/add-to-quote:", err);
-    return bad(
+    return NextResponse.json(
       {
         ok: false,
         error: "SERVER_ERROR",
+        detail: String(err?.message ?? err),
         message: "Unexpected error adding carton to quote.",
       },
-      500,
+      { status: 500 },
     );
   }
 }
