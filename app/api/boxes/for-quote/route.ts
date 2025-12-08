@@ -21,6 +21,8 @@
 //         inside_length_in: number;
 //         inside_width_in: number;
 //         inside_height_in: number;
+//         unit_price_usd?: number | null;
+//         extended_price_usd?: number | null;
 //       },
 //       ...
 //     ]
@@ -48,6 +50,8 @@ type Row = {
   inside_length_in: number;
   inside_width_in: number;
   inside_height_in: number;
+  unit_price_usd?: number | null;
+  extended_price_usd?: number | null;
 };
 
 type Ok = {
@@ -87,7 +91,9 @@ export async function GET(req: NextRequest) {
         qbs.qty,
         b.inside_length_in,
         b.inside_width_in,
-        b.inside_height_in
+        b.inside_height_in,
+        qbs.unit_price_usd,
+        qbs.extended_price_usd
       FROM public.quote_box_selections AS qbs
       JOIN public."quotes" AS q
         ON q.id = qbs.quote_id

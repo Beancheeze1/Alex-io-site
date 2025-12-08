@@ -129,6 +129,7 @@ type RequestedBox = {
 };
 
 
+
 type RequestedBoxesOk = {
   ok: true;
   selections: RequestedBox[];
@@ -1567,7 +1568,9 @@ export default function QuotePrintClient() {
 
                         const qty = rb.qty || primaryItem?.qty || 1;
 
-                                                const unitPrice = parsePriceField(
+
+
+                                                 const unitPrice = parsePriceField(
                           (rb as any).unit_price_usd ?? null,
                         );
                         const lineTotal = parsePriceField(
@@ -1663,7 +1666,7 @@ export default function QuotePrintClient() {
                             >
                               {qty}
                             </td>
-                                                       <td
+                                                          <td
                               style={{
                                 padding: 8,
                                 borderBottom: "1px solid #f3f4f6",
@@ -1681,6 +1684,7 @@ export default function QuotePrintClient() {
                             >
                               {formatUsd(lineTotal)}
                             </td>
+
 
                           </tr>
                         );
