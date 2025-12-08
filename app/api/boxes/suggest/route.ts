@@ -72,9 +72,10 @@ type SuggestedBox = StubBoxRow & {
 
 type BoxSuggestOut = {
   ok: boolean;
-  bestRsc?: SuggestedBox;
-  bestMailer?: SuggestedBox;
+  bestRsc?: SuggestedBox | null;
+  bestMailer?: SuggestedBox | null;
   error?: string;
+  message?: string;
 };
 
 // Tiny stub catalog (replace with real Box Partners data later).
@@ -192,6 +193,38 @@ function pickBestStub(
   return best;
 }
 
+function pickBestFromDbRows(
+  dbRows: BoxSuggestion[],
+  style: "RSC" | "MAILER",
+  footprintL: number,
+  footprintW: number,
+  stackDepth: number,
+): SuggestedBox | null {
+  if (!Array.isArray(dbRows) || dbRows.length === 0) return null;
+
+  const stubRows: StubBoxRow[] = dbRows.map((b) => ({
+    sku: b.sku,
+    description: b.description,
+    style,
+    inside_length_in: b.inside_length_in,
+    inside_width_in: b.inside_width_in,
+    inside_height_in: b.inside_height_in,
+  }));
+
+  const best = pickBestStub(
+    stubRows,
+    style,
+    footprintL,
+    footprintW,
+    stackDepth,
+  );
+
+  // Normalize undefined → null so the signature stays SuggestedBox | null
+  return best ?? null;
+}
+
+
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as Partial<BoxSuggestIn>;
@@ -208,24 +241,50 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(resp);
     }
 
-    const bestRsc = pickBestStub(CATALOG, "RSC", L, W, H);
-    const bestMailer = pickBestStub(CATALOG, "MAILER", L, W, H);
+        // Use the live Box Partners catalog stored in public.boxes.
+    const requiredL = L;
+    const requiredW = W;
+    const requiredH = H;
+
+    // Pull candidates for each style from the DB.
+    const [rscRows, mailerRows] = await Promise.all([
+      fetchBoxesForStyle(requiredL, requiredW, requiredH, "rsc"),
+      fetchBoxesForStyle(requiredL, requiredW, requiredH, "mailer"),
+    ]);
+
+    const bestRsc = pickBestFromDbRows(
+      rscRows,
+      "RSC",
+      requiredL,
+      requiredW,
+      requiredH,
+    );
+    const bestMailer = pickBestFromDbRows(
+      mailerRows,
+      "MAILER",
+      requiredL,
+      requiredW,
+      requiredH,
+    );
 
     if (!bestRsc && !bestMailer) {
       const resp: BoxSuggestOut = {
         ok: false,
-        error: "No cartons in the stub catalog fit these dimensions.",
+        error: "No cartons in the live boxes catalog fit these dimensions.",
       };
       return NextResponse.json(resp);
     }
 
-    const resp: BoxSuggestOut = {
-      ok: true,
-      bestRsc,
-      bestMailer,
-    };
+const resp: BoxSuggestOut = {
+  ok: true,
+  bestRsc: bestRsc ?? null,
+  bestMailer: bestMailer ?? null,
+};
 
-    return NextResponse.json(resp);
+return NextResponse.json(resp);
+
+
+
   } catch (err: any) {
     console.error("Box suggester POST error", err);
     const resp: BoxSuggestOut = {
