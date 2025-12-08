@@ -17,9 +17,7 @@
 //        "email": "buyer@acme.com",
 //        "company": "Acme Corporation",
 //        "phone": "555-123-4567"
-//     },
-//     "selectedCarton": { ... },  // OPTIONAL: chosen box from layout editor
-//     "foamLayers": [ ... ]      // OPTIONAL: foam layer summaries
+//     }
 //   }
 //////////////////////////
 // Behaviour:
@@ -37,8 +35,8 @@
 //   - Also syncs dims / cavities / qty / material into the facts store
 //     (loadFacts/saveFacts) under quote_no so follow-up emails + layout links
 //     use the latest layout, not stale test data.
-//   - NEW: if selectedCarton / foamLayers are present, syncs them into the
-//     facts store AND creates auto quote_items rows for the box + each layer.
+//   - NEW: syncs each foam layer in layout.stack into quote_items as separate
+//     rows marked with notes starting "[LAYOUT-LAYER] ...".
 //   - Returns the new package id + (if changed) the updatedQty.
 //
 // GET (debug helper):
@@ -84,24 +82,6 @@ type FlatCavity = {
   depthIn: number;
   x: number;
   y: number;
-};
-
-// Facts-safe versions of carton + layer payloads
-type SelectedCartonFacts = {
-  style: string | null;
-  sku: string | null;
-  description: string | null;
-  inside_length_in: number | null;
-  inside_width_in: number | null;
-  inside_height_in: number | null;
-  fit_score: number | null;
-  notes: string | null;
-};
-
-type FoamLayerFacts = {
-  id: string;
-  label: string;
-  thicknessIn: number | null;
 };
 
 /**
@@ -452,104 +432,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Optional selected carton and foam layer summaries, sanitized for facts
-  const rawSelectedCarton =
-    body.selectedCarton && typeof body.selectedCarton === "object"
-      ? body.selectedCarton
-      : null;
-
-  let selectedCarton: SelectedCartonFacts | null = null;
-  if (rawSelectedCarton) {
-    const fitRaw = (rawSelectedCarton as any).fit_score;
-    const fitNum =
-      typeof fitRaw === "number"
-        ? fitRaw
-        : fitRaw != null
-        ? Number(fitRaw)
-        : NaN;
-
-    const insideLenRaw = (rawSelectedCarton as any).inside_length_in;
-    const insideWidRaw = (rawSelectedCarton as any).inside_width_in;
-    const insideHtRaw = (rawSelectedCarton as any).inside_height_in;
-
-    const insideLenNum =
-      typeof insideLenRaw === "number"
-        ? insideLenRaw
-        : insideLenRaw != null
-        ? Number(insideLenRaw)
-        : NaN;
-    const insideWidNum =
-      typeof insideWidRaw === "number"
-        ? insideWidRaw
-        : insideWidRaw != null
-        ? Number(insideWidRaw)
-        : NaN;
-    const insideHtNum =
-      typeof insideHtRaw === "number"
-        ? insideHtRaw
-        : insideHtRaw != null
-        ? Number(insideHtRaw)
-        : NaN;
-
-    selectedCarton = {
-      style:
-        typeof rawSelectedCarton.style === "string"
-          ? rawSelectedCarton.style.trim() || null
-          : null,
-      sku:
-        typeof rawSelectedCarton.sku === "string"
-          ? rawSelectedCarton.sku.trim() || null
-          : null,
-      description:
-        typeof rawSelectedCarton.description === "string"
-          ? rawSelectedCarton.description.trim() || null
-          : null,
-      inside_length_in:
-        Number.isFinite(insideLenNum) && insideLenNum > 0
-          ? insideLenNum
-          : null,
-      inside_width_in:
-        Number.isFinite(insideWidNum) && insideWidNum > 0
-          ? insideWidNum
-          : null,
-      inside_height_in:
-        Number.isFinite(insideHtNum) && insideHtNum > 0
-          ? insideHtNum
-          : null,
-      fit_score:
-        Number.isFinite(fitNum) && fitNum >= 0 && fitNum <= 100
-          ? fitNum
-          : null,
-      notes:
-        typeof rawSelectedCarton.notes === "string" &&
-        rawSelectedCarton.notes.trim().length > 0
-          ? rawSelectedCarton.notes.trim()
-          : null,
-    };
-  }
-
-  const foamLayers: FoamLayerFacts[] = [];
-  if (Array.isArray(body.foamLayers)) {
-    for (const raw of body.foamLayers) {
-      if (!raw || typeof raw !== "object") continue;
-      const id = typeof raw.id === "string" ? raw.id.trim() : "";
-      const label =
-        typeof raw.label === "string" ? raw.label.trim() : "";
-      const tRaw = (raw as any).thicknessIn;
-      const tNum =
-        typeof tRaw === "number"
-          ? tRaw
-          : tRaw != null
-          ? Number(tRaw)
-          : NaN;
-      const thicknessIn =
-        Number.isFinite(tNum) && tNum > 0 ? tNum : null;
-
-      if (!id || !label) continue;
-      foamLayers.push({ id, label, thicknessIn });
-    }
-  }
-
   // Current user (if logged in). We fail soft here: layout save still works
   // even if auth is misconfigured; user_id columns just stay null.
   let currentUserId: number | null = null;
@@ -793,188 +675,149 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // NEW: Auto quote_items for selected carton + foam layers
+    // ===================== NEW: sync foam layers into quote_items =====================
+    // This does NOT change existing lines; it appends per-layer rows marked with a
+    // special notes prefix so we can safely overwrite them on each Apply.
     try {
-      if (selectedCarton || foamLayers.length > 0) {
-        const primary = await one<{
-          id: number;
-          material_id: any;
-          qty: any;
-          length_in: any;
-          width_in: any;
-          height_in: any;
-        }>(
+      // Primary line after potential material/qty updates
+      const primaryItem = await one<{
+        id: number;
+        length_in: any;
+        width_in: any;
+        height_in: any;
+        material_id: any;
+        qty: any;
+      }>(
+        `
+        select id, length_in, width_in, height_in, material_id, qty
+        from quote_items
+        where quote_id = $1
+        order by id asc
+        limit 1
+        `,
+        [quote.id],
+      );
+
+      const block = layout && layout.block ? layout.block : null;
+      const blockL = block
+        ? Number(block.lengthIn ?? block.length_in) || 0
+        : 0;
+      const blockW = block
+        ? Number(block.widthIn ?? block.width_in) || 0
+        : 0;
+
+      const baseQtyRaw =
+        updatedQty != null
+          ? updatedQty
+          : primaryItem
+          ? Number(primaryItem.qty)
+          : NaN;
+      const baseQty =
+        Number.isFinite(baseQtyRaw) && baseQtyRaw > 0 ? baseQtyRaw : null;
+
+      const baseMaterialIdRaw =
+        materialId != null
+          ? materialId
+          : primaryItem
+          ? Number(primaryItem.material_id)
+          : NaN;
+      const baseMaterialId =
+        Number.isFinite(baseMaterialIdRaw) && baseMaterialIdRaw > 0
+          ? baseMaterialIdRaw
+          : null;
+
+      const layers = Array.isArray(layout?.stack) ? layout.stack : [];
+
+      if (
+        blockL > 0 &&
+        blockW > 0 &&
+        baseQty != null &&
+        baseMaterialId != null &&
+        layers.length > 0
+      ) {
+        // Clear out any previous auto-generated layer rows to avoid duplicates.
+        await q(
           `
-          select id, material_id, qty, length_in, width_in, height_in
-          from quote_items
+          delete from quote_items
           where quote_id = $1
-          order by id asc
-          limit 1
+            and notes like '[LAYOUT-LAYER] %'
           `,
           [quote.id],
         );
 
-        if (primary && primary.material_id != null) {
-          const baseMaterialId = Number(primary.material_id);
-          const baseQty =
-            updatedQty != null && Number.isFinite(updatedQty)
-              ? updatedQty
-              : Number(primary.qty) || 1;
+        let layerIndex = 0;
 
-          const baseLength =
-            layout &&
-            layout.block &&
-            Number(layout.block.lengthIn) > 0
-              ? Number(layout.block.lengthIn)
-              : Number(primary.length_in) || 0;
+        for (const rawLayer of layers) {
+          if (!rawLayer) continue;
 
-          const baseWidth =
-            layout &&
-            layout.block &&
-            Number(layout.block.widthIn) > 0
-              ? Number(layout.block.widthIn)
-              : Number(primary.width_in) || 0;
+          const thicknessRaw =
+            (rawLayer as any).thicknessIn ??
+            (rawLayer as any).thickness_in ??
+            (rawLayer as any).thickness;
 
-          // Wipe prior auto_from_layout rows so we don't duplicate on re-save
+          const thickness = Number(thicknessRaw) || 0;
+          if (!(thickness > 0)) continue;
+
+          layerIndex += 1;
+
+          const rawLabel =
+            (rawLayer as any).label ??
+            (rawLayer as any).name ??
+            (rawLayer as any).title ??
+            null;
+
+          let label =
+            typeof rawLabel === "string" && rawLabel.trim().length > 0
+              ? rawLabel.trim()
+              : null;
+
+          const isBottom =
+            (rawLayer as any).isBottom === true ||
+            (rawLayer as any).id === "layer-bottom";
+
+          if (!label) {
+            label = isBottom ? "Bottom pad" : `Layer ${layerIndex}`;
+          }
+
+          const notesForRow = `[LAYOUT-LAYER] ${label}`;
+
           await q(
             `
-            delete from quote_items
-            where quote_id = $1
-              and calc_snapshot->>'auto_from_layout' = 'true'
+            insert into quote_items (
+              quote_id,
+              product_id,
+              length_in,
+              width_in,
+              height_in,
+              material_id,
+              qty,
+              notes
+            )
+            values ($1, null, $2, $3, $4, $5, $6, $7)
             `,
-            [quote.id],
+            [
+              quote.id,
+              blockL,
+              blockW,
+              thickness,
+              baseMaterialId,
+              baseQty,
+              notesForRow,
+            ],
           );
-
-          // Carton row
-          if (selectedCarton) {
-            const boxLen =
-  selectedCarton.inside_length_in ?? (baseLength || 0);
-
-            const boxWid =
-              selectedCarton.inside_width_in ?? (baseWidth || 0);
-            
-              const boxHt =
-  selectedCarton.inside_height_in ??
-  (Number(primary.height_in) || 0);
-
-
-            const boxLabel =
-              selectedCarton.description ||
-              selectedCarton.sku ||
-              selectedCarton.style ||
-              "Carton from box suggester";
-
-            const boxNotes = `[AUTO] Carton: ${boxLabel}`;
-
-            const boxSnapshot = {
-              auto_from_layout: true,
-              type: "carton",
-              source: "boxes_suggest",
-              sku: selectedCarton.sku,
-              style: selectedCarton.style,
-              description: selectedCarton.description,
-              inside_length_in: selectedCarton.inside_length_in,
-              inside_width_in: selectedCarton.inside_width_in,
-              inside_height_in: selectedCarton.inside_height_in,
-              fit_score: selectedCarton.fit_score,
-              notes: selectedCarton.notes,
-            };
-
-            await q(
-              `
-              insert into quote_items (
-                quote_id,
-                product_id,
-                length_in,
-                width_in,
-                height_in,
-                material_id,
-                qty,
-                notes,
-                price_unit_usd,
-                price_total_usd,
-                calc_snapshot
-              )
-              values ($1, null, $2, $3, $4, $5, $6, $7, null, null, $8::jsonb)
-              `,
-              [
-                quote.id,
-                boxLen,
-                boxWid,
-                boxHt,
-                baseMaterialId,
-                baseQty,
-                boxNotes,
-                JSON.stringify(boxSnapshot),
-              ],
-            );
-          }
-
-          // Foam layer rows
-          if (foamLayers.length > 0) {
-            const baseHeight =
-              layout &&
-              layout.block &&
-              Number(layout.block.thicknessIn) > 0
-                ? Number(layout.block.thicknessIn)
-                : Number(primary.height_in) || 0;
-
-            for (const layer of foamLayers) {
-              const layerHeight = layer.thicknessIn ?? (baseHeight || 0);
-
-              const layerLabel = layer.label || "Foam layer";
-
-              const layerNotes = `[AUTO] Foam layer: ${layerLabel}`;
-
-              const layerSnapshot = {
-                auto_from_layout: true,
-                type: "foam_layer",
-                layer_id: layer.id,
-                label: layer.label,
-                thicknessIn: layer.thicknessIn,
-              };
-
-              await q(
-                `
-                insert into quote_items (
-                  quote_id,
-                  product_id,
-                  length_in,
-                  width_in,
-                  height_in,
-                  material_id,
-                  qty,
-                  notes,
-                  price_unit_usd,
-                  price_total_usd,
-                  calc_snapshot
-                )
-                values ($1, null, $2, $3, $4, $5, $6, $7, null, null, $8::jsonb)
-                `,
-                [
-                  quote.id,
-                  baseLength,
-                  baseWidth,
-                  layerHeight,
-                  baseMaterialId,
-                  baseQty,
-                  layerNotes,
-                  JSON.stringify(layerSnapshot),
-                ],
-              );
-            }
-          }
         }
       }
-    } catch (e) {
+    } catch (layerErr) {
+      // Non-fatal: if this fails, the rest of the layout save still succeeds.
       console.error(
-        "Error creating auto carton / foam layer quote_items for quote",
+        "Warning: failed to sync foam layers into quote_items for",
         quoteNo,
-        e,
+        layerErr,
       );
     }
+    // =================== END new foam layer sync block ===================
 
-    // Sync layout dims, cavities, qty, material, customer, and NEW carton/layers into the facts store
+    // Sync layout dims, cavities, qty, material, and customer into the facts store
     try {
       const factsKey = quoteNo;
       const prevFacts = await loadFacts(factsKey);
@@ -1042,18 +885,6 @@ export async function POST(req: NextRequest) {
       }
       if (customerCompany) {
         nextFacts.customer_company = customerCompany;
-      }
-
-      if (selectedCarton) {
-        nextFacts.selected_carton = selectedCarton;
-      } else {
-        delete nextFacts.selected_carton;
-      }
-
-      if (foamLayers.length > 0) {
-        nextFacts.foam_layers = foamLayers;
-      } else {
-        delete nextFacts.foam_layers;
       }
 
       if (Object.keys(nextFacts).length > 0) {
