@@ -626,20 +626,22 @@ export default function QuotePrintClient() {
         qty: number;
       }[] = [];
 
-      layers.forEach((layer: any, index: number) => {
-        const tRaw =
-          layer.thicknessIn ??
-          layer.thickness_in ??
-          block.heightIn ??
-          block.height_in;
+            layers.forEach((layer: any, index: number) => {
+        // Only show layers that have their *own* thickness.
+        // We intentionally DO NOT fall back to block height here
+        // to avoid ghost "6 inch" rows when total stack is 6"
+        // but each layer is 3".
+        const tRaw = layer.thicknessIn ?? layer.thickness_in;
         const T = Number(tRaw);
-        if (!Number.isFinite(T) || T <= 0) return;
+        if (!Number.isFinite(T) || T <= 0) return; // skip layers without a real thickness
 
         const name =
           (typeof layer.name === "string" && layer.name.trim()) ||
           `Layer ${index + 1}`;
 
-        const dimsStr = `${formatDims(L, W, T)} in`;
+        // If your file already uses formatDims, keep that:
+        // const dimsStr = `${formatDims(L, W, T)} in`;
+        const dimsStr = `${L} × ${W} × ${T}`;
         const qty = primaryItem?.qty ?? 1;
 
         result.push({
@@ -649,6 +651,7 @@ export default function QuotePrintClient() {
           qty,
         });
       });
+
 
       return result;
     },
