@@ -676,10 +676,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ===================== NEW: sync foam layers into quote_items =====================
+        // ===================== NEW: sync foam layers into quote_items =====================
     // This does NOT change existing lines; it appends per-layer rows marked with a
     // special notes prefix so we can safely overwrite them on each Apply.
     try {
+      // Primary line (if it exists). We now treat this as OPTIONAL.
       const primaryItem = await one<{
         id: number;
         length_in: any;
@@ -698,72 +699,76 @@ export async function POST(req: NextRequest) {
         [quote.id],
       );
 
-      // Be tolerant of different block property names
-      const blockSrc =
-        layout && typeof layout === "object"
-          ? layout.block ??
-            layout.outerBlock ??
-            layout.blockInches ??
-            null
-          : null;
+      // Block footprint from the incoming layout
+      const block = layout && layout.block ? layout.block : null;
+      const blockL = block
+        ? Number(block.lengthIn ?? block.length_in) || 0
+        : 0;
+      const blockW = block
+        ? Number(block.widthIn ?? block.width_in) || 0
+        : 0;
 
-      const blockL = Number(
-        blockSrc?.lengthIn ??
-          blockSrc?.length_in ??
-          blockSrc?.length ??
-          blockSrc?.L ??
-          0,
-      );
-      const blockW = Number(
-        blockSrc?.widthIn ??
-          blockSrc?.width_in ??
-          blockSrc?.width ??
-          blockSrc?.W ??
-          0,
-      );
-
-      const baseQtyRaw =
-        updatedQty != null
-          ? updatedQty
-          : primaryItem
-          ? Number(primaryItem.qty)
-          : NaN;
-      const baseQty =
-        Number.isFinite(baseQtyRaw) && baseQtyRaw > 0 ? baseQtyRaw : null;
-
-      const baseMaterialIdRaw =
-        materialId != null
-          ? materialId
-          : primaryItem
-          ? Number(primaryItem.material_id)
-          : NaN;
-      const baseMaterialId =
-        Number.isFinite(baseMaterialIdRaw) && baseMaterialIdRaw > 0
-          ? baseMaterialIdRaw
-          : null;
-
-      const layers: any[] = Array.isArray(layout?.stack)
+      // Layers from layout.stack (primary) or layout.layers (fallback)
+      const layers = Array.isArray(layout?.stack)
         ? layout.stack
         : Array.isArray(layout?.layers)
         ? layout.layers
         : [];
 
-      console.log("[layout/apply] layer sync", {
-        quoteId: quote.id,
-        blockL,
-        blockW,
-        baseQty,
-        baseMaterialId,
-        layersCount: layers.length,
-      });
+      // Derive a base quantity to use for all layer rows.
+      let baseQty: number | null = null;
 
-      if (
-        blockL > 0 &&
-        blockW > 0 &&
-        baseQty != null &&
-        baseMaterialId != null &&
-        layers.length > 0
+      if (updatedQty != null && updatedQty > 0) {
+        baseQty = updatedQty;
+      } else if (body && body.qty !== undefined && body.qty !== null && body.qty !== "") {
+        const qn = Number(body.qty);
+        if (Number.isFinite(qn) && qn > 0) {
+          baseQty = qn;
+        }
+      } else if (primaryItem && primaryItem.qty != null) {
+        const qn = Number(primaryItem.qty);
+        if (Number.isFinite(qn) && qn > 0) {
+          baseQty = qn;
+        }
+      }
+
+      // If all else fails, fall back to 1 so we at least get visible rows.
+      if (baseQty == null) {
+        baseQty = 1;
+      }
+
+      // Derive a material id to use for all layer rows.
+      let baseMaterialId: number | null = null;
+
+      if (materialId != null && Number(materialId) > 0) {
+        baseMaterialId = Number(materialId);
+      } else if (primaryItem && primaryItem.material_id != null) {
+        const mid = Number(primaryItem.material_id);
+        if (Number.isFinite(mid) && mid > 0) {
+          baseMaterialId = mid;
+        }
+      } else if (
+        layout &&
+        (layout.materialId != null || layout.material_id != null)
       ) {
+        const rawMid = layout.materialId ?? layout.material_id;
+        const mid = Number(rawMid);
+        if (Number.isFinite(mid) && mid > 0) {
+          baseMaterialId = mid;
+        }
+      }
+
+      // If we still don't have a material id, we can't safely insert rows.
+      if (!baseMaterialId || blockL <= 0 || blockW <= 0 || !Array.isArray(layers) || layers.length === 0) {
+        console.warn("[layout/apply] Skipping foam-layer → quote_items sync", {
+          quoteId: quote.id,
+          blockL,
+          blockW,
+          baseQty,
+          baseMaterialId,
+          layersLen: Array.isArray(layers) ? layers.length : 0,
+        });
+      } else {
         // Clear out any previous auto-generated layer rows to avoid duplicates.
         await q(
           `
@@ -783,6 +788,7 @@ export async function POST(req: NextRequest) {
             (rawLayer as any).thicknessIn ??
             (rawLayer as any).thickness_in ??
             (rawLayer as any).thickness;
+
           const thickness = Number(thicknessRaw) || 0;
           if (!(thickness > 0)) continue;
 
@@ -834,14 +840,6 @@ export async function POST(req: NextRequest) {
             ],
           );
         }
-      } else {
-        console.log("[layout/apply] layer sync skipped", {
-          blockL,
-          blockW,
-          hasBaseQty: baseQty != null,
-          hasBaseMaterialId: baseMaterialId != null,
-          layersCount: layers.length,
-        });
       }
     } catch (layerErr) {
       // Non-fatal: if this fails, the rest of the layout save still succeeds.
@@ -851,6 +849,7 @@ export async function POST(req: NextRequest) {
         layerErr,
       );
     }
+    
     // =================== END new foam layer sync block ===================
 
     // Sync layout dims, cavities, qty, material, and customer into the facts store
