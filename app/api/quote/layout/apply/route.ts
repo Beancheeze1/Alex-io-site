@@ -37,6 +37,7 @@
 //     use the latest layout, not stale test data.
 //   - NEW: syncs each foam layer in layout.stack into quote_items as separate
 //     rows marked with notes starting "[LAYOUT-LAYER] ...".
+//
 //   - Returns the new package id + (if changed) the updatedQty.
 //
 // GET (debug helper):
@@ -679,7 +680,6 @@ export async function POST(req: NextRequest) {
     // This does NOT change existing lines; it appends per-layer rows marked with a
     // special notes prefix so we can safely overwrite them on each Apply.
     try {
-      // Primary line after potential material/qty updates
       const primaryItem = await one<{
         id: number;
         length_in: any;
@@ -698,13 +698,29 @@ export async function POST(req: NextRequest) {
         [quote.id],
       );
 
-      const block = layout && layout.block ? layout.block : null;
-      const blockL = block
-        ? Number(block.lengthIn ?? block.length_in) || 0
-        : 0;
-      const blockW = block
-        ? Number(block.widthIn ?? block.width_in) || 0
-        : 0;
+      // Be tolerant of different block property names
+      const blockSrc =
+        layout && typeof layout === "object"
+          ? layout.block ??
+            layout.outerBlock ??
+            layout.blockInches ??
+            null
+          : null;
+
+      const blockL = Number(
+        blockSrc?.lengthIn ??
+          blockSrc?.length_in ??
+          blockSrc?.length ??
+          blockSrc?.L ??
+          0,
+      );
+      const blockW = Number(
+        blockSrc?.widthIn ??
+          blockSrc?.width_in ??
+          blockSrc?.width ??
+          blockSrc?.W ??
+          0,
+      );
 
       const baseQtyRaw =
         updatedQty != null
@@ -726,7 +742,20 @@ export async function POST(req: NextRequest) {
           ? baseMaterialIdRaw
           : null;
 
-      const layers = Array.isArray(layout?.stack) ? layout.stack : [];
+      const layers: any[] = Array.isArray(layout?.stack)
+        ? layout.stack
+        : Array.isArray(layout?.layers)
+        ? layout.layers
+        : [];
+
+      console.log("[layout/apply] layer sync", {
+        quoteId: quote.id,
+        blockL,
+        blockW,
+        baseQty,
+        baseMaterialId,
+        layersCount: layers.length,
+      });
 
       if (
         blockL > 0 &&
@@ -754,7 +783,6 @@ export async function POST(req: NextRequest) {
             (rawLayer as any).thicknessIn ??
             (rawLayer as any).thickness_in ??
             (rawLayer as any).thickness;
-
           const thickness = Number(thicknessRaw) || 0;
           if (!(thickness > 0)) continue;
 
@@ -806,6 +834,14 @@ export async function POST(req: NextRequest) {
             ],
           );
         }
+      } else {
+        console.log("[layout/apply] layer sync skipped", {
+          blockL,
+          blockW,
+          hasBaseQty: baseQty != null,
+          hasBaseMaterialId: baseMaterialId != null,
+          layersCount: layers.length,
+        });
       }
     } catch (layerErr) {
       // Non-fatal: if this fails, the rest of the layout save still succeeds.
