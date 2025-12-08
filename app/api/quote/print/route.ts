@@ -363,15 +363,62 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return ok(
+        // ---------- subtotals: foam + packaging ----------
+
+    // Foam subtotal: sum of item.price_total_usd across quote_items.
+    const foamSubtotal = items.reduce((sum, it) => {
+      const raw = (it as any).price_total_usd;
+      const n =
+        typeof raw === "number"
+          ? raw
+          : raw != null
+          ? Number(raw)
+          : 0;
+      return Number.isFinite(n) ? sum + n : sum;
+    }, 0);
+
+    // Packaging subtotal: sum of carton pricing from quote_box_selections.
+    // Uses extended_price_usd if present, otherwise unit_price_usd * qty.
+    const packagingRow = await one<{
+      packaging_subtotal: string | number | null;
+    }>(
+      `
+        select
+          coalesce(
+            sum(
+              coalesce(extended_price_usd, unit_price_usd * qty, 0)
+            ),
+            0
+          ) as packaging_subtotal
+        from public."quote_box_selections"
+        where quote_id = $1
+      `,
+      [quote.id],
+    );
+
+    const rawPackaging =
+      packagingRow?.packaging_subtotal != null
+        ? packagingRow.packaging_subtotal
+        : 0;
+
+    const packagingSubtotal = Number(rawPackaging) || 0;
+
+    const grandSubtotal = foamSubtotal + packagingSubtotal;
+
+
+       return ok(
       {
         ok: true,
         quote,
         items,
         layoutPkg,
+        foamSubtotal,
+        packagingSubtotal,
+        grandSubtotal,
       },
       200,
     );
+ 
   } catch (err) {
     console.error("Error in /api/quote/print:", err);
     return bad(

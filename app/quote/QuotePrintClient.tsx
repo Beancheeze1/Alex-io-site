@@ -95,7 +95,11 @@ type ApiOk = {
   quote: QuoteRow;
   items: ItemRow[];
   layoutPkg: LayoutPkgRow | null;
+  foamSubtotal: number;
+  packagingSubtotal: number;
+  grandSubtotal: number;
 };
+
 
 type ApiErr = {
   ok: false;
@@ -194,6 +198,13 @@ export default function QuotePrintClient() {
   const [requestedBoxes, setRequestedBoxes] = React.useState<RequestedBox[]>(
     [],
   );
+
+    // Subtotals from server: foam, packaging, grand
+  const [foamSubtotal, setFoamSubtotal] = React.useState<number>(0);
+  const [packagingSubtotal, setPackagingSubtotal] =
+    React.useState<number>(0);
+  const [grandSubtotal, setGrandSubtotal] = React.useState<number>(0);
+
 
   // Which carton selection is currently being removed (for button disable/spinner)
   const [removingBoxId, setRemovingBoxId] = React.useState<number | null>(null);
@@ -347,12 +358,27 @@ export default function QuotePrintClient() {
         }
 
         if (json.ok) {
-          setQuote(json.quote);
-          setItems(json.items || []);
-          setLayoutPkg(json.layoutPkg || null);
-        } else {
-          setError("Unexpected response from quote API.");
-        }
+  setQuote(json.quote);
+  setItems(json.items || []);
+  setLayoutPkg(json.layoutPkg || null);
+
+  // Subtotals from server (fallback to 0 if missing)
+  const asOk = json as ApiOk;
+  setFoamSubtotal(
+    typeof asOk.foamSubtotal === "number" ? asOk.foamSubtotal : 0,
+  );
+  setPackagingSubtotal(
+    typeof asOk.packagingSubtotal === "number"
+      ? asOk.packagingSubtotal
+      : 0,
+  );
+  setGrandSubtotal(
+    typeof asOk.grandSubtotal === "number" ? asOk.grandSubtotal : 0,
+  );
+} else {
+  setError("Unexpected response from quote API.");
+}
+
       } catch (err) {
         console.error("Error fetching /api/quote/print:", err);
         setError(
@@ -456,12 +482,10 @@ export default function QuotePrintClient() {
 
   const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
 
-  const subtotal = items.reduce((sum, i) => {
-    const lineTotal = parsePriceField(i.price_total_usd) ?? 0;
-    return sum + lineTotal;
-  }, 0);
+  // anyPricing: use grandSubtotal (foam + packaging) if available,
+  // but still works if only foam is priced.
+  const anyPricing = grandSubtotal > 0 || foamSubtotal > 0;
 
-  const anyPricing = subtotal > 0;
 
   const notesPreview =
     layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
@@ -541,10 +565,11 @@ export default function QuotePrintClient() {
       ? primaryBreakdown.unitPrice
       : parsePriceField(primaryItem?.price_unit_usd ?? null);
 
-  const breakdownSubtotal =
+    const breakdownSubtotal =
     primaryBreakdown && Number.isFinite(primaryBreakdown.extendedPrice)
       ? primaryBreakdown.extendedPrice
-      : subtotal;
+      : foamSubtotal;
+
 
   const materialCost =
     primaryBreakdown && Number.isFinite(primaryBreakdown.materialCost)
@@ -966,6 +991,27 @@ export default function QuotePrintClient() {
                         </div>
                       </div>
 
+                                            {packagingSubtotal > 0 && (
+                        <div>
+                          <div style={labelStyle}>Packaging subtotal</div>
+                          <div style={{ fontSize: 13 }}>
+                            {formatUsd(packagingSubtotal)}
+                          </div>
+                        </div>
+                      )}
+
+                      {grandSubtotal > 0 && (
+                        <div>
+                          <div style={labelStyle}>
+                            Combined estimate (foam + packaging)
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 600 }}>
+                            {formatUsd(grandSubtotal)}
+                          </div>
+                        </div>
+                      )}
+
+
                       {primaryBreakdown && (
                         <>
                           <div
@@ -1074,7 +1120,7 @@ export default function QuotePrintClient() {
                                 ? ` A minimum charge of ${formatUsd(
                                     primaryPricing.min_charge ??
                                       breakdownSubtotal ??
-                                      subtotal,
+                                      foamSubtotal,
                                   )} applies to this configuration.`
                                 : ""}
                             </span>
@@ -1605,7 +1651,7 @@ export default function QuotePrintClient() {
                       >
                         {overallQty}
                       </div>
-                      {anyPricing && (
+                              {anyPricing && (
                         <>
                           <div
                             style={{
@@ -1614,7 +1660,7 @@ export default function QuotePrintClient() {
                               color: "#6b7280",
                             }}
                           >
-                            Estimated subtotal
+                            Estimated subtotal (foam + packaging)
                           </div>
                           <div
                             style={{
@@ -1622,10 +1668,13 @@ export default function QuotePrintClient() {
                               fontWeight: 600,
                             }}
                           >
-                            {formatUsd(subtotal)}
+                            {formatUsd(
+                              grandSubtotal > 0 ? grandSubtotal : foamSubtotal,
+                            )}
                           </div>
                         </>
                       )}
+
                     </div>
                   </div>
                 </>
