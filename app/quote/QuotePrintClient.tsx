@@ -142,6 +142,26 @@ function parsePriceField(
   return n;
 }
 
+function formatDimPart(raw: any): string {
+  if (raw === null || raw === undefined) return "";
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return String(raw ?? "");
+
+  // Round to 2 decimals, then strip trailing .00 or .10 → .1, etc.
+  const rounded = Math.round(n * 100) / 100;
+  const s = rounded
+    .toFixed(2)
+    .replace(/\.00$/, "")
+    .replace(/(\.\d)0$/, "$1");
+
+  return s;
+}
+
+function formatDims(l: any, w: any, h: any): string {
+  return [l, w, h].map(formatDimPart).join(" × ");
+}
+
+
 function formatUsd(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   try {
@@ -832,12 +852,17 @@ export default function QuotePrintClient() {
                     }}
                   >
                     <div>
-                      <div style={labelStyle}>Dimensions</div>
-                      <div style={{ fontSize: 13, color: "#111827" }}>
-                        {primaryItem.length_in} × {primaryItem.width_in} ×{" "}
-                        {primaryItem.height_in} in
-                      </div>
-                    </div>
+  <div style={labelStyle}>Dimensions</div>
+  <div style={{ fontSize: 13, color: "#111827" }}>
+    {formatDims(
+      primaryItem.length_in,
+      primaryItem.width_in,
+      primaryItem.height_in,
+    )}{" "}
+    in
+  </div>
+</div>
+
                     <div>
                       <div style={labelStyle}>Quantity</div>
                       <div style={{ fontSize: 13, color: "#111827" }}>
@@ -1201,16 +1226,29 @@ export default function QuotePrintClient() {
                     </thead>
                     <tbody>
                       {/* Foam / core quote items (priced) */}
-                      {items.map((item, idx) => {
-                        const dims =
-                          item.length_in +
-                          " × " +
-                          item.width_in +
-                          " × " +
-                          item.height_in;
-                        const baseLabel =
-                          item.material_name ||
-                          "Material #" + item.material_id;
+  {items.map((item, idx) => {
+  const fmtDim = (v: any) => {
+    const n =
+      typeof v === "number"
+        ? v
+        : v != null
+        ? Number(v)
+        : NaN;
+    if (!Number.isFinite(n)) return String(v ?? "");
+    return Number.isInteger(n)
+      ? n.toString()
+      : n.toFixed(2).replace(/\.00$/, "");
+  };
+
+  const dims = `${fmtDim(item.length_in)} × ${fmtDim(
+    item.width_in,
+  )} × ${fmtDim(item.height_in)}`;
+
+  const baseLabel =
+    item.material_name ||
+    "Material #" + item.material_id;
+
+
 
                         const subParts: string[] = [];
                         if (item.material_family) {

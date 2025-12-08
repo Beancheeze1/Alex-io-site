@@ -826,7 +826,7 @@ function LayoutEditorHost(props: {
   const [selectedMaterialId, setSelectedMaterialId] =
     React.useState<number | null>(initialMaterialId);
 
-      // Box suggester state (RSC + mailer suggestions)
+  // Box suggester state (RSC + mailer suggestions)
   const [boxSuggest, setBoxSuggest] = React.useState<BoxSuggestState>({
     loading: false,
     error: null,
@@ -834,13 +834,63 @@ function LayoutEditorHost(props: {
     bestMailer: null,
   });
 
-    const [selectedCartonKind, setSelectedCartonKind] =
+  const [selectedCartonKind, setSelectedCartonKind] =
     React.useState<"RSC" | "MAILER" | null>(null);
 
+  const handlePickCarton = React.useCallback(
+    async (kind: "RSC" | "MAILER") => {
+      // Update the visual selection immediately
+      setSelectedCartonKind(kind);
 
+      const sku =
+        kind === "RSC"
+          ? boxSuggest.bestRsc?.sku
+          : boxSuggest.bestMailer?.sku;
+
+      // If we don't have a real quote or a SKU yet, bail out
+      if (!hasRealQuoteNo || !quoteNo || !sku) {
+        return;
+      }
+
+      // Use the same qty as the layout / primary foam line, defaulting to 1
+      const numericQty =
+        typeof qty === "number" && Number.isFinite(qty) && qty > 0
+          ? qty
+          : 1;
+
+      const payload = {
+        quote_no: quoteNo,
+        sku,
+        qty: numericQty,
+      };
+
+      try {
+        const res = await fetch("/api/boxes/add-to-quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          console.error(
+            "Failed to add box to quote",
+            res.status,
+            await res.text(),
+          );
+        }
+      } catch (err) {
+        console.error(
+          "Error in handlePickCarton /api/boxes/add-to-quote",
+          err,
+        );
+      }
+    },
+    [boxSuggest.bestRsc, boxSuggest.bestMailer, hasRealQuoteNo, quoteNo, qty],
+  );
 
   // Local input state for selected cavity dims (to avoid "wonky" inputs)
   const [cavityInputs, setCavityInputs] = React.useState<{
+
     id: string | null;
     length: string;
     width: string;
@@ -1966,18 +2016,19 @@ function LayoutEditorHost(props: {
 
                           <div className="mt-2 flex items-center justify-between">
                             <button
-                              type="button"
-                              onClick={() => setSelectedCartonKind("RSC")}
-                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
-                                selectedCartonKind === "RSC"
-                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
-                                  : "border-slate-600 bg-slate-900 text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
-                              }`}
-                            >
-                              {selectedCartonKind === "RSC"
-                                ? "Selected carton"
-                                : "Pick this box"}
-                            </button>
+  type="button"
+  onClick={() => handlePickCarton("RSC")}
+  className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+    selectedCartonKind === "RSC"
+      ? "border-sky-400 bg-sky-500/20 text-sky-50"
+      : "border-slate-600 bg-slate-9...200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+  }`}
+>
+  {selectedCartonKind === "RSC"
+    ? "Selected carton"
+    : "Pick this box"}
+</button>
+
                           </div>
 
 
@@ -2018,18 +2069,19 @@ function LayoutEditorHost(props: {
 
                           <div className="mt-2 flex items-center justify-between">
                             <button
-                              type="button"
-                              onClick={() => setSelectedCartonKind("MAILER")}
-                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
-                                selectedCartonKind === "MAILER"
-                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
-                                  : "border-slate-600 bg-slate-900 text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
-                              }`}
-                            >
-                              {selectedCartonKind === "MAILER"
-                                ? "Selected carton"
-                                : "Pick this box"}
-                            </button>
+  type="button"
+  onClick={() => handlePickCarton("MAILER")}
+  className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+    selectedCartonKind === "MAILER"
+      ? "border-sky-400 bg-sky-500/20 text-sky-50"
+      : "border-slate-600 bg-slate-9...200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+  }`}
+>
+  {selectedCartonKind === "MAILER"
+    ? "Selected carton"
+    : "Pick this box"}
+</button>
+
                           </div>
 
 
