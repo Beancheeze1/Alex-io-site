@@ -56,7 +56,7 @@ type ItemRow = {
     min_charge?: number | null;
     used_min_charge?: boolean;
     setup_fee?: number | null;
-    kerf_pct?: number | null;
+    kerf_waste_pct?: number | null;
   } | null;
 
   pricing_breakdown?: {
@@ -158,9 +158,8 @@ function formatDimPart(raw: any): string {
 }
 
 function formatDims(l: any, w: any, h: any): string {
-  return [l, w, h].map(formatDimPart).join(" × ");
+  return [l, w, h].map(formatDimPart).join(" x ");
 }
-
 
 function formatUsd(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
@@ -195,6 +194,9 @@ export default function QuotePrintClient() {
   const [requestedBoxes, setRequestedBoxes] = React.useState<RequestedBox[]>(
     [],
   );
+
+  // Which carton selection is currently being removed (for button disable/spinner)
+  const [removingBoxId, setRemovingBoxId] = React.useState<number | null>(null);
 
   // Ref to the SVG preview container so we can scale/center the inner <svg>
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -264,18 +266,22 @@ export default function QuotePrintClient() {
         labelParts.push(`${styleLabel} ${sel.sku}`);
       }
 
-      if (sel.vendor) {
-        labelParts.push(`Vendor: ${sel.vendor}`);
-      }
-
       const dimsOk =
         Number.isFinite(sel.inside_length_in) &&
         Number.isFinite(sel.inside_width_in) &&
         Number.isFinite(sel.inside_height_in);
 
       const dimsLabel = dimsOk
-        ? `Inside ${sel.inside_length_in} × ${sel.inside_width_in} × ${sel.inside_height_in} in`
+        ? `Inside ${formatDims(
+            sel.inside_length_in,
+            sel.inside_width_in,
+            sel.inside_height_in,
+          )} in`
         : null;
+
+      if (sel.vendor) {
+        labelParts.push(`Vendor: ${sel.vendor}`);
+      }
 
       const labelMain = labelParts.join(" · ");
       const qty = sel.qty || primaryQty;
@@ -315,6 +321,88 @@ export default function QuotePrintClient() {
     window.open(url, "_blank", "noopener,noreferrer");
   }, []);
 
+  // Helper to reload quote data from /api/quote/print (used on initial load and after removals)
+  const reloadQuoteData = React.useCallback(
+    async (qNo: string) => {
+      try {
+        const res = await fetch(
+          "/api/quote/print?quote_no=" + encodeURIComponent(qNo),
+          { cache: "no-store" },
+        );
+
+        const json = (await res.json()) as ApiResponse;
+
+        if (!res.ok) {
+          if (!json.ok && (json as ApiErr).error === "NOT_FOUND") {
+            setNotFound((json as ApiErr).message || "Quote not found.");
+          } else if (!json.ok) {
+            setError(
+              (json as ApiErr).message ||
+                "There was a problem loading this quote.",
+            );
+          } else {
+            setError("There was a problem loading this quote.");
+          }
+          return;
+        }
+
+        if (json.ok) {
+          setQuote(json.quote);
+          setItems(json.items || []);
+          setLayoutPkg(json.layoutPkg || null);
+        } else {
+          setError("Unexpected response from quote API.");
+        }
+      } catch (err) {
+        console.error("Error fetching /api/quote/print:", err);
+        setError(
+          "There was an unexpected problem loading this quote. Please try again.",
+        );
+      }
+    },
+    [],
+  );
+
+  // Remove handler for carton selections
+  const handleRemoveCarton = React.useCallback(
+    async (selectionId: number) => {
+      if (!quoteNo || !selectionId) return;
+
+      try {
+        setRemovingBoxId(selectionId);
+
+        const res = await fetch("/api/boxes/remove-from-quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            // Using selectionId here; server can map from selection → [CARTON] quote_items rows
+            quoteNo,
+            selectionId,
+          }),
+        });
+
+        if (!res.ok) {
+          console.error(
+            "Failed to remove carton selection:",
+            await res.text().catch(() => ""),
+          );
+          return;
+        }
+
+        // Refresh requested cartons
+        await refreshRequestedBoxes();
+
+        // Refresh quote items in case any carton quote_items were removed or pricing changed
+        await reloadQuoteData(quoteNo);
+      } catch (err) {
+        console.error("Error calling /api/boxes/remove-from-quote:", err);
+      } finally {
+        setRemovingBoxId(null);
+      }
+    },
+    [quoteNo, refreshRequestedBoxes, reloadQuoteData],
+  );
+
   // Rescue: if router searchParams didn’t have quote_no, fall back to window.location
   React.useEffect(() => {
     if (quoteNo) return;
@@ -345,45 +433,7 @@ export default function QuotePrintClient() {
       setLayoutPkg(null);
 
       try {
-        const res = await fetch(
-          "/api/quote/print?quote_no=" + encodeURIComponent(quoteNo),
-          { cache: "no-store" },
-        );
-
-        const json = (await res.json()) as ApiResponse;
-
-        if (!res.ok) {
-          if (!cancelled) {
-            if (!json.ok && (json as ApiErr).error === "NOT_FOUND") {
-              setNotFound((json as ApiErr).message || "Quote not found.");
-            } else if (!json.ok) {
-              setError(
-                (json as ApiErr).message ||
-                  "There was a problem loading this quote.",
-              );
-            } else {
-              setError("There was a problem loading this quote.");
-            }
-          }
-          return;
-        }
-
-        if (!cancelled) {
-          if (json.ok) {
-            setQuote(json.quote);
-            setItems(json.items || []);
-            setLayoutPkg(json.layoutPkg || null);
-          } else {
-            setError("Unexpected response from quote API.");
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching /api/quote/print:", err);
-        if (!cancelled) {
-          setError(
-            "There was an unexpected problem loading this quote. Please try again.",
-          );
-        }
+        await reloadQuoteData(quoteNo);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -396,7 +446,7 @@ export default function QuotePrintClient() {
     return () => {
       cancelled = true;
     };
-  }, [quoteNo]);
+  }, [quoteNo, reloadQuoteData]);
 
   // Load requested cartons from DB whenever quoteNo changes
   React.useEffect(() => {
@@ -453,8 +503,8 @@ export default function QuotePrintClient() {
       ? primaryPricing.setup_fee
       : null;
   const kerfPct =
-    typeof primaryPricing?.kerf_pct === "number"
-      ? primaryPricing.kerf_pct
+    typeof primaryPricing?.kerf_waste_pct === "number"
+      ? primaryPricing.kerf_waste_pct
       : null;
 
   // material display lines for primary item
@@ -589,7 +639,7 @@ export default function QuotePrintClient() {
           (typeof layer.name === "string" && layer.name.trim()) ||
           `Layer ${index + 1}`;
 
-        const dimsStr = `${L} × ${W} × ${T}`;
+        const dimsStr = `${formatDims(L, W, T)} in`;
         const qty = primaryItem?.qty ?? 1;
 
         result.push({
@@ -852,16 +902,16 @@ export default function QuotePrintClient() {
                     }}
                   >
                     <div>
-  <div style={labelStyle}>Dimensions</div>
-  <div style={{ fontSize: 13, color: "#111827" }}>
-    {formatDims(
-      primaryItem.length_in,
-      primaryItem.width_in,
-      primaryItem.height_in,
-    )}{" "}
-    in
-  </div>
-</div>
+                      <div style={labelStyle}>Dimensions</div>
+                      <div style={{ fontSize: 13, color: "#111827" }}>
+                        {formatDims(
+                          primaryItem.length_in,
+                          primaryItem.width_in,
+                          primaryItem.height_in,
+                        )}{" "}
+                        in
+                      </div>
+                    </div>
 
                     <div>
                       <div style={labelStyle}>Quantity</div>
@@ -1193,7 +1243,7 @@ export default function QuotePrintClient() {
                             borderBottom: "1px solid #e5e7eb",
                           }}
                         >
-                          Dimensions (L × W × H)
+                          Dimensions (L x W x H in)
                         </th>
                         <th
                           style={{
@@ -1226,29 +1276,16 @@ export default function QuotePrintClient() {
                     </thead>
                     <tbody>
                       {/* Foam / core quote items (priced) */}
-  {items.map((item, idx) => {
-  const fmtDim = (v: any) => {
-    const n =
-      typeof v === "number"
-        ? v
-        : v != null
-        ? Number(v)
-        : NaN;
-    if (!Number.isFinite(n)) return String(v ?? "");
-    return Number.isInteger(n)
-      ? n.toString()
-      : n.toFixed(2).replace(/\.00$/, "");
-  };
+                      {items.map((item, idx) => {
+                        const dims = `${formatDims(
+                          item.length_in,
+                          item.width_in,
+                          item.height_in,
+                        )} in`;
 
-  const dims = `${fmtDim(item.length_in)} × ${fmtDim(
-    item.width_in,
-  )} × ${fmtDim(item.height_in)}`;
-
-  const baseLabel =
-    item.material_name ||
-    "Material #" + item.material_id;
-
-
+                        const baseLabel =
+                          item.material_name ||
+                          "Material #" + item.material_id;
 
                         const subParts: string[] = [];
                         if (item.material_family) {
@@ -1400,34 +1437,42 @@ export default function QuotePrintClient() {
                         </tr>
                       ))}
 
-                      {/* Requested cartons appended as additional lines (display only for now) */}
+                      {/* Requested cartons appended as additional lines (display only for now, with Remove) */}
                       {requestedBoxes.map((rb) => {
-                        const baseLabel =
+                        const mainLabel =
                           (rb.description && rb.description.trim().length > 0
                             ? rb.description.trim()
-                            : `${rb.style || "Carton"} ${rb.sku}`) || rb.sku;
+                            : `${rb.style || "Carton"}`) || "Carton";
 
-                        const subParts: string[] = [];
-                        if (rb.vendor) subParts.push(rb.vendor);
                         const dimsOk =
                           Number.isFinite(rb.inside_length_in) &&
                           Number.isFinite(rb.inside_width_in) &&
                           Number.isFinite(rb.inside_height_in);
-                        if (dimsOk) {
-                          subParts.push(
-                            `Inside ${rb.inside_length_in} × ${rb.inside_width_in} × ${rb.inside_height_in} in`,
-                          );
-                        }
+
+                        const dimsText = dimsOk
+                          ? `${formatDims(
+                              rb.inside_length_in,
+                              rb.inside_width_in,
+                              rb.inside_height_in,
+                            )} in`
+                          : null;
+
+                        const notesParts: string[] = [];
+                        if (rb.sku) notesParts.push(`SKU: ${rb.sku}`);
+                        if (rb.vendor) notesParts.push(`Vendor: ${rb.vendor}`);
+                        if (dimsText)
+                          notesParts.push(`Inside ${dimsText}`);
+
                         const subLabel =
-                          subParts.length > 0
-                            ? subParts.join(" · ")
+                          notesParts.length > 0
+                            ? notesParts.join(" · ")
                             : null;
 
-                        const dimsDisplay = dimsOk
-                          ? `${rb.inside_length_in} × ${rb.inside_width_in} × ${rb.inside_height_in}`
-                          : "—";
+                        const dimsDisplay = dimsText ?? "—";
 
                         const qty = rb.qty || primaryItem?.qty || 1;
+
+                        const isRemoving = removingBoxId === rb.id;
 
                         return (
                           <tr key={`carton-${rb.id}`}>
@@ -1437,21 +1482,64 @@ export default function QuotePrintClient() {
                                 borderBottom: "1px solid #f3f4f6",
                               }}
                             >
-                              <div style={{ fontWeight: 500 }}>
-                                Carton selection
-                              </div>
-                              <div style={{ color: "#6b7280" }}>
-                                {baseLabel}
-                                {subLabel && (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  gap: 8,
+                                }}
+                              >
+                                <div>
                                   <div
                                     style={{
                                       fontSize: 11,
-                                      marginTop: 2,
+                                      fontWeight: 600,
+                                      textTransform: "uppercase",
+                                      letterSpacing: "0.08em",
+                                      color: "#4b5563",
+                                      marginBottom: 2,
                                     }}
                                   >
-                                    {subLabel}
+                                    Packaging – Carton selection
                                   </div>
-                                )}
+                                  <div style={{ fontWeight: 500 }}>
+                                    {mainLabel}
+                                  </div>
+                                  {subLabel && (
+                                    <div
+                                      style={{
+                                        color: "#6b7280",
+                                        fontSize: 11,
+                                        marginTop: 2,
+                                      }}
+                                    >
+                                      {subLabel}
+                                    </div>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveCarton(rb.id)}
+                                  disabled={isRemoving}
+                                  style={{
+                                    padding: "4px 10px",
+                                    borderRadius: 999,
+                                    border: "1px solid #fecaca",
+                                    background: isRemoving
+                                      ? "#fee2e2"
+                                      : "#fef2f2",
+                                    color: "#b91c1c",
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    cursor: isRemoving
+                                      ? "default"
+                                      : "pointer",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {isRemoving ? "Removing…" : "✕ Remove"}
+                                </button>
                               </div>
                             </td>
                             <td
