@@ -847,8 +847,12 @@ function LayoutEditorHost(props: {
           ? boxSuggest.bestRsc?.sku
           : boxSuggest.bestMailer?.sku;
 
-      // If we don't have a real quote or a SKU yet, bail out
-      if (!hasRealQuoteNo || !quoteNo || !sku) {
+      // We need a quote number and a SKU to do anything useful
+      if (!quoteNo || !sku) {
+        console.warn("[layout] Skipping carton pick: missing quoteNo or sku", {
+          quoteNo,
+          sku,
+        });
         return;
       }
 
@@ -864,6 +868,8 @@ function LayoutEditorHost(props: {
         qty: numericQty,
       };
 
+      console.log("[layout] handlePickCarton → /api/boxes/add-to-quote", payload);
+
       try {
         const res = await fetch("/api/boxes/add-to-quote", {
           method: "POST",
@@ -871,11 +877,21 @@ function LayoutEditorHost(props: {
           body: JSON.stringify(payload),
         });
 
+        const data = await res
+          .json()
+          .catch(() => ({ ok: false, error: "non_json_response" }));
+
+        console.log(
+          "[layout] /api/boxes/add-to-quote response",
+          res.status,
+          data,
+        );
+
         if (!res.ok) {
           console.error(
             "Failed to add box to quote",
             res.status,
-            await res.text(),
+            data,
           );
         }
       } catch (err) {
@@ -885,8 +901,9 @@ function LayoutEditorHost(props: {
         );
       }
     },
-    [boxSuggest.bestRsc, boxSuggest.bestMailer, hasRealQuoteNo, quoteNo, qty],
+    [boxSuggest.bestRsc, boxSuggest.bestMailer, quoteNo, qty],
   );
+
 
   // Local input state for selected cavity dims (to avoid "wonky" inputs)
   const [cavityInputs, setCavityInputs] = React.useState<{
