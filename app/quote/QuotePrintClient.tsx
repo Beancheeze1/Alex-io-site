@@ -1324,8 +1324,29 @@ export default function QuotePrintClient() {
                       </tr>
                     </thead>
                     <tbody>
+                                          <tbody>
                       {/* Foam / core quote items (priced) */}
+                      {items.length > 0 && (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            style={{
+                              padding: "6px 8px",
+                              borderBottom: "1px solid #e5e7eb",
+                              background: "#f9fafb",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              letterSpacing: "0.08em",
+                              textTransform: "uppercase",
+                              color: "#6b7280",
+                            }}
+                          >
+                            Foam materials
+                          </td>
+                        </tr>
+                      )}
                       {items.map((item, idx) => {
+
                         const dims = `${formatDims(
                           item.length_in,
                           item.width_in,
@@ -1486,8 +1507,29 @@ export default function QuotePrintClient() {
                         </tr>
                       ))}
 
-                      {/* Requested cartons appended as additional lines (display only for now, with Remove) */}
+                                            {/* Requested cartons appended as additional lines (display only for now) */}
+                      {requestedBoxes.length > 0 && (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            style={{
+                              padding: "6px 8px",
+                              borderTop: "1px solid #e5e7eb",
+                              borderBottom: "1px solid #f3f4f6",
+                              background: "#fef2f2",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              letterSpacing: "0.08em",
+                              textTransform: "uppercase",
+                              color: "#b91c1c",
+                            }}
+                          >
+                            Packaging
+                          </td>
+                        </tr>
+                      )}
                       {requestedBoxes.map((rb) => {
+
                         const mainLabel =
                           (rb.description && rb.description.trim().length > 0
                             ? rb.description.trim()
