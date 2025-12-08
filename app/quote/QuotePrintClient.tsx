@@ -1710,9 +1710,9 @@ export default function QuotePrintClient() {
                       >
                         {overallQty}
                       </div>
-                 {anyPricing && (
+{anyPricing && (
   <>
-    {/* Always show foam subtotal explicitly */}
+    {/* Foam subtotal always shown */}
     <div
       style={{
         marginTop: 4,
@@ -1731,9 +1731,27 @@ export default function QuotePrintClient() {
       {formatUsd(foamSubtotal)}
     </div>
 
-    {/* Only show combined subtotal when packaging has a non-zero price */}
+    {/* Packaging subtotal only if cartons are priced */}
     {packagingSubtotal > 0 && (
       <>
+        <div
+          style={{
+            marginTop: 4,
+            fontSize: 12,
+            color: "#6b7280",
+          }}
+        >
+          Packaging subtotal
+        </div>
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          {formatUsd(packagingSubtotal)}
+        </div>
+
         <div
           style={{
             marginTop: 4,
@@ -1755,6 +1773,7 @@ export default function QuotePrintClient() {
     )}
   </>
 )}
+
 
 
                     </div>
