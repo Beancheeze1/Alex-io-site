@@ -6,16 +6,15 @@
 // POST JSON:
 //   {
 //     "quote_no": "Q-AI-20251208-032309",
-//     "sku": "BOX-123",
+//     "sku": "BP-RSC-16x12x6",
 //     "qty": 250
 //   }
 //
-// Behaviour:
+// Behaviour (Path A, DB-safe):
 //   - Looks up quotes.id by quote_no
-//   - Looks up boxes.id by sku
-//   - Inserts a row into quote_box_selections (quote_id, quote_no, box_id, sku, qty)
-//   - Inserts a carton "note" row into quote_items so it shows on the quote print.
-//
+//   - Does NOT require a row in public.boxes
+//   - Inserts a row into quote_box_selections (quote_id, quote_no, sku, qty)
+//   - Inserts a simple carton row into quote_items so it shows on the quote print.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -64,46 +63,31 @@ export async function POST(req: NextRequest) {
 
     if (!quote) {
       return bad(
-        { ok: false, error: "QUOTE_NOT_FOUND", message: `No quote for ${quoteNo}` },
+        {
+          ok: false,
+          error: "QUOTE_NOT_FOUND",
+          message: `No quote for ${quoteNo}`,
+        },
         404,
       );
     }
 
-    // 2) Look up the box by sku (we only require id; product_id is optional / ignored)
-    const box = await one<{ id: number }>(
-      `
-      select id
-      from boxes
-      where sku = $1
-      limit 1
-      `,
-      [sku],
-    );
-
-    if (!box) {
-      return bad(
-        { ok: false, error: "BOX_NOT_FOUND", message: `No box with sku ${sku}` },
-        404,
-      );
-    }
-
-    // 3) Record the selection so we can audit / change later
+    // 2) Record the selection (no box_id required for now)
     await q(
       `
       insert into quote_box_selections (
         quote_id,
         quote_no,
-        box_id,
         sku,
         qty
       )
-      values ($1, $2, $3, $4, $5)
+      values ($1, $2, $3, $4)
       `,
-      [quote.id, quoteNo, box.id, sku, qtyNum],
+      [quote.id, quoteNo, sku, qtyNum],
     );
 
-    // 4) Add a simple carton line item so it shows in the quote viewer.
-    //    We keep dims/material null for now and use the notes to explain.
+    // 3) Add a simple carton line item so it shows in the quote viewer.
+    //    Keep dims/material null for now; use notes to explain.
     const notes = `[CARTON] SKU ${sku}`;
 
     await q(
