@@ -708,12 +708,21 @@ export async function POST(req: NextRequest) {
         ? Number(block.widthIn ?? block.width_in) || 0
         : 0;
 
-      // Layers from layout.stack (primary) or layout.layers (fallback)
-      const layers = Array.isArray(layout?.stack)
-        ? layout.stack
-        : Array.isArray(layout?.layers)
-        ? layout.layers
-        : [];
+            // Layers from foamLayers (payload-level) if present,
+      // otherwise layout.stack (primary) or layout.layers (fallback)
+      const foamLayers = Array.isArray((body as any)?.foamLayers)
+        ? (body as any).foamLayers
+        : null;
+
+      const layers =
+        Array.isArray(foamLayers) && foamLayers.length > 0
+          ? foamLayers
+          : Array.isArray(layout?.stack)
+          ? layout.stack
+          : Array.isArray(layout?.layers)
+          ? layout.layers
+          : [];
+
 
       // Derive a base quantity to use for all layer rows.
       let baseQty: number | null = null;
