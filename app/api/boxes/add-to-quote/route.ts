@@ -17,7 +17,7 @@
 //       * If (quote_id, box_id) exists, increments qty (qty = qty + incomingQty).
 //       * Otherwise inserts a new selection row.
 //   - NEW: After upsert, prices the carton selection using public.box_price_tiers:
-//       * Chooses the tier where vendor+sku match and min_qty <= selection.qty,
+//       * Chooses the tier where box_id matches and min_qty <= selection.qty,
 //         ordered by min_qty DESC (best match).
 //       * If unit_price_usd is present on the tier, uses that.
 //       * Else if unit_cost_usd and markup_pct are present, computes:
@@ -290,13 +290,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3b) Price the carton selection using box_price_tiers
+    // 3b) Price the carton selection using box_price_tiers (by box_id + min_qty)
     try {
-      const vendorKey = (box.vendor || "").trim();
-      const skuKey = (box.sku || "").trim();
       const effectiveQty = selection.qty ?? incomingQty;
 
-      if (vendorKey && skuKey && effectiveQty > 0) {
+      if (box.id && effectiveQty > 0) {
         const tier = (await one<TierRow>(
           `
           SELECT
@@ -304,14 +302,13 @@ export async function POST(req: NextRequest) {
             markup_pct,
             unit_price_usd
           FROM public.box_price_tiers
-          WHERE vendor = $1
-            AND sku    = $2
+          WHERE box_id = $1
             AND active = true
-            AND min_qty <= $3
+            AND min_qty <= $2
           ORDER BY min_qty DESC
           LIMIT 1
           `,
-          [vendorKey, skuKey, effectiveQty],
+          [box.id, effectiveQty],
         )) as TierRow | null;
 
         let unitPrice: number | null = null;
@@ -337,7 +334,7 @@ export async function POST(req: NextRequest) {
           `
           UPDATE public.quote_box_selections
           SET
-            unit_price_usd    = $1,
+            unit_price_usd     = $1,
             extended_price_usd = $2
           WHERE id = $3
           `,
