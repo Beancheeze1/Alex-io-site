@@ -468,103 +468,112 @@ export async function GET(req: NextRequest) {
 
     // ---------- packaging lines: quote_box_selections + boxes ----------
 
-    const packagingSelectionsRaw = await q<PackagingSelectionRow>(
-      `
-        select
-          qbs.id,
-          qbs.quote_id,
-          qbs.box_id,
-          qbs.sku,
-          qbs.qty,
-          qbs.unit_price_usd,
-          qbs.extended_price_usd,
-          b.vendor,
-          b.style,
-          b.description,
-          b.inside_length_in,
-          b.inside_width_in,
-          b.inside_height_in
-        from public.quote_box_selections qbs
-        join public.boxes b on b.id = qbs.box_id
-        where qbs.quote_id = $1
-        order by qbs.id asc
-      `,
-      [quote.id],
-    );
+  // ---------- packaging lines: quote_box_selections + boxes ----------
 
-    const packagingLines: PackagingLine[] = [];
+const packagingSelectionsRaw = await q<PackagingSelectionRow>(
+  `
+    select
+      qbs.id,
+      qbs.quote_id,
+      qbs.box_id,
+      qbs.sku,
+      qbs.qty,
+      qbs.unit_price_usd,
+      qbs.extended_price_usd,
+      b.vendor,
+      b.style,
+      b.description,
+      b.inside_length_in,
+      b.inside_width_in,
+      b.inside_height_in
+    from public.quote_box_selections qbs
+    join public.boxes b on b.id = qbs.box_id
+    where qbs.quote_id = $1
+    order by qbs.id asc
+  `,
+  [quote.id],
+);
 
-    for (const row of packagingSelectionsRaw) {
-      const qty = Number(row.qty) || 0;
+async function repriceIfMissing(sel: PackagingSelectionRow): Promise<PackagingLine> {
+  const qty = Number(sel.qty) || 0;
+  const vendor = (sel.vendor || "").trim();
+  const sku = (sel.sku || "").trim();
 
-      // 1) Primary source: stored unit_price_usd on the selection
-      let unit: number | null = null;
-      const unitRaw = row.unit_price_usd;
-      if (
-        unitRaw != null &&
-        unitRaw !== "" &&
-        Number.isFinite(Number(unitRaw))
-      ) {
-        unit = Number(unitRaw);
-      } else {
-        // 2) Fallback: recompute from box_price_tiers, same as /api/boxes/add-to-quote
-        unit = await computeCartonUnitPriceFromTiers(
-          row.vendor,
-          row.sku,
-          qty,
-        );
-      }
+  // Check stored price first
+  let unit = toNumberOrNull(sel.unit_price_usd);
+  let extended = toNumberOrNull(sel.extended_price_usd);
 
-      // 3) Extended price: prefer stored extended, else unit * qty
-      let extended: number | null = null;
-      const extendedRaw = row.extended_price_usd;
-      if (
-        extendedRaw != null &&
-        extendedRaw !== "" &&
-        Number.isFinite(Number(extendedRaw))
-      ) {
-        extended = Number(extendedRaw);
-      } else if (unit != null && Number.isFinite(unit) && qty > 0) {
-        extended = roundToCents(unit * qty);
-      }
+  // If we have price stored, use it
+  if (unit != null && extended != null) {
+    return formatPackaging(sel, qty, unit, extended);
+  }
 
-      const L =
-        row.inside_length_in != null &&
-        row.inside_length_in !== "" &&
-        Number.isFinite(Number(row.inside_length_in))
-          ? Number(row.inside_length_in)
-          : null;
+  // Otherwise re-evaluate price tiers
+  const tier = await one<TierRow>(
+    `
+      SELECT unit_cost_usd, markup_pct, unit_price_usd
+      FROM public.box_price_tiers
+      WHERE vendor = $1 AND sku = $2 AND active = true AND min_qty <= $3
+      ORDER BY min_qty DESC
+      LIMIT 1
+    `,
+    [vendor, sku, qty],
+  );
 
-      const W =
-        row.inside_width_in != null &&
-        row.inside_width_in !== "" &&
-        Number.isFinite(Number(row.inside_width_in))
-          ? Number(row.inside_width_in)
-          : null;
+  let unitPrice: number | null = null;
 
-      const H =
-        row.inside_height_in != null &&
-        row.inside_height_in !== "" &&
-        Number.isFinite(Number(row.inside_height_in))
-          ? Number(row.inside_height_in)
-          : null;
+  if (tier) {
+    const override = toNumberOrNull(tier.unit_price_usd);
+    const cost = toNumberOrNull(tier.unit_cost_usd);
+    const markupPct = toNumberOrNull(tier.markup_pct) ?? 0;
 
-      packagingLines.push({
-        id: row.id,
-        quote_id: row.quote_id,
-        box_id: row.box_id,
-        sku: row.sku,
-        qty,
-        unit_price_usd: unit,
-        extended_price_usd: extended,
-        vendor: row.vendor,
-        style: row.style,
-        description: row.description,
-        inside_length_in: L,
-        inside_width_in: W,
-        inside_height_in: H,
-      });
+    if (override !== null) {
+      unitPrice = override;
+    } else if (cost !== null) {
+      unitPrice = Math.round(cost * (1 + markupPct / 100) * 100) / 100;
     }
+  }
+
+  const ext =
+    unitPrice !== null && qty > 0
+      ? Math.round(unitPrice * qty * 100) / 100
+      : null;
+
+  return formatPackaging(sel, qty, unitPrice, ext);
+}
+
+function formatPackaging(
+  sel: PackagingSelectionRow,
+  qty: number,
+  unit: number | null,
+  extended: number | null,
+): PackagingLine {
+  const L = toNumberOrNull(sel.inside_length_in);
+  const W = toNumberOrNull(sel.inside_width_in);
+  const H = toNumberOrNull(sel.inside_height_in);
+
+  return {
+    id: sel.id,
+    quote_id: sel.quote_id,
+    box_id: sel.box_id,
+    sku: sel.sku,
+    qty,
+    unit_price_usd: unit,
+    extended_price_usd: extended,
+    vendor: sel.vendor,
+    style: sel.style,
+    description: sel.description,
+    inside_length_in: L,
+    inside_width_in: W,
+    inside_height_in: H,
+  };
+}
+
+const packagingLines: PackagingLine[] = [];
+for (const sel of packagingSelectionsRaw) {
+  packagingLines.push(await repriceIfMissing(sel));
+}
+
 
     // ---------- subtotals: foam + packaging ----------
 
