@@ -3,6 +3,8 @@
 // Admin Carton Pricing API
 // Path A safe: read & update carton pricing + tiers only.
 // - GET:  list boxes + box_price_tiers (if present)
+//   * If the box_price_tiers table or columns are missing/mismatched,
+//     we gracefully fall back to returning boxes with NULL tier fields.
 // - POST: save pricing for boxes (base price + up to 4 tiers)
 //
 // IMPORTANT:
@@ -36,6 +38,17 @@ type BoxWithTiersRow = {
   tier3_unit_price: string | number | null;
   tier4_min_qty: number | null;
   tier4_unit_price: string | number | null;
+};
+
+type BoxOnlyRow = {
+  box_id: number;
+  vendor: string;
+  style: string;
+  sku: string;
+  description: string;
+  inside_length_in: string | number;
+  inside_width_in: string | number;
+  inside_height_in: string | number;
 };
 
 type SaveUpdate = {
@@ -80,43 +93,102 @@ function toNullableInt(raw: any): number | null {
   return rounded;
 }
 
-// ---------- GET: list boxes + tiers ----------
+// ---------- GET: list boxes + tiers (with safe fallback) ----------
 export async function GET() {
   try {
-    const rows = await q<BoxWithTiersRow>(
-      `
-      select
-        b.id as box_id,
-        b.vendor,
-        b.style,
-        b.sku,
-        b.description,
-        b.inside_length_in,
-        b.inside_width_in,
-        b.inside_height_in,
-        t.id as tier_id,
-        t.base_unit_price,
-        t.tier1_min_qty,
-        t.tier1_unit_price,
-        t.tier2_min_qty,
-        t.tier2_unit_price,
-        t.tier3_min_qty,
-        t.tier3_unit_price,
-        t.tier4_min_qty,
-        t.tier4_unit_price
-      from public.boxes b
-      left join public.box_price_tiers t
-        on t.box_id = b.id
-      where b.active = true
-      order by b.vendor, b.style, b.sku
-      `,
-      [],
-    );
+    try {
+      // Preferred path: join boxes + box_price_tiers
+      const rows = await q<BoxWithTiersRow>(
+        `
+        select
+          b.id as box_id,
+          b.vendor,
+          b.style,
+          b.sku,
+          b.description,
+          b.inside_length_in,
+          b.inside_width_in,
+          b.inside_height_in,
+          t.id as tier_id,
+          t.base_unit_price,
+          t.tier1_min_qty,
+          t.tier1_unit_price,
+          t.tier2_min_qty,
+          t.tier2_unit_price,
+          t.tier3_min_qty,
+          t.tier3_unit_price,
+          t.tier4_min_qty,
+          t.tier4_unit_price
+        from public.boxes b
+        left join public.box_price_tiers t
+          on t.box_id = b.id
+        where b.active = true
+        order by b.vendor, b.style, b.sku
+        `,
+        [],
+      );
 
-    return ok({
-      ok: true,
-      boxes: rows,
-    });
+      return ok({
+        ok: true,
+        boxes: rows,
+      });
+    } catch (innerErr: any) {
+      const msg = String(innerErr?.message ?? innerErr ?? "");
+      const code = (innerErr && (innerErr as any).code) || "";
+
+      // If the error looks like a missing table / bad column on box_price_tiers,
+      // fall back to boxes-only so the UI still works.
+      const isTierSchemaProblem =
+        code === "42P01" || // undefined_table
+        code === "42703" || // undefined_column
+        msg.includes("box_price_tiers");
+
+      if (!isTierSchemaProblem) {
+        throw innerErr;
+      }
+
+      console.warn(
+        "[/api/admin/boxes] box_price_tiers not ready; falling back to boxes-only:",
+        { code, msg },
+      );
+
+      const boxesOnly = await q<BoxOnlyRow>(
+        `
+        select
+          b.id as box_id,
+          b.vendor,
+          b.style,
+          b.sku,
+          b.description,
+          b.inside_length_in,
+          b.inside_width_in,
+          b.inside_height_in
+        from public.boxes b
+        where b.active = true
+        order by b.vendor, b.style, b.sku
+        `,
+        [],
+      );
+
+      const boxesWithNullTiers: BoxWithTiersRow[] = boxesOnly.map((b) => ({
+        ...b,
+        tier_id: null,
+        base_unit_price: null,
+        tier1_min_qty: null,
+        tier1_unit_price: null,
+        tier2_min_qty: null,
+        tier2_unit_price: null,
+        tier3_min_qty: null,
+        tier3_unit_price: null,
+        tier4_min_qty: null,
+        tier4_unit_price: null,
+      }));
+
+      return ok({
+        ok: true,
+        boxes: boxesWithNullTiers,
+      });
+    }
   } catch (err: any) {
     console.error("Error in GET /api/admin/boxes:", err);
     return bad(
