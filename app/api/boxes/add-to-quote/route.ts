@@ -16,13 +16,8 @@
 //   - Upserts a row into public.quote_box_selections:
 //       * If (quote_id, box_id) exists, increments qty (qty = qty + incomingQty).
 //       * Otherwise inserts a new selection row.
-//   - NEW: After upsert, prices the carton selection using public.box_price_tiers:
-//       * Chooses the tier where box_id matches and min_qty <= selection.qty,
-//         ordered by min_qty DESC (best match).
-//       * If unit_price_usd is present on the tier, uses that.
-//       * Else if unit_cost_usd and markup_pct are present, computes:
-//           sell = cost * (1 + markup_pct/100), rounded to 2 decimals.
-//       * Writes unit_price_usd + extended_price_usd back to quote_box_selections.
+//   - NEW: After upsert, prices the carton selection using public.box_price_tiers
+//         (base price + up to 4 tiers keyed by box_id).
 //   - Best-effort: inserts a single carton line into public.quote_items using the
 //     box inside dimensions and the primary line's material_id (only when the
 //     selection row is first created, not on subsequent qty bumps).
@@ -78,13 +73,20 @@ type SelectionRow = {
   extended_price_usd?: number | null;
 };
 
+// NOTE: matches the schema used by /api/admin/boxes
 type TierRow = {
-  unit_cost_usd: string | number | null;
-  markup_pct: string | number | null;
-  unit_price_usd: string | number | null;
+  base_unit_price: string | number | null;
+  tier1_min_qty: number | null;
+  tier1_unit_price: string | number | null;
+  tier2_min_qty: number | null;
+  tier2_unit_price: string | number | null;
+  tier3_min_qty: number | null;
+  tier3_unit_price: string | number | null;
+  tier4_min_qty: number | null;
+  tier4_unit_price: string | number | null;
 };
 
-// Helpers
+// ---------- helpers ----------
 
 function parseQty(raw: any, fallback: number): number {
   const n = Number(raw);
@@ -290,62 +292,86 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3b) Price the carton selection using box_price_tiers (by box_id + min_qty)
+    // 3b) Price the carton selection using box_price_tiers (by box_id)
+    //
+    // Schema comes from /api/admin/boxes:
+    //   base_unit_price
+    //   tier1_min_qty, tier1_unit_price
+    //   ...
+    //   tier4_min_qty, tier4_unit_price
+    //
+    // Logic:
+    //   - Start with base_unit_price (if present)
+    //   - For each tier (1..4), if qty >= tierN_min_qty and tierN_unit_price
+    //     is present, override unitPrice with that tier's price.
+    //   - The highest qualifying tier wins.
     try {
       const effectiveQty = selection.qty ?? incomingQty;
 
-      if (box.id && effectiveQty > 0) {
+      if (effectiveQty > 0) {
         const tier = (await one<TierRow>(
           `
           SELECT
-            unit_cost_usd,
-            markup_pct,
-            unit_price_usd
+            base_unit_price,
+            tier1_min_qty,
+            tier1_unit_price,
+            tier2_min_qty,
+            tier2_unit_price,
+            tier3_min_qty,
+            tier3_unit_price,
+            tier4_min_qty,
+            tier4_unit_price
           FROM public.box_price_tiers
           WHERE box_id = $1
-            AND active = true
-            AND min_qty <= $2
-          ORDER BY min_qty DESC
           LIMIT 1
           `,
-          [box.id, effectiveQty],
+          [box.id],
         )) as TierRow | null;
 
-        let unitPrice: number | null = null;
-
         if (tier) {
-          const overridePrice = toNumberOrNull(tier.unit_price_usd);
-          const cost = toNumberOrNull(tier.unit_cost_usd);
-          const markupPct = toNumberOrNull(tier.markup_pct) ?? 0;
+          let unitPrice = toNumberOrNull(tier.base_unit_price);
 
-          if (overridePrice !== null) {
-            unitPrice = overridePrice;
-          } else if (cost !== null) {
-            const factor = 1 + markupPct / 100;
-            unitPrice = cost * factor;
-          }
+          const applyTier = (minQtyRaw: any, priceRaw: any) => {
+            const minQty = toNumberOrNull(minQtyRaw);
+            const price = toNumberOrNull(priceRaw);
+            if (
+              minQty !== null &&
+              price !== null &&
+              effectiveQty >= minQty
+            ) {
+              // Later tiers override earlier ones (so tier4 wins over tier1)
+              unitPrice = price;
+            }
+          };
+
+          applyTier(tier.tier1_min_qty, tier.tier1_unit_price);
+          applyTier(tier.tier2_min_qty, tier.tier2_unit_price);
+          applyTier(tier.tier3_min_qty, tier.tier3_unit_price);
+          applyTier(tier.tier4_min_qty, tier.tier4_unit_price);
+
+          unitPrice = roundToCents(unitPrice);
+          const extended =
+            unitPrice !== null
+              ? roundToCents(unitPrice * effectiveQty)
+              : null;
+
+          await q(
+            `
+            UPDATE public.quote_box_selections
+            SET
+              unit_price_usd     = $1,
+              extended_price_usd = $2
+            WHERE id = $3
+            `,
+            [unitPrice, extended, selection.id],
+          );
+
+          selection = {
+            ...selection,
+            unit_price_usd: unitPrice,
+            extended_price_usd: extended,
+          };
         }
-
-        unitPrice = roundToCents(unitPrice);
-        const extended =
-          unitPrice !== null ? roundToCents(unitPrice * effectiveQty) : null;
-
-        await q(
-          `
-          UPDATE public.quote_box_selections
-          SET
-            unit_price_usd     = $1,
-            extended_price_usd = $2
-          WHERE id = $3
-          `,
-          [unitPrice, extended, selection.id],
-        );
-
-        selection = {
-          ...selection,
-          unit_price_usd: unitPrice,
-          extended_price_usd: extended,
-        };
       }
     } catch (pricingErr) {
       console.error(
@@ -444,7 +470,7 @@ export async function POST(req: NextRequest) {
       box_item_id: boxItemId,
     });
   } catch (err: any) {
-    console.error("Error in /api/boxes/add-to-quote:", err);
+    console.error("Error in /api/boxes/add-to-quote/route.ts:", err);
     return NextResponse.json(
       {
         ok: false,
