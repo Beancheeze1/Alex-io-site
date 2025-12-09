@@ -90,30 +90,11 @@ type LayoutPkgRow = {
   created_at: string;
 };
 
-// ==== NEW: Packaging lines from /api/quote/print ====
-// Normalized shape that matches the server-side PackagingLine type.
-type PackagingLine = {
-  id: number; // quote_box_selections.id
-  quote_id: number;
-  box_id: number;
-  sku: string;
-  qty: number;
-  unit_price_usd: number | null;
-  extended_price_usd: number | null;
-  vendor: string | null;
-  style: string | null;
-  description: string | null;
-  inside_length_in: number | null;
-  inside_width_in: number | null;
-  inside_height_in: number | null;
-};
-
 type ApiOk = {
   ok: true;
   quote: QuoteRow;
   items: ItemRow[];
   layoutPkg: LayoutPkgRow | null;
-  packagingLines: PackagingLine[]; // NEW
   foamSubtotal: number;
   packagingSubtotal: number;
   grandSubtotal: number;
@@ -138,9 +119,9 @@ type RequestedBox = {
   style: string | null;
   description: string | null;
   qty: number;
-  inside_length_in: number;
-  inside_width_in: number;
-  inside_height_in: number;
+  inside_length_in: number | string;
+  inside_width_in: number | string;
+  inside_height_in: number | string;
   // Optional pricing fields from quote_box_selections
   unit_price_usd?: number | string | null;
   extended_price_usd?: number | string | null;
@@ -220,11 +201,6 @@ export default function QuotePrintClient() {
     [],
   );
 
-  // NEW: normalized packaging lines from /api/quote/print
-  const [packagingLines, setPackagingLines] = React.useState<PackagingLine[]>(
-    [],
-  );
-
   // Subtotals from server: foam, packaging, grand
   const [foamSubtotal, setFoamSubtotal] = React.useState<number>(0);
   const [packagingSubtotal, setPackagingSubtotal] =
@@ -232,7 +208,9 @@ export default function QuotePrintClient() {
   const [grandSubtotal, setGrandSubtotal] = React.useState<number>(0);
 
   // Which carton selection is currently being removed (for button disable/spinner)
-  const [removingBoxId, setRemovingBoxId] = React.useState<number | null>(null);
+  const [removingBoxId, setRemovingBoxId] = React.useState<
+    number | null
+  >(null);
 
   // Ref to the SVG preview container so we can scale/center the inner <svg>
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -302,12 +280,12 @@ export default function QuotePrintClient() {
         labelParts.push(`${styleLabel} ${sel.sku}`);
       }
 
-      const dimsOk =
-        Number.isFinite(sel.inside_length_in) &&
-        Number.isFinite(sel.inside_width_in) &&
-        Number.isFinite(sel.inside_height_in);
+      const hasDims =
+        sel.inside_length_in != null &&
+        sel.inside_width_in != null &&
+        sel.inside_height_in != null;
 
-      const dimsLabel = dimsOk
+      const dimsLabel = hasDims
         ? `Inside ${formatDims(
             sel.inside_length_in,
             sel.inside_width_in,
@@ -323,7 +301,9 @@ export default function QuotePrintClient() {
       const qty = sel.qty || primaryQty;
 
       requestedLines.push(
-        `- ${labelMain}${dimsLabel ? ` (${dimsLabel})` : ""} – Qty ${qty}`,
+        `- ${labelMain}${
+          dimsLabel ? ` (${dimsLabel})` : ""
+        } – Qty ${qty}`,
       );
     }
 
@@ -383,18 +363,15 @@ export default function QuotePrintClient() {
         }
 
         if (json.ok) {
+          setQuote(json.quote);
+          setItems(json.items || []);
+          setLayoutPkg(json.layoutPkg || null);
+
           const asOk = json as ApiOk;
-
-          setQuote(asOk.quote);
-          setItems(asOk.items || []);
-          setLayoutPkg(asOk.layoutPkg || null);
-
-          // NEW: packaging lines from server
-          setPackagingLines(asOk.packagingLines || []);
-
-          // Subtotals from server (fallback to 0 if missing)
           setFoamSubtotal(
-            typeof asOk.foamSubtotal === "number" ? asOk.foamSubtotal : 0,
+            typeof asOk.foamSubtotal === "number"
+              ? asOk.foamSubtotal
+              : 0,
           );
           setPackagingSubtotal(
             typeof asOk.packagingSubtotal === "number"
@@ -402,7 +379,9 @@ export default function QuotePrintClient() {
               : 0,
           );
           setGrandSubtotal(
-            typeof asOk.grandSubtotal === "number" ? asOk.grandSubtotal : 0,
+            typeof asOk.grandSubtotal === "number"
+              ? asOk.grandSubtotal
+              : 0,
           );
         } else {
           setError("Unexpected response from quote API.");
@@ -429,7 +408,6 @@ export default function QuotePrintClient() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            // Using selectionId here; server can map from selection → [CARTON] quote_items rows
             quoteNo,
             selectionId,
           }),
@@ -446,7 +424,7 @@ export default function QuotePrintClient() {
         // Refresh requested cartons
         await refreshRequestedBoxes();
 
-        // Refresh quote items and packaging pricing
+        // Refresh quote items in case any carton quote_items were removed or pricing changed
         await reloadQuoteData(quoteNo);
       } catch (err) {
         console.error("Error calling /api/boxes/remove-from-quote:", err);
@@ -485,7 +463,6 @@ export default function QuotePrintClient() {
       setQuote(null);
       setItems([]);
       setLayoutPkg(null);
-      setPackagingLines([]); // NEW: clear packaging lines on reload
 
       try {
         await reloadQuoteData(quoteNo);
@@ -679,7 +656,6 @@ export default function QuotePrintClient() {
       }[] = [];
 
       layers.forEach((layer: any, index: number) => {
-        // Only show layers that have their *own* thickness.
         const tRaw = layer.thicknessIn ?? layer.thickness_in;
         const T = Number(tRaw);
         if (!Number.isFinite(T) || T <= 0) return;
@@ -1526,7 +1502,7 @@ export default function QuotePrintClient() {
                         </tr>
                       ))}
 
-                      {/* Requested cartons appended as additional lines */}
+                      {/* Packaging rows: requested cartons with pricing + dims */}
                       {requestedBoxes.length > 0 && (
                         <tr>
                           <td
@@ -1553,50 +1529,42 @@ export default function QuotePrintClient() {
                             ? rb.description.trim()
                             : `${rb.style || "Carton"}`) || "Carton";
 
-                        const dimsOk =
-                          Number.isFinite(rb.inside_length_in) &&
-                          Number.isFinite(rb.inside_width_in) &&
-                          Number.isFinite(rb.inside_height_in);
+                        // NEW: dims based on presence, not Number.isFinite,
+                        // so it works even if the API sends strings.
+                        const hasDims =
+                          rb.inside_length_in != null &&
+                          rb.inside_width_in != null &&
+                          rb.inside_height_in != null;
 
-                        const dimsText = dimsOk
+                        const dimsDisplay = hasDims
                           ? `${formatDims(
                               rb.inside_length_in,
                               rb.inside_width_in,
                               rb.inside_height_in,
                             )} in`
-                          : null;
+                          : "—";
 
                         const notesParts: string[] = [];
                         if (rb.sku) notesParts.push(`SKU: ${rb.sku}`);
-                        if (rb.vendor) notesParts.push(`Vendor: ${rb.vendor}`);
-                        if (dimsText)
-                          notesParts.push(`Inside ${dimsText}`);
+                        if (rb.vendor)
+                          notesParts.push(`Vendor: ${rb.vendor}`);
+                        if (hasDims)
+                          notesParts.push(`Inside ${dimsDisplay}`);
 
                         const subLabel =
                           notesParts.length > 0
                             ? notesParts.join(" · ")
                             : null;
 
-                        const dimsDisplay = dimsText ?? "—";
-
                         const qty = rb.qty || primaryItem?.qty || 1;
 
-                        // NEW: pull pricing from packagingLines if present,
-                        // falling back to any raw fields from /api/boxes/for-quote.
-                        const matchedLine = packagingLines.find(
-                          (pl) => pl.id === rb.id,
-                        );
-
-                        const unitPrice = matchedLine?.unit_price_usd ?? parsePriceField(
+                        const unitPrice = parsePriceField(
                           (rb as any).unit_price_usd ?? null,
                         );
-
-                        const lineTotal =
-                          matchedLine?.extended_price_usd ??
-                          parsePriceField(
-                            (rb as any).extended_price_usd ??
-                              (unitPrice != null ? unitPrice * qty : null),
-                          );
+                        const lineTotal = parsePriceField(
+                          (rb as any).extended_price_usd ??
+                            (unitPrice != null ? unitPrice * qty : null),
+                        );
 
                         const isRemoving = removingBoxId === rb.id;
 
@@ -1717,14 +1685,10 @@ export default function QuotePrintClient() {
                     }}
                   >
                     <div style={{ textAlign: "right" }}>
-                      <div
-                        style={{ fontSize: 12, color: "#6b7280" }}
-                      >
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>
                         Total quantity
                       </div>
-                      <div
-                        style={{ fontSize: 18, fontWeight: 600 }}
-                      >
+                      <div style={{ fontSize: 18, fontWeight: 600 }}>
                         {overallQty}
                       </div>
                       {anyPricing && (
