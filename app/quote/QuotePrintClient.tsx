@@ -181,48 +181,6 @@ function formatUsd(value: number | null | undefined): string {
   }
 }
 
-// ===== Simple shipping estimator (Path A, client-side only) =====
-//
-// We keep this deliberately simple and tunable:
-//   - Approximate total cubic feet for all requested cartons
-//   - Apply a flat per-cubic-foot rate and optional base fee
-//   - Result is NOT baked into subtotal from the server; it's a planning-only estimate.
-
-const SHIPPING_BASE_FEE = 0; // e.g. 25 for a base handling/ship charge
-const SHIPPING_RATE_PER_CUFT = 0.45; // USD per cubic foot, rough planning rate
-
-function computeShippingEstimate(boxes: RequestedBox[]): number {
-  if (!boxes || boxes.length === 0) return 0;
-
-  let totalCuFt = 0;
-
-  for (const rb of boxes) {
-    const L = Number(rb.inside_length_in);
-    const W = Number(rb.inside_width_in);
-    const H = Number(rb.inside_height_in);
-    const qty = rb.qty || 0;
-
-    if (
-      Number.isFinite(L) &&
-      Number.isFinite(W) &&
-      Number.isFinite(H) &&
-      qty > 0
-    ) {
-      const cuIn = L * W * H * qty;
-      const cuFt = cuIn / 1728; // 12^3
-      if (Number.isFinite(cuFt) && cuFt > 0) {
-        totalCuFt += cuFt;
-      }
-    }
-  }
-
-  if (totalCuFt <= 0) return 0;
-
-  const estimate =
-    (SHIPPING_BASE_FEE || 0) + totalCuFt * (SHIPPING_RATE_PER_CUFT || 0);
-  return Math.round(estimate * 100) / 100;
-}
-
 export default function QuotePrintClient() {
   const searchParams = useSearchParams();
 
@@ -243,17 +201,11 @@ export default function QuotePrintClient() {
     [],
   );
 
-  // Subtotals from server: foam, packaging, grand (foam + packaging)
+  // Subtotals from server: foam, packaging, grand
   const [foamSubtotal, setFoamSubtotal] = React.useState<number>(0);
   const [packagingSubtotal, setPackagingSubtotal] =
     React.useState<number>(0);
   const [grandSubtotal, setGrandSubtotal] = React.useState<number>(0);
-
-  // Rough shipping estimate, derived client-side from requestedBoxes
-  const shippingEstimate = React.useMemo(
-    () => computeShippingEstimate(requestedBoxes),
-    [requestedBoxes],
-  );
 
   // Which carton selection is currently being removed (for button disable/spinner)
   const [removingBoxId, setRemovingBoxId] = React.useState<number | null>(
@@ -416,7 +368,9 @@ export default function QuotePrintClient() {
           // Subtotals from server (fallback to 0 if missing)
           const asOk = json as ApiOk;
           setFoamSubtotal(
-            typeof asOk.foamSubtotal === "number" ? asOk.foamSubtotal : 0,
+            typeof asOk.foamSubtotal === "number"
+              ? asOk.foamSubtotal
+              : 0,
           );
           setPackagingSubtotal(
             typeof asOk.packagingSubtotal === "number"
@@ -537,9 +491,6 @@ export default function QuotePrintClient() {
   // anyPricing: use grandSubtotal (foam + packaging) if available,
   // but still works if only foam is priced.
   const anyPricing = grandSubtotal > 0 || foamSubtotal > 0;
-
-  // Planning total adds rough shipping to the server-side grandSubtotal
-  const planningTotal = grandSubtotal + (shippingEstimate || 0);
 
   const notesPreview =
     layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
@@ -706,9 +657,12 @@ export default function QuotePrintClient() {
 
       layers.forEach((layer: any, index: number) => {
         // Only show layers that have their *own* thickness.
+        // We intentionally DO NOT fall back to block height here
+        // to avoid ghost "6 inch" rows when total stack is 6"
+        // but each layer is 3".
         const tRaw = layer.thicknessIn ?? layer.thickness_in;
         const T = Number(tRaw);
-        if (!Number.isFinite(T) || T <= 0) return;
+        if (!Number.isFinite(T) || T <= 0) return; // skip layers without a real thickness
 
         const name =
           (typeof layer.name === "string" && layer.name.trim()) ||
@@ -1058,45 +1012,6 @@ export default function QuotePrintClient() {
                         </div>
                       )}
 
-                      {shippingEstimate > 0 && (
-                        <>
-                          <div>
-                            <div style={labelStyle}>
-                              Rough shipping estimate
-                            </div>
-                            <div style={{ fontSize: 13 }}>
-                              {formatUsd(shippingEstimate)}{" "}
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  color: "#6b7280",
-                                  marginLeft: 4,
-                                }}
-                              >
-                                (for planning only; not included in above
-                                subtotals)
-                              </span>
-                            </div>
-                          </div>
-
-                          {grandSubtotal > 0 && (
-                            <div>
-                              <div style={labelStyle}>
-                                Planning total (foam + packaging + shipping)
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: 14,
-                                  fontWeight: 600,
-                                }}
-                              >
-                                {formatUsd(planningTotal)}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      )}
-
                       {primaryBreakdown && (
                         <>
                           <div
@@ -1105,7 +1020,8 @@ export default function QuotePrintClient() {
                               paddingTop: 6,
                               borderTop: "1px dashed #e5e7eb",
                               display: "grid",
-                              gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+                              gridTemplateColumns:
+                                "repeat(2,minmax(0,1fr))",
                               gap: 8,
                             }}
                           >
@@ -1132,13 +1048,16 @@ export default function QuotePrintClient() {
                               <div style={{ fontSize: 13 }}>
                                 {markupFactor != null
                                   ? (() => {
-                                      const over = (markupFactor - 1) * 100;
+                                      const over =
+                                        (markupFactor - 1) * 100;
                                       if (over > 0) {
                                         return `${over.toFixed(
                                           0,
                                         )}% over cost`;
                                       }
-                                      return `${markupFactor.toFixed(2)}×`;
+                                      return `${markupFactor.toFixed(
+                                        2,
+                                      )}×`;
                                     })()
                                   : "—"}
                               </div>
@@ -1158,7 +1077,9 @@ export default function QuotePrintClient() {
                                 Example price breaks:{" "}
                               </span>
                               {priceBreaks
-                                .filter((b) => b.qty === 10 || b.qty === 50)
+                                .filter(
+                                  (b) => b.qty === 10 || b.qty === 50,
+                                )
                                 .map(
                                   (b) =>
                                     `${b.qty} pcs – ${formatUsd(
@@ -1187,7 +1108,8 @@ export default function QuotePrintClient() {
                               {typeof kerfPct === "number"
                                 ? ` (~${kerfPct}% kerf)`
                                 : ""}.
-                              {materialCost != null && machineCost != null
+                              {materialCost != null &&
+                              machineCost != null
                                 ? ` In this estimate, material is approximately ${formatUsd(
                                     materialCost,
                                   )} and machine time approximately ${formatUsd(
@@ -1613,11 +1535,6 @@ export default function QuotePrintClient() {
                         </tr>
                       )}
                       {requestedBoxes.map((rb) => {
-                        const mainLabel =
-                          (rb.description && rb.description.trim().length > 0
-                            ? rb.description.trim()
-                            : `${rb.style || "Carton"}`) || "Carton";
-
                         const dimsOk =
                           Number.isFinite(rb.inside_length_in) &&
                           Number.isFinite(rb.inside_width_in) &&
@@ -1631,19 +1548,44 @@ export default function QuotePrintClient() {
                             )} in`
                           : null;
 
-                        const notesParts: string[] = [];
-                        if (rb.sku) notesParts.push(`SKU: ${rb.sku}`);
-                        // Vendor is intentionally NOT shown on client quote
+                        const dimsDisplay = dimsText ?? "—";
+
+                        // New: customer-facing main label = style + dims
+                        const styleLabel =
+                          rb.style && rb.style.trim().length > 0
+                            ? rb.style.trim()
+                            : "Carton";
+
+                        let mainLabel = styleLabel;
                         if (dimsText) {
-                          notesParts.push(`Inside ${dimsText}`);
+                          const dimsNoUnit = dimsText.replace(
+                            /\s*in$/,
+                            "",
+                          );
+                          mainLabel = `${styleLabel} ${dimsNoUnit}`;
+                        } else if (
+                          rb.description &&
+                          rb.description.trim().length > 0
+                        ) {
+                          mainLabel = rb.description.trim();
                         }
+
+                        // New: sublabel shows description + SKU + Inside dims, but NO vendor
+                        const notesParts: string[] = [];
+                        if (
+                          rb.description &&
+                          rb.description.trim().length > 0
+                        ) {
+                          notesParts.push(rb.description.trim());
+                        }
+                        if (rb.sku) notesParts.push(`SKU: ${rb.sku}`);
+                        if (dimsText)
+                          notesParts.push(`Inside ${dimsText}`);
 
                         const subLabel =
                           notesParts.length > 0
                             ? notesParts.join(" · ")
                             : null;
-
-                        const dimsDisplay = dimsText ?? "—";
 
                         const qty = rb.qty || primaryItem?.qty || 1;
 
@@ -1703,7 +1645,9 @@ export default function QuotePrintClient() {
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => handleRemoveCarton(rb.id)}
+                                  onClick={() =>
+                                    handleRemoveCarton(rb.id)
+                                  }
                                   disabled={isRemoving}
                                   style={{
                                     padding: "4px 10px",
