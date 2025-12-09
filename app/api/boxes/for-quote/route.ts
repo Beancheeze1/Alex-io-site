@@ -78,9 +78,6 @@ export async function GET(req: NextRequest) {
     }
 
     // Read-only join from quotes -> quote_box_selections -> boxes
-    // NOTE: Path A tweak:
-    //  - Use COALESCE(qbs.unit_price_usd, b.base_unit_price) for unit_price_usd
-    //  - Derive extended_price_usd when missing using unit_price * qty
     const rows = (await q<Row>(
       `
       SELECT
@@ -95,11 +92,8 @@ export async function GET(req: NextRequest) {
         b.inside_length_in,
         b.inside_width_in,
         b.inside_height_in,
-        COALESCE(qbs.unit_price_usd, b.base_unit_price) AS unit_price_usd,
-        COALESCE(
-          qbs.extended_price_usd,
-          COALESCE(qbs.unit_price_usd, b.base_unit_price) * qbs.qty
-        ) AS extended_price_usd
+        qbs.unit_price_usd,
+        qbs.extended_price_usd
       FROM public.quote_box_selections AS qbs
       JOIN public."quotes" AS q
         ON q.id = qbs.quote_id
