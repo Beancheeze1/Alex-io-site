@@ -78,6 +78,40 @@ type LayoutPkgRow = {
   created_at: string;
 };
 
+// Raw shape from DB for carton selections + boxes join
+type PackagingSelectionRow = {
+  id: number;
+  quote_id: number;
+  box_id: number;
+  sku: string;
+  qty: number;
+  unit_price_usd: number | string | null;
+  extended_price_usd: number | string | null;
+  vendor: string | null;
+  style: string | null;
+  description: string | null;
+  inside_length_in: number | string | null;
+  inside_width_in: number | string | null;
+  inside_height_in: number | string | null;
+};
+
+// Normalized shape returned to the client
+export type PackagingLine = {
+  id: number;
+  quote_id: number;
+  box_id: number;
+  sku: string;
+  qty: number;
+  unit_price_usd: number | null;
+  extended_price_usd: number | null;
+  vendor: string | null;
+  style: string | null;
+  description: string | null;
+  inside_length_in: number | null;
+  inside_width_in: number | null;
+  inside_height_in: number | null;
+};
+
 function ok(body: any, status = 200) {
   return NextResponse.json(body, { status });
 }
@@ -314,7 +348,7 @@ export async function GET(req: NextRequest) {
     );
 
     // ---------- treat layout block as source of truth for primary dims ----------
-    //
+
     // If we have a layout package with a block that has valid dims,
     // override the primary item (items[0]) L/W/H for display + pricing.
     if (layoutPkg && layoutPkg.layout_json && items.length > 0) {
@@ -363,7 +397,95 @@ export async function GET(req: NextRequest) {
       }
     }
 
-        // ---------- subtotals: foam + packaging ----------
+    // ---------- packaging lines: quote_box_selections + boxes ----------
+
+    const packagingSelectionsRaw = await q<PackagingSelectionRow>(
+      `
+        select
+          qbs.id,
+          qbs.quote_id,
+          qbs.box_id,
+          qbs.sku,
+          qbs.qty,
+          qbs.unit_price_usd,
+          qbs.extended_price_usd,
+          b.vendor,
+          b.style,
+          b.description,
+          b.inside_length_in,
+          b.inside_width_in,
+          b.inside_height_in
+        from public.quote_box_selections qbs
+        join public.boxes b on b.id = qbs.box_id
+        where qbs.quote_id = $1
+        order by qbs.id asc
+      `,
+      [quote.id],
+    );
+
+    const packagingLines: PackagingLine[] = packagingSelectionsRaw.map(
+      (row) => {
+        const qty = Number(row.qty) || 0;
+
+        const unitRaw = row.unit_price_usd;
+        const unit =
+          unitRaw != null && unitRaw !== "" && Number.isFinite(Number(unitRaw))
+            ? Number(unitRaw)
+            : null;
+
+        const extendedRaw = row.extended_price_usd;
+        let extended: number | null = null;
+
+        if (
+          extendedRaw != null &&
+          extendedRaw !== "" &&
+          Number.isFinite(Number(extendedRaw))
+        ) {
+          extended = Number(extendedRaw);
+        } else if (unit != null && Number.isFinite(unit) && qty > 0) {
+          extended = unit * qty;
+        }
+
+        const L =
+          row.inside_length_in != null &&
+          row.inside_length_in !== "" &&
+          Number.isFinite(Number(row.inside_length_in))
+            ? Number(row.inside_length_in)
+            : null;
+
+        const W =
+          row.inside_width_in != null &&
+          row.inside_width_in !== "" &&
+          Number.isFinite(Number(row.inside_width_in))
+            ? Number(row.inside_width_in)
+            : null;
+
+        const H =
+          row.inside_height_in != null &&
+          row.inside_height_in !== "" &&
+          Number.isFinite(Number(row.inside_height_in))
+            ? Number(row.inside_height_in)
+            : null;
+
+        return {
+          id: row.id,
+          quote_id: row.quote_id,
+          box_id: row.box_id,
+          sku: row.sku,
+          qty,
+          unit_price_usd: unit,
+          extended_price_usd: extended,
+          vendor: row.vendor,
+          style: row.style,
+          description: row.description,
+          inside_length_in: L,
+          inside_width_in: W,
+          inside_height_in: H,
+        };
+      },
+    );
+
+    // ---------- subtotals: foam + packaging ----------
 
     // Foam subtotal: sum of item.price_total_usd across quote_items.
     const foamSubtotal = items.reduce((sum, it) => {
@@ -377,48 +499,30 @@ export async function GET(req: NextRequest) {
       return Number.isFinite(n) ? sum + n : sum;
     }, 0);
 
-    // Packaging subtotal: sum of carton pricing from quote_box_selections.
-    // Uses extended_price_usd if present, otherwise unit_price_usd * qty.
-    const packagingRow = await one<{
-      packaging_subtotal: string | number | null;
-    }>(
-      `
-        select
-          coalesce(
-            sum(
-              coalesce(extended_price_usd, unit_price_usd * qty, 0)
-            ),
-            0
-          ) as packaging_subtotal
-        from public."quote_box_selections"
-        where quote_id = $1
-      `,
-      [quote.id],
-    );
-
-    const rawPackaging =
-      packagingRow?.packaging_subtotal != null
-        ? packagingRow.packaging_subtotal
-        : 0;
-
-    const packagingSubtotal = Number(rawPackaging) || 0;
+    // Packaging subtotal: sum of carton extended prices.
+    const packagingSubtotal = packagingLines.reduce((sum, line) => {
+      const n =
+        line.extended_price_usd != null
+          ? Number(line.extended_price_usd)
+          : 0;
+      return Number.isFinite(n) ? sum + n : sum;
+    }, 0);
 
     const grandSubtotal = foamSubtotal + packagingSubtotal;
 
-
-       return ok(
+    return ok(
       {
         ok: true,
         quote,
         items,
         layoutPkg,
+        packagingLines,
         foamSubtotal,
         packagingSubtotal,
         grandSubtotal,
       },
       200,
     );
- 
   } catch (err) {
     console.error("Error in /api/quote/print:", err);
     return bad(
