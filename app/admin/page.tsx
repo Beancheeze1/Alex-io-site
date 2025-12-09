@@ -138,6 +138,13 @@ export default function AdminHomePage() {
               description="View price books and run pricing sandbox tests without affecting real quotes."
             />
 
+            {/* NEW: Carton pricing (box_price_tiers editor will live here) */}
+            <NavCard
+              href="/admin/boxes"
+              title="Carton pricing (RSC & mailers)"
+              description="Manage carton SKUs, placeholder pricing, and box price tiers used for packaging add-ons."
+            />
+
             {/* NEW: Pricing settings & knobs */}
             <NavCard
               href="/admin/settings"
