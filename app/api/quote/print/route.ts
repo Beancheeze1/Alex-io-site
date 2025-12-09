@@ -41,7 +41,7 @@ type ItemRow = {
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
 
-  // Full pricing metadata from /api/quotes/calc (optional)
+  // NEW: full pricing metadata from /api/quotes/calc (optional)
   pricing_meta?: {
     variant_used?: string | null;
     // direct carry-through of calc.result
@@ -62,8 +62,8 @@ type ItemRow = {
     material_name?: string | null;
   } | null;
 
-  // High-level breakdown for UI (material + machine + markup + breaks).
-  // Optional and may be omitted if we can't safely compute it.
+  // NEW: high-level breakdown for UI (material + machine + markup + breaks).
+  // This is optional and may be omitted if we can't safely compute it.
   pricing_breakdown?: any;
 };
 
@@ -112,13 +112,6 @@ export type PackagingLine = {
   inside_height_in: number | null;
 };
 
-// Tier pricing row (matches add-to-quote logic)
-type TierRow = {
-  unit_cost_usd: string | number | null;
-  markup_pct: string | number | null;
-  unit_price_usd: string | number | null;
-};
-
 function ok(body: any, status = 200) {
   return NextResponse.json(body, { status });
 }
@@ -132,74 +125,6 @@ function parseDimsNums(item: ItemRow) {
   const W = Number(item.width_in);
   const H = Number(item.height_in);
   return { L, W, H };
-}
-
-function toNumberOrNull(raw: any): number | null {
-  if (raw === null || raw === undefined) return null;
-  const n = typeof raw === "number" ? raw : Number(raw);
-  return Number.isFinite(n) ? n : null;
-}
-
-function roundToCents(value: number | null): number | null {
-  if (value === null) return null;
-  if (!Number.isFinite(value)) return null;
-  return Math.round(value * 100) / 100;
-}
-
-// Fallback pricing from box_price_tiers (same logic as add-to-quote)
-async function computeCartonUnitPriceFromTiers(
-  vendor: string | null,
-  sku: string,
-  qty: number,
-): Promise<number | null> {
-  const vendorKey = (vendor || "").trim();
-  const skuKey = (sku || "").trim();
-
-  if (!vendorKey || !skuKey || !Number.isFinite(qty) || qty <= 0) {
-    return null;
-  }
-
-  try {
-    const tier = (await one<TierRow>(
-      `
-      SELECT
-        unit_cost_usd,
-        markup_pct,
-        unit_price_usd
-      FROM public.box_price_tiers
-      WHERE vendor = $1
-        AND sku    = $2
-        AND active = true
-        AND min_qty <= $3
-      ORDER BY min_qty DESC
-      LIMIT 1
-      `,
-      [vendorKey, skuKey, qty],
-    )) as TierRow | null;
-
-    if (!tier) return null;
-
-    const overridePrice = toNumberOrNull(tier.unit_price_usd);
-    const cost = toNumberOrNull(tier.unit_cost_usd);
-    const markupPct = toNumberOrNull(tier.markup_pct) ?? 0;
-
-    let unitPrice: number | null = null;
-
-    if (overridePrice !== null) {
-      unitPrice = overridePrice;
-    } else if (cost !== null) {
-      const factor = 1 + markupPct / 100;
-      unitPrice = cost * factor;
-    }
-
-    return roundToCents(unitPrice);
-  } catch (err) {
-    console.error(
-      "quote/print: error loading box_price_tiers for carton:",
-      err,
-    );
-    return null;
-  }
 }
 
 async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
@@ -241,6 +166,7 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
     const total = Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : 0;
     const piece = qty > 0 && Number.isFinite(total) ? total / qty : null;
 
+    // NEW: compact pricing_meta blob we can use on the UI
     const pricing_meta: ItemRow["pricing_meta"] = {
       variant_used: json.variant_used ?? null,
       piece_ci: result.piece_ci ?? null,
@@ -260,7 +186,10 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       material_name: result.material_name ?? null,
     };
 
-    // Optional pricing_breakdown currently disabled (no stable cost source).
+    // Optional pricing_breakdown is currently disabled because the old
+    // cost_per_lb column was removed from the materials table. Once we
+    // have a new, stable source for cost data (price books, etc.), this
+    // can be re-enabled using those fields instead of cost_per_lb.
     let pricing_breakdown: any = undefined;
 
     return {
@@ -420,6 +349,8 @@ export async function GET(req: NextRequest) {
 
     // ---------- treat layout block as source of truth for primary dims ----------
 
+    // If we have a layout package with a block that has valid dims,
+    // override the primary item (items[0]) L/W/H for display + pricing.
     if (layoutPkg && layoutPkg.layout_json && items.length > 0) {
       try {
         const block = layoutPkg.layout_json.block || {};
@@ -468,115 +399,97 @@ export async function GET(req: NextRequest) {
 
     // ---------- packaging lines: quote_box_selections + boxes ----------
 
-  // ---------- packaging lines: quote_box_selections + boxes ----------
+    const packagingSelectionsRaw = await q<PackagingSelectionRow>(
+      `
+        select
+          qbs.id,
+          qbs.quote_id,
+          qbs.box_id,
+          qbs.sku,
+          qbs.qty,
+          qbs.unit_price_usd,
+          qbs.extended_price_usd,
+          b.vendor,
+          b.style,
+          b.description,
+          b.inside_length_in,
+          b.inside_width_in,
+          b.inside_height_in
+        from public.quote_box_selections qbs
+        join public.boxes b on b.id = qbs.box_id
+        where qbs.quote_id = $1
+        order by qbs.id asc
+      `,
+      [quote.id],
+    );
 
-const packagingSelectionsRaw = await q<PackagingSelectionRow>(
-  `
-    select
-      qbs.id,
-      qbs.quote_id,
-      qbs.box_id,
-      qbs.sku,
-      qbs.qty,
-      qbs.unit_price_usd,
-      qbs.extended_price_usd,
-      b.vendor,
-      b.style,
-      b.description,
-      b.inside_length_in,
-      b.inside_width_in,
-      b.inside_height_in
-    from public.quote_box_selections qbs
-    join public.boxes b on b.id = qbs.box_id
-    where qbs.quote_id = $1
-    order by qbs.id asc
-  `,
-  [quote.id],
-);
+    const packagingLines: PackagingLine[] = packagingSelectionsRaw.map(
+      (row) => {
+        const qty = Number(row.qty) || 0;
 
-async function repriceIfMissing(sel: PackagingSelectionRow): Promise<PackagingLine> {
-  const qty = Number(sel.qty) || 0;
-  const vendor = (sel.vendor || "").trim();
-  const sku = (sel.sku || "").trim();
+        const unitRaw = row.unit_price_usd;
+        const unit =
+          unitRaw != null &&
+          unitRaw !== "" &&
+          Number.isFinite(Number(unitRaw))
+            ? Number(unitRaw)
+            : null;
 
-  // Check stored price first
-  let unit = toNumberOrNull(sel.unit_price_usd);
-  let extended = toNumberOrNull(sel.extended_price_usd);
+        const extendedRaw = row.extended_price_usd;
+        let extended: number | null = null;
 
-  // If we have price stored, use it
-  if (unit != null && extended != null) {
-    return formatPackaging(sel, qty, unit, extended);
-  }
+        if (
+          extendedRaw != null &&
+          extendedRaw !== "" &&
+          Number.isFinite(Number(extendedRaw))
+        ) {
+          extended = Number(extendedRaw);
+        } else if (unit != null && Number.isFinite(unit) && qty > 0) {
+          extended = unit * qty;
+        }
 
-  // Otherwise re-evaluate price tiers
-  const tier = await one<TierRow>(
-    `
-      SELECT unit_cost_usd, markup_pct, unit_price_usd
-      FROM public.box_price_tiers
-      WHERE vendor = $1 AND sku = $2 AND active = true AND min_qty <= $3
-      ORDER BY min_qty DESC
-      LIMIT 1
-    `,
-    [vendor, sku, qty],
-  );
+        const L =
+          row.inside_length_in != null &&
+          row.inside_length_in !== "" &&
+          Number.isFinite(Number(row.inside_length_in))
+            ? Number(row.inside_length_in)
+            : null;
 
-  let unitPrice: number | null = null;
+        const W =
+          row.inside_width_in != null &&
+          row.inside_width_in !== "" &&
+          Number.isFinite(Number(row.inside_width_in))
+            ? Number(row.inside_width_in)
+            : null;
 
-  if (tier) {
-    const override = toNumberOrNull(tier.unit_price_usd);
-    const cost = toNumberOrNull(tier.unit_cost_usd);
-    const markupPct = toNumberOrNull(tier.markup_pct) ?? 0;
+        const H =
+          row.inside_height_in != null &&
+          row.inside_height_in !== "" &&
+          Number.isFinite(Number(row.inside_height_in))
+            ? Number(row.inside_height_in)
+            : null;
 
-    if (override !== null) {
-      unitPrice = override;
-    } else if (cost !== null) {
-      unitPrice = Math.round(cost * (1 + markupPct / 100) * 100) / 100;
-    }
-  }
-
-  const ext =
-    unitPrice !== null && qty > 0
-      ? Math.round(unitPrice * qty * 100) / 100
-      : null;
-
-  return formatPackaging(sel, qty, unitPrice, ext);
-}
-
-function formatPackaging(
-  sel: PackagingSelectionRow,
-  qty: number,
-  unit: number | null,
-  extended: number | null,
-): PackagingLine {
-  const L = toNumberOrNull(sel.inside_length_in);
-  const W = toNumberOrNull(sel.inside_width_in);
-  const H = toNumberOrNull(sel.inside_height_in);
-
-  return {
-    id: sel.id,
-    quote_id: sel.quote_id,
-    box_id: sel.box_id,
-    sku: sel.sku,
-    qty,
-    unit_price_usd: unit,
-    extended_price_usd: extended,
-    vendor: sel.vendor,
-    style: sel.style,
-    description: sel.description,
-    inside_length_in: L,
-    inside_width_in: W,
-    inside_height_in: H,
-  };
-}
-
-const packagingLines: PackagingLine[] = [];
-for (const sel of packagingSelectionsRaw) {
-  packagingLines.push(await repriceIfMissing(sel));
-}
-
+        return {
+          id: row.id,
+          quote_id: row.quote_id,
+          box_id: row.box_id,
+          sku: row.sku,
+          qty,
+          unit_price_usd: unit,
+          extended_price_usd: extended,
+          vendor: row.vendor,
+          style: row.style,
+          description: row.description,
+          inside_length_in: L,
+          inside_width_in: W,
+          inside_height_in: H,
+        };
+      },
+    );
 
     // ---------- subtotals: foam + packaging ----------
 
+    // Foam subtotal: sum of item.price_total_usd across quote_items.
     const foamSubtotal = items.reduce((sum, it) => {
       const raw = (it as any).price_total_usd;
       const n =
@@ -588,6 +501,7 @@ for (const sel of packagingSelectionsRaw) {
       return Number.isFinite(n) ? sum + n : sum;
     }, 0);
 
+    // Packaging subtotal: sum of carton extended prices.
     const packagingSubtotal = packagingLines.reduce((sum, line) => {
       const n =
         line.extended_price_usd != null
