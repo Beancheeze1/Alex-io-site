@@ -119,10 +119,10 @@ type RequestedBox = {
   style: string | null;
   description: string | null;
   qty: number;
-  inside_length_in: number | string;
-  inside_width_in: number | string;
-  inside_height_in: number | string;
-  // Optional pricing fields from quote_box_selections / boxes
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
+  // Optional pricing fields from quote_box_selections
   unit_price_usd?: number | string | null;
   extended_price_usd?: number | string | null;
 };
@@ -328,16 +328,22 @@ export default function QuotePrintClient() {
         labelParts.push(`${styleLabel} ${sel.sku}`);
       }
 
-      const L = Number(sel.inside_length_in);
-      const W = Number(sel.inside_width_in);
-      const H = Number(sel.inside_height_in);
-
       const dimsOk =
-        Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H);
+        Number.isFinite(sel.inside_length_in) &&
+        Number.isFinite(sel.inside_width_in) &&
+        Number.isFinite(sel.inside_height_in);
 
       const dimsLabel = dimsOk
-        ? `Inside ${formatDims(L, W, H)} in`
+        ? `Inside ${formatDims(
+            sel.inside_length_in,
+            sel.inside_width_in,
+            sel.inside_height_in,
+          )} in`
         : null;
+
+      if (sel.vendor) {
+        labelParts.push(`Vendor: ${sel.vendor}`);
+      }
 
       const labelMain = labelParts.join(" · ");
       const qty = sel.qty || primaryQty;
@@ -528,7 +534,13 @@ export default function QuotePrintClient() {
 
   const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
 
-  // Planning notes from layout
+  // anyPricing: use grandSubtotal (foam + packaging) if available,
+  // but still works if only foam is priced.
+  const anyPricing = grandSubtotal > 0 || foamSubtotal > 0;
+
+  // Planning total adds rough shipping to the server-side grandSubtotal
+  const planningTotal = grandSubtotal + (shippingEstimate || 0);
+
   const notesPreview =
     layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
       ? layoutPkg.notes.trim().length > 140
@@ -633,49 +645,6 @@ export default function QuotePrintClient() {
       : null;
 
   const priceBreaks = primaryBreakdown?.breaks ?? [];
-
-  // Derived packaging subtotal from carton lines (used only if server subtotal is 0)
-  const derivedPackagingSubtotal = React.useMemo(() => {
-    if (!requestedBoxes || requestedBoxes.length === 0) return 0;
-
-    let sum = 0;
-    for (const rb of requestedBoxes) {
-      const qty = rb.qty || primaryItem?.qty || 1;
-
-      const unitPriceRaw =
-        (rb as any).unit_price_usd ??
-        (rb as any).base_unit_price ??
-        (rb as any).price_unit_usd ??
-        null;
-
-      const unitPrice = parsePriceField(unitPriceRaw);
-      if (unitPrice != null && qty > 0) {
-        sum += unitPrice * qty;
-      }
-    }
-
-    if (!Number.isFinite(sum) || sum <= 0) return 0;
-    return Math.round(sum * 100) / 100;
-  }, [requestedBoxes, primaryItem]);
-
-  const effectivePackagingSubtotal =
-    packagingSubtotal > 0 ? packagingSubtotal : derivedPackagingSubtotal;
-
-  const effectiveGrandSubtotal =
-    grandSubtotal > 0
-      ? grandSubtotal
-      : foamSubtotal + effectivePackagingSubtotal;
-
-  // anyPricing: use effective grandSubtotal (foam + packaging) if available,
-  // but still works if only foam is priced.
-  const anyPricing =
-    (effectiveGrandSubtotal ?? 0) > 0 ||
-    (foamSubtotal ?? 0) > 0 ||
-    (breakdownUnitPrice ?? null) != null;
-
-  // Planning total adds rough shipping to the effective grandSubtotal
-  const planningTotal =
-    (effectiveGrandSubtotal ?? 0) + (shippingEstimate || 0);
 
   // Shared card styles
   const cardBase: React.CSSProperties = {
@@ -1069,22 +1038,22 @@ export default function QuotePrintClient() {
                         </div>
                       </div>
 
-                      {effectivePackagingSubtotal > 0 && (
+                      {packagingSubtotal > 0 && (
                         <div>
                           <div style={labelStyle}>Packaging subtotal</div>
                           <div style={{ fontSize: 13 }}>
-                            {formatUsd(effectivePackagingSubtotal)}
+                            {formatUsd(packagingSubtotal)}
                           </div>
                         </div>
                       )}
 
-                      {effectiveGrandSubtotal > 0 && (
+                      {grandSubtotal > 0 && (
                         <div>
                           <div style={labelStyle}>
                             Combined estimate (foam + packaging)
                           </div>
                           <div style={{ fontSize: 14, fontWeight: 600 }}>
-                            {formatUsd(effectiveGrandSubtotal)}
+                            {formatUsd(grandSubtotal)}
                           </div>
                         </div>
                       )}
@@ -1110,7 +1079,7 @@ export default function QuotePrintClient() {
                             </div>
                           </div>
 
-                          {effectiveGrandSubtotal > 0 && (
+                          {grandSubtotal > 0 && (
                             <div>
                               <div style={labelStyle}>
                                 Planning total (foam + packaging + shipping)
@@ -1649,17 +1618,17 @@ export default function QuotePrintClient() {
                             ? rb.description.trim()
                             : `${rb.style || "Carton"}`) || "Carton";
 
-                        const L = Number(rb.inside_length_in);
-                        const W = Number(rb.inside_width_in);
-                        const H = Number(rb.inside_height_in);
-
                         const dimsOk =
-                          Number.isFinite(L) &&
-                          Number.isFinite(W) &&
-                          Number.isFinite(H);
+                          Number.isFinite(rb.inside_length_in) &&
+                          Number.isFinite(rb.inside_width_in) &&
+                          Number.isFinite(rb.inside_height_in);
 
                         const dimsText = dimsOk
-                          ? `${formatDims(L, W, H)} in`
+                          ? `${formatDims(
+                              rb.inside_length_in,
+                              rb.inside_width_in,
+                              rb.inside_height_in,
+                            )} in`
                           : null;
 
                         const notesParts: string[] = [];
@@ -1678,18 +1647,13 @@ export default function QuotePrintClient() {
 
                         const qty = rb.qty || primaryItem?.qty || 1;
 
-                        const unitPriceRaw =
-                          (rb as any).unit_price_usd ??
-                          (rb as any).base_unit_price ??
-                          (rb as any).price_unit_usd ??
-                          null;
-                        const unitPrice = parsePriceField(unitPriceRaw);
-
-                        const lineTotalRaw =
+                        const unitPrice = parsePriceField(
+                          (rb as any).unit_price_usd ?? null,
+                        );
+                        const lineTotal = parsePriceField(
                           (rb as any).extended_price_usd ??
-                          (rb as any).line_total_usd ??
-                          (unitPrice != null ? unitPrice * qty : null);
-                        const lineTotal = parsePriceField(lineTotalRaw);
+                            (unitPrice != null ? unitPrice * qty : null),
+                        );
 
                         const isRemoving = removingBoxId === rb.id;
 
@@ -1838,7 +1802,7 @@ export default function QuotePrintClient() {
                           </div>
 
                           {/* Packaging subtotal only if cartons are priced */}
-                          {effectivePackagingSubtotal > 0 && (
+                          {packagingSubtotal > 0 && (
                             <>
                               <div
                                 style={{
@@ -1855,7 +1819,7 @@ export default function QuotePrintClient() {
                                   fontWeight: 600,
                                 }}
                               >
-                                {formatUsd(effectivePackagingSubtotal)}
+                                {formatUsd(packagingSubtotal)}
                               </div>
 
                               <div
@@ -1873,7 +1837,7 @@ export default function QuotePrintClient() {
                                   fontWeight: 600,
                                 }}
                               >
-                                {formatUsd(effectiveGrandSubtotal)}
+                                {formatUsd(grandSubtotal)}
                               </div>
                             </>
                           )}
