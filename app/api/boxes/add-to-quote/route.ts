@@ -9,24 +9,29 @@
 //     "sku": "BP-RSC-16x12x6",  // optional if box_id omitted
 //     "qty": 250                // optional, defaults to 1
 //   }
-////
-//// Behavior (Path A):
-////   - Looks up the quote by quote_no.
-////   - Looks up the box in public.boxes (by id or sku).
-////   - Upserts a row into public.quote_box_selections:
-////       * If (quote_id, box_id) exists, increments qty (qty = qty + incomingQty).
-////       * Otherwise inserts a new selection row.
-////   - Best-effort: inserts a single carton line into public.quote_items using the
-////     box inside dimensions and the primary line's material_id (only when the
-////     selection row is first created, not on subsequent qty bumps).
-////   - Returns ok:true + the selection row, and optionally box_item_id.
-////
-//// Notes:
-////   - Does NOT change existing foam items or pricing logic.
-////   - Carton quote_items rows are inserted with NULL pricing fields so they
-////     don't affect existing calculations.
-////   - NEW: When possible, uses boxes.list_price_usd to populate
-////     unit_price_usd and extended_price_usd on quote_box_selections.
+//
+// Behavior (Path A):
+//   - Looks up the quote by quote_no.
+//   - Looks up the box in public.boxes (by id or sku).
+//   - Upserts a row into public.quote_box_selections:
+//       * If (quote_id, box_id) exists, increments qty (qty = qty + incomingQty).
+//       * Otherwise inserts a new selection row.
+//   - NEW: After upsert, prices the carton selection using public.box_price_tiers:
+//       * Chooses the tier where vendor+sku match and min_qty <= selection.qty,
+//         ordered by min_qty DESC (best match).
+//       * If unit_price_usd is present on the tier, uses that.
+//       * Else if unit_cost_usd and markup_pct are present, computes:
+//           sell = cost * (1 + markup_pct/100), rounded to 2 decimals.
+//       * Writes unit_price_usd + extended_price_usd back to quote_box_selections.
+//   - Best-effort: inserts a single carton line into public.quote_items using the
+//     box inside dimensions and the primary line's material_id (only when the
+//     selection row is first created, not on subsequent qty bumps).
+//   - Returns ok:true + the selection row, and optionally box_item_id.
+//
+// Notes:
+//   - Does NOT change existing foam items or pricing logic.
+//   - Carton quote_items rows are still inserted with NULL foam pricing fields;
+//     carton pricing lives on quote_box_selections for packagingSubtotal.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
@@ -54,7 +59,6 @@ type BoxRow = {
   inside_length_in: number;
   inside_width_in: number;
   inside_height_in: number;
-  list_price_usd: number | null;
 };
 
 type PrimaryItemRow = {
@@ -64,11 +68,23 @@ type PrimaryItemRow = {
 
 type SelectionRow = {
   id: number;
+  quote_id: number;
+  quote_no: string;
+  box_id: number;
+  sku: string;
   qty: number;
-  unit_price_usd: number | null;
+  created_at: string;
+  unit_price_usd?: number | null;
+  extended_price_usd?: number | null;
 };
 
-// ---------- helpers ----------
+type TierRow = {
+  unit_cost_usd: string | number | null;
+  markup_pct: string | number | null;
+  unit_price_usd: string | number | null;
+};
+
+// Helpers
 
 function parseQty(raw: any, fallback: number): number {
   const n = Number(raw);
@@ -84,52 +100,19 @@ function bad(body: any, status = 400) {
   return NextResponse.json(body, { status });
 }
 
-// Round to 2 decimals, returning null if invalid or <= 0.
-function normalizeUnitPrice(raw: any): number | null {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n * 100) / 100;
+function toNumberOrNull(raw: any): number | null {
+  if (raw === null || raw === undefined) return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
-// Round to 2 decimals for extended price.
-function normalizeExtendedPrice(raw: any): number | null {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 100) / 100;
+function roundToCents(value: number | null): number | null {
+  if (value === null) return null;
+  if (!Number.isFinite(value)) return null;
+  return Math.round(value * 100) / 100;
 }
 
-/**
- * Compute the effective carton unit price for this selection.
- *
- * For now (Path A):
- *   - If there is an existing unit price (manual override), keep it.
- *   - Otherwise, use boxes.list_price_usd (rounded to 2 decimals).
- *
- * In the future, this function can be expanded for tiered pricing
- * without touching the rest of the route.
- */
-function computeCartonUnitPrice(opts: {
-  box: BoxRow;
-  existingUnitPrice: number | null;
-  newQty: number;
-}): number | null {
-  const { box, existingUnitPrice } = opts;
-
-  // Respect any previously-set unit_price_usd (manual override).
-  if (existingUnitPrice != null && Number.isFinite(existingUnitPrice)) {
-    return normalizeUnitPrice(existingUnitPrice);
-  }
-
-  // Fallback to catalog list_price_usd.
-  const fromBox = normalizeUnitPrice(box.list_price_usd);
-  if (fromBox != null) return fromBox;
-
-  // No pricing available; allow NULL price.
-  return null;
-}
-
-// ---------- POST /api/boxes/add-to-quote ----------
-
+// POST /api/boxes/add-to-quote
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as BodyIn;
@@ -177,7 +160,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2) Look up box (now including list_price_usd)
+    // 2) Look up box
     let box: BoxRow | null = null;
 
     if (hasBoxId) {
@@ -192,8 +175,7 @@ export async function POST(req: NextRequest) {
             sku,
             inside_length_in,
             inside_width_in,
-            inside_height_in,
-            list_price_usd
+            inside_height_in
           FROM public.boxes
           WHERE id = $1
           `,
@@ -211,8 +193,7 @@ export async function POST(req: NextRequest) {
           sku,
           inside_length_in,
           inside_width_in,
-          inside_height_in,
-          list_price_usd
+          inside_height_in
         FROM public.boxes
         WHERE sku = $1
         `,
@@ -235,21 +216,14 @@ export async function POST(req: NextRequest) {
     }
 
     // 3) Upsert into quote_box_selections (incrementing qty on duplicates)
-    let selection:
-      | {
-          id: number;
-          quote_id: number;
-          quote_no: string;
-          box_id: number;
-          sku: string;
-          qty: number;
-          created_at: string;
-        }
-      | null = null;
+    let selection: SelectionRow | null = null;
 
-    const existingSelection = (await one<SelectionRow>(
+    const existingSelection = (await one<{
+      id: number;
+      qty: number;
+    }>(
       `
-      SELECT id, qty, unit_price_usd
+      SELECT id, qty
       FROM public.quote_box_selections
       WHERE quote_id = $1
         AND box_id = $2
@@ -257,67 +231,131 @@ export async function POST(req: NextRequest) {
       LIMIT 1
       `,
       [quote.id, box.id],
-    )) as SelectionRow | null;
+    )) as { id: number; qty: number } | null;
 
     const isNewSelection = !existingSelection;
 
     if (existingSelection) {
       const newQty = (existingSelection.qty ?? 0) + incomingQty;
 
-      const effectiveUnitPrice = computeCartonUnitPrice({
-        box,
-        existingUnitPrice: existingSelection.unit_price_usd,
-        newQty,
-      });
-
-      const extendedPrice =
-        effectiveUnitPrice != null
-          ? normalizeExtendedPrice(effectiveUnitPrice * newQty)
-          : null;
-
       const rows = await q(
         `
         UPDATE public.quote_box_selections
-        SET
-          qty = $1,
-          unit_price_usd = $2,
-          extended_price_usd = $3
-        WHERE id = $4
-        RETURNING id, quote_id, quote_no, box_id, sku, qty, created_at
+        SET qty = $1
+        WHERE id = $2
+        RETURNING
+          id,
+          quote_id,
+          quote_no,
+          box_id,
+          sku,
+          qty,
+          created_at,
+          unit_price_usd,
+          extended_price_usd
         `,
-        [newQty, effectiveUnitPrice, extendedPrice, existingSelection.id],
+        [newQty, existingSelection.id],
       );
-      selection = (rows[0] ?? null) as any;
+      selection = (rows[0] ?? null) as SelectionRow | null;
     } else {
-      const effectiveUnitPrice = computeCartonUnitPrice({
-        box,
-        existingUnitPrice: null,
-        newQty: incomingQty,
-      });
-
-      const extendedPrice =
-        effectiveUnitPrice != null
-          ? normalizeExtendedPrice(effectiveUnitPrice * incomingQty)
-          : null;
-
       const rows = await q(
         `
         INSERT INTO public.quote_box_selections
-          (quote_id, quote_no, box_id, sku, qty, unit_price_usd, extended_price_usd)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id, quote_id, quote_no, box_id, sku, qty, created_at
+          (quote_id, quote_no, box_id, sku, qty)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING
+          id,
+          quote_id,
+          quote_no,
+          box_id,
+          sku,
+          qty,
+          created_at,
+          unit_price_usd,
+          extended_price_usd
         `,
-        [
-          quote.id,
-          quote.quote_no,
-          box.id,
-          box.sku,
-          incomingQty,
-          effectiveUnitPrice,
-          extendedPrice,
-        ],
+        [quote.id, quote.quote_no, box.id, box.sku, incomingQty],
       );
-      selection = (rows[0] ?? null) as any;
+      selection = (rows[0] ?? null) as SelectionRow | null;
+    }
+
+    if (!selection) {
+      return bad(
+        {
+          ok: false,
+          error: "SELECTION_FAILED",
+          message: "Unable to create or update carton selection row.",
+        },
+        500,
+      );
+    }
+
+    // 3b) Price the carton selection using box_price_tiers
+    try {
+      const vendorKey = (box.vendor || "").trim();
+      const skuKey = (box.sku || "").trim();
+      const effectiveQty = selection.qty ?? incomingQty;
+
+      if (vendorKey && skuKey && effectiveQty > 0) {
+        const tier = (await one<TierRow>(
+          `
+          SELECT
+            unit_cost_usd,
+            markup_pct,
+            unit_price_usd
+          FROM public.box_price_tiers
+          WHERE vendor = $1
+            AND sku    = $2
+            AND active = true
+            AND min_qty <= $3
+          ORDER BY min_qty DESC
+          LIMIT 1
+          `,
+          [vendorKey, skuKey, effectiveQty],
+        )) as TierRow | null;
+
+        let unitPrice: number | null = null;
+
+        if (tier) {
+          const overridePrice = toNumberOrNull(tier.unit_price_usd);
+          const cost = toNumberOrNull(tier.unit_cost_usd);
+          const markupPct = toNumberOrNull(tier.markup_pct) ?? 0;
+
+          if (overridePrice !== null) {
+            unitPrice = overridePrice;
+          } else if (cost !== null) {
+            const factor = 1 + markupPct / 100;
+            unitPrice = cost * factor;
+          }
+        }
+
+        unitPrice = roundToCents(unitPrice);
+        const extended =
+          unitPrice !== null ? roundToCents(unitPrice * effectiveQty) : null;
+
+        await q(
+          `
+          UPDATE public.quote_box_selections
+          SET
+            unit_price_usd    = $1,
+            extended_price_usd = $2
+          WHERE id = $3
+          `,
+          [unitPrice, extended, selection.id],
+        );
+
+        selection = {
+          ...selection,
+          unit_price_usd: unitPrice,
+          extended_price_usd: extended,
+        };
+      }
+    } catch (pricingErr) {
+      console.error(
+        "Error applying box_price_tiers pricing in /api/boxes/add-to-quote:",
+        pricingErr,
+      );
+      // Pricing failure should not block carton selection itself.
     }
 
     // 4) Best-effort: also insert a carton line into quote_items
