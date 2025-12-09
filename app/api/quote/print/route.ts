@@ -407,8 +407,11 @@ export async function GET(req: NextRequest) {
           qbs.box_id,
           qbs.sku,
           qbs.qty,
-          qbs.unit_price_usd,
-          qbs.extended_price_usd,
+          COALESCE(qbs.unit_price_usd, b.base_unit_price) as unit_price_usd,
+          COALESCE(
+            qbs.extended_price_usd,
+            COALESCE(qbs.unit_price_usd, b.base_unit_price) * qbs.qty
+          ) as extended_price_usd,
           b.vendor,
           b.style,
           b.description,
