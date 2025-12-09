@@ -119,9 +119,9 @@ type RequestedBox = {
   style: string | null;
   description: string | null;
   qty: number;
-  inside_length_in: number | string;
-  inside_width_in: number | string;
-  inside_height_in: number | string;
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
   // Optional pricing fields from quote_box_selections
   unit_price_usd?: number | string | null;
   extended_price_usd?: number | string | null;
@@ -181,6 +181,48 @@ function formatUsd(value: number | null | undefined): string {
   }
 }
 
+// ===== Simple shipping estimator (Path A, client-side only) =====
+//
+// We keep this deliberately simple and tunable:
+//   - Approximate total cubic feet for all requested cartons
+//   - Apply a flat per-cubic-foot rate and optional base fee
+//   - Result is NOT baked into subtotal from the server; it's a planning-only estimate.
+
+const SHIPPING_BASE_FEE = 0; // e.g. 25 for a base handling/ship charge
+const SHIPPING_RATE_PER_CUFT = 0.45; // USD per cubic foot, rough planning rate
+
+function computeShippingEstimate(boxes: RequestedBox[]): number {
+  if (!boxes || boxes.length === 0) return 0;
+
+  let totalCuFt = 0;
+
+  for (const rb of boxes) {
+    const L = Number(rb.inside_length_in);
+    const W = Number(rb.inside_width_in);
+    const H = Number(rb.inside_height_in);
+    const qty = rb.qty || 0;
+
+    if (
+      Number.isFinite(L) &&
+      Number.isFinite(W) &&
+      Number.isFinite(H) &&
+      qty > 0
+    ) {
+      const cuIn = L * W * H * qty;
+      const cuFt = cuIn / 1728; // 12^3
+      if (Number.isFinite(cuFt) && cuFt > 0) {
+        totalCuFt += cuFt;
+      }
+    }
+  }
+
+  if (totalCuFt <= 0) return 0;
+
+  const estimate =
+    (SHIPPING_BASE_FEE || 0) + totalCuFt * (SHIPPING_RATE_PER_CUFT || 0);
+  return Math.round(estimate * 100) / 100;
+}
+
 export default function QuotePrintClient() {
   const searchParams = useSearchParams();
 
@@ -201,16 +243,22 @@ export default function QuotePrintClient() {
     [],
   );
 
-  // Subtotals from server: foam, packaging, grand
+  // Subtotals from server: foam, packaging, grand (foam + packaging)
   const [foamSubtotal, setFoamSubtotal] = React.useState<number>(0);
   const [packagingSubtotal, setPackagingSubtotal] =
     React.useState<number>(0);
   const [grandSubtotal, setGrandSubtotal] = React.useState<number>(0);
 
+  // Rough shipping estimate, derived client-side from requestedBoxes
+  const shippingEstimate = React.useMemo(
+    () => computeShippingEstimate(requestedBoxes),
+    [requestedBoxes],
+  );
+
   // Which carton selection is currently being removed (for button disable/spinner)
-  const [removingBoxId, setRemovingBoxId] = React.useState<
-    number | null
-  >(null);
+  const [removingBoxId, setRemovingBoxId] = React.useState<number | null>(
+    null,
+  );
 
   // Ref to the SVG preview container so we can scale/center the inner <svg>
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -280,12 +328,12 @@ export default function QuotePrintClient() {
         labelParts.push(`${styleLabel} ${sel.sku}`);
       }
 
-      const hasDims =
-        sel.inside_length_in != null &&
-        sel.inside_width_in != null &&
-        sel.inside_height_in != null;
+      const dimsOk =
+        Number.isFinite(sel.inside_length_in) &&
+        Number.isFinite(sel.inside_width_in) &&
+        Number.isFinite(sel.inside_height_in);
 
-      const dimsLabel = hasDims
+      const dimsLabel = dimsOk
         ? `Inside ${formatDims(
             sel.inside_length_in,
             sel.inside_width_in,
@@ -301,9 +349,7 @@ export default function QuotePrintClient() {
       const qty = sel.qty || primaryQty;
 
       requestedLines.push(
-        `- ${labelMain}${
-          dimsLabel ? ` (${dimsLabel})` : ""
-        } – Qty ${qty}`,
+        `- ${labelMain}${dimsLabel ? ` (${dimsLabel})` : ""} – Qty ${qty}`,
       );
     }
 
@@ -367,11 +413,10 @@ export default function QuotePrintClient() {
           setItems(json.items || []);
           setLayoutPkg(json.layoutPkg || null);
 
+          // Subtotals from server (fallback to 0 if missing)
           const asOk = json as ApiOk;
           setFoamSubtotal(
-            typeof asOk.foamSubtotal === "number"
-              ? asOk.foamSubtotal
-              : 0,
+            typeof asOk.foamSubtotal === "number" ? asOk.foamSubtotal : 0,
           );
           setPackagingSubtotal(
             typeof asOk.packagingSubtotal === "number"
@@ -408,6 +453,7 @@ export default function QuotePrintClient() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            // Using selectionId here; server can map from selection → [CARTON] quote_items rows
             quoteNo,
             selectionId,
           }),
@@ -491,6 +537,9 @@ export default function QuotePrintClient() {
   // anyPricing: use grandSubtotal (foam + packaging) if available,
   // but still works if only foam is priced.
   const anyPricing = grandSubtotal > 0 || foamSubtotal > 0;
+
+  // Planning total adds rough shipping to the server-side grandSubtotal
+  const planningTotal = grandSubtotal + (shippingEstimate || 0);
 
   const notesPreview =
     layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
@@ -656,6 +705,7 @@ export default function QuotePrintClient() {
       }[] = [];
 
       layers.forEach((layer: any, index: number) => {
+        // Only show layers that have their *own* thickness.
         const tRaw = layer.thicknessIn ?? layer.thickness_in;
         const T = Number(tRaw);
         if (!Number.isFinite(T) || T <= 0) return;
@@ -1006,6 +1056,45 @@ export default function QuotePrintClient() {
                             {formatUsd(grandSubtotal)}
                           </div>
                         </div>
+                      )}
+
+                      {shippingEstimate > 0 && (
+                        <>
+                          <div>
+                            <div style={labelStyle}>
+                              Rough shipping estimate
+                            </div>
+                            <div style={{ fontSize: 13 }}>
+                              {formatUsd(shippingEstimate)}{" "}
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  color: "#6b7280",
+                                  marginLeft: 4,
+                                }}
+                              >
+                                (for planning only; not included in above
+                                subtotals)
+                              </span>
+                            </div>
+                          </div>
+
+                          {grandSubtotal > 0 && (
+                            <div>
+                              <div style={labelStyle}>
+                                Planning total (foam + packaging + shipping)
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 14,
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {formatUsd(planningTotal)}
+                              </div>
+                            </div>
+                          )}
+                        </>
                       )}
 
                       {primaryBreakdown && (
@@ -1502,7 +1591,7 @@ export default function QuotePrintClient() {
                         </tr>
                       ))}
 
-                      {/* Packaging rows: requested cartons with pricing + dims */}
+                      {/* Requested cartons appended as additional lines */}
                       {requestedBoxes.length > 0 && (
                         <tr>
                           <td
@@ -1529,32 +1618,32 @@ export default function QuotePrintClient() {
                             ? rb.description.trim()
                             : `${rb.style || "Carton"}`) || "Carton";
 
-                        // NEW: dims based on presence, not Number.isFinite,
-                        // so it works even if the API sends strings.
-                        const hasDims =
-                          rb.inside_length_in != null &&
-                          rb.inside_width_in != null &&
-                          rb.inside_height_in != null;
+                        const dimsOk =
+                          Number.isFinite(rb.inside_length_in) &&
+                          Number.isFinite(rb.inside_width_in) &&
+                          Number.isFinite(rb.inside_height_in);
 
-                        const dimsDisplay = hasDims
+                        const dimsText = dimsOk
                           ? `${formatDims(
                               rb.inside_length_in,
                               rb.inside_width_in,
                               rb.inside_height_in,
                             )} in`
-                          : "—";
+                          : null;
 
                         const notesParts: string[] = [];
                         if (rb.sku) notesParts.push(`SKU: ${rb.sku}`);
-                        if (rb.vendor)
-                          notesParts.push(`Vendor: ${rb.vendor}`);
-                        if (hasDims)
-                          notesParts.push(`Inside ${dimsDisplay}`);
+                        // Vendor is intentionally NOT shown on client quote
+                        if (dimsText) {
+                          notesParts.push(`Inside ${dimsText}`);
+                        }
 
                         const subLabel =
                           notesParts.length > 0
                             ? notesParts.join(" · ")
                             : null;
+
+                        const dimsDisplay = dimsText ?? "—";
 
                         const qty = rb.qty || primaryItem?.qty || 1;
 
