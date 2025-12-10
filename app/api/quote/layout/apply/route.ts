@@ -170,23 +170,23 @@ function buildDxfFromLayout(layout: any): string | null {
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
   }
 
-  function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
-    return [
-      "0",
-      "LINE",
-      "8",
-      "0", // layer
-      "10",
-      fmt(x1),
-      "20",
-      fmt(y1),
-      "11",
-      fmt(x2),
-      "21",
-      fmt(y2),
-      "",
-    ].join("\n");
-  }
+function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
+  return [
+    "0",
+    "LINE",
+    "8",
+    "0", // layer
+    "10",
+    fmt(x1),
+    "20",
+    fmt(y1),
+    "11",
+    fmt(x2),
+    "21",
+    fmt(y2),
+  ].join("\n");
+}
+
 
   const entities: string[] = [];
 
