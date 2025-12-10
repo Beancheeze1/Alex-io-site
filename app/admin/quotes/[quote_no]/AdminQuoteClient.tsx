@@ -35,7 +35,7 @@ type ItemRow = {
   length_in: string;
   width_in: string;
   height_in: string;
-  qty: number;
+  qty: number | string | null;
   material_id: number;
   material_name: string | null;
 
@@ -43,8 +43,8 @@ type ItemRow = {
   material_family?: string | null;
   density_lb_ft3?: number | null;
 
-  price_unit_usd?: string | null;
-  price_total_usd?: string | null;
+  price_unit_usd?: string | number | null;
+  price_total_usd?: string | number | null;
 
   // NEW: richer pricing metadata from /api/quote/print
   pricing_meta?: {
@@ -95,7 +95,7 @@ type RequestedBoxRow = {
   vendor: string | null;
   style: string | null;
   description: string | null;
-  qty: number;
+  qty: number | string | null;
 };
 
 type BoxesForQuoteOk = {
@@ -117,6 +117,25 @@ function parsePriceField(
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n)) return null;
   return n;
+}
+
+// NEW: safe numeric parser for quantities / counts
+function toNumberSafe(raw: any): number | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+// NEW: safe formatter for integer-ish quantities
+function formatQty(raw: any): string {
+  const n = toNumberSafe(raw);
+  if (n === null) return "—";
+  try {
+    return n.toLocaleString("en-US");
+  } catch {
+    return String(n);
+  }
 }
 
 function formatUsd(value: number | null | undefined): string {
@@ -213,11 +232,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
         if (!res.ok) {
           if (!cancelled) {
-            if (!json.ok && json.error === "NOT_FOUND") {
-              setNotFound(json.message || "Quote not found.");
+            if (!json.ok && (json as ApiErr).error === "NOT_FOUND") {
+              setNotFound((json as ApiErr).message || "Quote not found.");
             } else if (!json.ok) {
               setError(
-                json.message || "There was a problem loading this quote.",
+                (json as ApiErr).message ||
+                  "There was a problem loading this quote.",
               );
             } else {
               setError("There was a problem loading this quote.");
@@ -313,7 +333,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     };
   }, [quoteNoValue]);
 
-  const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
+  // === derived numbers / text ===============================================
+
+  const overallQty = items.reduce((sum, i) => {
+    const qtyNum = toNumberSafe(i.qty);
+    return sum + (qtyNum ?? 0);
+  }, 0);
 
   const subtotal = items.reduce((sum, i) => {
     const lineTotal = parsePriceField(i.price_total_usd ?? null) ?? 0;
@@ -655,14 +680,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       </div>
                       <div>
                         <div style={labelStyle}>Quoted quantity</div>
-                        <div>
-                          {primaryItem.qty != null &&
-                          Number.isFinite(Number(primaryItem.qty))
-                            ? Number(
-                                primaryItem.qty,
-                              ).toLocaleString()
-                            : "—"}
-                        </div>
+                        <div>{formatQty(primaryItem.qty)}</div>
                       </div>
                     </>
                   )}
@@ -697,7 +715,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     </div>
                     <div>
                       <div style={labelStyle}>Total quantity</div>
-                      <div>{overallQty}</div>
+                      <div>{formatQty(overallQty)}</div>
                     </div>
                     {anyPricing && (
                       <>
@@ -746,7 +764,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                 ? ` Includes a setup fee of ${formatUsd(
                                     setupFee,
                                   )}.`
-                                : ""}
+                                : ""}{" "}
                               {minChargeApplied
                                 ? ` Pricing is currently governed by the minimum charge (${formatUsd(
                                     minChargeValue ?? subtotal,
@@ -966,9 +984,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     >
                       These selections come from the public quote viewer
                       when the customer clicks{" "}
-                      <strong>&ldquo;Add this carton to my quote&rdquo;</strong>.
-                      Use this list as a heads-up when finalizing packaging
-                      and placing box orders.
+                      <strong>
+                        &ldquo;Add this carton to my quote&rdquo;
+                      </strong>
+                      . Use this list as a heads-up when finalizing
+                      packaging and placing box orders.
                     </p>
                     <ul
                       style={{
@@ -1000,12 +1020,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               }}
                             >
                               {metaParts.join(" • ")} — Qty{" "}
-                              {sel.qty != null &&
-                              Number.isFinite(Number(sel.qty))
-                                ? Number(
-                                    sel.qty,
-                                  ).toLocaleString()
-                                : "—"}
+                              {formatQty(sel.qty)}
                             </div>
                           </li>
                         );
@@ -1420,7 +1435,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               textAlign: "right",
                             }}
                           >
-                            {item.qty}
+                            {formatQty(item.qty)}
                           </td>
                           <td
                             style={{
