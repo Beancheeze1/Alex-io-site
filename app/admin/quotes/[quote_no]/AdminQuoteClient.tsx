@@ -41,7 +41,7 @@ type ItemRow = {
 
   // NEW: carry-through from /api/quote/print
   material_family?: string | null;
-  density_lb_ft3?: number | null;
+  density_lb_ft3?: number | string | null;
 
   price_unit_usd?: string | number | null;
   price_total_usd?: string | number | null;
@@ -119,7 +119,7 @@ function parsePriceField(
   return n;
 }
 
-// NEW: safe numeric parser for quantities / counts
+// NEW: safe numeric parser for quantities / counts / densities
 function toNumberSafe(raw: any): number | null {
   if (raw === null || raw === undefined || raw === "") return null;
   const n = typeof raw === "number" ? raw : Number(raw);
@@ -470,7 +470,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     primaryItem?.material_name ||
     (primaryItem ? `Material #${primaryItem.material_id}` : null);
   const primaryMaterialFamily = primaryItem?.material_family || null;
-  const primaryDensity = primaryItem?.density_lb_ft3 ?? null;
+
+  // density as a clean number (handles string-from-DB cases)
+  const primaryDensity = toNumberSafe(primaryItem?.density_lb_ft3 ?? null);
 
   const customerQuoteUrl =
     quoteState?.quote_no && typeof window === "undefined"
@@ -674,7 +676,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       <div>
                         <div style={labelStyle}>Primary material</div>
                         <div>
-                          {primaryItem.material_name ||
+                          {primaryMaterialName ||
                             `Material #${primaryItem.material_id}`}
                         </div>
                       </div>
