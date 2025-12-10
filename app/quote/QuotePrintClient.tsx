@@ -139,6 +139,16 @@ type RequestedBoxesErr = {
 
 type RequestedBoxesResponse = RequestedBoxesOk | RequestedBoxesErr;
 
+// Admin rough shipping settings
+
+type ShippingSettingsResponse = {
+  ok: boolean;
+  rough_ship_pct: number;
+  source?: "db" | "default";
+  error?: string;
+  message?: string;
+};
+
 function parsePriceField(
   raw: string | number | null | undefined,
 ): number | null {
@@ -181,48 +191,6 @@ function formatUsd(value: number | null | undefined): string {
   }
 }
 
-// ===== Simple shipping estimator (Path A, client-side only) =====
-//
-// We keep this deliberately simple and tunable:
-//   - Approximate total cubic feet for all requested cartons
-//   - Apply a flat per-cubic-foot rate and optional base fee
-//   - Result is NOT baked into subtotal from the server; it's a planning-only estimate.
-
-const SHIPPING_BASE_FEE = 0; // e.g. 25 for a base handling/ship charge
-const SHIPPING_RATE_PER_CUFT = 0.45; // USD per cubic foot, rough planning rate
-
-function computeShippingEstimate(boxes: RequestedBox[]): number {
-  if (!boxes || boxes.length === 0) return 0;
-
-  let totalCuFt = 0;
-
-  for (const rb of boxes) {
-    const L = Number(rb.inside_length_in);
-    const W = Number(rb.inside_width_in);
-    const H = Number(rb.inside_height_in);
-    const qty = rb.qty || 0;
-
-    if (
-      Number.isFinite(L) &&
-      Number.isFinite(W) &&
-      Number.isFinite(H) &&
-      qty > 0
-    ) {
-      const cuIn = L * W * H * qty;
-      const cuFt = cuIn / 1728; // 12^3
-      if (Number.isFinite(cuFt) && cuFt > 0) {
-        totalCuFt += cuFt;
-      }
-    }
-  }
-
-  if (totalCuFt <= 0) return 0;
-
-  const estimate =
-    (SHIPPING_BASE_FEE || 0) + totalCuFt * (SHIPPING_RATE_PER_CUFT || 0);
-  return Math.round(estimate * 100) / 100;
-}
-
 export default function QuotePrintClient() {
   const searchParams = useSearchParams();
 
@@ -249,10 +217,9 @@ export default function QuotePrintClient() {
     React.useState<number>(0);
   const [grandSubtotal, setGrandSubtotal] = React.useState<number>(0);
 
-  // Rough shipping estimate, derived client-side from requestedBoxes
-  const shippingEstimate = React.useMemo(
-    () => computeShippingEstimate(requestedBoxes),
-    [requestedBoxes],
+  // Rough shipping % knob from admin (percent of foam + packaging)
+  const [roughShipPct, setRoughShipPct] = React.useState<number | null>(
+    null,
   );
 
   // Which carton selection is currently being removed (for button disable/spinner)
@@ -526,6 +493,45 @@ export default function QuotePrintClient() {
     refreshRequestedBoxes();
   }, [quoteNo, refreshRequestedBoxes]);
 
+  // Load rough shipping % knob from admin
+  React.useEffect(() => {
+    let active = true;
+
+    async function load() {
+      try {
+        const res = await fetch("/api/admin/shipping-settings", {
+          cache: "no-store",
+        });
+        const json = (await res
+          .json()
+          .catch(() => null)) as ShippingSettingsResponse | null;
+
+        if (!active) return;
+
+        if (!res.ok || !json || !json.ok) {
+          // Fall back to default 2% if the API isn't ready
+          setRoughShipPct(2.0);
+          return;
+        }
+
+        const pct = json.rough_ship_pct ?? 2.0;
+        setRoughShipPct(pct);
+      } catch (err) {
+        console.error("Failed to load shipping settings (quote view):", err);
+        // Safe fallback
+        if (active) {
+          setRoughShipPct(2.0);
+        }
+      }
+    }
+
+    load();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
 
   // Planning notes from layout
@@ -672,6 +678,15 @@ export default function QuotePrintClient() {
     (effectiveGrandSubtotal ?? 0) > 0 ||
     (foamSubtotal ?? 0) > 0 ||
     (breakdownUnitPrice ?? null) != null;
+
+  // Rough shipping estimate from admin knob:
+  //   shippingEstimate = (foam+packaging subtotal) * roughShipPct / 100
+  const shippingEstimate =
+    roughShipPct != null && (effectiveGrandSubtotal ?? 0) > 0
+      ? Math.round(
+          (effectiveGrandSubtotal * (roughShipPct / 100)) * 100,
+        ) / 100
+      : 0;
 
   // Planning total adds rough shipping to the effective grandSubtotal
   const planningTotal =
@@ -1104,8 +1119,8 @@ export default function QuotePrintClient() {
                                   marginLeft: 4,
                                 }}
                               >
-                                (for planning only; not included in above
-                                subtotals)
+                                ({roughShipPct?.toFixed(1).replace(/\.0$/, "")}
+                                % of foam + packaging; for planning only)
                               </span>
                             </div>
                           </div>

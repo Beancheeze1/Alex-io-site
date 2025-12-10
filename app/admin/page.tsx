@@ -4,8 +4,8 @@
 // Path A / Straight Path safe.
 // - System Health row uses /api/health/* endpoints.
 // - HubSpot + Email (Graph) cards each have a "Run deep check" button.
-// - NEW: Rough shipping % knob backed by /api/admin/shipping-settings.
-//   (This only stores the setting; shipping math wiring is a separate step.)
+// - Rough shipping % knob backed by /api/admin/shipping-settings.
+//   (This only stores the setting; shipping math wiring is in the quote page.)
 
 "use client";
 
@@ -119,18 +119,8 @@ export default function AdminHomePage() {
           </div>
         </section>
 
-        {/* NEW: Rough shipping estimate knob */}
-        <section className="mb-10">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Rough Shipping Estimate
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <ShippingSettingsCard />
-          </div>
-        </section>
-
         {/* Main navigation tiles */}
-        <section>
+        <section className="mb-10">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
             Admin Areas
           </h2>
@@ -184,6 +174,16 @@ export default function AdminHomePage() {
               title="Logs & events"
               description="Inspect webhook events, error logs, and other system diagnostics."
             />
+          </div>
+        </section>
+
+        {/* Rough shipping estimate knob - moved under Admin Areas */}
+        <section className="mb-10">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+            Rough Shipping Estimate
+          </h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            <ShippingSettingsCard />
           </div>
         </section>
       </div>
