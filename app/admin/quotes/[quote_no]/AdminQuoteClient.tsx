@@ -154,14 +154,20 @@ function getLayersFromLayout(layout: any): LayoutLayer[] {
   if (Array.isArray(layout.layers) && layout.layers.length > 0) {
     return layout.layers as LayoutLayer[];
   }
-  if (Array.isArray((layout as any).foamLayers) && layout.foamLayers.length > 0) {
+  if (
+    Array.isArray((layout as any).foamLayers) &&
+    (layout as any).foamLayers.length > 0
+  ) {
     return (layout.foamLayers as any[]) as LayoutLayer[];
   }
 
   return [];
 }
 
-function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): string {
+function getLayerLabel(
+  layer: LayoutLayer | null | undefined,
+  idx: number,
+): string {
   if (!layer) return `Layer ${idx + 1}`;
 
   const raw =
@@ -179,17 +185,26 @@ function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): stri
 }
 
 /**
- * Build a DXF for a single layer using the same geometry logic
- * as the server-side buildDxfFromLayout:
+ * Build a DXF for a single layer using the same geometry style
+ * as the server-side builder:
  *  - Foam block as rectangle from (0,0) to (L,W)
  *  - Cavities in that layer as rectangles
+ *
+ * IMPORTANT:
+ *  - Supports BOTH normalized (0–1) and absolute-inch x/y coordinates.
+ *    - If 0 ≤ x,y ≤ 1: treat as normalized → left = L * x, top = W * y.
+ *    - Else: treat as already in inches → left = x, top = y.
  */
 function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   if (!layout || !layout.block) return null;
 
   const block = layout.block || {};
-  let L = Number(block.lengthIn ?? block.length_in);
-  let W = Number(block.widthIn ?? block.width_in);
+  let L = Number(
+    (block as any).lengthIn ?? (block as any).length_in ?? (block as any).length,
+  );
+  let W = Number(
+    (block as any).widthIn ?? (block as any).width_in ?? (block as any).width,
+  );
 
   if (!Number.isFinite(L) || L <= 0) return null;
   if (!Number.isFinite(W) || W <= 0) {
@@ -229,32 +244,39 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   // Layer-specific cavities
   const layers = getLayersFromLayout(layout);
   const layer = layers[layerIndex];
-  const rawCavities = layer && Array.isArray(layer.cavities) ? layer.cavities : [];
+  const rawCavities =
+    layer && Array.isArray(layer.cavities) ? layer.cavities : [];
 
   for (const cav of rawCavities) {
     if (!cav) continue;
 
-    const lengthIn = Number(cav.lengthIn);
-    const widthIn = Number(cav.widthIn);
-    const x = Number(cav.x);
-    const y = Number(cav.y);
+    const lengthIn = Number((cav as any).lengthIn ?? (cav as any).length_in);
+    const widthInRaw = Number((cav as any).widthIn ?? (cav as any).width_in);
+    const xRaw = Number((cav as any).x);
+    const yRaw = Number((cav as any).y);
 
     if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
-    const w = Number.isFinite(widthIn) && widthIn > 0 ? widthIn : lengthIn;
 
-    if (
-      !Number.isFinite(x) ||
-      !Number.isFinite(y) ||
-      x < 0 ||
-      x > 1 ||
-      y < 0 ||
-      y > 1
-    ) {
+    const w = Number.isFinite(widthInRaw) && widthInRaw > 0
+      ? widthInRaw
+      : lengthIn;
+
+    if (!Number.isFinite(xRaw) || !Number.isFinite(yRaw)) {
       continue;
     }
 
-    const left = L * x;
-    const top = W * y;
+    let left: number;
+    let top: number;
+
+    // If 0–1, treat as normalized fractions of block size.
+    if (xRaw >= 0 && xRaw <= 1 && yRaw >= 0 && yRaw <= 1) {
+      left = L * xRaw;
+      top = W * yRaw;
+    } else {
+      // Otherwise, treat x / y as absolute inches (already in block coords).
+      left = xRaw;
+      top = yRaw;
+    }
 
     entities.push(lineEntity(left, top, left + lengthIn, top));
     entities.push(lineEntity(left + lengthIn, top, left + lengthIn, top + w));
@@ -384,11 +406,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
         if (!res.ok) {
           if (!cancelled) {
-            if (!json.ok && json.error === "NOT_FOUND") {
-              setNotFound(json.message || "Quote not found.");
+            if (!json.ok && (json as ApiErr).error === "NOT_FOUND") {
+              setNotFound((json as ApiErr).message || "Quote not found.");
             } else if (!json.ok) {
               setError(
-                json.message || "There was a problem loading this quote.",
+                (json as ApiErr).message ||
+                  "There was a problem loading this quote.",
               );
             } else {
               setError("There was a problem loading this quote.");
@@ -516,10 +539,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       svgEl.removeAttribute("height");
       svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
 
-      svgEl.style.width = "100%";
-      svgEl.style.height = "100%";
-      svgEl.style.display = "block";
-      svgEl.style.margin = "0 auto";
+      (svgEl.style as any).width = "100%";
+      (svgEl.style as any).height = "100%";
+      (svgEl.style as any).display = "block";
+      (svgEl.style as any).margin = "0 auto";
     } catch (e) {
       console.warn("Admin: could not normalize SVG preview:", e);
     }
