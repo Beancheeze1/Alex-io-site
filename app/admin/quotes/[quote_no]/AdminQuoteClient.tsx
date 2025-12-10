@@ -86,9 +86,8 @@ type Props = {
 };
 
 // NEW: requested cartons (quote_box_selections + boxes join) for this quote
-
 type RequestedBoxRow = {
-  id: number; // row id from quote_box_selections
+  id: number;
   quote_id: number;
   box_id: number;
   sku: string;
@@ -154,7 +153,7 @@ function formatUsd(value: number | null | undefined): string {
   }
 }
 
-/* ========= Layout layer + DXF helpers (per-layer DXF) ========= */
+/* ========= Layout layer + DXF helpers ========= */
 
 type LayoutBlock = {
   lengthIn?: any;
@@ -178,6 +177,15 @@ type LayoutLayer = {
   title?: string;
   isBottom?: boolean;
   cavities?: LayoutCavity[] | null;
+};
+
+// Flat cavity used for DXF math
+type FlatCavity = {
+  lengthIn: number;
+  widthIn: number;
+  depthIn: number;
+  x: number;
+  y: number;
 };
 
 // Extract layers from layout_json in a backwards compatible way.
@@ -220,25 +228,94 @@ function getLayerLabel(layer: LayoutLayer, index: number): string {
   return `Layer ${index + 1}`;
 }
 
-// Build a DXF string for a single layer (block outline + that layer's cavities only)
-function buildLayerDxf(
-  block: LayoutBlock | null | undefined,
-  layer: LayoutLayer | null | undefined,
+/**
+ * Gather cavities for:
+ *  - targetLayerIndex = null → all cavities (combined view).
+ *  - targetLayerIndex = n    → only cavities from that layer index.
+ *
+ * This mirrors the server-side getAllCavitiesFromLayout behaviour, then adds
+ * a layer filter so our DXF geometry matches exactly.
+ */
+function getCavitiesForLayer(
+  layout: any,
+  targetLayerIndex: number | null,
+): FlatCavity[] {
+  const out: FlatCavity[] = [];
+  if (!layout || typeof layout !== "object") return out;
+
+  const pushFrom = (cavs: any[], layerIndex: number | null) => {
+    for (const cav of cavs) {
+      if (!cav) continue;
+
+      const lengthIn = Number(cav.lengthIn);
+      const widthIn = Number(cav.widthIn);
+      const depthIn = Number(cav.depthIn);
+      const x = Number(cav.x);
+      const y = Number(cav.y);
+
+      if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
+      if (!Number.isFinite(widthIn) || widthIn <= 0) continue;
+      if (!Number.isFinite(depthIn) || depthIn <= 0) continue;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+      if (
+        targetLayerIndex !== null &&
+        layerIndex !== null &&
+        layerIndex !== targetLayerIndex
+      ) {
+        continue;
+      }
+
+      out.push({ lengthIn, widthIn, depthIn, x, y });
+    }
+  };
+
+  // Legacy single-layer layouts
+  if (Array.isArray(layout.cavities)) {
+    pushFrom(layout.cavities, 0);
+  }
+
+  // Multi-layer layouts: stack[].cavities[]
+  if (Array.isArray(layout.stack)) {
+    layout.stack.forEach((layer: any, idx: number) => {
+      if (layer && Array.isArray(layer.cavities)) {
+        pushFrom(layer.cavities, idx);
+      }
+    });
+  }
+
+  // Fallback for layout.layers if used
+  if (Array.isArray(layout.layers)) {
+    layout.layers.forEach((layer: any, idx: number) => {
+      if (layer && Array.isArray(layer.cavities)) {
+        pushFrom(layer.cavities, idx);
+      }
+    });
+  }
+
+  return out;
+}
+
+/**
+ * DXF builder that mirrors the server-side buildDxfFromLayout, but with an
+ * extra layerIndex parameter so we can export "combined" (null) or a single
+ * layer (0,1,2,...). Coordinates, units, and header match the server exactly.
+ */
+function buildDxfForLayer(
+  layout: any,
+  targetLayerIndex: number | null,
 ): string | null {
-  if (!block || !layer) return null;
+  if (!layout || !layout.block) return null;
 
-  const Lraw = (block.lengthIn ?? block.length_in) as any;
-  const Wraw = (block.widthIn ?? block.width_in) as any;
+  const block = layout.block as LayoutBlock;
+  let L = Number(block.lengthIn ?? (block as any).length_in);
+  let W = Number(block.widthIn ?? (block as any).width_in);
 
-  const L = Number(Lraw);
-  const W = Number(Wraw);
-
+  // Basic sanity / fallback – this matches the server logic.
   if (!Number.isFinite(L) || L <= 0) return null;
-  if (!Number.isFinite(W) || W <= 0) return null;
-
-  const cavities = Array.isArray(layer.cavities)
-    ? (layer.cavities as LayoutCavity[])
-    : [];
+  if (!Number.isFinite(W) || W <= 0) {
+    W = L; // fallback to square if width is bad
+  }
 
   function fmt(n: number) {
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
@@ -249,7 +326,7 @@ function buildLayerDxf(
       "0",
       "LINE",
       "8",
-      "0",
+      "0", // layer 0, same as server
       "10",
       fmt(x1),
       "20",
@@ -264,45 +341,48 @@ function buildLayerDxf(
 
   const entities: string[] = [];
 
-  // Foam block outline
+  // 1) Foam block as outer rectangle from (0,0) to (L,W) – 4 LINES.
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // Layer cavities
-  for (const cav of cavities) {
-    if (!cav) continue;
+  // 2) Cavities for the given layer (or all layers) as inner rectangles.
+  const allCavities = getCavitiesForLayer(layout, targetLayerIndex);
 
-    let cL = Number(cav.lengthIn);
-    let cW = Number(cav.widthIn);
-    const nx = Number(cav.x);
-    const ny = Number(cav.y);
+  if (allCavities.length > 0) {
+    for (const cav of allCavities) {
+      let cL = cav.lengthIn;
+      let cW = cav.widthIn;
+      const nx = cav.x;
+      const ny = cav.y;
 
-    if (!Number.isFinite(cL) || cL <= 0) continue;
-    if (!Number.isFinite(cW) || cW <= 0) cW = cL;
-    if (
-      !Number.isFinite(nx) ||
-      !Number.isFinite(ny) ||
-      nx < 0 ||
-      ny < 0 ||
-      nx > 1 ||
-      ny > 1
-    ) {
-      continue;
+      if (!Number.isFinite(cL) || cL <= 0) continue;
+      if (!Number.isFinite(cW) || cW <= 0) {
+        cW = cL; // fallback to square
+      }
+      if (
+        ![nx, ny].every(
+          (n) => Number.isFinite(n) && n >= 0 && n <= 1,
+        )
+      ) {
+        continue;
+      }
+
+      // x,y are normalized top-left; convert to block inches.
+      const left = L * nx;
+      const top = W * ny;
+
+      entities.push(lineEntity(left, top, left + cL, top));
+      entities.push(lineEntity(left + cL, top, left + cL, top + cW));
+      entities.push(lineEntity(left + cL, top + cW, left, top + cW));
+      entities.push(lineEntity(left, top + cW, left, top));
     }
-
-    const left = L * nx;
-    const top = W * ny;
-
-    entities.push(lineEntity(left, top, left + cL, top));
-    entities.push(lineEntity(left + cL, top, left + cL, top + cW));
-    entities.push(lineEntity(left + cL, top + cW, left, top + cW));
-    entities.push(lineEntity(left, top + cW, left, top));
   }
 
   if (!entities.length) return null;
 
+  // Full-ish R12-style DXF with HEADER / TABLES / BLOCKS / ENTITIES.
   const header = [
     "0",
     "SECTION",
@@ -311,11 +391,11 @@ function buildLayerDxf(
     "9",
     "$ACADVER",
     "1",
-    "AC1009",
+    "AC1009", // R12
     "9",
     "$INSUNITS",
     "70",
-    "1",
+    "1", // 1 = inches
     "0",
     "ENDSEC",
     "0",
@@ -448,7 +528,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         }
       } catch (err) {
         console.error("Error fetching /api/quote/print (admin view):", err);
-        if (!cancelled) {
+
+             if (!cancelled) {
           setError(
             "There was an unexpected problem loading this quote. Please try again.",
           );
@@ -524,33 +605,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     };
   }, [quoteNoValue]);
 
-  // Derived layout layer list for per-layer DXF (from layout_json)
-  const layoutLayers: LayoutLayer[] = React.useMemo(() => {
-    if (!layoutPkg || !layoutPkg.layout_json) return [];
-    return extractLayersFromLayout(layoutPkg.layout_json);
-  }, [layoutPkg]);
-
-  // === derived numbers / text ===============================================
-
-  const overallQty = items.reduce((sum, i) => {
-    const qtyNum = toNumberSafe(i.qty);
-    return sum + (qtyNum ?? 0);
-  }, 0);
-
-  const subtotal = items.reduce((sum, i) => {
-    const lineTotal = parsePriceField(i.price_total_usd ?? null) ?? 0;
-    return sum + lineTotal;
-  }, 0);
-
-  const anyPricing = subtotal > 0;
-
-  const notesPreview =
-    layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
-      ? layoutPkg.notes.trim().length > 160
-        ? layoutPkg.notes.trim().slice(0, 160) + "..."
-        : layoutPkg.notes.trim()
-      : null;
-
   // Normalize SVG preview (same as client-facing quote page)
   React.useEffect(() => {
     if (!layoutPkg) return;
@@ -576,6 +630,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [layoutPkg]);
 
+  // Combined SVG / DXF / STEP download using server-generated fields
   const handleDownload = React.useCallback(
     (kind: "svg" | "dxf" | "step") => {
       if (typeof window === "undefined") return;
@@ -621,18 +676,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     [layoutPkg, quoteState],
   );
 
-  // NEW: per-layer DXF download
+  // NEW: Per-layer DXF download using local DXF builder (matches server math)
   const handleDownloadLayerDxf = React.useCallback(
     (layerIndex: number) => {
+      if (typeof window === "undefined") return;
       if (!layoutPkg || !layoutPkg.layout_json) return;
-      if (layerIndex < 0 || layerIndex >= layoutLayers.length) return;
 
-      const layout = layoutPkg.layout_json;
-      const block: LayoutBlock | null =
-        (layout && layout.block) || null;
-      const layer = layoutLayers[layerIndex];
-
-      const dxf = buildLayerDxf(block, layer);
+      const dxf = buildDxfForLayer(layoutPkg.layout_json, layerIndex);
       if (!dxf) return;
 
       try {
@@ -642,25 +692,38 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         a.href = url;
 
         const baseName = quoteState?.quote_no || "quote";
-        const labelSlug = getLayerLabel(layer, layerIndex)
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-+|-+$/g, "");
-
-        a.download = `${baseName}-layout-layer-${layerIndex + 1}-${
-          labelSlug || "layer"
-        }.dxf`;
+        const suffix = `layer-${layerIndex + 1}`;
+        a.download = `${baseName}-layout-${suffix}.dxf`;
 
         document.body.appendChild(a);
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
       } catch (err) {
-        console.error("Admin: per-layer DXF download failed:", err);
+        console.error("Admin: layer DXF download failed:", err);
       }
     },
-    [layoutPkg, layoutLayers, quoteState],
+    [layoutPkg, quoteState],
   );
+
+  const overallQty = items.reduce((sum, i) => {
+    const q = toNumberSafe(i.qty);
+    return sum + (q ?? 0);
+  }, 0);
+
+  const subtotal = items.reduce((sum, i) => {
+    const lineTotal = parsePriceField(i.price_total_usd ?? null) ?? 0;
+    return sum + lineTotal;
+  }, 0);
+
+  const anyPricing = subtotal > 0;
+
+  const notesPreview =
+    layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
+      ? layoutPkg.notes.trim().length > 160
+        ? layoutPkg.notes.trim().slice(0, 160) + "..."
+        : layoutPkg.notes.trim()
+      : null;
 
   const primaryItem = items[0] || null;
 
@@ -708,11 +771,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     primaryItem?.material_name ||
     (primaryItem ? `Material #${primaryItem.material_id}` : null);
   const primaryMaterialFamily = primaryItem?.material_family || null;
-
-  // density as a clean number (handles string-from-DB cases)
-  const primaryDensity = toNumberSafe(
-    primaryItem?.density_lb_ft3 ?? null,
-  );
+  const primaryDensity =
+    primaryItem?.density_lb_ft3 != null
+      ? toNumberSafe(primaryItem.density_lb_ft3)
+      : null;
 
   const customerQuoteUrl =
     quoteState?.quote_no && typeof window === "undefined"
@@ -720,6 +782,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       : quoteState?.quote_no
       ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
       : null;
+
+  // NEW: layout layers from layout_json for per-layer DXF buttons
+  const layoutJson = layoutPkg?.layout_json ?? null;
+  const layoutLayers = React.useMemo(
+    () => extractLayersFromLayout(layoutJson),
+    [layoutJson],
+  );
 
   return (
     <div
@@ -916,7 +985,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       <div>
                         <div style={labelStyle}>Primary material</div>
                         <div>
-                          {primaryMaterialName ||
+                          {primaryItem.material_name ||
                             `Material #${primaryItem.material_id}`}
                         </div>
                       </div>
@@ -986,7 +1055,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             </div>
                           </div>
                         )}
-                        {/* NEW: tiny internal-only context about how pricing was built */}
                         {primaryPricing && (
                           <div
                             style={{
@@ -1008,10 +1076,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                   )}.`
                                 : ""}{" "}
                               {minChargeApplied
-                                ? ` Pricing is currently governed by the minimum charge (${formatUsd(
+                                ? `Pricing is currently governed by the minimum charge (${formatUsd(
                                     minChargeValue ?? subtotal,
                                   )}), not the raw volume math.`
-                                : " Minimum charge is not the limiting factor for this configuration."}
+                                : "Minimum charge is not the limiting factor for this configuration."}
                             </span>
                           </div>
                         )}
@@ -1457,7 +1525,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             )}
                         </div>
 
-                        {layoutLayers.length > 0 && (
+                        {/* NEW: per-layer DXF exports */}
+                        {layoutLayers.length > 1 && (
                           <div
                             style={{
                               marginTop: 8,
@@ -1465,10 +1534,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               color: "#6b7280",
                             }}
                           >
-                            Per-layer DXF:
+                            <div style={{ marginBottom: 4 }}>
+                              Layer-specific DXF exports
+                            </div>
                             <div
                               style={{
-                                marginTop: 4,
                                 display: "flex",
                                 flexWrap: "wrap",
                                 gap: 6,
@@ -1485,15 +1555,14 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                   style={{
                                     padding: "3px 8px",
                                     borderRadius: 999,
-                                    border: "1px solid #e5e7eb",
+                                    border: "1px dashed #d1d5db",
                                     background: "#f9fafb",
-                                    color: "#111827",
+                                    color: "#374151",
                                     fontSize: 10,
-                                    fontWeight: 500,
                                     cursor: "pointer",
                                   }}
                                 >
-                                  {getLayerLabel(layer, idx)}
+                                  DXF – {getLayerLabel(layer, idx)}
                                 </button>
                               ))}
                             </div>
@@ -1766,3 +1835,5 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     </div>
   );
 }
+
+
