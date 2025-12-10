@@ -35,16 +35,16 @@ type ItemRow = {
   length_in: string;
   width_in: string;
   height_in: string;
-  qty: number | string | null;
+  qty: number;
   material_id: number;
   material_name: string | null;
 
   // NEW: carry-through from /api/quote/print
   material_family?: string | null;
-  density_lb_ft3?: number | string | null;
+  density_lb_ft3?: number | null;
 
-  price_unit_usd?: string | number | null;
-  price_total_usd?: string | number | null;
+  price_unit_usd?: string | null;
+  price_total_usd?: string | null;
 
   // NEW: richer pricing metadata from /api/quote/print
   pricing_meta?: {
@@ -87,14 +87,14 @@ type Props = {
 
 // NEW: requested cartons (quote_box_selections + boxes join) for this quote
 type RequestedBoxRow = {
-  id: number;
+  id: number; // row id from quote_box_selections
   quote_id: number;
   box_id: number;
   sku: string;
   vendor: string | null;
   style: string | null;
   description: string | null;
-  qty: number | string | null;
+  qty: number;
 };
 
 type BoxesForQuoteOk = {
@@ -109,8 +109,6 @@ type BoxesForQuoteErr = {
 
 type BoxesForQuoteResponse = BoxesForQuoteOk | BoxesForQuoteErr;
 
-/* ========= Shared numeric helpers ========= */
-
 function parsePriceField(
   raw: string | number | null | undefined,
 ): number | null {
@@ -118,25 +116,6 @@ function parsePriceField(
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n)) return null;
   return n;
-}
-
-// Safe numeric parser for quantities / counts / densities
-function toNumberSafe(raw: any): number | null {
-  if (raw === null || raw === undefined || raw === "") return null;
-  const n = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(n)) return null;
-  return n;
-}
-
-// Safe formatter for integer-ish quantities
-function formatQty(raw: any): string {
-  const n = toNumberSafe(raw);
-  if (n === null) return "—";
-  try {
-    return n.toLocaleString("en-US");
-  } catch {
-    return String(n);
-  }
 }
 
 function formatUsd(value: number | null | undefined): string {
@@ -153,43 +132,20 @@ function formatUsd(value: number | null | undefined): string {
   }
 }
 
-/* ========= Layout layer + DXF helpers ========= */
-
-type LayoutBlock = {
-  lengthIn?: any;
-  length_in?: any;
-  widthIn?: any;
-  width_in?: any;
-};
-
-type LayoutCavity = {
-  lengthIn?: any;
-  widthIn?: any;
-  depthIn?: any;
-  x?: any;
-  y?: any;
-};
+// ---------------- DXF helpers (per-layer) ----------------
 
 type LayoutLayer = {
   id?: string;
   label?: string;
   name?: string;
   title?: string;
-  isBottom?: boolean;
-  cavities?: LayoutCavity[] | null;
+  thicknessIn?: number;
+  thickness_in?: number;
+  thickness?: number;
+  cavities?: any[];
 };
 
-// Flat cavity used for DXF math
-type FlatCavity = {
-  lengthIn: number;
-  widthIn: number;
-  depthIn: number;
-  x: number;
-  y: number;
-};
-
-// Extract layers from layout_json in a backwards compatible way.
-function extractLayersFromLayout(layout: any): LayoutLayer[] {
+function getLayersFromLayout(layout: any): LayoutLayer[] {
   if (!layout || typeof layout !== "object") return [];
 
   if (Array.isArray(layout.stack) && layout.stack.length > 0) {
@@ -198,123 +154,46 @@ function extractLayersFromLayout(layout: any): LayoutLayer[] {
   if (Array.isArray(layout.layers) && layout.layers.length > 0) {
     return layout.layers as LayoutLayer[];
   }
-
-  // Legacy single-layer layouts with layout.cavities only:
-  if (Array.isArray(layout.cavities) && layout.cavities.length > 0) {
-    return [
-      {
-        label: "Main layer",
-        cavities: layout.cavities as LayoutCavity[],
-      },
-    ];
+  if (Array.isArray((layout as any).foamLayers) && layout.foamLayers.length > 0) {
+    return (layout.foamLayers as any[]) as LayoutLayer[];
   }
 
   return [];
 }
 
-// Human-friendly label for a layer (Top pad, Layer 2, Bottom pad, etc.)
-function getLayerLabel(layer: LayoutLayer, index: number): string {
+function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): string {
+  if (!layer) return `Layer ${idx + 1}`;
+
   const raw =
-    (layer.label as string | undefined) ||
-    (layer.name as string | undefined) ||
-    (layer.title as string | undefined) ||
-    "";
-  const trimmed = raw.trim();
-  const isBottom =
-    layer.isBottom === true || layer.id === "layer-bottom";
+    layer.label ??
+    layer.name ??
+    layer.title ??
+    (layer.id === "layer-bottom" ? "Bottom pad" : null);
 
-  if (trimmed) return trimmed;
-  if (isBottom) return "Bottom pad";
-  return `Layer ${index + 1}`;
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    return raw.trim();
+  }
+
+  if (layer.id === "layer-bottom") return "Bottom pad";
+  return `Layer ${idx + 1}`;
 }
 
 /**
- * Gather cavities for:
- *  - targetLayerIndex = null → all cavities (combined view).
- *  - targetLayerIndex = n    → only cavities from that layer index.
- *
- * This mirrors the server-side getAllCavitiesFromLayout behaviour, then adds
- * a layer filter so our DXF geometry matches exactly.
+ * Build a DXF for a single layer using the same geometry logic
+ * as the server-side buildDxfFromLayout:
+ *  - Foam block as rectangle from (0,0) to (L,W)
+ *  - Cavities in that layer as rectangles
  */
-function getCavitiesForLayer(
-  layout: any,
-  targetLayerIndex: number | null,
-): FlatCavity[] {
-  const out: FlatCavity[] = [];
-  if (!layout || typeof layout !== "object") return out;
-
-  const pushFrom = (cavs: any[], layerIndex: number | null) => {
-    for (const cav of cavs) {
-      if (!cav) continue;
-
-      const lengthIn = Number(cav.lengthIn);
-      const widthIn = Number(cav.widthIn);
-      const depthIn = Number(cav.depthIn);
-      const x = Number(cav.x);
-      const y = Number(cav.y);
-
-      if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
-      if (!Number.isFinite(widthIn) || widthIn <= 0) continue;
-      if (!Number.isFinite(depthIn) || depthIn <= 0) continue;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-
-      if (
-        targetLayerIndex !== null &&
-        layerIndex !== null &&
-        layerIndex !== targetLayerIndex
-      ) {
-        continue;
-      }
-
-      out.push({ lengthIn, widthIn, depthIn, x, y });
-    }
-  };
-
-  // Legacy single-layer layouts
-  if (Array.isArray(layout.cavities)) {
-    pushFrom(layout.cavities, 0);
-  }
-
-  // Multi-layer layouts: stack[].cavities[]
-  if (Array.isArray(layout.stack)) {
-    layout.stack.forEach((layer: any, idx: number) => {
-      if (layer && Array.isArray(layer.cavities)) {
-        pushFrom(layer.cavities, idx);
-      }
-    });
-  }
-
-  // Fallback for layout.layers if used
-  if (Array.isArray(layout.layers)) {
-    layout.layers.forEach((layer: any, idx: number) => {
-      if (layer && Array.isArray(layer.cavities)) {
-        pushFrom(layer.cavities, idx);
-      }
-    });
-  }
-
-  return out;
-}
-
-/**
- * DXF builder that mirrors the server-side buildDxfFromLayout, but with an
- * extra layerIndex parameter so we can export "combined" (null) or a single
- * layer (0,1,2,...). Coordinates, units, and header match the server exactly.
- */
-function buildDxfForLayer(
-  layout: any,
-  targetLayerIndex: number | null,
-): string | null {
+function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   if (!layout || !layout.block) return null;
 
-  const block = layout.block as LayoutBlock;
-  let L = Number(block.lengthIn ?? (block as any).length_in);
-  let W = Number(block.widthIn ?? (block as any).width_in);
+  const block = layout.block || {};
+  let L = Number(block.lengthIn ?? block.length_in);
+  let W = Number(block.widthIn ?? block.width_in);
 
-  // Basic sanity / fallback – this matches the server logic.
   if (!Number.isFinite(L) || L <= 0) return null;
   if (!Number.isFinite(W) || W <= 0) {
-    W = L; // fallback to square if width is bad
+    W = L; // fallback to square like server
   }
 
   function fmt(n: number) {
@@ -326,7 +205,7 @@ function buildDxfForLayer(
       "0",
       "LINE",
       "8",
-      "0", // layer 0, same as server
+      "0",
       "10",
       fmt(x1),
       "20",
@@ -341,48 +220,50 @@ function buildDxfForLayer(
 
   const entities: string[] = [];
 
-  // 1) Foam block as outer rectangle from (0,0) to (L,W) – 4 LINES.
+  // Block rectangle
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // 2) Cavities for the given layer (or all layers) as inner rectangles.
-  const allCavities = getCavitiesForLayer(layout, targetLayerIndex);
+  // Layer-specific cavities
+  const layers = getLayersFromLayout(layout);
+  const layer = layers[layerIndex];
+  const rawCavities = layer && Array.isArray(layer.cavities) ? layer.cavities : [];
 
-  if (allCavities.length > 0) {
-    for (const cav of allCavities) {
-      let cL = cav.lengthIn;
-      let cW = cav.widthIn;
-      const nx = cav.x;
-      const ny = cav.y;
+  for (const cav of rawCavities) {
+    if (!cav) continue;
 
-      if (!Number.isFinite(cL) || cL <= 0) continue;
-      if (!Number.isFinite(cW) || cW <= 0) {
-        cW = cL; // fallback to square
-      }
-      if (
-        ![nx, ny].every(
-          (n) => Number.isFinite(n) && n >= 0 && n <= 1,
-        )
-      ) {
-        continue;
-      }
+    const lengthIn = Number(cav.lengthIn);
+    const widthIn = Number(cav.widthIn);
+    const x = Number(cav.x);
+    const y = Number(cav.y);
 
-      // x,y are normalized top-left; convert to block inches.
-      const left = L * nx;
-      const top = W * ny;
+    if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
+    const w = Number.isFinite(widthIn) && widthIn > 0 ? widthIn : lengthIn;
 
-      entities.push(lineEntity(left, top, left + cL, top));
-      entities.push(lineEntity(left + cL, top, left + cL, top + cW));
-      entities.push(lineEntity(left + cL, top + cW, left, top + cW));
-      entities.push(lineEntity(left, top + cW, left, top));
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      x < 0 ||
+      x > 1 ||
+      y < 0 ||
+      y > 1
+    ) {
+      continue;
     }
+
+    const left = L * x;
+    const top = W * y;
+
+    entities.push(lineEntity(left, top, left + lengthIn, top));
+    entities.push(lineEntity(left + lengthIn, top, left + lengthIn, top + w));
+    entities.push(lineEntity(left + lengthIn, top + w, left, top + w));
+    entities.push(lineEntity(left, top + w, left, top));
   }
 
   if (!entities.length) return null;
 
-  // Full-ish R12-style DXF with HEADER / TABLES / BLOCKS / ENTITIES.
   const header = [
     "0",
     "SECTION",
@@ -391,11 +272,11 @@ function buildDxfForLayer(
     "9",
     "$ACADVER",
     "1",
-    "AC1009", // R12
+    "AC1009",
     "9",
     "$INSUNITS",
     "70",
-    "1", // 1 = inches
+    "1", // inches
     "0",
     "ENDSEC",
     "0",
@@ -421,7 +302,7 @@ function buildDxfForLayer(
   return [header, entities.join("\n"), footer].join("\n");
 }
 
-/* ========= Component ========= */
+// ---------------- Component ----------------
 
 export default function AdminQuoteClient({ quoteNo }: Props) {
   // Local quote number value: prefer prop, fall back to URL path.
@@ -503,12 +384,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
         if (!res.ok) {
           if (!cancelled) {
-            if (!json.ok && (json as ApiErr).error === "NOT_FOUND") {
-              setNotFound((json as ApiErr).message || "Quote not found.");
+            if (!json.ok && json.error === "NOT_FOUND") {
+              setNotFound(json.message || "Quote not found.");
             } else if (!json.ok) {
               setError(
-                (json as ApiErr).message ||
-                  "There was a problem loading this quote.",
+                json.message || "There was a problem loading this quote.",
               );
             } else {
               setError("There was a problem loading this quote.");
@@ -528,8 +408,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         }
       } catch (err) {
         console.error("Error fetching /api/quote/print (admin view):", err);
-
-             if (!cancelled) {
+        if (!cancelled) {
           setError(
             "There was an unexpected problem loading this quote. Please try again.",
           );
@@ -605,6 +484,22 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     };
   }, [quoteNoValue]);
 
+  const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
+
+  const subtotal = items.reduce((sum, i) => {
+    const lineTotal = parsePriceField(i.price_total_usd ?? null) ?? 0;
+    return sum + lineTotal;
+  }, 0);
+
+  const anyPricing = subtotal > 0;
+
+  const notesPreview =
+    layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
+      ? layoutPkg.notes.trim().length > 160
+        ? layoutPkg.notes.trim().slice(0, 160) + "..."
+        : layoutPkg.notes.trim()
+      : null;
+
   // Normalize SVG preview (same as client-facing quote page)
   React.useEffect(() => {
     if (!layoutPkg) return;
@@ -630,7 +525,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [layoutPkg]);
 
-  // Combined SVG / DXF / STEP download using server-generated fields
   const handleDownload = React.useCallback(
     (kind: "svg" | "dxf" | "step") => {
       if (typeof window === "undefined") return;
@@ -675,55 +569,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     },
     [layoutPkg, quoteState],
   );
-
-  // NEW: Per-layer DXF download using local DXF builder (matches server math)
-  const handleDownloadLayerDxf = React.useCallback(
-    (layerIndex: number) => {
-      if (typeof window === "undefined") return;
-      if (!layoutPkg || !layoutPkg.layout_json) return;
-
-      const dxf = buildDxfForLayer(layoutPkg.layout_json, layerIndex);
-      if (!dxf) return;
-
-      try {
-        const blob = new Blob([dxf], { type: "application/dxf" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-
-        const baseName = quoteState?.quote_no || "quote";
-        const suffix = `layer-${layerIndex + 1}`;
-        a.download = `${baseName}-layout-${suffix}.dxf`;
-
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.error("Admin: layer DXF download failed:", err);
-      }
-    },
-    [layoutPkg, quoteState],
-  );
-
-  const overallQty = items.reduce((sum, i) => {
-    const q = toNumberSafe(i.qty);
-    return sum + (q ?? 0);
-  }, 0);
-
-  const subtotal = items.reduce((sum, i) => {
-    const lineTotal = parsePriceField(i.price_total_usd ?? null) ?? 0;
-    return sum + lineTotal;
-  }, 0);
-
-  const anyPricing = subtotal > 0;
-
-  const notesPreview =
-    layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
-      ? layoutPkg.notes.trim().length > 160
-        ? layoutPkg.notes.trim().slice(0, 160) + "..."
-        : layoutPkg.notes.trim()
-      : null;
 
   const primaryItem = items[0] || null;
 
@@ -771,10 +616,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     primaryItem?.material_name ||
     (primaryItem ? `Material #${primaryItem.material_id}` : null);
   const primaryMaterialFamily = primaryItem?.material_family || null;
-  const primaryDensity =
-    primaryItem?.density_lb_ft3 != null
-      ? toNumberSafe(primaryItem.density_lb_ft3)
-      : null;
+  const primaryDensity = primaryItem?.density_lb_ft3 ?? null;
 
   const customerQuoteUrl =
     quoteState?.quote_no && typeof window === "undefined"
@@ -783,11 +625,42 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
       : null;
 
-  // NEW: layout layers from layout_json for per-layer DXF buttons
-  const layoutJson = layoutPkg?.layout_json ?? null;
-  const layoutLayers = React.useMemo(
-    () => extractLayersFromLayout(layoutJson),
-    [layoutJson],
+  // Layers for per-layer DXFs
+  const layersForDxf = React.useMemo(
+    () =>
+      layoutPkg && layoutPkg.layout_json
+        ? getLayersFromLayout(layoutPkg.layout_json)
+        : [],
+    [layoutPkg],
+  );
+
+  const handleDownloadLayerDxf = React.useCallback(
+    (layerIndex: number) => {
+      if (typeof window === "undefined") return;
+      if (!layoutPkg || !layoutPkg.layout_json) return;
+
+      const dxf = buildDxfForLayer(layoutPkg.layout_json, layerIndex);
+      if (!dxf) return;
+
+      try {
+        const blob = new Blob([dxf], { type: "application/dxf" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+
+        const baseName = quoteState?.quote_no || "quote";
+        const suffix = `layer-${layerIndex + 1}`;
+        a.download = `${baseName}-layout-${suffix}.dxf`;
+
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error("Admin: layer DXF download failed:", err);
+      }
+    },
+    [layoutPkg, quoteState],
   );
 
   return (
@@ -991,7 +864,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       </div>
                       <div>
                         <div style={labelStyle}>Quoted quantity</div>
-                        <div>{formatQty(primaryItem.qty)}</div>
+                        <div>{primaryItem.qty.toLocaleString()}</div>
                       </div>
                     </>
                   )}
@@ -1026,7 +899,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     </div>
                     <div>
                       <div style={labelStyle}>Total quantity</div>
-                      <div>{formatQty(overallQty)}</div>
+                      <div>{overallQty}</div>
                     </div>
                     {anyPricing && (
                       <>
@@ -1055,6 +928,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             </div>
                           </div>
                         )}
+                        {/* NEW: tiny internal-only context about how pricing was built */}
                         {primaryPricing && (
                           <div
                             style={{
@@ -1074,12 +948,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                 ? ` Includes a setup fee of ${formatUsd(
                                     setupFee,
                                   )}.`
-                                : ""}{" "}
+                                : ""}
                               {minChargeApplied
-                                ? `Pricing is currently governed by the minimum charge (${formatUsd(
+                                ? ` Pricing is currently governed by the minimum charge (${formatUsd(
                                     minChargeValue ?? subtotal,
                                   )}), not the raw volume math.`
-                                : "Minimum charge is not the limiting factor for this configuration."}
+                                : " Minimum charge is not the limiting factor for this configuration."}
                             </span>
                           </div>
                         )}
@@ -1294,11 +1168,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     >
                       These selections come from the public quote viewer
                       when the customer clicks{" "}
-                      <strong>
-                        &ldquo;Add this carton to my quote&rdquo;
-                      </strong>
-                      . Use this list as a heads-up when finalizing
-                      packaging and placing box orders.
+                      <strong>&ldquo;Add this carton to my quote&rdquo;</strong>.
+                      Use this list as a heads-up when finalizing packaging
+                      and placing box orders.
                     </p>
                     <ul
                       style={{
@@ -1330,7 +1202,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               }}
                             >
                               {metaParts.join(" • ")} — Qty{" "}
-                              {formatQty(sel.qty)}
+                              {sel.qty.toLocaleString()}
                             </div>
                           </li>
                         );
@@ -1444,7 +1316,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                         style={{
                           textAlign: "right",
                           fontSize: 12,
-                          minWidth: 220,
+                          minWidth: 260,
                         }}
                       >
                         <div
@@ -1525,27 +1397,35 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             )}
                         </div>
 
-                        {/* NEW: per-layer DXF exports */}
-                        {layoutLayers.length > 1 && (
+                        {/* Per-layer DXFs */}
+                        {layersForDxf && layersForDxf.length > 0 && (
                           <div
                             style={{
-                              marginTop: 8,
-                              fontSize: 11,
-                              color: "#6b7280",
+                              marginTop: 10,
+                              paddingTop: 6,
+                              borderTop: "1px dashed #e5e7eb",
                             }}
                           >
-                            <div style={{ marginBottom: 4 }}>
-                              Layer-specific DXF exports
+                            <div
+                              style={{
+                                fontSize: 11,
+                                textTransform: "uppercase",
+                                letterSpacing: "0.08em",
+                                color: "#6b7280",
+                                marginBottom: 4,
+                              }}
+                            >
+                              Per-layer DXFs
                             </div>
                             <div
                               style={{
                                 display: "flex",
-                                flexWrap: "wrap",
-                                gap: 6,
-                                justifyContent: "flex-end",
+                                flexDirection: "column",
+                                gap: 4,
+                                alignItems: "flex-end",
                               }}
                             >
-                              {layoutLayers.map((layer, idx) => (
+                              {layersForDxf.map((layer, idx) => (
                                 <button
                                   key={idx}
                                   type="button"
@@ -1553,16 +1433,17 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                     handleDownloadLayerDxf(idx)
                                   }
                                   style={{
-                                    padding: "3px 8px",
+                                    padding: "3px 9px",
                                     borderRadius: 999,
-                                    border: "1px dashed #d1d5db",
+                                    border: "1px dashed #e5e7eb",
                                     background: "#f9fafb",
-                                    color: "#374151",
-                                    fontSize: 10,
+                                    color: "#111827",
+                                    fontSize: 11,
                                     cursor: "pointer",
                                   }}
                                 >
-                                  DXF – {getLayerLabel(layer, idx)}
+                                  Download DXF —{" "}
+                                  {getLayerLabel(layer, idx)}
                                 </button>
                               ))}
                             </div>
@@ -1789,7 +1670,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               textAlign: "right",
                             }}
                           >
-                            {formatQty(item.qty)}
+                            {item.qty}
                           </td>
                           <td
                             style={{
@@ -1835,5 +1716,3 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     </div>
   );
 }
-
-
