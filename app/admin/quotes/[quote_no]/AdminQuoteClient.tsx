@@ -611,12 +611,18 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     marginBottom: 2,
   };
 
-  // NEW: derived material fields for the explorer card
+  // NEW: derived material fields for the explorer card (with safe density handling)
   const primaryMaterialName =
     primaryItem?.material_name ||
     (primaryItem ? `Material #${primaryItem.material_id}` : null);
   const primaryMaterialFamily = primaryItem?.material_family || null;
-  const primaryDensity = primaryItem?.density_lb_ft3 ?? null;
+  const rawPrimaryDensity = primaryItem?.density_lb_ft3 ?? null;
+  const primaryDensity =
+    rawPrimaryDensity != null ? Number(rawPrimaryDensity) : null;
+  const primaryDensityDisplay =
+    primaryDensity != null && Number.isFinite(primaryDensity)
+      ? primaryDensity.toFixed(2)
+      : null;
 
   const customerQuoteUrl =
     quoteState?.quote_no && typeof window === "undefined"
@@ -1017,8 +1023,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     <div>
                       <div style={labelStyle}>Density</div>
                       <div>
-                        {primaryDensity != null
-                          ? `${primaryDensity.toFixed(2)} pcf`
+                        {primaryDensityDisplay != null
+                          ? `${primaryDensityDisplay} pcf`
                           : "—"}
                       </div>
                     </div>
