@@ -655,7 +655,14 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       </div>
                       <div>
                         <div style={labelStyle}>Quoted quantity</div>
-                        <div>{primaryItem.qty.toLocaleString()}</div>
+                        <div>
+                          {primaryItem.qty != null &&
+                          Number.isFinite(Number(primaryItem.qty))
+                            ? Number(
+                                primaryItem.qty,
+                              ).toLocaleString()
+                            : "—"}
+                        </div>
                       </div>
                     </>
                   )}
@@ -993,7 +1000,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               }}
                             >
                               {metaParts.join(" • ")} — Qty{" "}
-                              {sel.qty.toLocaleString()}
+                              {sel.qty != null &&
+                              Number.isFinite(Number(sel.qty))
+                                ? Number(
+                                    sel.qty,
+                                  ).toLocaleString()
+                                : "—"}
                             </div>
                           </li>
                         );
