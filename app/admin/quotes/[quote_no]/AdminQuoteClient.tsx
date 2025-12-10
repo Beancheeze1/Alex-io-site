@@ -110,6 +110,8 @@ type BoxesForQuoteErr = {
 
 type BoxesForQuoteResponse = BoxesForQuoteOk | BoxesForQuoteErr;
 
+/* ========= Shared numeric helpers ========= */
+
 function parsePriceField(
   raw: string | number | null | undefined,
 ): number | null {
@@ -119,7 +121,7 @@ function parsePriceField(
   return n;
 }
 
-// NEW: safe numeric parser for quantities / counts / densities
+// Safe numeric parser for quantities / counts / densities
 function toNumberSafe(raw: any): number | null {
   if (raw === null || raw === undefined || raw === "") return null;
   const n = typeof raw === "number" ? raw : Number(raw);
@@ -127,7 +129,7 @@ function toNumberSafe(raw: any): number | null {
   return n;
 }
 
-// NEW: safe formatter for integer-ish quantities
+// Safe formatter for integer-ish quantities
 function formatQty(raw: any): string {
   const n = toNumberSafe(raw);
   if (n === null) return "—";
@@ -151,6 +153,195 @@ function formatUsd(value: number | null | undefined): string {
     return `$${value.toFixed(2)}`;
   }
 }
+
+/* ========= Layout layer + DXF helpers (per-layer DXF) ========= */
+
+type LayoutBlock = {
+  lengthIn?: any;
+  length_in?: any;
+  widthIn?: any;
+  width_in?: any;
+};
+
+type LayoutCavity = {
+  lengthIn?: any;
+  widthIn?: any;
+  depthIn?: any;
+  x?: any;
+  y?: any;
+};
+
+type LayoutLayer = {
+  id?: string;
+  label?: string;
+  name?: string;
+  title?: string;
+  isBottom?: boolean;
+  cavities?: LayoutCavity[] | null;
+};
+
+// Extract layers from layout_json in a backwards compatible way.
+function extractLayersFromLayout(layout: any): LayoutLayer[] {
+  if (!layout || typeof layout !== "object") return [];
+
+  if (Array.isArray(layout.stack) && layout.stack.length > 0) {
+    return layout.stack as LayoutLayer[];
+  }
+  if (Array.isArray(layout.layers) && layout.layers.length > 0) {
+    return layout.layers as LayoutLayer[];
+  }
+
+  // Legacy single-layer layouts with layout.cavities only:
+  if (Array.isArray(layout.cavities) && layout.cavities.length > 0) {
+    return [
+      {
+        label: "Main layer",
+        cavities: layout.cavities as LayoutCavity[],
+      },
+    ];
+  }
+
+  return [];
+}
+
+// Human-friendly label for a layer (Top pad, Layer 2, Bottom pad, etc.)
+function getLayerLabel(layer: LayoutLayer, index: number): string {
+  const raw =
+    (layer.label as string | undefined) ||
+    (layer.name as string | undefined) ||
+    (layer.title as string | undefined) ||
+    "";
+  const trimmed = raw.trim();
+  const isBottom =
+    layer.isBottom === true || layer.id === "layer-bottom";
+
+  if (trimmed) return trimmed;
+  if (isBottom) return "Bottom pad";
+  return `Layer ${index + 1}`;
+}
+
+// Build a DXF string for a single layer (block outline + that layer's cavities only)
+function buildLayerDxf(
+  block: LayoutBlock | null | undefined,
+  layer: LayoutLayer | null | undefined,
+): string | null {
+  if (!block || !layer) return null;
+
+  const Lraw = (block.lengthIn ?? block.length_in) as any;
+  const Wraw = (block.widthIn ?? block.width_in) as any;
+
+  const L = Number(Lraw);
+  const W = Number(Wraw);
+
+  if (!Number.isFinite(L) || L <= 0) return null;
+  if (!Number.isFinite(W) || W <= 0) return null;
+
+  const cavities = Array.isArray(layer.cavities)
+    ? (layer.cavities as LayoutCavity[])
+    : [];
+
+  function fmt(n: number) {
+    return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
+  }
+
+  function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
+    return [
+      "0",
+      "LINE",
+      "8",
+      "0",
+      "10",
+      fmt(x1),
+      "20",
+      fmt(y1),
+      "11",
+      fmt(x2),
+      "21",
+      fmt(y2),
+      "",
+    ].join("\n");
+  }
+
+  const entities: string[] = [];
+
+  // Foam block outline
+  entities.push(lineEntity(0, 0, L, 0));
+  entities.push(lineEntity(L, 0, L, W));
+  entities.push(lineEntity(L, W, 0, W));
+  entities.push(lineEntity(0, W, 0, 0));
+
+  // Layer cavities
+  for (const cav of cavities) {
+    if (!cav) continue;
+
+    let cL = Number(cav.lengthIn);
+    let cW = Number(cav.widthIn);
+    const nx = Number(cav.x);
+    const ny = Number(cav.y);
+
+    if (!Number.isFinite(cL) || cL <= 0) continue;
+    if (!Number.isFinite(cW) || cW <= 0) cW = cL;
+    if (
+      !Number.isFinite(nx) ||
+      !Number.isFinite(ny) ||
+      nx < 0 ||
+      ny < 0 ||
+      nx > 1 ||
+      ny > 1
+    ) {
+      continue;
+    }
+
+    const left = L * nx;
+    const top = W * ny;
+
+    entities.push(lineEntity(left, top, left + cL, top));
+    entities.push(lineEntity(left + cL, top, left + cL, top + cW));
+    entities.push(lineEntity(left + cL, top + cW, left, top + cW));
+    entities.push(lineEntity(left, top + cW, left, top));
+  }
+
+  if (!entities.length) return null;
+
+  const header = [
+    "0",
+    "SECTION",
+    "2",
+    "HEADER",
+    "9",
+    "$ACADVER",
+    "1",
+    "AC1009",
+    "9",
+    "$INSUNITS",
+    "70",
+    "1",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "TABLES",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "BLOCKS",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "ENTITIES",
+  ].join("\n");
+
+  const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
+
+  return [header, entities.join("\n"), footer].join("\n");
+}
+
+/* ========= Component ========= */
 
 export default function AdminQuoteClient({ quoteNo }: Props) {
   // Local quote number value: prefer prop, fall back to URL path.
@@ -333,6 +524,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     };
   }, [quoteNoValue]);
 
+  // Derived layout layer list for per-layer DXF (from layout_json)
+  const layoutLayers: LayoutLayer[] = React.useMemo(() => {
+    if (!layoutPkg || !layoutPkg.layout_json) return [];
+    return extractLayersFromLayout(layoutPkg.layout_json);
+  }, [layoutPkg]);
+
   // === derived numbers / text ===============================================
 
   const overallQty = items.reduce((sum, i) => {
@@ -424,6 +621,47 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     [layoutPkg, quoteState],
   );
 
+  // NEW: per-layer DXF download
+  const handleDownloadLayerDxf = React.useCallback(
+    (layerIndex: number) => {
+      if (!layoutPkg || !layoutPkg.layout_json) return;
+      if (layerIndex < 0 || layerIndex >= layoutLayers.length) return;
+
+      const layout = layoutPkg.layout_json;
+      const block: LayoutBlock | null =
+        (layout && layout.block) || null;
+      const layer = layoutLayers[layerIndex];
+
+      const dxf = buildLayerDxf(block, layer);
+      if (!dxf) return;
+
+      try {
+        const blob = new Blob([dxf], { type: "application/dxf" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+
+        const baseName = quoteState?.quote_no || "quote";
+        const labelSlug = getLayerLabel(layer, layerIndex)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+
+        a.download = `${baseName}-layout-layer-${layerIndex + 1}-${
+          labelSlug || "layer"
+        }.dxf`;
+
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error("Admin: per-layer DXF download failed:", err);
+      }
+    },
+    [layoutPkg, layoutLayers, quoteState],
+  );
+
   const primaryItem = items[0] || null;
 
   // NEW: unpack richer pricing info for quick engineering context
@@ -472,7 +710,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const primaryMaterialFamily = primaryItem?.material_family || null;
 
   // density as a clean number (handles string-from-DB cases)
-  const primaryDensity = toNumberSafe(primaryItem?.density_lb_ft3 ?? null);
+  const primaryDensity = toNumberSafe(
+    primaryItem?.density_lb_ft3 ?? null,
+  );
 
   const customerQuoteUrl =
     quoteState?.quote_no && typeof window === "undefined"
@@ -1216,6 +1456,49 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               </button>
                             )}
                         </div>
+
+                        {layoutLayers.length > 0 && (
+                          <div
+                            style={{
+                              marginTop: 8,
+                              fontSize: 11,
+                              color: "#6b7280",
+                            }}
+                          >
+                            Per-layer DXF:
+                            <div
+                              style={{
+                                marginTop: 4,
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: 6,
+                                justifyContent: "flex-end",
+                              }}
+                            >
+                              {layoutLayers.map((layer, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() =>
+                                    handleDownloadLayerDxf(idx)
+                                  }
+                                  style={{
+                                    padding: "3px 8px",
+                                    borderRadius: 999,
+                                    border: "1px solid #e5e7eb",
+                                    background: "#f9fafb",
+                                    color: "#111827",
+                                    fontSize: 10,
+                                    fontWeight: 500,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {getLayerLabel(layer, idx)}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
 
