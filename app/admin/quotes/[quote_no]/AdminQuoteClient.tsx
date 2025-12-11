@@ -153,8 +153,7 @@ type FlatCavity = {
   y: number; // normalized 0..1
 };
 
-/** Extract the stack/layers array from a layout_json, same priorities
- * we use server-side (stack -> layers -> foamLayers). */
+/** Extract the stack/layers array from a layout_json */
 function getLayersFromLayout(layout: any): LayoutLayer[] {
   if (!layout || typeof layout !== "object") return [];
 
@@ -191,9 +190,7 @@ function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): stri
   return `Layer ${idx + 1}`;
 }
 
-/** Flatten cavities for a single layer, using the same geometry
- * assumptions as the server-side getAllCavitiesFromLayout, but
- * restricted to a specific layer index. */
+/** Flatten cavities for a single layer */
 function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   const out: FlatCavity[] = [];
 
@@ -246,8 +243,7 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
 }
 
 /**
- * Build a DXF for a single layer using the same geometry logic
- * as the server-side buildDxfFromLayout:
+ * Build a DXF for a single layer:
  *  - Foam block as rectangle from (0,0) to (L,W)
  *  - Cavities in that layer as rectangles
  */
@@ -260,14 +256,14 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
 
   if (!Number.isFinite(L) || L <= 0) return null;
   if (!Number.isFinite(W) || W <= 0) {
-    // defensive fallback: square, same as server builder
-    W = L;
+    W = L; // defensive fallback
   }
 
   function fmt(n: number) {
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
   }
 
+  // IMPORTANT: include Z coords (30/31) so CAD parses as proper R12 LINEs
   function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
     return [
       "0",
@@ -278,11 +274,14 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
       fmt(x1),
       "20",
       fmt(y1),
+      "30",
+      "0.0",
       "11",
       fmt(x2),
       "21",
       fmt(y2),
-      "",
+      "31",
+      "0.0",
     ].join("\n");
   }
 
@@ -312,7 +311,6 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
 
   if (!entities.length) return null;
 
-  // Same R12-style header as the server-side DXF builder
   const header = [
     "0",
     "SECTION",
@@ -325,7 +323,7 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
     "9",
     "$INSUNITS",
     "70",
-    "1", // 1 = inches
+    "1", // inches
     "0",
     "ENDSEC",
     "0",
@@ -728,6 +726,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         padding: "24px",
       }}
     >
+
+
       <div
         style={{
           maxWidth: "1100px",
