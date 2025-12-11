@@ -404,8 +404,27 @@ export function buildStepFromLayoutFull(
 ): string | null {
   if (!layout?.block) return null;
 
-  const blockL = safe(layout.block.lengthIn);
-  const blockW = safe(layout.block.widthIn);
+  // Be forgiving about block dims: support lengthIn/widthIn as primary,
+  // fall back to *_in or generic length/width, and if width is missing
+  // but length is valid, assume a square (same behavior as DXF builder).
+  const rawBlockL =
+    layout.block.lengthIn ??
+    layout.block.length_in ??
+    layout.block.length;
+
+  const rawBlockW =
+    layout.block.widthIn ??
+    layout.block.width_in ??
+    layout.block.width ??
+    rawBlockL;
+
+  const blockL = safe(rawBlockL);
+  let blockW = safe(rawBlockW);
+
+  if (blockW <= 0 && blockL > 0) {
+    // Fallback to square if width is bad/missing.
+    blockW = blockL;
+  }
 
   const layers: any[] = Array.isArray(layout.stack)
     ? layout.stack
