@@ -406,6 +406,7 @@ export function buildStepFromLayoutFull(
 
   const blockL = safe(layout.block.lengthIn);
   const blockW = safe(layout.block.widthIn);
+  const blockThicknessIn = safe(layout.block.thicknessIn);
 
   const layers: any[] = Array.isArray(layout.stack)
     ? layout.stack
@@ -413,12 +414,18 @@ export function buildStepFromLayoutFull(
         {
           id: "single",
           label: "Foam layer",
-          thicknessIn: safe(layout.block.thicknessIn),
+          thicknessIn: blockThicknessIn,
           cavities: layout.cavities || [],
         },
       ];
 
   if (!layers.length || blockL <= 0 || blockW <= 0) return null;
+
+  // If layer-specific thicknesses are missing, spread block thickness evenly.
+  const defaultLayerThicknessIn =
+    blockThicknessIn > 0 && layers.length > 0
+      ? blockThicknessIn / layers.length
+      : 0;
 
   const sb = new StepBuilder();
 
@@ -435,8 +442,14 @@ export function buildStepFromLayoutFull(
   const finalLayerSolidIds: number[] = [];
 
   for (const layer of layers) {
-    const thicknessIn = safe((layer as any).thicknessIn);
-    if (thicknessIn <= 0) continue;
+    let thicknessIn = safe((layer as any).thicknessIn);
+    if (thicknessIn <= 0) {
+      thicknessIn = defaultLayerThicknessIn;
+    }
+    if (thicknessIn <= 0) {
+      // If we still don't have a valid thickness, skip this layer.
+      continue;
+    }
 
     const layerBottomZ = currentBottomZmm;
 
