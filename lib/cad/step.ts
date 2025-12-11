@@ -1,25 +1,37 @@
 // lib/cad/step.ts
 //
-// STEP export helper (Path A, v3).
+// STEP export helper (Path A, v4).
 //
-// v3 goal:
-//   - Emit a valid STEP file that contains one or more rectangular solids:
-//       * If layout.stack/layout.layers is present: one BLOCK solid per layer,
-//         stacked in Z using each layer's thickness.
-//       * Otherwise: single BLOCK solid using layout.block.thicknessIn.
+// v4 goal:
+//   - Emit a valid STEP file that contains a single rectangular solid
+//     representing the foam block *with cavities cut out* using a CSG boolean
+//     tree:
+//         result = BLOCK - cavity1 - cavity2 - ...
 //   - Geometry is emitted in millimeters (mm), converted from inches.
 //   - Header + metadata stay stable so we can iterate later.
 //
 // Notes:
 //   - We keep this helper self-contained and pure: no DB, no Next APIs.
 //   - The calling route is responsible for passing layout + metadata.
-//   - Cavities are NOT modeled in 3D here; use DXF for machining details.
+//   - Cavities are modeled as rectangular prisms based on length/width/depth
+//     and normalized x/y from the layout. RoundedRect/circle are approximated
+//     as rectangular pockets for now.
 
 import type { LayoutModel } from "@/app/quote/layout/editor/layoutTypes";
 
 export type StepBuildOptions = {
   quoteNo?: string | null;
   materialLegend?: string | null;
+};
+
+/* ===================== Layout helpers ===================== */
+
+type FlatCavity = {
+  lengthIn: number;
+  widthIn: number;
+  depthIn: number;
+  x: number; // normalized 0..1 from left
+  y: number; // normalized 0..1 from top
 };
 
 /**
@@ -55,63 +67,57 @@ function getBlockDims(layout: any): {
 }
 
 /**
- * Extract per-layer thickness and label from the layout.
+ * Gather all cavities from a layout in a backward-compatible way.
  *
- * Priority:
- *   1) layout.stack
- *   2) layout.layers
- *   3) Fallback: single layer with overall block thickness
+ * Supports:
+ *  - Legacy single-layer layouts:
+ *      layout.cavities = [...]
+ *  - Multi-layer layouts:
+ *      layout.stack = [{ cavities: [...] }, ...]
+ *
+ * If both are present, we include both sets.
  */
-function getLayerSpecs(
-  layout: any,
-  fallbackThicknessIn: number,
-): { label: string; thicknessIn: number }[] {
-  const out: { label: string; thicknessIn: number }[] = [];
+function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
+  const out: FlatCavity[] = [];
 
-  const rawLayers = Array.isArray((layout as any)?.stack)
-    ? (layout as any).stack
-    : Array.isArray((layout as any)?.layers)
-    ? (layout as any).layers
-    : null;
+  if (!layout || typeof layout !== "object") return out;
 
-  if (Array.isArray(rawLayers) && rawLayers.length > 0) {
-    let idx = 0;
-    for (const rawLayer of rawLayers) {
-      if (!rawLayer) continue;
-      idx += 1;
+  const pushFrom = (cavs: any[]) => {
+    for (const cav of cavs) {
+      if (!cav) continue;
 
-      const tRaw =
-        (rawLayer as any).thicknessIn ??
-        (rawLayer as any).thickness_in ??
-        (rawLayer as any).thickness;
-      const t = Number(tRaw);
-      if (!Number.isFinite(t) || t <= 0) continue;
+      const lengthIn = Number((cav as any).lengthIn);
+      const widthIn = Number((cav as any).widthIn);
+      const depthIn = Number((cav as any).depthIn);
+      const x = Number((cav as any).x);
+      const y = Number((cav as any).y);
 
-      const rawLabel =
-        (rawLayer as any).label ??
-        (rawLayer as any).name ??
-        (rawLayer as any).title ??
-        null;
+      if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
+      if (!Number.isFinite(widthIn) || widthIn <= 0) continue;
+      if (!Number.isFinite(depthIn) || depthIn <= 0) continue;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < 0 || x > 1 || y < 0 || y > 1) continue;
 
-      const label =
-        typeof rawLabel === "string" && rawLabel.trim().length > 0
-          ? rawLabel.trim()
-          : `Layer ${idx}`;
-
-      out.push({ label, thicknessIn: t });
+      out.push({ lengthIn, widthIn, depthIn, x, y });
     }
+  };
+
+  if (Array.isArray((layout as any).cavities)) {
+    pushFrom((layout as any).cavities);
   }
 
-  // Fallback: single layer matching the block thickness
-  if (out.length === 0 && fallbackThicknessIn > 0) {
-    out.push({
-      label: "Foam block",
-      thicknessIn: fallbackThicknessIn,
-    });
+  if (Array.isArray((layout as any).stack)) {
+    for (const layer of (layout as any).stack) {
+      if (layer && Array.isArray((layer as any).cavities)) {
+        pushFrom((layer as any).cavities);
+      }
+    }
   }
 
   return out;
 }
+
+/* ===================== STEP formatting helpers ===================== */
 
 /**
  * Escape a string for use inside a STEP string literal.
@@ -132,22 +138,27 @@ function fmtLen(n: number): string {
   return s.includes(".") ? s : `${s}.`;
 }
 
+/* ===================== Main STEP builder ===================== */
+
 /**
  * Build a **valid STEP file** for a foam layout.
  *
  * Geometry:
- *   - One BLOCK solid per foam layer, stacked along +Z.
- *   - Dimensions are in mm:
- *       L_mm = L_in * 25.4
- *       W_mm = W_in * 25.4
- *       T_mm = T_in * 25.4 (per layer)
+ *   - Single BLOCK solid representing the full foam block:
+ *       size L x W x T (in inches) → mm.
+ *   - Each cavity becomes a BLOCK solid representing its volume:
+ *       length x width x depth, positioned using normalized x/y and depth.
+ *   - We then build a CSG tree:
+ *       result = baseBlock - cav1 - cav2 - ...
  *
- * Metadata:
- *   - FILE_DESCRIPTION summarizing dims (in inches), quote, material.
- *   - FILE_NAME derived from quoteNo where possible.
- *   - FILE_SCHEMA('CONFIG_CONTROL_DESIGN').
- *
- * This is conservative but widely accepted by CAD tools.
+ * Assumptions:
+ *   - X axis = block length direction.
+ *   - Y axis = block width direction.
+ *   - Z axis = thickness, 0 at bottom, +Z up.
+ *   - Layout's normalized (x,y) is measured from top-left, so:
+ *       left_in = x * lengthIn
+ *       top_in  = y * widthIn
+ *     and cavities cut downward from the *top* surface.
  */
 export function buildStepFromLayout(
   layout: any,
@@ -166,25 +177,15 @@ export function buildStepFromLayout(
       ? opts.materialLegend.trim()
       : null;
 
-  // Determine layer structure (multi-layer or single-block fallback).
-  const layerSpecs = getLayerSpecs(layout, thicknessIn);
-  if (!layerSpecs.length) {
-    return null;
-  }
+  const cavities = getAllCavitiesFromLayout(layout);
 
   // Build a human-readable description for FILE_DESCRIPTION.
   const descParts: string[] = [];
   descParts.push(
     `Foam block ${lengthIn} x ${widthIn} x ${thicknessIn} in`,
   );
-  if (layerSpecs.length > 1) {
-    const totalT = layerSpecs.reduce(
-      (sum, l) => sum + l.thicknessIn,
-      0,
-    );
-    descParts.push(
-      `Multi-layer: ${layerSpecs.length} layer(s), total thickness ${totalT} in`,
-    );
+  if (cavities.length > 0) {
+    descParts.push(`Cavities: ${cavities.length}`);
   }
   if (quoteNo) {
     descParts.push(`Quote ${quoteNo}`);
@@ -193,6 +194,11 @@ export function buildStepFromLayout(
     descParts.push(materialLegend);
   }
   const description = descParts.join(" | ");
+
+  // If we somehow have no geometry at all, bail.
+  if (!(lengthIn > 0 && widthIn > 0 && thicknessIn > 0)) {
+    return null;
+  }
 
   // File name: use quote number if available.
   const safeQuoteForFile =
@@ -206,6 +212,7 @@ export function buildStepFromLayout(
   const mmPerInch = 25.4;
   const Lmm = lengthIn * mmPerInch;
   const Wmm = widthIn * mmPerInch;
+  const Tmm = thicknessIn * mmPerInch;
 
   // Simple id generator for STEP entities.
   let nextId = 1;
@@ -291,7 +298,7 @@ export function buildStepFromLayout(
     )}, ${stepStringLiteral("")});`,
   );
 
-  // Shared X/Y directions for all layers.
+  // Shared X/Y directions for all placements.
   const xDirId = id();
   ents.push(
     `#${xDirId} = DIRECTION(${stepStringLiteral(
@@ -306,53 +313,108 @@ export function buildStepFromLayout(
     )}, (0.,1.,0.));`,
   );
 
-  // ===== Layer solids (BLOCK per layer, stacked in Z) =====
-  const layerSolidIds: number[] = [];
-  let zOffsetMm = 0;
+  // ===== Base foam block (no cavities yet) =====
+  const baseOriginPtId = id();
+  ents.push(
+    `#${baseOriginPtId} = CARTESIAN_POINT(${stepStringLiteral(
+      "",
+    )}, (0.,0.,0.));`,
+  );
 
-  layerSpecs.forEach((layer, idx) => {
-    const Tmm = layer.thicknessIn * mmPerInch;
-    if (!(Tmm > 0)) return;
+  const basePlacementId = id();
+  ents.push(
+    `#${basePlacementId} = AXIS2_PLACEMENT_3D(${stepStringLiteral(
+      "Foam block",
+    )}, #${baseOriginPtId}, #${xDirId}, #${yDirId});`,
+  );
 
-    // Origin for this layer is at (0,0,zOffsetMm).
-    const originPtId = id();
+  const baseBlockId = id();
+  ents.push(
+    `#${baseBlockId} = BLOCK(${stepStringLiteral(
+      "FOAM_BLOCK",
+    )}, #${basePlacementId}, ${fmtLen(Lmm)}, ${fmtLen(
+      Wmm,
+    )}, ${fmtLen(Tmm)});`,
+  );
+
+  // ===== Cavity blocks (to be subtracted) =====
+  const cavityBlockIds: number[] = [];
+
+  for (let i = 0; i < cavities.length; i++) {
+    const cav = cavities[i];
+
+    const cavLmm = cav.lengthIn * mmPerInch;
+    const cavWmm = cav.widthIn * mmPerInch;
+    const cavDmm = cav.depthIn * mmPerInch;
+
+    if (!(cavLmm > 0 && cavWmm > 0 && cavDmm > 0)) continue;
+
+    // Normalized x,y are measured from left and top of the block.
+    const leftIn = cav.x * lengthIn;
+    const topIn = cav.y * widthIn;
+
+    const leftMm = leftIn * mmPerInch;
+    const topMm = topIn * mmPerInch;
+
+    // Cut from the *top* surface downwards:
+    //   block bottom  = 0
+    //   block top     = Tmm
+    //   cavity bottom = max(Tmm - cavDmm, 0)
+    const cavBottomZmm = Math.max(Tmm - cavDmm, 0);
+
+    const cavOriginPtId = id();
     ents.push(
-      `#${originPtId} = CARTESIAN_POINT(${stepStringLiteral(
+      `#${cavOriginPtId} = CARTESIAN_POINT(${stepStringLiteral(
         "",
-      )}, (0.,0.,${fmtLen(zOffsetMm)}));`,
+      )}, (${fmtLen(leftMm)},${fmtLen(topMm)},${fmtLen(
+        cavBottomZmm,
+      )}));`,
     );
 
-    const placementId = id();
+    const cavPlacementId = id();
     ents.push(
-      `#${placementId} = AXIS2_PLACEMENT_3D(${stepStringLiteral(
-        layer.label,
-      )}, #${originPtId}, #${xDirId}, #${yDirId});`,
+      `#${cavPlacementId} = AXIS2_PLACEMENT_3D(${stepStringLiteral(
+        `Cavity ${i + 1}`,
+      )}, #${cavOriginPtId}, #${xDirId}, #${yDirId});`,
     );
 
-    const blockId = id();
+    const cavBlockId = id();
     ents.push(
-      `#${blockId} = BLOCK(${stepStringLiteral(
-        layer.label,
-      )}, #${placementId}, ${fmtLen(Lmm)}, ${fmtLen(
-        Wmm,
-      )}, ${fmtLen(Tmm)});`,
+      `#${cavBlockId} = BLOCK(${stepStringLiteral(
+        `CAVITY_${i + 1}`,
+      )}, #${cavPlacementId}, ${fmtLen(cavLmm)}, ${fmtLen(
+        cavWmm,
+      )}, ${fmtLen(cavDmm)});`,
     );
 
-    layerSolidIds.push(blockId);
-    zOffsetMm += Tmm;
-  });
-
-  if (!layerSolidIds.length) {
-    return null;
+    cavityBlockIds.push(cavBlockId);
   }
 
+  // ===== CSG boolean tree: base block minus all cavity blocks =====
+  let finalSolidId: number = baseBlockId;
+
+  for (const cavId of cavityBlockIds) {
+    const boolId = id();
+    ents.push(
+      `#${boolId} = BOOLEAN_RESULT(.DIFFERENCE., #${finalSolidId}, #${cavId});`,
+    );
+    finalSolidId = boolId;
+  }
+
+  // Wrap the final boolean tree in a CSG_SOLID for representation.
+  const csgSolidId = id();
+  ents.push(
+    `#${csgSolidId} = CSG_SOLID(${stepStringLiteral(
+      "Foam block with cavities",
+    )}, #${finalSolidId});`,
+  );
+
   // Shape representation + link back to product definition.
-  const itemsList = layerSolidIds.map((sid) => `#${sid}`).join(",");
   const shapeRepId = id();
   ents.push(
     `#${shapeRepId} = SHAPE_REPRESENTATION(${stepStringLiteral(
       "",
-    )}, (${itemsList}), #${contextId});`,
+    )}, (#${csgSolidId}), #${contextId});`,
   );
 
   const sdrId = id();
@@ -374,7 +436,7 @@ export function buildStepFromLayout(
     )},${stepStringLiteral(nowIso)},(),(),${stepStringLiteral(
       "Alex-IO",
     )},${stepStringLiteral("alex-io.com")},${stepStringLiteral(
-      "STEP export v3 (multi-layer BLOCK solids)",
+      "STEP export v4 (block with cavity cutouts)",
     )});`,
   );
   // CONFIG_CONTROL_DESIGN is a common AP203-style schema used for mechanical parts.
