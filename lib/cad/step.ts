@@ -391,12 +391,11 @@ function makeCavitySolid(
   const Lmm = inToMm(safe(cav.lengthIn));
   const Wmm = inToMm(safe(cav.widthIn));
 
-  // NEW: clamp cavity depth to the actual layer thickness (in mm)
+  // Clamp cavity depth to the layer thickness to avoid over-deep cuts
   const totalLayerThicknessMm = inToMm(layerThicknessIn);
   const rawDepthMm = inToMm(safe(cav.depthIn));
   const Dmm = Math.min(rawDepthMm, totalLayerThicknessMm);
 
-  // Cavity top at top of layer, cut downward
   const cavityTopZ = layerBottomZmm + totalLayerThicknessMm;
   const cavityBottomZ = cavityTopZ - Dmm;
 
@@ -445,8 +444,16 @@ export function buildStepFromLayoutFull(
 ): string | null {
   if (!layout?.block) return null;
 
-  const blockL = safe(layout.block.lengthIn);
-  const blockW = safe(layout.block.widthIn);
+  const blockL = safe(
+    (layout.block as any).lengthIn ??
+      (layout.block as any).length_in ??
+      (layout.block as any).length
+  );
+  const blockW = safe(
+    (layout.block as any).widthIn ??
+      (layout.block as any).width_in ??
+      (layout.block as any).width
+  );
 
   const layers: any[] = Array.isArray(layout.stack)
     ? layout.stack
@@ -454,7 +461,14 @@ export function buildStepFromLayoutFull(
         {
           id: "single",
           label: "Foam layer",
-          thicknessIn: safe(layout.block.thicknessIn),
+          thicknessIn: safe(
+            (layout.block as any).thicknessIn ??
+              (layout.block as any).thickness_in ??
+              (layout.block as any).heightIn ??
+              (layout.block as any).height_in ??
+              (layout.block as any).thickness ??
+              (layout.block as any).height
+          ),
           cavities: layout.cavities || [],
         },
       ];
@@ -476,7 +490,14 @@ export function buildStepFromLayoutFull(
   const finalLayerSolidIds: number[] = [];
 
   for (const layer of layers) {
-    const thicknessIn = safe((layer as any).thicknessIn);
+    const thicknessIn = safe(
+      (layer as any).thicknessIn ??
+        (layer as any).thickness_in ??
+        (layer as any).heightIn ??
+        (layer as any).height_in ??
+        (layer as any).thickness ??
+        (layer as any).height
+    );
     if (thicknessIn <= 0) continue;
 
     const layerBottomZ = currentBottomZmm;
@@ -495,9 +516,9 @@ export function buildStepFromLayoutFull(
     if (Array.isArray((layer as any).cavities)) {
       for (const rawCav of (layer as any).cavities as any[]) {
         if (!rawCav) continue;
-        const Lc = safe(rawCav.lengthIn);
-        const Wc = safe(rawCav.widthIn);
-        const Dc = safe(rawCav.depthIn);
+        const Lc = safe(rawCav.lengthIn ?? rawCav.length_in ?? rawCav.length);
+        const Wc = safe(rawCav.widthIn ?? rawCav.width_in ?? rawCav.width);
+        const Dc = safe(rawCav.depthIn ?? rawCav.depth_in ?? rawCav.height);
         const nx = Number(rawCav.x);
         const ny = Number(rawCav.y);
         if (
@@ -544,7 +565,31 @@ export function buildStepFromLayoutFull(
     currentBottomZmm += inToMm(thicknessIn);
   }
 
-  if (!finalLayerSolidIds.length) return null;
+  // Fallback: if no valid layer solids were built, emit a single solid
+  // representing the whole block so step_text is not null.
+  if (!finalLayerSolidIds.length) {
+    const blockThicknessIn = safe(
+      (layout.block as any).thicknessIn ??
+        (layout.block as any).thickness_in ??
+        (layout.block as any).heightIn ??
+        (layout.block as any).height_in ??
+        (layout.block as any).thickness ??
+        (layout.block as any).height
+    );
+    if (blockThicknessIn > 0) {
+      const fallbackSolid = makeLayerBlockSolid(
+        sb,
+        blockL,
+        blockW,
+        blockThicknessIn,
+        0
+      );
+      finalLayerSolidIds.push(fallbackSolid);
+    } else {
+      // Nothing reasonable to emit
+      return null;
+    }
+  }
 
   // ===================== Representation context + shape rep =====================
 
@@ -608,7 +653,6 @@ export function buildStepFromLayoutFull(
     )},${stepString(
       new Date().toISOString()
     )},(),(),'Alex-IO','alex-io.com','Foam STEP export');`,
-    // Use a more standard schema that CAD tools expect for mechanical parts
     "FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));",
     "ENDSEC;",
     "DATA;",
