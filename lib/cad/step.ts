@@ -1,12 +1,14 @@
 // lib/cad/step.ts
 //
-// STEP export helper (Path A, v2).
+// STEP export helper (Path A, v3).
 //
-// v2 goal:
-//   - Emit a valid STEP file that contains a single rectangular solid
-//     representing the foam block (overall block, not per-layer solids).
+// v3 goal:
+//   - Emit a valid STEP file that contains one or more rectangular solids:
+//       * If layout.stack/layout.layers is present: one BLOCK solid per layer,
+//         stacked in Z using each layer's thickness.
+//       * Otherwise: single BLOCK solid using layout.block.thicknessIn.
 //   - Geometry is emitted in millimeters (mm), converted from inches.
-//   - Header + metadata stay stable so we can iterate later if needed.
+//   - Header + metadata stay stable so we can iterate later.
 //
 // Notes:
 //   - We keep this helper self-contained and pure: no DB, no Next APIs.
@@ -24,7 +26,11 @@ export type StepBuildOptions = {
  * Extract basic block dimensions from the layout.
  * Falls back safely if the layout is malformed.
  */
-function getBlockDims(layout: any): { lengthIn: number; widthIn: number; thicknessIn: number } | null {
+function getBlockDims(layout: any): {
+  lengthIn: number;
+  widthIn: number;
+  thicknessIn: number;
+} | null {
   if (!layout || typeof layout !== "object") return null;
 
   const block = (layout as LayoutModel).block as any;
@@ -49,6 +55,65 @@ function getBlockDims(layout: any): { lengthIn: number; widthIn: number; thickne
 }
 
 /**
+ * Extract per-layer thickness and label from the layout.
+ *
+ * Priority:
+ *   1) layout.stack
+ *   2) layout.layers
+ *   3) Fallback: single layer with overall block thickness
+ */
+function getLayerSpecs(
+  layout: any,
+  fallbackThicknessIn: number,
+): { label: string; thicknessIn: number }[] {
+  const out: { label: string; thicknessIn: number }[] = [];
+
+  const rawLayers = Array.isArray((layout as any)?.stack)
+    ? (layout as any).stack
+    : Array.isArray((layout as any)?.layers)
+    ? (layout as any).layers
+    : null;
+
+  if (Array.isArray(rawLayers) && rawLayers.length > 0) {
+    let idx = 0;
+    for (const rawLayer of rawLayers) {
+      if (!rawLayer) continue;
+      idx += 1;
+
+      const tRaw =
+        (rawLayer as any).thicknessIn ??
+        (rawLayer as any).thickness_in ??
+        (rawLayer as any).thickness;
+      const t = Number(tRaw);
+      if (!Number.isFinite(t) || t <= 0) continue;
+
+      const rawLabel =
+        (rawLayer as any).label ??
+        (rawLayer as any).name ??
+        (rawLayer as any).title ??
+        null;
+
+      const label =
+        typeof rawLabel === "string" && rawLabel.trim().length > 0
+          ? rawLabel.trim()
+          : `Layer ${idx}`;
+
+      out.push({ label, thicknessIn: t });
+    }
+  }
+
+  // Fallback: single layer matching the block thickness
+  if (out.length === 0 && fallbackThicknessIn > 0) {
+    out.push({
+      label: "Foam block",
+      thicknessIn: fallbackThicknessIn,
+    });
+  }
+
+  return out;
+}
+
+/**
  * Escape a string for use inside a STEP string literal.
  * STEP uses single quotes and doubles them for escaping.
  */
@@ -68,14 +133,14 @@ function fmtLen(n: number): string {
 }
 
 /**
- * Build a **valid STEP file** for a single foam block.
+ * Build a **valid STEP file** for a foam layout.
  *
  * Geometry:
- *   - A BLOCK solid primitive at origin.
+ *   - One BLOCK solid per foam layer, stacked along +Z.
  *   - Dimensions are in mm:
  *       L_mm = L_in * 25.4
  *       W_mm = W_in * 25.4
- *       T_mm = T_in * 25.4
+ *       T_mm = T_in * 25.4 (per layer)
  *
  * Metadata:
  *   - FILE_DESCRIPTION summarizing dims (in inches), quote, material.
@@ -101,11 +166,26 @@ export function buildStepFromLayout(
       ? opts.materialLegend.trim()
       : null;
 
-  // Build a human-readable description for FILE_DESCRIPTION
+  // Determine layer structure (multi-layer or single-block fallback).
+  const layerSpecs = getLayerSpecs(layout, thicknessIn);
+  if (!layerSpecs.length) {
+    return null;
+  }
+
+  // Build a human-readable description for FILE_DESCRIPTION.
   const descParts: string[] = [];
   descParts.push(
     `Foam block ${lengthIn} x ${widthIn} x ${thicknessIn} in`,
   );
+  if (layerSpecs.length > 1) {
+    const totalT = layerSpecs.reduce(
+      (sum, l) => sum + l.thicknessIn,
+      0,
+    );
+    descParts.push(
+      `Multi-layer: ${layerSpecs.length} layer(s), total thickness ${totalT} in`,
+    );
+  }
   if (quoteNo) {
     descParts.push(`Quote ${quoteNo}`);
   }
@@ -114,27 +194,26 @@ export function buildStepFromLayout(
   }
   const description = descParts.join(" | ");
 
-  // File name: use quote number if available
+  // File name: use quote number if available.
   const safeQuoteForFile =
     quoteNo?.replace(/[^A-Za-z0-9_\-]+/g, "_") || "foam_block";
   const fileName = `${safeQuoteForFile}.step`;
 
-  // ISO timestamp for FILE_NAME
+  // ISO timestamp for FILE_NAME.
   const nowIso = new Date().toISOString();
 
-  // Convert inches -> millimeters for actual geometry
+  // Convert inches -> millimeters for actual geometry.
   const mmPerInch = 25.4;
   const Lmm = lengthIn * mmPerInch;
   const Wmm = widthIn * mmPerInch;
-  const Tmm = thicknessIn * mmPerInch;
 
-  // Simple id generator for STEP entities
+  // Simple id generator for STEP entities.
   let nextId = 1;
   const ents: string[] = [];
 
   const id = () => nextId++;
 
-  // Application / product context chain
+  // ===== Application / product context chain =====
   const appContextId = id();
   ents.push(
     `#${appContextId} = APPLICATION_CONTEXT(${stepStringLiteral(
@@ -182,7 +261,7 @@ export function buildStepFromLayout(
     )}, ${stepStringLiteral("")}, #${pdfId}, #${prodDefContextId});`,
   );
 
-  // Units & representation context (mm, radian, steradian)
+  // ===== Units & representation context (mm, radian, steradian) =====
   const lengthUnitId = id();
   ents.push(
     `#${lengthUnitId} = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI., .METRE.) );`,
@@ -212,14 +291,7 @@ export function buildStepFromLayout(
     )}, ${stepStringLiteral("")});`,
   );
 
-  // Placement at origin
-  const originPtId = id();
-  ents.push(
-    `#${originPtId} = CARTESIAN_POINT(${stepStringLiteral(
-      "",
-    )}, (0.,0.,0.));`,
-  );
-
+  // Shared X/Y directions for all layers.
   const xDirId = id();
   ents.push(
     `#${xDirId} = DIRECTION(${stepStringLiteral(
@@ -234,29 +306,53 @@ export function buildStepFromLayout(
     )}, (0.,1.,0.));`,
   );
 
-  const axisPlacementId = id();
-  ents.push(
-    `#${axisPlacementId} = AXIS2_PLACEMENT_3D(${stepStringLiteral(
-      "Foam block placement",
-    )}, #${originPtId}, #${xDirId}, #${yDirId});`,
-  );
+  // ===== Layer solids (BLOCK per layer, stacked in Z) =====
+  const layerSolidIds: number[] = [];
+  let zOffsetMm = 0;
 
-  // BLOCK solid primitive – main geometry
-  const blockId = id();
-  ents.push(
-    `#${blockId} = BLOCK(${stepStringLiteral(
-      "FOAM_BLOCK",
-    )}, #${axisPlacementId}, ${fmtLen(Lmm)}, ${fmtLen(
-      Wmm,
-    )}, ${fmtLen(Tmm)});`,
-  );
+  layerSpecs.forEach((layer, idx) => {
+    const Tmm = layer.thicknessIn * mmPerInch;
+    if (!(Tmm > 0)) return;
 
-  // Shape representation + link back to product definition
+    // Origin for this layer is at (0,0,zOffsetMm).
+    const originPtId = id();
+    ents.push(
+      `#${originPtId} = CARTESIAN_POINT(${stepStringLiteral(
+        "",
+      )}, (0.,0.,${fmtLen(zOffsetMm)}));`,
+    );
+
+    const placementId = id();
+    ents.push(
+      `#${placementId} = AXIS2_PLACEMENT_3D(${stepStringLiteral(
+        layer.label,
+      )}, #${originPtId}, #${xDirId}, #${yDirId});`,
+    );
+
+    const blockId = id();
+    ents.push(
+      `#${blockId} = BLOCK(${stepStringLiteral(
+        layer.label,
+      )}, #${placementId}, ${fmtLen(Lmm)}, ${fmtLen(
+        Wmm,
+      )}, ${fmtLen(Tmm)});`,
+    );
+
+    layerSolidIds.push(blockId);
+    zOffsetMm += Tmm;
+  });
+
+  if (!layerSolidIds.length) {
+    return null;
+  }
+
+  // Shape representation + link back to product definition.
+  const itemsList = layerSolidIds.map((sid) => `#${sid}`).join(",");
   const shapeRepId = id();
   ents.push(
     `#${shapeRepId} = SHAPE_REPRESENTATION(${stepStringLiteral(
       "",
-    )}, (#${blockId}), #${contextId});`,
+    )}, (${itemsList}), #${contextId});`,
   );
 
   const sdrId = id();
@@ -265,7 +361,6 @@ export function buildStepFromLayout(
   );
 
   // ----- Assemble full STEP file -----
-
   const lines: string[] = [];
 
   lines.push("ISO-10303-21;");
@@ -279,7 +374,7 @@ export function buildStepFromLayout(
     )},${stepStringLiteral(nowIso)},(),(),${stepStringLiteral(
       "Alex-IO",
     )},${stepStringLiteral("alex-io.com")},${stepStringLiteral(
-      "STEP export v2 (single BLOCK solid)",
+      "STEP export v3 (multi-layer BLOCK solids)",
     )});`,
   );
   // CONFIG_CONTROL_DESIGN is a common AP203-style schema used for mechanical parts.
