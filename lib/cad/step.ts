@@ -1,18 +1,16 @@
 // lib/cad/step.ts
 //
-// STEP export helper (Path A, v6 - ultra simple).
+// STEP export helper (Path A, v7 - simple geometry + ASCII-safe strings).
 //
-// Goal:
-//   - Generate a STEP file that *any* viewer (including ABViewer) will open.
-//   - Geometry only:
-//       * One BLOCK solid for the foam block.
-//       * Optional BLOCK solids for each cavity (visual only).
-//   - No booleans, no CSG, no complex units, no product hierarchy.
+// Geometry:
+//   - One BLOCK solid for the foam block.
+//   - Optional BLOCK solids for each cavity (visual only).
+//   - No booleans, no CSG tree, no product hierarchy.
 //
-// Notes:
-//   - Units: we still output in millimeters (mm) for sane values,
-//     but we do NOT declare unit entities – bare geometry is fine.
-//   - Cavities are separate solids, NOT subtracted from the block.
+// Strings:
+//   - All text is forced to plain ASCII (0x20–0x7E) and single quotes are
+//     doubled per STEP rules. This avoids viewers choking on bullets, UTF-8
+//     superscripts, etc.
 
 import type { LayoutModel } from "@/app/quote/layout/editor/layoutTypes";
 
@@ -99,11 +97,23 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
 
 /* ===================== STEP formatting helpers ===================== */
 
+/**
+ * Force to plain ASCII (0x20–0x7E), then escape single quotes.
+ * This avoids non-ASCII symbols (•, ·, ³, etc.) that some viewers
+ * mishandle and misreport as "floating point overflow".
+ */
 function stepStringLiteral(input: string): string {
-  const safe = input.replace(/'/g, "''");
+  // Replace any non-printable / non-ASCII with a space
+  const asciiOnly = input.replace(/[^\x20-\x7E]/g, " ");
+  // Escape STEP single quotes
+  const safe = asciiOnly.replace(/'/g, "''");
   return `'${safe}'`;
 }
 
+/**
+ * Format a numeric length for STEP.
+ * Keep things boring: a small number of decimals, always with a dot.
+ */
 function fmtLen(n: number): string {
   if (!Number.isFinite(n)) return "0.";
   const s = n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
@@ -211,14 +221,18 @@ export function buildStepFromLayout(
 
     const cavPlacementId = id();
     ents.push(
-      `#${cavPlacementId} = AXIS2_PLACEMENT_3D('Cavity ${i + 1}', #${cavOriginId}, #${axisZId}, #${refXId});`,
+      `#${cavPlacementId} = AXIS2_PLACEMENT_3D(${stepStringLiteral(
+        `Cavity ${i + 1}`,
+      )}, #${cavOriginId}, #${axisZId}, #${refXId});`,
     );
 
     const cavBlockId = id();
     ents.push(
-      `#${cavBlockId} = BLOCK('CAVITY_${i + 1}', #${cavPlacementId}, ${fmtLen(
-        cavLmm,
-      )}, ${fmtLen(cavWmm)}, ${fmtLen(cavDmm)});`,
+      `#${cavBlockId} = BLOCK(${stepStringLiteral(
+        `CAVITY_${i + 1}`,
+      )}, #${cavPlacementId}, ${fmtLen(cavLmm)}, ${fmtLen(
+        cavWmm,
+      )}, ${fmtLen(cavDmm)});`,
     );
 
     solidIds.push(cavBlockId);
@@ -249,10 +263,9 @@ export function buildStepFromLayout(
     )},${stepStringLiteral(nowIso)},(),(),${stepStringLiteral(
       "Alex-IO",
     )},${stepStringLiteral("alex-io.com")},${stepStringLiteral(
-      "STEP export v6 (simple block + cavities)",
+      "STEP export v7 (simple block + cavities, ASCII-safe)",
     )});`,
   );
-  // Use a very common schema that viewers know well.
   lines.push("FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));");
   lines.push("ENDSEC;");
   lines.push("DATA;");
