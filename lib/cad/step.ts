@@ -66,13 +66,15 @@ function inToMm(inches: number): number {
 export type FoamLayer = {
   thicknessIn: number;
   label?: string | null;
-  cavities?: Array<{
-    lengthIn: number;
-    widthIn: number;
-    depthIn: number;
-    x: number; // normalized 0..1
-    y: number; // normalized 0..1
-  }> | null;
+  cavities?:
+    | Array<{
+        lengthIn: number;
+        widthIn: number;
+        depthIn: number;
+        x: number; // normalized 0..1
+        y: number; // normalized 0..1
+      }>
+    | null;
 };
 
 export type LayoutForStep = {
@@ -132,12 +134,21 @@ function makePoint(sb: StepBuilder, p: Pt): number {
 }
 
 // 2) Direction
-function makeDirection(sb: StepBuilder, dx: number, dy: number, dz: number): number {
+function makeDirection(
+  sb: StepBuilder,
+  dx: number,
+  dy: number,
+  dz: number
+): number {
   return sb.add(`DIRECTION('', (${dx},${dy},${dz}))`);
 }
 
 // 3) Vector (unused but kept for future use)
-function makeVector(sb: StepBuilder, dirId: number, mag: number): number {
+function makeVector(
+  sb: StepBuilder,
+  dirId: number,
+  mag: number
+): number {
   return sb.add(`VECTOR('', #${dirId}, ${mm(mag)})`);
 }
 
@@ -150,12 +161,20 @@ function makeEdge(
 ): number {
   const baseDirId = makeDirection(sb, dir.dx, dir.dy, dir.dz);
   const lineId = sb.add(`LINE('', #${startPtId}, #${baseDirId})`);
-  return sb.add(`EDGE_CURVE('', #${startPtId}, #${endPtId}, #${lineId}, .T.)`);
+  return sb.add(
+    `EDGE_CURVE('', #${startPtId}, #${endPtId}, #${lineId}, .T.)`
+  );
 }
 
 // 5) Oriented edge
-function makeOrientedEdge(sb: StepBuilder, edgeId: number, sense: boolean): number {
-  return sb.add(`ORIENTED_EDGE('', *, *, #${edgeId}, ${sense ? ".T." : ".F."})`);
+function makeOrientedEdge(
+  sb: StepBuilder,
+  edgeId: number,
+  sense: boolean
+): number {
+  return sb.add(
+    `ORIENTED_EDGE('', *, *, #${edgeId}, ${sense ? ".T." : ".F."})`
+  );
 }
 
 // 6) EDGE_LOOP
@@ -165,7 +184,12 @@ function makeLoop(sb: StepBuilder, orientedEdgeIds: number[]): number {
 }
 
 // 7) Plane for a face
-function makePlane(sb: StepBuilder, originId: number, normalDirId: number, refDirId: number): number {
+function makePlane(
+  sb: StepBuilder,
+  originId: number,
+  normalDirId: number,
+  refDirId: number
+): number {
   const axId = sb.add(
     `AXIS2_PLACEMENT_3D('', #${originId}, #${normalDirId}, #${refDirId})`
   );
@@ -180,7 +204,9 @@ function makeFace(
   sameSense = true
 ): number {
   return sb.add(
-    `ADVANCED_FACE('', (#${loopId}), #${planeId}, ${sameSense ? ".T." : ".F."})`
+    `ADVANCED_FACE('', (#${loopId}), #${planeId}, ${
+      sameSense ? ".T." : ".F."
+    })`
   );
 }
 
@@ -317,7 +343,14 @@ function makeRectSolid(
   const planeT = makePlane(sb, p010, dy, refX);
   const faceT = makeFace(sb, loopT, planeT);
 
-  const shellId = makeClosedShell(sb, [faceF, faceB, faceL, faceR, faceD, faceT]);
+  const shellId = makeClosedShell(sb, [
+    faceF,
+    faceB,
+    faceL,
+    faceR,
+    faceD,
+    faceT,
+  ]);
   return makeSolid(sb, shellId);
 }
 
@@ -325,8 +358,14 @@ function makeRectSolid(
 // Boolean subtraction
 ///////////////////////////////////////////////////////////////
 
-function booleanSubtract(sb: StepBuilder, leftSolidId: number, rightSolidId: number): number {
-  return sb.add(`BOOLEAN_RESULT(.DIFFERENCE., #${leftSolidId}, #${rightSolidId})`);
+function booleanSubtract(
+  sb: StepBuilder,
+  leftSolidId: number,
+  rightSolidId: number
+): number {
+  return sb.add(
+    `BOOLEAN_RESULT(.DIFFERENCE., #${leftSolidId}, #${rightSolidId})`
+  );
 }
 
 ///////////////////////////////////////////////////////////////
@@ -406,7 +445,6 @@ export function buildStepFromLayoutFull(
 
   const blockL = safe(layout.block.lengthIn);
   const blockW = safe(layout.block.widthIn);
-  const blockThicknessIn = safe(layout.block.thicknessIn);
 
   const layers: any[] = Array.isArray(layout.stack)
     ? layout.stack
@@ -414,18 +452,12 @@ export function buildStepFromLayoutFull(
         {
           id: "single",
           label: "Foam layer",
-          thicknessIn: blockThicknessIn,
+          thicknessIn: safe(layout.block.thicknessIn),
           cavities: layout.cavities || [],
         },
       ];
 
   if (!layers.length || blockL <= 0 || blockW <= 0) return null;
-
-  // If layer-specific thicknesses are missing, spread block thickness evenly.
-  const defaultLayerThicknessIn =
-    blockThicknessIn > 0 && layers.length > 0
-      ? blockThicknessIn / layers.length
-      : 0;
 
   const sb = new StepBuilder();
 
@@ -442,14 +474,8 @@ export function buildStepFromLayoutFull(
   const finalLayerSolidIds: number[] = [];
 
   for (const layer of layers) {
-    let thicknessIn = safe((layer as any).thicknessIn);
-    if (thicknessIn <= 0) {
-      thicknessIn = defaultLayerThicknessIn;
-    }
-    if (thicknessIn <= 0) {
-      // If we still don't have a valid thickness, skip this layer.
-      continue;
-    }
+    const thicknessIn = safe((layer as any).thicknessIn);
+    if (thicknessIn <= 0) continue;
 
     const layerBottomZ = currentBottomZmm;
 
@@ -472,7 +498,15 @@ export function buildStepFromLayoutFull(
         const Dc = safe(rawCav.depthIn);
         const nx = Number(rawCav.x);
         const ny = Number(rawCav.y);
-        if (Lc > 0 && Wc > 0 && Dc > 0 && nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1) {
+        if (
+          Lc > 0 &&
+          Wc > 0 &&
+          Dc > 0 &&
+          nx >= 0 &&
+          nx <= 1 &&
+          ny >= 0 &&
+          ny <= 1
+        ) {
           cavityDefs.push({
             lengthIn: Lc,
             widthIn: Wc,
@@ -498,7 +532,11 @@ export function buildStepFromLayoutFull(
     }
 
     // 3) Apply booleans
-    const finalLayerSolid = applyCavitiesToLayer(sb, layerBlockSolidId, cavitySolidIds);
+    const finalLayerSolid = applyCavitiesToLayer(
+      sb,
+      layerBlockSolidId,
+      cavitySolidIds
+    );
     finalLayerSolidIds.push(finalLayerSolid);
 
     currentBottomZmm += inToMm(thicknessIn);
@@ -506,29 +544,70 @@ export function buildStepFromLayoutFull(
 
   if (!finalLayerSolidIds.length) return null;
 
-  // Representation context + shape rep
+  // ===================== Representation context + shape rep =====================
+
   const repCtx = sb.add(
     `GEOMETRIC_REPRESENTATION_CONTEXT(3) REPRESENTATION_CONTEXT('', '')`
   );
+
   const solidsList = finalLayerSolidIds.map((id) => `#${id}`).join(",");
 
-  // Use ADVANCED_BREP_SHAPE_REPRESENTATION so kernels treat this as solid BREP geometry.
-  sb.add(
-    `ADVANCED_BREP_SHAPE_REPRESENTATION('Foam layout', (${solidsList}), #${repCtx})`
+  // Advanced BREP shape representation so CAD tools treat this as real 3D solids
+  const shapeRepId = sb.add(
+    `ADVANCED_BREP_SHAPE_REPRESENTATION('Foam Layout', (${solidsList}), #${repCtx})`
   );
 
-  // Wrap everything in ISO-10303-21
+  // Minimal AP203-style product / shape wiring so that tools like
+  // SolidWorks / Bambu / ABViewer see an actual part with geometry.
+  const appCtxId = sb.add(
+    `APPLICATION_CONTEXT('mechanical design')`
+  );
+  const prodCtxId = sb.add(
+    `PRODUCT_CONTEXT('', #${appCtxId}, 'mechanical')`
+  );
+
+  const productId = sb.add(
+    `PRODUCT(${stepString(
+      `Foam layout ${quoteNo}`
+    )}, ${stepString("Foam layout")}, '', (#${prodCtxId}))`
+  );
+
+  const pdfsId = sb.add(
+    `PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE('', ${stepString(
+      "Foam layout"
+    )}, #${productId}, .NOT_KNOWN.)`
+  );
+
+  const prodDefId = sb.add(
+    `PRODUCT_DEFINITION('', '', #${pdfsId}, #${prodCtxId})`
+  );
+
+  const prodDefShapeId = sb.add(
+    `PRODUCT_DEFINITION_SHAPE('', '', #${prodDefId})`
+  );
+
+  // Link the product definition shape to our BREP representation
+  const _shapeDefRepId = sb.add(
+    `SHAPE_DEFINITION_REPRESENTATION(#${prodDefShapeId}, #${shapeRepId})`
+  );
+
+  // ===================== Wrap everything in ISO-10303-21 =====================
+
   const header = [
     "ISO-10303-21;",
     "HEADER;",
     `FILE_DESCRIPTION((${stepString(
-      `Foam layout | Quote ${quoteNo}` +
-        (materialLegend ? ` | ${materialLegend}` : "")
+      `Foam layout | Quote ${quoteNo}${
+        materialLegend ? ` | ${materialLegend}` : ""
+      }`
     )}),'2;1');`,
     `FILE_NAME(${stepString(
       `${quoteNo}.step`
-    )},${stepString(new Date().toISOString())},(),(),'Alex-IO','alex-io.com','Foam STEP export');`,
-    "FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));",
+    )},${stepString(
+      new Date().toISOString()
+    )},(),(),'Alex-IO','alex-io.com','Foam STEP export');`,
+    // Use a more standard schema that CAD tools expect for mechanical parts
+    "FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));",
     "ENDSEC;",
     "DATA;",
   ].join("\n");
@@ -539,17 +618,4 @@ export function buildStepFromLayoutFull(
   const footer = ["ENDSEC;", "END-ISO-10303-21;"].join("\n");
 
   return `${header}\n${data}\n${footer}`;
-}
-
-///////////////////////////////////////////////////////////////
-// Legacy/simple alias for step-simple endpoint
-///////////////////////////////////////////////////////////////
-
-export function buildStepFromLayoutSimple(
-  layout: any,
-  quoteNo: string,
-  materialLegend: string | null
-): string | null {
-  // Path A: keep one implementation; step-simple just reuses full builder.
-  return buildStepFromLayoutFull(layout, quoteNo, materialLegend);
 }

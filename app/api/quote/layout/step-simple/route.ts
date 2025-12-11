@@ -2,19 +2,19 @@
 //
 // GET /api/quote/layout/step-simple?quote_no=Q-...
 //
-// Returns a SIMPLE STEP file (BLOCK primitives only) for the latest
-// layout on a quote. This is intended for Bambu Studio / lightweight
-// viewers that can't handle full BREP/boolean STEP files.
+// Originally intended to return a SIMPLE STEP file (BLOCK primitives only)
+// for the latest layout on a quote. For now, to keep things minimal and
+// avoid extra exporters, this route simply returns the latest saved STEP
+// text from quote_layout_packages.step_text (the same data produced by
+// buildStepFromLayoutFull in /api/quote/layout/apply).
 //
 // Important:
-//   - This does NOT read quote_layout_packages.step_text.
-//   - Instead, it rebuilds a simple STEP on the fly from layout_json.
-//   - Full /api/quote/layout/step continues to serve the BREP export
-//     saved by buildStepFromLayoutFull (for Solidworks, etc).
+//   - Reads quote_layout_packages.step_text.
+//   - Does NOT call any buildStepFromLayout* helpers directly.
+//   - /api/quote/layout/step remains the primary BREP export endpoint.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
-import { buildStepFromLayoutSimple } from "@/lib/cad/step";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -94,31 +94,28 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    if (!layoutPkg || !layoutPkg.layout_json) {
+    if (!layoutPkg) {
       return bad(
         {
           ok: false,
           error: "LAYOUT_NOT_FOUND",
-          message: "No layout has been saved for this quote yet. Try applying a layout first.",
+          message:
+            "No layout has been saved for this quote yet. Try applying a layout first.",
         },
         404,
       );
     }
 
-    // For the simple exporter we don't strictly need material info; pass null.
-    const stepText = buildStepFromLayoutSimple(
-      layoutPkg.layout_json,
-      quote.quote_no,
-      null,
-    );
+    // For the "simple" route, we now just reuse the saved STEP text.
+    const stepText = layoutPkg.step_text;
 
     if (!stepText) {
       return bad(
         {
           ok: false,
-          error: "STEP_BUILD_FAILED",
+          error: "STEP_NOT_AVAILABLE",
           message:
-            "Unable to build a simple STEP file for this layout. Check that block + layer dimensions are valid.",
+            "No STEP data has been saved for this quote yet. Try clicking Apply to quote again.",
         },
         500,
       );
@@ -140,7 +137,7 @@ export async function GET(req: NextRequest) {
         ok: false,
         error: "SERVER_ERROR",
         message:
-          "There was an unexpected problem building the simple STEP file for this quote.",
+          "There was an unexpected problem returning the STEP file for this quote.",
       },
       500,
     );
