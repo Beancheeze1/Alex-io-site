@@ -3,8 +3,14 @@
 // STEP exporter for foam layouts.
 // - Z-up coordinate system
 // - One solid per foam layer
-// - Cavities cut out with BOOLEAN_RESULT(.DIFFERENCE.)
+// - Cavities cut out with BOOLEAN_RESULT(.DIFFERENCE.) in the "full" exporter
 // - Units: millimeters (standard STEP practice)
+//
+// Exports:
+//   - buildStepFromLayoutFull(layout, quoteNo, materialLegend)
+//       → full boolean BREP (intended for SolidWorks, etc.)
+//   - buildStepFromLayoutSimple(layout, quoteNo, materialLegend)
+//       → no booleans, multi-body boxes (layers + cavity plugs)
 
 ///////////////////////////////////////////////////////////////
 // ID allocator (STEP requires numeric references)
@@ -434,178 +440,109 @@ function applyCavitiesToLayer(
 }
 
 ///////////////////////////////////////////////////////////////
-// Public: build full STEP text from a layout
+// Shared helpers: layer + cavity extraction
 ///////////////////////////////////////////////////////////////
 
-export function buildStepFromLayoutFull(
-  layout: any,
-  quoteNo: string,
-  materialLegend: string | null
-): string | null {
+function getBlockDims(layout: any): { L: number; W: number; T: number } | null {
   if (!layout?.block) return null;
-
-  const blockL = safe(
-    (layout.block as any).lengthIn ??
-      (layout.block as any).length_in ??
-      (layout.block as any).length
+  const blockAny = layout.block as any;
+  const L = safe(blockAny.lengthIn ?? blockAny.length_in ?? blockAny.length);
+  const W = safe(blockAny.widthIn ?? blockAny.width_in ?? blockAny.width);
+  const T = safe(
+    blockAny.thicknessIn ??
+      blockAny.thickness_in ??
+      blockAny.heightIn ??
+      blockAny.height_in ??
+      blockAny.thickness ??
+      blockAny.height
   );
-  const blockW = safe(
-    (layout.block as any).widthIn ??
-      (layout.block as any).width_in ??
-      (layout.block as any).width
-  );
+  if (!(L > 0) || !(W > 0) || !(T > 0)) return null;
+  return { L, W, T };
+}
 
-  const layers: any[] = Array.isArray(layout.stack)
-    ? layout.stack
-    : [
-        {
-          id: "single",
-          label: "Foam layer",
-          thicknessIn: safe(
-            (layout.block as any).thicknessIn ??
-              (layout.block as any).thickness_in ??
-              (layout.block as any).heightIn ??
-              (layout.block as any).height_in ??
-              (layout.block as any).thickness ??
-              (layout.block as any).height
-          ),
-          cavities: layout.cavities || [],
-        },
-      ];
-
-  if (!layers.length || blockL <= 0 || blockW <= 0) return null;
-
-  const sb = new StepBuilder();
-
-  // Orientation (Z-up)
-  const dirZ = sb.add(`DIRECTION('', (0.,0.,1.))`);
-  const dirX = sb.add(`DIRECTION('', (1.,0.,0.))`);
-  const origin = sb.add(`CARTESIAN_POINT('', (0.,0.,0.))`);
-  const _baseAX = sb.add(
-    `AXIS2_PLACEMENT_3D('Base', #${origin}, #${dirZ}, #${dirX})`
-  );
-
-  // Track Z stacking
-  let currentBottomZmm = 0;
-  const finalLayerSolidIds: number[] = [];
-
-  for (const layer of layers) {
-    const thicknessIn = safe(
-      (layer as any).thicknessIn ??
-        (layer as any).thickness_in ??
-        (layer as any).heightIn ??
-        (layer as any).height_in ??
-        (layer as any).thickness ??
-        (layer as any).height
-    );
-    if (thicknessIn <= 0) continue;
-
-    const layerBottomZ = currentBottomZmm;
-
-    // 1) Base layer block
-    const layerBlockSolidId = makeLayerBlockSolid(
-      sb,
-      blockL,
-      blockW,
-      thicknessIn,
-      layerBottomZ
-    );
-
-    // 2) Cavity solids
-    const cavityDefs: CavityDef[] = [];
-    if (Array.isArray((layer as any).cavities)) {
-      for (const rawCav of (layer as any).cavities as any[]) {
-        if (!rawCav) continue;
-        const Lc = safe(rawCav.lengthIn ?? rawCav.length_in ?? rawCav.length);
-        const Wc = safe(rawCav.widthIn ?? rawCav.width_in ?? rawCav.width);
-        const Dc = safe(rawCav.depthIn ?? rawCav.depth_in ?? rawCav.height);
-        const nx = Number(rawCav.x);
-        const ny = Number(rawCav.y);
-        if (
-          Lc > 0 &&
-          Wc > 0 &&
-          Dc > 0 &&
-          nx >= 0 &&
-          nx <= 1 &&
-          ny >= 0 &&
-          ny <= 1
-        ) {
-          cavityDefs.push({
-            lengthIn: Lc,
-            widthIn: Wc,
-            depthIn: Dc,
-            x: nx,
-            y: ny,
-          });
-        }
-      }
-    }
-
-    const cavitySolidIds: number[] = [];
-    for (const cav of cavityDefs) {
-      const cavSolidId = makeCavitySolid(
-        sb,
-        cav,
-        blockL,
-        blockW,
-        layerBottomZ,
-        thicknessIn
-      );
-      cavitySolidIds.push(cavSolidId);
-    }
-
-    // 3) Apply booleans
-    const finalLayerSolid = applyCavitiesToLayer(
-      sb,
-      layerBlockSolidId,
-      cavitySolidIds
-    );
-    finalLayerSolidIds.push(finalLayerSolid);
-
-    currentBottomZmm += inToMm(thicknessIn);
+function getLayersArray(layout: any): any[] {
+  const foamLayers = Array.isArray((layout as any)?.stack)
+    ? (layout as any).stack
+    : null;
+  if (Array.isArray(foamLayers) && foamLayers.length > 0) {
+    return foamLayers;
   }
+  // Fallback single layer from block + legacy cavities
+  const blockDims = getBlockDims(layout);
+  return [
+    {
+      id: "single",
+      label: "Foam layer",
+      thicknessIn: blockDims ? blockDims.T : 0,
+      cavities: layout.cavities || [],
+    },
+  ];
+}
 
-  // Fallback: if no valid layer solids were built, emit a single solid
-  // representing the whole block so step_text is not null.
-  if (!finalLayerSolidIds.length) {
-    const blockThicknessIn = safe(
-      (layout.block as any).thicknessIn ??
-        (layout.block as any).thickness_in ??
-        (layout.block as any).heightIn ??
-        (layout.block as any).height_in ??
-        (layout.block as any).thickness ??
-        (layout.block as any).height
-    );
-    if (blockThicknessIn > 0) {
-      const fallbackSolid = makeLayerBlockSolid(
-        sb,
-        blockL,
-        blockW,
-        blockThicknessIn,
-        0
-      );
-      finalLayerSolidIds.push(fallbackSolid);
-    } else {
-      // Nothing reasonable to emit
-      return null;
+function getLayerThicknessIn(layer: any, fallback: number): number {
+  return safe(
+    layer?.thicknessIn ??
+      layer?.thickness_in ??
+      layer?.heightIn ??
+      layer?.height_in ??
+      layer?.thickness ??
+      layer?.height ??
+      fallback
+  );
+}
+
+function getLayerCavities(layer: any): CavityDef[] {
+  const out: CavityDef[] = [];
+  const rawCavs = Array.isArray(layer?.cavities) ? (layer.cavities as any[]) : [];
+  for (const raw of rawCavs) {
+    if (!raw) continue;
+    const Lc = safe(raw.lengthIn ?? raw.length_in ?? raw.length);
+    const Wc = safe(raw.widthIn ?? raw.width_in ?? raw.width);
+    const Dc = safe(raw.depthIn ?? raw.depth_in ?? raw.height);
+    const nx = Number(raw.x);
+    const ny = Number(raw.y);
+    if (
+      Lc > 0 &&
+      Wc > 0 &&
+      Dc > 0 &&
+      Number.isFinite(nx) &&
+      Number.isFinite(ny) &&
+      nx >= 0 &&
+      nx <= 1 &&
+      ny >= 0 &&
+      ny <= 1
+    ) {
+      out.push({ lengthIn: Lc, widthIn: Wc, depthIn: Dc, x: nx, y: ny });
     }
   }
+  return out;
+}
 
-  // ===================== Representation context + shape rep =====================
+///////////////////////////////////////////////////////////////
+// Shared helpers: wrapper / header
+///////////////////////////////////////////////////////////////
+
+function buildWrapperAndEmit(
+  sb: StepBuilder,
+  solids: number[],
+  quoteNo: string,
+  materialLegend: string | null,
+  repName: string
+): string | null {
+  if (!solids.length) return null;
 
   const repCtx = sb.add(
     `GEOMETRIC_REPRESENTATION_CONTEXT(3) REPRESENTATION_CONTEXT('', '')`
   );
 
-  const solidsList = finalLayerSolidIds.map((id) => `#${id}`).join(",");
+  const solidsList = solids.map((id) => `#${id}`).join(",");
 
-  // Advanced BREP shape representation so CAD tools treat this as real 3D solids
   const shapeRepId = sb.add(
-    `ADVANCED_BREP_SHAPE_REPRESENTATION('Foam Layout', (${solidsList}), #${repCtx})`
+    `ADVANCED_BREP_SHAPE_REPRESENTATION(${stepString(
+      repName
+    )}, (${solidsList}), #${repCtx})`
   );
 
-  // Minimal AP203-style product / shape wiring so that tools like
-  // SolidWorks / Bambu / ABViewer see an actual part with geometry.
   const appCtxId = sb.add(
     `APPLICATION_CONTEXT('mechanical design')`
   );
@@ -633,12 +570,9 @@ export function buildStepFromLayoutFull(
     `PRODUCT_DEFINITION_SHAPE('', '', #${prodDefId})`
   );
 
-  // Link the product definition shape to our BREP representation
   const _shapeDefRepId = sb.add(
     `SHAPE_DEFINITION_REPRESENTATION(#${prodDefShapeId}, #${shapeRepId})`
   );
-
-  // ===================== Wrap everything in ISO-10303-21 =====================
 
   const header = [
     "ISO-10303-21;",
@@ -664,4 +598,172 @@ export function buildStepFromLayoutFull(
   const footer = ["ENDSEC;", "END-ISO-10303-21;"].join("\n");
 
   return `${header}\n${data}\n${footer}`;
+}
+
+///////////////////////////////////////////////////////////////
+// Public: FULL exporter (boolean cuts)
+///////////////////////////////////////////////////////////////
+
+export function buildStepFromLayoutFull(
+  layout: any,
+  quoteNo: string,
+  materialLegend: string | null
+): string | null {
+  const blockDims = getBlockDims(layout);
+  if (!blockDims) return null;
+  const { L: blockL, W: blockW } = blockDims;
+
+  const layers = getLayersArray(layout);
+  if (!layers.length) return null;
+
+  const sb = new StepBuilder();
+
+  // Orientation (Z-up)
+  const dirZ = sb.add(`DIRECTION('', (0.,0.,1.))`);
+  const dirX = sb.add(`DIRECTION('', (1.,0.,0.))`);
+  const origin = sb.add(`CARTESIAN_POINT('', (0.,0.,0.))`);
+  const _baseAX = sb.add(
+    `AXIS2_PLACEMENT_3D('Base', #${origin}, #${dirZ}, #${dirX})`
+  );
+
+  let currentBottomZmm = 0;
+  const finalLayerSolidIds: number[] = [];
+
+  for (const layer of layers) {
+    const thicknessIn = getLayerThicknessIn(layer, 0);
+    if (thicknessIn <= 0) continue;
+
+    const layerBottomZ = currentBottomZmm;
+
+    const layerBlockSolidId = makeLayerBlockSolid(
+      sb,
+      blockL,
+      blockW,
+      thicknessIn,
+      layerBottomZ
+    );
+
+    const cavityDefs = getLayerCavities(layer);
+    const cavitySolidIds: number[] = [];
+    for (const cav of cavityDefs) {
+      const cavSolidId = makeCavitySolid(
+        sb,
+        cav,
+        blockL,
+        blockW,
+        layerBottomZ,
+        thicknessIn
+      );
+      cavitySolidIds.push(cavSolidId);
+    }
+
+    const finalLayerSolid = applyCavitiesToLayer(
+      sb,
+      layerBlockSolidId,
+      cavitySolidIds
+    );
+    finalLayerSolidIds.push(finalLayerSolid);
+
+    currentBottomZmm += inToMm(thicknessIn);
+  }
+
+  if (!finalLayerSolidIds.length) {
+    // Fallback: emit single block for entire stack
+    const T = blockDims.T;
+    const fallbackSb = sb; // reuse
+    const fallbackSolid = makeLayerBlockSolid(
+      fallbackSb,
+      blockL,
+      blockW,
+      T,
+      0
+    );
+    finalLayerSolidIds.push(fallbackSolid);
+  }
+
+  return buildWrapperAndEmit(
+    sb,
+    finalLayerSolidIds,
+    quoteNo,
+    materialLegend,
+    "Foam Layout"
+  );
+}
+
+///////////////////////////////////////////////////////////////
+// Public: SIMPLE exporter (no booleans, multi-body blocks)
+///////////////////////////////////////////////////////////////
+
+export function buildStepFromLayoutSimple(
+  layout: any,
+  quoteNo: string,
+  materialLegend: string | null
+): string | null {
+  const blockDims = getBlockDims(layout);
+  if (!blockDims) return null;
+  const { L: blockL, W: blockW } = blockDims;
+
+  const layers = getLayersArray(layout);
+  if (!layers.length) return null;
+
+  const sb = new StepBuilder();
+
+  // Orientation (Z-up)
+  const dirZ = sb.add(`DIRECTION('', (0.,0.,1.))`);
+  const dirX = sb.add(`DIRECTION('', (1.,0.,0.))`);
+  const origin = sb.add(`CARTESIAN_POINT('', (0.,0.,0.))`);
+  const _baseAX = sb.add(
+    `AXIS2_PLACEMENT_3D('Base', #${origin}, #${dirZ}, #${dirX})`
+  );
+
+  let currentBottomZmm = 0;
+  const solids: number[] = [];
+
+  for (const layer of layers) {
+    const thicknessIn = getLayerThicknessIn(layer, 0);
+    if (thicknessIn <= 0) continue;
+
+    const layerBottomZ = currentBottomZmm;
+
+    // 1) Foam layer block as its own solid
+    const layerBlockSolidId = makeLayerBlockSolid(
+      sb,
+      blockL,
+      blockW,
+      thicknessIn,
+      layerBottomZ
+    );
+    solids.push(layerBlockSolidId);
+
+    // 2) Cavity plugs as separate solids (no boolean)
+    const cavityDefs = getLayerCavities(layer);
+    for (const cav of cavityDefs) {
+      const cavSolidId = makeCavitySolid(
+        sb,
+        cav,
+        blockL,
+        blockW,
+        layerBottomZ,
+        thicknessIn
+      );
+      solids.push(cavSolidId);
+    }
+
+    currentBottomZmm += inToMm(thicknessIn);
+  }
+
+  if (!solids.length) {
+    // Fallback: emit single block for entire stack
+    const T = blockDims.T;
+    const fallbackSolid = makeLayerBlockSolid(sb, blockL, blockW, T, 0);
+    solids.push(fallbackSolid);
+  }
+
+  return buildWrapperAndEmit(
+    sb,
+    solids,
+    quoteNo,
+    materialLegend,
+    "Foam Layout (Simple)"
+  );
 }
