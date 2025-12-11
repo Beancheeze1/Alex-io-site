@@ -404,94 +404,30 @@ export function buildStepFromLayoutFull(
 ): string | null {
   if (!layout?.block) return null;
 
-  // Be forgiving about block dims: support lengthIn/widthIn as primary,
-  // fall back to *_in or generic length/width, and if width is missing
-  // but length is valid, assume a square (same behavior as DXF builder).
-  const rawBlockL =
-    layout.block.lengthIn ??
-    layout.block.length_in ??
-    layout.block.length;
+  const blockL = safe(layout.block.lengthIn);
+  const blockW = safe(layout.block.widthIn);
 
-  const rawBlockW =
-    layout.block.widthIn ??
-    layout.block.width_in ??
-    layout.block.width ??
-    rawBlockL;
+  const layers: any[] = Array.isArray(layout.stack)
+    ? layout.stack
+    : [
+        {
+          id: "single",
+          label: "Foam layer",
+          thicknessIn: safe(layout.block.thicknessIn),
+          cavities: layout.cavities || [],
+        },
+      ];
 
-  const blockL = safe(rawBlockL);
-  let blockW = safe(rawBlockW);
-
-  if (blockW <= 0 && blockL > 0) {
-    // Fallback to square if width is bad/missing.
-    blockW = blockL;
-  }
-
-  // Block thickness (used for per-layer fallback).
-  const rawBlockT =
-    layout.block.thicknessIn ??
-    layout.block.thickness_in ??
-    layout.block.heightIn ??
-    layout.block.height_in ??
-    layout.block.height;
-
-  const blockThicknessIn = safe(rawBlockT);
-
-  // Layers: prefer stack, then layers, then single-layer fallback.
-  let layers: any[] = [];
-  const stackArr = Array.isArray(layout.stack)
-    ? (layout.stack as any[]).filter(Boolean)
-    : [];
-  const layersArr = Array.isArray(layout.layers)
-    ? (layout.layers as any[]).filter(Boolean)
-    : [];
-
-  if (stackArr.length) {
-    layers = stackArr;
-  } else if (layersArr.length) {
-    layers = layersArr;
-  } else {
-    layers = [
-      {
-        id: "single",
-        label: "Foam layer",
-        thicknessIn: blockThicknessIn,
-        cavities: layout.cavities || [],
-      },
-    ];
-  }
-
-  if (!layers.length || blockL <= 0 || blockW <= 0) {
-    console.warn("[STEP] No valid layers or block dims for quote", quoteNo, {
-      blockL,
-      blockW,
-      layersLen: layers.length,
-    });
-    return null;
-  }
+  if (!layers.length || blockL <= 0 || blockW <= 0) return null;
 
   const sb = new StepBuilder();
 
-  // Orientation (Z-up)
-  const dirZ = sb.add(`DIRECTION('', (0.,0.,1.))`);
-  const dirX = sb.add(`DIRECTION('', (1.,0.,0.))`);
-  const origin = sb.add(`CARTESIAN_POINT('', (0.,0.,0.))`);
-  const _baseAX = sb.add(
-    `AXIS2_PLACEMENT_3D('Base', #${origin}, #${dirZ}, #${dirX})`
-  );
-
-  // Track Z stacking
+  // Track Z stacking (mm)
   let currentBottomZmm = 0;
   const finalLayerSolidIds: number[] = [];
 
   for (const layer of layers) {
-    let thicknessIn = safe((layer as any).thicknessIn);
-
-    // ⭐️ New: if a layer has no thickness, evenly split the block thickness
-    // across all layers (Option A).
-    if (thicknessIn <= 0 && blockThicknessIn > 0 && layers.length > 0) {
-      thicknessIn = blockThicknessIn / layers.length;
-    }
-
+    const thicknessIn = safe((layer as any).thicknessIn);
     if (thicknessIn <= 0) continue;
 
     const layerBottomZ = currentBottomZmm;
@@ -547,25 +483,59 @@ export function buildStepFromLayoutFull(
     currentBottomZmm += inToMm(thicknessIn);
   }
 
-  if (!finalLayerSolidIds.length) {
-    console.warn("[STEP] Built no solids for quote", quoteNo, {
-      blockL,
-      blockW,
-      layersLen: layers.length,
-    });
-    return null;
-  }
+  if (!finalLayerSolidIds.length) return null;
 
-  // Representation context + shape rep
-  const repCtx = sb.add(
-    `GEOMETRIC_REPRESENTATION_CONTEXT(3) REPRESENTATION_CONTEXT('', '')`
-  );
+  // ============================ AP203-ish wrapper ============================
   const solidsList = finalLayerSolidIds.map((id) => `#${id}`).join(",");
-  const _shapeRep = sb.add(
-    `SHAPE_REPRESENTATION('Foam Layers', (${solidsList}), #${repCtx})`
+
+  // Units + uncertainty
+  const lengthUnitId = sb.add(
+    "( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI., .METRE.) )"
+  );
+  const planeAngleUnitId = sb.add(
+    "( PLANE_ANGLE_UNIT() NAMED_UNIT(*) SI_UNIT($, .RADIAN.) )"
+  );
+  const solidAngleUnitId = sb.add(
+    "( SOLID_ANGLE_UNIT() NAMED_UNIT(*) SI_UNIT($, .STERADIAN.) )"
+  );
+  const uncertaintyId = sb.add(
+    `UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.01), #${lengthUnitId}, 'distance_accuracy_value', '')`
   );
 
-  // Wrap everything in ISO-10303-21
+  const repContextId = sb.add(
+    `GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#${uncertaintyId})) GLOBAL_UNIT_ASSIGNED_CONTEXT((#${lengthUnitId},#${planeAngleUnitId},#${solidAngleUnitId})) REPRESENTATION_CONTEXT('', '')`
+  );
+
+  // Application + product chain
+  const appCtxId = sb.add(`APPLICATION_CONTEXT('mechanical design')`);
+  const prodDefCtxId = sb.add(
+    `PRODUCT_DEFINITION_CONTEXT('part definition', #${appCtxId}, 'design')`
+  );
+  const productId = sb.add(
+    `PRODUCT(${stepString(quoteNo)}, ${stepString(
+      "Foam layout"
+    )}, '', (#${appCtxId}))`
+  );
+  const prodDefFormationId = sb.add(
+    `PRODUCT_DEFINITION_FORMATION('', '', #${productId})`
+  );
+  const prodDefId = sb.add(
+    `PRODUCT_DEFINITION('', '', #${prodDefFormationId}, #${prodDefCtxId})`
+  );
+  const prodDefShapeId = sb.add(
+    `PRODUCT_DEFINITION_SHAPE('', '', #${prodDefId})`
+  );
+
+  // Shape representation referencing our solids
+  const shapeRepId = sb.add(
+    `ADVANCED_BREP_SHAPE_REPRESENTATION('Foam layout', (${solidsList}), #${repContextId})`
+  );
+
+  // Link product → shape
+  sb.add(`SHAPE_DEFINITION_REPRESENTATION(#${prodDefShapeId}, #${shapeRepId})`);
+
+  // ======================= Wrap everything into STEP =========================
+
   const header = [
     "ISO-10303-21;",
     "HEADER;",
