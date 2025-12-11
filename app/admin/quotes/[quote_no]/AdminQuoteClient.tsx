@@ -132,7 +132,7 @@ function formatUsd(value: number | null | undefined): string {
   }
 }
 
-// ---------------- DXF helpers (per-layer) ----------------
+/* ---------------- DXF helpers (per-layer) ---------------- */
 
 type LayoutLayer = {
   id?: string;
@@ -145,6 +145,16 @@ type LayoutLayer = {
   cavities?: any[];
 };
 
+type FlatCavity = {
+  lengthIn: number;
+  widthIn: number;
+  depthIn: number | null;
+  x: number; // normalized 0..1
+  y: number; // normalized 0..1
+};
+
+/** Extract the stack/layers array from a layout_json, same priorities
+ * we use server-side (stack -> layers -> foamLayers). */
 function getLayersFromLayout(layout: any): LayoutLayer[] {
   if (!layout || typeof layout !== "object") return [];
 
@@ -164,10 +174,7 @@ function getLayersFromLayout(layout: any): LayoutLayer[] {
   return [];
 }
 
-function getLayerLabel(
-  layer: LayoutLayer | null | undefined,
-  idx: number,
-): string {
+function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): string {
   if (!layer) return `Layer ${idx + 1}`;
 
   const raw =
@@ -184,31 +191,77 @@ function getLayerLabel(
   return `Layer ${idx + 1}`;
 }
 
+/** Flatten cavities for a single layer, using the same geometry
+ * assumptions as the server-side getAllCavitiesFromLayout, but
+ * restricted to a specific layer index. */
+function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
+  const out: FlatCavity[] = [];
+
+  if (!layout || typeof layout !== "object") return out;
+
+  const layers = getLayersFromLayout(layout);
+  if (!Array.isArray(layers) || layers.length === 0) return out;
+
+  const layer = layers[layerIndex];
+  if (!layer || !Array.isArray(layer.cavities)) return out;
+
+  for (const cav of layer.cavities) {
+    if (!cav) continue;
+
+    const lengthIn = Number((cav as any).lengthIn);
+    const widthIn = Number((cav as any).widthIn);
+    const depthInRaw = (cav as any).depthIn;
+    const depthIn =
+      depthInRaw == null ? null : Number(depthInRaw);
+
+    const x = Number((cav as any).x);
+    const y = Number((cav as any).y);
+
+    if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
+
+    const w =
+      Number.isFinite(widthIn) && widthIn > 0 ? widthIn : lengthIn;
+
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      x < 0 ||
+      x > 1 ||
+      y < 0 ||
+      y > 1
+    ) {
+      continue;
+    }
+
+    out.push({
+      lengthIn,
+      widthIn: w,
+      depthIn: Number.isFinite(depthIn || NaN) ? depthIn : null,
+      x,
+      y,
+    });
+  }
+
+  return out;
+}
+
 /**
- * Build a DXF for a single layer using the same geometry style
- * as the server-side builder:
+ * Build a DXF for a single layer using the same geometry logic
+ * as the server-side buildDxfFromLayout:
  *  - Foam block as rectangle from (0,0) to (L,W)
  *  - Cavities in that layer as rectangles
- *
- * IMPORTANT:
- *  - Supports BOTH normalized (0–1) and absolute-inch x/y coordinates.
- *    - If 0 ≤ x,y ≤ 1: treat as normalized → left = L * x, top = W * y.
- *    - Else: treat as already in inches → left = x, top = y.
  */
 function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   if (!layout || !layout.block) return null;
 
   const block = layout.block || {};
-  let L = Number(
-    (block as any).lengthIn ?? (block as any).length_in ?? (block as any).length,
-  );
-  let W = Number(
-    (block as any).widthIn ?? (block as any).width_in ?? (block as any).width,
-  );
+  let L = Number(block.lengthIn ?? block.length_in);
+  let W = Number(block.widthIn ?? block.width_in);
 
   if (!Number.isFinite(L) || L <= 0) return null;
   if (!Number.isFinite(W) || W <= 0) {
-    W = L; // fallback to square like server
+    // defensive fallback: square, same as server builder
+    W = L;
   }
 
   function fmt(n: number) {
@@ -235,57 +288,31 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
 
   const entities: string[] = [];
 
-  // Block rectangle
+  // 1) Block rectangle
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // Layer-specific cavities
-  const layers = getLayersFromLayout(layout);
-  const layer = layers[layerIndex];
-  const rawCavities =
-    layer && Array.isArray(layer.cavities) ? layer.cavities : [];
+  // 2) Layer-specific cavities (normalized x/y → inches)
+  const cavs = getCavitiesForLayer(layout, layerIndex);
 
-  for (const cav of rawCavities) {
-    if (!cav) continue;
+  for (const cav of cavs) {
+    const left = L * cav.x;
+    const top = W * cav.y;
 
-    const lengthIn = Number((cav as any).lengthIn ?? (cav as any).length_in);
-    const widthInRaw = Number((cav as any).widthIn ?? (cav as any).width_in);
-    const xRaw = Number((cav as any).x);
-    const yRaw = Number((cav as any).y);
+    const cL = cav.lengthIn;
+    const cW = cav.widthIn;
 
-    if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
-
-    const w = Number.isFinite(widthInRaw) && widthInRaw > 0
-      ? widthInRaw
-      : lengthIn;
-
-    if (!Number.isFinite(xRaw) || !Number.isFinite(yRaw)) {
-      continue;
-    }
-
-    let left: number;
-    let top: number;
-
-    // If 0–1, treat as normalized fractions of block size.
-    if (xRaw >= 0 && xRaw <= 1 && yRaw >= 0 && yRaw <= 1) {
-      left = L * xRaw;
-      top = W * yRaw;
-    } else {
-      // Otherwise, treat x / y as absolute inches (already in block coords).
-      left = xRaw;
-      top = yRaw;
-    }
-
-    entities.push(lineEntity(left, top, left + lengthIn, top));
-    entities.push(lineEntity(left + lengthIn, top, left + lengthIn, top + w));
-    entities.push(lineEntity(left + lengthIn, top + w, left, top + w));
-    entities.push(lineEntity(left, top + w, left, top));
+    entities.push(lineEntity(left, top, left + cL, top));
+    entities.push(lineEntity(left + cL, top, left + cL, top + cW));
+    entities.push(lineEntity(left + cL, top + cW, left, top + cW));
+    entities.push(lineEntity(left, top + cW, left, top));
   }
 
   if (!entities.length) return null;
 
+  // Same R12-style header as the server-side DXF builder
   const header = [
     "0",
     "SECTION",
@@ -298,7 +325,7 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
     "9",
     "$INSUNITS",
     "70",
-    "1", // inches
+    "1", // 1 = inches
     "0",
     "ENDSEC",
     "0",
@@ -324,7 +351,7 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   return [header, entities.join("\n"), footer].join("\n");
 }
 
-// ---------------- Component ----------------
+/* ---------------- Component ---------------- */
 
 export default function AdminQuoteClient({ quoteNo }: Props) {
   // Local quote number value: prefer prop, fall back to URL path.
@@ -406,12 +433,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
         if (!res.ok) {
           if (!cancelled) {
-            if (!json.ok && (json as ApiErr).error === "NOT_FOUND") {
-              setNotFound((json as ApiErr).message || "Quote not found.");
+            if (!json.ok && json.error === "NOT_FOUND") {
+              setNotFound(json.message || "Quote not found.");
             } else if (!json.ok) {
               setError(
-                (json as ApiErr).message ||
-                  "There was a problem loading this quote.",
+                json.message || "There was a problem loading this quote.",
               );
             } else {
               setError("There was a problem loading this quote.");
@@ -539,10 +565,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       svgEl.removeAttribute("height");
       svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
 
-      (svgEl.style as any).width = "100%";
-      (svgEl.style as any).height = "100%";
-      (svgEl.style as any).display = "block";
-      (svgEl.style as any).margin = "0 auto";
+      svgEl.style.width = "100%";
+      svgEl.style.height = "100%";
+      svgEl.style.display = "block";
+      svgEl.style.margin = "0 auto";
     } catch (e) {
       console.warn("Admin: could not normalize SVG preview:", e);
     }
