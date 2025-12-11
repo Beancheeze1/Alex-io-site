@@ -37,7 +37,6 @@
 //     use the latest layout, not stale test data.
 //   - NEW: syncs each foam layer in layout.stack into quote_items as separate
 //     rows marked with notes starting "[LAYOUT-LAYER] ...".
-//
 //   - Returns the new package id + (if changed) the updatedQty.
 //
 // GET (debug helper):
@@ -47,7 +46,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest } from "@/lib/auth";
-import { buildStepFromLayout } from "@/lib/cad/step";
+import { buildStepFromLayoutFull } from "@/lib/cad/step";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -623,11 +622,12 @@ export async function POST(req: NextRequest) {
     // Build DXF from the incoming layout.
     const dxf = buildDxfFromLayout(layout);
 
-    // Build STEP (v1: valid STEP container + metadata, no geometry yet).
-    const step = buildStepFromLayout(layout, {
+    // Build STEP (full geometry using buildStepFromLayoutFull).
+    const step = buildStepFromLayoutFull(
+      layout,
       quoteNo,
-      materialLegend: materialLegend ?? null,
-    });
+      materialLegend ?? null,
+    );
 
     // Clean + re-annotate SVG (if provided) with quote legend and shifted geometry.
     const svgAnnotated = buildSvgWithAnnotations(
@@ -945,7 +945,7 @@ export async function POST(req: NextRequest) {
     return ok(
       {
         ok: true,
-        quoteNo,
+               quoteNo,
         packageId: pkg ? pkg.id : null,
         updatedQty,
       },
