@@ -2,8 +2,12 @@
 //
 // STEP exporter for foam layouts.
 // - Z-up coordinate system
-// - One solid per foam layer
-// - Cavities cut out with BOOLEAN_RESULT(.DIFFERENCE.)
+// - FULL EXPORT (buildStepFromLayoutFull):
+//     * One solid per foam layer as full BREP
+//     * Cavities cut out with BOOLEAN_RESULT(.DIFFERENCE.)
+// - SIMPLE EXPORT (buildStepFromLayoutSimple):
+//     * One BLOCK primitive for the foam block
+//     * One BLOCK primitive per cavity (no booleans)
 // - Units: millimeters (standard STEP practice)
 
 ///////////////////////////////////////////////////////////////
@@ -121,7 +125,7 @@ class StepBuilder {
 }
 
 ///////////////////////////////////////////////////////////////
-// STEP topology helpers
+// STEP topology helpers (FULL BREP path)
 ///////////////////////////////////////////////////////////////
 
 // 1) Cartesian point
@@ -196,7 +200,7 @@ function makeSolid(sb: StepBuilder, shellId: number): number {
 }
 
 ///////////////////////////////////////////////////////////////
-// Rectangular solid builder (box with 6 faces)
+// Rectangular solid builder (box with 6 faces) – FULL BREP
 ///////////////////////////////////////////////////////////////
 
 function makeRectSolid(
@@ -322,7 +326,7 @@ function makeRectSolid(
 }
 
 ///////////////////////////////////////////////////////////////
-// Boolean subtraction
+// Boolean subtraction (FULL BREP path)
 ///////////////////////////////////////////////////////////////
 
 function booleanSubtract(sb: StepBuilder, leftSolidId: number, rightSolidId: number): number {
@@ -330,7 +334,7 @@ function booleanSubtract(sb: StepBuilder, leftSolidId: number, rightSolidId: num
 }
 
 ///////////////////////////////////////////////////////////////
-// Cavity + layer helpers
+// Cavity + layer helpers (shared)
 ///////////////////////////////////////////////////////////////
 
 type CavityDef = {
@@ -394,7 +398,8 @@ function applyCavitiesToLayer(
 }
 
 ///////////////////////////////////////////////////////////////
-// Public: build full STEP text from a layout
+// Public: FULL STEP text from a layout (BREP + booleans)
+//   - Intended for Solidworks / CAD systems with robust STEP support
 ///////////////////////////////////////////////////////////////
 
 export function buildStepFromLayoutFull(
@@ -422,7 +427,15 @@ export function buildStepFromLayoutFull(
 
   const sb = new StepBuilder();
 
-  // Track Z stacking (mm)
+  // Orientation (Z-up)
+  const dirZ = sb.add(`DIRECTION('', (0.,0.,1.))`);
+  const dirX = sb.add(`DIRECTION('', (1.,0.,0.))`);
+  const origin = sb.add(`CARTESIAN_POINT('', (0.,0.,0.))`);
+  const _baseAX = sb.add(
+    `AXIS2_PLACEMENT_3D('Base', #${origin}, #${dirZ}, #${dirX})`
+  );
+
+  // Track Z stacking
   let currentBottomZmm = 0;
   const finalLayerSolidIds: number[] = [];
 
@@ -485,57 +498,16 @@ export function buildStepFromLayoutFull(
 
   if (!finalLayerSolidIds.length) return null;
 
-  // ============================ AP203-ish wrapper ============================
+  // Representation context + shape rep
+  const repCtx = sb.add(
+    `GEOMETRIC_REPRESENTATION_CONTEXT(3) REPRESENTATION_CONTEXT('', '')`
+  );
   const solidsList = finalLayerSolidIds.map((id) => `#${id}`).join(",");
-
-  // Units + uncertainty
-  const lengthUnitId = sb.add(
-    "( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI., .METRE.) )"
-  );
-  const planeAngleUnitId = sb.add(
-    "( PLANE_ANGLE_UNIT() NAMED_UNIT(*) SI_UNIT($, .RADIAN.) )"
-  );
-  const solidAngleUnitId = sb.add(
-    "( SOLID_ANGLE_UNIT() NAMED_UNIT(*) SI_UNIT($, .STERADIAN.) )"
-  );
-  const uncertaintyId = sb.add(
-    `UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.01), #${lengthUnitId}, 'distance_accuracy_value', '')`
+  const _shapeRep = sb.add(
+    `ADVANCED_BREP_SHAPE_REPRESENTATION('Foam Layers', (${solidsList}), #${repCtx})`
   );
 
-  const repContextId = sb.add(
-    `GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#${uncertaintyId})) GLOBAL_UNIT_ASSIGNED_CONTEXT((#${lengthUnitId},#${planeAngleUnitId},#${solidAngleUnitId})) REPRESENTATION_CONTEXT('', '')`
-  );
-
-  // Application + product chain
-  const appCtxId = sb.add(`APPLICATION_CONTEXT('mechanical design')`);
-  const prodDefCtxId = sb.add(
-    `PRODUCT_DEFINITION_CONTEXT('part definition', #${appCtxId}, 'design')`
-  );
-  const productId = sb.add(
-    `PRODUCT(${stepString(quoteNo)}, ${stepString(
-      "Foam layout"
-    )}, '', (#${appCtxId}))`
-  );
-  const prodDefFormationId = sb.add(
-    `PRODUCT_DEFINITION_FORMATION('', '', #${productId})`
-  );
-  const prodDefId = sb.add(
-    `PRODUCT_DEFINITION('', '', #${prodDefFormationId}, #${prodDefCtxId})`
-  );
-  const prodDefShapeId = sb.add(
-    `PRODUCT_DEFINITION_SHAPE('', '', #${prodDefId})`
-  );
-
-  // Shape representation referencing our solids
-  const shapeRepId = sb.add(
-    `ADVANCED_BREP_SHAPE_REPRESENTATION('Foam layout', (${solidsList}), #${repContextId})`
-  );
-
-  // Link product → shape
-  sb.add(`SHAPE_DEFINITION_REPRESENTATION(#${prodDefShapeId}, #${shapeRepId})`);
-
-  // ======================= Wrap everything into STEP =========================
-
+  // Wrap everything in ISO-10303-21
   const header = [
     "ISO-10303-21;",
     "HEADER;",
@@ -546,6 +518,229 @@ export function buildStepFromLayoutFull(
     `FILE_NAME(${stepString(
       `${quoteNo}.step`
     )},${stepString(new Date().toISOString())},(),(),'Alex-IO','alex-io.com','Foam STEP export');`,
+    "FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));",
+    "ENDSEC;",
+    "DATA;",
+  ].join("\n");
+
+  const dataLines = sb.emitAll();
+  const data = dataLines.join("\n");
+
+  const footer = ["ENDSEC;", "END-ISO-10303-21;"].join("\n");
+
+  return `${header}\n${data}\n${footer}`;
+}
+
+///////////////////////////////////////////////////////////////
+// SIMPLE EXPORT for Bambu / lightweight viewers
+// - Uses only BLOCK primitives (no BOOLEAN_RESULT, no ADVANCED_FACE)
+// - One BLOCK for the full foam block
+// - One BLOCK per cavity (positioned inside the block)
+// - Geometry is super simple and widely supported
+///////////////////////////////////////////////////////////////
+
+type SimpleCavity = {
+  xMm: number;
+  yMm: number;
+  zMm: number;
+  Lmm: number;
+  Wmm: number;
+  Hmm: number;
+};
+
+export function buildStepFromLayoutSimple(
+  layout: any,
+  quoteNo: string,
+  materialLegend: string | null
+): string | null {
+  if (!layout?.block) return null;
+
+  const blockLIn = safe(layout.block.lengthIn);
+  const blockWIn = safe(layout.block.widthIn);
+  const blockTIn = safe(layout.block.thicknessIn);
+
+  if (!(blockLIn > 0 && blockWIn > 0 && blockTIn > 0)) {
+    return null;
+  }
+
+  const blockLmm = inToMm(blockLIn);
+  const blockWmm = inToMm(blockWIn);
+  const blockTmm = inToMm(blockTIn);
+
+  // Collect cavities with approximate real Z positions so they sit inside the block.
+  const cavities: SimpleCavity[] = [];
+
+  const layers: any[] = Array.isArray(layout.stack)
+    ? layout.stack
+    : Array.isArray(layout.layers)
+    ? layout.layers
+    : [];
+
+  let currentBottomZmm = 0;
+
+  if (layers.length > 0) {
+    for (const layer of layers) {
+      if (!layer) continue;
+      const thicknessIn =
+        safe((layer as any).thicknessIn ??
+             (layer as any).thickness_in ??
+             (layer as any).thickness);
+      if (!(thicknessIn > 0)) continue;
+
+      const layerBottomZmm = currentBottomZmm;
+      const layerTopZmm = layerBottomZmm + inToMm(thicknessIn);
+
+      if (Array.isArray((layer as any).cavities)) {
+        for (const rawCav of (layer as any).cavities as any[]) {
+          if (!rawCav) continue;
+          const Lc = safe(rawCav.lengthIn);
+          const Wc = safe(rawCav.widthIn);
+          const Dc = safe(rawCav.depthIn);
+          const nx = Number(rawCav.x);
+          const ny = Number(rawCav.y);
+          if (
+            !(Lc > 0 && Wc > 0 && Dc > 0) ||
+            !Number.isFinite(nx) ||
+            !Number.isFinite(ny) ||
+            nx < 0 ||
+            nx > 1 ||
+            ny < 0 ||
+            ny > 1
+          ) {
+            continue;
+          }
+
+          const Lmm = inToMm(Lc);
+          const Wmm = inToMm(Wc);
+          const Hmm = inToMm(Dc);
+
+          const xMm = inToMm(blockLIn * nx);
+          const yMm = inToMm(blockWIn * ny);
+          const zMm = layerTopZmm - Hmm; // cut downward from layer top
+
+          cavities.push({ xMm, yMm, zMm, Lmm, Wmm, Hmm });
+        }
+      }
+
+      currentBottomZmm = layerTopZmm;
+    }
+  } else if (Array.isArray(layout.cavities)) {
+    // Legacy single-layer: place cavities starting from top of the block
+    const layerBottomZmm = 0;
+    const layerTopZmm = blockTmm;
+
+    for (const rawCav of layout.cavities as any[]) {
+      if (!rawCav) continue;
+      const Lc = safe(rawCav.lengthIn);
+      const Wc = safe(rawCav.widthIn);
+      const Dc = safe(rawCav.depthIn);
+      const nx = Number(rawCav.x);
+      const ny = Number(rawCav.y);
+
+      if (
+        !(Lc > 0 && Wc > 0 && Dc > 0) ||
+        !Number.isFinite(nx) ||
+        !Number.isFinite(ny) ||
+        nx < 0 ||
+        nx > 1 ||
+        ny < 0 ||
+        ny > 1
+      ) {
+        continue;
+      }
+
+      const Lmm = inToMm(Lc);
+      const Wmm = inToMm(Wc);
+      const Hmm = inToMm(Dc);
+
+      const xMm = inToMm(blockLIn * nx);
+      const yMm = inToMm(blockWIn * ny);
+      const zMm = layerTopZmm - Hmm;
+
+      cavities.push({ xMm, yMm, zMm, Lmm, Wmm, Hmm });
+    }
+  }
+
+  const sb = new StepBuilder();
+
+  // Shared orientation
+  const dirZ = sb.add(`DIRECTION('', (0.,0.,1.))`);
+  const dirX = sb.add(`DIRECTION('', (1.,0.,0.))`);
+  const globalOrigin = sb.add(`CARTESIAN_POINT('', (0.,0.,0.))`);
+
+  // Helper to emit a BLOCK primitive
+  function addBlockPrimitive(
+    name: string,
+    x: number,
+    y: number,
+    z: number,
+    L: number,
+    W: number,
+    H: number
+  ): number {
+    const originId = sb.add(
+      `CARTESIAN_POINT('', (${mm(x)},${mm(y)},${mm(z)}))`
+    );
+    const axId = sb.add(
+      `AXIS2_PLACEMENT_3D(${stepString(name)}, #${originId}, #${dirZ}, #${dirX})`
+    );
+    return sb.add(
+      `BLOCK(${stepString(name)}, #${axId}, ${mm(L)},${mm(W)},${mm(H)})`
+    );
+  }
+
+  const solids: number[] = [];
+
+  // Foam block at origin
+  solids.push(
+    addBlockPrimitive(
+      "FOAM_BLOCK",
+      0,
+      0,
+      0,
+      blockLmm,
+      blockWmm,
+      blockTmm
+    )
+  );
+
+  // Cavities as separate positive solids
+  let cavIndex = 0;
+  for (const cav of cavities) {
+    cavIndex += 1;
+    solids.push(
+      addBlockPrimitive(
+        `CAVITY_${cavIndex}`,
+        cav.xMm,
+        cav.yMm,
+        cav.zMm,
+        cav.Lmm,
+        cav.Wmm,
+        cav.Hmm
+      )
+    );
+  }
+
+  // Representation context + simple shape representation
+  const repCtx = sb.add(
+    `GEOMETRIC_REPRESENTATION_CONTEXT(3) REPRESENTATION_CONTEXT('', '')`
+  );
+  const solidsList = solids.map((id) => `#${id}`).join(",");
+  sb.add(
+    `SHAPE_REPRESENTATION('Foam layout (simple)', (${solidsList}), #${repCtx})`
+  );
+
+  // Wrap as ISO-10303-21
+  const header = [
+    "ISO-10303-21;",
+    "HEADER;",
+    `FILE_DESCRIPTION((${stepString(
+      `Foam layout (simple) | Quote ${quoteNo}` +
+        (materialLegend ? ` | ${materialLegend}` : "")
+    )}),'2;1');`,
+    `FILE_NAME(${stepString(
+      `${quoteNo}-simple.step`
+    )},${stepString(new Date().toISOString())},(),(),'Alex-IO','alex-io.com','Foam STEP export (simple BLOCKs)');`,
     "FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));",
     "ENDSEC;",
     "DATA;",
