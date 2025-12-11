@@ -47,6 +47,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { buildStepFromLayout } from "@/lib/cad/step";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -170,23 +171,22 @@ function buildDxfFromLayout(layout: any): string | null {
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
   }
 
-function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
-  return [
-    "0",
-    "LINE",
-    "8",
-    "0", // layer
-    "10",
-    fmt(x1),
-    "20",
-    fmt(y1),
-    "11",
-    fmt(x2),
-    "21",
-    fmt(y2),
-  ].join("\n");
-}
-
+  function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
+    return [
+      "0",
+      "LINE",
+      "8",
+      "0", // layer
+      "10",
+      fmt(x1),
+      "20",
+      fmt(y1),
+      "11",
+      fmt(x2),
+      "21",
+      fmt(y2),
+    ].join("\n");
+  }
 
   const entities: string[] = [];
 
@@ -399,7 +399,7 @@ function buildSvgWithAnnotations(
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as any;
 
-  if (!body || !body.quoteNo || !body.layout) {
+  if (!body || !body.layout || !body.quoteNo) {
     return bad(
       {
         ok: false,
@@ -620,9 +620,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Build DXF from the incoming layout; STEP left null for now.
+    // Build DXF from the incoming layout.
     const dxf = buildDxfFromLayout(layout);
-    const step: string | null = null;
+
+    // Build STEP (v1: valid STEP container + metadata, no geometry yet).
+    const step = buildStepFromLayout(layout, {
+      quoteNo,
+      materialLegend: materialLegend ?? null,
+    });
 
     // Clean + re-annotate SVG (if provided) with quote legend and shifted geometry.
     const svgAnnotated = buildSvgWithAnnotations(
@@ -676,7 +681,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-        // ===================== NEW: sync foam layers into quote_items =====================
+    // ===================== NEW: sync foam layers into quote_items =====================
     // This does NOT change existing lines; it appends per-layer rows marked with a
     // special notes prefix so we can safely overwrite them on each Apply.
     try {
@@ -708,7 +713,7 @@ export async function POST(req: NextRequest) {
         ? Number(block.widthIn ?? block.width_in) || 0
         : 0;
 
-            // Layers from foamLayers (payload-level) if present,
+      // Layers from foamLayers (payload-level) if present,
       // otherwise layout.stack (primary) or layout.layers (fallback)
       const foamLayers = Array.isArray((body as any)?.foamLayers)
         ? (body as any).foamLayers
@@ -722,7 +727,6 @@ export async function POST(req: NextRequest) {
           : Array.isArray(layout?.layers)
           ? layout.layers
           : [];
-
 
       // Derive a base quantity to use for all layer rows.
       let baseQty: number | null = null;
@@ -858,7 +862,7 @@ export async function POST(req: NextRequest) {
         layerErr,
       );
     }
-    
+
     // =================== END new foam layer sync block ===================
 
     // Sync layout dims, cavities, qty, material, and customer into the facts store
