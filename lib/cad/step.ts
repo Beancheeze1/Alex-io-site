@@ -6,6 +6,7 @@
 // - Cavities cut out with BOOLEAN_RESULT(.DIFFERENCE.) in the "full" exporter
 // - Units: millimeters (standard STEP practice)
 //
+//
 // Exports:
 //   - buildStepFromLayoutFull(layout, quoteNo, materialLegend)
 //       → full boolean BREP (intended for SolidWorks, etc.)
@@ -139,6 +140,11 @@ function makePoint(sb: StepBuilder, p: Pt): number {
   );
 }
 
+// 1b) Vertex from a point (STEP wants vertices at edge ends)
+function makeVertex(sb: StepBuilder, pointId: number): number {
+  return sb.add(`VERTEX_POINT('', #${pointId})`);
+}
+
 // 2) Direction
 function makeDirection(
   sb: StepBuilder,
@@ -159,16 +165,20 @@ function makeVector(
 }
 
 // 4) EdgeCurve (straight line edge)
+//    - Uses a point as the LINE base point
+//    - Uses vertices for EDGE_CURVE start/end (schema-correct)
+type CornerRef = { p: number; v: number };
+
 function makeEdge(
   sb: StepBuilder,
-  startPtId: number,
-  endPtId: number,
+  start: CornerRef,
+  end: CornerRef,
   dir: { dx: number; dy: number; dz: number }
 ): number {
   const baseDirId = makeDirection(sb, dir.dx, dir.dy, dir.dz);
-  const lineId = sb.add(`LINE('', #${startPtId}, #${baseDirId})`);
+  const lineId = sb.add(`LINE('', #${start.p}, #${baseDirId})`);
   return sb.add(
-    `EDGE_CURVE('', #${startPtId}, #${endPtId}, #${lineId}, .T.)`
+    `EDGE_CURVE('', #${start.v}, #${end.v}, #${lineId}, .T.)`
   );
 }
 
@@ -203,14 +213,18 @@ function makePlane(
 }
 
 // 8) AdvancedFace from loop + plane
+//    - Wraps loop in FACE_OUTER_BOUND (schema-correct)
 function makeFace(
   sb: StepBuilder,
   loopId: number,
   planeId: number,
   sameSense = true
 ): number {
+  const outerBoundId = sb.add(
+    `FACE_OUTER_BOUND('', #${loopId}, .T.)`
+  );
   return sb.add(
-    `ADVANCED_FACE('', (#${loopId}), #${planeId}, ${
+    `ADVANCED_FACE('', (#${outerBoundId}), #${planeId}, ${
       sameSense ? ".T." : ".F."
     })`
   );
@@ -249,6 +263,27 @@ function makeRectSolid(
   const p111 = makePoint(sb, pt(corner.x + L, corner.y + W, corner.z + H));
   const p011 = makePoint(sb, pt(corner.x, corner.y + W, corner.z + H));
 
+  // Vertices for those points (used by EDGE_CURVE)
+  const v000 = makeVertex(sb, p000);
+  const v100 = makeVertex(sb, p100);
+  const v110 = makeVertex(sb, p110);
+  const v010 = makeVertex(sb, p010);
+
+  const v001 = makeVertex(sb, p001);
+  const v101 = makeVertex(sb, p101);
+  const v111 = makeVertex(sb, p111);
+  const v011 = makeVertex(sb, p011);
+
+  const c000: CornerRef = { p: p000, v: v000 };
+  const c100: CornerRef = { p: p100, v: v100 };
+  const c110: CornerRef = { p: p110, v: v110 };
+  const c010: CornerRef = { p: p010, v: v010 };
+
+  const c001: CornerRef = { p: p001, v: v001 };
+  const c101: CornerRef = { p: p101, v: v101 };
+  const c111: CornerRef = { p: p111, v: v111 };
+  const c011: CornerRef = { p: p011, v: v011 };
+
   const up = makeDirection(sb, 0, 0, 1);
   const down = makeDirection(sb, 0, 0, -1);
   const dx = makeDirection(sb, 1, 0, 0);
@@ -260,10 +295,10 @@ function makeRectSolid(
   const refY = dy;
 
   // FRONT (Z = corner.z)
-  const eF1 = makeEdge(sb, p000, p100, { dx: 1, dy: 0, dz: 0 });
-  const eF2 = makeEdge(sb, p100, p110, { dx: 0, dy: 1, dz: 0 });
-  const eF3 = makeEdge(sb, p110, p010, { dx: -1, dy: 0, dz: 0 });
-  const eF4 = makeEdge(sb, p010, p000, { dx: 0, dy: -1, dz: 0 });
+  const eF1 = makeEdge(sb, c000, c100, { dx: 1, dy: 0, dz: 0 });
+  const eF2 = makeEdge(sb, c100, c110, { dx: 0, dy: 1, dz: 0 });
+  const eF3 = makeEdge(sb, c110, c010, { dx: -1, dy: 0, dz: 0 });
+  const eF4 = makeEdge(sb, c010, c000, { dx: 0, dy: -1, dz: 0 });
 
   const oF1 = makeOrientedEdge(sb, eF1, true);
   const oF2 = makeOrientedEdge(sb, eF2, true);
@@ -275,10 +310,10 @@ function makeRectSolid(
   const faceF = makeFace(sb, loopF, planeF);
 
   // BACK (Z = corner.z + H)
-  const eB1 = makeEdge(sb, p001, p101, { dx: 1, dy: 0, dz: 0 });
-  const eB2 = makeEdge(sb, p101, p111, { dx: 0, dy: 1, dz: 0 });
-  const eB3 = makeEdge(sb, p111, p011, { dx: -1, dy: 0, dz: 0 });
-  const eB4 = makeEdge(sb, p011, p001, { dx: 0, dy: -1, dz: 0 });
+  const eB1 = makeEdge(sb, c001, c101, { dx: 1, dy: 0, dz: 0 });
+  const eB2 = makeEdge(sb, c101, c111, { dx: 0, dy: 1, dz: 0 });
+  const eB3 = makeEdge(sb, c111, c011, { dx: -1, dy: 0, dz: 0 });
+  const eB4 = makeEdge(sb, c011, c001, { dx: 0, dy: -1, dz: 0 });
 
   const oB1 = makeOrientedEdge(sb, eB1, true);
   const oB2 = makeOrientedEdge(sb, eB2, true);
@@ -290,10 +325,10 @@ function makeRectSolid(
   const faceB = makeFace(sb, loopB, planeB);
 
   // LEFT (X = corner.x)
-  const eL1 = makeEdge(sb, p000, p010, { dx: 0, dy: 1, dz: 0 });
-  const eL2 = makeEdge(sb, p010, p011, { dx: 0, dy: 0, dz: 1 });
-  const eL3 = makeEdge(sb, p011, p001, { dx: 0, dy: -1, dz: 0 });
-  const eL4 = makeEdge(sb, p001, p000, { dx: 0, dy: 0, dz: -1 });
+  const eL1 = makeEdge(sb, c000, c010, { dx: 0, dy: 1, dz: 0 });
+  const eL2 = makeEdge(sb, c010, c011, { dx: 0, dy: 0, dz: 1 });
+  const eL3 = makeEdge(sb, c011, c001, { dx: 0, dy: -1, dz: 0 });
+  const eL4 = makeEdge(sb, c001, c000, { dx: 0, dy: 0, dz: -1 });
 
   const oL1 = makeOrientedEdge(sb, eL1, true);
   const oL2 = makeOrientedEdge(sb, eL2, true);
@@ -305,10 +340,10 @@ function makeRectSolid(
   const faceL = makeFace(sb, loopL, planeL);
 
   // RIGHT (X = corner.x + L)
-  const eR1 = makeEdge(sb, p100, p110, { dx: 0, dy: 1, dz: 0 });
-  const eR2 = makeEdge(sb, p110, p111, { dx: 0, dy: 0, dz: 1 });
-  const eR3 = makeEdge(sb, p111, p101, { dx: 0, dy: -1, dz: 0 });
-  const eR4 = makeEdge(sb, p101, p100, { dx: 0, dy: 0, dz: -1 });
+  const eR1 = makeEdge(sb, c100, c110, { dx: 0, dy: 1, dz: 0 });
+  const eR2 = makeEdge(sb, c110, c111, { dx: 0, dy: 0, dz: 1 });
+  const eR3 = makeEdge(sb, c111, c101, { dx: 0, dy: -1, dz: 0 });
+  const eR4 = makeEdge(sb, c101, c100, { dx: 0, dy: 0, dz: -1 });
 
   const oR1 = makeOrientedEdge(sb, eR1, true);
   const oR2 = makeOrientedEdge(sb, eR2, true);
@@ -320,10 +355,10 @@ function makeRectSolid(
   const faceR = makeFace(sb, loopR, planeR);
 
   // BOTTOM (Y = corner.y)
-  const eD1 = makeEdge(sb, p000, p100, { dx: 1, dy: 0, dz: 0 });
-  const eD2 = makeEdge(sb, p100, p101, { dx: 0, dy: 0, dz: 1 });
-  const eD3 = makeEdge(sb, p101, p001, { dx: -1, dy: 0, dz: 0 });
-  const eD4 = makeEdge(sb, p001, p000, { dx: 0, dy: 0, dz: -1 });
+  const eD1 = makeEdge(sb, c000, c100, { dx: 1, dy: 0, dz: 0 });
+  const eD2 = makeEdge(sb, c100, c101, { dx: 0, dy: 0, dz: 1 });
+  const eD3 = makeEdge(sb, c101, c001, { dx: -1, dy: 0, dz: 0 });
+  const eD4 = makeEdge(sb, c001, c000, { dx: 0, dy: 0, dz: -1 });
 
   const oD1 = makeOrientedEdge(sb, eD1, true);
   const oD2 = makeOrientedEdge(sb, eD2, true);
@@ -335,10 +370,10 @@ function makeRectSolid(
   const faceD = makeFace(sb, loopD, planeD);
 
   // TOP (Y = corner.y + W)
-  const eT1 = makeEdge(sb, p010, p110, { dx: 1, dy: 0, dz: 0 });
-  const eT2 = makeEdge(sb, p110, p111, { dx: 0, dy: 0, dz: 1 });
-  const eT3 = makeEdge(sb, p111, p011, { dx: -1, dy: 0, dz: 0 });
-  const eT4 = makeEdge(sb, p011, p010, { dx: 0, dy: 0, dz: -1 });
+  const eT1 = makeEdge(sb, c010, c110, { dx: 1, dy: 0, dz: 0 });
+  const eT2 = makeEdge(sb, c110, c111, { dx: 0, dy: 0, dz: 1 });
+  const eT3 = makeEdge(sb, c111, c011, { dx: -1, dy: 0, dz: 0 });
+  const eT4 = makeEdge(sb, c011, c010, { dx: 0, dy: 0, dz: -1 });
 
   const oT1 = makeOrientedEdge(sb, eT1, true);
   const oT2 = makeOrientedEdge(sb, eT2, true);
