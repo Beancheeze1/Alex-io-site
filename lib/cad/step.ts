@@ -426,18 +426,46 @@ export function buildStepFromLayoutFull(
     blockW = blockL;
   }
 
-  const layers: any[] = Array.isArray(layout.stack)
-    ? layout.stack
-    : [
-        {
-          id: "single",
-          label: "Foam layer",
-          thicknessIn: safe(layout.block.thicknessIn),
-          cavities: layout.cavities || [],
-        },
-      ];
+  // Layers: prefer stack, then layers, then single-layer fallback.
+  let layers: any[] = [];
+  const stackArr = Array.isArray(layout.stack)
+    ? (layout.stack as any[]).filter(Boolean)
+    : [];
+  const layersArr = Array.isArray(layout.layers)
+    ? (layout.layers as any[]).filter(Boolean)
+    : [];
 
-  if (!layers.length || blockL <= 0 || blockW <= 0) return null;
+  if (stackArr.length) {
+    layers = stackArr;
+  } else if (layersArr.length) {
+    layers = layersArr;
+  } else {
+    const rawThickness =
+      layout.block.thicknessIn ??
+      layout.block.thickness_in ??
+      layout.block.heightIn ??
+      layout.block.height_in ??
+      layout.block.height;
+
+    const thickness = safe(rawThickness);
+    layers = [
+      {
+        id: "single",
+        label: "Foam layer",
+        thicknessIn: thickness,
+        cavities: layout.cavities || [],
+      },
+    ];
+  }
+
+  if (!layers.length || blockL <= 0 || blockW <= 0) {
+    console.warn("[STEP] No valid layers or block dims for quote", quoteNo, {
+      blockL,
+      blockW,
+      layersLen: layers.length,
+    });
+    return null;
+  }
 
   const sb = new StepBuilder();
 
@@ -510,7 +538,14 @@ export function buildStepFromLayoutFull(
     currentBottomZmm += inToMm(thicknessIn);
   }
 
-  if (!finalLayerSolidIds.length) return null;
+  if (!finalLayerSolidIds.length) {
+    console.warn("[STEP] Built no solids for quote", quoteNo, {
+      blockL,
+      blockW,
+      layersLen: layers.length,
+    });
+    return null;
+  }
 
   // Representation context + shape rep
   const repCtx = sb.add(
