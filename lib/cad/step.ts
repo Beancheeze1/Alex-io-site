@@ -1,21 +1,21 @@
 // lib/cad/step.ts
 //
-// STEP export helper (Path A, v4).
+// STEP export helper (Path A, v5).
 //
-// v4 goal:
-//   - Emit a valid STEP file that contains a single rectangular solid
-//     representing the foam block *with cavities cut out* using a CSG boolean
-//     tree:
-//         result = BLOCK - cavity1 - cavity2 - ...
+// v5 goal (stability-first):
+//   - Emit a valid STEP file that contains:
+//       * One BLOCK solid representing the foam block.
+//       * Optional BLOCK solids for each cavity (as separate solids),
+//         positioned correctly in 3D.
+//   - NO BOOLEAN_RESULT / CSG_SOLID (some viewers choke on those).
 //   - Geometry is emitted in millimeters (mm), converted from inches.
 //   - Header + metadata stay stable so we can iterate later.
 //
 // Notes:
 //   - We keep this helper self-contained and pure: no DB, no Next APIs.
 //   - The calling route is responsible for passing layout + metadata.
-//   - Cavities are modeled as rectangular prisms based on length/width/depth
-//     and normalized x/y from the layout. RoundedRect/circle are approximated
-//     as rectangular pockets for now.
+//   - Cavities are represented as rectangular solids for visualization;
+//     they are NOT “cut out” of the block in this version.
 
 import type { LayoutModel } from "@/app/quote/layout/editor/layoutTypes";
 
@@ -148,8 +148,8 @@ function fmtLen(n: number): string {
  *       size L x W x T (in inches) → mm.
  *   - Each cavity becomes a BLOCK solid representing its volume:
  *       length x width x depth, positioned using normalized x/y and depth.
- *   - We then build a CSG tree:
- *       result = baseBlock - cav1 - cav2 - ...
+ *   - All solids are listed in a SHAPE_REPRESENTATION:
+ *       items = (foam_block, cavity_1, cavity_2, ...)
  *
  * Assumptions:
  *   - X axis = block length direction.
@@ -158,7 +158,7 @@ function fmtLen(n: number): string {
  *   - Layout's normalized (x,y) is measured from top-left, so:
  *       left_in = x * lengthIn
  *       top_in  = y * widthIn
- *     and cavities cut downward from the *top* surface.
+ *     and cavities are positioned cutting downward from the *top* surface.
  */
 export function buildStepFromLayout(
   layout: any,
@@ -185,7 +185,7 @@ export function buildStepFromLayout(
     `Foam block ${lengthIn} x ${widthIn} x ${thicknessIn} in`,
   );
   if (cavities.length > 0) {
-    descParts.push(`Cavities: ${cavities.length}`);
+    descParts.push(`Cavities (as solids): ${cavities.length}`);
   }
   if (quoteNo) {
     descParts.push(`Quote ${quoteNo}`);
@@ -313,7 +313,7 @@ export function buildStepFromLayout(
     )}, (0.,1.,0.));`,
   );
 
-  // ===== Base foam block (no cavities yet) =====
+  // ===== Base foam block =====
   const baseOriginPtId = id();
   ents.push(
     `#${baseOriginPtId} = CARTESIAN_POINT(${stepStringLiteral(
@@ -337,9 +337,9 @@ export function buildStepFromLayout(
     )}, ${fmtLen(Tmm)});`,
   );
 
-  // ===== Cavity blocks (to be subtracted) =====
-  const cavityBlockIds: number[] = [];
+  const solidIds: number[] = [baseBlockId];
 
+  // ===== Cavity solids (visual only, NOT subtracted) =====
   for (let i = 0; i < cavities.length; i++) {
     const cav = cavities[i];
 
@@ -356,7 +356,7 @@ export function buildStepFromLayout(
     const leftMm = leftIn * mmPerInch;
     const topMm = topIn * mmPerInch;
 
-    // Cut from the *top* surface downwards:
+    // Place the cavity solid so its top face is flush with the block top.
     //   block bottom  = 0
     //   block top     = Tmm
     //   cavity bottom = max(Tmm - cavDmm, 0)
@@ -387,34 +387,16 @@ export function buildStepFromLayout(
       )}, ${fmtLen(cavDmm)});`,
     );
 
-    cavityBlockIds.push(cavBlockId);
+    solidIds.push(cavBlockId);
   }
-
-  // ===== CSG boolean tree: base block minus all cavity blocks =====
-  let finalSolidId: number = baseBlockId;
-
-  for (const cavId of cavityBlockIds) {
-    const boolId = id();
-    ents.push(
-      `#${boolId} = BOOLEAN_RESULT(.DIFFERENCE., #${finalSolidId}, #${cavId});`,
-    );
-    finalSolidId = boolId;
-  }
-
-  // Wrap the final boolean tree in a CSG_SOLID for representation.
-  const csgSolidId = id();
-  ents.push(
-    `#${csgSolidId} = CSG_SOLID(${stepStringLiteral(
-      "Foam block with cavities",
-    )}, #${finalSolidId});`,
-  );
 
   // Shape representation + link back to product definition.
+  const itemsList = solidIds.map((sid) => `#${sid}`).join(",");
   const shapeRepId = id();
   ents.push(
     `#${shapeRepId} = SHAPE_REPRESENTATION(${stepStringLiteral(
       "",
-    )}, (#${csgSolidId}), #${contextId});`,
+    )}, (${itemsList}), #${contextId});`,
   );
 
   const sdrId = id();
@@ -436,7 +418,7 @@ export function buildStepFromLayout(
     )},${stepStringLiteral(nowIso)},(),(),${stepStringLiteral(
       "Alex-IO",
     )},${stepStringLiteral("alex-io.com")},${stepStringLiteral(
-      "STEP export v4 (block with cavity cutouts)",
+      "STEP export v5 (block + cavity solids)",
     )});`,
   );
   // CONFIG_CONTROL_DESIGN is a common AP203-style schema used for mechanical parts.
