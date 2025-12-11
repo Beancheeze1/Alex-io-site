@@ -390,9 +390,11 @@ function makeCavitySolid(
 ): number {
   const Lmm = inToMm(safe(cav.lengthIn));
   const Wmm = inToMm(safe(cav.widthIn));
-  const Dmm = inToMm(safe(cav.depthIn));
 
+  // NEW: clamp cavity depth to the actual layer thickness (in mm)
   const totalLayerThicknessMm = inToMm(layerThicknessIn);
+  const rawDepthMm = inToMm(safe(cav.depthIn));
+  const Dmm = Math.min(rawDepthMm, totalLayerThicknessMm);
 
   // Cavity top at top of layer, cut downward
   const cavityTopZ = layerBottomZmm + totalLayerThicknessMm;
