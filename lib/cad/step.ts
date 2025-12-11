@@ -426,6 +426,16 @@ export function buildStepFromLayoutFull(
     blockW = blockL;
   }
 
+  // Block thickness (used for per-layer fallback).
+  const rawBlockT =
+    layout.block.thicknessIn ??
+    layout.block.thickness_in ??
+    layout.block.heightIn ??
+    layout.block.height_in ??
+    layout.block.height;
+
+  const blockThicknessIn = safe(rawBlockT);
+
   // Layers: prefer stack, then layers, then single-layer fallback.
   let layers: any[] = [];
   const stackArr = Array.isArray(layout.stack)
@@ -440,19 +450,11 @@ export function buildStepFromLayoutFull(
   } else if (layersArr.length) {
     layers = layersArr;
   } else {
-    const rawThickness =
-      layout.block.thicknessIn ??
-      layout.block.thickness_in ??
-      layout.block.heightIn ??
-      layout.block.height_in ??
-      layout.block.height;
-
-    const thickness = safe(rawThickness);
     layers = [
       {
         id: "single",
         label: "Foam layer",
-        thicknessIn: thickness,
+        thicknessIn: blockThicknessIn,
         cavities: layout.cavities || [],
       },
     ];
@@ -482,7 +484,14 @@ export function buildStepFromLayoutFull(
   const finalLayerSolidIds: number[] = [];
 
   for (const layer of layers) {
-    const thicknessIn = safe((layer as any).thicknessIn);
+    let thicknessIn = safe((layer as any).thicknessIn);
+
+    // ⭐️ New: if a layer has no thickness, evenly split the block thickness
+    // across all layers (Option A).
+    if (thicknessIn <= 0 && blockThicknessIn > 0 && layers.length > 0) {
+      thicknessIn = blockThicknessIn / layers.length;
+    }
+
     if (thicknessIn <= 0) continue;
 
     const layerBottomZ = currentBottomZmm;
