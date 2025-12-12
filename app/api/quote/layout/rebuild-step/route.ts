@@ -23,41 +23,40 @@ type InBody = {
   quote_no?: string;
 };
 
-function jsonErr(status: number, error: string, message: string) {
-  return NextResponse.json({ ok: false, error, message }, { status });
+function jsonErr(status: number, error: string, message: string, extra?: any) {
+  return NextResponse.json({ ok: false, error, message, ...extra }, { status });
 }
 
-function normalizeBaseUrl(raw: string): string {
-  return raw.trim().replace(/\/+$/, "");
-}
+async function callStepService(layoutJson: any): Promise<{ stepText: string; usedUrl: string }> {
+  const base = (process.env.STEP_SERVICE_URL || "").trim();
+  if (!base) throw new Error("STEP_SERVICE_URL is not set on the server environment.");
 
-async function callStepService(layoutJson: any): Promise<string> {
-  const raw = (process.env.STEP_SERVICE_URL || "").trim();
-  if (!raw) throw new Error("STEP_SERVICE_URL is not set");
+  const root = base.replace(/\/+$/, "");
 
-  const base = normalizeBaseUrl(raw);
+  // Try a small, reasonable set of candidates (Path A: minimal guessing).
+  const candidates = [`${root}/api/step`, `${root}/step`];
 
-  // IMPORTANT:
-  // - If STEP_SERVICE_URL already includes a path, we should try it directly first.
-  // - Then try common suffixes.
-  const candidates = [base, base + "/api/step", base + "/step"];
-
+  // Keep payload simple and consistent with what we used elsewhere: { layout: ... }
   const payload = { layout: layoutJson };
 
+  const tried: string[] = [];
   let lastErr: any = null;
 
   for (const url of candidates) {
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 45_000);
+    tried.push(url);
 
+    // 60s timeout so we fail cleanly vs hanging
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+
+    try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      }).finally(() => clearTimeout(t));
+        signal: controller.signal,
+      });
 
       const ct = res.headers.get("content-type") || "";
 
@@ -75,24 +74,26 @@ async function callStepService(layoutJson: any): Promise<string> {
           (typeof json?.data === "string" && json.data) ||
           null;
 
-        if (!stepText) {
-          throw new Error("STEP service returned JSON but no step_text field was found.");
-        }
-        return stepText;
-      } else {
-        const stepText = await res.text();
         if (!stepText || stepText.trim().length === 0) {
-          throw new Error("STEP service returned empty text.");
+          throw new Error("STEP service returned JSON but no step_text field was found (or it was empty).");
         }
-        return stepText;
+        return { stepText, usedUrl: url };
       }
+
+      const stepText = await res.text();
+      if (!stepText || stepText.trim().length === 0) {
+        throw new Error("STEP service returned empty text.");
+      }
+      return { stepText, usedUrl: url };
     } catch (e: any) {
       lastErr = e;
-      // try next candidate
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
-  throw lastErr || new Error("Failed to call STEP service.");
+  const msg = String(lastErr?.message ?? lastErr ?? "Failed to call STEP service.");
+  throw new Error(`Failed to call STEP service. Tried: ${tried.join(", ")}. Last error: ${msg}`);
 }
 
 export async function POST(req: Request) {
@@ -101,7 +102,6 @@ export async function POST(req: Request) {
     const quote_no = String(body?.quote_no || "").trim();
     if (!quote_no) return jsonErr(400, "BAD_REQUEST", "Missing quote_no.");
 
-    // Load latest layout package for this quote
     const pkg = await one<{
       id: number;
       quote_id: number;
@@ -120,9 +120,8 @@ export async function POST(req: Request) {
 
     if (!pkg) return jsonErr(404, "NOT_FOUND", "No layout package found for this quote.");
 
-    const stepText = await callStepService(pkg.layout_json);
+    const { stepText, usedUrl } = await callStepService(pkg.layout_json);
 
-    // Save back into SAME latest package row (Path A)
     await q(
       `
       UPDATE public.quote_layout_packages
@@ -132,7 +131,7 @@ export async function POST(req: Request) {
       [stepText, pkg.id],
     );
 
-    return NextResponse.json({ ok: true, pkg_id: pkg.id });
+    return NextResponse.json({ ok: true, pkg_id: pkg.id, used_url: usedUrl });
   } catch (err: any) {
     console.error("POST /api/quote/layout/rebuild-step error:", err);
     return jsonErr(500, "SERVER_ERROR", String(err?.message ?? err));
