@@ -27,26 +27,45 @@ function jsonErr(status: number, error: string, message: string) {
   return NextResponse.json({ ok: false, error, message }, { status });
 }
 
-async function callStepService(layoutJson: any): Promise<string> {
-  const base = (process.env.STEP_SERVICE_URL || "").trim();
-  if (!base) throw new Error("STEP_SERVICE_URL is not set");
+function normalizeBase(raw: string): string {
+  return String(raw || "").trim().replace(/\/+$/, "");
+}
 
-  // Try the most likely endpoints without guessing too hard.
-  const candidates = [
-    base.replace(/\/+$/, "") + "/api/step",
-    base.replace(/\/+$/, "") + "/step",
-  ];
+function buildStepServiceCandidates(envValue: string): string[] {
+  const base = normalizeBase(envValue);
+  if (!base) return [];
+
+  // If user provided a full endpoint already, do NOT append again.
+  // Accept:
+  // - https://.../api/step
+  // - https://.../step
+  if (/\/api\/step$/i.test(base) || /\/step$/i.test(base)) {
+    return [base];
+  }
+
+  // Otherwise treat as base URL.
+  return [base + "/api/step", base + "/step"];
+}
+
+async function callStepService(layoutJson: any): Promise<{ stepText: string; usedUrl: string }> {
+  const env = (process.env.STEP_SERVICE_URL || "").trim();
+  if (!env) throw new Error("STEP_SERVICE_URL is not set");
+
+  const candidates = buildStepServiceCandidates(env);
+  if (candidates.length === 0) throw new Error("STEP_SERVICE_URL is empty");
 
   const payload = { layout: layoutJson };
 
   let lastErr: any = null;
+  const tried: string[] = [];
 
   for (const url of candidates) {
+    tried.push(url);
+
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // microservice calls should not be cached
         cache: "no-store",
         body: JSON.stringify(payload),
       });
@@ -67,16 +86,16 @@ async function callStepService(layoutJson: any): Promise<string> {
           (typeof json?.data === "string" && json.data) ||
           null;
 
-        if (!stepText) {
+        if (!stepText || stepText.trim().length === 0) {
           throw new Error("STEP service returned JSON but no step_text field was found.");
         }
-        return stepText;
+        return { stepText, usedUrl: url };
       } else {
         const stepText = await res.text();
         if (!stepText || stepText.trim().length === 0) {
           throw new Error("STEP service returned empty text.");
         }
-        return stepText;
+        return { stepText, usedUrl: url };
       }
     } catch (e: any) {
       lastErr = e;
@@ -84,7 +103,8 @@ async function callStepService(layoutJson: any): Promise<string> {
     }
   }
 
-  throw lastErr || new Error("Failed to call STEP service.");
+  const lastMsg = String(lastErr?.message ?? lastErr ?? "Unknown error");
+  throw new Error(`Failed to call STEP service. Tried: ${tried.join(" , ")}. Last error: ${lastMsg}`);
 }
 
 export async function POST(req: Request) {
@@ -112,7 +132,7 @@ export async function POST(req: Request) {
 
     if (!pkg) return jsonErr(404, "NOT_FOUND", "No layout package found for this quote.");
 
-    const stepText = await callStepService(pkg.layout_json);
+    const { stepText, usedUrl } = await callStepService(pkg.layout_json);
 
     // Save back into SAME latest package row (Path A)
     await q(
@@ -124,7 +144,7 @@ export async function POST(req: Request) {
       [stepText, pkg.id],
     );
 
-    return NextResponse.json({ ok: true, pkg_id: pkg.id });
+    return NextResponse.json({ ok: true, pkg_id: pkg.id, step_service_url_used: usedUrl });
   } catch (err: any) {
     console.error("POST /api/quote/layout/rebuild-step error:", err);
     return jsonErr(500, "SERVER_ERROR", String(err?.message ?? err));

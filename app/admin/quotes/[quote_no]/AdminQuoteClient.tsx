@@ -187,8 +187,7 @@ function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): stri
 
 function getLayerThicknessIn(layer: LayoutLayer | null | undefined): number | null {
   if (!layer) return null;
-  const t =
-    (layer.thicknessIn ?? layer.thickness_in ?? (layer as any).thickness ?? null) as any;
+  const t = (layer.thicknessIn ?? layer.thickness_in ?? (layer as any).thickness ?? null) as any;
   const n = Number(t);
   if (!Number.isFinite(n) || n <= 0) return null;
   return n;
@@ -417,6 +416,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
 
+  // NEW: selected layer for the big preview
+  const [selectedLayerIndex, setSelectedLayerIndex] = React.useState<number>(0);
+  const selectedLayerSvgRef = React.useRef<HTMLDivElement | null>(null);
+
   // NEW: requested cartons for this quote (from quote_box_selections)
   const [boxSelections, setBoxSelections] = React.useState<RequestedBoxRow[] | null>(null);
   const [boxSelectionsLoading, setBoxSelectionsLoading] = React.useState<boolean>(false);
@@ -588,7 +591,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     if (!svgContainerRef.current) return;
 
     const svgEl = svgContainerRef.current.querySelector("svg") as SVGSVGElement | null;
-
     if (!svgEl) return;
 
     try {
@@ -604,6 +606,27 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       console.warn("Admin: could not normalize SVG preview:", e);
     }
   }, [layoutPkg]);
+
+  // Normalize SVG preview (selected-layer big preview)
+  React.useEffect(() => {
+    if (!selectedLayerSvgRef.current) return;
+
+    const svgEl = selectedLayerSvgRef.current.querySelector("svg") as SVGSVGElement | null;
+    if (!svgEl) return;
+
+    try {
+      svgEl.removeAttribute("width");
+      svgEl.removeAttribute("height");
+      svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+      svgEl.style.width = "100%";
+      svgEl.style.height = "100%";
+      svgEl.style.display = "block";
+      svgEl.style.margin = "0 auto";
+    } catch (e) {
+      console.warn("Admin: could not normalize selected-layer SVG preview:", e);
+    }
+  }, [layoutPkg, selectedLayerIndex]);
 
   // SVG + DXF blob downloads remain local (fine).
   const handleDownload = React.useCallback(
@@ -745,6 +768,17 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     [layoutPkg],
   );
 
+  // Keep selected layer index in range whenever layers change
+  React.useEffect(() => {
+    const n = layersForDxf?.length || 0;
+    if (n <= 0) return;
+    setSelectedLayerIndex((cur) => {
+      if (cur < 0) return 0;
+      if (cur >= n) return 0;
+      return cur;
+    });
+  }, [layersForDxf?.length]);
+
   const handleDownloadLayerDxf = React.useCallback(
     (layerIndex: number) => {
       if (typeof window === "undefined") return;
@@ -816,6 +850,17 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       setRebuildBusy(false);
     }
   }, [quoteNoValue, rebuildBusy]);
+
+  const selectedLayer =
+    layersForDxf && layersForDxf.length > 0 ? layersForDxf[selectedLayerIndex] : null;
+
+  const selectedLayerLabel =
+    selectedLayer != null ? getLayerLabel(selectedLayer, selectedLayerIndex) : "—";
+
+  const selectedLayerSvg =
+    layoutPkg?.layout_json && layersForDxf && layersForDxf.length > 0
+      ? buildSvgPreviewForLayer(layoutPkg.layout_json, selectedLayerIndex)
+      : null;
 
   return (
     <div
@@ -1327,9 +1372,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             {rebuildOkAt && (
                               <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>
                             )}
-                            {rebuildError && (
-                              <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>
-                            )}
+                            {rebuildError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>}
                           </div>
                         </div>
                       </div>
@@ -1433,16 +1476,29 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             const t = getLayerThicknessIn(layer);
                             const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, idx);
 
+                            const isSelected = idx === selectedLayerIndex;
+
                             return (
                               <div
                                 key={idx}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedLayerIndex(idx)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") setSelectedLayerIndex(idx);
+                                }}
                                 style={{
-                                  border: "1px solid #e5e7eb",
+                                  border: isSelected ? "2px solid #0ea5e9" : "1px solid #e5e7eb",
                                   borderRadius: 14,
                                   padding: 10,
                                   background: "#ffffff",
-                                  boxShadow: "0 6px 16px rgba(15,23,42,0.06)",
+                                  boxShadow: isSelected
+                                    ? "0 10px 22px rgba(14,165,233,0.18)"
+                                    : "0 6px 16px rgba(15,23,42,0.06)",
+                                  cursor: "pointer",
+                                  outline: "none",
                                 }}
+                                title="Click to select this layer for the large preview below"
                               >
                                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                   <div>
@@ -1461,7 +1517,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                     marginTop: 8,
                                     height: 160,
                                     borderRadius: 10,
-                                    border: "1px solid #e5e7eb",
+                                    border: isSelected ? "1px solid #7dd3fc" : "1px solid #e5e7eb",
                                     background: "#f3f4f6",
                                     overflow: "hidden",
                                     display: "flex",
@@ -1483,7 +1539,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                 <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
                                   <button
                                     type="button"
-                                    onClick={() => handleDownloadLayerDxf(idx)}
+                                    onClick={(e: React.MouseEvent) => {
+                                      e.stopPropagation();
+                                      handleDownloadLayerDxf(idx);
+                                    }}
                                     style={{
                                       padding: "4px 10px",
                                       borderRadius: 999,
@@ -1499,7 +1558,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
                                   <button
                                     type="button"
-                                    onClick={() => handleDownloadLayerStep(idx)}
+                                    onClick={(e: React.MouseEvent) => {
+                                      e.stopPropagation();
+                                      handleDownloadLayerStep(idx);
+                                    }}
                                     style={{
                                       padding: "4px 10px",
                                       borderRadius: 999,
@@ -1522,6 +1584,48 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               </div>
                             );
                           })}
+                        </div>
+
+                        {/* NEW: Large preview area for the selected layer */}
+                        <div
+                          style={{
+                            marginTop: 14,
+                            padding: 8,
+                            borderRadius: 10,
+                            border: "1px solid #e5e7eb",
+                            background: "#ffffff",
+                          }}
+                        >
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
+                            Selected layer preview:{" "}
+                            <span style={{ color: "#0f172a" }}>
+                              {selectedLayerLabel} (Layer {selectedLayerIndex + 1}/{layersForDxf.length})
+                            </span>
+                          </div>
+
+                          <div
+                            ref={selectedLayerSvgRef}
+                            style={{
+                              width: "100%",
+                              height: 420,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderRadius: 8,
+                              border: "1px solid #e5e7eb",
+                              background: "#f3f4f6",
+                              overflow: "hidden",
+                            }}
+                          >
+                            {selectedLayerSvg ? (
+                              <div
+                                style={{ width: "100%", height: "100%" }}
+                                dangerouslySetInnerHTML={{ __html: selectedLayerSvg }}
+                              />
+                            ) : (
+                              <div style={{ fontSize: 12, color: "#6b7280" }}>No preview available for this layer.</div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
