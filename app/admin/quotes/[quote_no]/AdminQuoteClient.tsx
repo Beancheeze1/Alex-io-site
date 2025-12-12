@@ -185,6 +185,15 @@ function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): stri
   return `Layer ${idx + 1}`;
 }
 
+function getLayerThicknessIn(layer: LayoutLayer | null | undefined): number | null {
+  if (!layer) return null;
+  const t =
+    (layer.thicknessIn ?? layer.thickness_in ?? (layer as any).thickness ?? null) as any;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
 /** Flatten cavities for a single layer */
 function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   const out: FlatCavity[] = [];
@@ -335,6 +344,61 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   return [header, entities.join("\n"), footer].join("\n");
 }
 
+/* ---------------- Lightweight SVG preview (per-layer, client-side) ---------------- */
+/**
+ * This is intentionally simple and deterministic:
+ * - Draw foam block outline
+ * - Draw that layer’s cavity rectangles
+ * - Uses layout.block length/width inches for viewBox
+ *
+ * NOTE: This is only for *admin preview clarity* and does not touch the
+ * working SVG exporter that generates layoutPkg.svg_text.
+ */
+function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null {
+  if (!layout || !layout.block) return null;
+
+  const block = layout.block || {};
+  let L = Number(block.lengthIn ?? block.length_in);
+  let W = Number(block.widthIn ?? block.width_in);
+
+  if (!Number.isFinite(L) || L <= 0) return null;
+  if (!Number.isFinite(W) || W <= 0) W = L;
+
+  const cavs = getCavitiesForLayer(layout, layerIndex);
+
+  const stroke = "#111827";
+  const cavStroke = "#ef4444";
+
+  const rects = cavs
+    .map((c) => {
+      const x = L * c.x;
+      const y = W * c.y;
+      const w = c.lengthIn;
+      const h = c.widthIn;
+      // Keep within bounds defensively (preview only)
+      const x2 = Math.max(0, Math.min(L, x));
+      const y2 = Math.max(0, Math.min(W, y));
+      const w2 = Math.max(0, Math.min(L - x2, w));
+      const h2 = Math.max(0, Math.min(W - y2, h));
+      if (w2 <= 0 || h2 <= 0) return "";
+      return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${Math.max(
+        0.03,
+        Math.min(L, W) / 300,
+      )}" />`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  const strokeWidth = Math.max(0.04, Math.min(L, W) / 250);
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" preserveAspectRatio="xMidYMid meet">`,
+    `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`,
+    rects,
+    `</svg>`,
+  ].join("");
+}
+
 /* ---------------- Component ---------------- */
 
 export default function AdminQuoteClient({ quoteNo }: Props) {
@@ -348,12 +412,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
+  // Used to force a refetch (e.g., after rebuild-step)
+  const [refreshTick, setRefreshTick] = React.useState<number>(0);
+
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
 
   // NEW: requested cartons for this quote (from quote_box_selections)
   const [boxSelections, setBoxSelections] = React.useState<RequestedBoxRow[] | null>(null);
   const [boxSelectionsLoading, setBoxSelectionsLoading] = React.useState<boolean>(false);
   const [boxSelectionsError, setBoxSelectionsError] = React.useState<string | null>(null);
+
+  // NEW: rebuild-step UI state
+  const [rebuildBusy, setRebuildBusy] = React.useState<boolean>(false);
+  const [rebuildError, setRebuildError] = React.useState<string | null>(null);
+  const [rebuildOkAt, setRebuildOkAt] = React.useState<string | null>(null);
 
   // 🔁 Rescue quote_no from URL path if prop is missing/empty.
   // Expected path: /admin/quotes/<quote_no>
@@ -442,7 +514,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [quoteNoValue]);
+  }, [quoteNoValue, refreshTick]);
 
   // NEW: Fetch requested cartons (quote_box_selections) for this quote
   React.useEffect(() => {
@@ -510,7 +582,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         : layoutPkg.notes.trim()
       : null;
 
-  // Normalize SVG preview (same as client-facing quote page)
+  // Normalize SVG preview (full layout preview)
   React.useEffect(() => {
     if (!layoutPkg) return;
     if (!svgContainerRef.current) return;
@@ -575,15 +647,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     [layoutPkg, quoteState],
   );
 
-  // NEW: STEP download uses the server endpoint directly.
-  // This avoids relying on layoutPkg.step_text being present in /api/quote/print.
+  // STEP download uses the server endpoint directly.
   const handleDownloadStep = React.useCallback(() => {
     if (typeof window === "undefined") return;
     if (!quoteNoValue) return;
 
     const url = `/api/quote/layout/step?quote_no=${encodeURIComponent(quoteNoValue)}`;
 
-    // Trigger a normal browser download.
     try {
       const a = document.createElement("a");
       a.href = url;
@@ -593,21 +663,44 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       a.remove();
     } catch (err) {
       console.error("Admin: STEP download failed:", err);
-      // fallback
       window.open(url, "_blank", "noopener,noreferrer");
     }
   }, [quoteNoValue]);
 
+  const handleDownloadLayerStep = React.useCallback(
+    (layerIndex: number) => {
+      if (typeof window === "undefined") return;
+      if (!quoteNoValue) return;
+
+      const url = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(
+        quoteNoValue,
+      )}&layer_index=${encodeURIComponent(String(layerIndex))}`;
+
+      try {
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch (err) {
+        console.error("Admin: layer STEP download failed:", err);
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    },
+    [quoteNoValue],
+  );
+
   const primaryItem = items[0] || null;
 
-  // NEW: unpack richer pricing info for quick engineering context
+  // Pricing metadata
   const primaryPricing = primaryItem?.pricing_meta || null;
   const minChargeApplied = !!primaryPricing?.used_min_charge;
   const setupFee = typeof primaryPricing?.setup_fee === "number" ? primaryPricing.setup_fee : null;
   const kerfPct = typeof primaryPricing?.kerf_pct === "number" ? primaryPricing.kerf_pct : null;
   const minChargeValue = typeof primaryPricing?.min_charge === "number" ? primaryPricing.min_charge : null;
 
-  // shared card styles (aligned with client-facing quote page palette)
+  // shared card styles
   const cardBase: React.CSSProperties = {
     borderRadius: 16,
     border: "1px solid #e5e7eb",
@@ -630,7 +723,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     marginBottom: 2,
   };
 
-  // NEW: derived material fields for the explorer card (with safe density handling)
+  // derived material fields
   const primaryMaterialName =
     primaryItem?.material_name || (primaryItem ? `Material #${primaryItem.material_id}` : null);
   const primaryMaterialFamily = primaryItem?.material_family || null;
@@ -646,7 +739,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
         : null;
 
-  // Layers for per-layer DXFs
+  // Layers for per-layer tools/previews
   const layersForDxf = React.useMemo(
     () => (layoutPkg && layoutPkg.layout_json ? getLayersFromLayout(layoutPkg.layout_json) : []),
     [layoutPkg],
@@ -681,6 +774,49 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     [layoutPkg, quoteState],
   );
 
+  const handleRebuildStepNow = React.useCallback(async () => {
+    if (!quoteNoValue) return;
+    if (rebuildBusy) return;
+
+    setRebuildBusy(true);
+    setRebuildError(null);
+    setRebuildOkAt(null);
+
+    try {
+      const res = await fetch("/api/quote/layout/rebuild-step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ quote_no: quoteNoValue }),
+      });
+
+      const ct = res.headers.get("content-type") || "";
+      let json: any = null;
+
+      if (ct.includes("application/json")) {
+        json = await res.json();
+      } else {
+        const text = await res.text();
+        json = { ok: res.ok, message: text };
+      }
+
+      if (!res.ok || !json?.ok) {
+        setRebuildError(json?.error || json?.message || "Rebuild failed.");
+        return;
+      }
+
+      setRebuildOkAt(new Date().toLocaleString());
+
+      // Force refresh of /api/quote/print payload so admin UI reflects newest layoutPkg.step_text timestamp/notes/etc
+      setRefreshTick((x) => x + 1);
+    } catch (e: any) {
+      console.error("Admin: rebuild-step failed:", e);
+      setRebuildError(String(e?.message ?? e));
+    } finally {
+      setRebuildBusy(false);
+    }
+  }, [quoteNoValue, rebuildBusy]);
+
   return (
     <div
       style={{
@@ -714,7 +850,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
           </a>
         </div>
 
-        {/* Header: Admin badge + quote ID */}
+        {/* Header */}
         <div
           style={{
             margin: "-24px -24px 20px -24px",
@@ -933,7 +1069,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               </div>
             </div>
 
-            {/* NEW: Materials explorer + "view customer quote" */}
+            {/* Materials explorer + "view customer quote" */}
             {primaryItem && (
               <div
                 style={{
@@ -1058,7 +1194,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               </div>
             )}
 
-            {/* NEW: Customer requested cartons (admin-only view) */}
+            {/* Customer requested cartons */}
             <div style={{ ...cardBase, background: "#ffffff", marginBottom: 20 }}>
               <div style={cardTitleStyle}>Customer requested cartons</div>
               {boxSelectionsLoading && (
@@ -1153,6 +1289,49 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             {notesPreview}
                           </div>
                         )}
+
+                        {/* Admin-only: rebuild STEP */}
+                        <div style={{ marginTop: 10 }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.08em",
+                              color: "#6b7280",
+                              marginBottom: 4,
+                            }}
+                          >
+                            STEP maintenance
+                          </div>
+
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <button
+                              type="button"
+                              onClick={handleRebuildStepNow}
+                              disabled={rebuildBusy}
+                              style={{
+                                padding: "4px 10px",
+                                borderRadius: 999,
+                                border: "1px solid #111827",
+                                background: rebuildBusy ? "#e5e7eb" : "#111827",
+                                color: rebuildBusy ? "#6b7280" : "#ffffff",
+                                fontSize: 11,
+                                fontWeight: 700,
+                                cursor: rebuildBusy ? "not-allowed" : "pointer",
+                              }}
+                              title="Rebuilds and saves STEP into the latest quote_layout_packages.step_text via the STEP microservice"
+                            >
+                              {rebuildBusy ? "Rebuilding STEP..." : "Rebuild STEP now"}
+                            </button>
+
+                            {rebuildOkAt && (
+                              <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>
+                            )}
+                            {rebuildError && (
+                              <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
 
                       <div style={{ textAlign: "right", fontSize: 12, minWidth: 260 }}>
@@ -1207,7 +1386,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             </button>
                           )}
 
-                          {/* STEP now downloads from server endpoint (no dependency on step_text being in the print payload) */}
                           <button
                             type="button"
                             onClick={handleDownloadStep}
@@ -1226,50 +1404,133 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             Download STEP
                           </button>
                         </div>
-
-                        {/* Per-layer DXFs */}
-                        {layersForDxf && layersForDxf.length > 0 && (
-                          <div style={{ marginTop: 10, paddingTop: 6, borderTop: "1px dashed #e5e7eb" }}>
-                            <div
-                              style={{
-                                fontSize: 11,
-                                textTransform: "uppercase",
-                                letterSpacing: "0.08em",
-                                color: "#6b7280",
-                                marginBottom: 4,
-                              }}
-                            >
-                              Per-layer DXFs
-                            </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-                              {layersForDxf.map((layer, idx) => (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={() => handleDownloadLayerDxf(idx)}
-                                  style={{
-                                    padding: "3px 9px",
-                                    borderRadius: 999,
-                                    border: "1px dashed #e5e7eb",
-                                    background: "#f9fafb",
-                                    color: "#111827",
-                                    fontSize: 11,
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  Download DXF — {getLayerLabel(layer, idx)}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
                       </div>
                     </div>
 
+                    {/* Per-layer previews + buttons */}
+                    {layersForDxf && layersForDxf.length > 0 && layoutPkg.layout_json && (
+                      <div style={{ marginTop: 12 }}>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: "#0f172a",
+                            marginBottom: 8,
+                          }}
+                        >
+                          Layers (preview + downloads)
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                            gap: 12,
+                          }}
+                        >
+                          {layersForDxf.map((layer, idx) => {
+                            const label = getLayerLabel(layer, idx);
+                            const t = getLayerThicknessIn(layer);
+                            const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, idx);
+
+                            return (
+                              <div
+                                key={idx}
+                                style={{
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: 14,
+                                  padding: 10,
+                                  background: "#ffffff",
+                                  boxShadow: "0 6px 16px rgba(15,23,42,0.06)",
+                                }}
+                              >
+                                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                                  <div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{label}</div>
+                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                                      {t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}
+                                    </div>
+                                  </div>
+                                  <div style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>
+                                    Layer {idx + 1}/{layersForDxf.length}
+                                  </div>
+                                </div>
+
+                                <div
+                                  style={{
+                                    marginTop: 8,
+                                    height: 160,
+                                    borderRadius: 10,
+                                    border: "1px solid #e5e7eb",
+                                    background: "#f3f4f6",
+                                    overflow: "hidden",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                  }}
+                                >
+                                  {svg ? (
+                                    <div
+                                      style={{ width: "100%", height: "100%" }}
+                                      // safe here: we generate the svg string locally
+                                      dangerouslySetInnerHTML={{ __html: svg }}
+                                    />
+                                  ) : (
+                                    <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>
+                                  )}
+                                </div>
+
+                                <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadLayerDxf(idx)}
+                                    style={{
+                                      padding: "4px 10px",
+                                      borderRadius: 999,
+                                      border: "1px dashed #e5e7eb",
+                                      background: "#f9fafb",
+                                      color: "#111827",
+                                      fontSize: 11,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    Download DXF (layer)
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadLayerStep(idx)}
+                                    style={{
+                                      padding: "4px 10px",
+                                      borderRadius: 999,
+                                      border: "1px solid #0ea5e9",
+                                      background: "#e0f2fe",
+                                      color: "#0369a1",
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      cursor: "pointer",
+                                    }}
+                                    title="Generates a STEP for this single layer (including only this layer’s cavities) via /api/quote/layout/step-layer"
+                                  >
+                                    Download STEP (layer)
+                                  </button>
+                                </div>
+
+                                <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
+                                  Preview shows foam outline + cavity rectangles (layer-specific).
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Full-layout preview remains (useful) */}
                     {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
                       <div
                         style={{
-                          marginTop: 10,
+                          marginTop: 14,
                           padding: 8,
                           borderRadius: 10,
                           border: "1px solid #e5e7eb",
@@ -1277,7 +1538,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                         }}
                       >
                         <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
-                          Layout preview
+                          Full layout preview
                         </div>
                         <div
                           ref={svgContainerRef}
@@ -1300,7 +1561,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 )}
               </div>
 
-              {/* NEW: lightweight layout activity panel (latest package) */}
+              {/* Layout activity */}
               {layoutPkg && (
                 <div style={{ ...cardBase, background: "#ffffff", marginTop: 12 }}>
                   <div style={cardTitleStyle}>Layout activity</div>
