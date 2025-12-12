@@ -189,6 +189,17 @@ function makeLoop(sb: StepBuilder, orientedEdgeIds: number[]): number {
   return sb.add(`EDGE_LOOP('', (${list}))`);
 }
 
+// 6.5) FACE_OUTER_BOUND wrapper for a loop (AP203-legal ADVANCED_FACE)
+function makeFaceOuterBound(
+  sb: StepBuilder,
+  loopId: number,
+  sameSense = true
+): number {
+  return sb.add(
+    `FACE_OUTER_BOUND('', #${loopId}, ${sameSense ? ".T." : ".F."})`
+  );
+}
+
 // 7) Plane for a face
 function makePlane(
   sb: StepBuilder,
@@ -209,8 +220,10 @@ function makeFace(
   planeId: number,
   sameSense = true
 ): number {
+  // STEP spec: ADVANCED_FACE expects FACE_BOUND / FACE_OUTER_BOUND, not EDGE_LOOP.
+  const boundId = makeFaceOuterBound(sb, loopId, sameSense);
   return sb.add(
-    `ADVANCED_FACE('', (#${loopId}), #${planeId}, ${
+    `ADVANCED_FACE('', (#${boundId}), #${planeId}, ${
       sameSense ? ".T." : ".F."
     })`
   );
@@ -532,7 +545,6 @@ function buildWrapperAndEmit(
   if (!solids.length) return null;
 
   // AP203-style units + tolerance + representation context
-  // Pattern taken from widely used "block" sample files. :contentReference[oaicite:2]{index=2}
   const lengthUnitId = sb.add(
     `(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI., .METRE.))`
   );
