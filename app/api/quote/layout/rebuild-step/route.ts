@@ -27,48 +27,37 @@ function jsonErr(status: number, error: string, message: string) {
   return NextResponse.json({ ok: false, error, message }, { status });
 }
 
-function normalizeBase(raw: string): string {
-  return String(raw || "").trim().replace(/\/+$/, "");
+function normalizeBaseUrl(raw: string): string {
+  return raw.trim().replace(/\/+$/, "");
 }
 
-function buildStepServiceCandidates(envValue: string): string[] {
-  const base = normalizeBase(envValue);
-  if (!base) return [];
+async function callStepService(layoutJson: any): Promise<string> {
+  const raw = (process.env.STEP_SERVICE_URL || "").trim();
+  if (!raw) throw new Error("STEP_SERVICE_URL is not set");
 
-  // If user provided a full endpoint already, do NOT append again.
-  // Accept:
-  // - https://.../api/step
-  // - https://.../step
-  if (/\/api\/step$/i.test(base) || /\/step$/i.test(base)) {
-    return [base];
-  }
+  const base = normalizeBaseUrl(raw);
 
-  // Otherwise treat as base URL.
-  return [base + "/api/step", base + "/step"];
-}
-
-async function callStepService(layoutJson: any): Promise<{ stepText: string; usedUrl: string }> {
-  const env = (process.env.STEP_SERVICE_URL || "").trim();
-  if (!env) throw new Error("STEP_SERVICE_URL is not set");
-
-  const candidates = buildStepServiceCandidates(env);
-  if (candidates.length === 0) throw new Error("STEP_SERVICE_URL is empty");
+  // IMPORTANT:
+  // - If STEP_SERVICE_URL already includes a path, we should try it directly first.
+  // - Then try common suffixes.
+  const candidates = [base, base + "/api/step", base + "/step"];
 
   const payload = { layout: layoutJson };
 
   let lastErr: any = null;
-  const tried: string[] = [];
 
   for (const url of candidates) {
-    tried.push(url);
-
     try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 45_000);
+
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify(payload),
-      });
+        signal: ctrl.signal,
+      }).finally(() => clearTimeout(t));
 
       const ct = res.headers.get("content-type") || "";
 
@@ -86,16 +75,16 @@ async function callStepService(layoutJson: any): Promise<{ stepText: string; use
           (typeof json?.data === "string" && json.data) ||
           null;
 
-        if (!stepText || stepText.trim().length === 0) {
+        if (!stepText) {
           throw new Error("STEP service returned JSON but no step_text field was found.");
         }
-        return { stepText, usedUrl: url };
+        return stepText;
       } else {
         const stepText = await res.text();
         if (!stepText || stepText.trim().length === 0) {
           throw new Error("STEP service returned empty text.");
         }
-        return { stepText, usedUrl: url };
+        return stepText;
       }
     } catch (e: any) {
       lastErr = e;
@@ -103,8 +92,7 @@ async function callStepService(layoutJson: any): Promise<{ stepText: string; use
     }
   }
 
-  const lastMsg = String(lastErr?.message ?? lastErr ?? "Unknown error");
-  throw new Error(`Failed to call STEP service. Tried: ${tried.join(" , ")}. Last error: ${lastMsg}`);
+  throw lastErr || new Error("Failed to call STEP service.");
 }
 
 export async function POST(req: Request) {
@@ -132,7 +120,7 @@ export async function POST(req: Request) {
 
     if (!pkg) return jsonErr(404, "NOT_FOUND", "No layout package found for this quote.");
 
-    const { stepText, usedUrl } = await callStepService(pkg.layout_json);
+    const stepText = await callStepService(pkg.layout_json);
 
     // Save back into SAME latest package row (Path A)
     await q(
@@ -144,7 +132,7 @@ export async function POST(req: Request) {
       [stepText, pkg.id],
     );
 
-    return NextResponse.json({ ok: true, pkg_id: pkg.id, step_service_url_used: usedUrl });
+    return NextResponse.json({ ok: true, pkg_id: pkg.id });
   } catch (err: any) {
     console.error("POST /api/quote/layout/rebuild-step error:", err);
     return jsonErr(500, "SERVER_ERROR", String(err?.message ?? err));
