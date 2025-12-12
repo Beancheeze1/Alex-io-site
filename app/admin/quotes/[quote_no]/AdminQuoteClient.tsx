@@ -149,6 +149,10 @@ type FlatCavity = {
   depthIn: number | null;
   x: number; // normalized 0..1
   y: number; // normalized 0..1
+
+  // NEW (Path A): used only for admin per-layer preview clarity
+  shape?: "rect" | "circle" | null;
+  diameterIn?: number | null;
 };
 
 /** Extract the stack/layers array from a layout_json */
@@ -189,6 +193,16 @@ function getLayerThicknessIn(layer: LayoutLayer | null | undefined): number | nu
   return n;
 }
 
+function normalizeShape(raw: any): "rect" | "circle" | null {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (!s) return null;
+
+  if (s === "circle" || s === "round" || s === "circular") return "circle";
+  if (s === "rect" || s === "rectangle" || s === "square") return "rect";
+
+  return null;
+}
+
 /** Flatten cavities for a single layer */
 function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   const out: FlatCavity[] = [];
@@ -220,12 +234,29 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
       continue;
     }
 
+    // NEW: preserve shape when present (admin preview only)
+    const shape = normalizeShape(
+      (cav as any).shape ?? (cav as any).cavityShape ?? (cav as any).cavity_shape ?? (cav as any).type ?? (cav as any).kind,
+    );
+
+    // If circle, attempt to use diameter (or infer from footprint)
+    const rawDia = (cav as any).diameterIn ?? (cav as any).diameter_in ?? (cav as any).diameter ?? null;
+    const diaNum = rawDia == null ? NaN : Number(rawDia);
+    const diameterIn =
+      shape === "circle"
+        ? Number.isFinite(diaNum) && diaNum > 0
+          ? diaNum
+          : Math.min(lengthIn, w)
+        : null;
+
     out.push({
       lengthIn,
       widthIn: w,
       depthIn: Number.isFinite(depthIn || NaN) ? depthIn : null,
       x,
       y,
+      shape: shape ?? null,
+      diameterIn: diameterIn ?? null,
     });
   }
 
@@ -341,16 +372,14 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
 
 /* ---------------- Lightweight SVG preview (per-layer, client-side) ---------------- */
 /**
- * This is intentionally simple and deterministic:
+ * Deterministic admin preview:
  * - Draw foam block outline
- * - Draw that layer’s cavity rectangles
+ * - Draw that layer’s cavities
  * - Uses layout.block length/width inches for viewBox
  *
- * NOTE: This is only for *admin preview clarity* and does not touch the
- * working SVG exporter that generates layoutPkg.svg_text.
- *
- * IMPORTANT: This preview currently renders cavities as rectangles (even if the cavity was a circle).
- * The STEP “square vs circle” issue is NOT solved here — that is in the STEP export path.
+ * IMPORTANT (Path A):
+ * - This does NOT touch the saved layoutPkg.svg_text (full layout exporter).
+ * - This is only for admin layer clarity.
  */
 function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null {
   if (!layout || !layout.block) return null;
@@ -367,35 +396,48 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
   const stroke = "#111827";
   const cavStroke = "#ef4444";
 
-  const rects = cavs
+  const strokeWidth = Math.max(0.04, Math.min(L, W) / 250);
+  const cavStrokeWidth = Math.max(0.03, Math.min(L, W) / 300);
+
+  const shapes = cavs
     .map((c) => {
-      const x = L * c.x;
-      const y = W * c.y;
+      const left = L * c.x;
+      const top = W * c.y;
+
+      // Default footprint
       const w = c.lengthIn;
       const h = c.widthIn;
 
       // Keep within bounds defensively (preview only)
-      const x2 = Math.max(0, Math.min(L, x));
-      const y2 = Math.max(0, Math.min(W, y));
+      const x2 = Math.max(0, Math.min(L, left));
+      const y2 = Math.max(0, Math.min(W, top));
       const w2 = Math.max(0, Math.min(L - x2, w));
       const h2 = Math.max(0, Math.min(W - y2, h));
       if (w2 <= 0 || h2 <= 0) return "";
 
-      return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${Math.max(
-        0.03,
-        Math.min(L, W) / 300,
-      )}" />`;
+      // If circle, render a circle centered in the cavity footprint.
+      if (c.shape === "circle") {
+        const dia = c.diameterIn != null && Number.isFinite(c.diameterIn) && c.diameterIn > 0 ? c.diameterIn : Math.min(w2, h2);
+        const r = Math.max(0, Math.min(dia / 2, Math.min(w2, h2) / 2));
+        if (r <= 0) return "";
+
+        const cx = x2 + w2 / 2;
+        const cy = y2 + h2 / 2;
+
+        return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+      }
+
+      // Rect (default)
+      return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
     })
     .filter(Boolean)
     .join("");
 
-  const strokeWidth = Math.max(0.04, Math.min(L, W) / 250);
-
-  // CRITICAL: width/height 100% so it scales to the preview panes reliably
+  // width/height 100% so it scales to preview panes reliably
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`,
     `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`,
-    rects,
+    shapes,
     `</svg>`,
   ].join("");
 }
