@@ -46,7 +46,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest } from "@/lib/auth";
-import { buildStepFromLayoutFull } from "@/lib/cad/step";
+import { buildStepFromLayout } from "@/lib/cad/step";
+
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -622,12 +623,13 @@ export async function POST(req: NextRequest) {
     // Build DXF from the incoming layout.
     const dxf = buildDxfFromLayout(layout);
 
-    // Build STEP (full geometry using buildStepFromLayoutFull).
-    const step = buildStepFromLayoutFull(
+        // Build STEP via external geometry service (microservice-backed).
+    const step = await buildStepFromLayout(
       layout,
       quoteNo,
       materialLegend ?? null,
     );
+
 
     // Clean + re-annotate SVG (if provided) with quote legend and shifted geometry.
     const svgAnnotated = buildSvgWithAnnotations(
