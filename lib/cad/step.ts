@@ -2,12 +2,18 @@
 //
 // STEP exporter facade for foam layouts (microservice-backed).
 //
-// Key fix:
-// - Normalize legacy layouts (block + cavities, no stack) into the microservice
-//   schema (block + stack[0] + cavities optional).
+// Key fixes (Path A):
+//  1) Preserve cavity shape metadata (circle vs rect) when present.
+//  2) Avoid "dual cavity sources" (top-level + stack[0]) which causes
+//     layer preview/export desync and sometimes "scaled/offset" looking output.
+//     We always merge legacy cavities into stack[0] and do NOT send top-level
+//     cavities separately.
+//  3) For circles, include diameterIn when we can infer it.
 //
 // ENV:
 //   STEP_SERVICE_URL = https://alex-io-step-service.onrender.com
+
+export type CavityShape = "rect" | "circle";
 
 export type CavityDef = {
   lengthIn: number;
@@ -15,6 +21,12 @@ export type CavityDef = {
   depthIn: number;
   x: number; // normalized 0..1 across block length
   y: number; // normalized 0..1 across block width
+
+  // Optional: preserved if editor provides it; microservice may use it.
+  shape?: CavityShape | null;
+
+  // Optional convenience for circle cavities (microservice may use it).
+  diameterIn?: number | null;
 };
 
 export type FoamLayer = {
@@ -30,7 +42,10 @@ export type LayoutForStep = {
     thicknessIn: number; // total stack height
   };
   stack: FoamLayer[];
-  cavities?: CavityDef[] | null; // legacy top-level cavities
+
+  // NOTE: We intentionally DO NOT send top-level cavities anymore.
+  // The microservice should consume stack[*].cavities.
+  cavities?: null;
 };
 
 function isNonEmptyString(v: unknown): v is string {
@@ -47,21 +62,60 @@ function safeNorm01(v: unknown): number | null {
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
 }
 
+function normalizeShape(raw: any): CavityShape | null {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (!s) return null;
+
+  // Common editor / legacy spellings:
+  if (s === "circle" || s === "round" || s === "circular") return "circle";
+  if (s === "rect" || s === "rectangle" || s === "square") return "rect";
+
+  return null;
+}
+
 function normalizeCavities(raw: any): CavityDef[] {
   if (!Array.isArray(raw)) return [];
   const out: CavityDef[] = [];
 
   for (const c of raw) {
     if (!c) continue;
+
     const lengthIn = safePosNumber(c.lengthIn ?? c.length_in ?? c.length);
     const widthIn = safePosNumber(c.widthIn ?? c.width_in ?? c.width);
-    const depthIn = safePosNumber(c.depthIn ?? c.depth_in ?? c.depth ?? c.heightIn ?? c.height_in ?? c.height);
+    const depthIn = safePosNumber(
+      c.depthIn ??
+        c.depth_in ??
+        c.depth ??
+        c.heightIn ??
+        c.height_in ??
+        c.height,
+    );
     const x = safeNorm01(c.x);
     const y = safeNorm01(c.y);
 
-    if (lengthIn && widthIn && depthIn && x != null && y != null) {
-      out.push({ lengthIn, widthIn, depthIn, x, y });
-    }
+    if (!(lengthIn && widthIn && depthIn && x != null && y != null)) continue;
+
+    // Try to preserve cavity shape if editor includes it
+    const shape = normalizeShape(
+      c.shape ?? c.cavityShape ?? c.cavity_shape ?? c.type ?? c.kind,
+    );
+
+    // If circle: diameter is best derived from the cavity footprint.
+    // (We choose the smaller dimension to be safe in case of slight drift.)
+    const diameterIn =
+      shape === "circle"
+        ? Math.min(lengthIn, widthIn)
+        : null;
+
+    out.push({
+      lengthIn,
+      widthIn,
+      depthIn,
+      x,
+      y,
+      shape: shape ?? null,
+      diameterIn: diameterIn ?? null,
+    });
   }
 
   return out;
@@ -73,18 +127,25 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
   const blockRaw = (layout as any).block ?? null;
   if (!blockRaw) return null;
 
-  const lengthIn = safePosNumber(blockRaw.lengthIn ?? blockRaw.length_in ?? blockRaw.length);
-  const widthIn = safePosNumber(blockRaw.widthIn ?? blockRaw.width_in ?? blockRaw.width);
+  const lengthIn = safePosNumber(
+    blockRaw.lengthIn ?? blockRaw.length_in ?? blockRaw.length,
+  );
+  const widthIn = safePosNumber(
+    blockRaw.widthIn ?? blockRaw.width_in ?? blockRaw.width,
+  );
   const thicknessIn = safePosNumber(
     blockRaw.thicknessIn ??
       blockRaw.thickness_in ??
       blockRaw.heightIn ??
       blockRaw.height_in ??
       blockRaw.thickness ??
-      blockRaw.height
+      blockRaw.height,
   );
 
   if (!lengthIn || !widthIn || !thicknessIn) return null;
+
+  // Legacy top-level cavities (some old layouts only have this)
+  const legacyCavs = normalizeCavities((layout as any).cavities);
 
   // Normalize stack layers if present
   const rawStack = Array.isArray((layout as any).stack) ? (layout as any).stack : [];
@@ -100,7 +161,7 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
           (layer as any).heightIn ??
           (layer as any).height_in ??
           (layer as any).thickness ??
-          (layer as any).height
+          (layer as any).height,
       );
       if (!t) continue;
 
@@ -110,6 +171,7 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
           : null;
 
       const cavities = normalizeCavities((layer as any).cavities);
+
       normalizedStack.push({
         thicknessIn: t,
         label,
@@ -118,9 +180,6 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
     }
   }
 
-  // Legacy top-level cavities (some old layouts only have this)
-  const legacyCavs = normalizeCavities((layout as any).cavities);
-
   // If stack is missing/empty, create a single layer so the microservice accepts it.
   if (normalizedStack.length === 0) {
     normalizedStack.push({
@@ -128,25 +187,36 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
       label: "Foam layer",
       cavities: legacyCavs.length ? legacyCavs : null,
     });
+
     return {
       block: { lengthIn, widthIn, thicknessIn },
       stack: normalizedStack,
-      cavities: null, // already moved into the single layer
+      cavities: null,
     };
   }
 
-  // Otherwise keep legacy cavs as top-level (microservice already applies to idx==0)
+  // IMPORTANT (desync fix):
+  // Do NOT send legacy cavities as a separate top-level field.
+  // Instead, merge them into stack[0].cavities so the microservice has ONE source.
+  if (legacyCavs.length > 0) {
+    const first = normalizedStack[0];
+    const existing = Array.isArray(first.cavities) ? first.cavities : [];
+    first.cavities = [...existing, ...legacyCavs];
+  }
+
   return {
     block: { lengthIn, widthIn, thicknessIn },
     stack: normalizedStack,
-    cavities: legacyCavs.length ? legacyCavs : null,
+    cavities: null,
   };
 }
 
 function getStepServiceUrl(): string | null {
   const raw = process.env.STEP_SERVICE_URL;
   if (!raw || !raw.trim()) {
-    console.error("[STEP] Missing STEP_SERVICE_URL env var; cannot contact STEP microservice.");
+    console.error(
+      "[STEP] Missing STEP_SERVICE_URL env var; cannot contact STEP microservice.",
+    );
     return null;
   }
   return raw.replace(/\/+$/, "");
@@ -161,7 +231,7 @@ function getStepServiceUrl(): string | null {
 export async function buildStepFromLayout(
   layout: any,
   quoteNo: string,
-  materialLegend: string | null
+  materialLegend: string | null,
 ): Promise<string | null> {
   const baseUrl = getStepServiceUrl();
   if (!baseUrl) return null;
@@ -204,9 +274,14 @@ export async function buildStepFromLayout(
 
     const contentType = res.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
-      const json = (await res.json().catch(() => null)) as { ok?: boolean; step?: unknown } | null;
+      const json = (await res.json().catch(() => null)) as
+        | { ok?: boolean; step?: unknown }
+        | null;
       if (json && json.ok && isNonEmptyString(json.step)) return json.step;
-      console.error("[STEP] Microservice JSON missing ok:true and step string.", { quoteNo, json });
+      console.error("[STEP] Microservice JSON missing ok:true and step string.", {
+        quoteNo,
+        json,
+      });
       return null;
     }
 
