@@ -10,7 +10,7 @@
 //   - buildStepFromLayoutFull(layout, quoteNo, materialLegend)
 //       → full boolean BREP (intended for SolidWorks, etc.)
 //   - buildStepFromLayoutSimple(layout, quoteNo, materialLegend)
-//       → ULTRA-SIMPLE: single box for the whole block (no layers, no cavities)
+//       → no booleans, multi-body boxes (layers + cavity plugs)
 
 ///////////////////////////////////////////////////////////////
 // ID allocator (STEP requires numeric references)
@@ -234,9 +234,9 @@ function makeSolid(sb: StepBuilder, shellId: number): number {
 function makeRectSolid(
   sb: StepBuilder,
   corner: Pt, // lower-left-bottom corner
-  L: number,  // length  (X)
-  W: number,  // width   (Y)
-  H: number   // height  (Z)
+  L: number, // length  (X)
+  W: number, // width   (Y)
+  H: number // height  (Z)
 ): number {
   // Corner points
   const p000 = makePoint(sb, pt(corner.x, corner.y, corner.z));
@@ -531,8 +531,31 @@ function buildWrapperAndEmit(
 ): string | null {
   if (!solids.length) return null;
 
+  // AP203-style units + tolerance + representation context
+  // Pattern taken from widely used "block" sample files. :contentReference[oaicite:2]{index=2}
+  const lengthUnitId = sb.add(
+    `(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI., .METRE.))`
+  );
+  const planeAngleUnitId = sb.add(
+    `(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($, .RADIAN.))`
+  );
+  const planeAngleMeasureId = sb.add(
+    `PLANE_ANGLE_MEASURE_WITH_UNIT(PLANE_ANGLE_MEASURE(0.0174532925), #${planeAngleUnitId})`
+  );
+  const dimExpId = sb.add(
+    `DIMENSIONAL_EXPONENTS(0.,0.,0.,0.,0.,0.,0.)`
+  );
+  const degreeUnitId = sb.add(
+    `(CONVERSION_BASED_UNIT('DEGREE', #${planeAngleMeasureId}) NAMED_UNIT(#${dimExpId}) PLANE_ANGLE_UNIT())`
+  );
+  const solidAngleUnitId = sb.add(
+    `(NAMED_UNIT(*) SI_UNIT($, .STERADIAN.) SOLID_ANGLE_UNIT())`
+  );
+  const uncertaintyId = sb.add(
+    `UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-05), #${lengthUnitId}, 'MODEL_ACCURACY', 'Maximum Tolerance applied to model')`
+  );
   const repCtx = sb.add(
-    `GEOMETRIC_REPRESENTATION_CONTEXT(3) REPRESENTATION_CONTEXT('', '')`
+    `(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#${uncertaintyId})) GLOBAL_UNIT_ASSIGNED_CONTEXT((#${lengthUnitId}, #${degreeUnitId}, #${solidAngleUnitId})) REPRESENTATION_CONTEXT('', ''))`
   );
 
   const solidsList = solids.map((id) => `#${id}`).join(",");
@@ -577,17 +600,13 @@ function buildWrapperAndEmit(
   const header = [
     "ISO-10303-21;",
     "HEADER;",
-    `FILE_DESCRIPTION((${stepString(
-      `Foam layout | Quote ${quoteNo}${
-        materialLegend ? ` | ${materialLegend}` : ""
-      }`
-    )}),'2;1');`,
+    "FILE_DESCRIPTION (('STEP AP203'),'1');",
     `FILE_NAME(${stepString(
-      `${quoteNo}.step`
+      `${quoteNo}.STEP`
     )},${stepString(
       new Date().toISOString()
-    )},(),(),'Alex-IO','alex-io.com','Foam STEP export');`,
-    "FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));",
+    )},(''),(''),'Alex-IO','alex-io.com','Foam STEP export');`,
+    "FILE_SCHEMA (('CONFIG_CONTROL_DESIGN'));",
     "ENDSEC;",
     "DATA;",
   ].join("\n");
@@ -670,8 +689,9 @@ export function buildStepFromLayoutFull(
   if (!finalLayerSolidIds.length) {
     // Fallback: emit single block for entire stack
     const T = blockDims.T;
+    const fallbackSb = sb; // reuse
     const fallbackSolid = makeLayerBlockSolid(
-      sb,
+      fallbackSb,
       blockL,
       blockW,
       T,
@@ -690,7 +710,7 @@ export function buildStepFromLayoutFull(
 }
 
 ///////////////////////////////////////////////////////////////
-// Public: SIMPLE exporter (NO layers, NO cavities – single box)
+// Public: SIMPLE exporter (no booleans, multi-body blocks)
 ///////////////////////////////////////////////////////////////
 
 export function buildStepFromLayoutSimple(
@@ -698,12 +718,12 @@ export function buildStepFromLayoutSimple(
   quoteNo: string,
   materialLegend: string | null
 ): string | null {
-  // New ultra-simple behavior:
-  //   - Ignore layers / cavities.
-  //   - Emit ONE block: length x width x total thickness.
   const blockDims = getBlockDims(layout);
   if (!blockDims) return null;
-  const { L: blockL, W: blockW, T } = blockDims;
+  const { L: blockL, W: blockW } = blockDims;
+
+  const layers = getLayersArray(layout);
+  if (!layers.length) return null;
 
   const sb = new StepBuilder();
 
@@ -715,14 +735,54 @@ export function buildStepFromLayoutSimple(
     `AXIS2_PLACEMENT_3D('Base', #${origin}, #${dirZ}, #${dirX})`
   );
 
-  const solid = makeLayerBlockSolid(sb, blockL, blockW, T, 0);
-  const solids = [solid];
+  let currentBottomZmm = 0;
+  const solids: number[] = [];
+
+  for (const layer of layers) {
+    const thicknessIn = getLayerThicknessIn(layer, 0);
+    if (thicknessIn <= 0) continue;
+
+    const layerBottomZ = currentBottomZmm;
+
+    // 1) Foam layer block as its own solid
+    const layerBlockSolidId = makeLayerBlockSolid(
+      sb,
+      blockL,
+      blockW,
+      thicknessIn,
+      layerBottomZ
+    );
+    solids.push(layerBlockSolidId);
+
+    // 2) Cavity plugs as separate solids (no boolean)
+    const cavityDefs = getLayerCavities(layer);
+    for (const cav of cavityDefs) {
+      const cavSolidId = makeCavitySolid(
+        sb,
+        cav,
+        blockL,
+        blockW,
+        layerBottomZ,
+        thicknessIn
+      );
+      solids.push(cavSolidId);
+    }
+
+    currentBottomZmm += inToMm(thicknessIn);
+  }
+
+  if (!solids.length) {
+    // Fallback: emit single block for entire stack
+    const T = blockDims.T;
+    const fallbackSolid = makeLayerBlockSolid(sb, blockL, blockW, T, 0);
+    solids.push(fallbackSolid);
+  }
 
   return buildWrapperAndEmit(
     sb,
     solids,
     quoteNo,
     materialLegend,
-    "Foam Layout (Simple Block)"
+    "Foam Layout (Simple)"
   );
 }
