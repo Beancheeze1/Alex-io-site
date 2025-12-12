@@ -5,11 +5,11 @@
 // Behavior:
 // - Loads latest layout package for the quote
 // - Slices layout_json to include ONLY the requested layer (and that layer's cavities)
-// - Calls STEP microservice (via shared buildStepFromLayout facade)
+// - Uses the SAME STEP builder facade as Apply-to-quote (buildStepFromLayout)
 // - Returns attachment .step
 //
 // Notes:
-// - Generates on-demand (no DB write) to keep Path A minimal.
+// - This generates on-demand (no DB write) to keep Path A minimal.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,39 +31,48 @@ function getLayers(layout: any): any[] {
   return [];
 }
 
-function sliceLayoutToSingleLayer(layout: any, layerIndex: number): any | null {
+function getLayerThicknessIn(layer: any): number | null {
+  if (!layer || typeof layer !== "object") return null;
+  const t =
+    (layer as any).thicknessIn ??
+    (layer as any).thickness_in ??
+    (layer as any).heightIn ??
+    (layer as any).height_in ??
+    (layer as any).thickness ??
+    (layer as any).height ??
+    null;
+
+  const n = Number(t);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+function sliceLayoutToSingleLayer(layout: any, layerIndex: number): any {
   const layers = getLayers(layout);
   const layer = layers[layerIndex];
   if (!layer) return null;
 
-  // Clone shallowly
+  // Clone shallowly; replace only the layers container
   const out: any = { ...(layout || {}) };
 
-  // Force a single canonical layers container to avoid ambiguity/desync.
-  // The STEP facade (lib/cad/step.ts) normalizes stack[].
-  out.stack = [layer];
-  delete out.layers;
-  delete out.foamLayers;
+  if (Array.isArray(layout.stack)) out.stack = [layer];
+  if (Array.isArray(layout.layers)) out.layers = [layer];
+  if (Array.isArray((layout as any).foamLayers)) out.foamLayers = [layer];
 
-  // IMPORTANT: exporting a *single layer* means the block thickness should match
-  // that layer thickness, not the total stack thickness.
-  const t =
-    Number((layer as any)?.thicknessIn ?? (layer as any)?.thickness_in ?? (layer as any)?.thickness ?? 0) || 0;
-
-  if (out.block && t > 0) {
-    // preserve existing L/W; override thickness only
-    out.block = { ...(out.block || {}) };
-    out.block.thicknessIn = t;
-    // also set common aliases (harmless if ignored)
-    out.block.thickness_in = t;
-    out.block.heightIn = t;
-    out.block.height_in = t;
-    out.block.height = t;
+  // IMPORTANT: For per-layer STEP, set block.thicknessIn to the layer thickness
+  // so the exported solid matches the editor’s per-layer thickness.
+  if (out.block && typeof out.block === "object") {
+    const t = getLayerThicknessIn(layer);
+    if (t && t > 0) {
+      out.block = { ...out.block, thicknessIn: t };
+    }
   }
 
-  // Avoid dual cavity sources; the STEP facade will merge legacy cavities
-  // into stack[0] when appropriate. For a sliced layer export, keep it clean.
-  out.cavities = null;
+  // Prevent legacy top-level cavities from “leaking” into the single-layer export.
+  // The layer’s cavities are already inside out.stack[0].cavities (or equivalent).
+  if (Array.isArray(out.cavities)) {
+    out.cavities = null;
+  }
 
   // Helpful metadata for downstream services (safe if ignored)
   out.__layer_index = layerIndex;
@@ -104,10 +113,11 @@ export async function GET(req: Request) {
     const sliced = sliceLayoutToSingleLayer(pkg.layout_json, layer_index);
     if (!sliced) return jsonErr(404, "NOT_FOUND", "Layer not found for this quote layout.");
 
-    // Use the shared STEP facade so behavior matches Apply-to-quote STEP.
+    // Use the same STEP build path as apply/route.ts to eliminate schema drift.
     const stepText = await buildStepFromLayout(sliced, quote_no, null);
+
     if (!stepText || stepText.trim().length === 0) {
-      return jsonErr(502, "STEP_EMPTY", "STEP service returned empty STEP body.");
+      return jsonErr(502, "STEP_FAILED", "STEP microservice returned empty STEP text for this layer.");
     }
 
     const filename = `${quote_no}-layer-${layer_index + 1}.step`;
