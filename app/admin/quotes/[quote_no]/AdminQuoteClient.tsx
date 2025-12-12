@@ -109,9 +109,7 @@ type BoxesForQuoteErr = {
 
 type BoxesForQuoteResponse = BoxesForQuoteOk | BoxesForQuoteErr;
 
-function parsePriceField(
-  raw: string | number | null | undefined,
-): number | null {
+function parsePriceField(raw: string | number | null | undefined): number | null {
   if (raw == null) return null;
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n)) return null;
@@ -163,10 +161,7 @@ function getLayersFromLayout(layout: any): LayoutLayer[] {
   if (Array.isArray(layout.layers) && layout.layers.length > 0) {
     return layout.layers as LayoutLayer[];
   }
-  if (
-    Array.isArray((layout as any).foamLayers) &&
-    (layout as any).foamLayers.length > 0
-  ) {
+  if (Array.isArray((layout as any).foamLayers) && (layout as any).foamLayers.length > 0) {
     return (layout.foamLayers as any[]) as LayoutLayer[];
   }
 
@@ -208,25 +203,16 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
     const lengthIn = Number((cav as any).lengthIn);
     const widthIn = Number((cav as any).widthIn);
     const depthInRaw = (cav as any).depthIn;
-    const depthIn =
-      depthInRaw == null ? null : Number(depthInRaw);
+    const depthIn = depthInRaw == null ? null : Number(depthInRaw);
 
     const x = Number((cav as any).x);
     const y = Number((cav as any).y);
 
     if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
 
-    const w =
-      Number.isFinite(widthIn) && widthIn > 0 ? widthIn : lengthIn;
+    const w = Number.isFinite(widthIn) && widthIn > 0 ? widthIn : lengthIn;
 
-    if (
-      !Number.isFinite(x) ||
-      !Number.isFinite(y) ||
-      x < 0 ||
-      x > 1 ||
-      y < 0 ||
-      y > 1
-    ) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
       continue;
     }
 
@@ -353,29 +339,21 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
 
 export default function AdminQuoteClient({ quoteNo }: Props) {
   // Local quote number value: prefer prop, fall back to URL path.
-  const [quoteNoValue, setQuoteNoValue] = React.useState<string>(
-    quoteNo || "",
-  );
+  const [quoteNoValue, setQuoteNoValue] = React.useState<string>(quoteNo || "");
 
   const [loading, setLoading] = React.useState<boolean>(!!quoteNoValue);
   const [error, setError] = React.useState<string | null>(null);
   const [notFound, setNotFound] = React.useState<string | null>(null);
   const [quoteState, setQuoteState] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
-  const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(
-    null,
-  );
+  const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
 
   // NEW: requested cartons for this quote (from quote_box_selections)
-  const [boxSelections, setBoxSelections] = React.useState<
-    RequestedBoxRow[] | null
-  >(null);
-  const [boxSelectionsLoading, setBoxSelectionsLoading] =
-    React.useState<boolean>(false);
-  const [boxSelectionsError, setBoxSelectionsError] =
-    React.useState<string | null>(null);
+  const [boxSelections, setBoxSelections] = React.useState<RequestedBoxRow[] | null>(null);
+  const [boxSelectionsLoading, setBoxSelectionsLoading] = React.useState<boolean>(false);
+  const [boxSelectionsError, setBoxSelectionsError] = React.useState<string | null>(null);
 
   // 🔁 Rescue quote_no from URL path if prop is missing/empty.
   // Expected path: /admin/quotes/<quote_no>
@@ -387,10 +365,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       const path = window.location.pathname || "";
       const parts = path.split("/").filter(Boolean); // e.g. ["admin", "quotes", "Q-AI-..."]
       const idx = parts.findIndex((p) => p === "quotes");
-      const fromPath =
-        idx >= 0 && parts[idx + 1]
-          ? decodeURIComponent(parts[idx + 1])
-          : "";
+      const fromPath = idx >= 0 && parts[idx + 1] ? decodeURIComponent(parts[idx + 1]) : "";
 
       if (fromPath) {
         setQuoteNoValue(fromPath);
@@ -422,10 +397,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       setLayoutPkg(null);
 
       try {
-        const res = await fetch(
-          "/api/quote/print?quote_no=" + encodeURIComponent(quoteNoValue),
-          { cache: "no-store" },
-        );
+        const res = await fetch("/api/quote/print?quote_no=" + encodeURIComponent(quoteNoValue), {
+          cache: "no-store",
+        });
 
         const json = (await res.json()) as ApiResponse;
 
@@ -434,9 +408,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             if (!json.ok && json.error === "NOT_FOUND") {
               setNotFound(json.message || "Quote not found.");
             } else if (!json.ok) {
-              setError(
-                json.message || "There was a problem loading this quote.",
-              );
+              setError(json.message || "There was a problem loading this quote.");
             } else {
               setError("There was a problem loading this quote.");
             }
@@ -456,9 +428,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       } catch (err) {
         console.error("Error fetching /api/quote/print (admin view):", err);
         if (!cancelled) {
-          setError(
-            "There was an unexpected problem loading this quote. Please try again.",
-          );
+          setError("There was an unexpected problem loading this quote. Please try again.");
         }
       } finally {
         if (!cancelled) {
@@ -486,11 +456,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       setBoxSelections(null);
 
       try {
-        const res = await fetch(
-          "/api/boxes/for-quote?quote_no=" +
-            encodeURIComponent(quoteNoValue),
-          { cache: "no-store" },
-        );
+        const res = await fetch("/api/boxes/for-quote?quote_no=" + encodeURIComponent(quoteNoValue), {
+          cache: "no-store",
+        });
 
         const json = (await res.json()) as BoxesForQuoteResponse;
 
@@ -508,14 +476,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
           setBoxSelections(json.selections || []);
         }
       } catch (err) {
-        console.error(
-          "Error fetching /api/boxes/for-quote (admin view):",
-          err,
-        );
+        console.error("Error fetching /api/boxes/for-quote (admin view):", err);
         if (!cancelled) {
-          setBoxSelectionsError(
-            "Unable to load requested cartons for this quote.",
-          );
+          setBoxSelectionsError("Unable to load requested cartons for this quote.");
         }
       } finally {
         if (!cancelled) {
@@ -552,9 +515,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     if (!layoutPkg) return;
     if (!svgContainerRef.current) return;
 
-    const svgEl = svgContainerRef.current.querySelector("svg") as
-      | SVGSVGElement
-      | null;
+    const svgEl = svgContainerRef.current.querySelector("svg") as SVGSVGElement | null;
 
     if (!svgEl) return;
 
@@ -572,8 +533,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [layoutPkg]);
 
+  // SVG + DXF blob downloads remain local (fine).
   const handleDownload = React.useCallback(
-    (kind: "svg" | "dxf" | "step") => {
+    (kind: "svg" | "dxf") => {
       if (typeof window === "undefined") return;
       if (!layoutPkg) return;
 
@@ -589,10 +551,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         data = layoutPkg.dxf_text;
         ext = "dxf";
         mime = "application/dxf";
-      } else if (kind === "step" && layoutPkg.step_text) {
-        data = layoutPkg.step_text;
-        ext = "step";
-        mime = "application/step";
       }
 
       if (!data) return;
@@ -617,23 +575,37 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     [layoutPkg, quoteState],
   );
 
+  // NEW: STEP download uses the server endpoint directly.
+  // This avoids relying on layoutPkg.step_text being present in /api/quote/print.
+  const handleDownloadStep = React.useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (!quoteNoValue) return;
+
+    const url = `/api/quote/layout/step?quote_no=${encodeURIComponent(quoteNoValue)}`;
+
+    // Trigger a normal browser download.
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      console.error("Admin: STEP download failed:", err);
+      // fallback
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }, [quoteNoValue]);
+
   const primaryItem = items[0] || null;
 
   // NEW: unpack richer pricing info for quick engineering context
   const primaryPricing = primaryItem?.pricing_meta || null;
   const minChargeApplied = !!primaryPricing?.used_min_charge;
-  const setupFee =
-    typeof primaryPricing?.setup_fee === "number"
-      ? primaryPricing.setup_fee
-      : null;
-  const kerfPct =
-    typeof primaryPricing?.kerf_pct === "number"
-      ? primaryPricing.kerf_pct
-      : null;
-  const minChargeValue =
-    typeof primaryPricing?.min_charge === "number"
-      ? primaryPricing.min_charge
-      : null;
+  const setupFee = typeof primaryPricing?.setup_fee === "number" ? primaryPricing.setup_fee : null;
+  const kerfPct = typeof primaryPricing?.kerf_pct === "number" ? primaryPricing.kerf_pct : null;
+  const minChargeValue = typeof primaryPricing?.min_charge === "number" ? primaryPricing.min_charge : null;
 
   // shared card styles (aligned with client-facing quote page palette)
   const cardBase: React.CSSProperties = {
@@ -660,30 +632,23 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
   // NEW: derived material fields for the explorer card (with safe density handling)
   const primaryMaterialName =
-    primaryItem?.material_name ||
-    (primaryItem ? `Material #${primaryItem.material_id}` : null);
+    primaryItem?.material_name || (primaryItem ? `Material #${primaryItem.material_id}` : null);
   const primaryMaterialFamily = primaryItem?.material_family || null;
   const rawPrimaryDensity = primaryItem?.density_lb_ft3 ?? null;
-  const primaryDensity =
-    rawPrimaryDensity != null ? Number(rawPrimaryDensity) : null;
+  const primaryDensity = rawPrimaryDensity != null ? Number(rawPrimaryDensity) : null;
   const primaryDensityDisplay =
-    primaryDensity != null && Number.isFinite(primaryDensity)
-      ? primaryDensity.toFixed(2)
-      : null;
+    primaryDensity != null && Number.isFinite(primaryDensity) ? primaryDensity.toFixed(2) : null;
 
   const customerQuoteUrl =
     quoteState?.quote_no && typeof window === "undefined"
       ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
       : quoteState?.quote_no
-      ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
-      : null;
+        ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
+        : null;
 
   // Layers for per-layer DXFs
   const layersForDxf = React.useMemo(
-    () =>
-      layoutPkg && layoutPkg.layout_json
-        ? getLayersFromLayout(layoutPkg.layout_json)
-        : [],
+    () => (layoutPkg && layoutPkg.layout_json ? getLayersFromLayout(layoutPkg.layout_json) : []),
     [layoutPkg],
   );
 
@@ -719,15 +684,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   return (
     <div
       style={{
-        fontFamily:
-          "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
+        fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
         background: "#020617",
         minHeight: "100vh",
         padding: "24px",
       }}
     >
-
-
       <div
         style={{
           maxWidth: "1100px",
@@ -758,8 +720,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             margin: "-24px -24px 20px -24px",
             padding: "16px 24px",
             borderRadius: "24px 24px 0 0",
-            background:
-              "linear-gradient(90deg,#0ea5e9 0%,#22d3ee 35%,#6366f1 100%)",
+            background: "linear-gradient(90deg,#0ea5e9 0%,#22d3ee 35%,#6366f1 100%)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -829,8 +790,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     opacity: 0.9,
                   }}
                 >
-                  Created:{" "}
-                  {new Date(quoteState.created_at).toLocaleString()}
+                  Created: {new Date(quoteState.created_at).toLocaleString()}
                 </p>
               </>
             )}
@@ -840,29 +800,21 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         {/* loading / errors */}
         {loading && (
           <>
-            <h1 style={{ fontSize: 20, marginBottom: 8 }}>
-              Loading quote...
-            </h1>
-            <p style={{ color: "#6b7280", fontSize: 13 }}>
-              Fetching quote + latest foam layout package.
-            </p>
+            <h1 style={{ fontSize: 20, marginBottom: 8 }}>Loading quote...</h1>
+            <p style={{ color: "#6b7280", fontSize: 13 }}>Fetching quote + latest foam layout package.</p>
           </>
         )}
 
         {!loading && notFound && (
           <>
-            <h1 style={{ fontSize: 20, marginBottom: 8 }}>
-              Quote not found
-            </h1>
+            <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
             <p style={{ color: "#555" }}>{notFound}</p>
           </>
         )}
 
         {!loading && error && !quoteState && (
           <>
-            <h1 style={{ fontSize: 20, marginBottom: 8 }}>
-              Problem loading quote
-            </h1>
+            <h1 style={{ fontSize: 20, marginBottom: 8 }}>Problem loading quote</h1>
             <p style={{ color: "#6b7280", fontSize: 13 }}>{error}</p>
           </>
         )}
@@ -901,21 +853,14 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   {primaryItem && (
                     <>
                       <div>
-                        <div style={labelStyle}>
-                          Primary dims (L × W × H)
-                        </div>
+                        <div style={labelStyle}>Primary dims (L × W × H)</div>
                         <div>
-                          {primaryItem.length_in} ×{" "}
-                          {primaryItem.width_in} ×{" "}
-                          {primaryItem.height_in} in
+                          {primaryItem.length_in} × {primaryItem.width_in} × {primaryItem.height_in} in
                         </div>
                       </div>
                       <div>
                         <div style={labelStyle}>Primary material</div>
-                        <div>
-                          {primaryItem.material_name ||
-                            `Material #${primaryItem.material_id}`}
-                        </div>
+                        <div>{primaryItem.material_name || `Material #${primaryItem.material_id}`}</div>
                       </div>
                       <div>
                         <div style={labelStyle}>Quoted quantity</div>
@@ -929,14 +874,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               <div style={cardBase}>
                 <div style={cardTitleStyle}>Pricing snapshot</div>
                 {items.length === 0 ? (
-                  <div
-                    style={{
-                      fontSize: 13,
-                      color: "#6b7280",
-                    }}
-                  >
-                    No stored line items yet. Once quote_items are written,
-                    you&apos;ll see per-line pricing here.
+                  <div style={{ fontSize: 13, color: "#6b7280" }}>
+                    No stored line items yet. Once quote_items are written, you&apos;ll see per-line pricing here.
                   </div>
                 ) : (
                   <div
@@ -960,50 +899,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       <>
                         <div>
                           <div style={labelStyle}>Estimated subtotal</div>
-                          <div
-                            style={{
-                              fontSize: 16,
-                              fontWeight: 600,
-                            }}
-                          >
-                            {formatUsd(subtotal)}
-                          </div>
+                          <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(subtotal)}</div>
                         </div>
                         {primaryItem && (
                           <div>
-                            <div style={labelStyle}>
-                              Primary unit price
-                            </div>
-                            <div>
-                              {formatUsd(
-                                parsePriceField(
-                                  primaryItem.price_unit_usd ?? null,
-                                ),
-                              )}
-                            </div>
+                            <div style={labelStyle}>Primary unit price</div>
+                            <div>{formatUsd(parsePriceField(primaryItem.price_unit_usd ?? null))}</div>
                           </div>
                         )}
-                        {/* NEW: tiny internal-only context about how pricing was built */}
                         {primaryPricing && (
-                          <div
-                            style={{
-                              marginTop: 4,
-                              fontSize: 11,
-                              color: "#6b7280",
-                              lineHeight: 1.5,
-                            }}
-                          >
+                          <div style={{ marginTop: 4, fontSize: 11, color: "#6b7280", lineHeight: 1.5 }}>
                             <span>
                               Calc basis: volumetric foam charge with{" "}
-                              {typeof kerfPct === "number"
-                                ? `~${kerfPct}% kerf/waste`
-                                : "standard kerf/waste"}
-                              .
-                              {setupFee && setupFee > 0
-                                ? ` Includes a setup fee of ${formatUsd(
-                                    setupFee,
-                                  )}.`
-                                : ""}
+                              {typeof kerfPct === "number" ? `~${kerfPct}% kerf/waste` : "standard kerf/waste"}.{" "}
+                              {setupFee && setupFee > 0 ? ` Includes a setup fee of ${formatUsd(setupFee)}.` : ""}
                               {minChargeApplied
                                 ? ` Pricing is currently governed by the minimum charge (${formatUsd(
                                     minChargeValue ?? subtotal,
@@ -1015,15 +924,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       </>
                     )}
                     {!anyPricing && (
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "#6b7280",
-                          marginTop: 4,
-                        }}
-                      >
-                        Volumetric calc did not attach pricing. Check
-                        material / dims / qty if you expect a value here.
+                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                        Volumetric calc did not attach pricing. Check material / dims / qty if you expect a value here.
                       </div>
                     )}
                   </div>
@@ -1039,8 +941,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   background: "#ffffff",
                   marginBottom: 20,
                   display: "grid",
-                  gridTemplateColumns:
-                    "minmax(0,2.2fr) minmax(0,1.8fr)",
+                  gridTemplateColumns: "minmax(0,2.2fr) minmax(0,1.8fr)",
                   gap: 16,
                 }}
               >
@@ -1063,34 +964,26 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       <div style={labelStyle}>Family</div>
                       <div>
                         {primaryMaterialFamily || (
-                          <span style={{ color: "#9ca3af" }}>
-                            Unassigned (set in materials admin)
-                          </span>
+                          <span style={{ color: "#9ca3af" }}>Unassigned (set in materials admin)</span>
                         )}
                       </div>
                     </div>
                     <div>
                       <div style={labelStyle}>Density</div>
-                      <div>
-                        {primaryDensityDisplay != null
-                          ? `${primaryDensityDisplay} pcf`
-                          : "—"}
-                      </div>
+                      <div>{primaryDensityDisplay != null ? `${primaryDensityDisplay} pcf` : "—"}</div>
                     </div>
                     <div style={{ fontSize: 11, color: "#6b7280" }}>
                       Family + density come directly from the{" "}
                       <span
                         style={{
-                          fontFamily:
-                            "ui-monospace, SFMono-Regular, monospace",
+                          fontFamily: "ui-monospace, SFMono-Regular, monospace",
                           fontSize: 11,
                           color: "#0369a1",
                         }}
                       >
                         materials
                       </span>{" "}
-                      table. Polyethylene and Expanded Polyethylene remain
-                      separate families.
+                      table. Polyethylene and Expanded Polyethylene remain separate families.
                     </div>
                   </div>
                 </div>
@@ -1118,13 +1011,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       }}
                     >
                       <li>
-                        <a
-                          href="/admin/materials"
-                          style={{
-                            color: "#0369a1",
-                            textDecoration: "none",
-                          }}
-                        >
+                        <a href="/admin/materials" style={{ color: "#0369a1", textDecoration: "none" }}>
                           Open materials catalog
                         </a>{" "}
                         to confirm family / density.
@@ -1132,10 +1019,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       <li>
                         <a
                           href={`/admin/cushion-curves/${primaryItem.material_id}`}
-                          style={{
-                            color: "#0369a1",
-                            textDecoration: "none",
-                          }}
+                          style={{ color: "#0369a1", textDecoration: "none" }}
                         >
                           View cushion curves for this material
                         </a>{" "}
@@ -1145,13 +1029,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   </div>
 
                   {customerQuoteUrl && (
-                    <div
-                      style={{
-                        marginTop: 4,
-                        paddingTop: 6,
-                        borderTop: "1px dashed #e5e7eb",
-                      }}
-                    >
+                    <div style={{ marginTop: 4, paddingTop: 6, borderTop: "1px dashed #e5e7eb" }}>
                       <div style={labelStyle}>Customer-facing view</div>
                       <a
                         href={customerQuoteUrl}
@@ -1172,8 +1050,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           textDecoration: "none",
                         }}
                       >
-                        View customer quote in new tab
-                        <span aria-hidden="true">↗</span>
+                        View customer quote in new tab <span aria-hidden="true">↗</span>
                       </a>
                     </div>
                   )}
@@ -1182,139 +1059,65 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             )}
 
             {/* NEW: Customer requested cartons (admin-only view) */}
-            <div
-              style={{
-                ...cardBase,
-                background: "#ffffff",
-                marginBottom: 20,
-              }}
-            >
+            <div style={{ ...cardBase, background: "#ffffff", marginBottom: 20 }}>
               <div style={cardTitleStyle}>Customer requested cartons</div>
               {boxSelectionsLoading && (
                 <p style={{ fontSize: 12, color: "#6b7280" }}>
-                  Looking up any cartons the customer marked as{" "}
-                  <strong>Requested</strong> from the quote viewer…
+                  Looking up any cartons the customer marked as <strong>Requested</strong> from the quote viewer…
                 </p>
               )}
               {!boxSelectionsLoading && boxSelectionsError && (
-                <p style={{ fontSize: 12, color: "#b91c1c" }}>
-                  {boxSelectionsError}
+                <p style={{ fontSize: 12, color: "#b91c1c" }}>{boxSelectionsError}</p>
+              )}
+              {!boxSelectionsLoading && !boxSelectionsError && (!boxSelections || boxSelections.length === 0) && (
+                <p style={{ fontSize: 12, color: "#6b7280" }}>
+                  No cartons have been requested on this quote yet from the customer-facing /quote page.
                 </p>
               )}
-              {!boxSelectionsLoading &&
-                !boxSelectionsError &&
-                (!boxSelections || boxSelections.length === 0) && (
-                  <p style={{ fontSize: 12, color: "#6b7280" }}>
-                    No cartons have been requested on this quote yet from
-                    the customer-facing /quote page.
+              {!boxSelectionsLoading && !boxSelectionsError && boxSelections && boxSelections.length > 0 && (
+                <>
+                  <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 6 }}>
+                    These selections come from the public quote viewer when the customer clicks{" "}
+                    <strong>&ldquo;Add this carton to my quote&rdquo;</strong>. Use this list as a heads-up when
+                    finalizing packaging and placing box orders.
                   </p>
-                )}
-              {!boxSelectionsLoading &&
-                !boxSelectionsError &&
-                boxSelections &&
-                boxSelections.length > 0 && (
-                  <>
-                    <p
-                      style={{
-                        fontSize: 12,
-                        color: "#4b5563",
-                        marginBottom: 6,
-                      }}
-                    >
-                      These selections come from the public quote viewer
-                      when the customer clicks{" "}
-                      <strong>&ldquo;Add this carton to my quote&rdquo;</strong>.
-                      Use this list as a heads-up when finalizing packaging
-                      and placing box orders.
-                    </p>
-                    <ul
-                      style={{
-                        listStyle: "disc",
-                        paddingLeft: 18,
-                        margin: 0,
-                        fontSize: 12,
-                        color: "#111827",
-                      }}
-                    >
-                      {boxSelections.map((sel) => {
-                        const metaParts: string[] = [];
-                        if (sel.vendor) metaParts.push(sel.vendor);
-                        if (sel.style) metaParts.push(sel.style);
-                        if (sel.sku) metaParts.push(sel.sku);
+                  <ul style={{ listStyle: "disc", paddingLeft: 18, margin: 0, fontSize: 12, color: "#111827" }}>
+                    {boxSelections.map((sel) => {
+                      const metaParts: string[] = [];
+                      if (sel.vendor) metaParts.push(sel.vendor);
+                      if (sel.style) metaParts.push(sel.style);
+                      if (sel.sku) metaParts.push(sel.sku);
 
-                        return (
-                          <li
-                            key={sel.id}
-                            style={{ marginBottom: 4 }}
-                          >
-                            <div style={{ fontWeight: 500 }}>
-                              {sel.description || sel.sku}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 11,
-                                color: "#6b7280",
-                              }}
-                            >
-                              {metaParts.join(" • ")} — Qty{" "}
-                              {sel.qty.toLocaleString()}
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <p
-                      style={{
-                        marginTop: 6,
-                        fontSize: 11,
-                        color: "#9ca3af",
-                      }}
-                    >
-                      Read-only mirror of{" "}
-                      <span
-                        style={{
-                          fontFamily:
-                            "ui-monospace, SFMono-Regular, monospace",
-                        }}
-                      >
-                        quote_box_selections
-                      </span>
-                      . Changing cartons or quantities still happens via
-                      your normal quoting workflow.
-                    </p>
-                  </>
-                )}
+                      return (
+                        <li key={sel.id} style={{ marginBottom: 4 }}>
+                          <div style={{ fontWeight: 500 }}>{sel.description || sel.sku}</div>
+                          <div style={{ fontSize: 11, color: "#6b7280" }}>
+                            {metaParts.join(" • ")} — Qty {sel.qty.toLocaleString()}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p style={{ marginTop: 6, fontSize: 11, color: "#9ca3af" }}>
+                    Read-only mirror of{" "}
+                    <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>quote_box_selections</span>.
+                    Changing cartons or quantities still happens via your normal quoting workflow.
+                  </p>
+                </>
+              )}
             </div>
 
             {/* layout + CAD downloads */}
-            <div
-              style={{
-                marginTop: 4,
-                marginBottom: 20,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: "#0f172a",
-                  marginBottom: 8,
-                }}
-              >
+            <div style={{ marginTop: 4, marginBottom: 20 }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
                 Foam layout & CAD exports
               </div>
 
-              <div
-                style={{
-                  ...cardBase,
-                  background: "#ffffff",
-                }}
-              >
+              <div style={{ ...cardBase, background: "#ffffff" }}>
                 {!layoutPkg ? (
                   <p style={{ color: "#6b7280", fontSize: 13 }}>
-                    No foam layout package has been stored for this quote
-                    yet. Have the client use the layout editor from their
-                    emailed quote and click <strong>Apply to quote</strong>.
+                    No foam layout package has been stored for this quote yet. Have the client use the layout editor
+                    from their emailed quote and click <strong>Apply to quote</strong>.
                   </p>
                 ) : (
                   <>
@@ -1328,25 +1131,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       }}
                     >
                       <div>
-                        <div
-                          style={{
-                            fontWeight: 600,
-                            color: "#111827",
-                            marginBottom: 2,
-                          }}
-                        >
+                        <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>
                           Layout package #{layoutPkg.id}
                         </div>
-                        <div
-                          style={{
-                            color: "#6b7280",
-                            fontSize: 12,
-                          }}
-                        >
-                          Saved:{" "}
-                          {new Date(
-                            layoutPkg.created_at,
-                          ).toLocaleString()}
+                        <div style={{ color: "#6b7280", fontSize: 12 }}>
+                          Saved: {new Date(layoutPkg.created_at).toLocaleString()}
                         </div>
                         {notesPreview && (
                           <div
@@ -1360,20 +1149,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               maxWidth: 420,
                             }}
                           >
-                            <span style={{ fontWeight: 500 }}>
-                              Notes:{" "}
-                            </span>
+                            <span style={{ fontWeight: 500 }}>Notes: </span>
                             {notesPreview}
                           </div>
                         )}
                       </div>
-                      <div
-                        style={{
-                          textAlign: "right",
-                          fontSize: 12,
-                          minWidth: 260,
-                        }}
-                      >
+
+                      <div style={{ textAlign: "right", fontSize: 12, minWidth: 260 }}>
                         <div
                           style={{
                             marginBottom: 4,
@@ -1385,82 +1167,69 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                         >
                           CAD downloads
                         </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: 8,
-                            justifyContent: "flex-end",
-                          }}
-                        >
-                          {layoutPkg.svg_text &&
-                            layoutPkg.svg_text.trim().length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => handleDownload("svg")}
-                                style={{
-                                  padding: "4px 10px",
-                                  borderRadius: 999,
-                                  border: "1px solid #c7d2fe",
-                                  background: "#eef2ff",
-                                  color: "#1d4ed8",
-                                  fontSize: 11,
-                                  fontWeight: 500,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                Download SVG
-                              </button>
-                            )}
-                          {layoutPkg.dxf_text &&
-                            layoutPkg.dxf_text.trim().length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => handleDownload("dxf")}
-                                style={{
-                                  padding: "4px 10px",
-                                  borderRadius: 999,
-                                  border: "1px solid #e5e7eb",
-                                  background: "#f9fafb",
-                                  color: "#111827",
-                                  fontSize: 11,
-                                  fontWeight: 500,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                Download DXF
-                              </button>
-                            )}
-                          {layoutPkg.step_text &&
-                            layoutPkg.step_text.trim().length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => handleDownload("step")}
-                                style={{
-                                  padding: "4px 10px",
-                                  borderRadius: 999,
-                                  border: "1px solid #e5e7eb",
-                                  background: "#f9fafb",
-                                  color: "#111827",
-                                  fontSize: 11,
-                                  fontWeight: 500,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                Download STEP
-                              </button>
-                            )}
+
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+                          {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleDownload("svg")}
+                              style={{
+                                padding: "4px 10px",
+                                borderRadius: 999,
+                                border: "1px solid #c7d2fe",
+                                background: "#eef2ff",
+                                color: "#1d4ed8",
+                                fontSize: 11,
+                                fontWeight: 500,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Download SVG
+                            </button>
+                          )}
+
+                          {layoutPkg.dxf_text && layoutPkg.dxf_text.trim().length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleDownload("dxf")}
+                              style={{
+                                padding: "4px 10px",
+                                borderRadius: 999,
+                                border: "1px solid #e5e7eb",
+                                background: "#f9fafb",
+                                color: "#111827",
+                                fontSize: 11,
+                                fontWeight: 500,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Download DXF
+                            </button>
+                          )}
+
+                          {/* STEP now downloads from server endpoint (no dependency on step_text being in the print payload) */}
+                          <button
+                            type="button"
+                            onClick={handleDownloadStep}
+                            style={{
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              border: "1px solid #0ea5e9",
+                              background: "#e0f2fe",
+                              color: "#0369a1",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                            title="Downloads latest STEP saved for this quote via /api/quote/layout/step"
+                          >
+                            Download STEP
+                          </button>
                         </div>
 
                         {/* Per-layer DXFs */}
                         {layersForDxf && layersForDxf.length > 0 && (
-                          <div
-                            style={{
-                              marginTop: 10,
-                              paddingTop: 6,
-                              borderTop: "1px dashed #e5e7eb",
-                            }}
-                          >
+                          <div style={{ marginTop: 10, paddingTop: 6, borderTop: "1px dashed #e5e7eb" }}>
                             <div
                               style={{
                                 fontSize: 11,
@@ -1472,21 +1241,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             >
                               Per-layer DXFs
                             </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 4,
-                                alignItems: "flex-end",
-                              }}
-                            >
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
                               {layersForDxf.map((layer, idx) => (
                                 <button
                                   key={idx}
                                   type="button"
-                                  onClick={() =>
-                                    handleDownloadLayerDxf(idx)
-                                  }
+                                  onClick={() => handleDownloadLayerDxf(idx)}
                                   style={{
                                     padding: "3px 9px",
                                     borderRadius: 999,
@@ -1497,8 +1257,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                     cursor: "pointer",
                                   }}
                                 >
-                                  Download DXF —{" "}
-                                  {getLayerLabel(layer, idx)}
+                                  Download DXF — {getLayerLabel(layer, idx)}
                                 </button>
                               ))}
                             </div>
@@ -1507,105 +1266,63 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       </div>
                     </div>
 
-                    {layoutPkg.svg_text &&
-                      layoutPkg.svg_text.trim().length > 0 && (
-                        <div
-                          style={{
-                            marginTop: 10,
-                            padding: 8,
-                            borderRadius: 10,
-                            border: "1px solid #e5e7eb",
-                            background: "#ffffff",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 500,
-                              color: "#374151",
-                              marginBottom: 6,
-                            }}
-                          >
-                            Layout preview
-                          </div>
-                          <div
-                            ref={svgContainerRef}
-                            style={{
-                              width: "100%",
-                              height: 480,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              borderRadius: 8,
-                              border: "1px solid #e5e7eb",
-                              background: "#f3f4f6",
-                              overflow: "hidden",
-                            }}
-                            dangerouslySetInnerHTML={{
-                              __html: layoutPkg.svg_text,
-                            }}
-                          />
+                    {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          padding: 8,
+                          borderRadius: 10,
+                          border: "1px solid #e5e7eb",
+                          background: "#ffffff",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
+                          Layout preview
                         </div>
-                      )}
+                        <div
+                          ref={svgContainerRef}
+                          style={{
+                            width: "100%",
+                            height: 480,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            borderRadius: 8,
+                            border: "1px solid #e5e7eb",
+                            background: "#f3f4f6",
+                            overflow: "hidden",
+                          }}
+                          dangerouslySetInnerHTML={{ __html: layoutPkg.svg_text }}
+                        />
+                      </div>
+                    )}
                   </>
                 )}
               </div>
 
               {/* NEW: lightweight layout activity panel (latest package) */}
               {layoutPkg && (
-                <div
-                  style={{
-                    ...cardBase,
-                    background: "#ffffff",
-                    marginTop: 12,
-                  }}
-                >
+                <div style={{ ...cardBase, background: "#ffffff", marginTop: 12 }}>
                   <div style={cardTitleStyle}>Layout activity</div>
-                  <p
-                    style={{
-                      fontSize: 12,
-                      color: "#4b5563",
-                      marginBottom: 4,
-                    }}
-                  >
-                    Latest layout package is{" "}
-                    <strong>#{layoutPkg.id}</strong>, saved on{" "}
+                  <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 4 }}>
+                    Latest layout package is <strong>#{layoutPkg.id}</strong>, saved on{" "}
                     {new Date(layoutPkg.created_at).toLocaleString()}.
                   </p>
-                  <p
-                    style={{
-                      fontSize: 11,
-                      color: "#9ca3af",
-                    }}
-                  >
-                    Future upgrade: once a history API is wired, this panel
-                    will list multiple layout revisions with timestamps.
+                  <p style={{ fontSize: 11, color: "#9ca3af" }}>
+                    Future upgrade: once a history API is wired, this panel will list multiple layout revisions with
+                    timestamps.
                   </p>
                 </div>
               )}
             </div>
 
             {/* optional: quick line items table (admin view) */}
-            <div
-              style={{
-                ...cardBase,
-                background: "#ffffff",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "#0f172a",
-                  marginBottom: 4,
-                }}
-              >
+            <div style={{ ...cardBase, background: "#ffffff" }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>
                 Line items (admin view)
               </div>
               {items.length === 0 ? (
-                <p style={{ color: "#6b7280", fontSize: 13 }}>
-                  No line items stored for this quote.
-                </p>
+                <p style={{ color: "#6b7280", fontSize: 13 }}>No line items stored for this quote.</p>
               ) : (
                 <table
                   style={{
@@ -1619,130 +1336,34 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 >
                   <thead>
                     <tr style={{ background: "#eef2ff" }}>
-                      <th
-                        style={{
-                          textAlign: "left",
-                          padding: 6,
-                          borderBottom: "1px solid #e5e7eb",
-                        }}
-                      >
-                        Line
-                      </th>
-                      <th
-                        style={{
-                          textAlign: "left",
-                          padding: 6,
-                          borderBottom: "1px solid #e5e7eb",
-                        }}
-                      >
-                        Material
-                      </th>
-                      <th
-                        style={{
-                          textAlign: "left",
-                          padding: 6,
-                          borderBottom: "1px solid #e5e7eb",
-                        }}
-                      >
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Line</th>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Material</th>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>
                         Dims (L × W × H)
                       </th>
-                      <th
-                        style={{
-                          textAlign: "right",
-                          padding: 6,
-                          borderBottom: "1px solid #e5e7eb",
-                        }}
-                      >
-                        Qty
-                      </th>
-                      <th
-                        style={{
-                          textAlign: "right",
-                          padding: 6,
-                          borderBottom: "1px solid #e5e7eb",
-                        }}
-                      >
-                        Unit
-                      </th>
-                      <th
-                        style={{
-                          textAlign: "right",
-                          padding: 6,
-                          borderBottom: "1px solid #e5e7eb",
-                        }}
-                      >
-                        Total
-                      </th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Qty</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Unit</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((item, idx) => {
-                      const dims =
-                        item.length_in +
-                        " × " +
-                        item.width_in +
-                        " × " +
-                        item.height_in;
-                      const label =
-                        item.material_name ||
-                        "Material #" + item.material_id;
-                      const unit = parsePriceField(
-                        item.price_unit_usd ?? null,
-                      );
-                      const total = parsePriceField(
-                        item.price_total_usd ?? null,
-                      );
+                      const dims = item.length_in + " × " + item.width_in + " × " + item.height_in;
+                      const label = item.material_name || "Material #" + item.material_id;
+                      const unit = parsePriceField(item.price_unit_usd ?? null);
+                      const total = parsePriceField(item.price_total_usd ?? null);
                       return (
                         <tr key={item.id}>
-                          <td
-                            style={{
-                              padding: 6,
-                              borderBottom: "1px solid #f3f4f6",
-                            }}
-                          >
-                            {idx + 1}
-                          </td>
-                          <td
-                            style={{
-                              padding: 6,
-                              borderBottom: "1px solid #f3f4f6",
-                            }}
-                          >
-                            {label}
-                          </td>
-                          <td
-                            style={{
-                              padding: 6,
-                              borderBottom: "1px solid #f3f4f6",
-                            }}
-                          >
-                            {dims}
-                          </td>
-                          <td
-                            style={{
-                              padding: 6,
-                              borderBottom: "1px solid #f3f4f6",
-                              textAlign: "right",
-                            }}
-                          >
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{idx + 1}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{label}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
                             {item.qty}
                           </td>
-                          <td
-                            style={{
-                              padding: 6,
-                              borderBottom: "1px solid #f3f4f6",
-                              textAlign: "right",
-                            }}
-                          >
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
                             {formatUsd(unit)}
                           </td>
-                          <td
-                            style={{
-                              padding: 6,
-                              borderBottom: "1px solid #f3f4f6",
-                              textAlign: "right",
-                            }}
-                          >
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
                             {formatUsd(total)}
                           </td>
                         </tr>
@@ -1753,17 +1374,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               )}
             </div>
 
-            <p
-              style={{
-                marginTop: 24,
-                fontSize: 11,
-                color: "#6b7280",
-                lineHeight: 1.4,
-              }}
-            >
-              Internal-only view. Use this page for engineering review and
-              CAD exports. Clients should continue to use the public
-              /quote link in their email.
+            <p style={{ marginTop: 24, fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
+              Internal-only view. Use this page for engineering review and CAD exports. Clients should continue to use
+              the public /quote link in their email.
             </p>
           </>
         )}
