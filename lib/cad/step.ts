@@ -5,7 +5,8 @@
 // Key fix:
 // - Normalize legacy layouts (block + cavities, no stack) into the microservice
 //   schema (block + stack[0] + cavities optional).
-// - NEW: Preserve cavity shape metadata (circle vs rect) so circles remain circles.
+// - Preserve cavity shape metadata and ALSO provide alias keys so the STEP
+//   microservice can recognize circles even if it expects different field names.
 //
 // ENV:
 //   STEP_SERVICE_URL = https://alex-io-step-service.onrender.com
@@ -17,9 +18,16 @@ export type CavityDef = {
   x: number; // normalized 0..1 across block length
   y: number; // normalized 0..1 across block width
 
-  // NEW
+  // preferred (our canonical)
   shape?: string | null; // "rect" | "circle"
   diameterIn?: number | null;
+
+  // aliases (for microservice compatibility)
+  cavityShape?: string | null;
+  type?: string | null;
+  radiusIn?: number | null;
+  diameter?: number | null;
+  r?: number | null;
 };
 
 export type FoamLayer = {
@@ -58,7 +66,7 @@ function normalizeShape(raw: any): string | null {
   if (!s) return null;
   if (s === "circle" || s === "round") return "circle";
   if (s === "rect" || s === "rectangle" || s === "square") return "rect";
-  return s; // pass-through for forward-compat; microservice may ignore unknown
+  return s;
 }
 
 function normalizeCavities(raw: any): CavityDef[] {
@@ -83,18 +91,41 @@ function normalizeCavities(raw: any): CavityDef[] {
 
     if (!(lengthIn && widthIn && depthIn && x != null && y != null)) continue;
 
-    const shape = normalizeShape(c.shape ?? c.cavityShape ?? c.type ?? null);
-    const diameterIn = safePosNumber(c.diameterIn ?? c.diameter_in ?? c.diameter);
+    const shape = normalizeShape(c.shape ?? c.cavityShape ?? c.type ?? c.cavity_shape ?? null);
 
-    out.push({
+    // “diameter” may exist under many names
+    const diameterIn =
+      safePosNumber(c.diameterIn ?? c.diameter_in ?? c.diameter ?? c.diaIn ?? c.dia_in ?? c.dia) ??
+      null;
+
+    // If it’s a circle and we still don’t have a diameter, fall back to min(L,W)
+    const inferredDiameter =
+      shape === "circle" ? Math.min(lengthIn, widthIn) : null;
+
+    const d = diameterIn ?? inferredDiameter ?? null;
+    const r = d != null ? d / 2 : null;
+
+    // Build a cavity object that includes both our canonical keys and aliases
+    const cav: CavityDef = {
       lengthIn,
       widthIn,
       depthIn,
       x,
       y,
-      shape,
-      diameterIn: diameterIn ?? null,
-    });
+
+      // canonical
+      shape: shape ?? null,
+      diameterIn: d,
+
+      // aliases (so the microservice matches *something*)
+      cavityShape: shape ?? null,
+      type: shape ?? null,
+      radiusIn: r,
+      diameter: d,
+      r: r,
+    };
+
+    out.push(cav);
   }
 
   return out;
@@ -142,6 +173,7 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
           : null;
 
       const cavities = normalizeCavities((layer as any).cavities);
+
       normalizedStack.push({
         thicknessIn: t,
         label,
