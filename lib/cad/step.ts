@@ -2,16 +2,13 @@
 //
 // STEP exporter facade for foam layouts (microservice-backed).
 //
-// Key fixes:
+// Key fix:
 // - Normalize legacy layouts (block + cavities, no stack) into the microservice
 //   schema (block + stack[0] + cavities optional).
-// - Preserve cavity shape metadata (circle vs rectangle) so circles don't export as squares.
-// - Preserve diameterIn for circle cavities when available.
+// - NEW: Preserve cavity shape metadata (circle vs rect) so circles remain circles.
 //
 // ENV:
 //   STEP_SERVICE_URL = https://alex-io-step-service.onrender.com
-
-export type CavityShape = "rect" | "circle";
 
 export type CavityDef = {
   lengthIn: number;
@@ -20,11 +17,8 @@ export type CavityDef = {
   x: number; // normalized 0..1 across block length
   y: number; // normalized 0..1 across block width
 
-  // NEW: optional shape support (safe if ignored by service)
-  shape?: CavityShape | null;
-
-  // NEW: for circles (diameter in inches). If omitted and shape==="circle",
-  // we fall back to min(lengthIn,widthIn).
+  // NEW
+  shape?: string | null; // "rect" | "circle"
   diameterIn?: number | null;
 };
 
@@ -58,13 +52,13 @@ function safeNorm01(v: unknown): number | null {
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
 }
 
-function normalizeShape(raw: any): CavityShape | null {
+function normalizeShape(raw: any): string | null {
   if (typeof raw !== "string") return null;
   const s = raw.trim().toLowerCase();
   if (!s) return null;
-  if (s === "circle" || s === "round" || s === "circular") return "circle";
+  if (s === "circle" || s === "round") return "circle";
   if (s === "rect" || s === "rectangle" || s === "square") return "rect";
-  return null;
+  return s; // pass-through for forward-compat; microservice may ignore unknown
 }
 
 function normalizeCavities(raw: any): CavityDef[] {
@@ -74,38 +68,23 @@ function normalizeCavities(raw: any): CavityDef[] {
   for (const c of raw) {
     if (!c) continue;
 
-    const lengthIn = safePosNumber((c as any).lengthIn ?? (c as any).length_in ?? (c as any).length);
-    const widthIn = safePosNumber((c as any).widthIn ?? (c as any).width_in ?? (c as any).width);
+    const lengthIn = safePosNumber(c.lengthIn ?? c.length_in ?? c.length);
+    const widthIn = safePosNumber(c.widthIn ?? c.width_in ?? c.width);
     const depthIn = safePosNumber(
-      (c as any).depthIn ??
-        (c as any).depth_in ??
-        (c as any).depth ??
-        (c as any).heightIn ??
-        (c as any).height_in ??
-        (c as any).height,
+      c.depthIn ??
+        c.depth_in ??
+        c.depth ??
+        c.heightIn ??
+        c.height_in ??
+        c.height,
     );
+    const x = safeNorm01(c.x);
+    const y = safeNorm01(c.y);
 
-    const x = safeNorm01((c as any).x);
-    const y = safeNorm01((c as any).y);
+    if (!(lengthIn && widthIn && depthIn && x != null && y != null)) continue;
 
-    if (!lengthIn || !widthIn || !depthIn || x == null || y == null) continue;
-
-    // NEW: shape + diameter passthrough
-    const shape =
-      normalizeShape((c as any).shape) ??
-      normalizeShape((c as any).cavityShape) ??
-      normalizeShape((c as any).kind) ??
-      normalizeShape((c as any).type) ??
-      null;
-
-    const diameterRaw =
-      (c as any).diameterIn ?? (c as any).diameter_in ?? (c as any).diameter ?? null;
-    let diameterIn = diameterRaw == null ? null : safePosNumber(diameterRaw);
-
-    // If declared circle but no diameter, infer from min(length,width)
-    if (shape === "circle" && diameterIn == null) {
-      diameterIn = Math.min(lengthIn, widthIn);
-    }
+    const shape = normalizeShape(c.shape ?? c.cavityShape ?? c.type ?? null);
+    const diameterIn = safePosNumber(c.diameterIn ?? c.diameter_in ?? c.diameter);
 
     out.push({
       lengthIn,
@@ -113,7 +92,7 @@ function normalizeCavities(raw: any): CavityDef[] {
       depthIn,
       x,
       y,
-      shape: shape ?? null,
+      shape,
       diameterIn: diameterIn ?? null,
     });
   }
@@ -127,20 +106,19 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
   const blockRaw = (layout as any).block ?? null;
   if (!blockRaw) return null;
 
-  const lengthIn = safePosNumber((blockRaw as any).lengthIn ?? (blockRaw as any).length_in ?? (blockRaw as any).length);
-  const widthIn = safePosNumber((blockRaw as any).widthIn ?? (blockRaw as any).width_in ?? (blockRaw as any).width);
+  const lengthIn = safePosNumber(blockRaw.lengthIn ?? blockRaw.length_in ?? blockRaw.length);
+  const widthIn = safePosNumber(blockRaw.widthIn ?? blockRaw.width_in ?? blockRaw.width);
   const thicknessIn = safePosNumber(
-    (blockRaw as any).thicknessIn ??
-      (blockRaw as any).thickness_in ??
-      (blockRaw as any).heightIn ??
-      (blockRaw as any).height_in ??
-      (blockRaw as any).thickness ??
-      (blockRaw as any).height,
+    blockRaw.thicknessIn ??
+      blockRaw.thickness_in ??
+      blockRaw.heightIn ??
+      blockRaw.height_in ??
+      blockRaw.thickness ??
+      blockRaw.height,
   );
 
   if (!lengthIn || !widthIn || !thicknessIn) return null;
 
-  // Normalize stack layers if present
   const rawStack = Array.isArray((layout as any).stack) ? (layout as any).stack : [];
   const normalizedStack: FoamLayer[] = [];
 
@@ -172,10 +150,8 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
     }
   }
 
-  // Legacy top-level cavities (some old layouts only have this)
   const legacyCavs = normalizeCavities((layout as any).cavities);
 
-  // If stack is missing/empty, create a single layer so the microservice accepts it.
   if (normalizedStack.length === 0) {
     normalizedStack.push({
       thicknessIn,
@@ -185,12 +161,10 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
     return {
       block: { lengthIn, widthIn, thicknessIn },
       stack: normalizedStack,
-      cavities: null, // already moved into the single layer
+      cavities: null,
     };
   }
 
-  // Otherwise keep legacy cavs as top-level (microservice may apply to idx==0),
-  // but we also keep per-layer cavities as provided.
   return {
     block: { lengthIn, widthIn, thicknessIn },
     stack: normalizedStack,
@@ -233,7 +207,6 @@ export async function buildStepFromLayout(
 
   const url = `${baseUrl}/step-from-layout`;
 
-  // Small timeout so Apply-to-quote can't hang forever
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 25_000);
 
@@ -251,9 +224,7 @@ export async function buildStepFromLayout(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error(`[STEP] Microservice HTTP ${res.status}: ${text?.slice(0, 600)}`, {
-        quoteNo,
-      });
+      console.error(`[STEP] Microservice HTTP ${res.status}: ${text?.slice(0, 600)}`, { quoteNo });
       return null;
     }
 

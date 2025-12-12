@@ -5,7 +5,7 @@
 // Behavior:
 // - Loads latest layout package for the quote
 // - Slices layout_json to include ONLY the requested layer (and that layer's cavities)
-// - Uses the SAME STEP builder facade as Apply-to-quote (buildStepFromLayout)
+// - Calls STEP microservice via buildStepFromLayout (normalized)
 // - Returns attachment .step
 //
 // Notes:
@@ -31,50 +31,21 @@ function getLayers(layout: any): any[] {
   return [];
 }
 
-function getLayerThicknessIn(layer: any): number | null {
-  if (!layer || typeof layer !== "object") return null;
-  const t =
-    (layer as any).thicknessIn ??
-    (layer as any).thickness_in ??
-    (layer as any).heightIn ??
-    (layer as any).height_in ??
-    (layer as any).thickness ??
-    (layer as any).height ??
-    null;
-
-  const n = Number(t);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return n;
-}
-
 function sliceLayoutToSingleLayer(layout: any, layerIndex: number): any {
   const layers = getLayers(layout);
   const layer = layers[layerIndex];
   if (!layer) return null;
 
-  // Clone shallowly; replace only the layers container
   const out: any = { ...(layout || {}) };
 
+  // Prefer stack if present, else mirror the container that exists.
   if (Array.isArray(layout.stack)) out.stack = [layer];
+  else out.stack = [layer];
+
+  // Keep other potential containers consistent (harmless if ignored)
   if (Array.isArray(layout.layers)) out.layers = [layer];
   if (Array.isArray((layout as any).foamLayers)) out.foamLayers = [layer];
 
-  // IMPORTANT: For per-layer STEP, set block.thicknessIn to the layer thickness
-  // so the exported solid matches the editor’s per-layer thickness.
-  if (out.block && typeof out.block === "object") {
-    const t = getLayerThicknessIn(layer);
-    if (t && t > 0) {
-      out.block = { ...out.block, thicknessIn: t };
-    }
-  }
-
-  // Prevent legacy top-level cavities from “leaking” into the single-layer export.
-  // The layer’s cavities are already inside out.stack[0].cavities (or equivalent).
-  if (Array.isArray(out.cavities)) {
-    out.cavities = null;
-  }
-
-  // Helpful metadata for downstream services (safe if ignored)
   out.__layer_index = layerIndex;
   out.__mode = "layer";
 
@@ -113,11 +84,9 @@ export async function GET(req: Request) {
     const sliced = sliceLayoutToSingleLayer(pkg.layout_json, layer_index);
     if (!sliced) return jsonErr(404, "NOT_FOUND", "Layer not found for this quote layout.");
 
-    // Use the same STEP build path as apply/route.ts to eliminate schema drift.
     const stepText = await buildStepFromLayout(sliced, quote_no, null);
-
     if (!stepText || stepText.trim().length === 0) {
-      return jsonErr(502, "STEP_FAILED", "STEP microservice returned empty STEP text for this layer.");
+      return jsonErr(502, "STEP_FAILED", "STEP service did not return a STEP payload.");
     }
 
     const filename = `${quote_no}-layer-${layer_index + 1}.step`;

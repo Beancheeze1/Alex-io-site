@@ -48,7 +48,6 @@ import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { buildStepFromLayout } from "@/lib/cad/step";
 
-
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -84,7 +83,21 @@ type FlatCavity = {
   depthIn: number;
   x: number;
   y: number;
+
+  // NEW: preserve shape metadata for CAD exporters
+  shape?: string | null; // "rect" | "circle" (editor may vary)
+  diameterIn?: number | null;
 };
+
+function safeNorm01(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
+}
+
+function safePosNumber(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 /**
  * Gather all cavities from a layout in a backward-compatible way.
@@ -106,18 +119,41 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
     for (const cav of cavs) {
       if (!cav) continue;
 
-      const lengthIn = Number(cav.lengthIn);
-      const widthIn = Number(cav.widthIn);
-      const depthIn = Number(cav.depthIn);
-      const x = Number(cav.x);
-      const y = Number(cav.y);
+      const lengthIn = safePosNumber(cav.lengthIn ?? cav.length_in ?? cav.length);
+      const widthIn = safePosNumber(cav.widthIn ?? cav.width_in ?? cav.width);
+      const depthIn = safePosNumber(
+        cav.depthIn ??
+          cav.depth_in ??
+          cav.depth ??
+          cav.heightIn ??
+          cav.height_in ??
+          cav.height,
+      );
 
-      if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
-      if (!Number.isFinite(widthIn) || widthIn <= 0) continue;
-      if (!Number.isFinite(depthIn) || depthIn <= 0) continue;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const x = safeNorm01(cav.x);
+      const y = safeNorm01(cav.y);
 
-      out.push({ lengthIn, widthIn, depthIn, x, y });
+      if (!lengthIn || !widthIn || !depthIn) continue;
+      if (x == null || y == null) continue;
+
+      // NEW: shape + diameter support (non-breaking)
+      const rawShape = cav.shape ?? cav.cavityShape ?? cav.type ?? null;
+      const shape =
+        typeof rawShape === "string" && rawShape.trim().length > 0
+          ? rawShape.trim().toLowerCase()
+          : null;
+
+      const diameterIn = safePosNumber(cav.diameterIn ?? cav.diameter_in ?? cav.diameter);
+
+      out.push({
+        lengthIn,
+        widthIn,
+        depthIn,
+        x,
+        y,
+        shape,
+        diameterIn: diameterIn ?? null,
+      });
     }
   };
 
@@ -145,14 +181,9 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
  *  - Writes a basic R12-style HEADER with ACADVER + INSUNITS (inches).
  *  - Uses ENTITIES section with:
  *      - Foam block as 4 LINE entities (rectangle).
- *      - Each cavity as 4 LINE entities (rectangle).
+ *      - Each cavity as LINE rectangle OR CIRCLE if shape indicates circle.
  *
- * Layout assumptions (matches editor types, but we DO NOT change them):
- *  - layout.block: { lengthIn, widthIn, thicknessIn }
- *  - Primary cavity geometry comes from:
- *      - layout.cavities (legacy single-layer), or
- *      - layout.stack[].cavities (future multi-layer)
- *    All cavities are flattened for DXF purposes.
+ * NOTE: This stays simple (Path A). SVG remains the gold reference for preview.
  */
 function buildDxfFromLayout(layout: any): string | null {
   if (!layout || !layout.block) return null;
@@ -172,62 +203,95 @@ function buildDxfFromLayout(layout: any): string | null {
   }
 
   function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
+    // include Z codes (R12 consumers are happier)
     return [
       "0",
       "LINE",
       "8",
-      "0", // layer
+      "0",
       "10",
       fmt(x1),
       "20",
       fmt(y1),
+      "30",
+      "0.0",
       "11",
       fmt(x2),
       "21",
       fmt(y2),
+      "31",
+      "0.0",
+    ].join("\n");
+  }
+
+  function circleEntity(cx: number, cy: number, r: number): string {
+    return [
+      "0",
+      "CIRCLE",
+      "8",
+      "0",
+      "10",
+      fmt(cx),
+      "20",
+      fmt(cy),
+      "30",
+      "0.0",
+      "40",
+      fmt(r),
     ].join("\n");
   }
 
   const entities: string[] = [];
 
-  // 1) Foam block as outer rectangle from (0,0) to (L,W) – 4 LINES.
+  // 1) Foam block as outer rectangle from (0,0) to (L,W)
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // 2) Cavities as inner rectangles (flattened across all layers)
+  // 2) Cavities (flattened across all layers)
   const allCavities = getAllCavitiesFromLayout(layout);
 
-  if (allCavities.length > 0) {
-    for (const cav of allCavities) {
-      let cL = cav.lengthIn;
-      let cW = cav.widthIn;
-      const nx = cav.x;
-      const ny = cav.y;
+  for (const cav of allCavities) {
+    const nx = cav.x;
+    const ny = cav.y;
 
-      if (!Number.isFinite(cL) || cL <= 0) continue;
-      if (!Number.isFinite(cW) || cW <= 0) {
-        cW = cL; // fallback to square
-      }
-      if (![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) {
+    if (![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) continue;
+
+    // x,y are normalized top-left; convert to block inches.
+    const left = L * nx;
+    const top = W * ny;
+
+    const shape = (cav.shape || "").toLowerCase();
+    const wantsCircle = shape === "circle" || shape === "round";
+
+    if (wantsCircle) {
+      const d =
+        (cav.diameterIn != null && cav.diameterIn > 0 ? cav.diameterIn : null) ??
+        Math.min(cav.lengthIn, cav.widthIn);
+
+      if (Number.isFinite(d) && d > 0) {
+        const r = d / 2;
+        const cx = left + r;
+        const cy = top + r;
+        entities.push(circleEntity(cx, cy, r));
         continue;
       }
-
-      // x,y are normalized top-left; convert to block inches.
-      const left = L * nx;
-      const top = W * ny;
-
-      entities.push(lineEntity(left, top, left + cL, top));
-      entities.push(lineEntity(left + cL, top, left + cL, top + cW));
-      entities.push(lineEntity(left + cL, top + cW, left, top + cW));
-      entities.push(lineEntity(left, top + cW, left, top));
+      // fall through to rectangle if diameter is missing
     }
+
+    // Rectangle cavity
+    const cL = cav.lengthIn;
+    const cW = cav.widthIn > 0 ? cav.widthIn : cav.lengthIn;
+
+    entities.push(lineEntity(left, top, left + cL, top));
+    entities.push(lineEntity(left + cL, top, left + cL, top + cW));
+    entities.push(lineEntity(left + cL, top + cW, left, top + cW));
+    entities.push(lineEntity(left, top + cW, left, top));
   }
 
   if (!entities.length) return null;
 
-  // Full-ish R12-style DXF with HEADER / TABLES / BLOCKS / ENTITIES.
   const header = [
     "0",
     "SECTION",
@@ -240,7 +304,7 @@ function buildDxfFromLayout(layout: any): string | null {
     "9",
     "$INSUNITS",
     "70",
-    "1", // 1 = inches
+    "1", // inches
     "0",
     "ENDSEC",
     "0",
@@ -278,23 +342,14 @@ function buildSvgWithAnnotations(
 
   let svg = svgRaw as string;
 
-  // 1) Remove any previous <g id="alex-io-notes">...</g> groups.
-  svg = svg.replace(
-    /<g[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g>/gi,
-    "",
+  svg = svg.replace(/<g[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g>/gi, "");
+
+  const legendLabelPattern = /(NOT TO SCALE|FOAM BLOCK:|FOAM:|BLOCK:|MATERIAL:)/i;
+
+  svg = svg.replace(/<text\b[^>]*>[\s\S]*?<\/text>/gi, (match) =>
+    legendLabelPattern.test(match) ? "" : match,
   );
 
-  // 2) Remove individual <text> nodes that look like old legends.
-  const legendLabelPattern =
-    /(NOT TO SCALE|FOAM BLOCK:|FOAM:|BLOCK:|MATERIAL:)/i;
-
-  svg = svg.replace(
-    /<text\b[^>]*>[\s\S]*?<\/text>/gi,
-    (match) => (legendLabelPattern.test(match) ? "" : match),
-  );
-
-  // 3) We need basic layout info for dynamic block text; if it's missing, just
-  //    leave the SVG as-is (with geometry only).
   if (!layout || !layout.block) {
     return svg;
   }
@@ -320,9 +375,9 @@ function buildSvgWithAnnotations(
 
   const GEOMETRY_SHIFT_Y = 80;
 
-  let svgOpen = svg.slice(0, firstTagEnd + 1); // <svg ...>
-  const svgChildren = svg.slice(firstTagEnd + 1, closeIdx); // inner content
-  const svgClose = svg.slice(closeIdx); // </svg ...>
+  let svgOpen = svg.slice(0, firstTagEnd + 1);
+  const svgChildren = svg.slice(firstTagEnd + 1, closeIdx);
+  const svgClose = svg.slice(closeIdx);
 
   function bumpLengthAttr(tag: string, attrName: string, delta: number): string {
     const re = new RegExp(`${attrName}\\s*=\\s*"([^"]+)"`);
@@ -356,9 +411,7 @@ function buildSvgWithAnnotations(
   const lines: string[] = [];
 
   const safeQuoteNo = quoteNo && quoteNo.trim().length > 0 ? quoteNo.trim() : "";
-  if (safeQuoteNo) {
-    lines.push(`QUOTE: ${safeQuoteNo}`);
-  }
+  if (safeQuoteNo) lines.push(`QUOTE: ${safeQuoteNo}`);
 
   lines.push("NOT TO SCALE");
 
@@ -390,8 +443,7 @@ function buildSvgWithAnnotations(
   const notesGroup = `<g id="alex-io-notes">${notesTexts}</g>`;
   const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
 
-  const rebuilt = `${svgOpen}\n${notesGroup}\n${geometryGroup}\n${svgClose}`;
-  return rebuilt;
+  return `${svgOpen}\n${notesGroup}\n${geometryGroup}\n${svgClose}`;
 }
 
 /* ===================== POST: save layout (+ optional qty/material/customer) ===================== */
@@ -414,27 +466,17 @@ export async function POST(req: NextRequest) {
   const quoteNo = String(body.quoteNo).trim();
   const layout = body.layout;
   const notes =
-    typeof body.notes === "string" && body.notes.trim().length > 0
-      ? body.notes.trim()
-      : null;
+    typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
   const svgRaw =
-    typeof body.svg === "string" && body.svg.trim().length > 0
-      ? body.svg
-      : null;
+    typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
 
   if (!quoteNo) {
     return bad(
-      {
-        ok: false,
-        error: "missing_quote_no",
-        message: "quoteNo must be a non-empty string.",
-      },
+      { ok: false, error: "missing_quote_no", message: "quoteNo must be a non-empty string." },
       400,
     );
   }
 
-  // Current user (if logged in). We fail soft here: layout save still works
-  // even if auth is misconfigured; user_id columns just stay null.
   let currentUserId: number | null = null;
   try {
     const user = await getCurrentUserFromRequest(req);
@@ -443,9 +485,7 @@ export async function POST(req: NextRequest) {
     console.error("getCurrentUserFromRequest failed in layout/apply:", e);
   }
 
-  // Optional customer info from the layout editor
-  const rawCustomer =
-    body.customer && typeof body.customer === "object" ? body.customer : null;
+  const rawCustomer = body.customer && typeof body.customer === "object" ? body.customer : null;
 
   let customerName: string | null = null;
   let customerEmail: string | null = null;
@@ -453,21 +493,11 @@ export async function POST(req: NextRequest) {
   let customerCompany: string | null = null;
 
   if (rawCustomer) {
-    const rawName =
-      rawCustomer.name ??
-      rawCustomer.customerName ??
-      rawCustomer.customer_name ??
-      null;
+    const rawName = rawCustomer.name ?? rawCustomer.customerName ?? rawCustomer.customer_name ?? null;
     const rawEmail =
-      rawCustomer.email ??
-      rawCustomer.customerEmail ??
-      rawCustomer.customer_email ??
-      null;
+      rawCustomer.email ?? rawCustomer.customerEmail ?? rawCustomer.customer_email ?? null;
     const rawPhone =
-      rawCustomer.phone ??
-      rawCustomer.customerPhone ??
-      rawCustomer.customer_phone ??
-      null;
+      rawCustomer.phone ?? rawCustomer.customerPhone ?? rawCustomer.customer_phone ?? null;
     const rawCompany =
       rawCustomer.company ??
       rawCustomer.companyName ??
@@ -475,37 +505,20 @@ export async function POST(req: NextRequest) {
       rawCustomer.customer_company ??
       null;
 
-    customerName =
-      typeof rawName === "string" && rawName.trim().length > 0
-        ? rawName.trim()
-        : null;
+    customerName = typeof rawName === "string" && rawName.trim().length > 0 ? rawName.trim() : null;
     customerEmail =
-      typeof rawEmail === "string" && rawEmail.trim().length > 0
-        ? rawEmail.trim()
-        : null;
+      typeof rawEmail === "string" && rawEmail.trim().length > 0 ? rawEmail.trim() : null;
     customerPhone =
-      typeof rawPhone === "string" && rawPhone.trim().length > 0
-        ? rawPhone.trim()
-        : null;
+      typeof rawPhone === "string" && rawPhone.trim().length > 0 ? rawPhone.trim() : null;
     customerCompany =
-      typeof rawCompany === "string" && rawCompany.trim().length > 0
-        ? rawCompany.trim()
-        : null;
+      typeof rawCompany === "string" && rawCompany.trim().length > 0 ? rawCompany.trim() : null;
   }
 
-  // Material coming from the layout editor
-  const rawMaterialId =
-    body.materialId ?? body.material_id ?? body.material ?? null;
+  const rawMaterialId = body.materialId ?? body.material_id ?? body.material ?? null;
   let materialId: number | null = null;
-  if (
-    rawMaterialId !== null &&
-    rawMaterialId !== undefined &&
-    rawMaterialId !== ""
-  ) {
+  if (rawMaterialId !== null && rawMaterialId !== undefined && rawMaterialId !== "") {
     const n = Number(rawMaterialId);
-    if (Number.isFinite(n) && n > 0) {
-      materialId = n;
-    }
+    if (Number.isFinite(n) && n > 0) materialId = n;
   }
 
   try {
@@ -520,16 +533,11 @@ export async function POST(req: NextRequest) {
 
     if (!quote) {
       return bad(
-        {
-          ok: false,
-          error: "quote_not_found",
-          message: `No quote header found for quote_no ${quoteNo}.`,
-        },
+        { ok: false, error: "quote_not_found", message: `No quote header found for quote_no ${quoteNo}.` },
         404,
       );
     }
 
-    // Optional: update customer info on the quote using editor input
     if (customerName || customerEmail || customerPhone || customerCompany) {
       await q(
         `
@@ -542,25 +550,16 @@ export async function POST(req: NextRequest) {
             updated_by_user_id = coalesce($6, updated_by_user_id)
           where id = $1
         `,
-        [
-          quote.id,
-          customerName,
-          customerEmail,
-          customerPhone,
-          customerCompany,
-          currentUserId,
-        ],
+        [quote.id, customerName, customerEmail, customerPhone, customerCompany, currentUserId],
       );
     }
 
-    // Material details (for facts + SVG legend)
     let materialLegend: string | null = null;
     let materialNameForFacts: string | null = null;
     let materialFamilyForFacts: string | null = null;
     let materialDensityForFacts: number | null = null;
 
     if (materialId != null) {
-      // Update the PRIMARY quote item to this material
       await q(
         `
           update quote_items
@@ -598,48 +597,26 @@ export async function POST(req: NextRequest) {
 
         const rawDens: any = (mat as any).density_lb_ft3;
         const densNum =
-          typeof rawDens === "number"
-            ? rawDens
-            : rawDens != null
-            ? Number(rawDens)
-            : NaN;
+          typeof rawDens === "number" ? rawDens : rawDens != null ? Number(rawDens) : NaN;
 
-        if (Number.isFinite(densNum) && densNum > 0) {
-          materialDensityForFacts = densNum;
-        }
+        if (Number.isFinite(densNum) && densNum > 0) materialDensityForFacts = densNum;
 
         const legendParts: string[] = [];
         if (mat.name) legendParts.push(mat.name);
         if (mat.material_family) legendParts.push(mat.material_family);
-        if (materialDensityForFacts != null) {
-          legendParts.push(`${materialDensityForFacts.toFixed(1)} lb/ft³`);
-        }
-        if (legendParts.length) {
-          materialLegend = legendParts.join(" · ");
-        }
+        if (materialDensityForFacts != null) legendParts.push(`${materialDensityForFacts.toFixed(1)} lb/ft³`);
+        if (legendParts.length) materialLegend = legendParts.join(" · ");
       }
     }
 
-    // Build DXF from the incoming layout.
+    // Build DXF from the incoming layout (now preserves circles).
     const dxf = buildDxfFromLayout(layout);
 
-        // Build STEP via external geometry service (microservice-backed).
-    const step = await buildStepFromLayout(
-      layout,
-      quoteNo,
-      materialLegend ?? null,
-    );
+    // Build STEP via external geometry service (microservice-backed).
+    const step = await buildStepFromLayout(layout, quoteNo, materialLegend ?? null);
 
+    const svgAnnotated = buildSvgWithAnnotations(layout, svgRaw, materialLegend ?? null, quoteNo);
 
-    // Clean + re-annotate SVG (if provided) with quote legend and shifted geometry.
-    const svgAnnotated = buildSvgWithAnnotations(
-      layout,
-      svgRaw,
-      materialLegend ?? null,
-      quoteNo,
-    );
-
-    // Insert layout package (now including annotated svg_text, dxf_text, step_text, and user ids).
     const pkg = await one<LayoutPkgRow>(
       `
       insert into quote_layout_packages (
@@ -658,7 +635,6 @@ export async function POST(req: NextRequest) {
       [quote.id, layout, notes, svgAnnotated, dxf, step, currentUserId],
     );
 
-    // Optional: update qty on the PRIMARY quote item for this quote.
     let updatedQty: number | null = null;
 
     if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
@@ -684,10 +660,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ===================== NEW: sync foam layers into quote_items =====================
-    // This does NOT change existing lines; it appends per-layer rows marked with a
-    // special notes prefix so we can safely overwrite them on each Apply.
     try {
-      // Primary line (if it exists). We now treat this as OPTIONAL.
       const primaryItem = await one<{
         id: number;
         length_in: any;
@@ -706,74 +679,48 @@ export async function POST(req: NextRequest) {
         [quote.id],
       );
 
-      // Block footprint from the incoming layout
       const block = layout && layout.block ? layout.block : null;
-      const blockL = block
-        ? Number(block.lengthIn ?? block.length_in) || 0
-        : 0;
-      const blockW = block
-        ? Number(block.widthIn ?? block.width_in) || 0
-        : 0;
+      const blockL = block ? Number(block.lengthIn ?? block.length_in) || 0 : 0;
+      const blockW = block ? Number(block.widthIn ?? block.width_in) || 0 : 0;
 
-      // Layers from foamLayers (payload-level) if present,
-      // otherwise layout.stack (primary) or layout.layers (fallback)
-      const foamLayers = Array.isArray((body as any)?.foamLayers)
-        ? (body as any).foamLayers
-        : null;
+      const foamLayers = Array.isArray((body as any)?.foamLayers) ? (body as any).foamLayers : null;
 
       const layers =
         Array.isArray(foamLayers) && foamLayers.length > 0
           ? foamLayers
           : Array.isArray(layout?.stack)
-          ? layout.stack
-          : Array.isArray(layout?.layers)
-          ? layout.layers
-          : [];
+            ? layout.stack
+            : Array.isArray(layout?.layers)
+              ? layout.layers
+              : [];
 
-      // Derive a base quantity to use for all layer rows.
       let baseQty: number | null = null;
 
       if (updatedQty != null && updatedQty > 0) {
         baseQty = updatedQty;
       } else if (body && body.qty !== undefined && body.qty !== null && body.qty !== "") {
         const qn = Number(body.qty);
-        if (Number.isFinite(qn) && qn > 0) {
-          baseQty = qn;
-        }
+        if (Number.isFinite(qn) && qn > 0) baseQty = qn;
       } else if (primaryItem && primaryItem.qty != null) {
         const qn = Number(primaryItem.qty);
-        if (Number.isFinite(qn) && qn > 0) {
-          baseQty = qn;
-        }
+        if (Number.isFinite(qn) && qn > 0) baseQty = qn;
       }
 
-      // If all else fails, fall back to 1 so we at least get visible rows.
-      if (baseQty == null) {
-        baseQty = 1;
-      }
+      if (baseQty == null) baseQty = 1;
 
-      // Derive a material id to use for all layer rows.
       let baseMaterialId: number | null = null;
 
       if (materialId != null && Number(materialId) > 0) {
         baseMaterialId = Number(materialId);
       } else if (primaryItem && primaryItem.material_id != null) {
         const mid = Number(primaryItem.material_id);
-        if (Number.isFinite(mid) && mid > 0) {
-          baseMaterialId = mid;
-        }
-      } else if (
-        layout &&
-        (layout.materialId != null || layout.material_id != null)
-      ) {
+        if (Number.isFinite(mid) && mid > 0) baseMaterialId = mid;
+      } else if (layout && (layout.materialId != null || layout.material_id != null)) {
         const rawMid = layout.materialId ?? layout.material_id;
         const mid = Number(rawMid);
-        if (Number.isFinite(mid) && mid > 0) {
-          baseMaterialId = mid;
-        }
+        if (Number.isFinite(mid) && mid > 0) baseMaterialId = mid;
       }
 
-      // If we still don't have a material id, we can't safely insert rows.
       if (!baseMaterialId || blockL <= 0 || blockW <= 0 || !Array.isArray(layers) || layers.length === 0) {
         console.warn("[layout/apply] Skipping foam-layer → quote_items sync", {
           quoteId: quote.id,
@@ -784,7 +731,6 @@ export async function POST(req: NextRequest) {
           layersLen: Array.isArray(layers) ? layers.length : 0,
         });
       } else {
-        // Clear out any previous auto-generated layer rows to avoid duplicates.
         await q(
           `
           delete from quote_items
@@ -810,23 +756,14 @@ export async function POST(req: NextRequest) {
           layerIndex += 1;
 
           const rawLabel =
-            (rawLayer as any).label ??
-            (rawLayer as any).name ??
-            (rawLayer as any).title ??
-            null;
+            (rawLayer as any).label ?? (rawLayer as any).name ?? (rawLayer as any).title ?? null;
 
           let label =
-            typeof rawLabel === "string" && rawLabel.trim().length > 0
-              ? rawLabel.trim()
-              : null;
+            typeof rawLabel === "string" && rawLabel.trim().length > 0 ? rawLabel.trim() : null;
 
-          const isBottom =
-            (rawLayer as any).isBottom === true ||
-            (rawLayer as any).id === "layer-bottom";
+          const isBottom = (rawLayer as any).isBottom === true || (rawLayer as any).id === "layer-bottom";
 
-          if (!label) {
-            label = isBottom ? "Bottom pad" : `Layer ${layerIndex}`;
-          }
+          if (!label) label = isBottom ? "Bottom pad" : `Layer ${layerIndex}`;
 
           const notesForRow = `[LAYOUT-LAYER] ${label}`;
 
@@ -844,43 +781,25 @@ export async function POST(req: NextRequest) {
             )
             values ($1, null, $2, $3, $4, $5, $6, $7)
             `,
-            [
-              quote.id,
-              blockL,
-              blockW,
-              thickness,
-              baseMaterialId,
-              baseQty,
-              notesForRow,
-            ],
+            [quote.id, blockL, blockW, thickness, baseMaterialId, baseQty, notesForRow],
           );
         }
       }
     } catch (layerErr) {
-      // Non-fatal: if this fails, the rest of the layout save still succeeds.
-      console.error(
-        "Warning: failed to sync foam layers into quote_items for",
-        quoteNo,
-        layerErr,
-      );
+      console.error("Warning: failed to sync foam layers into quote_items for", quoteNo, layerErr);
     }
-
     // =================== END new foam layer sync block ===================
 
-    // Sync layout dims, cavities, qty, material, and customer into the facts store
     try {
       const factsKey = quoteNo;
       const prevFacts = await loadFacts(factsKey);
-      const nextFacts: any =
-        prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
+      const nextFacts: any = prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
 
       if (layout && layout.block) {
         const Lb = Number(layout.block.lengthIn) || 0;
         const Wb = Number(layout.block.widthIn) || 0;
         const Tb = Number(layout.block.thicknessIn) || 0;
-        if (Lb > 0 && Wb > 0 && Tb > 0) {
-          nextFacts.dims = `${Lb}x${Wb}x${Tb}`;
-        }
+        if (Lb > 0 && Wb > 0 && Tb > 0) nextFacts.dims = `${Lb}x${Wb}x${Tb}`;
       }
 
       const allCavities = getAllCavitiesFromLayout(layout);
@@ -890,9 +809,7 @@ export async function POST(req: NextRequest) {
           const Lc = cav.lengthIn || 0;
           const Wc = cav.widthIn || 0;
           const Dc = cav.depthIn || 0;
-          if (Lc > 0 && Wc > 0 && Dc > 0) {
-            cavDims.push(`${Lc}x${Wc}x${Dc}`);
-          }
+          if (Lc > 0 && Wc > 0 && Dc > 0) cavDims.push(`${Lc}x${Wc}x${Dc}`);
         }
 
         if (cavDims.length) {
@@ -907,39 +824,19 @@ export async function POST(req: NextRequest) {
         delete nextFacts.cavityCount;
       }
 
-      if (updatedQty != null) {
-        nextFacts.qty = updatedQty;
-      }
+      if (updatedQty != null) nextFacts.qty = updatedQty;
 
-      if (materialId != null) {
-        nextFacts.material_id = materialId;
-      }
-      if (materialNameForFacts) {
-        nextFacts.material_name = materialNameForFacts;
-      }
-      if (materialFamilyForFacts) {
-        nextFacts.material_family = materialFamilyForFacts;
-      }
-      if (materialDensityForFacts != null) {
-        nextFacts.material_density_lb_ft3 = materialDensityForFacts;
-      }
+      if (materialId != null) nextFacts.material_id = materialId;
+      if (materialNameForFacts) nextFacts.material_name = materialNameForFacts;
+      if (materialFamilyForFacts) nextFacts.material_family = materialFamilyForFacts;
+      if (materialDensityForFacts != null) nextFacts.material_density_lb_ft3 = materialDensityForFacts;
 
-      if (customerName) {
-        nextFacts.customer_name = customerName;
-      }
-      if (customerEmail) {
-        nextFacts.customer_email = customerEmail;
-      }
-      if (customerPhone) {
-        nextFacts.customer_phone = customerPhone;
-      }
-      if (customerCompany) {
-        nextFacts.customer_company = customerCompany;
-      }
+      if (customerName) nextFacts.customer_name = customerName;
+      if (customerEmail) nextFacts.customer_email = customerEmail;
+      if (customerPhone) nextFacts.customer_phone = customerPhone;
+      if (customerCompany) nextFacts.customer_company = customerCompany;
 
-      if (Object.keys(nextFacts).length > 0) {
-        await saveFacts(factsKey, nextFacts);
-      }
+      if (Object.keys(nextFacts).length > 0) await saveFacts(factsKey, nextFacts);
     } catch (e) {
       console.error("Error syncing layout facts for quote", quoteNo, e);
     }
@@ -947,7 +844,7 @@ export async function POST(req: NextRequest) {
     return ok(
       {
         ok: true,
-               quoteNo,
+        quoteNo,
         packageId: pkg ? pkg.id : null,
         updatedQty,
       },
@@ -959,8 +856,7 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         error: "server_error",
-        message:
-          "There was an unexpected problem saving this layout. Please try again.",
+        message: "There was an unexpected problem saving this layout. Please try again.",
       },
       500,
     );
@@ -975,11 +871,7 @@ export async function GET(req: NextRequest) {
 
   if (!quoteNo) {
     return bad(
-      {
-        ok: false,
-        error: "MISSING_QUOTE_NO",
-        message: "No quote_no was provided in the query string.",
-      },
+      { ok: false, error: "MISSING_QUOTE_NO", message: "No quote_no was provided in the query string." },
       400,
     );
   }
@@ -995,14 +887,7 @@ export async function GET(req: NextRequest) {
     );
 
     if (!quote) {
-      return bad(
-        {
-          ok: false,
-          error: "NOT_FOUND",
-          message: `No quote found with number ${quoteNo}.`,
-        },
-        404,
-      );
+      return bad({ ok: false, error: "NOT_FOUND", message: `No quote found with number ${quoteNo}.` }, 404);
     }
 
     const layoutPkg = await one<LayoutPkgRow>(
@@ -1024,23 +909,11 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    return ok(
-      {
-        ok: true,
-        quote,
-        layoutPkg,
-      },
-      200,
-    );
+    return ok({ ok: true, quote, layoutPkg }, 200);
   } catch (err) {
     console.error("Error in /api/quote/layout/apply GET:", err);
     return bad(
-      {
-        ok: false,
-        error: "SERVER_ERROR",
-        message:
-          "There was an unexpected problem loading the latest layout package.",
-      },
+      { ok: false, error: "SERVER_ERROR", message: "There was an unexpected problem loading the latest layout package." },
       500,
     );
   }
