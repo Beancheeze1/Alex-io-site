@@ -39,14 +39,14 @@ type ItemRow = {
   material_id: number;
   material_name: string | null;
 
-  // carry-through from /api/quote/print
+  // NEW: carry-through from /api/quote/print
   material_family?: string | null;
   density_lb_ft3?: number | null;
 
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
 
-  // richer pricing metadata from /api/quote/print
+  // NEW: richer pricing metadata from /api/quote/print
   pricing_meta?: {
     min_charge?: number | null;
     used_min_charge?: boolean;
@@ -85,7 +85,7 @@ type Props = {
   quoteNo?: string;
 };
 
-// requested cartons (quote_box_selections + boxes join) for this quote
+// NEW: requested cartons (quote_box_selections + boxes join) for this quote
 type RequestedBoxRow = {
   id: number; // row id from quote_box_selections
   quote_id: number;
@@ -143,22 +143,13 @@ type LayoutLayer = {
   cavities?: any[];
 };
 
-type FlatCavity =
-  | {
-      kind: "rect";
-      lengthIn: number;
-      widthIn: number;
-      depthIn: number | null;
-      x: number; // normalized 0..1
-      y: number; // normalized 0..1
-    }
-  | {
-      kind: "circle";
-      diameterIn: number;
-      depthIn: number | null;
-      x: number; // normalized 0..1
-      y: number; // normalized 0..1
-    };
+type FlatCavity = {
+  lengthIn: number;
+  widthIn: number;
+  depthIn: number | null;
+  x: number; // normalized 0..1
+  y: number; // normalized 0..1
+};
 
 /** Extract the stack/layers array from a layout_json */
 function getLayersFromLayout(layout: any): LayoutLayer[] {
@@ -180,7 +171,7 @@ function getLayersFromLayout(layout: any): LayoutLayer[] {
 function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): string {
   if (!layer) return `Layer ${idx + 1}`;
 
-  // Prefer explicit labels if present, otherwise ALWAYS fall back to Layer #.
+  // IMPORTANT: keep this neutral (numbers), no “top/middle/bottom” assumptions
   const raw = layer.label ?? layer.name ?? layer.title ?? null;
 
   if (typeof raw === "string" && raw.trim().length > 0) {
@@ -198,15 +189,7 @@ function getLayerThicknessIn(layer: LayoutLayer | null | undefined): number | nu
   return n;
 }
 
-function pickFirstNumber(...vals: any[]): number | null {
-  for (const v of vals) {
-    const n = Number(v);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return null;
-}
-
-/** Flatten cavities for a single layer (supports rectangles + circles) */
+/** Flatten cavities for a single layer */
 function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   const out: FlatCavity[] = [];
 
@@ -221,59 +204,25 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   for (const cav of layer.cavities) {
     if (!cav) continue;
 
-    const x = Number((cav as any).x);
-    const y = Number((cav as any).y);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
-
-    const depthInRaw = (cav as any).depthIn ?? (cav as any).depth_in ?? null;
+    const lengthIn = Number((cav as any).lengthIn);
+    const widthIn = Number((cav as any).widthIn);
+    const depthInRaw = (cav as any).depthIn;
     const depthIn = depthInRaw == null ? null : Number(depthInRaw);
 
-    const shape =
-      String((cav as any).shape ?? (cav as any).type ?? (cav as any).kind ?? "")
-        .toLowerCase()
-        .trim() || "";
+    const x = Number((cav as any).x);
+    const y = Number((cav as any).y);
 
-    // Circle cavity (common fields: diameterIn / diameter_in / radiusIn / r)
-    const circleDia = pickFirstNumber(
-      (cav as any).diameterIn,
-      (cav as any).diameter_in,
-      (cav as any).diaIn,
-      (cav as any).dia_in,
-      // radius → diameter
-      (cav as any).radiusIn != null ? Number((cav as any).radiusIn) * 2 : null,
-      (cav as any).radius_in != null ? Number((cav as any).radius_in) * 2 : null,
-      (cav as any).r != null ? Number((cav as any).r) * 2 : null,
-    );
+    if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
 
-    const rectL = pickFirstNumber((cav as any).lengthIn, (cav as any).length_in, (cav as any).lenIn);
-    const rectW = pickFirstNumber((cav as any).widthIn, (cav as any).width_in, (cav as any).widIn);
+    const w = Number.isFinite(widthIn) && widthIn > 0 ? widthIn : lengthIn;
 
-    const isCircle = shape === "circle" || shape === "round" || (!!circleDia && !(rectL && rectW));
-
-    if (isCircle) {
-      const diameterIn = circleDia;
-      if (!diameterIn || !Number.isFinite(diameterIn) || diameterIn <= 0) continue;
-
-      out.push({
-        kind: "circle",
-        diameterIn,
-        depthIn: Number.isFinite(depthIn || NaN) ? depthIn : null,
-        x,
-        y,
-      });
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
       continue;
     }
 
-    // Rectangle pocket
-    const lengthIn = rectL;
-    if (!lengthIn || !Number.isFinite(lengthIn) || lengthIn <= 0) continue;
-
-    const widthIn = rectW && Number.isFinite(rectW) && rectW > 0 ? rectW : lengthIn;
-
     out.push({
-      kind: "rect",
       lengthIn,
-      widthIn,
+      widthIn: w,
       depthIn: Number.isFinite(depthIn || NaN) ? depthIn : null,
       x,
       y,
@@ -286,9 +235,7 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
 /**
  * Build a DXF for a single layer:
  *  - Foam block as rectangle from (0,0) to (L,W)
- *  - Cavities in that layer:
- *      - rect pockets as rectangles
- *      - circle pockets as CIRCLE entities
+ *  - Cavities in that layer as rectangles
  */
 function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   if (!layout || !layout.block) return null;
@@ -298,12 +245,15 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   let W = Number(block.widthIn ?? block.width_in);
 
   if (!Number.isFinite(L) || L <= 0) return null;
-  if (!Number.isFinite(W) || W <= 0) W = L;
+  if (!Number.isFinite(W) || W <= 0) {
+    W = L; // defensive fallback
+  }
 
   function fmt(n: number) {
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
   }
 
+  // IMPORTANT: include Z coords (30/31) so CAD parses as proper R12 LINEs
   function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
     return [
       "0",
@@ -325,54 +275,28 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
     ].join("\n");
   }
 
-  function circleEntity(cx: number, cy: number, r: number): string {
-    return [
-      "0",
-      "CIRCLE",
-      "8",
-      "0",
-      "10",
-      fmt(cx),
-      "20",
-      fmt(cy),
-      "30",
-      "0.0",
-      "40",
-      fmt(r),
-    ].join("\n");
-  }
-
   const entities: string[] = [];
 
-  // Block rectangle
+  // 1) Block rectangle
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // Cavities
+  // 2) Layer-specific cavities (normalized x/y → inches)
   const cavs = getCavitiesForLayer(layout, layerIndex);
 
   for (const cav of cavs) {
     const left = L * cav.x;
     const top = W * cav.y;
 
-    if (cav.kind === "rect") {
-      const cL = cav.lengthIn;
-      const cW = cav.widthIn;
+    const cL = cav.lengthIn;
+    const cW = cav.widthIn;
 
-      entities.push(lineEntity(left, top, left + cL, top));
-      entities.push(lineEntity(left + cL, top, left + cL, top + cW));
-      entities.push(lineEntity(left + cL, top + cW, left, top + cW));
-      entities.push(lineEntity(left, top + cW, left, top));
-    } else {
-      const r = cav.diameterIn / 2;
-      // interpret x/y as top-left anchor like the rectangle preview;
-      // center circle within its bounding box for preview clarity
-      const cx = left + r;
-      const cy = top + r;
-      entities.push(circleEntity(cx, cy, r));
-    }
+    entities.push(lineEntity(left, top, left + cL, top));
+    entities.push(lineEntity(left + cL, top, left + cL, top + cW));
+    entities.push(lineEntity(left + cL, top + cW, left, top + cW));
+    entities.push(lineEntity(left, top + cW, left, top));
   }
 
   if (!entities.length) return null;
@@ -417,12 +341,16 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
 
 /* ---------------- Lightweight SVG preview (per-layer, client-side) ---------------- */
 /**
- * Deterministic admin-only preview:
+ * This is intentionally simple and deterministic:
  * - Draw foam block outline
- * - Draw that layer’s cavities (rect + circle)
+ * - Draw that layer’s cavity rectangles
  * - Uses layout.block length/width inches for viewBox
  *
- * NOTE: preview only; does not touch the working SVG exporter in layoutPkg.svg_text.
+ * NOTE: This is only for *admin preview clarity* and does not touch the
+ * working SVG exporter that generates layoutPkg.svg_text.
+ *
+ * IMPORTANT: This preview currently renders cavities as rectangles (even if the cavity was a circle).
+ * The STEP “square vs circle” issue is NOT solved here — that is in the STEP export path.
  */
 function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null {
   if (!layout || !layout.block) return null;
@@ -439,45 +367,35 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
   const stroke = "#111827";
   const cavStroke = "#ef4444";
 
-  const strokeWidth = Math.max(0.04, Math.min(L, W) / 250);
-  const cavStrokeWidth = Math.max(0.03, Math.min(L, W) / 300);
-
-  const shapes = cavs
+  const rects = cavs
     .map((c) => {
       const x = L * c.x;
       const y = W * c.y;
+      const w = c.lengthIn;
+      const h = c.widthIn;
 
-      if (c.kind === "rect") {
-        const w = c.lengthIn;
-        const h = c.widthIn;
+      // Keep within bounds defensively (preview only)
+      const x2 = Math.max(0, Math.min(L, x));
+      const y2 = Math.max(0, Math.min(W, y));
+      const w2 = Math.max(0, Math.min(L - x2, w));
+      const h2 = Math.max(0, Math.min(W - y2, h));
+      if (w2 <= 0 || h2 <= 0) return "";
 
-        // Keep within bounds defensively (preview only)
-        const x2 = Math.max(0, Math.min(L, x));
-        const y2 = Math.max(0, Math.min(W, y));
-        const w2 = Math.max(0, Math.min(L - x2, w));
-        const h2 = Math.max(0, Math.min(W - y2, h));
-        if (w2 <= 0 || h2 <= 0) return "";
-
-        return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
-      }
-
-      // circle: center inside its bounding box for consistency with editor expectations
-      const r = c.diameterIn / 2;
-      const cx = x + r;
-      const cy = y + r;
-
-      // basic bounds guard (preview only)
-      if (!Number.isFinite(cx) || !Number.isFinite(cy) || r <= 0) return "";
-      return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+      return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${Math.max(
+        0.03,
+        Math.min(L, W) / 300,
+      )}" />`;
     })
     .filter(Boolean)
     .join("");
 
-  // Force scaling to the container (this fixes the “tiny/centered SVG” issue)
+  const strokeWidth = Math.max(0.04, Math.min(L, W) / 250);
+
+  // CRITICAL: width/height 100% so it scales to the preview panes reliably
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" preserveAspectRatio="xMidYMid meet" width="100%" height="100%" style="display:block">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`,
     `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`,
-    shapes,
+    rects,
     `</svg>`,
   ].join("");
 }
@@ -485,6 +403,7 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
 /* ---------------- Component ---------------- */
 
 export default function AdminQuoteClient({ quoteNo }: Props) {
+  // Local quote number value: prefer prop, fall back to URL path.
   const [quoteNoValue, setQuoteNoValue] = React.useState<string>(quoteNo || "");
 
   const [loading, setLoading] = React.useState<boolean>(!!quoteNoValue);
@@ -494,32 +413,33 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
-  // Force a refetch (e.g., after rebuild-step)
+  // Used to force a refetch (e.g., after rebuild-step)
   const [refreshTick, setRefreshTick] = React.useState<number>(0);
-
-  // Selected layer for the large “selected layer preview”
-  const [selectedLayerIndex, setSelectedLayerIndex] = React.useState<number>(0);
 
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
 
-  // requested cartons
+  // NEW: requested cartons for this quote (from quote_box_selections)
   const [boxSelections, setBoxSelections] = React.useState<RequestedBoxRow[] | null>(null);
   const [boxSelectionsLoading, setBoxSelectionsLoading] = React.useState<boolean>(false);
   const [boxSelectionsError, setBoxSelectionsError] = React.useState<string | null>(null);
 
-  // rebuild-step UI state
+  // NEW: rebuild-step UI state
   const [rebuildBusy, setRebuildBusy] = React.useState<boolean>(false);
   const [rebuildError, setRebuildError] = React.useState<string | null>(null);
   const [rebuildOkAt, setRebuildOkAt] = React.useState<string | null>(null);
 
-  // Rescue quote_no from URL path if prop missing
+  // NEW: layer selection (click a layer card, large preview follows)
+  const [selectedLayerIdx, setSelectedLayerIdx] = React.useState<number>(0);
+
+  // 🔁 Rescue quote_no from URL path if prop is missing/empty.
+  // Expected path: /admin/quotes/<quote_no>
   React.useEffect(() => {
     if (quoteNoValue) return;
     if (typeof window === "undefined") return;
 
     try {
       const path = window.location.pathname || "";
-      const parts = path.split("/").filter(Boolean);
+      const parts = path.split("/").filter(Boolean); // e.g. ["admin", "quotes", "Q-AI-..."]
       const idx = parts.findIndex((p) => p === "quotes");
       const fromPath = idx >= 0 && parts[idx + 1] ? decodeURIComponent(parts[idx + 1]) : "";
 
@@ -538,7 +458,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [quoteNoValue]);
 
-  // Fetch quote data
+  // Fetch quote data from /api/quote/print when we have a quote number.
   React.useEffect(() => {
     if (!quoteNoValue) return;
 
@@ -577,33 +497,30 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             setQuoteState(json.quote);
             setItems(json.items || []);
             setLayoutPkg(json.layoutPkg || null);
-
-            // Reset selected layer if the stack size changed
-            const layers = json.layoutPkg?.layout_json ? getLayersFromLayout(json.layoutPkg.layout_json) : [];
-            if (layers.length > 0) {
-              setSelectedLayerIndex((prev) => Math.max(0, Math.min(prev, layers.length - 1)));
-            } else {
-              setSelectedLayerIndex(0);
-            }
           } else {
             setError("Unexpected response from quote API.");
           }
         }
       } catch (err) {
         console.error("Error fetching /api/quote/print (admin view):", err);
-        if (!cancelled) setError("There was an unexpected problem loading this quote. Please try again.");
+        if (!cancelled) {
+          setError("There was an unexpected problem loading this quote. Please try again.");
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     load();
+
     return () => {
       cancelled = true;
     };
   }, [quoteNoValue, refreshTick]);
 
-  // Fetch requested cartons
+  // NEW: Fetch requested cartons (quote_box_selections) for this quote
   React.useEffect(() => {
     if (!quoteNoValue) return;
 
@@ -624,22 +541,30 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         if (!res.ok || !json.ok) {
           if (!cancelled) {
             const msg =
-              (!json.ok && (json as BoxesForQuoteErr).error) || "Unable to load requested cartons for this quote.";
+              (!json.ok && (json as BoxesForQuoteErr).error) ||
+              "Unable to load requested cartons for this quote.";
             setBoxSelectionsError(msg);
           }
           return;
         }
 
-        if (!cancelled) setBoxSelections(json.selections || []);
+        if (!cancelled) {
+          setBoxSelections(json.selections || []);
+        }
       } catch (err) {
         console.error("Error fetching /api/boxes/for-quote (admin view):", err);
-        if (!cancelled) setBoxSelectionsError("Unable to load requested cartons for this quote.");
+        if (!cancelled) {
+          setBoxSelectionsError("Unable to load requested cartons for this quote.");
+        }
       } finally {
-        if (!cancelled) setBoxSelectionsLoading(false);
+        if (!cancelled) {
+          setBoxSelectionsLoading(false);
+        }
       }
     }
 
     loadRequestedBoxes();
+
     return () => {
       cancelled = true;
     };
@@ -661,18 +586,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         : layoutPkg.notes.trim()
       : null;
 
-  // Normalize full-layout SVG preview
+  // Normalize SVG preview (full layout preview)
   React.useEffect(() => {
     if (!layoutPkg) return;
     if (!svgContainerRef.current) return;
 
     const svgEl = svgContainerRef.current.querySelector("svg") as SVGSVGElement | null;
+
     if (!svgEl) return;
 
     try {
       svgEl.removeAttribute("width");
       svgEl.removeAttribute("height");
       svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
       svgEl.style.width = "100%";
       svgEl.style.height = "100%";
       svgEl.style.display = "block";
@@ -682,7 +609,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [layoutPkg]);
 
-  // SVG + DXF blob downloads remain local
+  // SVG + DXF blob downloads remain local (fine).
   const handleDownload = React.useCallback(
     (kind: "svg" | "dxf") => {
       if (typeof window === "undefined") return;
@@ -724,7 +651,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     [layoutPkg, quoteState],
   );
 
-  // STEP download uses server endpoint directly.
+  // STEP download uses the server endpoint directly.
   const handleDownloadStep = React.useCallback(() => {
     if (typeof window === "undefined") return;
     if (!quoteNoValue) return;
@@ -822,6 +749,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     [layoutPkg],
   );
 
+  // Keep selection in range when the layout changes
+  React.useEffect(() => {
+    const n = layersForDxf?.length || 0;
+    if (n <= 0) {
+      setSelectedLayerIdx(0);
+      return;
+    }
+    setSelectedLayerIdx((prev) => {
+      if (prev < 0) return 0;
+      if (prev >= n) return 0;
+      return prev;
+    });
+  }, [layersForDxf]);
+
   const handleDownloadLayerDxf = React.useCallback(
     (layerIndex: number) => {
       if (typeof window === "undefined") return;
@@ -884,7 +825,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
       setRebuildOkAt(new Date().toLocaleString());
 
-      // Force refresh of /api/quote/print payload
+      // Force refresh of /api/quote/print payload so admin UI reflects newest layoutPkg.step_text timestamp/notes/etc
       setRefreshTick((x) => x + 1);
     } catch (e: any) {
       console.error("Admin: rebuild-step failed:", e);
@@ -1035,7 +976,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         {/* main content */}
         {!loading && quoteState && (
           <>
-            {/* top row */}
+            {/* top row: basic specs + quick pricing snapshot */}
             <div
               style={{
                 display: "grid",
@@ -1046,7 +987,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             >
               <div style={cardBase}>
                 <div style={cardTitleStyle}>Client & specs</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: "#111827" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    fontSize: 13,
+                    color: "#111827",
+                  }}
+                >
                   <div>
                     <div style={labelStyle}>Customer</div>
                     <div>
@@ -1083,7 +1032,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     No stored line items yet. Once quote_items are written, you&apos;ll see per-line pricing here.
                   </div>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: "#111827" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      fontSize: 13,
+                      color: "#111827",
+                    }}
+                  >
                     <div>
                       <div style={labelStyle}>Lines</div>
                       <div>{items.length}</div>
@@ -1130,7 +1087,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               </div>
             </div>
 
-            {/* Materials explorer */}
+            {/* Materials explorer + "view customer quote" */}
             {primaryItem && (
               <div
                 style={{
@@ -1144,7 +1101,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               >
                 <div>
                   <div style={cardTitleStyle}>Materials explorer</div>
-                  <div style={{ fontSize: 13, color: "#111827", display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: "#111827",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                    }}
+                  >
                     <div>
                       <div style={labelStyle}>Primary material</div>
                       <div>{primaryMaterialName}</div>
@@ -1152,7 +1117,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     <div>
                       <div style={labelStyle}>Family</div>
                       <div>
-                        {primaryMaterialFamily || <span style={{ color: "#9ca3af" }}>Unassigned (set in materials admin)</span>}
+                        {primaryMaterialFamily || (
+                          <span style={{ color: "#9ca3af" }}>Unassigned (set in materials admin)</span>
+                        )}
                       </div>
                     </div>
                     <div>
@@ -1161,7 +1128,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     </div>
                     <div style={{ fontSize: 11, color: "#6b7280" }}>
                       Family + density come directly from the{" "}
-                      <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace", fontSize: 11, color: "#0369a1" }}>
+                      <span
+                        style={{
+                          fontFamily: "ui-monospace, SFMono-Regular, monospace",
+                          fontSize: 11,
+                          color: "#0369a1",
+                        }}
+                      >
                         materials
                       </span>{" "}
                       table. Polyethylene and Expanded Polyethylene remain separate families.
@@ -1169,10 +1142,28 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 8, fontSize: 12, color: "#111827" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    fontSize: 12,
+                    color: "#111827",
+                  }}
+                >
                   <div>
                     <div style={labelStyle}>Admin shortcuts</div>
-                    <ul style={{ listStyle: "disc", paddingLeft: 18, marginTop: 4, marginBottom: 4, color: "#1f2937", fontSize: 12 }}>
+                    <ul
+                      style={{
+                        listStyle: "disc",
+                        paddingLeft: 18,
+                        marginTop: 4,
+                        marginBottom: 4,
+                        color: "#1f2937",
+                        fontSize: 12,
+                      }}
+                    >
                       <li>
                         <a href="/admin/materials" style={{ color: "#0369a1", textDecoration: "none" }}>
                           Open materials catalog
@@ -1180,7 +1171,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                         to confirm family / density.
                       </li>
                       <li>
-                        <a href={`/admin/cushion-curves/${primaryItem.material_id}`} style={{ color: "#0369a1", textDecoration: "none" }}>
+                        <a
+                          href={`/admin/cushion-curves/${primaryItem.material_id}`}
+                          style={{ color: "#0369a1", textDecoration: "none" }}
+                        >
                           View cushion curves for this material
                         </a>{" "}
                         (foam advisor data).
@@ -1226,7 +1220,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   Looking up any cartons the customer marked as <strong>Requested</strong> from the quote viewer…
                 </p>
               )}
-              {!boxSelectionsLoading && boxSelectionsError && <p style={{ fontSize: 12, color: "#b91c1c" }}>{boxSelectionsError}</p>}
+              {!boxSelectionsLoading && boxSelectionsError && (
+                <p style={{ fontSize: 12, color: "#b91c1c" }}>{boxSelectionsError}</p>
+              )}
               {!boxSelectionsLoading && !boxSelectionsError && (!boxSelections || boxSelections.length === 0) && (
                 <p style={{ fontSize: 12, color: "#6b7280" }}>
                   No cartons have been requested on this quote yet from the customer-facing /quote page.
@@ -1236,7 +1232,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 <>
                   <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 6 }}>
                     These selections come from the public quote viewer when the customer clicks{" "}
-                    <strong>&ldquo;Add this carton to my quote&rdquo;</strong>. Use this list as a heads-up when finalizing packaging and placing box orders.
+                    <strong>&ldquo;Add this carton to my quote&rdquo;</strong>. Use this list as a heads-up when
+                    finalizing packaging and placing box orders.
                   </p>
                   <ul style={{ listStyle: "disc", paddingLeft: 18, margin: 0, fontSize: 12, color: "#111827" }}>
                     {boxSelections.map((sel) => {
@@ -1266,23 +1263,46 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
             {/* layout + CAD downloads */}
             <div style={{ marginTop: 4, marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Foam layout & CAD exports</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
+                Foam layout & CAD exports
+              </div>
 
               <div style={{ ...cardBase, background: "#ffffff" }}>
                 {!layoutPkg ? (
                   <p style={{ color: "#6b7280", fontSize: 13 }}>
-                    No foam layout package has been stored for this quote yet. Have the client use the layout editor from their emailed quote and click{" "}
-                    <strong>Apply to quote</strong>.
+                    No foam layout package has been stored for this quote yet. Have the client use the layout editor
+                    from their emailed quote and click <strong>Apply to quote</strong>.
                   </p>
                 ) : (
                   <>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 12, flexWrap: "wrap" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        marginBottom: 8,
+                        gap: 12,
+                        flexWrap: "wrap",
+                      }}
+                    >
                       <div>
-                        <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>Layout package #{layoutPkg.id}</div>
-                        <div style={{ color: "#6b7280", fontSize: 12 }}>Saved: {new Date(layoutPkg.created_at).toLocaleString()}</div>
-
+                        <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>
+                          Layout package #{layoutPkg.id}
+                        </div>
+                        <div style={{ color: "#6b7280", fontSize: 12 }}>
+                          Saved: {new Date(layoutPkg.created_at).toLocaleString()}
+                        </div>
                         {notesPreview && (
-                          <div style={{ marginTop: 6, color: "#4b5563", fontSize: 12, background: "#eef2ff", borderRadius: 10, padding: "6px 8px", maxWidth: 420 }}>
+                          <div
+                            style={{
+                              marginTop: 6,
+                              color: "#4b5563",
+                              fontSize: 12,
+                              background: "#eef2ff",
+                              borderRadius: 10,
+                              padding: "6px 8px",
+                              maxWidth: 420,
+                            }}
+                          >
                             <span style={{ fontWeight: 500 }}>Notes: </span>
                             {notesPreview}
                           </div>
@@ -1290,7 +1310,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
                         {/* Admin-only: rebuild STEP */}
                         <div style={{ marginTop: 10 }}>
-                          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280", marginBottom: 4 }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.08em",
+                              color: "#6b7280",
+                              marginBottom: 4,
+                            }}
+                          >
                             STEP maintenance
                           </div>
 
@@ -1321,7 +1349,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       </div>
 
                       <div style={{ textAlign: "right", fontSize: 12, minWidth: 260 }}>
-                        <div style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280" }}>
+                        <div
+                          style={{
+                            marginBottom: 4,
+                            fontSize: 11,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.08em",
+                            color: "#6b7280",
+                          }}
+                        >
                           CAD downloads
                         </div>
 
@@ -1392,31 +1428,43 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           Layers (preview + downloads)
                         </div>
 
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                            gap: 12,
+                          }}
+                        >
                           {layersForDxf.map((layer, idx) => {
                             const label = getLayerLabel(layer, idx);
                             const t = getLayerThicknessIn(layer);
                             const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, idx);
-                            const isSelected = idx === selectedLayerIndex;
+                            const isSelected = idx === selectedLayerIdx;
 
                             return (
                               <div
                                 key={idx}
                                 role="button"
                                 tabIndex={0}
-                                onClick={() => setSelectedLayerIndex(idx)}
+                                onClick={() => setSelectedLayerIdx(idx)}
                                 onKeyDown={(e) => {
-                                  if (e.key === "Enter" || e.key === " ") setSelectedLayerIndex(idx);
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    setSelectedLayerIdx(idx);
+                                  }
                                 }}
                                 style={{
                                   border: isSelected ? "2px solid #0ea5e9" : "1px solid #e5e7eb",
                                   borderRadius: 14,
                                   padding: 10,
                                   background: "#ffffff",
-                                  boxShadow: isSelected ? "0 10px 24px rgba(14,165,233,0.18)" : "0 6px 16px rgba(15,23,42,0.06)",
+                                  boxShadow: isSelected
+                                    ? "0 10px 22px rgba(14,165,233,0.20)"
+                                    : "0 6px 16px rgba(15,23,42,0.06)",
                                   cursor: "pointer",
+                                  outline: "none",
                                 }}
-                                title="Click to select this layer for the large preview"
+                                title="Click to set the large preview to this layer"
                               >
                                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                   <div>
@@ -1438,15 +1486,27 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                     border: "1px solid #e5e7eb",
                                     background: "#f3f4f6",
                                     overflow: "hidden",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
                                   }}
                                 >
                                   {svg ? (
-                                    <div style={{ width: "100%", height: "100%" }} dangerouslySetInnerHTML={{ __html: svg }} />
+                                    <div
+                                      style={{ width: "100%", height: "100%", display: "flex" }}
+                                      // safe here: we generate the svg string locally
+                                      dangerouslySetInnerHTML={{ __html: svg }}
+                                    />
                                   ) : (
-                                    <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>
+                                    <div
+                                      style={{
+                                        height: "100%",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        fontSize: 12,
+                                        color: "#6b7280",
+                                      }}
+                                    >
+                                      No preview
+                                    </div>
                                   )}
                                 </div>
 
@@ -1500,54 +1560,66 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           })}
                         </div>
 
-                        {/* Selected layer preview (large) */}
-                        {layoutPkg.layout_json && layersForDxf[selectedLayerIndex] && (
+                        {/* Large selected layer preview */}
+                        <div
+                          style={{
+                            marginTop: 14,
+                            padding: 8,
+                            borderRadius: 10,
+                            border: "1px solid #e5e7eb",
+                            background: "#ffffff",
+                          }}
+                        >
+                          <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
+                            Selected layer preview:{" "}
+                            <span style={{ fontWeight: 700 }}>
+                              {getLayerLabel(layersForDxf[selectedLayerIdx] || null, selectedLayerIdx)} (Layer{" "}
+                              {Math.min(selectedLayerIdx + 1, layersForDxf.length)}/{layersForDxf.length})
+                            </span>
+                          </div>
+
                           <div
                             style={{
-                              marginTop: 14,
-                              padding: 10,
-                              borderRadius: 14,
+                              width: "100%",
+                              height: 360,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderRadius: 8,
                               border: "1px solid #e5e7eb",
-                              background: "#ffffff",
-                              boxShadow: "0 6px 16px rgba(15,23,42,0.06)",
+                              background: "#f3f4f6",
+                              overflow: "hidden",
                             }}
                           >
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
-                              Selected layer preview: {getLayerLabel(layersForDxf[selectedLayerIndex], selectedLayerIndex)} (Layer{" "}
-                              {selectedLayerIndex + 1}/{layersForDxf.length})
-                            </div>
-
-                            <div
-                              style={{
-                                width: "100%",
-                                height: 360,
-                                borderRadius: 12,
-                                border: "1px solid #e5e7eb",
-                                background: "#f3f4f6",
-                                overflow: "hidden",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                              }}
-                            >
-                              {(() => {
-                                const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, selectedLayerIndex);
-                                return svg ? (
-                                  <div style={{ width: "100%", height: "100%" }} dangerouslySetInnerHTML={{ __html: svg }} />
-                                ) : (
-                                  <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>
-                                );
-                              })()}
-                            </div>
+                            {(() => {
+                              const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, selectedLayerIdx);
+                              if (!svg) return <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>;
+                              return (
+                                <div
+                                  style={{ width: "100%", height: "100%", display: "flex" }}
+                                  dangerouslySetInnerHTML={{ __html: svg }}
+                                />
+                              );
+                            })()}
                           </div>
-                        )}
+                        </div>
                       </div>
                     )}
 
-                    {/* Full-layout preview */}
+                    {/* Full-layout preview remains (useful) */}
                     {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
-                      <div style={{ marginTop: 14, padding: 8, borderRadius: 10, border: "1px solid #e5e7eb", background: "#ffffff" }}>
-                        <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>Full layout preview</div>
+                      <div
+                        style={{
+                          marginTop: 14,
+                          padding: 8,
+                          borderRadius: 10,
+                          border: "1px solid #e5e7eb",
+                          background: "#ffffff",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
+                          Full layout preview
+                        </div>
                         <div
                           ref={svgContainerRef}
                           style={{
@@ -1574,27 +1646,42 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 <div style={{ ...cardBase, background: "#ffffff", marginTop: 12 }}>
                   <div style={cardTitleStyle}>Layout activity</div>
                   <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 4 }}>
-                    Latest layout package is <strong>#{layoutPkg.id}</strong>, saved on {new Date(layoutPkg.created_at).toLocaleString()}.
+                    Latest layout package is <strong>#{layoutPkg.id}</strong>, saved on{" "}
+                    {new Date(layoutPkg.created_at).toLocaleString()}.
                   </p>
                   <p style={{ fontSize: 11, color: "#9ca3af" }}>
-                    Future upgrade: once a history API is wired, this panel will list multiple layout revisions with timestamps.
+                    Future upgrade: once a history API is wired, this panel will list multiple layout revisions with
+                    timestamps.
                   </p>
                 </div>
               )}
             </div>
 
-            {/* line items */}
+            {/* optional: quick line items table (admin view) */}
             <div style={{ ...cardBase, background: "#ffffff" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>Line items (admin view)</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>
+                Line items (admin view)
+              </div>
               {items.length === 0 ? (
                 <p style={{ color: "#6b7280", fontSize: 13 }}>No line items stored for this quote.</p>
               ) : (
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 4, borderRadius: 12, overflow: "hidden" }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: 13,
+                    marginTop: 4,
+                    borderRadius: 12,
+                    overflow: "hidden",
+                  }}
+                >
                   <thead>
                     <tr style={{ background: "#eef2ff" }}>
                       <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Line</th>
                       <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Material</th>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Dims (L × W × H)</th>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>
+                        Dims (L × W × H)
+                      </th>
                       <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Qty</th>
                       <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Unit</th>
                       <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Total</th>
@@ -1611,9 +1698,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{idx + 1}</td>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{label}</td>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{item.qty}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(unit)}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(total)}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                            {item.qty}
+                          </td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                            {formatUsd(unit)}
+                          </td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                            {formatUsd(total)}
+                          </td>
                         </tr>
                       );
                     })}
@@ -1623,7 +1716,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             </div>
 
             <p style={{ marginTop: 24, fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
-              Internal-only view. Use this page for engineering review and CAD exports. Clients should continue to use the public /quote link in their email.
+              Internal-only view. Use this page for engineering review and CAD exports. Clients should continue to use
+              the public /quote link in their email.
             </p>
           </>
         )}
