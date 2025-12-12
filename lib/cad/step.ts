@@ -220,7 +220,7 @@ function makeFace(
   planeId: number,
   sameSense = true
 ): number {
-  // STEP spec: ADVANCED_FACE expects FACE_BOUND / FACE_OUTER_BOUND, not EDGE_LOOP.
+  // Important: ADVANCED_FACE expects FACE_BOUND / FACE_OUTER_BOUND, not EDGE_LOOP.
   const boundId = makeFaceOuterBound(sb, loopId, sameSense);
   return sb.add(
     `ADVANCED_FACE('', (#${boundId}), #${planeId}, ${
@@ -544,30 +544,8 @@ function buildWrapperAndEmit(
 ): string | null {
   if (!solids.length) return null;
 
-  // AP203-style units + tolerance + representation context
-  const lengthUnitId = sb.add(
-    `(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI., .METRE.))`
-  );
-  const planeAngleUnitId = sb.add(
-    `(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($, .RADIAN.))`
-  );
-  const planeAngleMeasureId = sb.add(
-    `PLANE_ANGLE_MEASURE_WITH_UNIT(PLANE_ANGLE_MEASURE(0.0174532925), #${planeAngleUnitId})`
-  );
-  const dimExpId = sb.add(
-    `DIMENSIONAL_EXPONENTS(0.,0.,0.,0.,0.,0.,0.)`
-  );
-  const degreeUnitId = sb.add(
-    `(CONVERSION_BASED_UNIT('DEGREE', #${planeAngleMeasureId}) NAMED_UNIT(#${dimExpId}) PLANE_ANGLE_UNIT())`
-  );
-  const solidAngleUnitId = sb.add(
-    `(NAMED_UNIT(*) SI_UNIT($, .STERADIAN.) SOLID_ANGLE_UNIT())`
-  );
-  const uncertaintyId = sb.add(
-    `UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-05), #${lengthUnitId}, 'MODEL_ACCURACY', 'Maximum Tolerance applied to model')`
-  );
   const repCtx = sb.add(
-    `(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#${uncertaintyId})) GLOBAL_UNIT_ASSIGNED_CONTEXT((#${lengthUnitId}, #${degreeUnitId}, #${solidAngleUnitId})) REPRESENTATION_CONTEXT('', ''))`
+    `GEOMETRIC_REPRESENTATION_CONTEXT(3) REPRESENTATION_CONTEXT('', '')`
   );
 
   const solidsList = solids.map((id) => `#${id}`).join(",");
@@ -612,13 +590,17 @@ function buildWrapperAndEmit(
   const header = [
     "ISO-10303-21;",
     "HEADER;",
-    "FILE_DESCRIPTION (('STEP AP203'),'1');",
+    `FILE_DESCRIPTION((${stepString(
+      `Foam layout | Quote ${quoteNo}${
+        materialLegend ? ` | ${materialLegend}` : ""
+      }`
+    )}),'2;1');`,
     `FILE_NAME(${stepString(
-      `${quoteNo}.STEP`
+      `${quoteNo}.step`
     )},${stepString(
       new Date().toISOString()
-    )},(''),(''),'Alex-IO','alex-io.com','Foam STEP export');`,
-    "FILE_SCHEMA (('CONFIG_CONTROL_DESIGN'));",
+    )},(),(),'Alex-IO','alex-io.com','Foam STEP export');`,
+    "FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));",
     "ENDSEC;",
     "DATA;",
   ].join("\n");
