@@ -287,7 +287,6 @@ function getLayerThicknessInFromLayout(layout: any, layerIndex: number): number 
   return null;
 }
 
-
 /** Normalize shape field values to rect/circle. Matches admin logic 1:1. */
 function normalizeShape(raw: any): "rect" | "circle" | null {
   const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
@@ -577,12 +576,7 @@ export default function QuotePrintClient() {
     const body = encodeURIComponent(bodyLines.join("\n"));
 
     const mailto =
-      "mailto:" +
-      encodeURIComponent(salesEmail) +
-      "?subject=" +
-      encodeURIComponent(subject) +
-      "&body=" +
-      body;
+      "mailto:" + encodeURIComponent(salesEmail) + "?subject=" + encodeURIComponent(subject) + "&body=" + body;
 
     window.location.href = mailto;
   }, [quoteNo, quote, items, requestedBoxes]);
@@ -843,8 +837,7 @@ export default function QuotePrintClient() {
 
   // anyPricing: use effective grandSubtotal (foam + packaging) if available,
   // but still works if only foam is priced.
-  const anyPricing =
-    (effectiveGrandSubtotal ?? 0) > 0 || (foamSubtotal ?? 0) > 0 || (breakdownUnitPrice ?? null) != null;
+  const anyPricing = (effectiveGrandSubtotal ?? 0) > 0 || (foamSubtotal ?? 0) > 0 || (breakdownUnitPrice ?? null) != null;
 
   // Rough shipping estimate from admin knob:
   //   shippingEstimate = (foam+packaging subtotal) * roughShipPct / 100
@@ -1491,9 +1484,7 @@ export default function QuotePrintClient() {
                               </div>
                             </td>
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {item.qty}
-                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{item.qty}</td>
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
                               {formatUsd(unit)}
                             </td>
@@ -1740,7 +1731,9 @@ export default function QuotePrintClient() {
 
                       return (
                         <div style={{ marginTop: 12 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Layers (preview)</div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
+                            Layers (preview)
+                          </div>
 
                           <div
                             style={{
@@ -1751,7 +1744,19 @@ export default function QuotePrintClient() {
                           >
                             {layersForPreview.map((layer, idx) => {
                               const label = getLayerLabel(layer, idx);
-                              const t = getLayerThicknessInFromLayout(json, idx);
+
+                              // Thickness display:
+                              // 1) Prefer explicit thickness in saved layout_json
+                              // 2) Fallback to the primary foam thickness from the quote item (height_in)
+                              const tFromLayout = getLayerThicknessInFromLayout(json, idx);
+                              const primaryThicknessNum =
+                                primaryItem?.height_in == null ? NaN : Number(primaryItem.height_in);
+                              const t =
+                                tFromLayout != null
+                                  ? tFromLayout
+                                  : Number.isFinite(primaryThicknessNum) && primaryThicknessNum > 0
+                                    ? primaryThicknessNum
+                                    : null;
 
                               const depthSummary = getPocketDepthSummary(json, idx);
                               const svg = buildSvgPreviewForLayer(json, idx);
@@ -1774,7 +1779,9 @@ export default function QuotePrintClient() {
                                     borderRadius: 14,
                                     padding: 10,
                                     background: "#ffffff",
-                                    boxShadow: isSelected ? "0 10px 22px rgba(14,165,233,0.20)" : "0 6px 16px rgba(15,23,42,0.06)",
+                                    boxShadow: isSelected
+                                      ? "0 10px 22px rgba(14,165,233,0.20)"
+                                      : "0 6px 16px rgba(15,23,42,0.06)",
                                     cursor: "pointer",
                                     outline: "none",
                                   }}
@@ -1806,7 +1813,10 @@ export default function QuotePrintClient() {
                                     }}
                                   >
                                     {svg ? (
-                                      <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
+                                      <div
+                                        style={{ width: "100%", height: "100%", display: "flex" }}
+                                        dangerouslySetInnerHTML={{ __html: svg }}
+                                      />
                                     ) : (
                                       <div
                                         style={{
@@ -1843,9 +1853,21 @@ export default function QuotePrintClient() {
                           >
                             {(() => {
                               const selIdx = selectedLayerIdx;
-const t = getLayerThicknessInFromLayout(json, selIdx);
-const depthSummary = getPocketDepthSummary(json, selIdx);
 
+                              // Thickness display:
+                              // 1) Prefer explicit thickness in saved layout_json
+                              // 2) Fallback to the primary foam thickness from the quote item (height_in)
+                              const tFromLayout = getLayerThicknessInFromLayout(json, selIdx);
+                              const primaryThicknessNum =
+                                primaryItem?.height_in == null ? NaN : Number(primaryItem.height_in);
+                              const t =
+                                tFromLayout != null
+                                  ? tFromLayout
+                                  : Number.isFinite(primaryThicknessNum) && primaryThicknessNum > 0
+                                    ? primaryThicknessNum
+                                    : null;
+
+                              const depthSummary = getPocketDepthSummary(json, selIdx);
 
                               return (
                                 <>
@@ -1855,18 +1877,16 @@ const depthSummary = getPocketDepthSummary(json, selIdx);
                                       {getLayerLabel(layersForPreview[selIdx] || null, selIdx)} (Layer{" "}
                                       {Math.min(selIdx + 1, layersForPreview.length)}/{layersForPreview.length})
                                     </span>
-
-{t ? <span style={{ marginLeft: 10, color: "#6b7280" }}>• Thickness: {t.toFixed(3)} in</span> : null}
-
-
+                                    {t ? (
+                                      <span style={{ marginLeft: 10, color: "#6b7280" }}>• Thickness: {t.toFixed(3)} in</span>
+                                    ) : (
+                                      <span style={{ marginLeft: 10, color: "#6b7280" }}>• Thickness: —</span>
+                                    )}
                                     {depthSummary ? (
                                       <span style={{ marginLeft: 10, color: "#6b7280" }}>• Pocket depth: {depthSummary}</span>
-                                     
                                     ) : (
                                       <span style={{ marginLeft: 10, color: "#6b7280" }}>• Pocket depth: —</span>
                                     )}
-
-                                    
                                   </div>
 
                                   <div
@@ -1886,7 +1906,10 @@ const depthSummary = getPocketDepthSummary(json, selIdx);
                                       const svg = buildSvgPreviewForLayer(json, selIdx);
                                       if (!svg) return <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>;
                                       return (
-                                        <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
+                                        <div
+                                          style={{ width: "100%", height: "100%", display: "flex" }}
+                                          dangerouslySetInnerHTML={{ __html: svg }}
+                                        />
                                       );
                                     })()}
                                   </div>
