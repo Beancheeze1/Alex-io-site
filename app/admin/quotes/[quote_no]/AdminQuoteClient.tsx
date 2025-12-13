@@ -177,10 +177,7 @@ function buildLayerFilename(opts: {
   return `${parts.join("__")}.${opts.ext}`;
 }
 
-function buildFullPackageFilename(opts: {
-  quoteNo: string;
-  ext: "dxf" | "step" | "zip";
-}): string {
+function buildFullPackageFilename(opts: { quoteNo: string; ext: "dxf" | "step" | "zip" }): string {
   const q = sanitizeFilenamePart(opts.quoteNo || "quote");
   return `${q}__Full-Package.${opts.ext}`;
 }
@@ -211,7 +208,6 @@ type FlatCavity = {
 };
 
 type TargetDimsIn = { L: number; W: number };
-
 
 function getLayerThicknessInFromLayout(layout: any, layerIndex: number): number | null {
   if (!layout || typeof layout !== "object") return null;
@@ -247,10 +243,6 @@ function getLayerThicknessInFromLayout(layout: any, layerIndex: number): number 
 
   return null;
 }
-
-
-
-
 
 /** Extract the stack/layers array from a layout_json */
 function getLayersFromLayout(layout: any): LayoutLayer[] {
@@ -908,8 +900,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         if (!res.ok || !json.ok) {
           if (!cancelled) {
             const msg =
-              (!json.ok && (json as BoxesForQuoteErr).error) ||
-              "Unable to load requested cartons for this quote.";
+              (!json.ok && (json as BoxesForQuoteErr).error) || "Unable to load requested cartons for this quote.";
             setBoxSelectionsError(msg);
           }
           return;
@@ -1009,8 +1000,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const primaryMaterialFamily = primaryItem?.material_family || null;
   const rawPrimaryDensity = primaryItem?.density_lb_ft3 ?? null;
   const primaryDensity = rawPrimaryDensity != null ? Number(rawPrimaryDensity) : null;
-  const primaryDensityDisplay =
-    primaryDensity != null && Number.isFinite(primaryDensity) ? primaryDensity.toFixed(2) : null;
+  const primaryDensityDisplay = primaryDensity != null && Number.isFinite(primaryDensity) ? primaryDensity.toFixed(2) : null;
 
   const customerQuoteUrl =
     quoteState?.quote_no && typeof window === "undefined"
@@ -1217,7 +1207,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         const label = getLayerLabel(layer, i);
-        const thicknessIn = getLayerThicknessIn(layer);
+
+        // IMPORTANT (Path A): thickness may live outside the chosen preview array (e.g., stack vs layers),
+        // so resolve thickness directly from the full layout payload.
+        const thicknessIn = getLayerThicknessInFromLayout(layoutPkg.layout_json, i);
 
         // DXF (client-generated, trusted)
         const dxf = buildDxfForLayer(layoutPkg.layout_json, i, targetDims);
@@ -1269,7 +1262,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         const label = getLayerLabel(layer, i);
-        const thicknessIn = getLayerThicknessIn(layer);
+        const thicknessIn = getLayerThicknessInFromLayout(layoutPkg.layout_json, i);
         const thick = formatThicknessForName(thicknessIn) || "—";
         manifestLines.push(`Layer ${i + 1}: ${label} (thickness ${thick})`);
       }
@@ -1715,9 +1708,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   Looking up any cartons the customer marked as <strong>Requested</strong> from the quote viewer…
                 </p>
               )}
-              {!boxSelectionsLoading && boxSelectionsError && (
-                <p style={{ fontSize: 12, color: "#b91c1c" }}>{boxSelectionsError}</p>
-              )}
+              {!boxSelectionsLoading && boxSelectionsError && <p style={{ fontSize: 12, color: "#b91c1c" }}>{boxSelectionsError}</p>}
               {!boxSelectionsLoading && !boxSelectionsError && (!boxSelections || boxSelections.length === 0) && (
                 <p style={{ fontSize: 12, color: "#6b7280" }}>
                   No cartons have been requested on this quote yet from the customer-facing /quote page.
@@ -1749,10 +1740,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   </ul>
                   <p style={{ marginTop: 6, fontSize: 11, color: "#9ca3af" }}>
                     Read-only mirror of{" "}
-                    <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
-                      quote_box_selections
-                    </span>
-                    . Changing cartons or quantities still happens via your normal quoting workflow.
+                    <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>quote_box_selections</span>.
+                    Changing cartons or quantities still happens via your normal quoting workflow.
                   </p>
                 </>
               )}
@@ -1760,9 +1749,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
             {/* layout + CAD downloads */}
             <div style={{ marginTop: 4, marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
-                Foam layout & CAD exports
-              </div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Foam layout & CAD exports</div>
 
               <div style={{ ...cardBase, background: "#ffffff" }}>
                 {!layoutPkg ? (
@@ -1782,12 +1769,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       }}
                     >
                       <div>
-                        <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>
-                          Layout package #{layoutPkg.id}
-                        </div>
-                        <div style={{ color: "#6b7280", fontSize: 12 }}>
-                          Saved: {new Date(layoutPkg.created_at).toLocaleString()}
-                        </div>
+                        <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>Layout package #{layoutPkg.id}</div>
+                        <div style={{ color: "#6b7280", fontSize: 12 }}>Saved: {new Date(layoutPkg.created_at).toLocaleString()}</div>
                         {notesPreview && (
                           <div
                             style={{
@@ -1839,9 +1822,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               {rebuildBusy ? "Rebuilding STEP..." : "Rebuild STEP now"}
                             </button>
 
-                            {rebuildOkAt && (
-                              <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>
-                            )}
+                            {rebuildOkAt && <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>}
                             {rebuildError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>}
                           </div>
                         </div>
@@ -1954,9 +1935,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     {/* Per-layer previews + buttons */}
                     {layersForDxf && layersForDxf.length > 0 && layoutPkg.layout_json && (
                       <div style={{ marginTop: 12 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
-                          Layers (preview + downloads)
-                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Layers (preview + downloads)</div>
 
                         <div
                           style={{
@@ -1967,131 +1946,132 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                         >
                           {layersForDxf.map((layer, idx) => {
                             const label = getLayerLabel(layer, idx);
-                            const t = getLayerThicknessIn(layer);
+
+                            // IMPORTANT (Path A): thickness might not be on the chosen preview array (stack vs layers).
+                            // Resolve thickness from the full layout payload, with fallbacks.
+                            const t = getLayerThicknessInFromLayout(layoutPkg.layout_json, idx);
+
                             const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, idx);
                             const isSelected = idx === selectedLayerIdx;
 
                             const pocket = getLayerPocketDepthSummary(layoutPkg.layout_json, idx);
 
                             return (
-                              <div
-                                key={idx}
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => setSelectedLayerIdx(idx)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    e.preventDefault();
-                                    setSelectedLayerIdx(idx);
-                                  }
-                                }}
-                                style={{
-                                  border: isSelected ? "2px solid #0ea5e9" : "1px solid #e5e7eb",
-                                  borderRadius: 14,
-                                  padding: 10,
-                                  background: "#ffffff",
-                                  boxShadow: isSelected
-                                    ? "0 10px 22px rgba(14,165,233,0.20)"
-                                    : "0 6px 16px rgba(15,23,42,0.06)",
-                                  cursor: "pointer",
-                                  outline: "none",
-                                }}
-                                title="Click to set the large preview to this layer"
-                              >
-                                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                                  <div>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{label}</div>
-                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                                      {t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}
-                                    </div>
-                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                                      Pocket depth: {pocket.text}
-                                    </div>
-                                  </div>
-                                  <div style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>
-                                    Layer {idx + 1}/{layersForDxf.length}
-                                  </div>
-                                </div>
+  <div
+    key={idx}
+    role="button"
+    tabIndex={0}
+    onClick={() => setSelectedLayerIdx(idx)}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        setSelectedLayerIdx(idx);
+      }
+    }}
+    style={{
+      border: isSelected ? "2px solid #0ea5e9" : "1px solid #e5e7eb",
+      borderRadius: 14,
+      padding: 10,
+      background: "#ffffff",
+      boxShadow: isSelected
+        ? "0 10px 22px rgba(14,165,233,0.20)"
+        : "0 6px 16px rgba(15,23,42,0.06)",
+      cursor: "pointer",
+      outline: "none",
+    }}
+    title="Click to set the large preview to this layer"
+  >
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{label}</div>
+        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+          {t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}
+        </div>
+        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+          Pocket depth: {pocket.text}
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>
+        Layer {idx + 1}/{layersForDxf.length}
+      </div>
+    </div>
 
-                                <div
-                                  style={{
-                                    marginTop: 8,
-                                    height: 160,
-                                    borderRadius: 10,
-                                    border: "1px solid #e5e7eb",
-                                    background: "#f3f4f6",
-                                    overflow: "hidden",
-                                  }}
-                                >
-                                  {svg ? (
-                                    <div
-                                      style={{ width: "100%", height: "100%", display: "flex" }}
-                                      dangerouslySetInnerHTML={{ __html: svg }}
-                                    />
-                                  ) : (
-                                    <div
-                                      style={{
-                                        height: "100%",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        fontSize: 12,
-                                        color: "#6b7280",
-                                      }}
-                                    >
-                                      No preview
-                                    </div>
-                                  )}
-                                </div>
+    <div
+      style={{
+        marginTop: 8,
+        height: 160,
+        borderRadius: 10,
+        border: "1px solid #e5e7eb",
+        background: "#f3f4f6",
+        overflow: "hidden",
+      }}
+    >
+      {svg ? (
+        <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : (
+        <div
+          style={{
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 12,
+            color: "#6b7280",
+          }}
+        >
+          No preview
+        </div>
+      )}
+    </div>
 
-                                <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDownloadLayerDxf(idx, label, t);
-                                    }}
-                                    style={{
-                                      padding: "4px 10px",
-                                      borderRadius: 999,
-                                      border: "1px dashed #e5e7eb",
-                                      background: "#f9fafb",
-                                      color: "#111827",
-                                      fontSize: 11,
-                                      cursor: "pointer",
-                                    }}
-                                  >
-                                    Download DXF (layer)
-                                  </button>
+    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          handleDownloadLayerDxf(idx, label, t);
+        }}
+        style={{
+          padding: "4px 10px",
+          borderRadius: 999,
+          border: "1px dashed #e5e7eb",
+          background: "#f9fafb",
+          color: "#111827",
+          fontSize: 11,
+          cursor: "pointer",
+        }}
+      >
+        Download DXF (layer)
+      </button>
 
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDownloadLayerStep(idx, label, t);
-                                    }}
-                                    style={{
-                                      padding: "4px 10px",
-                                      borderRadius: 999,
-                                      border: "1px solid #0ea5e9",
-                                      background: "#e0f2fe",
-                                      color: "#0369a1",
-                                      fontSize: 11,
-                                      fontWeight: 700,
-                                      cursor: "pointer",
-                                    }}
-                                    title="Generates a STEP for this single layer (including only this layer’s cavities) via /api/quote/layout/step-layer"
-                                  >
-                                    Download STEP (layer)
-                                  </button>
-                                </div>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          handleDownloadLayerStep(idx, label, t);
+        }}
+        style={{
+          padding: "4px 10px",
+          borderRadius: 999,
+          border: "1px solid #0ea5e9",
+          background: "#e0f2fe",
+          color: "#0369a1",
+          fontSize: 11,
+          fontWeight: 700,
+          cursor: "pointer",
+        }}
+        title="Generates a STEP for this single layer (including only this layer’s cavities) via /api/quote/layout/step-layer"
+      >
+        Download STEP (layer)
+      </button>
+    </div>
 
-                                <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
-                                  Preview shows foam outline + cavity geometry (layer-specific).
-                                </div>
-                              </div>
-                            );
-                          })}
+    <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
+      Preview shows foam outline + cavity geometry (layer-specific).
+    </div>
+  </div>
+);
+})}
                         </div>
 
                         {/* Large selected layer preview */}
@@ -2107,7 +2087,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           {(() => {
                             const selLayer = layersForDxf[selectedLayerIdx] || null;
                             const selLabel = getLayerLabel(selLayer, selectedLayerIdx);
-                            const selT = getLayerThicknessIn(selLayer);
+
+                            // Resolve thickness from full layout payload (NOT just the derived layer object)
+                            const selT =
+                              layoutPkg?.layout_json
+                                ? getLayerThicknessInFromLayout(layoutPkg.layout_json, selectedLayerIdx)
+                                : null;
+
                             const pocket = layoutPkg?.layout_json
                               ? getLayerPocketDepthSummary(layoutPkg.layout_json, selectedLayerIdx)
                               : { text: "—", hasMultiple: false };
@@ -2248,3 +2234,4 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     </div>
   );
 }
+
