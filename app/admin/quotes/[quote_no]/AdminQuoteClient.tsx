@@ -322,6 +322,33 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   return out;
 }
 
+/* ---------------- UI helpers for layer pocket depth (admin previews) ---------------- */
+
+function fmtIn(n: number): string {
+  return Number.isFinite(n) ? `${n.toFixed(3)} in` : "—";
+}
+
+function getLayerPocketDepthSummary(layout: any, layerIndex: number): { text: string; hasMultiple: boolean } {
+  const cavs = getCavitiesForLayer(layout, layerIndex);
+
+  // Accept 0 as a valid depth (rare, but keeps us honest); ignore null/NaN.
+  const depthsRaw = cavs
+    .map((c) => (c.depthIn == null ? NaN : Number(c.depthIn)))
+    .filter((d) => Number.isFinite(d) && d >= 0);
+
+  if (depthsRaw.length === 0) return { text: "—", hasMultiple: false };
+
+  // Normalize for uniqueness at 0.001 resolution (matches display precision)
+  const rounded = depthsRaw.map((d) => Math.round(d * 1000) / 1000);
+  const uniq = Array.from(new Set(rounded)).sort((a, b) => a - b);
+
+  if (uniq.length === 1) return { text: fmtIn(uniq[0]), hasMultiple: false };
+
+  const min = uniq[0];
+  const max = uniq[uniq.length - 1];
+  return { text: `${min.toFixed(3)}–${max.toFixed(3)} in`, hasMultiple: true };
+}
+
 /**
  * Build a DXF for a single layer:
  *  - Foam block as rectangle from (0,0) to (L,W)
@@ -1772,7 +1799,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               {rebuildBusy ? "Rebuilding STEP..." : "Rebuild STEP now"}
                             </button>
 
-                            {rebuildOkAt && <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>}
+                            {rebuildOkAt && (
+                              <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>
+                            )}
                             {rebuildError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>}
                           </div>
                         </div>
@@ -1791,7 +1820,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           Full Package
                         </div>
 
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 8,
+                            justifyContent: "flex-end",
+                            alignItems: "center",
+                          }}
+                        >
                           {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
                             <button
                               type="button"
@@ -1894,6 +1931,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, idx);
                             const isSelected = idx === selectedLayerIdx;
 
+                            const pocket = getLayerPocketDepthSummary(layoutPkg.layout_json, idx);
+
                             return (
                               <div
                                 key={idx}
@@ -1924,6 +1963,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                     <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{label}</div>
                                     <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
                                       {t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                                      Pocket depth: {pocket.text}
                                     </div>
                                   </div>
                                   <div style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>
@@ -2022,13 +2064,32 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             background: "#ffffff",
                           }}
                         >
-                          <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
-                            Selected layer preview:{" "}
-                            <span style={{ fontWeight: 700 }}>
-                              {getLayerLabel(layersForDxf[selectedLayerIdx] || null, selectedLayerIdx)} (Layer{" "}
-                              {Math.min(selectedLayerIdx + 1, layersForDxf.length)}/{layersForDxf.length})
-                            </span>
-                          </div>
+                          {(() => {
+                            const selLayer = layersForDxf[selectedLayerIdx] || null;
+                            const selLabel = getLayerLabel(selLayer, selectedLayerIdx);
+                            const selT = getLayerThicknessIn(selLayer);
+                            const pocket = layoutPkg?.layout_json
+                              ? getLayerPocketDepthSummary(layoutPkg.layout_json, selectedLayerIdx)
+                              : { text: "—", hasMultiple: false };
+
+                            return (
+                              <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
+                                Selected layer preview:{" "}
+                                <span style={{ fontWeight: 700 }}>
+                                  {selLabel} (Layer {Math.min(selectedLayerIdx + 1, layersForDxf.length)}/
+                                  {layersForDxf.length})
+                                </span>
+                                {" · "}
+                                <span style={{ fontWeight: 600, color: "#111827" }}>
+                                  Thickness: {selT ? `${selT.toFixed(3)} in` : "—"}
+                                </span>
+                                {" · "}
+                                <span style={{ fontWeight: 600, color: "#111827" }}>
+                                  Pocket depth: {pocket.text}
+                                </span>
+                              </div>
+                            );
+                          })()}
 
                           <div
                             style={{
@@ -2047,7 +2108,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, selectedLayerIdx);
                               if (!svg) return <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>;
                               return (
-                                <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
+                                <div
+                                  style={{ width: "100%", height: "100%", display: "flex" }}
+                                  dangerouslySetInnerHTML={{ __html: svg }}
+                                />
                               );
                             })()}
                           </div>
@@ -2055,8 +2119,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       </div>
                     )}
 
-                 {/* Full layout preview removed (layer previews are sufficient). */}
-
+                    {/* Full layout preview removed (layer previews are sufficient). */}
                   </>
                 )}
               </div>
