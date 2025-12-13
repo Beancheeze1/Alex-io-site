@@ -841,6 +841,33 @@ export async function POST(req: NextRequest) {
       quoteNo,
     );
 
+    // ===================== FIX: persist layer thickness into layout_json =====================
+    if (layout && Array.isArray(layout.stack)) {
+      layout.stack = layout.stack.map((layer: any) => {
+        if (!layer || typeof layer !== "object") return layer;
+
+        const raw =
+          layer.thicknessIn ??
+          layer.thickness_in ??
+          layer.thickness ??
+          null;
+
+        const n = Number(raw);
+
+        if (Number.isFinite(n) && n > 0) {
+          return {
+            ...layer,
+            thicknessIn: n, // canonical, numeric, admin-safe
+          };
+        }
+
+        return layer;
+      });
+    }
+    // ===================== END FIX =====================
+
+
+
     const pkg = await one<LayoutPkgRow>(
       `
       insert into quote_layout_packages (
