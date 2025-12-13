@@ -130,6 +130,61 @@ function formatUsd(value: number | null | undefined): string {
   }
 }
 
+/* ---------------- Filename helpers (manufacturer-friendly) ---------------- */
+
+function sanitizeFilenamePart(input: string): string {
+  const s = (input || "").trim();
+  if (!s) return "";
+  // Replace illegal-ish characters with dashes and collapse repeats
+  const cleaned = s
+    .replace(/[\s]+/g, "-")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_.]+|[-_.]+$/g, "");
+  // Keep it readable, not monstrous
+  return cleaned.length > 48 ? cleaned.slice(0, 48) : cleaned;
+}
+
+function formatThicknessForName(thicknessIn: number | null | undefined): string | null {
+  if (thicknessIn == null) return null;
+  const n = Number(thicknessIn);
+  if (!Number.isFinite(n) || n <= 0) return null;
+
+  // 1.250in format (trim trailing zeros)
+  const fixed = n.toFixed(3);
+  const trimmed = fixed.replace(/\.?0+$/g, "");
+  return `${trimmed}in`;
+}
+
+function buildLayerFilename(opts: {
+  quoteNo: string;
+  layerIndex: number; // 0-based
+  layerLabel: string | null;
+  thicknessIn: number | null;
+  ext: "dxf" | "step";
+}): string {
+  const q = sanitizeFilenamePart(opts.quoteNo || "quote");
+  const layerNum = opts.layerIndex + 1;
+  const label = sanitizeFilenamePart(opts.layerLabel || "");
+  const thick = formatThicknessForName(opts.thicknessIn);
+
+  const parts: string[] = [];
+  parts.push(q);
+  parts.push(`Layer-${layerNum}`);
+  if (label) parts.push(label);
+  if (thick) parts.push(thick);
+
+  return `${parts.join("__")}.${opts.ext}`;
+}
+
+function buildFullPackageFilename(opts: {
+  quoteNo: string;
+  ext: "dxf" | "step" | "zip";
+}): string {
+  const q = sanitizeFilenamePart(opts.quoteNo || "quote");
+  return `${q}__Full-Package.${opts.ext}`;
+}
+
 /* ---------------- DXF helpers (per-layer) ---------------- */
 
 type LayoutLayer = {
@@ -673,6 +728,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [rebuildError, setRebuildError] = React.useState<string | null>(null);
   const [rebuildOkAt, setRebuildOkAt] = React.useState<string | null>(null);
 
+  // NEW: Zip all-layers downloader state
+  const [zipBusy, setZipBusy] = React.useState<boolean>(false);
+  const [zipError, setZipError] = React.useState<string | null>(null);
+  const [zipOkAt, setZipOkAt] = React.useState<string | null>(null);
+
   const [selectedLayerIdx, setSelectedLayerIdx] = React.useState<number>(0);
 
   React.useEffect(() => {
@@ -847,86 +907,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [layoutPkg]);
 
-  const handleDownload = React.useCallback(
-    (kind: "svg") => {
-      if (typeof window === "undefined") return;
-      if (!layoutPkg) return;
-
-      let data: string | null = null;
-      let ext = "";
-      let mime = "";
-
-      if (kind === "svg" && layoutPkg.svg_text) {
-        data = layoutPkg.svg_text;
-        ext = "svg";
-        mime = "image/svg+xml";
-      }
-
-      if (!data) return;
-
-      try {
-        const blob = new Blob([data], { type: mime || "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-
-        const baseName = quoteState?.quote_no || "quote";
-        a.download = `${baseName}-layout-${layoutPkg.id}.${ext || "txt"}`;
-
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.error("Admin: download failed:", err);
-      }
-    },
-    [layoutPkg, quoteState],
-  );
-
-  const handleDownloadStep = React.useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (!quoteNoValue) return;
-
-    const url = `/api/quote/layout/step?quote_no=${encodeURIComponent(quoteNoValue)}`;
-
-    try {
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch (err) {
-      console.error("Admin: STEP download failed:", err);
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
-  }, [quoteNoValue]);
-
-  const handleDownloadLayerStep = React.useCallback(
-    (layerIndex: number) => {
-      if (typeof window === "undefined") return;
-      if (!quoteNoValue) return;
-
-      const url = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(
-        quoteNoValue,
-      )}&layer_index=${encodeURIComponent(String(layerIndex))}`;
-
-      try {
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      } catch (err) {
-        console.error("Admin: layer STEP download failed:", err);
-        window.open(url, "_blank", "noopener,noreferrer");
-      }
-    },
-    [quoteNoValue],
-  );
-
   const primaryItem = items[0] || null;
 
   const primaryPricing = primaryItem?.pricing_meta || null;
@@ -990,75 +970,257 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     });
   }, [layersForDxf]);
 
-  const handleDownloadLayerDxf = React.useCallback(
-    (layerIndex: number) => {
-      if (typeof window === "undefined") return;
-      if (!layoutPkg || !layoutPkg.layout_json) return;
-
-      // Use primary item dims as the "truth" for inches to correct any internal unit scaling.
-      const targetL = primaryItem ? Number(primaryItem.length_in) : NaN;
-      const targetW = primaryItem ? Number(primaryItem.width_in) : NaN;
-      const targetDims =
-        Number.isFinite(targetL) && targetL > 0 && Number.isFinite(targetW) && targetW > 0
-          ? ({ L: targetL, W: targetW } as TargetDimsIn)
-          : undefined;
-
-      const dxf = buildDxfForLayer(layoutPkg.layout_json, layerIndex, targetDims);
-      if (!dxf) return;
-
-      try {
-        const blob = new Blob([dxf], { type: "application/dxf" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-
-        const baseName = quoteState?.quote_no || "quote";
-        const suffix = `layer-${layerIndex + 1}`;
-        a.download = `${baseName}-layout-${suffix}.dxf`;
-
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.error("Admin: layer DXF download failed:", err);
-      }
-    },
-    [layoutPkg, quoteState, primaryItem],
-  );
-
-  // NEW: Full Package DXF (correct scale) generated on-demand using layout_json + primary dims
-  const handleDownloadFullPackageDxf = React.useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (!layoutPkg || !layoutPkg.layout_json) return;
-
+  function getTargetDims(): TargetDimsIn | undefined {
     const targetL = primaryItem ? Number(primaryItem.length_in) : NaN;
     const targetW = primaryItem ? Number(primaryItem.width_in) : NaN;
     const targetDims =
       Number.isFinite(targetL) && targetL > 0 && Number.isFinite(targetW) && targetW > 0
         ? ({ L: targetL, W: targetW } as TargetDimsIn)
         : undefined;
+    return targetDims;
+  }
 
+  function triggerBlobDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const handleDownloadSvg = React.useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (!layoutPkg?.svg_text) return;
+
+    try {
+      const blob = new Blob([layoutPkg.svg_text], { type: "image/svg+xml" });
+      const baseName = quoteState?.quote_no || "quote";
+      const filename = `${sanitizeFilenamePart(baseName)}__Full-Package.svg`;
+      triggerBlobDownload(blob, filename);
+    } catch (err) {
+      console.error("Admin: SVG download failed:", err);
+    }
+  }, [layoutPkg, quoteState]);
+
+  const handleDownloadFullPackageDxf = React.useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (!layoutPkg || !layoutPkg.layout_json) return;
+
+    const targetDims = getTargetDims();
     const dxf = buildDxfForFullPackage(layoutPkg.layout_json, targetDims);
     if (!dxf) return;
 
     try {
       const blob = new Blob([dxf], { type: "application/dxf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-
       const baseName = quoteState?.quote_no || "quote";
-      a.download = `${baseName}-layout-full-package.dxf`;
-
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const filename = buildFullPackageFilename({ quoteNo: baseName, ext: "dxf" });
+      triggerBlobDownload(blob, filename);
     } catch (err) {
       console.error("Admin: full package DXF download failed:", err);
     }
   }, [layoutPkg, quoteState, primaryItem]);
+
+  const handleDownloadStep = React.useCallback(async () => {
+    if (typeof window === "undefined") return;
+    if (!quoteNoValue) return;
+
+    const url = `/api/quote/layout/step?quote_no=${encodeURIComponent(quoteNoValue)}`;
+
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) {
+        console.error("Admin: STEP fetch failed:", res.status, res.statusText);
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      const buf = await res.arrayBuffer();
+      const blob = new Blob([buf], { type: "application/octet-stream" });
+
+      const baseName = quoteState?.quote_no || quoteNoValue || "quote";
+      const filename = buildFullPackageFilename({ quoteNo: baseName, ext: "step" });
+
+      triggerBlobDownload(blob, filename);
+    } catch (err) {
+      console.error("Admin: STEP download failed:", err);
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }, [quoteNoValue, quoteState]);
+
+  const handleDownloadLayerStep = React.useCallback(
+    async (layerIndex: number, layerLabel: string | null, thicknessIn: number | null) => {
+      if (typeof window === "undefined") return;
+      if (!quoteNoValue) return;
+
+      const url = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(
+        quoteNoValue,
+      )}&layer_index=${encodeURIComponent(String(layerIndex))}`;
+
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) {
+          console.error("Admin: layer STEP fetch failed:", res.status, res.statusText);
+          window.open(url, "_blank", "noopener,noreferrer");
+          return;
+        }
+
+        const buf = await res.arrayBuffer();
+        const blob = new Blob([buf], { type: "application/octet-stream" });
+
+        const baseName = quoteState?.quote_no || quoteNoValue || "quote";
+        const filename = buildLayerFilename({
+          quoteNo: baseName,
+          layerIndex,
+          layerLabel,
+          thicknessIn,
+          ext: "step",
+        });
+
+        triggerBlobDownload(blob, filename);
+      } catch (err) {
+        console.error("Admin: layer STEP download failed:", err);
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    },
+    [quoteNoValue, quoteState],
+  );
+
+  const handleDownloadLayerDxf = React.useCallback(
+    (layerIndex: number, layerLabel: string | null, thicknessIn: number | null) => {
+      if (typeof window === "undefined") return;
+      if (!layoutPkg || !layoutPkg.layout_json) return;
+
+      const targetDims = getTargetDims();
+      const dxf = buildDxfForLayer(layoutPkg.layout_json, layerIndex, targetDims);
+      if (!dxf) return;
+
+      try {
+        const blob = new Blob([dxf], { type: "application/dxf" });
+        const baseName = quoteState?.quote_no || quoteNoValue || "quote";
+
+        const filename = buildLayerFilename({
+          quoteNo: baseName,
+          layerIndex,
+          layerLabel,
+          thicknessIn,
+          ext: "dxf",
+        });
+
+        triggerBlobDownload(blob, filename);
+      } catch (err) {
+        console.error("Admin: layer DXF download failed:", err);
+      }
+    },
+    [layoutPkg, quoteState, primaryItem, quoteNoValue],
+  );
+
+  // NEW: Download all layers (DXF + STEP) as one ZIP
+  const handleDownloadAllLayersZip = React.useCallback(async () => {
+    if (typeof window === "undefined") return;
+    if (!layoutPkg?.layout_json) return;
+    if (!quoteNoValue) return;
+    if (zipBusy) return;
+
+    setZipBusy(true);
+    setZipError(null);
+    setZipOkAt(null);
+
+    try {
+      const baseName = quoteState?.quote_no || quoteNoValue || "quote";
+      const layers = getLayersFromLayout(layoutPkg.layout_json);
+      if (!layers || layers.length === 0) {
+        setZipError("No layers found in this layout package.");
+        return;
+      }
+
+      // Dynamic import keeps bundle lighter and avoids SSR issues.
+      const mod: any = await import("jszip");
+      const JSZipCtor = mod?.default || mod;
+      const zip = new JSZipCtor();
+
+      const targetDims = getTargetDims();
+
+      // Create a friendly folder
+      const folderName = `${sanitizeFilenamePart(baseName)}__Layers`;
+      const root = zip.folder(folderName) || zip;
+
+      for (let i = 0; i < layers.length; i++) {
+        const layer = layers[i];
+        const label = getLayerLabel(layer, i);
+        const thicknessIn = getLayerThicknessIn(layer);
+
+        // DXF (client-generated, trusted)
+        const dxf = buildDxfForLayer(layoutPkg.layout_json, i, targetDims);
+        if (dxf) {
+          const dxfName = buildLayerFilename({
+            quoteNo: baseName,
+            layerIndex: i,
+            layerLabel: label,
+            thicknessIn,
+            ext: "dxf",
+          });
+          root.file(dxfName, dxf);
+        }
+
+        // STEP (server-generated via microservice route)
+        const stepUrl = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(
+          quoteNoValue,
+        )}&layer_index=${encodeURIComponent(String(i))}`;
+
+        try {
+          const res = await fetch(stepUrl, { cache: "no-store" });
+          if (res.ok) {
+            const buf = await res.arrayBuffer();
+            const stepName = buildLayerFilename({
+              quoteNo: baseName,
+              layerIndex: i,
+              layerLabel: label,
+              thicknessIn,
+              ext: "step",
+            });
+            root.file(stepName, buf);
+          } else {
+            // Don’t fail the whole zip—just include a note.
+            const noteName = `Layer-${i + 1}__STEP-FAILED.txt`;
+            root.file(noteName, `STEP download failed (HTTP ${res.status}) for layer ${i + 1}.`);
+          }
+        } catch (e: any) {
+          const noteName = `Layer-${i + 1}__STEP-FAILED.txt`;
+          root.file(noteName, `STEP download failed for layer ${i + 1}: ${String(e?.message ?? e)}`);
+        }
+      }
+
+      // Add a tiny manifest (nice for manufacturers)
+      const manifestLines: string[] = [];
+      manifestLines.push(`Quote: ${baseName}`);
+      manifestLines.push(`Generated: ${new Date().toLocaleString()}`);
+      manifestLines.push(`Layers: ${layers.length}`);
+      manifestLines.push("");
+      for (let i = 0; i < layers.length; i++) {
+        const layer = layers[i];
+        const label = getLayerLabel(layer, i);
+        const thicknessIn = getLayerThicknessIn(layer);
+        const thick = formatThicknessForName(thicknessIn) || "—";
+        manifestLines.push(`Layer ${i + 1}: ${label} (thickness ${thick})`);
+      }
+      root.file("MANIFEST.txt", manifestLines.join("\n"));
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const zipName = buildFullPackageFilename({ quoteNo: baseName, ext: "zip" });
+
+      triggerBlobDownload(zipBlob, zipName);
+
+      setZipOkAt(new Date().toLocaleString());
+    } catch (e: any) {
+      console.error("Admin: zip build failed:", e);
+      setZipError(String(e?.message ?? e));
+    } finally {
+      setZipBusy(false);
+    }
+  }, [layoutPkg, quoteNoValue, quoteState, zipBusy, primaryItem]);
 
   const handleRebuildStepNow = React.useCallback(async () => {
     if (!quoteNoValue) return;
@@ -1610,15 +1772,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               {rebuildBusy ? "Rebuilding STEP..." : "Rebuild STEP now"}
                             </button>
 
-                            {rebuildOkAt && (
-                              <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>
-                            )}
+                            {rebuildOkAt && <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>}
                             {rebuildError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>}
                           </div>
                         </div>
                       </div>
 
-                      <div style={{ textAlign: "right", fontSize: 12, minWidth: 260 }}>
+                      <div style={{ textAlign: "right", fontSize: 12, minWidth: 320 }}>
                         <div
                           style={{
                             marginBottom: 4,
@@ -1631,11 +1791,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           Full Package
                         </div>
 
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
                           {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
                             <button
                               type="button"
-                              onClick={() => handleDownload("svg")}
+                              onClick={handleDownloadSvg}
                               style={{
                                 padding: "4px 10px",
                                 borderRadius: 999,
@@ -1684,10 +1844,32 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               fontWeight: 600,
                               cursor: "pointer",
                             }}
-                            title="Downloads latest STEP saved for this quote via /api/quote/layout/step"
+                            title="Downloads Full Package STEP via /api/quote/layout/step (saved for this quote)."
                           >
                             Download STEP
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={handleDownloadAllLayersZip}
+                            disabled={!layoutPkg.layout_json || zipBusy}
+                            style={{
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              border: "1px solid #111827",
+                              background: zipBusy ? "#e5e7eb" : "#111827",
+                              color: zipBusy ? "#6b7280" : "#ffffff",
+                              fontSize: 11,
+                              fontWeight: 800,
+                              cursor: zipBusy ? "not-allowed" : "pointer",
+                            }}
+                            title="Downloads a ZIP containing per-layer DXF + STEP with manufacturer-friendly filenames."
+                          >
+                            {zipBusy ? "Building ZIP..." : "Download All Layers (ZIP)"}
+                          </button>
+
+                          {zipOkAt && <span style={{ fontSize: 11, color: "#065f46" }}>✅ ZIP: {zipOkAt}</span>}
+                          {zipError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {zipError}</span>}
                         </div>
                       </div>
                     </div>
@@ -1785,7 +1967,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleDownloadLayerDxf(idx);
+                                      handleDownloadLayerDxf(idx, label, t);
                                     }}
                                     style={{
                                       padding: "4px 10px",
@@ -1804,7 +1986,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleDownloadLayerStep(idx);
+                                      handleDownloadLayerStep(idx, label, t);
                                     }}
                                     style={{
                                       padding: "4px 10px",
@@ -1865,10 +2047,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, selectedLayerIdx);
                               if (!svg) return <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>;
                               return (
-                                <div
-                                  style={{ width: "100%", height: "100%", display: "flex" }}
-                                  dangerouslySetInnerHTML={{ __html: svg }}
-                                />
+                                <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
                               );
                             })()}
                           </div>
