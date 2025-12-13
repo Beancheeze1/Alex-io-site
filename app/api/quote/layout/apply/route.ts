@@ -136,6 +136,89 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
   return out;
 }
 
+/* ===================== NEW: Normalize/persist layer thickness into layout_json ===================== */
+
+/**
+ * Your current stored layout_json.stack[] layers are missing thickness.
+ * The editor clearly has thickness (admin/quote_items sync sees it), but it is
+ * not being persisted into the layout package JSON.
+ *
+ * Path A fix:
+ * - Make a defensive copy of the layout before saving.
+ * - Ensure each layer has thicknessIn when we can resolve it.
+ * - Prefer values already on the layer, otherwise pull from body.foamLayers by index.
+ *
+ * This does NOT touch cavities; it only fills in a missing thickness field.
+ */
+function coercePositiveNumber(raw: any): number | null {
+  if (raw == null) return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+function resolveThicknessFromAny(layerLike: any): number | null {
+  if (!layerLike || typeof layerLike !== "object") return null;
+
+  const t =
+    (layerLike as any).thicknessIn ??
+    (layerLike as any).thickness_in ??
+    (layerLike as any).thickness ??
+    (layerLike as any).thicknessInches ??
+    (layerLike as any).thickness_inches ??
+    (layerLike as any).thickness_inch ??
+    (layerLike as any).heightIn ??
+    (layerLike as any).height_in ??
+    null;
+
+  return coercePositiveNumber(t);
+}
+
+function normalizeLayoutForStorage(layout: any, body: any): any {
+  if (!layout || typeof layout !== "object") return layout;
+
+  // Shallow clone root; clone stack/layers arrays if present.
+  const next: any = Array.isArray(layout) ? [...layout] : { ...layout };
+
+  const foamLayers = Array.isArray(body?.foamLayers) ? body.foamLayers : null;
+
+  // Helper to normalize an array of layers (stack or layers)
+  const normalizeLayerArray = (arr: any[] | null | undefined) => {
+    if (!Array.isArray(arr) || arr.length === 0) return arr;
+
+    return arr.map((layer, idx) => {
+      if (!layer || typeof layer !== "object") return layer;
+
+      const copy = { ...(layer as any) };
+
+      // 1) If thickness is already on the layer, normalize to thicknessIn
+      let thickness = resolveThicknessFromAny(copy);
+
+      // 2) If missing, try body.foamLayers[idx] (this is the key fix for your current payload)
+      if (thickness == null && Array.isArray(foamLayers) && foamLayers[idx]) {
+        thickness = resolveThicknessFromAny(foamLayers[idx]);
+      }
+
+      // 3) Persist canonical key if we found one
+      if (thickness != null) {
+        copy.thicknessIn = thickness;
+      }
+
+      return copy;
+    });
+  };
+
+  if (Array.isArray((layout as any).stack)) {
+    next.stack = normalizeLayerArray((layout as any).stack);
+  }
+
+  if (Array.isArray((layout as any).layers)) {
+    next.layers = normalizeLayerArray((layout as any).layers);
+  }
+
+  return next;
+}
+
 /* ===================== DXF builder from layout (fallback) ===================== */
 /**
  * Layout-based DXF fallback (rectangles only).
@@ -538,6 +621,10 @@ export async function POST(req: NextRequest) {
 
   const quoteNo = String(body.quoteNo).trim();
   const layout = body.layout;
+
+  // NEW: normalize layout before saving so layer thickness persists into layout_json.stack[]
+  const layoutForSave = normalizeLayoutForStorage(layout, body);
+
   const notes =
     typeof body.notes === "string" && body.notes.trim().length > 0
       ? body.notes.trim()
@@ -741,14 +828,14 @@ export async function POST(req: NextRequest) {
     // DXF (preferred): build from raw SVG so circles/rounded shapes match the editor.
     // Fallback: layout-based DXF if SVG is missing.
     const dxfFromSvg = buildDxfFromSvg(svgRaw);
-    const dxf = dxfFromSvg ?? buildDxfFromLayout(layout);
+    const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
 
     // STEP via external geometry service (microservice-backed).
-    const step = await buildStepFromLayout(layout, quoteNo, materialLegend ?? null);
+    const step = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
 
     // Annotate SVG (for stored preview)
     const svgAnnotated = buildSvgWithAnnotations(
-      layout,
+      layoutForSave,
       svgRaw,
       materialLegend ?? null,
       quoteNo,
@@ -769,7 +856,7 @@ export async function POST(req: NextRequest) {
       values ($1, $2, $3, $4, $5, $6, $7, $7)
       returning id, quote_id, layout_json, notes, svg_text, dxf_text, step_text, created_at
       `,
-      [quote.id, layout, notes, svgAnnotated, dxf, step, currentUserId],
+      [quote.id, layoutForSave, notes, svgAnnotated, dxf, step, currentUserId],
     );
 
     let updatedQty: number | null = null;
@@ -816,7 +903,7 @@ export async function POST(req: NextRequest) {
         [quote.id],
       );
 
-      const block = layout && layout.block ? layout.block : null;
+      const block = layoutForSave && layoutForSave.block ? layoutForSave.block : null;
       const blockL = block ? Number(block.lengthIn ?? block.length_in) || 0 : 0;
       const blockW = block ? Number(block.widthIn ?? block.width_in) || 0 : 0;
 
@@ -827,10 +914,10 @@ export async function POST(req: NextRequest) {
       const layers =
         Array.isArray(foamLayers) && foamLayers.length > 0
           ? foamLayers
-          : Array.isArray(layout?.stack)
-          ? layout.stack
-          : Array.isArray(layout?.layers)
-          ? layout.layers
+          : Array.isArray(layoutForSave?.stack)
+          ? layoutForSave.stack
+          : Array.isArray(layoutForSave?.layers)
+          ? layoutForSave.layers
           : [];
 
       let baseQty: number | null = null;
@@ -854,8 +941,8 @@ export async function POST(req: NextRequest) {
       } else if (primaryItem && primaryItem.material_id != null) {
         const mid = Number(primaryItem.material_id);
         if (Number.isFinite(mid) && mid > 0) baseMaterialId = mid;
-      } else if (layout && (layout.materialId != null || layout.material_id != null)) {
-        const rawMid = layout.materialId ?? layout.material_id;
+      } else if (layoutForSave && (layoutForSave.materialId != null || layoutForSave.material_id != null)) {
+        const rawMid = layoutForSave.materialId ?? layoutForSave.material_id;
         const mid = Number(rawMid);
         if (Number.isFinite(mid) && mid > 0) baseMaterialId = mid;
       }
@@ -954,16 +1041,16 @@ export async function POST(req: NextRequest) {
       const nextFacts: any =
         prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
 
-      if (layout && layout.block) {
-        const Lb = Number(layout.block.lengthIn) || 0;
-        const Wb = Number(layout.block.widthIn) || 0;
-        const Tb = Number(layout.block.thicknessIn) || 0;
+      if (layoutForSave && layoutForSave.block) {
+        const Lb = Number(layoutForSave.block.lengthIn) || 0;
+        const Wb = Number(layoutForSave.block.widthIn) || 0;
+        const Tb = Number(layoutForSave.block.thicknessIn) || 0;
         if (Lb > 0 && Wb > 0 && Tb > 0) {
           nextFacts.dims = `${Lb}x${Wb}x${Tb}`;
         }
       }
 
-      const allCavities = getAllCavitiesFromLayout(layout);
+      const allCavities = getAllCavitiesFromLayout(layoutForSave);
       if (allCavities.length > 0) {
         const cavDims: string[] = [];
         for (const cav of allCavities) {
