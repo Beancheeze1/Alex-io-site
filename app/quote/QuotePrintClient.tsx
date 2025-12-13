@@ -204,6 +204,8 @@ type FlatCavity = {
   widthIn: number;
   x: number; // normalized 0..1
   y: number; // normalized 0..1
+  shape?: "rect" | "circle" | null;
+  diameterIn?: number | null;
 };
 
 /** Extract the layers array from layout_json (supports stack/layers/foamLayers). */
@@ -234,7 +236,18 @@ function getLayerThicknessIn(layer: LayoutLayer | null | undefined): number | nu
   return n;
 }
 
-/** Flatten cavities for a single layer (square/rect only for now). */
+/** Normalize shape field values to rect/circle. Matches admin logic 1:1. */
+function normalizeShape(raw: any): "rect" | "circle" | null {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (!s) return null;
+
+  if (s === "circle" || s === "round" || s === "circular") return "circle";
+  if (s === "rect" || s === "rectangle" || s === "square") return "rect";
+
+  return null;
+}
+
+/** Flatten cavities for a single layer (supports rect + circle). */
 function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   const out: FlatCavity[] = [];
   if (!layout || typeof layout !== "object") return out;
@@ -259,7 +272,31 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
 
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
 
-    out.push({ lengthIn, widthIn: w, x, y });
+    const shape = normalizeShape(
+      (cav as any).shape ??
+        (cav as any).cavityShape ??
+        (cav as any).cavity_shape ??
+        (cav as any).type ??
+        (cav as any).kind,
+    );
+
+    const rawDia = (cav as any).diameterIn ?? (cav as any).diameter_in ?? (cav as any).diameter ?? null;
+    const diaNum = rawDia == null ? NaN : Number(rawDia);
+    const diameterIn =
+      shape === "circle"
+        ? Number.isFinite(diaNum) && diaNum > 0
+          ? diaNum
+          : Math.min(lengthIn, w)
+        : null;
+
+    out.push({
+      lengthIn,
+      widthIn: w,
+      x,
+      y,
+      shape: shape ?? null,
+      diameterIn: diameterIn ?? null,
+    });
   }
 
   return out;
@@ -268,7 +305,7 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
 /**
  * Build a lightweight SVG preview for one layer:
  * - Foam outline rectangle
- * - Cavities as rectangles
+ * - Cavities as rects or circles (display-only)
  *
  * NOTE: This is display-only and intentionally does not try to match CAD export transforms.
  */
@@ -294,6 +331,26 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
     .map((c) => {
       const left = L * c.x;
       const top = W * c.y;
+
+      // For rects we use lengthIn x widthIn.
+      // For circles we use diameterIn (fallback already handled).
+      if (c.shape === "circle") {
+        const dia = Number(c.diameterIn);
+        const d = Number.isFinite(dia) && dia > 0 ? dia : Math.min(c.lengthIn, c.widthIn);
+
+        const x2 = Math.max(0, Math.min(L, left));
+        const y2 = Math.max(0, Math.min(W, top));
+
+        // Clamp diameter so the circle stays inside the foam block.
+        const d2 = Math.max(0, Math.min(d, L - x2, W - y2));
+        if (d2 <= 0) return "";
+
+        const r = d2 / 2;
+        const cx = x2 + r;
+        const cy = y2 + r;
+
+        return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+      }
 
       const w = c.lengthIn;
       const h = c.widthIn;
