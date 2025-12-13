@@ -112,10 +112,6 @@ function extractRepSlugFromSubject(subject: string, body?: string): string | nul
 }
 
 // Infer rep slug from thread messages (mailbox / "to" address).
-// Option C behavior: if no explicit subject tag, we look at which
-// mailbox the customer emailed.
-//
-// You can extend this map as you add more seats.
 function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
   if (!Array.isArray(threadMsgs) || !threadMsgs.length) return null;
 
@@ -181,13 +177,6 @@ function normalizeCavity(raw: string): string {
   return rect || raw.trim();
 }
 
-/**
- * Option 1 behavior:
- * - Clean up cavity dims
- * - Preserve the user's stated cavityCount when possible
- * - If they said "2 cavities" but only gave one size, duplicate that size
- *   so lengths match (e.g. ["2x1x1", "2x1x1"]).
- */
 function applyCavityNormalization(facts: Mem): Mem {
   if (!facts) return facts;
   if (!Array.isArray(facts.cavityDims)) return facts;
@@ -259,6 +248,45 @@ function applyCavityNormalization(facts: Mem): Mem {
 }
 
 /* ============================================================
+   NEW: Color parsing (Path A)
+   ============================================================ */
+
+// Only capture a simple base color word for now.
+function grabColor(raw: string): string | undefined {
+  const t = String(raw || "").toLowerCase();
+
+  // If customer says "black PE" etc., we want "black"
+  const colors = [
+    "black",
+    "white",
+    "gray",
+    "grey",
+    "blue",
+    "red",
+    "green",
+    "yellow",
+    "orange",
+    "purple",
+    "pink",
+    "tan",
+    "beige",
+    "brown",
+    "natural",
+    "clear",
+  ];
+
+  for (const c of colors) {
+    const re = new RegExp(`\\b${c}\\b`, "i");
+    if (re.test(t)) {
+      if (c === "grey") return "gray";
+      return c;
+    }
+  }
+
+  return undefined;
+}
+
+/* ============================================================
    DB enrichment (material)
    ============================================================ */
 
@@ -270,6 +298,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     const like = `%${materialToken}%`;
     const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
 
+    // Family guard (PE vs EPE must remain separate; DB is source of truth)
     let familyFilter = "";
 
     const hasEpe =
@@ -299,6 +328,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       familyFilter = "AND material_family ILIKE 'Polystyrene%'";
     }
 
+    // 1) First pass: LIKE + density (with is_active)
     let row = await one<any>(
       `
       SELECT
@@ -325,6 +355,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       [like, densNum],
     );
 
+    // 2) Fallback: family + density
     if (!row) {
       row = await one<any>(
         `
@@ -378,6 +409,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
 
     return f;
   } catch {
+    // On any error, don’t block the quote; just return current facts.
     return f;
   }
 }
@@ -400,6 +432,7 @@ async function hydrateFromDBByQuoteNo(
   if (!quoteNo) return out;
 
   try {
+    // 1) Primary item for this quote: qty + dims
     const primaryItem = await one<any>(
       `
       select qi.id,
@@ -418,6 +451,7 @@ async function hydrateFromDBByQuoteNo(
     );
 
     if (primaryItem) {
+      // Qty
       if (!opts.lockQty) {
         const dbQty = Number(primaryItem.qty);
         if (Number.isFinite(dbQty) && dbQty > 0) {
@@ -425,6 +459,7 @@ async function hydrateFromDBByQuoteNo(
         }
       }
 
+      // Dims
       if (!opts.lockDims) {
         const hasDims =
           typeof out.dims === "string" && out.dims.trim().length > 0;
@@ -439,6 +474,7 @@ async function hydrateFromDBByQuoteNo(
       }
     }
 
+    // 2) Latest saved layout package: cavity sizes from layout_json
     if (!opts.lockCavities) {
       const layoutPkg = await one<any>(
         `
@@ -538,6 +574,10 @@ async function fetchCalcQuote(opts: {
   const { L, W, H } = parseDimsNums(opts.dims);
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
+  // IMPORTANT 11/27:
+  // For now we IGNORE cavity volume in pricing so that the
+  // first-response email, quote print page, and layout snapshot
+  // all show the same totals (full block volume pricing).
   const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -547,6 +587,7 @@ async function fetchCalcQuote(opts: {
       height_in: H,
       material_id: opts.material_id,
       qty: opts.qty,
+      // cavities intentionally omitted for pricing consistency
       cavities: [],
       round_to_bf: opts.round_to_bf,
     }),
@@ -577,6 +618,7 @@ async function buildPriceBreaks(
   const baseQty = baseOpts.qty;
   if (!baseQty || baseQty <= 0) return null;
 
+  // fixed ladder
   const ladder = Array.from(
     new Set(
       [1, 10, 25, 50, 100, 150, 250, baseQty]
@@ -666,7 +708,7 @@ function grabQty(raw: string): number | undefined {
     t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
     t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
     t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
-    // Common “pieces” formats (including common typos)
+    // include common misspellings
     t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|pices|peices|parts?)\b/);
 
   if (m) return Number(m[1]);
@@ -755,6 +797,7 @@ function extractCavities(raw: string): {
   const t = raw.toLowerCase();
   const lines = raw.split(/\r?\n/);
 
+  // PROTECT DECIMALS
   raw = raw.replace(/x\.(\d+)/g, "x0.$1").replace(/\.([0-9]+)/g, "0.$1");
 
   const cavityDims: string[] = [];
@@ -773,6 +816,7 @@ function extractCavities(raw: string): {
     const lower = line.toLowerCase();
     if (!/\bcavity|cavities|cutout|pocket\b/.test(lower)) continue;
 
+    // split on commas / semicolons only so decimals stay intact
     const tokens = line.split(/[;,]/);
 
     for (const tok of tokens) {
@@ -784,6 +828,7 @@ function extractCavities(raw: string): {
 
       const mPair = tok.trim().match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`));
       if (mPair) {
+        // missing depth -> assume 1"
         cavityDims.push(`${mPair[1]}x${mPair[2]}x1`);
       }
     }
@@ -795,6 +840,8 @@ function extractCavities(raw: string): {
   };
 }
 
+// Fallback: if we know there are cavities but no sizes, scan the text for
+// all LxWxH patterns and drop anything that matches the main outside dims.
 function recoverCavityDimsFromText(
   rawText: string,
   mainDims?: string | null,
@@ -817,6 +864,7 @@ function recoverCavityDimsFromText(
     const dims = `${m[1]}x${m[2]}x${m[3]}`;
     const norm = dims.toLowerCase().trim();
 
+    // Skip the main outside size
     if (mainNorm && norm === mainNorm) continue;
 
     if (!seen.has(norm)) {
@@ -836,14 +884,16 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const rawBody = body || "";
   const facts: Mem = {};
 
+  // Full text (subject + body) for most parsing
   const text = `${subject}\n\n${rawBody}`;
 
+  // 1) MAIN DIMS
   const outsideDims = grabOutsideDims(text);
   if (outsideDims) {
     facts.dims = normDims(outsideDims) || outsideDims;
   } else {
     const bodyNoCavity = rawBody
-      .split(/\r?\n/)
+  .split(/\r?\n/)
       .filter(
         (ln) =>
           !/\bcavity\b|\bcavities\b|\bpocket\b|\bpockets\b|\bcutout\b|\bcutouts\b/i.test(
@@ -859,6 +909,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
     }
   }
 
+  // 2) qty/density/material/color/cavities
   const qtyVal = grabQty(text);
   if (qtyVal) facts.qty = qtyVal;
 
@@ -868,6 +919,10 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const material = grabMaterial(text);
   if (material) facts.material = material;
 
+  // NEW: color
+  const color = grabColor(text);
+  if (color) facts.color = color;
+
   const { cavityCount, cavityDims } = extractCavities(text);
   if (cavityCount != null) facts.cavityCount = cavityCount;
   if (cavityDims && cavityDims.length) facts.cavityDims = cavityDims;
@@ -875,6 +930,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const mEmail = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   if (mEmail) facts.customerEmail = mEmail[0];
 
+  // fallback cavity recovery
   if (facts.dims && (!facts.cavityDims || facts.cavityDims.length === 0)) {
     const recovered = recoverCavityDimsFromText(text, facts.dims);
     if (recovered.length > 0) {
@@ -908,6 +964,7 @@ Valid keys:
 - qty: integer
 - material: string
 - density: string like "1.7#"
+- color: string like "black"
 - cavityCount: integer
 - cavityDims: array of strings
 
@@ -933,8 +990,6 @@ ${body}
     });
 
     const j = await r.json().catch(() => ({} as any));
-
-    // Pull the model's text output (same extraction style as aiOpener)
     const txt: string =
       j.output?.[0]?.content?.[0]?.text ??
       j.output_text ??
@@ -953,6 +1008,7 @@ ${body}
     if (parsed.qty) out.qty = parsed.qty;
     if (parsed.material) out.material = parsed.material;
     if (parsed.density) out.density = parsed.density;
+    if (parsed.color) out.color = String(parsed.color).toLowerCase().trim();
     if (parsed.cavityCount != null) out.cavityCount = parsed.cavityCount;
     if (Array.isArray(parsed.cavityDims)) {
       out.cavityDims = parsed.cavityDims.map((x: string) =>
@@ -1065,12 +1121,15 @@ export async function POST(req: NextRequest) {
       providedThreadId ||
       (subject ? `sub:${subject.toLowerCase().replace(/\s+/g, " ")}` : "");
 
+    // See if we can detect a quote_no in the subject so we can
+    // pull sketch facts stored under that key.
     const subjectQuoteNo = extractQuoteNo(subject);
 
     /* ------------------- Parse new turn ------------------- */
 
     let newly = extractAllFromTextAndSubject(lastText, subject);
 
+    // If the regex pass already found a main block size, don't let LLM override.
     const regexDims = newly.dims || null;
 
     const needsLLM =
@@ -1078,6 +1137,7 @@ export async function POST(req: NextRequest) {
       !newly.qty ||
       !newly.material ||
       !newly.density ||
+      (!newly.color) ||
       (newly.cavityCount &&
         (!newly.cavityDims || newly.cavityDims.length === 0));
 
@@ -1113,6 +1173,7 @@ export async function POST(req: NextRequest) {
       merged.sales_rep_slug = salesRepSlugResolved;
     }
 
+    // Fallback cavity recovery
     if (
       merged.cavityCount &&
       (!Array.isArray(merged.cavityDims) ||
@@ -1129,6 +1190,7 @@ export async function POST(req: NextRequest) {
 
     merged = applyCavityNormalization(merged);
 
+    // Drop bogus cavities equal to main dims
     if (merged.dims && Array.isArray(merged.cavityDims)) {
       const dimsNorm = String(merged.dims).toLowerCase().trim();
       const filtered = (merged.cavityDims as string[]).filter(
@@ -1149,6 +1211,7 @@ export async function POST(req: NextRequest) {
       merged.from = "sketch-auto-quote";
     }
 
+    // Stable quote number per thread
     if (!merged.quoteNumber && !merged.quote_no) {
       const now = new Date();
       const yyyy = now.getUTCFullYear();
@@ -1164,6 +1227,7 @@ export async function POST(req: NextRequest) {
       merged.quoteNumber = merged.quote_no;
     }
 
+    // If subject contained quote number, adopt it
     if (subjectQuoteNo && !merged.quote_no) {
       merged.quote_no = subjectQuoteNo;
       merged.quoteNumber = subjectQuoteNo;
@@ -1173,12 +1237,14 @@ export async function POST(req: NextRequest) {
 
     merged = await enrichFromDB(merged);
 
+    // hydrate from DB so qty + cavities match latest saved quote
     merged = await hydrateFromDBByQuoteNo(merged, {
       lockQty: hadNewQty,
       lockCavities: hadNewCavities,
       lockDims: hadNewDims,
     });
 
+    // Save early baseline facts (pre-pricing) under keys
     if (threadKey) await saveFacts(threadKey, merged);
     if (merged.quote_no) await saveFacts(merged.quote_no, merged);
 
@@ -1242,12 +1308,19 @@ export async function POST(req: NextRequest) {
 
     const hasDimsQty = !!(specs.dims && specs.qty);
 
+    // Header: store whenever we have dims + qty + quoteNumber
     let quoteId = merged.quote_id;
 
     const salesRepSlugForHeader: string | undefined =
       (merged.sales_rep_slug as string | undefined) ||
       salesRepSlugResolved ||
       undefined;
+
+    // NEW (Path A): send color through header write if present
+    const colorForPersist: string | null =
+      typeof merged.color === "string" && merged.color.trim()
+        ? merged.color.trim()
+        : null;
 
     if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
       try {
@@ -1256,8 +1329,7 @@ export async function POST(req: NextRequest) {
           merged.customer_name ||
           merged.name ||
           "Customer";
-        const customerEmail =
-          merged.customerEmail || merged.email || null;
+        const customerEmail = merged.customerEmail || merged.email || null;
         const phone = merged.phone || null;
         const status = merged.status || "draft";
 
@@ -1271,6 +1343,8 @@ export async function POST(req: NextRequest) {
             phone,
             status,
             sales_rep_slug: salesRepSlugForHeader,
+            // pass-through (safe if ignored by API)
+            color: colorForPersist,
           }),
         });
 
@@ -1292,6 +1366,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Primary item: only when we have material_id, and only once
     if (
       !dryRun &&
       quoteId &&
@@ -1307,6 +1382,8 @@ export async function POST(req: NextRequest) {
           height_in: H,
           material_id: Number(specs.material_id),
           qty: Number(specs.qty),
+          // pass-through (safe if ignored by API)
+          color: colorForPersist,
         };
 
         await fetch(`${base}/api/quotes/${quoteId}/items`, {
@@ -1322,6 +1399,8 @@ export async function POST(req: NextRequest) {
         console.error("quote item store error:", err);
       }
     }
+
+    /* ------------------- Build email template ------------------- */
 
     const dimsNums = parseDimsNums(specs.dims);
     const densityPcf = densityToPcf(specs.density);
@@ -1371,6 +1450,7 @@ export async function POST(req: NextRequest) {
         if (!merged.qty) miss.push("Quantity");
         if (!foamFamily) miss.push("Material");
         if (!merged.density) miss.push("Density");
+        if (!merged.color) miss.push("Color");
         if (
           merged.cavityCount > 0 &&
           (!merged.cavityDims || merged.cavityDims.length === 0)
