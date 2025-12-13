@@ -204,6 +204,7 @@ type FlatCavity = {
   widthIn: number;
   x: number; // normalized 0..1
   y: number; // normalized 0..1
+  depthIn?: number | null;
   shape?: "rect" | "circle" | null;
   diameterIn?: number | null;
 };
@@ -247,7 +248,7 @@ function normalizeShape(raw: any): "rect" | "circle" | null {
   return null;
 }
 
-/** Flatten cavities for a single layer (supports rect + circle). */
+/** Flatten cavities for a single layer (supports rect + circle + depth). */
 function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   const out: FlatCavity[] = [];
   if (!layout || typeof layout !== "object") return out;
@@ -265,6 +266,11 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
     const widthIn = Number((cav as any).widthIn);
     const x = Number((cav as any).x);
     const y = Number((cav as any).y);
+
+    const depthRaw =
+      (cav as any).depthIn ?? (cav as any).depth_in ?? (cav as any).depth ?? (cav as any).pocketDepthIn ?? null;
+    const depthNum = depthRaw == null ? NaN : Number(depthRaw);
+    const depthIn = Number.isFinite(depthNum) && depthNum > 0 ? depthNum : null;
 
     if (!Number.isFinite(lengthIn) || lengthIn <= 0) continue;
 
@@ -294,12 +300,50 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
       widthIn: w,
       x,
       y,
+      depthIn,
       shape: shape ?? null,
       diameterIn: diameterIn ?? null,
     });
   }
 
   return out;
+}
+
+function fmtInches3(n: number): string {
+  // Match the existing feel: 3 decimals like thickness line.
+  return n.toFixed(3);
+}
+
+/**
+ * Summarize pocket depths for a layer:
+ * - If no depths exist: null
+ * - If one unique depth: "1.250 in"
+ * - If multiple: "0.750–1.250 in"
+ */
+function getPocketDepthSummary(layout: any, layerIndex: number): string | null {
+  const cavs = getCavitiesForLayer(layout, layerIndex);
+  const depths: number[] = [];
+
+  for (const c of cavs) {
+    const d = c.depthIn;
+    if (typeof d === "number" && Number.isFinite(d) && d > 0) depths.push(d);
+  }
+
+  if (depths.length === 0) return null;
+
+  // De-dupe with small tolerance.
+  const sorted = depths.slice().sort((a, b) => a - b);
+  const uniq: number[] = [];
+  for (const v of sorted) {
+    const last = uniq.length ? uniq[uniq.length - 1] : null;
+    if (last == null || Math.abs(v - last) > 1e-3) uniq.push(v);
+  }
+
+  if (uniq.length === 1) return `${fmtInches3(uniq[0])} in`;
+
+  const min = uniq[0];
+  const max = uniq[uniq.length - 1];
+  return `${fmtInches3(min)}–${fmtInches3(max)} in`;
 }
 
 /**
@@ -496,7 +540,8 @@ export default function QuotePrintClient() {
   const handleScheduleCall = React.useCallback(() => {
     if (typeof window === "undefined") return;
 
-    const url = (process.env.NEXT_PUBLIC_SCHEDULE_CALL_URL as string | undefined) || "https://calendly.com/your-company/30min";
+    const url =
+      (process.env.NEXT_PUBLIC_SCHEDULE_CALL_URL as string | undefined) || "https://calendly.com/your-company/30min";
 
     window.open(url, "_blank", "noopener,noreferrer");
   }, []);
@@ -678,8 +723,7 @@ export default function QuotePrintClient() {
   const kerfPct = typeof primaryPricing?.kerf_waste_pct === "number" ? primaryPricing.kerf_waste_pct : null;
 
   // material display lines for primary item
-  const primaryMaterialName =
-    primaryItem?.material_name || (primaryItem ? `Material #${primaryItem.material_id}` : "");
+  const primaryMaterialName = primaryItem?.material_name || (primaryItem ? `Material #${primaryItem.material_id}` : "");
 
   let primaryMaterialSubline: string | null = null;
   if (primaryItem) {
@@ -729,7 +773,8 @@ export default function QuotePrintClient() {
     for (const rb of requestedBoxes) {
       const qty = rb.qty || primaryItem?.qty || 1;
 
-      const unitPriceRaw = (rb as any).unit_price_usd ?? (rb as any).base_unit_price ?? (rb as any).price_unit_usd ?? null;
+      const unitPriceRaw =
+        (rb as any).unit_price_usd ?? (rb as any).base_unit_price ?? (rb as any).price_unit_usd ?? null;
 
       const unitPrice = parsePriceField(unitPriceRaw);
       if (unitPrice != null && qty > 0) {
@@ -1391,11 +1436,7 @@ export default function QuotePrintClient() {
                               <div style={{ fontWeight: 500 }}>Line {idx + 1}</div>
                               <div style={{ color: "#6b7280" }}>
                                 {baseLabel}
-                                {subLabel && (
-                                  <div style={{ fontSize: 11, marginTop: 2 }}>
-                                    {subLabel}
-                                  </div>
-                                )}
+                                {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                               </div>
                             </td>
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
@@ -1423,8 +1464,12 @@ export default function QuotePrintClient() {
                           </td>
                           <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{layer.dims}</td>
                           <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{layer.qty}</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(null)}</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(null)}</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                            {formatUsd(null)}
+                          </td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                            {formatUsd(null)}
+                          </td>
                         </tr>
                       ))}
 
@@ -1501,9 +1546,7 @@ export default function QuotePrintClient() {
                                     Packaging – Carton selection
                                   </div>
                                   <div style={{ fontWeight: 500 }}>{mainLabel}</div>
-                                  {subLabel && (
-                                    <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>{subLabel}</div>
-                                  )}
+                                  {subLabel && <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                 </div>
                                 <button
                                   type="button"
@@ -1585,9 +1628,7 @@ export default function QuotePrintClient() {
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                       <div>
                         <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>Layout package #{layoutPkg.id}</div>
-                        <div style={{ color: "#6b7280", fontSize: 12 }}>
-                          Saved: {new Date(layoutPkg.created_at).toLocaleString()}
-                        </div>
+                        <div style={{ color: "#6b7280", fontSize: 12 }}>Saved: {new Date(layoutPkg.created_at).toLocaleString()}</div>
                       </div>
                       <div style={{ textAlign: "right", fontSize: 12 }}>
                         <a
@@ -1615,7 +1656,7 @@ export default function QuotePrintClient() {
                       </div>
                     )}
 
-                    {/* NEW: Per-layer previews (no CAD downloads) */}
+                    {/* Per-layer previews (no CAD downloads) */}
                     {(() => {
                       if (!layoutPkg.layout_json) return null;
 
@@ -1648,9 +1689,7 @@ export default function QuotePrintClient() {
 
                       return (
                         <div style={{ marginTop: 12 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
-                            Layers (preview)
-                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Layers (preview)</div>
 
                           <div
                             style={{
@@ -1662,6 +1701,7 @@ export default function QuotePrintClient() {
                             {layersForPreview.map((layer, idx) => {
                               const label = getLayerLabel(layer, idx);
                               const t = getLayerThicknessIn(layer);
+                              const depthSummary = getPocketDepthSummary(json, idx);
                               const svg = buildSvgPreviewForLayer(json, idx);
                               const isSelected = idx === selectedLayerIdx;
 
@@ -1682,9 +1722,7 @@ export default function QuotePrintClient() {
                                     borderRadius: 14,
                                     padding: 10,
                                     background: "#ffffff",
-                                    boxShadow: isSelected
-                                      ? "0 10px 22px rgba(14,165,233,0.20)"
-                                      : "0 6px 16px rgba(15,23,42,0.06)",
+                                    boxShadow: isSelected ? "0 10px 22px rgba(14,165,233,0.20)" : "0 6px 16px rgba(15,23,42,0.06)",
                                     cursor: "pointer",
                                     outline: "none",
                                   }}
@@ -1695,6 +1733,9 @@ export default function QuotePrintClient() {
                                       <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{label}</div>
                                       <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
                                         {t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}
+                                      </div>
+                                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                                        {depthSummary ? `Pocket depth: ${depthSummary}` : "Pocket depth: —"}
                                       </div>
                                     </div>
                                     <div style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>
@@ -1713,10 +1754,7 @@ export default function QuotePrintClient() {
                                     }}
                                   >
                                     {svg ? (
-                                      <div
-                                        style={{ width: "100%", height: "100%", display: "flex" }}
-                                        dangerouslySetInnerHTML={{ __html: svg }}
-                                      />
+                                      <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
                                     ) : (
                                       <div
                                         style={{
@@ -1751,35 +1789,49 @@ export default function QuotePrintClient() {
                               background: "#ffffff",
                             }}
                           >
-                            <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
-                              Selected layer preview:{" "}
-                              <span style={{ fontWeight: 700 }}>
-                                {getLayerLabel(layersForPreview[selectedLayerIdx] || null, selectedLayerIdx)} (Layer{" "}
-                                {Math.min(selectedLayerIdx + 1, layersForPreview.length)}/{layersForPreview.length})
-                              </span>
-                            </div>
+                            {(() => {
+                              const selIdx = selectedLayerIdx;
+                              const depthSummary = getPocketDepthSummary(json, selIdx);
 
-                            <div
-                              style={{
-                                width: "100%",
-                                height: 360,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                borderRadius: 8,
-                                border: "1px solid #e5e7eb",
-                                background: "#f3f4f6",
-                                overflow: "hidden",
-                              }}
-                            >
-                              {(() => {
-                                const svg = buildSvgPreviewForLayer(json, selectedLayerIdx);
-                                if (!svg) return <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>;
-                                return (
-                                  <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
-                                );
-                              })()}
-                            </div>
+                              return (
+                                <>
+                                  <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
+                                    Selected layer preview:{" "}
+                                    <span style={{ fontWeight: 700 }}>
+                                      {getLayerLabel(layersForPreview[selIdx] || null, selIdx)} (Layer{" "}
+                                      {Math.min(selIdx + 1, layersForPreview.length)}/{layersForPreview.length})
+                                    </span>
+                                    {depthSummary ? (
+                                      <span style={{ marginLeft: 10, color: "#6b7280" }}>• Pocket depth: {depthSummary}</span>
+                                    ) : (
+                                      <span style={{ marginLeft: 10, color: "#6b7280" }}>• Pocket depth: —</span>
+                                    )}
+                                  </div>
+
+                                  <div
+                                    style={{
+                                      width: "100%",
+                                      height: 360,
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      borderRadius: 8,
+                                      border: "1px solid #e5e7eb",
+                                      background: "#f3f4f6",
+                                      overflow: "hidden",
+                                    }}
+                                  >
+                                    {(() => {
+                                      const svg = buildSvgPreviewForLayer(json, selIdx);
+                                      if (!svg) return <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>;
+                                      return (
+                                        <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
+                                      );
+                                    })()}
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
                         </div>
                       );
