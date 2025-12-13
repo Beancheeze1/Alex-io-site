@@ -23,6 +23,9 @@ type QuoteRow = {
   company: string | null;
   status: string;
   created_at: string;
+
+  // NEW (Path A): optional hydrated field for UI
+  color?: string | null;
 };
 
 type ItemRow = {
@@ -36,6 +39,9 @@ type ItemRow = {
   material_name: string | null;
   material_family?: string | null;
   density_lb_ft3?: number | null;
+
+  // NEW (Path A): optional hydrated field for UI
+  color?: string | null;
 
   // These are NOT read from DB; we attach them after calling calc.
   price_unit_usd?: number | null;
@@ -138,8 +144,7 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       return item;
     }
 
-    const base =
-      process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
     const resp = await fetch(`${base}/api/quotes/calc`, {
       method: "POST",
@@ -195,8 +200,7 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
     return {
       ...item,
       price_total_usd: Number.isFinite(total) ? total : null,
-      price_unit_usd:
-        piece != null && Number.isFinite(piece) ? piece : null,
+      price_unit_usd: piece != null && Number.isFinite(piece) ? piece : null,
       pricing_meta,
       ...(pricing_breakdown ? { pricing_breakdown } : {}),
     };
@@ -250,6 +254,23 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    // NEW (Path A): always hydrate facts for this quote_no so UI fields
+    // like color can be shown even when DB items exist.
+    let facts: any = null;
+    try {
+      facts = await loadFacts(quote.quote_no);
+    } catch {
+      facts = null;
+    }
+
+    const hydratedColor: string | null =
+      facts?.color != null && String(facts.color).trim() !== ""
+        ? String(facts.color).trim()
+        : null;
+
+    // Attach color to the quote object so the client has a stable place to read it.
+    (quote as any).color = hydratedColor;
+
     const itemsRaw = await q<ItemRow>(
       `
         select
@@ -280,8 +301,6 @@ export async function GET(req: NextRequest) {
       // FALLBACK: no items stored yet. Pull facts from memory (same source as email)
       // and synthesize a primary line item so the print page still shows numbers.
       try {
-        const facts = (await loadFacts(quote.quote_no)) as any;
-
         const dims = String(facts?.dims || "");
         const [Lraw, Wraw, Hraw] = dims.split("x");
         const L = Number(Lraw);
@@ -290,11 +309,7 @@ export async function GET(req: NextRequest) {
         const qtyFact = Number(facts?.qty ?? 0);
         const matId = Number(facts?.material_id ?? 0);
 
-        if (
-          [L, W, H, qtyFact, matId].every(
-            (n) => Number.isFinite(n) && n > 0,
-          )
-        ) {
+        if ([L, W, H, qtyFact, matId].every((n) => Number.isFinite(n) && n > 0)) {
           const synthetic: ItemRow = {
             id: 0,
             quote_id: quote.id,
@@ -303,13 +318,12 @@ export async function GET(req: NextRequest) {
             height_in: H.toString(),
             qty: qtyFact,
             material_id: matId,
-            material_name: facts.material_name || null,
-            material_family: facts.material_family || null,
-            density_lb_ft3: Number.isFinite(
-              Number(facts.material_density_lb_ft3),
-            )
+            material_name: facts?.material_name || null,
+            material_family: facts?.material_family || null,
+            density_lb_ft3: Number.isFinite(Number(facts?.material_density_lb_ft3))
               ? Number(facts.material_density_lb_ft3)
               : undefined,
+            color: hydratedColor,
             price_total_usd: null,
             price_unit_usd: null,
           };
@@ -326,6 +340,12 @@ export async function GET(req: NextRequest) {
       } catch (err) {
         console.error("quote/print: fallback from memory failed:", err);
       }
+    }
+
+    // NEW (Path A): attach color onto each returned item so the UI can read it
+    // regardless of whether it looks at quote-level or item-level fields.
+    if (hydratedColor) {
+      items = items.map((it) => ({ ...it, color: it.color ?? hydratedColor }));
     }
 
     const layoutPkg = await one<LayoutPkgRow>(
@@ -355,10 +375,8 @@ export async function GET(req: NextRequest) {
       try {
         const block = layoutPkg.layout_json.block || {};
 
-        const rawLength =
-          block.lengthIn ?? block.length ?? block.L ?? block.l;
-        const rawWidth =
-          block.widthIn ?? block.width ?? block.W ?? block.w;
+        const rawLength = block.lengthIn ?? block.length ?? block.L ?? block.l;
+        const rawWidth = block.widthIn ?? block.width ?? block.W ?? block.w;
         const rawHeight =
           block.thicknessIn ??
           block.heightIn ??
@@ -372,9 +390,7 @@ export async function GET(req: NextRequest) {
         const W = Number(rawWidth);
         const H = Number(rawHeight);
 
-        const allFinite = [L, W, H].every(
-          (n) => Number.isFinite(n) && n > 0,
-        );
+        const allFinite = [L, W, H].every((n) => Number.isFinite(n) && n > 0);
 
         if (allFinite) {
           const primary = items[0];
@@ -388,18 +404,20 @@ export async function GET(req: NextRequest) {
 
           const pricedPrimary = await attachPricingToItem(overridden);
           items = [pricedPrimary, ...items.slice(1)];
+
+          // keep color on the priced primary if we had it
+          if (hydratedColor) {
+            items = items.map((it) => ({ ...it, color: it.color ?? hydratedColor }));
+          }
         }
       } catch (overrideErr) {
-        console.error(
-          "quote/print: failed to override dims from layout block:",
-          overrideErr,
-        );
+        console.error("quote/print: failed to override dims from layout block:", overrideErr);
       }
     }
 
     // ---------- packaging lines: quote_box_selections + boxes ----------
 
-    const packagingSelectionsRaw = await q<PackagingSelectionRow>(
+    const packagingSelectionsRaw = await q<any>(
       `
         select
           qbs.id,
@@ -423,90 +441,74 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    const packagingLines: PackagingLine[] = packagingSelectionsRaw.map(
-      (row) => {
-        const qty = Number(row.qty) || 0;
+    const packagingLines: PackagingLine[] = packagingSelectionsRaw.map((row: any) => {
+      const qty = Number(row.qty) || 0;
 
-        const unitRaw = row.unit_price_usd;
-        const unit =
-          unitRaw != null &&
-          unitRaw !== "" &&
-          Number.isFinite(Number(unitRaw))
-            ? Number(unitRaw)
-            : null;
+      const unitRaw = row.unit_price_usd;
+      const unit =
+        unitRaw != null && unitRaw !== "" && Number.isFinite(Number(unitRaw))
+          ? Number(unitRaw)
+          : null;
 
-        const extendedRaw = row.extended_price_usd;
-        let extended: number | null = null;
+      const extendedRaw = row.extended_price_usd;
+      let extended: number | null = null;
 
-        if (
-          extendedRaw != null &&
-          extendedRaw !== "" &&
-          Number.isFinite(Number(extendedRaw))
-        ) {
-          extended = Number(extendedRaw);
-        } else if (unit != null && Number.isFinite(unit) && qty > 0) {
-          extended = unit * qty;
-        }
+      if (extendedRaw != null && extendedRaw !== "" && Number.isFinite(Number(extendedRaw))) {
+        extended = Number(extendedRaw);
+      } else if (unit != null && Number.isFinite(unit) && qty > 0) {
+        extended = unit * qty;
+      }
 
-        const L =
-          row.inside_length_in != null &&
-          row.inside_length_in !== "" &&
-          Number.isFinite(Number(row.inside_length_in))
-            ? Number(row.inside_length_in)
-            : null;
+      const L =
+        row.inside_length_in != null &&
+        row.inside_length_in !== "" &&
+        Number.isFinite(Number(row.inside_length_in))
+          ? Number(row.inside_length_in)
+          : null;
 
-        const W =
-          row.inside_width_in != null &&
-          row.inside_width_in !== "" &&
-          Number.isFinite(Number(row.inside_width_in))
-            ? Number(row.inside_width_in)
-            : null;
+      const W =
+        row.inside_width_in != null &&
+        row.inside_width_in !== "" &&
+        Number.isFinite(Number(row.inside_width_in))
+          ? Number(row.inside_width_in)
+          : null;
 
-        const H =
-          row.inside_height_in != null &&
-          row.inside_height_in !== "" &&
-          Number.isFinite(Number(row.inside_height_in))
-            ? Number(row.inside_height_in)
-            : null;
+      const H =
+        row.inside_height_in != null &&
+        row.inside_height_in !== "" &&
+        Number.isFinite(Number(row.inside_height_in))
+          ? Number(row.inside_height_in)
+          : null;
 
-        return {
-          id: row.id,
-          quote_id: row.quote_id,
-          box_id: row.box_id,
-          sku: row.sku,
-          qty,
-          unit_price_usd: unit,
-          extended_price_usd: extended,
-          vendor: row.vendor,
-          style: row.style,
-          description: row.description,
-          inside_length_in: L,
-          inside_width_in: W,
-          inside_height_in: H,
-        };
-      },
-    );
+      return {
+        id: row.id,
+        quote_id: row.quote_id,
+        box_id: row.box_id,
+        sku: row.sku,
+        qty,
+        unit_price_usd: unit,
+        extended_price_usd: extended,
+        vendor: row.vendor,
+        style: row.style,
+        description: row.description,
+        inside_length_in: L,
+        inside_width_in: W,
+        inside_height_in: H,
+      };
+    });
 
     // ---------- subtotals: foam + packaging ----------
 
     // Foam subtotal: sum of item.price_total_usd across quote_items.
     const foamSubtotal = items.reduce((sum, it) => {
       const raw = (it as any).price_total_usd;
-      const n =
-        typeof raw === "number"
-          ? raw
-          : raw != null
-          ? Number(raw)
-          : 0;
+      const n = typeof raw === "number" ? raw : raw != null ? Number(raw) : 0;
       return Number.isFinite(n) ? sum + n : sum;
     }, 0);
 
     // Packaging subtotal: sum of carton extended prices.
     const packagingSubtotal = packagingLines.reduce((sum, line) => {
-      const n =
-        line.extended_price_usd != null
-          ? Number(line.extended_price_usd)
-          : 0;
+      const n = line.extended_price_usd != null ? Number(line.extended_price_usd) : 0;
       return Number.isFinite(n) ? sum + n : sum;
     }, 0);
 
