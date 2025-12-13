@@ -212,6 +212,41 @@ type FlatCavity = {
 
 type TargetDimsIn = { L: number; W: number };
 
+function getLayerThicknessInFromLayout(layout: any, layerIndex: number): number | null {
+  if (!layout || typeof layout !== "object") return null;
+
+  const candidates: any[] = [];
+
+  const previewLayers = getLayersFromLayout(layout);
+  if (previewLayers[layerIndex]) candidates.push(previewLayers[layerIndex]);
+
+  if (Array.isArray(layout.layers) && layout.layers[layerIndex]) candidates.push(layout.layers[layerIndex]);
+  if (Array.isArray(layout.stack) && layout.stack[layerIndex]) candidates.push(layout.stack[layerIndex]);
+  if (Array.isArray((layout as any).foamLayers) && (layout as any).foamLayers[layerIndex]) {
+    candidates.push((layout as any).foamLayers[layerIndex]);
+  }
+
+  for (const layer of candidates) {
+    if (!layer) continue;
+
+    const t =
+      layer.thicknessIn ??
+      layer.thickness_in ??
+      layer.thickness ??
+      layer.thicknessInches ??
+      layer.thickness_inches ??
+      layer.thickness_inch ??
+      layer.heightIn ??
+      layer.height_in ??
+      null;
+
+    const n = Number(t);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  return null;
+}
+
 /** Extract the stack/layers array from a layout_json */
 function getLayersFromLayout(layout: any): LayoutLayer[] {
   if (!layout || typeof layout !== "object") return [];
@@ -1177,7 +1212,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         const label = getLayerLabel(layer, i);
-        const thicknessIn = getLayerThicknessIn(layer);
+
+        // ✅ FIX: thickness must be resolved from the overall layout (not only layer object)
+        const thicknessIn = getLayerThicknessInFromLayout(layoutPkg.layout_json, i);
 
         // DXF (client-generated, trusted)
         const dxf = buildDxfForLayer(layoutPkg.layout_json, i, targetDims);
@@ -1229,7 +1266,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         const label = getLayerLabel(layer, i);
-        const thicknessIn = getLayerThicknessIn(layer);
+
+        // ✅ FIX: thickness must be resolved from the overall layout (not only layer object)
+        const thicknessIn = getLayerThicknessInFromLayout(layoutPkg.layout_json, i);
+
         const thick = formatThicknessForName(thicknessIn) || "—";
         manifestLines.push(`Layer ${i + 1}: ${label} (thickness ${thick})`);
       }
@@ -1927,7 +1967,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                         >
                           {layersForDxf.map((layer, idx) => {
                             const label = getLayerLabel(layer, idx);
-                            const t = getLayerThicknessIn(layer);
+
+                            // ✅ FIX: thickness must be resolved from the overall layout (not only layer object)
+                            const t = getLayerThicknessInFromLayout(layoutPkg.layout_json, idx);
+
                             const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, idx);
                             const isSelected = idx === selectedLayerIdx;
 
@@ -2067,7 +2110,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           {(() => {
                             const selLayer = layersForDxf[selectedLayerIdx] || null;
                             const selLabel = getLayerLabel(selLayer, selectedLayerIdx);
-                            const selT = getLayerThicknessIn(selLayer);
+
+                            // ✅ FIX: thickness must be resolved from the overall layout (not only layer object)
+                            const selT = layoutPkg?.layout_json
+                              ? getLayerThicknessInFromLayout(layoutPkg.layout_json, selectedLayerIdx)
+                              : null;
+
                             const pocket = layoutPkg?.layout_json
                               ? getLayerPocketDepthSummary(layoutPkg.layout_json, selectedLayerIdx)
                               : { text: "—", hasMultiple: false };
