@@ -212,6 +212,7 @@ type FlatCavity = {
 
 type TargetDimsIn = { L: number; W: number };
 
+
 function getLayerThicknessInFromLayout(layout: any, layerIndex: number): number | null {
   if (!layout || typeof layout !== "object") return null;
 
@@ -246,6 +247,10 @@ function getLayerThicknessInFromLayout(layout: any, layerIndex: number): number 
 
   return null;
 }
+
+
+
+
 
 /** Extract the stack/layers array from a layout_json */
 function getLayersFromLayout(layout: any): LayoutLayer[] {
@@ -1212,9 +1217,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         const label = getLayerLabel(layer, i);
-
-        // ✅ FIX: thickness must be resolved from the overall layout (not only layer object)
-        const thicknessIn = getLayerThicknessInFromLayout(layoutPkg.layout_json, i);
+        const thicknessIn = getLayerThicknessIn(layer);
 
         // DXF (client-generated, trusted)
         const dxf = buildDxfForLayer(layoutPkg.layout_json, i, targetDims);
@@ -1266,10 +1269,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         const label = getLayerLabel(layer, i);
-
-        // ✅ FIX: thickness must be resolved from the overall layout (not only layer object)
-        const thicknessIn = getLayerThicknessInFromLayout(layoutPkg.layout_json, i);
-
+        const thicknessIn = getLayerThicknessIn(layer);
         const thick = formatThicknessForName(thicknessIn) || "—";
         manifestLines.push(`Layer ${i + 1}: ${label} (thickness ${thick})`);
       }
@@ -1967,10 +1967,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                         >
                           {layersForDxf.map((layer, idx) => {
                             const label = getLayerLabel(layer, idx);
-
-                            // ✅ FIX: thickness must be resolved from the overall layout (not only layer object)
-                            const t = getLayerThicknessInFromLayout(layoutPkg.layout_json, idx);
-
+                            const t = getLayerThicknessIn(layer);
                             const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, idx);
                             const isSelected = idx === selectedLayerIdx;
 
@@ -2110,12 +2107,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           {(() => {
                             const selLayer = layersForDxf[selectedLayerIdx] || null;
                             const selLabel = getLayerLabel(selLayer, selectedLayerIdx);
-
-                            // ✅ FIX: thickness must be resolved from the overall layout (not only layer object)
-                            const selT = layoutPkg?.layout_json
-                              ? getLayerThicknessInFromLayout(layoutPkg.layout_json, selectedLayerIdx)
-                              : null;
-
+                            const selT = getLayerThicknessIn(selLayer);
                             const pocket = layoutPkg?.layout_json
                               ? getLayerPocketDepthSummary(layoutPkg.layout_json, selectedLayerIdx)
                               : { text: "—", hasMultiple: false };

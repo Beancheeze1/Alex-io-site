@@ -136,88 +136,6 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
   return out;
 }
 
-/* ===================== Persist layer thickness into saved layout_json ===================== */
-/**
- * FIX (Path A):
- * Thickness was showing blank in admin previews because it often lives in body.foamLayers,
- * but we were only saving body.layout to quote_layout_packages.layout_json.
- *
- * This function ensures:
- *  - layout.stack exists (preferred canonical layer array)
- *  - every layer has thicknessIn as a real positive number (copied from any known key)
- *  - layout.block.thicknessIn is filled (sum of layers) if missing, for consistency
- *
- * No geometry changes. No cavity changes. Just makes sure thickness is persisted.
- */
-function normalizeAndPersistLayerThickness(layout: any, body: any) {
-  if (!layout || typeof layout !== "object") return;
-
-  const foamLayers = Array.isArray(body?.foamLayers) ? body.foamLayers : null;
-
-  // If the editor provided foamLayers explicitly, persist them into layout.stack
-  // so downstream consumers (Admin previews, zip filenames) can reliably read thickness.
-  if (foamLayers && foamLayers.length > 0) {
-    layout.stack = foamLayers.map((layer: any) => {
-      const tRaw =
-        layer?.thicknessIn ??
-        layer?.thickness_in ??
-        layer?.thickness ??
-        layer?.heightIn ??
-        layer?.height_in ??
-        null;
-
-      const t = Number(tRaw);
-      const thicknessIn = Number.isFinite(t) && t > 0 ? t : null;
-
-      // Keep the rest of the layer shape as-is; just guarantee thicknessIn if possible.
-      return thicknessIn != null ? { ...layer, thicknessIn } : { ...layer };
-    });
-  }
-
-  // Otherwise, normalize whatever layer array exists in layout
-  const layers =
-    Array.isArray(layout.stack) && layout.stack.length > 0
-      ? layout.stack
-      : Array.isArray(layout.layers) && layout.layers.length > 0
-      ? layout.layers
-      : null;
-
-  if (layers) {
-    for (let i = 0; i < layers.length; i++) {
-      const layer: any = layers[i];
-      if (!layer || typeof layer !== "object") continue;
-
-      const tRaw =
-        layer.thicknessIn ??
-        layer.thickness_in ??
-        layer.thickness ??
-        layer.heightIn ??
-        layer.height_in ??
-        null;
-
-      const t = Number(tRaw);
-      if (Number.isFinite(t) && t > 0) {
-        layer.thicknessIn = t;
-      }
-    }
-
-    // If block thickness is missing, set it to sum of layer thicknesses (consistency only)
-    if (layout.block && typeof layout.block === "object") {
-      const existing = Number(layout.block.thicknessIn ?? layout.block.thickness_in ?? NaN);
-      if (!Number.isFinite(existing) || existing <= 0) {
-        const sum = layers.reduce((acc: number, l: any) => {
-          const tt = Number(l?.thicknessIn ?? l?.thickness_in ?? l?.thickness ?? NaN);
-          return Number.isFinite(tt) && tt > 0 ? acc + tt : acc;
-        }, 0);
-
-        if (Number.isFinite(sum) && sum > 0) {
-          layout.block.thicknessIn = sum;
-        }
-      }
-    }
-  }
-}
-
 /* ===================== DXF builder from layout (fallback) ===================== */
 /**
  * Layout-based DXF fallback (rectangles only).
@@ -495,13 +413,18 @@ function buildSvgWithAnnotations(
   let svg = svgRaw as string;
 
   // 1) Remove any previous <g id="alex-io-notes">...</g> groups.
-  svg = svg.replace(/<g[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g>/gi, "");
+  svg = svg.replace(
+    /<g[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g>/gi,
+    "",
+  );
 
   // 2) Remove individual <text> nodes that look like old legends.
-  const legendLabelPattern = /(NOT TO SCALE|FOAM BLOCK:|FOAM:|BLOCK:|MATERIAL:)/i;
+  const legendLabelPattern =
+    /(NOT TO SCALE|FOAM BLOCK:|FOAM:|BLOCK:|MATERIAL:)/i;
 
-  svg = svg.replace(/<text\b[^>]*>[\s\S]*?<\/text>/gi, (match) =>
-    legendLabelPattern.test(match) ? "" : match,
+  svg = svg.replace(
+    /<text\b[^>]*>[\s\S]*?<\/text>/gi,
+    (match) => (legendLabelPattern.test(match) ? "" : match),
   );
 
   if (!layout || !layout.block) {
@@ -616,8 +539,13 @@ export async function POST(req: NextRequest) {
   const quoteNo = String(body.quoteNo).trim();
   const layout = body.layout;
   const notes =
-    typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
-  const svgRaw = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
+    typeof body.notes === "string" && body.notes.trim().length > 0
+      ? body.notes.trim()
+      : null;
+  const svgRaw =
+    typeof body.svg === "string" && body.svg.trim().length > 0
+      ? body.svg
+      : null;
 
   if (!quoteNo) {
     return bad(
@@ -630,9 +558,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ✅ FIX: ensure layer thickness gets persisted into the saved layout_json
-  normalizeAndPersistLayerThickness(layout, body);
-
   let currentUserId: number | null = null;
   try {
     const user = await getCurrentUserFromRequest(req);
@@ -641,7 +566,8 @@ export async function POST(req: NextRequest) {
     console.error("getCurrentUserFromRequest failed in layout/apply:", e);
   }
 
-  const rawCustomer = body.customer && typeof body.customer === "object" ? body.customer : null;
+  const rawCustomer =
+    body.customer && typeof body.customer === "object" ? body.customer : null;
 
   let customerName: string | null = null;
   let customerEmail: string | null = null;
@@ -649,9 +575,21 @@ export async function POST(req: NextRequest) {
   let customerCompany: string | null = null;
 
   if (rawCustomer) {
-    const rawName = rawCustomer.name ?? rawCustomer.customerName ?? rawCustomer.customer_name ?? null;
-    const rawEmail = rawCustomer.email ?? rawCustomer.customerEmail ?? rawCustomer.customer_email ?? null;
-    const rawPhone = rawCustomer.phone ?? rawCustomer.customerPhone ?? rawCustomer.customer_phone ?? null;
+    const rawName =
+      rawCustomer.name ??
+      rawCustomer.customerName ??
+      rawCustomer.customer_name ??
+      null;
+    const rawEmail =
+      rawCustomer.email ??
+      rawCustomer.customerEmail ??
+      rawCustomer.customer_email ??
+      null;
+    const rawPhone =
+      rawCustomer.phone ??
+      rawCustomer.customerPhone ??
+      rawCustomer.customer_phone ??
+      null;
     const rawCompany =
       rawCustomer.company ??
       rawCustomer.companyName ??
@@ -659,15 +597,32 @@ export async function POST(req: NextRequest) {
       rawCustomer.customer_company ??
       null;
 
-    customerName = typeof rawName === "string" && rawName.trim().length > 0 ? rawName.trim() : null;
-    customerEmail = typeof rawEmail === "string" && rawEmail.trim().length > 0 ? rawEmail.trim() : null;
-    customerPhone = typeof rawPhone === "string" && rawPhone.trim().length > 0 ? rawPhone.trim() : null;
-    customerCompany = typeof rawCompany === "string" && rawCompany.trim().length > 0 ? rawCompany.trim() : null;
+    customerName =
+      typeof rawName === "string" && rawName.trim().length > 0
+        ? rawName.trim()
+        : null;
+    customerEmail =
+      typeof rawEmail === "string" && rawEmail.trim().length > 0
+        ? rawEmail.trim()
+        : null;
+    customerPhone =
+      typeof rawPhone === "string" && rawPhone.trim().length > 0
+        ? rawPhone.trim()
+        : null;
+    customerCompany =
+      typeof rawCompany === "string" && rawCompany.trim().length > 0
+        ? rawCompany.trim()
+        : null;
   }
 
-  const rawMaterialId = body.materialId ?? body.material_id ?? body.material ?? null;
+  const rawMaterialId =
+    body.materialId ?? body.material_id ?? body.material ?? null;
   let materialId: number | null = null;
-  if (rawMaterialId !== null && rawMaterialId !== undefined && rawMaterialId !== "") {
+  if (
+    rawMaterialId !== null &&
+    rawMaterialId !== undefined &&
+    rawMaterialId !== ""
+  ) {
     const n = Number(rawMaterialId);
     if (Number.isFinite(n) && n > 0) {
       materialId = n;
@@ -707,7 +662,14 @@ export async function POST(req: NextRequest) {
             updated_by_user_id = coalesce($6, updated_by_user_id)
           where id = $1
         `,
-        [quote.id, customerName, customerEmail, customerPhone, customerCompany, currentUserId],
+        [
+          quote.id,
+          customerName,
+          customerEmail,
+          customerPhone,
+          customerCompany,
+          currentUserId,
+        ],
       );
     }
 
@@ -754,7 +716,11 @@ export async function POST(req: NextRequest) {
 
         const rawDens: any = (mat as any).density_lb_ft3;
         const densNum =
-          typeof rawDens === "number" ? rawDens : rawDens != null ? Number(rawDens) : NaN;
+          typeof rawDens === "number"
+            ? rawDens
+            : rawDens != null
+            ? Number(rawDens)
+            : NaN;
 
         if (Number.isFinite(densNum) && densNum > 0) {
           materialDensityForFacts = densNum;
@@ -781,7 +747,12 @@ export async function POST(req: NextRequest) {
     const step = await buildStepFromLayout(layout, quoteNo, materialLegend ?? null);
 
     // Annotate SVG (for stored preview)
-    const svgAnnotated = buildSvgWithAnnotations(layout, svgRaw, materialLegend ?? null, quoteNo);
+    const svgAnnotated = buildSvgWithAnnotations(
+      layout,
+      svgRaw,
+      materialLegend ?? null,
+      quoteNo,
+    );
 
     const pkg = await one<LayoutPkgRow>(
       `
@@ -849,7 +820,9 @@ export async function POST(req: NextRequest) {
       const blockL = block ? Number(block.lengthIn ?? block.length_in) || 0 : 0;
       const blockW = block ? Number(block.widthIn ?? block.width_in) || 0 : 0;
 
-      const foamLayers = Array.isArray((body as any)?.foamLayers) ? (body as any).foamLayers : null;
+      const foamLayers = Array.isArray((body as any)?.foamLayers)
+        ? (body as any).foamLayers
+        : null;
 
       const layers =
         Array.isArray(foamLayers) && foamLayers.length > 0
@@ -887,7 +860,13 @@ export async function POST(req: NextRequest) {
         if (Number.isFinite(mid) && mid > 0) baseMaterialId = mid;
       }
 
-      if (!baseMaterialId || blockL <= 0 || blockW <= 0 || !Array.isArray(layers) || layers.length === 0) {
+      if (
+        !baseMaterialId ||
+        blockL <= 0 ||
+        blockW <= 0 ||
+        !Array.isArray(layers) ||
+        layers.length === 0
+      ) {
         console.warn("[layout/apply] Skipping foam-layer → quote_items sync", {
           quoteId: quote.id,
           blockL,
@@ -912,19 +891,29 @@ export async function POST(req: NextRequest) {
           if (!rawLayer) continue;
 
           const thicknessRaw =
-            (rawLayer as any).thicknessIn ?? (rawLayer as any).thickness_in ?? (rawLayer as any).thickness;
+            (rawLayer as any).thicknessIn ??
+            (rawLayer as any).thickness_in ??
+            (rawLayer as any).thickness;
 
           const thickness = Number(thicknessRaw) || 0;
           if (!(thickness > 0)) continue;
 
           layerIndex += 1;
 
-          const rawLabel = (rawLayer as any).label ?? (rawLayer as any).name ?? (rawLayer as any).title ?? null;
+          const rawLabel =
+            (rawLayer as any).label ??
+            (rawLayer as any).name ??
+            (rawLayer as any).title ??
+            null;
 
           let label =
-            typeof rawLabel === "string" && rawLabel.trim().length > 0 ? rawLabel.trim() : null;
+            typeof rawLabel === "string" && rawLabel.trim().length > 0
+              ? rawLabel.trim()
+              : null;
 
-          const isBottom = (rawLayer as any).isBottom === true || (rawLayer as any).id === "layer-bottom";
+          const isBottom =
+            (rawLayer as any).isBottom === true ||
+            (rawLayer as any).id === "layer-bottom";
 
           if (!label) {
             label = isBottom ? "Bottom pad" : `Layer ${layerIndex}`;
@@ -951,14 +940,19 @@ export async function POST(req: NextRequest) {
         }
       }
     } catch (layerErr) {
-      console.error("Warning: failed to sync foam layers into quote_items for", quoteNo, layerErr);
+      console.error(
+        "Warning: failed to sync foam layers into quote_items for",
+        quoteNo,
+        layerErr,
+      );
     }
     // =================== END new foam layer sync block ===================
 
     try {
       const factsKey = quoteNo;
       const prevFacts = await loadFacts(factsKey);
-      const nextFacts: any = prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
+      const nextFacts: any =
+        prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
 
       if (layout && layout.block) {
         const Lb = Number(layout.block.lengthIn) || 0;
@@ -1037,7 +1031,8 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         error: "server_error",
-        message: "There was an unexpected problem saving this layout. Please try again.",
+        message:
+          "There was an unexpected problem saving this layout. Please try again.",
       },
       500,
     );
@@ -1115,7 +1110,8 @@ export async function GET(req: NextRequest) {
       {
         ok: false,
         error: "SERVER_ERROR",
-        message: "There was an unexpected problem loading the latest layout package.",
+        message:
+          "There was an unexpected problem loading the latest layout package.",
       },
       500,
     );
