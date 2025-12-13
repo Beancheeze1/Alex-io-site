@@ -2055,37 +2055,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       </div>
                     )}
 
-                    {/* Full-layout preview remains (useful) */}
-                    {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
-                      <div
-                        style={{
-                          marginTop: 14,
-                          padding: 8,
-                          borderRadius: 10,
-                          border: "1px solid #e5e7eb",
-                          background: "#ffffff",
-                        }}
-                      >
-                        <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
-                          Full layout preview
-                        </div>
-                        <div
-                          ref={svgContainerRef}
-                          style={{
-                            width: "100%",
-                            height: 480,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            borderRadius: 8,
-                            border: "1px solid #e5e7eb",
-                            background: "#f3f4f6",
-                            overflow: "hidden",
-                          }}
-                          dangerouslySetInnerHTML={{ __html: layoutPkg.svg_text }}
-                        />
-                      </div>
-                    )}
+                 {/* Full layout preview removed (layer previews are sufficient). */}
+
                   </>
                 )}
               </div>
