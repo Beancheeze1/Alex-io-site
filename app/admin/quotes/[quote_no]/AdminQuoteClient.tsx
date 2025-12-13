@@ -354,37 +354,62 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
   entities.push(lineEntity(0, W, 0, 0));
 
   // 2) Layer-specific cavities (normalized x/y → raw units, then scale)
-  const cavs = getCavitiesForLayer(layout, layerIndex);
+ // 2) Layer-specific cavities (normalized x/y → inches)
+const cavs = getCavitiesForLayer(layout, layerIndex);
 
-  for (const cav of cavs) {
-    const left = rawL * cav.x * scale;
-    const top = fallbackW * cav.y * scale;
+for (const cav of cavs) {
+  const cL = cav.lengthIn;
+  const cW = cav.widthIn;
 
-    const cL = cav.lengthIn * scale;
-    const cW = cav.widthIn * scale;
+  // X is consistent (0 = left). Y must be flipped to match SVG/editor:
+  // SVG: y grows downward from top
+  // DXF: y grows upward from bottom
+  const x0 = L * cav.x;
 
-    if (cav.shape === "circle") {
-      const rawDia =
-        cav.diameterIn != null && Number.isFinite(cav.diameterIn) && cav.diameterIn > 0
-          ? cav.diameterIn
-          : Math.min(cav.lengthIn, cav.widthIn);
+  const ySvgTop = W * cav.y;
+  const y0 = W - ySvgTop - cW; // flip + keep cavity height in-bounds
 
-      const r = (rawDia * scale) / 2;
-      if (Number.isFinite(r) && r > 0) {
-        const cx = left + cL / 2;
-        const cy = top + cW / 2;
-        entities.push(circleEntity(cx, cy, r));
-        continue;
-      }
-      // fall through to rect if invalid
-    }
+  // Defensive clamp (keep inside block)
+  const left = Math.max(0, Math.min(L - cL, x0));
+  const bottom = Math.max(0, Math.min(W - cW, y0));
 
-    // Default: rectangle
-    entities.push(lineEntity(left, top, left + cL, top));
-    entities.push(lineEntity(left + cL, top, left + cL, top + cW));
-    entities.push(lineEntity(left + cL, top + cW, left, top + cW));
-    entities.push(lineEntity(left, top + cW, left, top));
+  // If circle, output a CIRCLE entity. Otherwise, rectangle lines.
+  if (cav.shape === "circle") {
+    const dia =
+      cav.diameterIn != null && Number.isFinite(cav.diameterIn) && cav.diameterIn > 0
+        ? cav.diameterIn
+        : Math.min(cL, cW);
+
+    const r = Math.max(0, dia / 2);
+    const cx = left + cL / 2;
+    const cy = bottom + cW / 2;
+
+    entities.push(
+      [
+        "0",
+        "CIRCLE",
+        "8",
+        "0",
+        "10",
+        fmt(cx),
+        "20",
+        fmt(cy),
+        "30",
+        "0.0",
+        "40",
+        fmt(r),
+      ].join("\n"),
+    );
+    continue;
   }
+
+  // Rect (default)
+  entities.push(lineEntity(left, bottom, left + cL, bottom));
+  entities.push(lineEntity(left + cL, bottom, left + cL, bottom + cW));
+  entities.push(lineEntity(left + cL, bottom + cW, left, bottom + cW));
+  entities.push(lineEntity(left, bottom + cW, left, bottom));
+}
+
 
   if (!entities.length) return null;
 
