@@ -229,13 +229,64 @@ function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): stri
   return `Layer ${idx + 1}`;
 }
 
-function getLayerThicknessIn(layer: LayoutLayer | null | undefined): number | null {
-  if (!layer) return null;
-  const t = (layer.thicknessIn ?? layer.thickness_in ?? (layer as any).thickness ?? null) as any;
-  const n = Number(t);
+function readPositiveNumber(val: any): number | null {
+  if (val == null) return null;
+
+  // Handle shapes like { in: 1.25 }
+  if (typeof val === "object" && val) {
+    const maybeIn = (val as any).in ?? (val as any).inch ?? (val as any).inches ?? null;
+    if (maybeIn != null) val = maybeIn;
+  }
+
+  const n = typeof val === "number" ? val : Number(val);
   if (!Number.isFinite(n) || n <= 0) return null;
   return n;
 }
+
+/**
+ * Resolve layer thickness by index from the full layout object.
+ * This avoids mismatches where previews iterate one array (stack)
+ * but thickness is stored on another array (layers), or under a different key.
+ */
+function getLayerThicknessInFromLayout(layout: any, layerIndex: number): number | null {
+  if (!layout || typeof layout !== "object") return null;
+
+  const candidates: any[] = [];
+
+  // 1) The same arrays we use for previews
+  const previewLayers = getLayersFromLayout(layout);
+  if (Array.isArray(previewLayers) && previewLayers[layerIndex]) candidates.push(previewLayers[layerIndex]);
+
+  // 2) Explicit alternates (some older saves store thickness here)
+  if (Array.isArray(layout.layers) && layout.layers[layerIndex]) candidates.push(layout.layers[layerIndex]);
+  if (Array.isArray(layout.stack) && layout.stack[layerIndex]) candidates.push(layout.stack[layerIndex]);
+  if (Array.isArray((layout as any).foamLayers) && (layout as any).foamLayers[layerIndex]) {
+    candidates.push((layout as any).foamLayers[layerIndex]);
+  }
+
+  // 3) Try common thickness keys across candidates
+  for (const layer of candidates) {
+    if (!layer) continue;
+
+    const t =
+      (layer as any).thicknessIn ??
+      (layer as any).thickness_in ??
+      (layer as any).thickness ??
+      (layer as any).thicknessInches ??
+      (layer as any).thickness_inches ??
+      (layer as any).thickness_inch ??
+      (layer as any).t ??
+      (layer as any).heightIn ??
+      (layer as any).height_in ??
+      null;
+
+    const n = readPositiveNumber(t);
+    if (n != null) return n;
+  }
+
+  return null;
+}
+
 
 /** Normalize shape field values to rect/circle. Matches admin logic 1:1. */
 function normalizeShape(raw: any): "rect" | "circle" | null {
@@ -1700,7 +1751,8 @@ export default function QuotePrintClient() {
                           >
                             {layersForPreview.map((layer, idx) => {
                               const label = getLayerLabel(layer, idx);
-                              const t = getLayerThicknessIn(layer);
+                              const t = getLayerThicknessInFromLayout(json, idx);
+
                               const depthSummary = getPocketDepthSummary(json, idx);
                               const svg = buildSvgPreviewForLayer(json, idx);
                               const isSelected = idx === selectedLayerIdx;
@@ -1791,7 +1843,9 @@ export default function QuotePrintClient() {
                           >
                             {(() => {
                               const selIdx = selectedLayerIdx;
-                              const depthSummary = getPocketDepthSummary(json, selIdx);
+const t = getLayerThicknessInFromLayout(json, selIdx);
+const depthSummary = getPocketDepthSummary(json, selIdx);
+
 
                               return (
                                 <>
@@ -1801,11 +1855,18 @@ export default function QuotePrintClient() {
                                       {getLayerLabel(layersForPreview[selIdx] || null, selIdx)} (Layer{" "}
                                       {Math.min(selIdx + 1, layersForPreview.length)}/{layersForPreview.length})
                                     </span>
+
+{t ? <span style={{ marginLeft: 10, color: "#6b7280" }}>• Thickness: {t.toFixed(3)} in</span> : null}
+
+
                                     {depthSummary ? (
                                       <span style={{ marginLeft: 10, color: "#6b7280" }}>• Pocket depth: {depthSummary}</span>
+                                     
                                     ) : (
                                       <span style={{ marginLeft: 10, color: "#6b7280" }}>• Pocket depth: —</span>
                                     )}
+
+                                    
                                   </div>
 
                                   <div
