@@ -37,8 +37,7 @@
 //     use the latest layout, not stale test data.
 //   - NEW: syncs each foam layer in layout.stack into quote_items as separate
 //     rows marked with notes starting "[LAYOUT-LAYER] ...".
-//   - Returns the new package id + (if changed) the updatedQty.
-//
+// 
 // GET (debug helper):
 //   - /api/quote/layout/apply?quote_no=Q-...   -> latest package for that quote
 
@@ -47,7 +46,6 @@ import { one, q } from "@/lib/db";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { buildStepFromLayout } from "@/lib/cad/step";
-
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -138,21 +136,10 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
   return out;
 }
 
-/* ===================== DXF builder from layout (LINES + full header) ===================== */
-
+/* ===================== DXF builder from layout (fallback) ===================== */
 /**
- * DXF writer that:
- *  - Writes a basic R12-style HEADER with ACADVER + INSUNITS (inches).
- *  - Uses ENTITIES section with:
- *      - Foam block as 4 LINE entities (rectangle).
- *      - Each cavity as 4 LINE entities (rectangle).
- *
- * Layout assumptions (matches editor types, but we DO NOT change them):
- *  - layout.block: { lengthIn, widthIn, thicknessIn }
- *  - Primary cavity geometry comes from:
- *      - layout.cavities (legacy single-layer), or
- *      - layout.stack[].cavities (future multi-layer)
- *    All cavities are flattened for DXF purposes.
+ * Layout-based DXF fallback (rectangles only).
+ * We keep this as a fallback if SVG is missing.
  */
 function buildDxfFromLayout(layout: any): string | null {
   if (!layout || !layout.block) return null;
@@ -161,11 +148,8 @@ function buildDxfFromLayout(layout: any): string | null {
   let L = Number(block.lengthIn);
   let W = Number(block.widthIn);
 
-  // Basic sanity / fallback
   if (!Number.isFinite(L) || L <= 0) return null;
-  if (!Number.isFinite(W) || W <= 0) {
-    W = L; // fallback to square if width is bad
-  }
+  if (!Number.isFinite(W) || W <= 0) W = L;
 
   function fmt(n: number) {
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
@@ -176,58 +160,58 @@ function buildDxfFromLayout(layout: any): string | null {
       "0",
       "LINE",
       "8",
-      "0", // layer
+      "0",
       "10",
       fmt(x1),
       "20",
       fmt(y1),
+      "30",
+      "0.0",
       "11",
       fmt(x2),
       "21",
       fmt(y2),
+      "31",
+      "0.0",
     ].join("\n");
   }
 
   const entities: string[] = [];
 
-  // 1) Foam block as outer rectangle from (0,0) to (L,W) – 4 LINES.
+  // outer block
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // 2) Cavities as inner rectangles (flattened across all layers)
+  // cavities (flattened) as rectangles
   const allCavities = getAllCavitiesFromLayout(layout);
 
-  if (allCavities.length > 0) {
-    for (const cav of allCavities) {
-      let cL = cav.lengthIn;
-      let cW = cav.widthIn;
-      const nx = cav.x;
-      const ny = cav.y;
+  for (const cav of allCavities) {
+    let cL = cav.lengthIn;
+    let cW = cav.widthIn;
+    const nx = cav.x;
+    const ny = cav.y;
 
-      if (!Number.isFinite(cL) || cL <= 0) continue;
-      if (!Number.isFinite(cW) || cW <= 0) {
-        cW = cL; // fallback to square
-      }
-      if (![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) {
-        continue;
-      }
+    if (!Number.isFinite(cL) || cL <= 0) continue;
+    if (!Number.isFinite(cW) || cW <= 0) cW = cL;
+    if (![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) continue;
 
-      // x,y are normalized top-left; convert to block inches.
-      const left = L * nx;
-      const top = W * ny;
+    const left = L * nx;
 
-      entities.push(lineEntity(left, top, left + cL, top));
-      entities.push(lineEntity(left + cL, top, left + cL, top + cW));
-      entities.push(lineEntity(left + cL, top + cW, left, top + cW));
-      entities.push(lineEntity(left, top + cW, left, top));
-    }
+    // NOTE: layout y is top-left normalized; DXF is bottom-left
+    // So flip Y so it matches SVG orientation.
+    const topSvg = W * ny;
+    const yCad = W - topSvg - cW;
+
+    entities.push(lineEntity(left, yCad, left + cL, yCad));
+    entities.push(lineEntity(left + cL, yCad, left + cL, yCad + cW));
+    entities.push(lineEntity(left + cL, yCad + cW, left, yCad + cW));
+    entities.push(lineEntity(left, yCad + cW, left, yCad));
   }
 
   if (!entities.length) return null;
 
-  // Full-ish R12-style DXF with HEADER / TABLES / BLOCKS / ENTITIES.
   const header = [
     "0",
     "SECTION",
@@ -236,11 +220,11 @@ function buildDxfFromLayout(layout: any): string | null {
     "9",
     "$ACADVER",
     "1",
-    "AC1009", // R12
+    "AC1009",
     "9",
     "$INSUNITS",
     "70",
-    "1", // 1 = inches
+    "1",
     "0",
     "ENDSEC",
     "0",
@@ -262,7 +246,157 @@ function buildDxfFromLayout(layout: any): string | null {
   ].join("\n");
 
   const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
+  return [header, entities.join("\n"), footer].join("\n");
+}
 
+/* ===================== DXF builder from SVG (preferred) ===================== */
+/**
+ * Canonical DXF generation from SVG (editor truth).
+ * Supports:
+ *  - <rect> (as 4 LINEs)
+ *  - <circle> (as DXF CIRCLE)
+ *
+ * IMPORTANT:
+ *  - SVG is top-left origin (y down)
+ *  - DXF is bottom-left origin (y up)
+ * We flip Y using the SVG viewBox height.
+ */
+function buildDxfFromSvg(svgRaw: string | null): string | null {
+  if (!svgRaw || typeof svgRaw !== "string") return null;
+
+  const svg = svgRaw;
+
+  // Extract viewBox: "minX minY width height"
+  const vbMatch = svg.match(/viewBox\s*=\s*"([^"]+)"/i);
+  if (!vbMatch) return null;
+
+  const vbParts = vbMatch[1].trim().split(/\s+/).map((s) => Number(s));
+  if (vbParts.length !== 4) return null;
+
+  const vbW = vbParts[2];
+  const vbH = vbParts[3];
+  if (!Number.isFinite(vbW) || !Number.isFinite(vbH) || vbW <= 0 || vbH <= 0) return null;
+
+  function fmt(n: number) {
+    return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
+  }
+
+  function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
+    return [
+      "0",
+      "LINE",
+      "8",
+      "0",
+      "10",
+      fmt(x1),
+      "20",
+      fmt(y1),
+      "30",
+      "0.0",
+      "11",
+      fmt(x2),
+      "21",
+      fmt(y2),
+      "31",
+      "0.0",
+    ].join("\n");
+  }
+
+  function circleEntity(cx: number, cy: number, r: number): string {
+    return [
+      "0",
+      "CIRCLE",
+      "8",
+      "0",
+      "10",
+      fmt(cx),
+      "20",
+      fmt(cy),
+      "40",
+      fmt(r),
+    ].join("\n");
+  }
+
+  const entities: string[] = [];
+
+  // --- rects ---
+  // Note: handle x/y/width/height. Ignore rx/ry for now (we can add arcs later).
+  const rectRe = /<rect\b([^>]*)\/?>/gi;
+  let rectM: RegExpExecArray | null = null;
+  while ((rectM = rectRe.exec(svg))) {
+    const attrs = rectM[1] || "";
+
+    const x = Number((attrs.match(/\bx\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const y = Number((attrs.match(/\by\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const w = Number((attrs.match(/\bwidth\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const h = Number((attrs.match(/\bheight\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) continue;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    // Flip Y to DXF space
+    const yCad = vbH - y - h;
+
+    entities.push(lineEntity(x, yCad, x + w, yCad));
+    entities.push(lineEntity(x + w, yCad, x + w, yCad + h));
+    entities.push(lineEntity(x + w, yCad + h, x, yCad + h));
+    entities.push(lineEntity(x, yCad + h, x, yCad));
+  }
+
+  // --- circles ---
+  const circleRe = /<circle\b([^>]*)\/?>/gi;
+  let circM: RegExpExecArray | null = null;
+  while ((circM = circleRe.exec(svg))) {
+    const attrs = circM[1] || "";
+
+    const cx = Number((attrs.match(/\bcx\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN"));
+    const cySvg = Number((attrs.match(/\bcy\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN"));
+    const r = Number((attrs.match(/\br\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN"));
+
+    if (!Number.isFinite(cx) || !Number.isFinite(cySvg) || !Number.isFinite(r) || r <= 0) continue;
+
+    // Flip center Y
+    const cy = vbH - cySvg;
+
+    entities.push(circleEntity(cx, cy, r));
+  }
+
+  if (!entities.length) return null;
+
+  const header = [
+    "0",
+    "SECTION",
+    "2",
+    "HEADER",
+    "9",
+    "$ACADVER",
+    "1",
+    "AC1009",
+    "9",
+    "$INSUNITS",
+    "70",
+    "1",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "TABLES",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "BLOCKS",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "ENTITIES",
+  ].join("\n");
+
+  const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
   return [header, entities.join("\n"), footer].join("\n");
 }
 
@@ -293,8 +427,6 @@ function buildSvgWithAnnotations(
     (match) => (legendLabelPattern.test(match) ? "" : match),
   );
 
-  // 3) We need basic layout info for dynamic block text; if it's missing, just
-  //    leave the SVG as-is (with geometry only).
   if (!layout || !layout.block) {
     return svg;
   }
@@ -309,20 +441,16 @@ function buildSvgWithAnnotations(
   }
 
   const closeIdx = svg.lastIndexOf("</svg");
-  if (closeIdx === -1) {
-    return svg;
-  }
+  if (closeIdx === -1) return svg;
 
   const firstTagEnd = svg.indexOf(">");
-  if (firstTagEnd === -1 || firstTagEnd > closeIdx) {
-    return svg;
-  }
+  if (firstTagEnd === -1 || firstTagEnd > closeIdx) return svg;
 
   const GEOMETRY_SHIFT_Y = 80;
 
-  let svgOpen = svg.slice(0, firstTagEnd + 1); // <svg ...>
-  const svgChildren = svg.slice(firstTagEnd + 1, closeIdx); // inner content
-  const svgClose = svg.slice(closeIdx); // </svg ...>
+  let svgOpen = svg.slice(0, firstTagEnd + 1);
+  const svgChildren = svg.slice(firstTagEnd + 1, closeIdx);
+  const svgClose = svg.slice(closeIdx);
 
   function bumpLengthAttr(tag: string, attrName: string, delta: number): string {
     const re = new RegExp(`${attrName}\\s*=\\s*"([^"]+)"`);
@@ -356,9 +484,7 @@ function buildSvgWithAnnotations(
   const lines: string[] = [];
 
   const safeQuoteNo = quoteNo && quoteNo.trim().length > 0 ? quoteNo.trim() : "";
-  if (safeQuoteNo) {
-    lines.push(`QUOTE: ${safeQuoteNo}`);
-  }
+  if (safeQuoteNo) lines.push(`QUOTE: ${safeQuoteNo}`);
 
   lines.push("NOT TO SCALE");
 
@@ -390,8 +516,7 @@ function buildSvgWithAnnotations(
   const notesGroup = `<g id="alex-io-notes">${notesTexts}</g>`;
   const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
 
-  const rebuilt = `${svgOpen}\n${notesGroup}\n${geometryGroup}\n${svgClose}`;
-  return rebuilt;
+  return `${svgOpen}\n${notesGroup}\n${geometryGroup}\n${svgClose}`;
 }
 
 /* ===================== POST: save layout (+ optional qty/material/customer) ===================== */
@@ -433,8 +558,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Current user (if logged in). We fail soft here: layout save still works
-  // even if auth is misconfigured; user_id columns just stay null.
   let currentUserId: number | null = null;
   try {
     const user = await getCurrentUserFromRequest(req);
@@ -443,7 +566,6 @@ export async function POST(req: NextRequest) {
     console.error("getCurrentUserFromRequest failed in layout/apply:", e);
   }
 
-  // Optional customer info from the layout editor
   const rawCustomer =
     body.customer && typeof body.customer === "object" ? body.customer : null;
 
@@ -493,7 +615,6 @@ export async function POST(req: NextRequest) {
         : null;
   }
 
-  // Material coming from the layout editor
   const rawMaterialId =
     body.materialId ?? body.material_id ?? body.material ?? null;
   let materialId: number | null = null;
@@ -529,7 +650,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Optional: update customer info on the quote using editor input
     if (customerName || customerEmail || customerPhone || customerCompany) {
       await q(
         `
@@ -553,14 +673,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Material details (for facts + SVG legend)
     let materialLegend: string | null = null;
     let materialNameForFacts: string | null = null;
     let materialFamilyForFacts: string | null = null;
     let materialDensityForFacts: number | null = null;
 
     if (materialId != null) {
-      // Update the PRIMARY quote item to this material
       await q(
         `
           update quote_items
@@ -620,18 +738,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Build DXF from the incoming layout.
-    const dxf = buildDxfFromLayout(layout);
+    // DXF (preferred): build from raw SVG so circles/rounded shapes match the editor.
+    // Fallback: layout-based DXF if SVG is missing.
+    const dxfFromSvg = buildDxfFromSvg(svgRaw);
+    const dxf = dxfFromSvg ?? buildDxfFromLayout(layout);
 
-        // Build STEP via external geometry service (microservice-backed).
-    const step = await buildStepFromLayout(
-      layout,
-      quoteNo,
-      materialLegend ?? null,
-    );
+    // STEP via external geometry service (microservice-backed).
+    const step = await buildStepFromLayout(layout, quoteNo, materialLegend ?? null);
 
-
-    // Clean + re-annotate SVG (if provided) with quote legend and shifted geometry.
+    // Annotate SVG (for stored preview)
     const svgAnnotated = buildSvgWithAnnotations(
       layout,
       svgRaw,
@@ -639,7 +754,6 @@ export async function POST(req: NextRequest) {
       quoteNo,
     );
 
-    // Insert layout package (now including annotated svg_text, dxf_text, step_text, and user ids).
     const pkg = await one<LayoutPkgRow>(
       `
       insert into quote_layout_packages (
@@ -658,7 +772,6 @@ export async function POST(req: NextRequest) {
       [quote.id, layout, notes, svgAnnotated, dxf, step, currentUserId],
     );
 
-    // Optional: update qty on the PRIMARY quote item for this quote.
     let updatedQty: number | null = null;
 
     if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
@@ -684,10 +797,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ===================== NEW: sync foam layers into quote_items =====================
-    // This does NOT change existing lines; it appends per-layer rows marked with a
-    // special notes prefix so we can safely overwrite them on each Apply.
     try {
-      // Primary line (if it exists). We now treat this as OPTIONAL.
       const primaryItem = await one<{
         id: number;
         length_in: any;
@@ -706,17 +816,10 @@ export async function POST(req: NextRequest) {
         [quote.id],
       );
 
-      // Block footprint from the incoming layout
       const block = layout && layout.block ? layout.block : null;
-      const blockL = block
-        ? Number(block.lengthIn ?? block.length_in) || 0
-        : 0;
-      const blockW = block
-        ? Number(block.widthIn ?? block.width_in) || 0
-        : 0;
+      const blockL = block ? Number(block.lengthIn ?? block.length_in) || 0 : 0;
+      const blockW = block ? Number(block.widthIn ?? block.width_in) || 0 : 0;
 
-      // Layers from foamLayers (payload-level) if present,
-      // otherwise layout.stack (primary) or layout.layers (fallback)
       const foamLayers = Array.isArray((body as any)?.foamLayers)
         ? (body as any).foamLayers
         : null;
@@ -730,51 +833,40 @@ export async function POST(req: NextRequest) {
           ? layout.layers
           : [];
 
-      // Derive a base quantity to use for all layer rows.
       let baseQty: number | null = null;
 
       if (updatedQty != null && updatedQty > 0) {
         baseQty = updatedQty;
       } else if (body && body.qty !== undefined && body.qty !== null && body.qty !== "") {
         const qn = Number(body.qty);
-        if (Number.isFinite(qn) && qn > 0) {
-          baseQty = qn;
-        }
+        if (Number.isFinite(qn) && qn > 0) baseQty = qn;
       } else if (primaryItem && primaryItem.qty != null) {
         const qn = Number(primaryItem.qty);
-        if (Number.isFinite(qn) && qn > 0) {
-          baseQty = qn;
-        }
+        if (Number.isFinite(qn) && qn > 0) baseQty = qn;
       }
 
-      // If all else fails, fall back to 1 so we at least get visible rows.
-      if (baseQty == null) {
-        baseQty = 1;
-      }
+      if (baseQty == null) baseQty = 1;
 
-      // Derive a material id to use for all layer rows.
       let baseMaterialId: number | null = null;
 
       if (materialId != null && Number(materialId) > 0) {
         baseMaterialId = Number(materialId);
       } else if (primaryItem && primaryItem.material_id != null) {
         const mid = Number(primaryItem.material_id);
-        if (Number.isFinite(mid) && mid > 0) {
-          baseMaterialId = mid;
-        }
-      } else if (
-        layout &&
-        (layout.materialId != null || layout.material_id != null)
-      ) {
+        if (Number.isFinite(mid) && mid > 0) baseMaterialId = mid;
+      } else if (layout && (layout.materialId != null || layout.material_id != null)) {
         const rawMid = layout.materialId ?? layout.material_id;
         const mid = Number(rawMid);
-        if (Number.isFinite(mid) && mid > 0) {
-          baseMaterialId = mid;
-        }
+        if (Number.isFinite(mid) && mid > 0) baseMaterialId = mid;
       }
 
-      // If we still don't have a material id, we can't safely insert rows.
-      if (!baseMaterialId || blockL <= 0 || blockW <= 0 || !Array.isArray(layers) || layers.length === 0) {
+      if (
+        !baseMaterialId ||
+        blockL <= 0 ||
+        blockW <= 0 ||
+        !Array.isArray(layers) ||
+        layers.length === 0
+      ) {
         console.warn("[layout/apply] Skipping foam-layer → quote_items sync", {
           quoteId: quote.id,
           blockL,
@@ -784,7 +876,6 @@ export async function POST(req: NextRequest) {
           layersLen: Array.isArray(layers) ? layers.length : 0,
         });
       } else {
-        // Clear out any previous auto-generated layer rows to avoid duplicates.
         await q(
           `
           delete from quote_items
@@ -844,30 +935,19 @@ export async function POST(req: NextRequest) {
             )
             values ($1, null, $2, $3, $4, $5, $6, $7)
             `,
-            [
-              quote.id,
-              blockL,
-              blockW,
-              thickness,
-              baseMaterialId,
-              baseQty,
-              notesForRow,
-            ],
+            [quote.id, blockL, blockW, thickness, baseMaterialId, baseQty, notesForRow],
           );
         }
       }
     } catch (layerErr) {
-      // Non-fatal: if this fails, the rest of the layout save still succeeds.
       console.error(
         "Warning: failed to sync foam layers into quote_items for",
         quoteNo,
         layerErr,
       );
     }
-
     // =================== END new foam layer sync block ===================
 
-    // Sync layout dims, cavities, qty, material, and customer into the facts store
     try {
       const factsKey = quoteNo;
       const prevFacts = await loadFacts(factsKey);
@@ -924,18 +1004,10 @@ export async function POST(req: NextRequest) {
         nextFacts.material_density_lb_ft3 = materialDensityForFacts;
       }
 
-      if (customerName) {
-        nextFacts.customer_name = customerName;
-      }
-      if (customerEmail) {
-        nextFacts.customer_email = customerEmail;
-      }
-      if (customerPhone) {
-        nextFacts.customer_phone = customerPhone;
-      }
-      if (customerCompany) {
-        nextFacts.customer_company = customerCompany;
-      }
+      if (customerName) nextFacts.customer_name = customerName;
+      if (customerEmail) nextFacts.customer_email = customerEmail;
+      if (customerPhone) nextFacts.customer_phone = customerPhone;
+      if (customerCompany) nextFacts.customer_company = customerCompany;
 
       if (Object.keys(nextFacts).length > 0) {
         await saveFacts(factsKey, nextFacts);
@@ -947,7 +1019,7 @@ export async function POST(req: NextRequest) {
     return ok(
       {
         ok: true,
-               quoteNo,
+        quoteNo,
         packageId: pkg ? pkg.id : null,
         updatedQty,
       },
