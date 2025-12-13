@@ -276,6 +276,11 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
  * - Some layouts store block dimensions in a different internal unit.
  * - If targetDimsIn is provided (from the quote primary item), we apply a uniform
  *   scale so the DXF measures correctly in inches while preserving geometry.
+ *
+ * ORIENTATION (fix):
+ * - In the SVG/editor, y grows downward from the TOP.
+ * - In DXF, y grows upward from the BOTTOM.
+ * - To match SVG orientation, we flip Y and also keep the cavity inside bounds.
  */
 function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: TargetDimsIn): string | null {
   if (!layout || !layout.block) return null;
@@ -328,23 +333,6 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
     ].join("\n");
   }
 
-  function circleEntity(cx: number, cy: number, r: number): string {
-    return [
-      "0",
-      "CIRCLE",
-      "8",
-      "0",
-      "10",
-      fmt(cx),
-      "20",
-      fmt(cy),
-      "30",
-      "0.0",
-      "40",
-      fmt(r),
-    ].join("\n");
-  }
-
   const entities: string[] = [];
 
   // 1) Block rectangle
@@ -353,63 +341,63 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // 2) Layer-specific cavities (normalized x/y → raw units, then scale)
- // 2) Layer-specific cavities (normalized x/y → inches)
-const cavs = getCavitiesForLayer(layout, layerIndex);
+  // 2) Layer-specific cavities (normalized x/y → inches)
+  const cavs = getCavitiesForLayer(layout, layerIndex);
 
-for (const cav of cavs) {
-  const cL = cav.lengthIn;
-  const cW = cav.widthIn;
+  for (const cav of cavs) {
+    const cL = cav.lengthIn;
+    const cW = cav.widthIn;
 
-  // X is consistent (0 = left). Y must be flipped to match SVG/editor:
-  // SVG: y grows downward from top
-  // DXF: y grows upward from bottom
-  const x0 = L * cav.x;
+    // X is consistent (0 = left).
+    // Y is flipped (SVG top-down → DXF bottom-up), and we keep the cavity fully inside bounds.
+    const xLeft = L * cav.x;
 
-  const ySvgTop = W * cav.y;
-  const y0 = W - ySvgTop - cW; // flip + keep cavity height in-bounds
+    // cav.y is "top" fraction in SVG space
+    const yTopSvg = W * cav.y;
 
-  // Defensive clamp (keep inside block)
-  const left = Math.max(0, Math.min(L - cL, x0));
-  const bottom = Math.max(0, Math.min(W - cW, y0));
+    // Convert to DXF "bottom" coordinate:
+    // bottom = (W - top) - cavityHeight
+    const yBottom = W - yTopSvg - cW;
 
-  // If circle, output a CIRCLE entity. Otherwise, rectangle lines.
-  if (cav.shape === "circle") {
-    const dia =
-      cav.diameterIn != null && Number.isFinite(cav.diameterIn) && cav.diameterIn > 0
-        ? cav.diameterIn
-        : Math.min(cL, cW);
+    // Defensive clamp
+    const left = Math.max(0, Math.min(L - cL, xLeft));
+    const bottom = Math.max(0, Math.min(W - cW, yBottom));
 
-    const r = Math.max(0, dia / 2);
-    const cx = left + cL / 2;
-    const cy = bottom + cW / 2;
+    if (cav.shape === "circle") {
+      const dia =
+        cav.diameterIn != null && Number.isFinite(cav.diameterIn) && cav.diameterIn > 0
+          ? cav.diameterIn
+          : Math.min(cL, cW);
 
-    entities.push(
-      [
-        "0",
-        "CIRCLE",
-        "8",
-        "0",
-        "10",
-        fmt(cx),
-        "20",
-        fmt(cy),
-        "30",
-        "0.0",
-        "40",
-        fmt(r),
-      ].join("\n"),
-    );
-    continue;
+      const r = Math.max(0, dia / 2);
+      const cx = left + cL / 2;
+      const cy = bottom + cW / 2;
+
+      entities.push(
+        [
+          "0",
+          "CIRCLE",
+          "8",
+          "0",
+          "10",
+          fmt(cx),
+          "20",
+          fmt(cy),
+          "30",
+          "0.0",
+          "40",
+          fmt(r),
+        ].join("\n"),
+      );
+      continue;
+    }
+
+    // Rect (default)
+    entities.push(lineEntity(left, bottom, left + cL, bottom));
+    entities.push(lineEntity(left + cL, bottom, left + cL, bottom + cW));
+    entities.push(lineEntity(left + cL, bottom + cW, left, bottom + cW));
+    entities.push(lineEntity(left, bottom + cW, left, bottom));
   }
-
-  // Rect (default)
-  entities.push(lineEntity(left, bottom, left + cL, bottom));
-  entities.push(lineEntity(left + cL, bottom, left + cL, bottom + cW));
-  entities.push(lineEntity(left + cL, bottom + cW, left, bottom + cW));
-  entities.push(lineEntity(left, bottom + cW, left, bottom));
-}
-
 
   if (!entities.length) return null;
 
@@ -485,7 +473,10 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
       if (w2 <= 0 || h2 <= 0) return "";
 
       if (c.shape === "circle") {
-        const dia = c.diameterIn != null && Number.isFinite(c.diameterIn) && c.diameterIn > 0 ? c.diameterIn : Math.min(w2, h2);
+        const dia =
+          c.diameterIn != null && Number.isFinite(c.diameterIn) && c.diameterIn > 0
+            ? c.diameterIn
+            : Math.min(w2, h2);
         const r = Math.max(0, Math.min(dia / 2, Math.min(w2, h2) / 2));
         if (r <= 0) return "";
 
@@ -1456,7 +1447,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             color: "#6b7280",
                           }}
                         >
-                          CAD downloads
+                          Full Package
                         </div>
 
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
