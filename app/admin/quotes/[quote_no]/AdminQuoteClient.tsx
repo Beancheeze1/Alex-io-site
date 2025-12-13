@@ -143,8 +143,6 @@ type LayoutLayer = {
   cavities?: any[];
 };
 
-type CavityShape = "rect" | "circle";
-
 type FlatCavity = {
   lengthIn: number;
   widthIn: number;
@@ -152,19 +150,10 @@ type FlatCavity = {
   x: number; // normalized 0..1
   y: number; // normalized 0..1
 
-  // NEW: optional shape passthrough for admin preview clarity
-  shape?: CavityShape | null;
+  // NEW (Path A): used only for admin per-layer preview clarity
+  shape?: "rect" | "circle" | null;
   diameterIn?: number | null;
 };
-
-function normalizeShape(raw: any): CavityShape | null {
-  if (typeof raw !== "string") return null;
-  const s = raw.trim().toLowerCase();
-  if (!s) return null;
-  if (s === "circle" || s === "round" || s === "circular") return "circle";
-  if (s === "rect" || s === "rectangle" || s === "square") return "rect";
-  return null;
-}
 
 /** Extract the stack/layers array from a layout_json */
 function getLayersFromLayout(layout: any): LayoutLayer[] {
@@ -185,8 +174,14 @@ function getLayersFromLayout(layout: any): LayoutLayer[] {
 
 function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): string {
   if (!layer) return `Layer ${idx + 1}`;
+
+  // IMPORTANT: keep this neutral (numbers), no “top/middle/bottom” assumptions
   const raw = layer.label ?? layer.name ?? layer.title ?? null;
-  if (typeof raw === "string" && raw.trim().length > 0) return raw.trim();
+
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    return raw.trim();
+  }
+
   return `Layer ${idx + 1}`;
 }
 
@@ -198,9 +193,20 @@ function getLayerThicknessIn(layer: LayoutLayer | null | undefined): number | nu
   return n;
 }
 
+function normalizeShape(raw: any): "rect" | "circle" | null {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (!s) return null;
+
+  if (s === "circle" || s === "round" || s === "circular") return "circle";
+  if (s === "rect" || s === "rectangle" || s === "square") return "rect";
+
+  return null;
+}
+
 /** Flatten cavities for a single layer */
 function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   const out: FlatCavity[] = [];
+
   if (!layout || typeof layout !== "object") return out;
 
   const layers = getLayersFromLayout(layout);
@@ -224,25 +230,24 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
 
     const w = Number.isFinite(widthIn) && widthIn > 0 ? widthIn : lengthIn;
 
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+      continue;
+    }
 
-    const shape =
-      normalizeShape((cav as any).shape) ??
-      normalizeShape((cav as any).cavityShape) ??
-      normalizeShape((cav as any).kind) ??
-      normalizeShape((cav as any).type) ??
-      null;
+    // NEW: preserve shape when present (admin preview only)
+    const shape = normalizeShape(
+      (cav as any).shape ?? (cav as any).cavityShape ?? (cav as any).cavity_shape ?? (cav as any).type ?? (cav as any).kind,
+    );
 
-    const dRaw = (cav as any).diameterIn ?? (cav as any).diameter_in ?? (cav as any).diameter ?? null;
-const dNum = dRaw == null ? NaN : Number(dRaw);
-
-const diameterIn =
-  Number.isFinite(dNum) && dNum > 0
-    ? dNum
-    : shape === "circle"
-      ? Math.min(lengthIn, w)
-      : null;
-
+    // If circle, attempt to use diameter (or infer from footprint)
+    const rawDia = (cav as any).diameterIn ?? (cav as any).diameter_in ?? (cav as any).diameter ?? null;
+    const diaNum = rawDia == null ? NaN : Number(rawDia);
+    const diameterIn =
+      shape === "circle"
+        ? Number.isFinite(diaNum) && diaNum > 0
+          ? diaNum
+          : Math.min(lengthIn, w)
+        : null;
 
     out.push({
       lengthIn,
@@ -261,7 +266,7 @@ const diameterIn =
 /**
  * Build a DXF for a single layer:
  *  - Foam block as rectangle from (0,0) to (L,W)
- *  - Cavities in that layer as rectangles
+ *  - Cavities in that layer as rects or circles (when shape === "circle")
  */
 function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   if (!layout || !layout.block) return null;
@@ -271,12 +276,15 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
   let W = Number(block.widthIn ?? block.width_in);
 
   if (!Number.isFinite(L) || L <= 0) return null;
-  if (!Number.isFinite(W) || W <= 0) W = L;
+  if (!Number.isFinite(W) || W <= 0) {
+    W = L; // defensive fallback
+  }
 
   function fmt(n: number) {
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
   }
 
+  // IMPORTANT: include Z coords (30/31) so CAD parses as proper R12 LINEs
   function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
     return [
       "0",
@@ -298,13 +306,33 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
     ].join("\n");
   }
 
+  // NEW: true DXF CIRCLE entity (R12)
+  function circleEntity(cx: number, cy: number, r: number): string {
+    return [
+      "0",
+      "CIRCLE",
+      "8",
+      "0",
+      "10",
+      fmt(cx),
+      "20",
+      fmt(cy),
+      "30",
+      "0.0",
+      "40",
+      fmt(r),
+    ].join("\n");
+  }
+
   const entities: string[] = [];
 
+  // 1) Block rectangle
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
+  // 2) Layer-specific cavities (normalized x/y → inches)
   const cavs = getCavitiesForLayer(layout, layerIndex);
 
   for (const cav of cavs) {
@@ -314,6 +342,25 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
     const cL = cav.lengthIn;
     const cW = cav.widthIn;
 
+    // If this cavity is a circle, emit a true DXF CIRCLE (not a square)
+    if (cav.shape === "circle") {
+      const dia =
+        cav.diameterIn != null && Number.isFinite(cav.diameterIn) && cav.diameterIn > 0
+          ? cav.diameterIn
+          : Math.min(cL, cW);
+
+      const r = dia / 2;
+      if (Number.isFinite(r) && r > 0) {
+        // Center in the cavity footprint (matches the preview logic)
+        const cx = left + cL / 2;
+        const cy = top + cW / 2;
+        entities.push(circleEntity(cx, cy, r));
+        continue;
+      }
+      // fall through to rect if r invalid
+    }
+
+    // Default: rectangle
     entities.push(lineEntity(left, top, left + cL, top));
     entities.push(lineEntity(left + cL, top, left + cL, top + cW));
     entities.push(lineEntity(left + cL, top + cW, left, top + cW));
@@ -334,7 +381,7 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
     "9",
     "$INSUNITS",
     "70",
-    "1",
+    "1", // inches
     "0",
     "ENDSEC",
     "0",
@@ -362,10 +409,14 @@ function buildDxfForLayer(layout: any, layerIndex: number): string | null {
 
 /* ---------------- Lightweight SVG preview (per-layer, client-side) ---------------- */
 /**
- * Deterministic admin-only preview:
+ * Deterministic admin preview:
  * - Draw foam block outline
  * - Draw that layer’s cavities
- * - Circles render as circles when shape indicates "circle"
+ * - Uses layout.block length/width inches for viewBox
+ *
+ * IMPORTANT (Path A):
+ * - This does NOT touch the saved layoutPkg.svg_text (full layout exporter).
+ * - This is only for admin layer clarity.
  */
 function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null {
   if (!layout || !layout.block) return null;
@@ -390,36 +441,36 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
       const left = L * c.x;
       const top = W * c.y;
 
-      if (c.shape === "circle") {
-        const d = (c.diameterIn && c.diameterIn > 0 ? c.diameterIn : Math.min(c.lengthIn, c.widthIn)) || 0;
-        if (d <= 0) return "";
-
-        const x2 = Math.max(0, Math.min(L, left));
-        const y2 = Math.max(0, Math.min(W, top));
-        const d2 = Math.max(0, Math.min(Math.min(L - x2, W - y2), d));
-        if (d2 <= 0) return "";
-
-        const cx = x2 + d2 / 2;
-        const cy = y2 + d2 / 2;
-
-        return `<circle cx="${cx}" cy="${cy}" r="${d2 / 2}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
-      }
-
-      // default: rect
+      // Default footprint
       const w = c.lengthIn;
       const h = c.widthIn;
 
+      // Keep within bounds defensively (preview only)
       const x2 = Math.max(0, Math.min(L, left));
       const y2 = Math.max(0, Math.min(W, top));
       const w2 = Math.max(0, Math.min(L - x2, w));
       const h2 = Math.max(0, Math.min(W - y2, h));
       if (w2 <= 0 || h2 <= 0) return "";
 
+      // If circle, render a circle centered in the cavity footprint.
+      if (c.shape === "circle") {
+        const dia = c.diameterIn != null && Number.isFinite(c.diameterIn) && c.diameterIn > 0 ? c.diameterIn : Math.min(w2, h2);
+        const r = Math.max(0, Math.min(dia / 2, Math.min(w2, h2) / 2));
+        if (r <= 0) return "";
+
+        const cx = x2 + w2 / 2;
+        const cy = y2 + h2 / 2;
+
+        return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+      }
+
+      // Rect (default)
       return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
     })
     .filter(Boolean)
     .join("");
 
+  // width/height 100% so it scales to preview panes reliably
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`,
     `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`,
@@ -431,7 +482,6 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
 /* ---------------- Component ---------------- */
 
 export default function AdminQuoteClient({ quoteNo }: Props) {
-  // (NO OTHER LOGIC CHANGES BELOW — this file remains your working version)
   // Local quote number value: prefer prop, fall back to URL path.
   const [quoteNoValue, setQuoteNoValue] = React.useState<string>(quoteNo || "");
 
@@ -442,27 +492,33 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
+  // Used to force a refetch (e.g., after rebuild-step)
   const [refreshTick, setRefreshTick] = React.useState<number>(0);
 
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
 
+  // NEW: requested cartons for this quote (from quote_box_selections)
   const [boxSelections, setBoxSelections] = React.useState<RequestedBoxRow[] | null>(null);
   const [boxSelectionsLoading, setBoxSelectionsLoading] = React.useState<boolean>(false);
   const [boxSelectionsError, setBoxSelectionsError] = React.useState<string | null>(null);
 
+  // NEW: rebuild-step UI state
   const [rebuildBusy, setRebuildBusy] = React.useState<boolean>(false);
   const [rebuildError, setRebuildError] = React.useState<string | null>(null);
   const [rebuildOkAt, setRebuildOkAt] = React.useState<string | null>(null);
 
+  // NEW: layer selection (click a layer card, large preview follows)
   const [selectedLayerIdx, setSelectedLayerIdx] = React.useState<number>(0);
 
+  // 🔁 Rescue quote_no from URL path if prop is missing/empty.
+  // Expected path: /admin/quotes/<quote_no>
   React.useEffect(() => {
     if (quoteNoValue) return;
     if (typeof window === "undefined") return;
 
     try {
       const path = window.location.pathname || "";
-      const parts = path.split("/").filter(Boolean);
+      const parts = path.split("/").filter(Boolean); // e.g. ["admin", "quotes", "Q-AI-..."]
       const idx = parts.findIndex((p) => p === "quotes");
       const fromPath = idx >= 0 && parts[idx + 1] ? decodeURIComponent(parts[idx + 1]) : "";
 
@@ -481,6 +537,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [quoteNoValue]);
 
+  // Fetch quote data from /api/quote/print when we have a quote number.
   React.useEffect(() => {
     if (!quoteNoValue) return;
 
@@ -529,16 +586,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
           setError("There was an unexpected problem loading this quote. Please try again.");
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     load();
+
     return () => {
       cancelled = true;
     };
   }, [quoteNoValue, refreshTick]);
 
+  // NEW: Fetch requested cartons (quote_box_selections) for this quote
   React.useEffect(() => {
     if (!quoteNoValue) return;
 
@@ -559,22 +620,30 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         if (!res.ok || !json.ok) {
           if (!cancelled) {
             const msg =
-              (!json.ok && (json as BoxesForQuoteErr).error) || "Unable to load requested cartons for this quote.";
+              (!json.ok && (json as BoxesForQuoteErr).error) ||
+              "Unable to load requested cartons for this quote.";
             setBoxSelectionsError(msg);
           }
           return;
         }
 
-        if (!cancelled) setBoxSelections(json.selections || []);
+        if (!cancelled) {
+          setBoxSelections(json.selections || []);
+        }
       } catch (err) {
         console.error("Error fetching /api/boxes/for-quote (admin view):", err);
-        if (!cancelled) setBoxSelectionsError("Unable to load requested cartons for this quote.");
+        if (!cancelled) {
+          setBoxSelectionsError("Unable to load requested cartons for this quote.");
+        }
       } finally {
-        if (!cancelled) setBoxSelectionsLoading(false);
+        if (!cancelled) {
+          setBoxSelectionsLoading(false);
+        }
       }
     }
 
     loadRequestedBoxes();
+
     return () => {
       cancelled = true;
     };
@@ -596,17 +665,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         : layoutPkg.notes.trim()
       : null;
 
+  // Normalize SVG preview (full layout preview)
   React.useEffect(() => {
     if (!layoutPkg) return;
     if (!svgContainerRef.current) return;
 
     const svgEl = svgContainerRef.current.querySelector("svg") as SVGSVGElement | null;
+
     if (!svgEl) return;
 
     try {
       svgEl.removeAttribute("width");
       svgEl.removeAttribute("height");
       svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
       svgEl.style.width = "100%";
       svgEl.style.height = "100%";
       svgEl.style.display = "block";
@@ -616,6 +688,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [layoutPkg]);
 
+  // SVG + DXF blob downloads remain local (fine).
   const handleDownload = React.useCallback(
     (kind: "svg" | "dxf") => {
       if (typeof window === "undefined") return;
@@ -657,6 +730,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     [layoutPkg, quoteState],
   );
 
+  // STEP download uses the server endpoint directly.
   const handleDownloadStep = React.useCallback(() => {
     if (typeof window === "undefined") return;
     if (!quoteNoValue) return;
@@ -702,12 +776,14 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
   const primaryItem = items[0] || null;
 
+  // Pricing metadata
   const primaryPricing = primaryItem?.pricing_meta || null;
   const minChargeApplied = !!primaryPricing?.used_min_charge;
   const setupFee = typeof primaryPricing?.setup_fee === "number" ? primaryPricing.setup_fee : null;
   const kerfPct = typeof primaryPricing?.kerf_pct === "number" ? primaryPricing.kerf_pct : null;
   const minChargeValue = typeof primaryPricing?.min_charge === "number" ? primaryPricing.min_charge : null;
 
+  // shared card styles
   const cardBase: React.CSSProperties = {
     borderRadius: 16,
     border: "1px solid #e5e7eb",
@@ -730,6 +806,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     marginBottom: 2,
   };
 
+  // derived material fields
   const primaryMaterialName =
     primaryItem?.material_name || (primaryItem ? `Material #${primaryItem.material_id}` : null);
   const primaryMaterialFamily = primaryItem?.material_family || null;
@@ -745,11 +822,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
         : null;
 
+  // Layers for per-layer tools/previews
   const layersForDxf = React.useMemo(
     () => (layoutPkg && layoutPkg.layout_json ? getLayersFromLayout(layoutPkg.layout_json) : []),
     [layoutPkg],
   );
 
+  // Keep selection in range when the layout changes
   React.useEffect(() => {
     const n = layersForDxf?.length || 0;
     if (n <= 0) {
@@ -824,6 +903,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       }
 
       setRebuildOkAt(new Date().toLocaleString());
+
+      // Force refresh of /api/quote/print payload so admin UI reflects newest layoutPkg.step_text timestamp/notes/etc
       setRefreshTick((x) => x + 1);
     } catch (e: any) {
       console.error("Admin: rebuild-step failed:", e);
@@ -1340,7 +1421,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               {rebuildBusy ? "Rebuilding STEP..." : "Rebuild STEP now"}
                             </button>
 
-                            {rebuildOkAt && <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>}
+                            {rebuildOkAt && (
+                              <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>
+                            )}
                             {rebuildError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>}
                           </div>
                         </div>

@@ -37,7 +37,6 @@
 //     use the latest layout, not stale test data.
 //   - NEW: syncs each foam layer in layout.stack into quote_items as separate
 //     rows marked with notes starting "[LAYOUT-LAYER] ...".
-//   - Returns the new package id + (if changed) the updatedQty.
 //
 // GET (debug helper):
 //   - /api/quote/layout/apply?quote_no=Q-...   -> latest package for that quote
@@ -85,6 +84,17 @@ type FlatCavity = {
   y: number;
 };
 
+/**
+ * Gather all cavities from a layout in a backward-compatible way.
+ *
+ * Supports:
+ *  - Legacy single-layer layouts:
+ *      layout.cavities = [...]
+ *  - Future multi-layer layouts:
+ *      layout.stack = [{ cavities: [...] }, ...]
+ *
+ * If both are present, we include both sets (defensive).
+ */
 function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
   const out: FlatCavity[] = [];
 
@@ -109,8 +119,12 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
     }
   };
 
-  if (Array.isArray(layout.cavities)) pushFrom(layout.cavities);
+  // Legacy single-layer layouts
+  if (Array.isArray(layout.cavities)) {
+    pushFrom(layout.cavities);
+  }
 
+  // Multi-layer layouts: stack[].cavities[]
   if (Array.isArray(layout.stack)) {
     for (const layer of layout.stack) {
       if (layer && Array.isArray((layer as any).cavities)) {
@@ -122,8 +136,11 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
   return out;
 }
 
-/* ===================== DXF builder from layout (LINES + full header) ===================== */
-
+/* ===================== DXF builder from layout (fallback) ===================== */
+/**
+ * Layout-based DXF fallback (rectangles only).
+ * We keep this as a fallback if SVG is missing.
+ */
 function buildDxfFromLayout(layout: any): string | null {
   if (!layout || !layout.block) return null;
 
@@ -148,22 +165,26 @@ function buildDxfFromLayout(layout: any): string | null {
       fmt(x1),
       "20",
       fmt(y1),
+      "30",
+      "0.0",
       "11",
       fmt(x2),
       "21",
       fmt(y2),
+      "31",
+      "0.0",
     ].join("\n");
   }
 
   const entities: string[] = [];
 
-  // Block outline
+  // outer block
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // Cavities (flattened)
+  // cavities (flattened) as rectangles
   const allCavities = getAllCavitiesFromLayout(layout);
 
   for (const cav of allCavities) {
@@ -176,18 +197,168 @@ function buildDxfFromLayout(layout: any): string | null {
     if (!Number.isFinite(cW) || cW <= 0) cW = cL;
     if (![nx, ny].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) continue;
 
-    // Editor/SVG uses top-left origin; CAD uses bottom-left origin.
-    // So we flip Y when converting normalized coordinates.
     const left = L * nx;
-    const topSvg = W * ny;
-    const topCad = W * (1 - ny) - cW;
 
-    const yCad = Math.max(0, Math.min(W - cW, topCad));
+    // NOTE: layout y is top-left normalized; DXF is bottom-left
+    // So flip Y so it matches SVG orientation.
+    const topSvg = W * ny;
+    const yCad = W - topSvg - cW;
 
     entities.push(lineEntity(left, yCad, left + cL, yCad));
     entities.push(lineEntity(left + cL, yCad, left + cL, yCad + cW));
     entities.push(lineEntity(left + cL, yCad + cW, left, yCad + cW));
     entities.push(lineEntity(left, yCad + cW, left, yCad));
+  }
+
+  if (!entities.length) return null;
+
+  const header = [
+    "0",
+    "SECTION",
+    "2",
+    "HEADER",
+    "9",
+    "$ACADVER",
+    "1",
+    "AC1009",
+    "9",
+    "$INSUNITS",
+    "70",
+    "1",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "TABLES",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "BLOCKS",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "ENTITIES",
+  ].join("\n");
+
+  const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
+  return [header, entities.join("\n"), footer].join("\n");
+}
+
+/* ===================== DXF builder from SVG (preferred) ===================== */
+/**
+ * Canonical DXF generation from SVG (editor truth).
+ * Supports:
+ *  - <rect> (as 4 LINEs)
+ *  - <circle> (as DXF CIRCLE)
+ *
+ * IMPORTANT:
+ *  - SVG is top-left origin (y down)
+ *  - DXF is bottom-left origin (y up)
+ * We flip Y using the SVG viewBox height.
+ */
+function buildDxfFromSvg(svgRaw: string | null): string | null {
+  if (!svgRaw || typeof svgRaw !== "string") return null;
+
+  const svg = svgRaw;
+
+  // Extract viewBox: "minX minY width height"
+  const vbMatch = svg.match(/viewBox\s*=\s*"([^"]+)"/i);
+  if (!vbMatch) return null;
+
+  const vbParts = vbMatch[1].trim().split(/\s+/).map((s) => Number(s));
+  if (vbParts.length !== 4) return null;
+
+  const vbW = vbParts[2];
+  const vbH = vbParts[3];
+  if (!Number.isFinite(vbW) || !Number.isFinite(vbH) || vbW <= 0 || vbH <= 0) return null;
+
+  function fmt(n: number) {
+    return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
+  }
+
+  function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
+    return [
+      "0",
+      "LINE",
+      "8",
+      "0",
+      "10",
+      fmt(x1),
+      "20",
+      fmt(y1),
+      "30",
+      "0.0",
+      "11",
+      fmt(x2),
+      "21",
+      fmt(y2),
+      "31",
+      "0.0",
+    ].join("\n");
+  }
+
+  function circleEntity(cx: number, cy: number, r: number): string {
+    return [
+      "0",
+      "CIRCLE",
+      "8",
+      "0",
+      "10",
+      fmt(cx),
+      "20",
+      fmt(cy),
+      "40",
+      fmt(r),
+    ].join("\n");
+  }
+
+  const entities: string[] = [];
+
+  // --- rects ---
+  // Note: handle x/y/width/height. Ignore rx/ry for now (we can add arcs later).
+  const rectRe = /<rect\b([^>]*)\/?>/gi;
+  let rectM: RegExpExecArray | null = null;
+  while ((rectM = rectRe.exec(svg))) {
+    const attrs = rectM[1] || "";
+
+    const x = Number((attrs.match(/\bx\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const y = Number((attrs.match(/\by\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const w = Number((attrs.match(/\bwidth\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const h = Number((attrs.match(/\bheight\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) continue;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    // Flip Y to DXF space
+    const yCad = vbH - y - h;
+
+    entities.push(lineEntity(x, yCad, x + w, yCad));
+    entities.push(lineEntity(x + w, yCad, x + w, yCad + h));
+    entities.push(lineEntity(x + w, yCad + h, x, yCad + h));
+    entities.push(lineEntity(x, yCad + h, x, yCad));
+  }
+
+  // --- circles ---
+  const circleRe = /<circle\b([^>]*)\/?>/gi;
+  let circM: RegExpExecArray | null = null;
+  while ((circM = circleRe.exec(svg))) {
+    const attrs = circM[1] || "";
+
+    const cx = Number((attrs.match(/\bcx\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN"));
+    const cySvg = Number((attrs.match(/\bcy\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN"));
+    const r = Number((attrs.match(/\br\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN"));
+
+    if (!Number.isFinite(cx) || !Number.isFinite(cySvg) || !Number.isFinite(r) || r <= 0) continue;
+
+    // Flip center Y
+    const cy = vbH - cySvg;
+
+    entities.push(circleEntity(cx, cy, r));
   }
 
   if (!entities.length) return null;
@@ -241,11 +412,13 @@ function buildSvgWithAnnotations(
 
   let svg = svgRaw as string;
 
+  // 1) Remove any previous <g id="alex-io-notes">...</g> groups.
   svg = svg.replace(
     /<g[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g>/gi,
     "",
   );
 
+  // 2) Remove individual <text> nodes that look like old legends.
   const legendLabelPattern =
     /(NOT TO SCALE|FOAM BLOCK:|FOAM:|BLOCK:|MATERIAL:)/i;
 
@@ -254,14 +427,18 @@ function buildSvgWithAnnotations(
     (match) => (legendLabelPattern.test(match) ? "" : match),
   );
 
-  if (!layout || !layout.block) return svg;
+  if (!layout || !layout.block) {
+    return svg;
+  }
 
   const block = layout.block || {};
   const L = Number(block.lengthIn);
   const W = Number(block.widthIn);
   const T = Number(block.thicknessIn);
 
-  if (!Number.isFinite(L) || !Number.isFinite(W) || L <= 0 || W <= 0) return svg;
+  if (!Number.isFinite(L) || !Number.isFinite(W) || L <= 0 || W <= 0) {
+    return svg;
+  }
 
   const closeIdx = svg.lastIndexOf("</svg");
   if (closeIdx === -1) return svg;
@@ -305,12 +482,17 @@ function buildSvgWithAnnotations(
   svgOpen = bumpLengthAttr(svgOpen, "height", GEOMETRY_SHIFT_Y);
 
   const lines: string[] = [];
+
   const safeQuoteNo = quoteNo && quoteNo.trim().length > 0 ? quoteNo.trim() : "";
   if (safeQuoteNo) lines.push(`QUOTE: ${safeQuoteNo}`);
+
   lines.push("NOT TO SCALE");
 
-  if (Number.isFinite(T) && T > 0) lines.push(`BLOCK: ${L} x ${W} x ${T} in`);
-  else lines.push(`BLOCK: ${L} x ${W} in (thickness see quote)`);
+  if (Number.isFinite(T) && T > 0) {
+    lines.push(`BLOCK: ${L} x ${W} x ${T} in`);
+  } else {
+    lines.push(`BLOCK: ${L} x ${W} in (thickness see quote)`);
+  }
 
   if (materialLegend && materialLegend.trim().length > 0) {
     lines.push(`MATERIAL: ${materialLegend.trim()}`);
@@ -367,7 +549,11 @@ export async function POST(req: NextRequest) {
 
   if (!quoteNo) {
     return bad(
-      { ok: false, error: "missing_quote_no", message: "quoteNo must be a non-empty string." },
+      {
+        ok: false,
+        error: "missing_quote_no",
+        message: "quoteNo must be a non-empty string.",
+      },
       400,
     );
   }
@@ -390,11 +576,20 @@ export async function POST(req: NextRequest) {
 
   if (rawCustomer) {
     const rawName =
-      rawCustomer.name ?? rawCustomer.customerName ?? rawCustomer.customer_name ?? null;
+      rawCustomer.name ??
+      rawCustomer.customerName ??
+      rawCustomer.customer_name ??
+      null;
     const rawEmail =
-      rawCustomer.email ?? rawCustomer.customerEmail ?? rawCustomer.customer_email ?? null;
+      rawCustomer.email ??
+      rawCustomer.customerEmail ??
+      rawCustomer.customer_email ??
+      null;
     const rawPhone =
-      rawCustomer.phone ?? rawCustomer.customerPhone ?? rawCustomer.customer_phone ?? null;
+      rawCustomer.phone ??
+      rawCustomer.customerPhone ??
+      rawCustomer.customer_phone ??
+      null;
     const rawCompany =
       rawCustomer.company ??
       rawCustomer.companyName ??
@@ -402,17 +597,36 @@ export async function POST(req: NextRequest) {
       rawCustomer.customer_company ??
       null;
 
-    customerName = typeof rawName === "string" && rawName.trim() ? rawName.trim() : null;
-    customerEmail = typeof rawEmail === "string" && rawEmail.trim() ? rawEmail.trim() : null;
-    customerPhone = typeof rawPhone === "string" && rawPhone.trim() ? rawPhone.trim() : null;
-    customerCompany = typeof rawCompany === "string" && rawCompany.trim() ? rawCompany.trim() : null;
+    customerName =
+      typeof rawName === "string" && rawName.trim().length > 0
+        ? rawName.trim()
+        : null;
+    customerEmail =
+      typeof rawEmail === "string" && rawEmail.trim().length > 0
+        ? rawEmail.trim()
+        : null;
+    customerPhone =
+      typeof rawPhone === "string" && rawPhone.trim().length > 0
+        ? rawPhone.trim()
+        : null;
+    customerCompany =
+      typeof rawCompany === "string" && rawCompany.trim().length > 0
+        ? rawCompany.trim()
+        : null;
   }
 
-  const rawMaterialId = body.materialId ?? body.material_id ?? body.material ?? null;
+  const rawMaterialId =
+    body.materialId ?? body.material_id ?? body.material ?? null;
   let materialId: number | null = null;
-  if (rawMaterialId !== null && rawMaterialId !== undefined && rawMaterialId !== "") {
+  if (
+    rawMaterialId !== null &&
+    rawMaterialId !== undefined &&
+    rawMaterialId !== ""
+  ) {
     const n = Number(rawMaterialId);
-    if (Number.isFinite(n) && n > 0) materialId = n;
+    if (Number.isFinite(n) && n > 0) {
+      materialId = n;
+    }
   }
 
   try {
@@ -427,7 +641,11 @@ export async function POST(req: NextRequest) {
 
     if (!quote) {
       return bad(
-        { ok: false, error: "quote_not_found", message: `No quote header found for quote_no ${quoteNo}.` },
+        {
+          ok: false,
+          error: "quote_not_found",
+          message: `No quote header found for quote_no ${quoteNo}.`,
+        },
         404,
       );
     }
@@ -444,7 +662,14 @@ export async function POST(req: NextRequest) {
             updated_by_user_id = coalesce($6, updated_by_user_id)
           where id = $1
         `,
-        [quote.id, customerName, customerEmail, customerPhone, customerCompany, currentUserId],
+        [
+          quote.id,
+          customerName,
+          customerEmail,
+          customerPhone,
+          customerCompany,
+          currentUserId,
+        ],
       );
     }
 
@@ -491,25 +716,43 @@ export async function POST(req: NextRequest) {
 
         const rawDens: any = (mat as any).density_lb_ft3;
         const densNum =
-          typeof rawDens === "number" ? rawDens : rawDens != null ? Number(rawDens) : NaN;
+          typeof rawDens === "number"
+            ? rawDens
+            : rawDens != null
+            ? Number(rawDens)
+            : NaN;
 
-        if (Number.isFinite(densNum) && densNum > 0) materialDensityForFacts = densNum;
+        if (Number.isFinite(densNum) && densNum > 0) {
+          materialDensityForFacts = densNum;
+        }
 
         const legendParts: string[] = [];
         if (mat.name) legendParts.push(mat.name);
         if (mat.material_family) legendParts.push(mat.material_family);
-        if (materialDensityForFacts != null) legendParts.push(`${materialDensityForFacts.toFixed(1)} lb/ft³`);
-        if (legendParts.length) materialLegend = legendParts.join(" · ");
+        if (materialDensityForFacts != null) {
+          legendParts.push(`${materialDensityForFacts.toFixed(1)} lb/ft³`);
+        }
+        if (legendParts.length) {
+          materialLegend = legendParts.join(" · ");
+        }
       }
     }
 
-    // Build DXF (now with Y-flip)
-    const dxf = buildDxfFromLayout(layout);
+    // DXF (preferred): build from raw SVG so circles/rounded shapes match the editor.
+    // Fallback: layout-based DXF if SVG is missing.
+    const dxfFromSvg = buildDxfFromSvg(svgRaw);
+    const dxf = dxfFromSvg ?? buildDxfFromLayout(layout);
 
-    // Build STEP via microservice
+    // STEP via external geometry service (microservice-backed).
     const step = await buildStepFromLayout(layout, quoteNo, materialLegend ?? null);
 
-    const svgAnnotated = buildSvgWithAnnotations(layout, svgRaw, materialLegend ?? null, quoteNo);
+    // Annotate SVG (for stored preview)
+    const svgAnnotated = buildSvgWithAnnotations(
+      layout,
+      svgRaw,
+      materialLegend ?? null,
+      quoteNo,
+    );
 
     const pkg = await one<LayoutPkgRow>(
       `
@@ -553,9 +796,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // (rest of your file unchanged — keeping your layer sync + facts sync exactly as-is)
-    // NOTE: Everything below this point is identical to what you pasted, so I’m leaving it as-is.
-
     // ===================== NEW: sync foam layers into quote_items =====================
     try {
       const primaryItem = await one<{
@@ -580,16 +820,18 @@ export async function POST(req: NextRequest) {
       const blockL = block ? Number(block.lengthIn ?? block.length_in) || 0 : 0;
       const blockW = block ? Number(block.widthIn ?? block.width_in) || 0 : 0;
 
-      const foamLayers = Array.isArray((body as any)?.foamLayers) ? (body as any).foamLayers : null;
+      const foamLayers = Array.isArray((body as any)?.foamLayers)
+        ? (body as any).foamLayers
+        : null;
 
       const layers =
         Array.isArray(foamLayers) && foamLayers.length > 0
           ? foamLayers
           : Array.isArray(layout?.stack)
-            ? layout.stack
-            : Array.isArray(layout?.layers)
-              ? layout.layers
-              : [];
+          ? layout.stack
+          : Array.isArray(layout?.layers)
+          ? layout.layers
+          : [];
 
       let baseQty: number | null = null;
 
@@ -618,7 +860,13 @@ export async function POST(req: NextRequest) {
         if (Number.isFinite(mid) && mid > 0) baseMaterialId = mid;
       }
 
-      if (!baseMaterialId || blockL <= 0 || blockW <= 0 || !Array.isArray(layers) || layers.length === 0) {
+      if (
+        !baseMaterialId ||
+        blockL <= 0 ||
+        blockW <= 0 ||
+        !Array.isArray(layers) ||
+        layers.length === 0
+      ) {
         console.warn("[layout/apply] Skipping foam-layer → quote_items sync", {
           quoteId: quote.id,
           blockL,
@@ -643,22 +891,33 @@ export async function POST(req: NextRequest) {
           if (!rawLayer) continue;
 
           const thicknessRaw =
-            (rawLayer as any).thicknessIn ?? (rawLayer as any).thickness_in ?? (rawLayer as any).thickness;
+            (rawLayer as any).thicknessIn ??
+            (rawLayer as any).thickness_in ??
+            (rawLayer as any).thickness;
 
           const thickness = Number(thicknessRaw) || 0;
           if (!(thickness > 0)) continue;
 
           layerIndex += 1;
 
-          const rawLabel = (rawLayer as any).label ?? (rawLayer as any).name ?? (rawLayer as any).title ?? null;
+          const rawLabel =
+            (rawLayer as any).label ??
+            (rawLayer as any).name ??
+            (rawLayer as any).title ??
+            null;
 
           let label =
-            typeof rawLabel === "string" && rawLabel.trim().length > 0 ? rawLabel.trim() : null;
+            typeof rawLabel === "string" && rawLabel.trim().length > 0
+              ? rawLabel.trim()
+              : null;
 
           const isBottom =
-            (rawLayer as any).isBottom === true || (rawLayer as any).id === "layer-bottom";
+            (rawLayer as any).isBottom === true ||
+            (rawLayer as any).id === "layer-bottom";
 
-          if (!label) label = isBottom ? "Bottom pad" : `Layer ${layerIndex}`;
+          if (!label) {
+            label = isBottom ? "Bottom pad" : `Layer ${layerIndex}`;
+          }
 
           const notesForRow = `[LAYOUT-LAYER] ${label}`;
 
@@ -681,19 +940,27 @@ export async function POST(req: NextRequest) {
         }
       }
     } catch (layerErr) {
-      console.error("Warning: failed to sync foam layers into quote_items for", quoteNo, layerErr);
+      console.error(
+        "Warning: failed to sync foam layers into quote_items for",
+        quoteNo,
+        layerErr,
+      );
     }
+    // =================== END new foam layer sync block ===================
 
     try {
       const factsKey = quoteNo;
       const prevFacts = await loadFacts(factsKey);
-      const nextFacts: any = prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
+      const nextFacts: any =
+        prevFacts && typeof prevFacts === "object" ? { ...prevFacts } : {};
 
       if (layout && layout.block) {
         const Lb = Number(layout.block.lengthIn) || 0;
         const Wb = Number(layout.block.widthIn) || 0;
         const Tb = Number(layout.block.thicknessIn) || 0;
-        if (Lb > 0 && Wb > 0 && Tb > 0) nextFacts.dims = `${Lb}x${Wb}x${Tb}`;
+        if (Lb > 0 && Wb > 0 && Tb > 0) {
+          nextFacts.dims = `${Lb}x${Wb}x${Tb}`;
+        }
       }
 
       const allCavities = getAllCavitiesFromLayout(layout);
@@ -703,8 +970,11 @@ export async function POST(req: NextRequest) {
           const Lc = cav.lengthIn || 0;
           const Wc = cav.widthIn || 0;
           const Dc = cav.depthIn || 0;
-          if (Lc > 0 && Wc > 0 && Dc > 0) cavDims.push(`${Lc}x${Wc}x${Dc}`);
+          if (Lc > 0 && Wc > 0 && Dc > 0) {
+            cavDims.push(`${Lc}x${Wc}x${Dc}`);
+          }
         }
+
         if (cavDims.length) {
           nextFacts.cavityDims = cavDims;
           nextFacts.cavityCount = cavDims.length;
@@ -717,28 +987,53 @@ export async function POST(req: NextRequest) {
         delete nextFacts.cavityCount;
       }
 
-      if (updatedQty != null) nextFacts.qty = updatedQty;
+      if (updatedQty != null) {
+        nextFacts.qty = updatedQty;
+      }
 
-      if (materialId != null) nextFacts.material_id = materialId;
-      if (materialNameForFacts) nextFacts.material_name = materialNameForFacts;
-      if (materialFamilyForFacts) nextFacts.material_family = materialFamilyForFacts;
-      if (materialDensityForFacts != null) nextFacts.material_density_lb_ft3 = materialDensityForFacts;
+      if (materialId != null) {
+        nextFacts.material_id = materialId;
+      }
+      if (materialNameForFacts) {
+        nextFacts.material_name = materialNameForFacts;
+      }
+      if (materialFamilyForFacts) {
+        nextFacts.material_family = materialFamilyForFacts;
+      }
+      if (materialDensityForFacts != null) {
+        nextFacts.material_density_lb_ft3 = materialDensityForFacts;
+      }
 
       if (customerName) nextFacts.customer_name = customerName;
       if (customerEmail) nextFacts.customer_email = customerEmail;
       if (customerPhone) nextFacts.customer_phone = customerPhone;
       if (customerCompany) nextFacts.customer_company = customerCompany;
 
-      if (Object.keys(nextFacts).length > 0) await saveFacts(factsKey, nextFacts);
+      if (Object.keys(nextFacts).length > 0) {
+        await saveFacts(factsKey, nextFacts);
+      }
     } catch (e) {
       console.error("Error syncing layout facts for quote", quoteNo, e);
     }
 
-    return ok({ ok: true, quoteNo, packageId: pkg ? pkg.id : null, updatedQty }, 200);
+    return ok(
+      {
+        ok: true,
+        quoteNo,
+        packageId: pkg ? pkg.id : null,
+        updatedQty,
+      },
+      200,
+    );
   } catch (err) {
     console.error("Error in /api/quote/layout/apply POST:", err);
     return bad(
-      { ok: false, error: "server_error", message: "There was an unexpected problem saving this layout. Please try again." },
+      {
+        ok: false,
+        error: "server_error",
+        message:
+          "There was an unexpected problem saving this layout. Please try again.",
+      },
       500,
     );
   }
@@ -752,7 +1047,11 @@ export async function GET(req: NextRequest) {
 
   if (!quoteNo) {
     return bad(
-      { ok: false, error: "MISSING_QUOTE_NO", message: "No quote_no was provided in the query string." },
+      {
+        ok: false,
+        error: "MISSING_QUOTE_NO",
+        message: "No quote_no was provided in the query string.",
+      },
       400,
     );
   }
@@ -768,7 +1067,14 @@ export async function GET(req: NextRequest) {
     );
 
     if (!quote) {
-      return bad({ ok: false, error: "NOT_FOUND", message: `No quote found with number ${quoteNo}.` }, 404);
+      return bad(
+        {
+          ok: false,
+          error: "NOT_FOUND",
+          message: `No quote found with number ${quoteNo}.`,
+        },
+        404,
+      );
     }
 
     const layoutPkg = await one<LayoutPkgRow>(
@@ -790,11 +1096,23 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    return ok({ ok: true, quote, layoutPkg }, 200);
+    return ok(
+      {
+        ok: true,
+        quote,
+        layoutPkg,
+      },
+      200,
+    );
   } catch (err) {
     console.error("Error in /api/quote/layout/apply GET:", err);
     return bad(
-      { ok: false, error: "SERVER_ERROR", message: "There was an unexpected problem loading the latest layout package." },
+      {
+        ok: false,
+        error: "SERVER_ERROR",
+        message:
+          "There was an unexpected problem loading the latest layout package.",
+      },
       500,
     );
   }
