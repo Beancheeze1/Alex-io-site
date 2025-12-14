@@ -2,8 +2,9 @@
 //
 // React hook for managing the layout model in the browser.
 // HARDENED:
+//  - Infers layers from email intent on first open
 //  - Single source of truth for cavities = stack[layer].cavities
-//  - layout.cavities is ALWAYS a mirror of the active layer
+//  - layout.cavities ALWAYS mirrors active layer
 //  - Prevents double-seeding on editor open
 //  - Legacy layouts normalized exactly once
 //  - Path A safe
@@ -121,12 +122,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           : {
               ...layer,
               cavities: layer.cavities.map((c) =>
-                c.id !== id
-                  ? c
-                  : {
-                      ...c,
-                      ...normalizeCavityPatch(patch),
-                    },
+                c.id !== id ? c : { ...c, ...normalizeCavityPatch(patch) },
               ),
             },
       );
@@ -279,7 +275,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   const block = { ...initial.block };
 
-  // 🔒 If stack exists, IGNORE initial.cavities entirely
+  // If stack already exists, trust it fully
   if (Array.isArray((initial as any).stack) && (initial as any).stack.length) {
     const stack = (initial as any).stack.map((l: any) => ({
       id: l.id,
@@ -297,17 +293,34 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     };
   }
 
-  // Legacy: seed exactly one layer ONCE
-  const layerId = "layer-1";
   const cavs = Array.isArray(initial.cavities) ? [...initial.cavities] : [];
 
+  // Infer 3-layer intent when cavities exist but stack does not
+  if (cavs.length) {
+    const stack: LayoutLayerLike[] = [
+      { id: "layer-1", label: "Layer 1", cavities: [] },
+      { id: "layer-2", label: "Layer 2", cavities: cavs },
+      { id: "layer-3", label: "Layer 3", cavities: [] },
+    ];
+
+    return {
+      layout: {
+        block,
+        stack,
+        cavities: [...cavs],
+      },
+      activeLayerId: "layer-2",
+    };
+  }
+
+  // Legacy fallback: single layer
   return {
     layout: {
       block,
-      stack: [{ id: layerId, label: "Layer 1", cavities: cavs }],
-      cavities: [...cavs],
+      stack: [{ id: "layer-1", label: "Layer 1", cavities: [] }],
+      cavities: [],
     },
-    activeLayerId: layerId,
+    activeLayerId: "layer-1",
   };
 }
 
