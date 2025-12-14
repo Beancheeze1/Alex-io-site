@@ -428,7 +428,9 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
 /* ---------- Helpers ---------- */
 
-function getStack(layout: LayoutModel & { stack?: LayoutLayerLike[] }): LayoutLayerLike[] | undefined {
+function getStack(
+  layout: LayoutModel & { stack?: LayoutLayerLike[] }
+): LayoutLayerLike[] | undefined {
   const raw = (layout as any).stack as LayoutLayerLike[] | undefined;
   if (!raw) return undefined;
   return raw;
@@ -436,10 +438,20 @@ function getStack(layout: LayoutModel & { stack?: LayoutLayerLike[] }): LayoutLa
 
 // Normalize legacy layouts into a single-layer stack (Path A)
 function normalizeInitialLayout(initial: LayoutModel): LayoutState {
+  // IMPORTANT:
+  // If a stack exists, we must NOT use legacy initial.cavities as an input source.
+  // layout.cavities is a DERIVED view of the active layer, otherwise duplicates can occur.
+  const stackFromInitial = getStack(initial as any);
+
   const base: LayoutModel & { stack?: LayoutLayerLike[] } = {
     block: { ...initial.block },
-    cavities: Array.isArray(initial.cavities) ? [...initial.cavities] : [],
-    stack: getStack(initial as any) ?? undefined,
+    cavities:
+      stackFromInitial && stackFromInitial.length > 0
+        ? [] // ignore legacy cavities when stack exists
+        : Array.isArray(initial.cavities)
+        ? [...initial.cavities]
+        : [],
+    stack: stackFromInitial ?? undefined,
   };
 
   const existingStack = base.stack;
