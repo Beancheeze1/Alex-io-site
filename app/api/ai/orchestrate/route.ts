@@ -20,10 +20,8 @@
 // - NEW 11/27: Pricing calc now ignores cavity volume so that the
 //   first-response email, quote page, and layout snapshot all match.
 // - HARDENING 12/13: If material_grade is present (e.g. "1560"),
-//   DB enrichment must prefer materials.name ILIKE '%1560%' within
-//   the correct foam family bucket BEFORE density fallback.
-// - HARDENING 12/14: Do not silently swallow JSON parse failures.
-//   Parse from req.clone().text() first, and expose debug in dryRun.
+//   DB enrichment must prefer grade matching within the correct foam family
+//   BEFORE density fallback, and avoid wrong subtypes (e.g. Ester) unless asked.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -50,12 +48,8 @@ type In = {
 type Mem = Record<string, any>;
 
 function ok(extra: Record<string, any> = {}) {
-  return NextResponse.json(
-    { ok: true, build: "orchestrate-2025-12-14a", ...extra },
-    { status: 200 },
-  );
+  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
 }
-
 
 function err(error: string, detail?: any) {
   return NextResponse.json({ ok: false, error, detail }, { status: 200 });
@@ -157,6 +151,7 @@ function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
 
   return null;
 }
+
 /* ============================================================
    Cavity normalization
    ============================================================ */
@@ -259,7 +254,6 @@ function applyCavityNormalization(facts: Mem): Mem {
 
   return facts;
 }
-
 /* ============================================================
    DB enrichment (material)
    ============================================================ */
@@ -315,10 +309,19 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       familyFilter = "AND material_family ILIKE 'Polystyrene%'";
     }
 
+    // Subtype intent (PU only): if the customer explicitly asks for ester/ether/char,
+    // we honor it. Otherwise we AVOID picking "Ester" by accident when multiple 1560s exist.
+    const wantsEster = /\bester\b/.test(materialToken);
+    const wantsEther = /\bether\b/.test(materialToken);
+    const wantsChar = /\bchar\b/.test(materialToken) || materialToken.includes("charcoal");
+
     // ---- HARDENING: grade-first match when present ----
     // If we have a grade like "1560" and we're in Polyurethane context,
-    // we must prefer a name match containing that grade BEFORE density fallback.
-    // This prevents generic density matching from landing on "S82C" etc.
+    // we must prefer a grade name match BEFORE density fallback.
+    //
+    // Additionally: when multiple 1560 PU rows exist (ester/ether/char),
+    // choose the subtype based on the email text; otherwise avoid "ester"
+    // unless the customer explicitly asked for it.
     let row: any = null;
 
     if (hasGrade && hasPolyurethane && gradeLike) {
@@ -336,20 +339,39 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         FROM materials
         WHERE is_active = true
           ${familyFilter}
-          AND name ILIKE $1
+          AND (
+            name ILIKE $1
+            OR category ILIKE $1
+            OR subcategory ILIKE $1
+          )
         ORDER BY
+          -- 0) Explicit subtype wins
           CASE
-            WHEN name ILIKE $1 THEN 0
-            ELSE 1
+            WHEN $2::boolean = true AND (name ILIKE '%ester%' OR category ILIKE '%ester%' OR subcategory ILIKE '%ester%') THEN 0
+            WHEN $3::boolean = true AND (name ILIKE '%ether%' OR category ILIKE '%ether%' OR subcategory ILIKE '%ether%') THEN 0
+            WHEN $4::boolean = true AND (name ILIKE '%char%'  OR category ILIKE '%char%'  OR subcategory ILIKE '%char%')  THEN 0
+            ELSE 5
           END,
-          LENGTH(name) ASC
+          -- 1) If NO explicit ester request, penalize ester so we don't auto-pick it
+          CASE
+            WHEN $2::boolean = false AND (name ILIKE '%ester%' OR category ILIKE '%ester%' OR subcategory ILIKE '%ester%') THEN 50
+            ELSE 0
+          END,
+          -- 2) If NO explicit char request, lightly penalize char so it doesn't steal generic 1560
+          CASE
+            WHEN $4::boolean = false AND (name ILIKE '%char%' OR category ILIKE '%char%' OR subcategory ILIKE '%char%') THEN 10
+            ELSE 0
+          END,
+          -- 3) Density closeness as a tiebreaker only
+          ABS(COALESCE(density_lb_ft3, 0) - $5)
         LIMIT 1;
         `,
-        [gradeLike],
+        [gradeLike, wantsEster, wantsEther, wantsChar, densNum],
       );
     }
 
-    // 1) First pass: LIKE + density (what we had before, but with is_active)
+    // 1) Next pass: token LIKE across name/family/category/subcategory (existing behavior)
+    // We keep this for non-grade materials and as a fallback when grade match fails.
     if (!row) {
       row = await one<any>(
         `
@@ -378,8 +400,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       );
     }
 
-    // 2) Fallback: if LIKE didn’t hit anything, just use family + density.
-    // This keeps PE and EPE separated, but makes us robust to naming noise.
+    // 2) Final fallback: family + density only (robust to naming noise).
     if (!row) {
       row = await one<any>(
         `
@@ -407,14 +428,27 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       return f;
     }
 
-    if (!f.material_id) f.material_id = row.id;
-    if (!f.material_name) f.material_name = row.name;
+    // If grade exists, we treat DB row as authoritative and overwrite any earlier wrong selection.
+    // This fixes cases where a generic density match grabbed the wrong "1560" subtype.
+    if (hasGrade && !f.material_id) {
+      f.material_id = row.id;
+    } else if (hasGrade && f.material_id && Number(f.material_id) !== Number(row.id)) {
+      f.material_id = row.id;
+    } else if (!f.material_id) {
+      f.material_id = row.id;
+    }
+
+    if (hasGrade) {
+      f.material_name = row.name;
+    } else if (!f.material_name) {
+      f.material_name = row.name;
+    }
+
     if (!f.material_family && row.material_family) {
       f.material_family = row.material_family;
     }
 
     // Only fill material from the DB if we had *nothing*.
-    // No PE/EPE cross-mapping here.
     const familyFromRow: string | null =
       row.material_family ||
       row.category ||
@@ -438,6 +472,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     return f;
   }
 }
+
 /* ============================================================
    NEW: hydrateFromDBByQuoteNo
    Keeps facts in sync with DB qty + cavities
@@ -541,7 +576,6 @@ async function hydrateFromDBByQuoteNo(
     return out;
   }
 }
-
 /* ============================================================
    Dimension / density helpers
    ============================================================ */
@@ -659,6 +693,7 @@ async function buildPriceBreaks(
 
   return out.length ? out : null;
 }
+
 /* ============================================================
    Regex-based parsing helpers
    ============================================================ */
@@ -766,8 +801,6 @@ function grabMaterial(raw: string): string | undefined {
 
   // Polyurethane family
   if (t.includes("polyurethane") || /\bpu\b/.test(t) || /\burethane\b/.test(t) || t.includes("urethane foam")) {
-    // Keep full phrase if provided (helps enrichment)
-    // e.g. "1560 black polyurethane" is captured by higher-level extraction
     return "polyurethane";
   }
 
@@ -927,7 +960,6 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   // HARDENING: preserve full material phrase if present (helps grade enrichment)
   // Example: "1560 black polyurethane" -> keep it (not just "polyurethane")
-  // This is safe because enrichFromDB now handles grade-first matching.
   const mMaterialPhrase = text.match(
     /\b(\d{3,5})\s+(black|white|gray|grey|blue|red|green|yellow|orange|tan|natural)\s+(polyurethane|urethane)\b/i,
   );
@@ -1079,50 +1111,11 @@ ${lastInbound}
 
 export async function POST(req: NextRequest) {
   try {
-    // HARDENING: parse request body explicitly (no silent {})
-    let rawBody = "";
-    let parseError: string | null = null;
-    let p: In = {};
-
-    try {
-      rawBody = await req.clone().text();
-    } catch (e: any) {
-      rawBody = "";
-      parseError = `clone_text_failed:${String(e?.message || e)}`;
-    }
-
-    if (rawBody && rawBody.trim().length) {
-      try {
-        p = JSON.parse(rawBody) as In;
-      } catch (e: any) {
-        parseError = `json_parse_failed:${String(e?.message || e)}`;
-        p = {} as In;
-      }
-    } else {
-      parseError = parseError || "empty_raw_body";
-      p = {} as In;
-    }
-
+    const p = (await req.json().catch(() => ({}))) as In;
     const mode = String(p.mode || "ai");
 
-    // DEBUG (dryRun only): prove what the server actually received + parse status
-    const debug_in =
-      p.dryRun
-        ? {
-            parseError,
-            rawLen: rawBody ? rawBody.length : 0,
-            rawHead: rawBody ? rawBody.slice(0, 140) : "",
-            keys: p && typeof p === "object" ? Object.keys(p as any) : [],
-            toEmailLen: typeof (p as any).toEmail === "string" ? (p as any).toEmail.length : null,
-            subjectLen: typeof (p as any).subject === "string" ? (p as any).subject.length : null,
-            textLen: typeof (p as any).text === "string" ? (p as any).text.length : null,
-            subjectHead: typeof (p as any).subject === "string" ? String((p as any).subject).slice(0, 80) : null,
-            textHead: typeof (p as any).text === "string" ? String((p as any).text).slice(0, 80) : null,
-          }
-        : undefined;
-
     if (mode !== "ai") {
-      return err("unsupported_mode", { mode, debug_in });
+      return err("unsupported_mode", { mode });
     }
 
     const lastText = String(p.text || "");
@@ -1151,13 +1144,6 @@ export async function POST(req: NextRequest) {
     /* ------------------- Parse new turn ------------------- */
 
     let newly = extractAllFromTextAndSubject(lastText, subject);
-
-    const debug_newly =
-      dryRun
-        ? {
-            newly,
-          }
-        : undefined;
 
     const regexDims = newly.dims || null;
 
@@ -1453,14 +1439,10 @@ export async function POST(req: NextRequest) {
     }
 
     const toEmail = p.toEmail || merged.email || merged.customerEmail;
-
     if (!toEmail) {
       return ok({
         dryRun: true,
-        mode: "dryrun",
         reason: "missing_toEmail",
-        debug_in,
-        debug_newly,
         htmlPreview: htmlBody,
         specs,
         calc,
@@ -1473,9 +1455,6 @@ export async function POST(req: NextRequest) {
     if (dryRun) {
       return ok({
         mode: "dryrun",
-        build: "orchestrate-2025-12-14a", // <-- proof stamp
-        debug_in,
-        debug_newly,
         htmlPreview: htmlBody,
         specs,
         calc,
