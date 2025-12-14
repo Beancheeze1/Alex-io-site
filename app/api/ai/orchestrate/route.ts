@@ -22,9 +22,8 @@
 // - HARDENING 12/13: If material_grade is present (e.g. "1560"),
 //   DB enrichment must prefer materials.name ILIKE '%1560%' within
 //   the correct foam family bucket BEFORE density fallback.
-// - HARDENING 12/14: If grade-first match hits, FORCE overwrite cached
-//   material_id/material_name (fixes “stuck wrong material”).
-// - HARDENING 12/14: Add debug_in/debug_newly to missing_toEmail early return.
+// - HARDENING 12/14: Do not silently swallow JSON parse failures.
+//   Parse from req.clone().text() first, and expose debug in dryRun.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -154,7 +153,6 @@ function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
 
   return null;
 }
-
 /* ============================================================
    Cavity normalization
    ============================================================ */
@@ -257,6 +255,7 @@ function applyCavityNormalization(facts: Mem): Mem {
 
   return facts;
 }
+
 /* ============================================================
    DB enrichment (material)
    ============================================================ */
@@ -317,7 +316,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     // we must prefer a name match containing that grade BEFORE density fallback.
     // This prevents generic density matching from landing on "S82C" etc.
     let row: any = null;
-    let rowSource: "grade" | "like_density" | "family_density" | null = null;
 
     if (hasGrade && hasPolyurethane && gradeLike) {
       row = await one<any>(
@@ -336,14 +334,15 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
           ${familyFilter}
           AND name ILIKE $1
         ORDER BY
-          CASE WHEN name ILIKE $1 THEN 0 ELSE 1 END,
-          CHAR_LENGTH(name) ASC,
-          id ASC
+          CASE
+            WHEN name ILIKE $1 THEN 0
+            ELSE 1
+          END,
+          LENGTH(name) ASC
         LIMIT 1;
         `,
         [gradeLike],
       );
-      if (row) rowSource = "grade";
     }
 
     // 1) First pass: LIKE + density (what we had before, but with is_active)
@@ -373,7 +372,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         `,
         [like, densNum],
       );
-      if (row) rowSource = "like_density";
     }
 
     // 2) Fallback: if LIKE didn’t hit anything, just use family + density.
@@ -398,7 +396,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         `,
         [densNum],
       );
-      if (row) rowSource = "family_density";
     }
 
     if (!row) {
@@ -406,20 +403,9 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       return f;
     }
 
-    // ✅ KEY FIX:
-    // If we hit a grade match, we MUST override any cached wrong material_id/material_name.
-    if (rowSource === "grade") {
-      f.material_id = row.id;
-      f.material_name = row.name;
-    } else {
-      if (!f.material_id) f.material_id = row.id;
-      if (!f.material_name) f.material_name = row.name;
-    }
-
+    if (!f.material_id) f.material_id = row.id;
+    if (!f.material_name) f.material_name = row.name;
     if (!f.material_family && row.material_family) {
-      f.material_family = row.material_family;
-    } else if (rowSource === "grade" && row.material_family) {
-      // Grade match should also correct the family if it was previously wrong.
       f.material_family = row.material_family;
     }
 
@@ -586,6 +572,7 @@ function densityToPcf(density: string | null | undefined) {
 function specsCompleteForQuote(s: { dims: string | null; qty: number | string | null; material_id: number | null }) {
   return !!(s.dims && s.qty && s.material_id);
 }
+
 /* ============================================================
    Quote calc via internal API
    ============================================================ */
@@ -668,7 +655,6 @@ async function buildPriceBreaks(
 
   return out.length ? out : null;
 }
-
 /* ============================================================
    Regex-based parsing helpers
    ============================================================ */
@@ -1089,21 +1075,50 @@ ${lastInbound}
 
 export async function POST(req: NextRequest) {
   try {
-    const p = (await req.json().catch(() => ({}))) as In;
+    // HARDENING: parse request body explicitly (no silent {})
+    let rawBody = "";
+    let parseError: string | null = null;
+    let p: In = {};
+
+    try {
+      rawBody = await req.clone().text();
+    } catch (e: any) {
+      rawBody = "";
+      parseError = `clone_text_failed:${String(e?.message || e)}`;
+    }
+
+    if (rawBody && rawBody.trim().length) {
+      try {
+        p = JSON.parse(rawBody) as In;
+      } catch (e: any) {
+        parseError = `json_parse_failed:${String(e?.message || e)}`;
+        p = {} as In;
+      }
+    } else {
+      parseError = parseError || "empty_raw_body";
+      p = {} as In;
+    }
+
     const mode = String(p.mode || "ai");
 
-    // DEBUG (dryRun only): prove what the server actually received
-    const debug_in = {
-      keys: Object.keys(p || {}),
-      subjectType: typeof (p as any).subject,
-      textType: typeof (p as any).text,
-      subjectLen: String((p as any).subject || "").length,
-      textLen: typeof (p as any).text === "string" ? (p as any).text.length : null,
-      textHead: typeof (p as any).text === "string" ? String((p as any).text).slice(0, 120) : null,
-    };
+    // DEBUG (dryRun only): prove what the server actually received + parse status
+    const debug_in =
+      p.dryRun
+        ? {
+            parseError,
+            rawLen: rawBody ? rawBody.length : 0,
+            rawHead: rawBody ? rawBody.slice(0, 140) : "",
+            keys: p && typeof p === "object" ? Object.keys(p as any) : [],
+            toEmailLen: typeof (p as any).toEmail === "string" ? (p as any).toEmail.length : null,
+            subjectLen: typeof (p as any).subject === "string" ? (p as any).subject.length : null,
+            textLen: typeof (p as any).text === "string" ? (p as any).text.length : null,
+            subjectHead: typeof (p as any).subject === "string" ? String((p as any).subject).slice(0, 80) : null,
+            textHead: typeof (p as any).text === "string" ? String((p as any).text).slice(0, 80) : null,
+          }
+        : undefined;
 
     if (mode !== "ai") {
-      return err("unsupported_mode", { mode });
+      return err("unsupported_mode", { mode, debug_in });
     }
 
     const lastText = String(p.text || "");
@@ -1132,7 +1147,13 @@ export async function POST(req: NextRequest) {
     /* ------------------- Parse new turn ------------------- */
 
     let newly = extractAllFromTextAndSubject(lastText, subject);
-    const debug_newly = { ...(newly || {}) };
+
+    const debug_newly =
+      dryRun
+        ? {
+            newly,
+          }
+        : undefined;
 
     const regexDims = newly.dims || null;
 
@@ -1428,14 +1449,14 @@ export async function POST(req: NextRequest) {
     }
 
     const toEmail = p.toEmail || merged.email || merged.customerEmail;
+
     if (!toEmail) {
-      // ✅ include debug so we can always see what parsing saw
       return ok({
-        mode: "dryrun",
         dryRun: true,
+        mode: "dryrun",
         reason: "missing_toEmail",
-        debug_in: dryRun ? debug_in : undefined,
-        debug_newly: dryRun ? debug_newly : undefined,
+        debug_in,
+        debug_newly,
         htmlPreview: htmlBody,
         specs,
         calc,
