@@ -310,12 +310,18 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     }
 
     // ---- HARDENING: grade-first match when present ----
-    // If we have a grade like "1560" and we're in Polyurethane context,
-    // we must prefer a name match containing that grade BEFORE density fallback.
+    // If we have a grade like "1560", we must prefer a name match containing that grade
+    // (within the Polyurethane family bucket) BEFORE density fallback.
     // This prevents generic density matching from landing on "S82C" etc.
     let row: any = null;
 
-    if (hasGrade && hasPolyurethane && gradeLike) {
+    const colorRaw = String(f.color || "").trim().toLowerCase();
+    const colorLike = colorRaw ? `%${colorRaw}%` : "";
+
+    const isPolyurethaneContext =
+      hasPolyurethane || familyFilter.toLowerCase().includes("polyurethane");
+
+    if (hasGrade && gradeLike && isPolyurethaneContext) {
       row = await one<any>(
         `
         SELECT
@@ -331,12 +337,17 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         WHERE is_active = true
           ${familyFilter}
           AND name ILIKE $1
+        ORDER BY
+          -- If we also know color, prefer rows that include it in the name.
+          CASE WHEN $2 = '' THEN 0 WHEN name ILIKE $2 THEN 0 ELSE 1 END,
+          -- Then prefer density closeness (if density was provided/extracted).
+          ABS(COALESCE(density_lb_ft3, 0) - $3),
+          id ASC
         LIMIT 1;
         `,
-        [gradeLike],
+        [gradeLike, colorLike, densNum],
       );
     }
-
     // 1) First pass: LIKE + density (what we had before, but with is_active)
     if (!row) {
       row = await one<any>(
@@ -529,7 +540,6 @@ async function hydrateFromDBByQuoteNo(
     return out;
   }
 }
-
 /* ============================================================
    Dimension / density helpers
    ============================================================ */
