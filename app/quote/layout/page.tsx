@@ -26,7 +26,7 @@ type MaterialOption = {
   density_lb_ft3: number | null;
 };
 
-// Suggested box types for the box suggester panel
+// NEW: suggested box types for the box suggester panel
 type SuggestedBox = {
   sku: string;
   description: string;
@@ -45,6 +45,7 @@ type BoxSuggestState = {
   bestRsc: SuggestedBox | null;
   bestMailer: SuggestedBox | null;
 };
+
 
 /**
  * Normalize block dims from searchParams (dims= / block=)
@@ -94,7 +95,11 @@ function parseDimsTriple(
 }
 
 /* "LxW" or "LxWxD" parser (depth default 1") */
-function parseCavityDims(raw: string): { L: number; W: number; D: number } | null {
+function parseCavityDims(raw: string): {
+  L: number;
+  W: number;
+  D: number;
+} | null {
   const t = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
   const num = String.raw`(?:\d+(?:\.\d+)?|\.\d+)`;
   const tripleRe = new RegExp(`(${num})\\s*[x×]\\s*(${num})\\s*[x×]\\s*(${num})`);
@@ -123,11 +128,14 @@ function snapInches(v: number): number {
   return Math.round(v / SNAP_IN) * SNAP_IN;
 }
 
-export default function LayoutPage({ searchParams }: { searchParams?: SearchParams }) {
+export default function LayoutPage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
   const initialQuoteNoParam = (searchParams?.quote_no ??
     searchParams?.quote ??
     "") as string | string[] | undefined;
-
   const [quoteNoFromUrl, setQuoteNoFromUrl] = React.useState<string>(
     Array.isArray(initialQuoteNoParam)
       ? initialQuoteNoParam[0]?.trim() || ""
@@ -138,7 +146,8 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
     try {
       if (typeof window === "undefined") return;
       const url = new URL(window.location.href);
-      const q = url.searchParams.get("quote_no") || url.searchParams.get("quote") || "";
+      const q =
+        url.searchParams.get("quote_no") || url.searchParams.get("quote") || "";
       if (q && q !== quoteNoFromUrl) setQuoteNoFromUrl(q);
     } catch {}
   }, []);
@@ -146,17 +155,22 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
   /* ---------- Other URL params (dims, cavities) ---------- */
 
   const hasDimsFromUrl =
-    typeof searchParams?.dims !== "undefined" || typeof searchParams?.block !== "undefined";
+    typeof searchParams?.dims !== "undefined" ||
+    typeof searchParams?.block !== "undefined";
 
   const hasCavitiesFromUrl =
-    typeof searchParams?.cavities !== "undefined" || typeof searchParams?.cavity !== "undefined";
+    typeof searchParams?.cavities !== "undefined" ||
+    typeof searchParams?.cavity !== "undefined";
 
+  // Server-side / initial guesses from Next searchParams
   const serverBlockStr = normalizeDimsParam(
-    (searchParams?.dims ?? searchParams?.block) as string | string[] | undefined,
+    (searchParams?.dims ??
+      searchParams?.block) as string | string[] | undefined,
   );
 
   const serverCavityStr = normalizeCavitiesParam(
-    (searchParams?.cavities ?? searchParams?.cavity) as string | string[] | undefined,
+    (searchParams?.cavities ??
+      searchParams?.cavity) as string | string[] | undefined,
   );
 
   const hasExplicitCavities = hasCavitiesFromUrl && serverCavityStr.length > 0;
@@ -164,15 +178,14 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
   const hasRealQuoteNo = !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
 
   const quoteNo = hasRealQuoteNo ? quoteNoFromUrl.trim() : "Q-AI-EXAMPLE";
-
-  const [materialIdFromUrl, setMaterialIdFromUrl] = React.useState<number | null>(() => {
-    const raw = searchParams?.material_id as string | string[] | undefined;
-    if (!raw) return null;
-    const first = Array.isArray(raw) ? raw[0] : raw;
-    const parsed = Number(first);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  });
-
+  const [materialIdFromUrl, setMaterialIdFromUrl] =
+    React.useState<number | null>(() => {
+      const raw = searchParams?.material_id as string | string[] | undefined;
+      if (!raw) return null;
+      const first = Array.isArray(raw) ? raw[0] : raw;
+      const parsed = Number(first);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    });
   React.useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -189,25 +202,37 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
 
   /* ---------- Build initial layout (from DB if available) ---------- */
 
-  const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(null);
+  const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(
+    null,
+  );
   const [initialNotes, setInitialNotes] = React.useState<string>("");
   const [initialQty, setInitialQty] = React.useState<number | null>(null);
-  const [initialMaterialId, setInitialMaterialId] = React.useState<number | null>(null);
+  const [initialMaterialId, setInitialMaterialId] =
+    React.useState<number | null>(null);
 
-  const [initialCustomerName, setInitialCustomerName] = React.useState<string>("");
-  const [initialCustomerEmail, setInitialCustomerEmail] = React.useState<string>("");
-  const [initialCustomerCompany, setInitialCustomerCompany] = React.useState<string>("");
-  const [initialCustomerPhone, setInitialCustomerPhone] = React.useState<string>("");
+  // customer initial values (prefill from quote header when available)
+  const [initialCustomerName, setInitialCustomerName] =
+    React.useState<string>("");
+  const [initialCustomerEmail, setInitialCustomerEmail] =
+    React.useState<string>("");
+  const [initialCustomerCompany, setInitialCustomerCompany] =
+    React.useState<string>("");
+  const [initialCustomerPhone, setInitialCustomerPhone] =
+    React.useState<string>("");
 
   const [loadingLayout, setLoadingLayout] = React.useState<boolean>(true);
 
   /**
    * Fallback layout builder, driven by arbitrary dims/cavities strings.
-   * (Preserves your original cavity parsing/auto-placement behavior.)
    */
   const buildFallbackLayout = React.useCallback(
     (blockStr: string, cavityStr: string): LayoutModel => {
-      const parsedBlock = parseDimsTriple(blockStr) ?? { L: 10, W: 10, H: 2 };
+      // Block from dims=..., default 10x10x2 if missing.
+      const parsedBlock = parseDimsTriple(blockStr) ?? {
+        L: 10,
+        W: 10,
+        H: 2,
+      };
 
       const block = {
         lengthIn: parsedBlock.L,
@@ -215,6 +240,7 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
         thicknessIn: parsedBlock.H,
       };
 
+      // Cavities from cavities=... string (can be "1x1x1;2x2x1" etc).
       const cavTokens = (cavityStr || "")
         .split(/[;,]/)
         .map((s) => s.trim())
@@ -233,8 +259,10 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
           const cols = Math.ceil(Math.sqrt(count));
           const rows = Math.ceil(count / cols);
 
-          const availW = Math.max(block.lengthIn - 2 * WALL_IN, 1) || block.lengthIn;
-          const availH = Math.max(block.widthIn - 2 * WALL_IN, 1) || block.widthIn;
+          const availW =
+            Math.max(block.lengthIn - 2 * WALL_IN, 1) || block.lengthIn;
+          const availH =
+            Math.max(block.widthIn - 2 * WALL_IN, 1) || block.widthIn;
 
           const cellW = availW / cols;
           const cellH = availH / rows;
@@ -275,7 +303,11 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
         }
       }
 
-      return { block, cavities };
+      // If we can’t build any cavities, just return a bare block.
+      return {
+        block,
+        cavities,
+      };
     },
     [],
   );
@@ -302,9 +334,14 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
           if (!dimsA && dimsB) dimsCandidates.push(dimsB);
 
           const cavityParts: string[] = [];
-          const cavitiesParams = url.searchParams.getAll("cavities").filter((v) => v);
-          const cavityParams = url.searchParams.getAll("cavity").filter((v) => v);
+          const cavitiesParams = url.searchParams
+            .getAll("cavities")
+            .filter((v) => v);
+          const cavityParams = url.searchParams
+            .getAll("cavity")
+            .filter((v) => v);
 
+          // Merge both sets (cavities + cavity), then dedupe via normalizeCavitiesParam.
           cavityParts.push(...cavitiesParams, ...cavityParams);
 
           if (dimsCandidates.length > 0) {
@@ -316,18 +353,22 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
           }
         }
       } catch {
-        // fall back to serverBlockStr/serverCavityStr
+        // if anything goes wrong, we fall back to serverBlockStr/serverCavityStr
       }
 
       try {
         // If we don't have a real quote number, just use fallback layout
         if (!hasRealQuoteNo) {
-          const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+          const fallback = buildFallbackLayout(
+            effectiveBlockStr,
+            effectiveCavityStr,
+          );
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
             setInitialQty(null);
             setInitialMaterialId(materialIdOverride ?? null);
+            // no header to pull customer info from in demo mode
             setInitialCustomerName("");
             setInitialCustomerEmail("");
             setInitialCustomerCompany("");
@@ -336,15 +377,18 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
           }
           return;
         }
-
         // Try to fetch the latest layout package via /api/quote/print
         const res = await fetch(
-          "/api/quote/print?quote_no=" + encodeURIComponent(quoteNoFromUrl.trim()),
+          "/api/quote/print?quote_no=" +
+            encodeURIComponent(quoteNoFromUrl.trim()),
           { cache: "no-store" },
         );
 
         if (!res.ok) {
-          const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+          const fallback = buildFallbackLayout(
+            effectiveBlockStr,
+            effectiveCavityStr,
+          );
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
@@ -367,10 +411,13 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
         if (Array.isArray(json.items) && json.items.length > 0) {
           const first = json.items[0];
           const rawQty = Number(first?.qty);
-          if (Number.isFinite(rawQty) && rawQty > 0) qtyFromItems = rawQty;
-
+          if (Number.isFinite(rawQty) && rawQty > 0) {
+            qtyFromItems = rawQty;
+          }
           const mid = Number(first?.material_id);
-          if (Number.isFinite(mid) && mid > 0) materialIdFromItems = mid;
+          if (Number.isFinite(mid) && mid > 0) {
+            materialIdFromItems = mid;
+          }
         }
 
         // pull customer info from quote header when present
@@ -384,10 +431,12 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
           if (!cancelled) {
             setInitialCustomerName((qh.customer_name ?? "").toString());
             setInitialCustomerEmail((qh.email ?? "").toString());
+            // Company isn’t stored on quotes table yet; keep blank for now.
             setInitialCustomerCompany("");
             setInitialCustomerPhone((qh.phone ?? "").toString());
           }
         } else if (!cancelled) {
+          // No header → clear initial customer fields
           setInitialCustomerName("");
           setInitialCustomerEmail("");
           setInitialCustomerCompany("");
@@ -405,7 +454,8 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
           !hasCavitiesFromUrl
         ) {
           const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
-          const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
+          const notesFromDb =
+            (json.layoutPkg.notes as string | null) ?? "";
 
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
@@ -418,7 +468,10 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
         }
 
         // Otherwise, use layout from URL (dims/cavities) and keep qty/material.
-        const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+        const fallback = buildFallbackLayout(
+          effectiveBlockStr,
+          effectiveCavityStr,
+        );
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
@@ -428,7 +481,10 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
         }
       } catch (err) {
         console.error("Error loading layout for /quote/layout:", err);
-        const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+        const fallback = buildFallbackLayout(
+          effectiveBlockStr,
+          effectiveCavityStr,
+        );
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
@@ -486,7 +542,14 @@ export default function LayoutPage({ searchParams }: { searchParams?: SearchPara
   );
 }
 
-const CAVITY_COLORS = ["#38bdf8", "#a855f7", "#f97316", "#22c55e", "#eab308", "#ec4899"];
+const CAVITY_COLORS = [
+  "#38bdf8",
+  "#a855f7",
+  "#f97316",
+  "#22c55e",
+  "#eab308",
+  "#ec4899",
+];
 
 /* ---------- Layout editor host (main body) ---------- */
 
@@ -529,90 +592,112 @@ function LayoutEditorHost(props: {
     addCavity,
     deleteCavity,
     addLayer,
+    renameLayer,
     deleteLayer,
   } = useLayoutModel(initialLayout);
 
   const { block, cavities, stack } = layout as LayoutModel & {
-    stack?: { id: string; label: string; cavities: any[]; thicknessIn?: number }[];
+    stack?: {
+      id: string;
+      label: string;
+      cavities: any[];
+      thicknessIn?: number;
+    }[];
   };
 
   const blockThicknessIn = Number(block.thicknessIn) || 0;
 
-  // Force re-render when we mutate stack thickness (Path A: no hook changes)
-  const [, bump] = React.useState(0);
+  // Thickness source of truth:
+  // - layout.stack[].thicknessIn
+  // - fallback: block.thicknessIn only for legacy / single-layer layouts without thicknessIn seeded
+  const [thicknessTick, setThicknessTick] = React.useState(0);
 
-  // Truth: layout.stack[].thicknessIn (fallback to block thickness if missing)
   const getLayerThickness = React.useCallback(
     (layerId: string): number => {
-      const layer = stack?.find((l) => l.id === layerId);
-      const raw = layer?.thicknessIn;
-      if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+      const layer =
+        stack && stack.length > 0
+          ? stack.find((l) => l.id === layerId) ?? null
+          : null;
+
+      const raw = layer ? Number(layer.thicknessIn) : NaN;
+      if (Number.isFinite(raw) && raw > 0) return raw;
+
       return blockThicknessIn;
     },
-    [stack, blockThicknessIn],
+    [stack, blockThicknessIn, thicknessTick],
   );
 
-  const setLayerThicknessInModel = React.useCallback(
-    (layerId: string, thickness: number) => {
+  const setLayerThicknessIn = React.useCallback(
+    (layerId: string, nextThicknessIn: number) => {
       if (!stack || stack.length === 0) return;
-      const snapped = snapInches(thickness);
-      const idx = stack.findIndex((l) => l.id === layerId);
-      if (idx < 0) return;
 
-      // mutate in-place (then bump) to avoid hook refactors
-      const cur = stack[idx];
-      cur.thicknessIn = snapped;
+      const layer = stack.find((l) => l.id === layerId);
+      if (!layer) return;
 
-      // single-layer: keep block thickness in sync
-      if (stack.length === 1 && stack[0].id === layerId) {
+      const snapped = snapInches(nextThicknessIn);
+      if (!Number.isFinite(snapped) || snapped <= 0) return;
+
+      layer.thicknessIn = snapped;
+
+      // Force a re-render so inputs + derived totals update immediately.
+      setThicknessTick((t) => t + 1);
+
+      // Legacy/single-layer fallback rule: keep block thickness in sync when only one layer exists.
+      if (stack.length === 1) {
         updateBlockDims({ thicknessIn: snapped });
       }
-
-      bump((n) => n + 1);
     },
     [stack, updateBlockDims],
   );
 
-  // Seed missing thicknessIn once whenever layers exist
+  // Seed missing per-layer thickness from block thickness (one-time / as stack changes).
   React.useEffect(() => {
     if (!stack || stack.length === 0) return;
+
     let changed = false;
+
     for (const layer of stack) {
-      if (
-        !(
-          typeof layer.thicknessIn === "number" &&
-          Number.isFinite(layer.thicknessIn) &&
-          layer.thicknessIn > 0
-        )
-      ) {
-        layer.thicknessIn = blockThicknessIn || 1;
+      const raw = Number(layer.thicknessIn);
+      if (!Number.isFinite(raw) || raw <= 0) {
+        // fallback seed
+        layer.thicknessIn = blockThicknessIn;
         changed = true;
       }
     }
-    if (changed) bump((n) => n + 1);
-  }, [stack, blockThicknessIn]);
 
+    if (changed) {
+      setThicknessTick((t) => t + 1);
+    }
+  }, [stack, blockThicknessIn]);
   const activeLayer =
     stack && stack.length > 0
       ? stack.find((layer) => layer.id === activeLayerId) ?? stack[0]
       : null;
 
   const activeLayerLabel = activeLayer?.label ?? null;
+  const selectedCavity =
+    cavities.find((c) => c.id === selectedId) || null;
 
-  // NOTE: by design, useLayoutModel keeps layout.cavities == active layer cavities.
-  const selectedCavity = cavities.find((c: any) => c.id === selectedId) || null;
+  // Multi-layer: derive layers view if stack exists
+  const layers = layout.stack && layout.stack.length > 0 ? layout.stack : null;
 
-  const layers = stack && stack.length > 0 ? stack : null;
-  const layerCount = layers?.length ?? 0;
-  const effectiveActiveLayerId = layers && layers.length > 0 ? activeLayerId ?? layers[0].id : null;
+  const effectiveActiveLayerId =
+    layers && layers.length > 0 ? activeLayerId ?? layers[0].id : null;
 
   // Total stack thickness used for box/carton suggestions.
+  // Rule:
+  // - No stack => use block thickness (legacy).
+  // - 1+ layers => sum of stack[].thicknessIn (fallback per-layer to block thickness if missing).
   let totalStackThicknessIn = blockThicknessIn;
-  if (stack && stack.length > 1) {
-    const sum = stack.reduce((acc, layer) => acc + (getLayerThickness(layer.id) || 0), 0);
+
+  if (stack && stack.length >= 1) {
+    const sum = stack.reduce((acc, layer) => {
+      const raw = Number(layer.thicknessIn);
+      const t = Number.isFinite(raw) && raw > 0 ? raw : blockThicknessIn;
+      return acc + t;
+    }, 0);
+
     if (sum > 0) totalStackThicknessIn = sum;
-  } else if (stack && stack.length === 1) {
-    totalStackThicknessIn = getLayerThickness(stack[0].id) || blockThicknessIn;
   }
 
   // Ensure the hook actually has an active layer when a stack exists
@@ -623,35 +708,162 @@ function LayoutEditorHost(props: {
   }, [layers, activeLayerId, setActiveLayerId]);
 
   // Clear selection when switching layers so we don't edit a cavity from a different layer
+  const layerCount = layers?.length ?? 0;
   React.useEffect(() => {
     if (!layers || layerCount === 0) return;
     selectCavity(null);
   }, [effectiveActiveLayerId, layerCount, selectCavity, layers]);
+  // When a new cavity is added, try to drop it into "dead space"
+  const prevCavityCountRef = React.useRef<number>(cavities.length);
+  React.useEffect(() => {
+    const prevCount = prevCavityCountRef.current;
+
+    if (
+      cavities.length > prevCount &&
+      block.lengthIn &&
+      block.widthIn &&
+      Number.isFinite(block.lengthIn) &&
+      Number.isFinite(block.widthIn)
+    ) {
+      const newCavity = cavities[cavities.length - 1];
+      if (newCavity) {
+        const existing = cavities.slice(0, -1);
+
+        const cavLen = Number(newCavity.lengthIn) || 1;
+        const cavWid = Number(newCavity.widthIn) || 1;
+
+        const usableLen = Math.max(block.lengthIn - 2 * WALL_IN, cavLen);
+        const usableWid = Math.max(block.widthIn - 2 * WALL_IN, cavWid);
+
+        const isOverlapping = (xIn: number, yIn: number) => {
+          return existing.some((c) => {
+            const cxIn = (Number(c.x) || 0) * block.lengthIn;
+            const cyIn = (Number(c.y) || 0) * block.widthIn;
+            const cLen = Number(c.lengthIn) || 0;
+            const cWid = Number(c.widthIn) || 0;
+
+            // Simple AABB overlap check
+            return !(
+              xIn + cavLen <= cxIn ||
+              cxIn + cLen <= xIn ||
+              yIn + cavWid <= cyIn ||
+              cyIn + cWid <= yIn
+            );
+          });
+        };
+
+        let chosenXIn: number | null = null;
+        let chosenYIn: number | null = null;
+
+        const cols = 3;
+        const rows = 3;
+        const cellW = usableLen / cols;
+        const cellH = usableWid / rows;
+
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            const centerXIn = WALL_IN + cellW * (col + 0.5);
+            const centerYIn = WALL_IN + cellH * (row + 0.5);
+
+            let xIn = centerXIn - cavLen / 2;
+            let yIn = centerYIn - cavWid / 2;
+
+            const minXIn = WALL_IN;
+            const maxXIn = block.lengthIn - WALL_IN - cavLen;
+            const minYIn = WALL_IN;
+            const maxYIn = block.widthIn - WALL_IN - cavWid;
+
+            const clamp = (v: number, min: number, max: number) =>
+              v < min ? min : v > max ? max : v;
+
+            xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+            yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+            if (!isOverlapping(xIn, yIn)) {
+              chosenXIn = xIn;
+              chosenYIn = yIn;
+              break;
+            }
+          }
+          if (chosenXIn != null) break;
+        }
+
+        // Fallback: center placement inside walls
+        if (chosenXIn == null || chosenYIn == null) {
+          let xIn = (block.lengthIn - cavLen) / 2;
+          let yIn = (block.widthIn - cavWid) / 2;
+
+          const minXIn = WALL_IN;
+          const maxXIn = block.lengthIn - WALL_IN - cavLen;
+          const minYIn = WALL_IN;
+          const maxYIn = block.widthIn - WALL_IN - cavWid;
+
+          const clamp = (v: number, min: number, max: number) =>
+            v < min ? min : v > max ? max : v;
+
+          xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+          yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+          chosenXIn = xIn;
+          chosenYIn = yIn;
+        }
+
+        if (
+          chosenXIn != null &&
+          chosenYIn != null &&
+          block.lengthIn > 0 &&
+          block.widthIn > 0
+        ) {
+          const xNorm = chosenXIn / block.lengthIn;
+          const yNorm = chosenYIn / block.widthIn;
+          updateCavityPosition(newCavity.id, xNorm, yNorm);
+        }
+      }
+    }
+
+    prevCavityCountRef.current = cavities.length;
+  }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
 
   // Handle edits to the active layer's thickness
   const handleActiveLayerThicknessChange = (value: string) => {
     if (!activeLayer) return;
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return;
-    setLayerThicknessInModel(activeLayer.id, num);
+    setLayerThicknessIn(activeLayer.id, num);
   };
 
   const [zoom, setZoom] = React.useState(1);
   const [croppedCorners, setCroppedCorners] = React.useState(false);
   const [notes, setNotes] = React.useState(initialNotes || "");
-  const [applyStatus, setApplyStatus] = React.useState<"idle" | "saving" | "done" | "error">("idle");
-  const [qty, setQty] = React.useState<number | "">(initialQty != null ? initialQty : "");
+  const [applyStatus, setApplyStatus] = React.useState<
+    "idle" | "saving" | "done" | "error"
+  >("idle");
+  const [qty, setQty] = React.useState<number | "">(
+    initialQty != null ? initialQty : "",
+  );
 
-  // Customer info (RESTORED fields: name/email required, company/phone optional)
-  const [customerName, setCustomerName] = React.useState<string>(initialCustomerName || "");
-  const [customerEmail, setCustomerEmail] = React.useState<string>(initialCustomerEmail || "");
-  const [customerCompany, setCustomerCompany] = React.useState<string>(initialCustomerCompany || "");
-  const [customerPhone, setCustomerPhone] = React.useState<string>(initialCustomerPhone || "");
+  // Customer info
+  const [customerName, setCustomerName] = React.useState<string>(
+    initialCustomerName || "",
+  );
+  const [customerEmail, setCustomerEmail] = React.useState<string>(
+    initialCustomerEmail || "",
+  );
+  const [customerCompany, setCustomerCompany] = React.useState<string>(
+    initialCustomerCompany || "",
+  );
+  const [customerPhone, setCustomerPhone] = React.useState<string>(
+    initialCustomerPhone || "",
+  );
 
   const [materials, setMaterials] = React.useState<MaterialOption[]>([]);
-  const [materialsLoading, setMaterialsLoading] = React.useState<boolean>(true);
-  const [materialsError, setMaterialsError] = React.useState<string | null>(null);
-  const [selectedMaterialId, setSelectedMaterialId] = React.useState<number | null>(initialMaterialId);
+  const [materialsLoading, setMaterialsLoading] =
+    React.useState<boolean>(true);
+  const [materialsError, setMaterialsError] = React.useState<string | null>(
+    null,
+  );
+  const [selectedMaterialId, setSelectedMaterialId] =
+    React.useState<number | null>(initialMaterialId);
 
   // Box suggester state (RSC + mailer suggestions)
   const [boxSuggest, setBoxSuggest] = React.useState<BoxSuggestState>({
@@ -661,42 +873,276 @@ function LayoutEditorHost(props: {
     bestMailer: null,
   });
 
-  const [selectedCartonKind, setSelectedCartonKind] = React.useState<"RSC" | "MAILER" | null>(null);
-
-  // FIXED: shared carton button classes (no truncation)
-  const cartonButtonBase =
-    "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium transition";
-  const cartonButtonIdle =
-    "border-slate-600 bg-slate-900/80 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10";
-  const cartonButtonActive = "border-sky-400 bg-sky-500/20 text-sky-50";
-
+  const [selectedCartonKind, setSelectedCartonKind] =
+    React.useState<"RSC" | "MAILER" | null>(null);
   const handlePickCarton = React.useCallback(
     async (kind: "RSC" | "MAILER") => {
+      // Update the visual selection immediately
       setSelectedCartonKind(kind);
 
-      const sku = kind === "RSC" ? boxSuggest.bestRsc?.sku : boxSuggest.bestMailer?.sku;
-      if (!quoteNo || !sku) return;
+      const sku =
+        kind === "RSC"
+          ? boxSuggest.bestRsc?.sku
+          : boxSuggest.bestMailer?.sku;
 
-      const numericQty = typeof qty === "number" && Number.isFinite(qty) && qty > 0 ? qty : 1;
+      // We need a quote number and a SKU to do anything useful
+      if (!quoteNo || !sku) {
+        console.warn("[layout] Skipping carton pick: missing quoteNo or sku", {
+          quoteNo,
+          sku,
+        });
+        return;
+      }
+
+      // Use the same qty as the layout / primary foam line, defaulting to 1
+      const numericQty =
+        typeof qty === "number" && Number.isFinite(qty) && qty > 0
+          ? qty
+          : 1;
+
+      const payload = {
+        quote_no: quoteNo,
+        sku,
+        qty: numericQty,
+      };
+
+      console.log("[layout] handlePickCarton → /api/boxes/add-to-quote", payload);
 
       try {
-        await fetch("/api/boxes/add-to-quote", {
+        const res = await fetch("/api/boxes/add-to-quote", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            quote_no: quoteNo,
-            sku,
-            qty: numericQty,
-          }),
+          body: JSON.stringify(payload),
         });
+
+        const data = await res
+          .json()
+          .catch(() => ({ ok: false, error: "non_json_response" }));
+
+        console.log(
+          "[layout] /api/boxes/add-to-quote response",
+          res.status,
+          data,
+        );
+
+        if (!res.ok) {
+          console.error(
+            "Failed to add box to quote",
+            res.status,
+            data,
+          );
+        }
       } catch (err) {
-        console.error("handlePickCarton failed", err);
+        console.error(
+          "Error in handlePickCarton /api/boxes/add-to-quote",
+          err,
+        );
       }
     },
     [boxSuggest.bestRsc, boxSuggest.bestMailer, quoteNo, qty],
   );
 
-  const missingCustomerInfo = !customerName.trim() || !customerEmail.trim();
+
+  // Local input state for selected cavity dims (to avoid "wonky" inputs)
+  const [cavityInputs, setCavityInputs] = React.useState<{
+
+    id: string | null;
+    length: string;
+    width: string;
+    depth: string;
+    cornerRadius: string;
+  }>({
+    id: null,
+    length: "",
+    width: "",
+    depth: "",
+    cornerRadius: "",
+  });
+  React.useEffect(() => {
+    if (!selectedCavity) {
+      setCavityInputs({
+        id: null,
+        length: "",
+        width: "",
+        depth: "",
+        cornerRadius: "",
+      });
+      return;
+    }
+
+    setCavityInputs({
+      id: selectedCavity.id,
+      length:
+        selectedCavity.lengthIn != null
+          ? String(selectedCavity.lengthIn)
+          : "",
+      width:
+        selectedCavity.widthIn != null ? String(selectedCavity.widthIn) : "",
+      depth:
+        selectedCavity.depthIn != null ? String(selectedCavity.depthIn) : "",
+      cornerRadius:
+        selectedCavity.cornerRadiusIn != null
+          ? String(selectedCavity.cornerRadiusIn)
+          : "",
+    });
+  }, [selectedCavity]);
+
+  const commitCavityField = React.useCallback(
+    (field: "length" | "width" | "depth" | "cornerRadius") => {
+      if (
+        !selectedCavity ||
+        !cavityInputs.id ||
+        cavityInputs.id !== selectedCavity.id
+      ) {
+        return;
+      }
+
+      const raw = cavityInputs[field];
+      const parsed = Number(raw);
+
+      const resetToCurrent = () => {
+        setCavityInputs((prev) => ({
+          ...prev,
+          [field]:
+            field === "length"
+              ? String(selectedCavity.lengthIn ?? "")
+              : field === "width"
+              ? String(selectedCavity.widthIn ?? "")
+              : field === "depth"
+              ? String(selectedCavity.depthIn ?? "")
+              : String(selectedCavity.cornerRadiusIn ?? ""),
+        }));
+      };
+
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        resetToCurrent();
+        return;
+      }
+
+      const snapped = snapInches(parsed);
+
+      // Circles keep length/width as the same "diameter"
+      if (
+        selectedCavity.shape === "circle" &&
+        (field === "length" || field === "width")
+      ) {
+        updateCavityDims(selectedCavity.id, {
+          lengthIn: snapped,
+          widthIn: snapped,
+        });
+        setCavityInputs((prev) => ({
+          ...prev,
+          length: String(snapped),
+          width: String(snapped),
+        }));
+        return;
+      }
+
+      if (field === "length") {
+        updateCavityDims(selectedCavity.id, { lengthIn: snapped });
+        setCavityInputs((prev) => ({ ...prev, length: String(snapped) }));
+      } else if (field === "width") {
+        updateCavityDims(selectedCavity.id, { widthIn: snapped });
+        setCavityInputs((prev) => ({ ...prev, width: String(snapped) }));
+      } else if (field === "depth") {
+        updateCavityDims(selectedCavity.id, { depthIn: snapped });
+        setCavityInputs((prev) => ({ ...prev, depth: String(snapped) }));
+      } else {
+        updateCavityDims(selectedCavity.id, {
+          cornerRadiusIn: snapped,
+        });
+        setCavityInputs((prev) => ({
+          ...prev,
+          cornerRadius: String(snapped),
+        }));
+      }
+    },
+    [cavityInputs, selectedCavity, updateCavityDims],
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadMaterials() {
+      setMaterialsLoading(true);
+      setMaterialsError(null);
+
+      try {
+        const res = await fetch("/api/materials", {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const json = await res.json();
+
+        if (!cancelled && Array.isArray(json.materials)) {
+          const mapped: MaterialOption[] = json.materials.map((m: any) => ({
+            id: m.id,
+            name:
+              (m.name ??
+                m.material_name ??
+                `Material #${m.id}`) || `Material #${m.id}`,
+            family: m.material_family || "Uncategorized",
+            density_lb_ft3:
+              typeof m.density_lb_ft3 === "number"
+                ? m.density_lb_ft3
+                : m.density_lb_ft3 != null
+                ? Number(m.density_lb_ft3)
+                : null,
+          }));
+          setMaterials(mapped);
+        }
+      } catch (err) {
+        console.error("Error loading materials for layout editor", err);
+        if (!cancelled) {
+          setMaterialsError(
+            "Couldn’t load material list. You can still edit the layout.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setMaterialsLoading(false);
+        }
+      }
+    }
+
+    loadMaterials();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ---- Safe Family Grouping (no PE/EPE remap) ----
+  const materialsByFamily = React.useMemo(() => {
+    const map = new Map<string, MaterialOption[]>();
+
+    for (const m of materials) {
+      const safeName =
+        (m.name && m.name.trim().length > 0
+          ? m.name
+          : `Material #${m.id}`) || `Material #${m.id}`;
+      const key = m.family || "Other";
+
+      const entry: MaterialOption = {
+        ...m,
+        name: safeName,
+      };
+
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(entry);
+    }
+
+    for (const [, list] of map) {
+      list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    }
+
+    return Array.from(map.entries());
+  }, [materials]);
+
+  const missingCustomerInfo =
+    !customerName.trim() || !customerEmail.trim();
 
   /* ---------- Palette interactions ---------- */
 
@@ -714,99 +1160,117 @@ function LayoutEditorHost(props: {
       addCavity("rect", { lengthIn: 4, widthIn: 2, depthIn: 2 });
     }
   };
+  /* ---------- Center selected cavity ---------- */
+  const handleCenterSelectedCavity = () => {
+    if (!selectedCavity) return;
 
-  /* ---------- Cavity editor helpers (RESTORED) ---------- */
+    const len = selectedCavity.lengthIn;
+    const wid = selectedCavity.widthIn;
 
-  const activeCavities = cavities as any[];
+    if (!block.lengthIn || !block.widthIn || !len || !wid) return;
 
-  const clamp = (v: number, min: number, max: number) => (v < min ? min : v > max ? max : v);
+    let xIn = (block.lengthIn - len) / 2;
+    let yIn = (block.widthIn - wid) / 2;
 
-  const centerCavityInBlock = React.useCallback(
-    (cavId: string) => {
-      const cav = activeCavities.find((c) => c.id === cavId);
-      if (!cav) return;
+    xIn = snapInches(xIn);
+    yIn = snapInches(yIn);
 
-      const L = Number(block.lengthIn) || 0;
-      const W = Number(block.widthIn) || 0;
-      const cL = Number(cav.lengthIn) || 0;
-      const cW = Number(cav.widthIn) || 0;
+    const minXIn = WALL_IN;
+    const maxXIn = block.lengthIn - WALL_IN - len;
+    const minYIn = WALL_IN;
+    const maxYIn = block.widthIn - WALL_IN - wid;
 
-      if (L <= 0 || W <= 0 || cL <= 0 || cW <= 0) return;
+    const clamp = (v: number, min: number, max: number) =>
+      v < min ? min : v > max ? max : v;
 
-      const minX = WALL_IN;
-      const minY = WALL_IN;
-      const maxX = Math.max(minX, L - WALL_IN - cL);
-      const maxY = Math.max(minY, W - WALL_IN - cW);
+    xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+    yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
 
-      const desiredX = (L - cL) / 2;
-      const desiredY = (W - cW) / 2;
+    const xNorm = xIn / block.lengthIn;
+    const yNorm = yIn / block.widthIn;
 
-      const xIn = clamp(desiredX, minX, maxX);
-      const yIn = clamp(desiredY, minY, maxY);
+    updateCavityPosition(selectedCavity.id, xNorm, yNorm);
+  };
 
-      const xNorm = L > 0 ? xIn / L : 0.1;
-      const yNorm = W > 0 ? yIn / W : 0.1;
+  /* ---------- Foam Advisor navigation ---------- */
 
-      updateCavityPosition(cavId, xNorm, yNorm);
-      selectCavity(cavId);
-    },
-    [activeCavities, block.lengthIn, block.widthIn, updateCavityPosition, selectCavity],
-  );
+  const handleGoToFoamAdvisor = () => {
+    if (missingCustomerInfo) return;
 
-  const safeSetCavityDim = React.useCallback(
-    (id: string, patch: any) => {
-      // Path A: use existing updateCavityDims hook call (assumes it accepts partial fields)
-      updateCavityDims(id, patch);
-    },
-    [updateCavityDims],
-  );
+    const params = new URLSearchParams();
 
-  const handleCavityLength = (id: string, val: string) => {
-    const num = snapInches(Number(val));
-    if (!Number.isFinite(num) || num <= 0) return;
-    const cav = activeCavities.find((c) => c.id === id);
-    if (cav?.shape === "circle") {
-      safeSetCavityDim(id, { lengthIn: num, widthIn: num });
-    } else {
-      safeSetCavityDim(id, { lengthIn: num });
+    if (hasRealQuoteNo && quoteNo) {
+      params.set("quote_no", quoteNo);
     }
-  };
 
-  const handleCavityWidth = (id: string, val: string) => {
-    const num = snapInches(Number(val));
-    if (!Number.isFinite(num) || num <= 0) return;
-    const cav = activeCavities.find((c) => c.id === id);
-    if (cav?.shape === "circle") {
-      safeSetCavityDim(id, { lengthIn: num, widthIn: num });
-    } else {
-      safeSetCavityDim(id, { widthIn: num });
+    const L = Number(block.lengthIn) || 0;
+    const W = Number(block.widthIn) || 0;
+    const T = Number(block.thicknessIn) || 0;
+
+    if (L > 0 && W > 0 && T >= 0) {
+      params.set("block", `${L}x${W}x${T}`);
     }
-  };
 
-  const handleCavityDepth = (id: string, val: string) => {
-    const num = snapInches(Number(val));
-    if (!Number.isFinite(num) || num <= 0) return;
-    safeSetCavityDim(id, { depthIn: num });
-  };
+    const query = params.toString();
+    const url = query ? `/foam-advisor?${query}` : "/foam-advisor";
 
-  const handleCornerRadius = (id: string, val: string) => {
-    const num = snapInches(Number(val));
-    if (!Number.isFinite(num) || num < 0) return;
-    safeSetCavityDim(id, { cornerRadiusIn: num });
+    router.push(url);
   };
 
   /* ---------- Apply-to-Quote ---------- */
 
   const handleApplyToQuote = async () => {
-    if (!hasRealQuoteNo || missingCustomerInfo) return;
+    if (!hasRealQuoteNo) {
+      alert(
+        "This layout isn’t linked to a quote.\nOpen from a real quote email.",
+      );
+      return;
+    }
+
+    if (missingCustomerInfo) {
+      alert("Add customer name + email before applying to quote.");
+      return;
+    }
 
     try {
       setApplyStatus("saving");
+
+      const selectedMaterial =
+        selectedMaterialId != null
+          ? materials.find((m) => m.id === selectedMaterialId) || null
+          : null;
+
+      let materialLabel: string | null = null;
+      if (selectedMaterial) {
+        const familyLabel =
+          (selectedMaterial.family && selectedMaterial.family.trim()) ||
+          (selectedMaterial.name && selectedMaterial.name.trim()) ||
+          "";
+
+        let densityLabel: string | null = null;
+        if (
+          typeof selectedMaterial.density_lb_ft3 === "number" &&
+          Number.isFinite(selectedMaterial.density_lb_ft3)
+        ) {
+          densityLabel = `${selectedMaterial.density_lb_ft3.toFixed(1)} pcf`;
+        }
+
+        materialLabel = densityLabel
+          ? `${familyLabel}, ${densityLabel}`
+          : familyLabel || null;
+      }
+
+      const svg = buildSvgFromLayout(layout, {
+        notes:
+          notes && notes.trim().length > 0 ? notes.trim() : undefined,
+        materialLabel: materialLabel || undefined,
+      });
 
       const payload: any = {
         quoteNo,
         layout,
         notes,
+        svg,
         customer: {
           name: customerName.trim(),
           email: customerEmail.trim(),
@@ -815,6 +1279,28 @@ function LayoutEditorHost(props: {
         },
       };
 
+            // Attach chosen carton (if any) so the backend can add a box line item
+      if (selectedCartonKind && (boxSuggest.bestRsc || boxSuggest.bestMailer)) {
+        const chosen =
+          selectedCartonKind === "RSC"
+            ? boxSuggest.bestRsc
+            : boxSuggest.bestMailer;
+
+        if (chosen) {
+          payload.selectedCarton = {
+            style: chosen.style,
+            sku: chosen.sku,
+            description: chosen.description,
+            inside_length_in: chosen.inside_length_in,
+            inside_width_in: chosen.inside_width_in,
+            inside_height_in: chosen.inside_height_in,
+            fit_score: chosen.fit_score,
+            notes: chosen.notes ?? null,
+          };
+        }
+      }
+
+      // Attach foam layers summary so the backend can add each pad as a line item
       if (layers && layers.length > 0) {
         payload.foamLayers = layers.map((layer) => ({
           id: layer.id,
@@ -823,99 +1309,168 @@ function LayoutEditorHost(props: {
         }));
       }
 
-      const nQty = Number(qty);
-      if (Number.isFinite(nQty) && nQty > 0) payload.qty = nQty;
-      if (selectedMaterialId != null) payload.materialId = selectedMaterialId;
 
-      await fetch("/api/quote/layout/apply", {
+      const nQty = Number(qty);
+      if (Number.isFinite(nQty) && nQty > 0) {
+        payload.qty = nQty;
+      }
+      if (selectedMaterialId != null) {
+        payload.materialId = selectedMaterialId;
+      }
+
+      const res = await fetch("/api/quote/layout/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      if (typeof window !== "undefined") {
-        window.location.href = "/quote?quote_no=" + encodeURIComponent(quoteNo);
+      if (!res.ok) {
+        let payloadJson: any = null;
+        try {
+          payloadJson = await res.json();
+          if (payloadJson?.error === "quote_not_found") {
+            alert(
+              `Couldn’t find a quote header for ${quoteNo}.\nOpen this link from a real quote email.`,
+            );
+          }
+        } catch {
+          // ignore
+        }
+        throw new Error(`HTTP ${res.status}`);
       }
+
+      if (typeof window !== "undefined") {
+        window.location.href =
+          "/quote?quote_no=" + encodeURIComponent(quoteNo);
+        return;
+      }
+
+      setApplyStatus("done");
+      setTimeout(() => setApplyStatus("idle"), 2000);
     } catch (err) {
       console.error("Apply-to-quote failed", err);
       setApplyStatus("error");
       setTimeout(() => setApplyStatus("idle"), 3000);
     }
   };
+  /* ---------- Layout ---------- */
 
-  /* ---------- Materials ---------- */
+  const canApplyButton =
+    hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
 
+    // Qty used for box/carton suggestions (null when not set)
+  const effectiveQty =
+    typeof qty === "number" && Number.isFinite(qty) && qty > 0 ? qty : null;
+
+  // Call /api/boxes/suggest whenever the layout + customer info are ready
   React.useEffect(() => {
+    const lengthIn = Number(block.lengthIn) || 0;
+    const widthIn = Number(block.widthIn) || 0;
+    const stackDepthIn = totalStackThicknessIn || 0;
+
+    // If we don't have enough info yet, reset state and bail.
+    if (
+      !hasRealQuoteNo ||
+      missingCustomerInfo ||
+      lengthIn <= 0 ||
+      widthIn <= 0 ||
+      stackDepthIn <= 0
+    ) {
+      setBoxSuggest({
+        loading: false,
+        error: null,
+        bestRsc: null,
+        bestMailer: null,
+      });
+      return;
+    }
+
     let cancelled = false;
 
-    async function loadMaterials() {
-      setMaterialsLoading(true);
-      setMaterialsError(null);
-
+    const run = async () => {
       try {
-        const res = await fetch("/api/materials", { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setBoxSuggest((prev) => ({
+          ...prev,
+          loading: true,
+          error: null,
+        }));
+
+        const res = await fetch("/api/boxes/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            footprint_length_in: lengthIn,
+            footprint_width_in: widthIn,
+            stack_depth_in: stackDepthIn,
+            qty: effectiveQty ?? null,
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
 
         const json = await res.json();
 
-        if (!cancelled && Array.isArray(json.materials)) {
-          const mapped: MaterialOption[] = json.materials.map((m: any) => ({
-            id: m.id,
-            name: (m.name ?? m.material_name ?? `Material #${m.id}`) || `Material #${m.id}`,
-            family: m.material_family || "Other",
-            density_lb_ft3:
-              typeof m.density_lb_ft3 === "number"
-                ? m.density_lb_ft3
-                : m.density_lb_ft3 != null
-                  ? Number(m.density_lb_ft3)
-                  : null,
-          }));
-          setMaterials(mapped);
-        }
-      } catch (err) {
-        console.error("Error loading materials for layout editor", err);
-        if (!cancelled) {
-          setMaterialsError("Couldn’t load material list.");
-        }
-      } finally {
-        if (!cancelled) setMaterialsLoading(false);
-      }
-    }
+        if (cancelled) return;
 
-    loadMaterials();
+        if (!json || json.ok !== true) {
+          setBoxSuggest({
+            loading: false,
+            error:
+              (json && typeof json.error === "string" && json.error) ||
+              "No carton suggestion returned.",
+            bestRsc: null,
+            bestMailer: null,
+          });
+          return;
+        }
+
+        setBoxSuggest({
+          loading: false,
+          error: null,
+          bestRsc: json.bestRsc ?? null,
+          bestMailer: json.bestMailer ?? null,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Box suggester call failed", err);
+        setBoxSuggest({
+          loading: false,
+          error: "Couldn’t calculate cartons right now.",
+          bestRsc: null,
+          bestMailer: null,
+        });
+      }
+    };
+
+    run();
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [
+    hasRealQuoteNo,
+    missingCustomerInfo,
+    block.lengthIn,
+    block.widthIn,
+    totalStackThicknessIn,
+    effectiveQty,
+  ]);
 
-  // ---- Safe family grouping (NO PE/EPE remap) ----
-  const materialsByFamily = React.useMemo(() => {
-    const map = new Map<string, MaterialOption[]>();
-
-    for (const m of materials) {
-      const family = m.family || "Other";
-      if (!map.has(family)) map.set(family, []);
-      map.get(family)!.push(m);
-    }
-
-    for (const [, list] of map) {
-      list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    }
-
-    return Array.from(map.entries());
-  }, [materials]);
-
-  /* ---------- Derived labels ---------- */
-
+  // Derived labels used in multiple spots
   const footprintLabel =
     Number(block.lengthIn) > 0 && Number(block.widthIn) > 0
-      ? `${Number(block.lengthIn).toFixed(2)}" × ${Number(block.widthIn).toFixed(2)}"`
+      ? `${Number(block.lengthIn).toFixed(2)}" × ${Number(
+          block.widthIn,
+        ).toFixed(2)}"`
       : "—";
 
-  const stackDepthLabel = totalStackThicknessIn > 0 ? `${totalStackThicknessIn.toFixed(2)}"` : "—";
+  const stackDepthLabel =
+    totalStackThicknessIn > 0 ? `${totalStackThicknessIn.toFixed(2)}"` : "—";
 
-  const effectiveQty = typeof qty === "number" && Number.isFinite(qty) && qty > 0 ? qty : null;
-  const qtyLabel = effectiveQty != null ? effectiveQty.toLocaleString() : "—";
+  const qtyLabel =
+    effectiveQty != null ? effectiveQty.toLocaleString() : "—";
 
   const suggesterReady =
     hasRealQuoteNo &&
@@ -924,10 +1479,12 @@ function LayoutEditorHost(props: {
     Number(block.widthIn) > 0 &&
     totalStackThicknessIn > 0;
 
+
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
       <div className="w-full max-w-none mx-auto">
         <div className="relative rounded-2xl border border-slate-800/80 bg-slate-950/90 shadow-[0_26px_60px_rgba(15,23,42,0.95)] overflow-hidden">
+          {/* global grid/glow overlay */}
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 opacity-65 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),transparent_55%),linear-gradient(to_right,rgba(15,23,42,0.95)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.95)_1px,transparent_1px)] [background-size:460px_460px,28px_28px,28px_28px]"
@@ -936,21 +1493,29 @@ function LayoutEditorHost(props: {
             {/* Header */}
             <div className="border-b border-slate-800/80 bg-gradient-to-r from-sky-500 via-sky-500/80 to-slate-900 px-6 py-4">
               <div className="flex items-center gap-4 w-full">
+                {/* LEFT: powered by + quote */}
                 <div className="flex flex-col">
                   <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-sky-50/90">
                     Powered by Alex-IO
                   </div>
                   <div className="mt-1 text-xs text-sky-50/95">
                     Quote{" "}
-                    <span className="font-mono font-semibold text-slate-50">{quoteNo}</span>
+                    <span className="font-mono font-semibold text-slate-50">
+                      {quoteNo}
+                    </span>
                     {hasRealQuoteNo ? (
-                      <span className="ml-1 text-sky-100/90">· Linked to active quote</span>
+                      <span className="ml-1 text-sky-100/90">
+                        · Linked to active quote
+                      </span>
                     ) : (
-                      <span className="ml-1 text-amber-50/90">· Demo view (no quote linked)</span>
+                      <span className="ml-1 text-amber-50/90">
+                        · Demo view (no quote linked)
+                      </span>
                     )}
                   </div>
                 </div>
 
+                {/* CENTER: stylized title */}
                 <div className="flex-1 text-center">
                   <div className="inline-flex flex-col items-center gap-1">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-100/70">
@@ -962,6 +1527,7 @@ function LayoutEditorHost(props: {
                   </div>
                 </div>
 
+                {/* RIGHT: BETA pill */}
                 <div className="flex items-center justify-end">
                   <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
@@ -971,7 +1537,36 @@ function LayoutEditorHost(props: {
               </div>
             </div>
 
-            {/* Metrics row */}
+            {/* How this works */}
+            <div className="border-b border-slate-800/80 bg-slate-950/95 px-6 py-3 text-[11px] text-slate-200 flex flex-wrap items-start gap-4">
+              <div className="flex items-center gap-2 font-semibold text-sky-200">
+                <span className="inline-flex h-5 w-1.5 items-center justify-center rounded-full border border-sky-400/70 bg-sky-500/20 text-[10px] font-bold shadow-[0_0_14px_rgba(56,189,248,0.7)]">
+                  ?
+                </span>
+                How this layout editor works
+              </div>
+
+              <ul className="flex flex-wrap gap-x-4 gap-y-1">
+                <li>
+                  <span className="text-sky-300 mr-1">1.</span>
+                  Adjust the foam block, add cavities from the left palette.
+                </li>
+                <li>
+                  <span className="text-sky-300 mr-1">2.</span>
+                  Drag / resize in the center canvas to fine-tune placement.
+                </li>
+                <li>
+                  <span className="text-sky-300 mr-1">3.</span>
+                  Fill in customer + material, then{" "}
+                  <span className="font-semibold text-sky-200">
+                    Apply to quote
+                  </span>
+                  .
+                </li>
+              </ul>
+            </div>
+
+            {/* Compressed top metrics + controls row */}
             <div className="px-5 pt-3 pb-2 bg-slate-950/95 border-b border-slate-900/80">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {/* LEFT: Layers summary + quick metrics + block dims */}
@@ -985,7 +1580,8 @@ function LayoutEditorHost(props: {
                         <span>
                           {layers && layers.length > 0 ? (
                             <>
-                              {layers.length} layer{layers.length > 1 ? "s" : ""} · Active:{" "}
+                              {layers.length} layer
+                              {layers.length > 1 ? "s" : ""} · Active:{" "}
                               <span className="font-semibold text-slate-50">
                                 {activeLayerLabel ?? layers[0].label}
                               </span>
@@ -996,11 +1592,15 @@ function LayoutEditorHost(props: {
                         </span>
                         <span className="text-slate-400">
                           · Footprint{" "}
-                          <span className="font-mono text-slate-100">{footprintLabel}</span>
+                          <span className="font-mono text-slate-100">
+                            {footprintLabel}
+                          </span>
                         </span>
                         <span className="text-slate-400">
                           · Stack depth{" "}
-                          <span className="font-mono text-slate-100">{stackDepthLabel}</span>
+                          <span className="font-mono text-slate-100">
+                            {stackDepthLabel}
+                          </span>
                         </span>
                       </div>
                     </div>
@@ -1015,43 +1615,57 @@ function LayoutEditorHost(props: {
 
                   <div className="grid grid-cols-3 gap-2 text-xs mt-1">
                     <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-slate-400">Length (in)</span>
+                      <span className="text-[10px] text-slate-400">
+                        Length (in)
+                      </span>
                       <input
                         type="number"
                         step={0.125}
                         value={block.lengthIn}
-                        onChange={(e) =>
-                          updateBlockDims({ lengthIn: snapInches(Number(e.target.value)) })
-                        }
+                        onChange={(e) => {
+                          const snapped = snapInches(Number(e.target.value));
+                          updateBlockDims({ lengthIn: snapped });
+                        }}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                       />
                     </label>
                     <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-slate-400">Width (in)</span>
+                      <span className="text-[10px] text-slate-400">
+                        Width (in)
+                      </span>
                       <input
                         type="number"
                         step={0.125}
                         value={block.widthIn}
-                        onChange={(e) =>
-                          updateBlockDims({ widthIn: snapInches(Number(e.target.value)) })
-                        }
+                        onChange={(e) => {
+                          const snapped = snapInches(Number(e.target.value));
+                          updateBlockDims({ widthIn: snapped });
+                        }}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                       />
                     </label>
                     <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-slate-400">Active layer thick (in)</span>
+                      <span className="text-[10px] text-slate-400">
+                        Active layer thick (in)
+                      </span>
                       <input
                         type="number"
                         step={0.125}
-                        value={activeLayer ? getLayerThickness(activeLayer.id) : blockThicknessIn}
-                        onChange={(e) => handleActiveLayerThicknessChange(e.target.value)}
+                        value={
+                          activeLayer
+                            ? getLayerThickness(activeLayer.id)
+                            : blockThicknessIn
+                        }
+                        onChange={(e) =>
+                          handleActiveLayerThicknessChange(e.target.value)
+                        }
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                       />
                     </label>
                   </div>
                 </div>
 
-                {/* CENTER: controls */}
+                {/* CENTER: Layout controls (Zoom + Qty + CTA buttons) */}
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 flex flex-col justify-between">
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-slate-400">
@@ -1059,7 +1673,10 @@ function LayoutEditorHost(props: {
                       Layout controls
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      Quoted qty: <span className="font-mono text-slate-50">{qtyLabel}</span>
+                      Quoted qty:{" "}
+                      <span className="font-mono text-slate-50">
+                        {qtyLabel}
+                      </span>
                     </div>
                   </div>
 
@@ -1075,9 +1692,10 @@ function LayoutEditorHost(props: {
                         onChange={(e) => setZoom(Number(e.target.value))}
                         className="w-32 accent-sky-400"
                       />
-                      <span className="ml-1 text-sky-200 font-mono">{Math.round(zoom * 100)}%</span>
+                      <span className="ml-1 text-sky-200 font-mono">
+                        {Math.round(zoom * 100)}%
+                      </span>
                     </div>
-
                     <div className="flex items-center gap-2 text-[11px] text-slate-400">
                       <span>Qty</span>
                       <input
@@ -1087,7 +1705,10 @@ function LayoutEditorHost(props: {
                         value={qty}
                         onChange={(e) => {
                           const v = e.target.value;
-                          if (!v) return setQty("");
+                          if (!v) {
+                            setQty("");
+                            return;
+                          }
                           const num = Number(v);
                           if (!Number.isFinite(num) || num <= 0) return;
                           setQty(num);
@@ -1101,17 +1722,8 @@ function LayoutEditorHost(props: {
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
+                      onClick={handleGoToFoamAdvisor}
                       disabled={missingCustomerInfo}
-                      onClick={() => {
-                        if (missingCustomerInfo) return;
-                        const params = new URLSearchParams();
-                        if (hasRealQuoteNo && quoteNo) params.set("quote_no", quoteNo);
-                        const L = Number(block.lengthIn) || 0;
-                        const W = Number(block.widthIn) || 0;
-                        const T = Number(block.thicknessIn) || 0;
-                        if (L > 0 && W > 0 && T >= 0) params.set("block", `${L}x${W}x${T}`);
-                        router.push(params.toString() ? `/foam-advisor?${params.toString()}` : "/foam-advisor");
-                      }}
                       className="inline-flex flex-1 items-center justify-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Recommend my foam
@@ -1120,26 +1732,25 @@ function LayoutEditorHost(props: {
                     <button
                       type="button"
                       onClick={handleApplyToQuote}
-                      disabled={!(hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving")}
+                      disabled={!canApplyButton}
                       className="inline-flex flex-1 items-center justify-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
                     >
-                      {applyStatus === "saving"
+                      {!hasRealQuoteNo
+                        ? "Link to a quote first"
+                        : missingCustomerInfo
+                        ? "Add name + email"
+                        : applyStatus === "saving"
                         ? "Applying…"
+                        : applyStatus === "done"
+                        ? "Applied!"
                         : applyStatus === "error"
-                          ? "Error – retry"
-                          : "Apply to quote"}
+                        ? "Error – retry"
+                        : "Apply to quote"}
                     </button>
                   </div>
-
-                  {missingCustomerInfo && (
-                    <div className="mt-2 rounded-xl border border-amber-500/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-50">
-                      Enter <span className="font-semibold">customer name</span> and{" "}
-                      <span className="font-semibold">email</span> to enable Recommend + Apply.
-                    </div>
-                  )}
                 </div>
 
-                {/* RIGHT: Layer details */}
+                {/* RIGHT: Layer details (stack + per-layer list + per-layer crop) */}
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 text-[11px] text-slate-200">
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex flex-col gap-0.5">
@@ -1147,14 +1758,19 @@ function LayoutEditorHost(props: {
                         Layer details
                       </span>
                       <span className="text-xs text-slate-200">
-                        Stack depth: <span className="font-mono text-slate-50">{stackDepthLabel}</span>
+                        Stack depth:{" "}
+                        <span className="font-mono text-slate-50">
+                          {stackDepthLabel}
+                        </span>
                       </span>
                     </div>
                     <label className="inline-flex items-center gap-1 text-[11px] text-slate-300">
                       <input
                         type="checkbox"
                         checked={croppedCorners}
-                        onChange={(e) => setCroppedCorners(e.target.checked)}
+                        onChange={(e) =>
+                          setCroppedCorners(e.target.checked)
+                        }
                         className="h-3 w-3 rounded border-slate-600 bg-slate-950"
                       />
                       <span>Crop corners 1&quot;</span>
@@ -1163,7 +1779,7 @@ function LayoutEditorHost(props: {
 
                   {layers && layers.length > 0 ? (
                     <div className="max-h-32 overflow-auto space-y-1 mt-0.5">
-                      {layers.map((layer) => {
+                      {layers.map((layer, idx) => {
                         const isActive = activeLayer?.id === layer.id;
                         const layerThick = getLayerThickness(layer.id);
 
@@ -1182,27 +1798,38 @@ function LayoutEditorHost(props: {
                                 <button
                                   type="button"
                                   onClick={() => setActiveLayerId(layer.id)}
-                                  className={"text-xs font-medium " + (isActive ? "text-sky-100" : "text-slate-100")}
+                                  className={
+                                    "text-xs font-medium " +
+                                    (isActive
+                                      ? "text-sky-100"
+                                      : "text-slate-100")
+                                  }
                                 >
                                   {layer.label}
                                 </button>
-
-                                <span className="text-[10px] text-slate-400">· Thickness (in)</span>
+                                <span className="text-[10px] text-slate-400">
+                                  · Thickness (in)
+                                </span>
                                 <input
                                   type="number"
                                   step={0.125}
                                   value={layerThick}
                                   onChange={(e) => {
-                                    const num = Number(e.target.value);
-                                    if (!Number.isFinite(num) || num <= 0) return;
-                                    setLayerThicknessInModel(layer.id, num);
+                                    const v = e.target.value;
+                                    const num = Number(v);
+                                    if (!Number.isFinite(num) || num <= 0) {
+                                      return;
+                                    }
+                                    setLayerThicknessIn(layer.id, num);
                                   }}
                                   className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100"
                                 />
                               </div>
                             </div>
-
                             <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-500">
+                                ID: {layer.id}
+                              </span>
                               {stack && stack.length > 1 && (
                                 <button
                                   type="button"
@@ -1219,412 +1846,727 @@ function LayoutEditorHost(props: {
                     </div>
                   ) : (
                     <div className="mt-1 text-[11px] text-slate-400">
-                      Single-layer foam block. Add layers if this layout needs multiple pads.
+                      Single-layer foam block. Add layers from the panel on the
+                      left if this layout needs multiple pads.
                     </div>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Body: three-column layout */}
-            <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
-              {/* LEFT */}
-              <aside className="w-52 shrink-0 flex flex-col gap-3">
-                <div>
-                  <div className="text-xs font-semibold text-slate-100 mb-1">Cavity palette</div>
-                  <p className="text-[11px] text-slate-400 mb-2">
-                    Click a style to add a new pocket, then drag and resize it in the block.
-                  </p>
-                </div>
+{/* Body: three-column layout */}
+<div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
+  {/* LEFT: Cavity palette + material + cartons + notes */}
+  <aside className="w-52 shrink-0 flex flex-col gap-3">
+    <div>
+      <div className="text-xs font-semibold text-slate-100 mb-1">
+        Cavity palette
+      </div>
+      <p className="text-[11px] text-slate-400 mb-2">
+        Click a style to add a new pocket, then drag and resize it in the block.
+      </p>
+    </div>
 
+    <button
+      type="button"
+      onClick={() => handleAddPreset("rect")}
+      className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+    >
+      <div className="font-semibold text-slate-50 flex items-center gap-2">
+        <span className="inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-slate-400/70 bg-slate-900/80" />
+        Rectangle
+      </div>
+      <div className="text-[11px] text-slate-400">
+        Rectangular pocket (4&quot; × 2&quot;)
+      </div>
+    </button>
+
+    <button
+      type="button"
+      onClick={() => handleAddPreset("circle")}
+      className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+    >
+      <div className="font-semibold text-slate-50 flex items-center gap-2">
+        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 bg-slate-900/80" />
+        Circle
+      </div>
+      <div className="text-[11px] text-slate-400">Round pocket (3&quot; Ø)</div>
+    </button>
+
+    <button
+      type="button"
+      onClick={() => handleAddPreset("roundedRect")}
+      className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+    >
+      <div className="font-semibold text-slate-50 flex items-center gap-2">
+        <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
+        Rounded rectangle
+      </div>
+      <div className="text-[11px] text-slate-400">
+        Rounded corners (4&quot; × 3&quot;, 0.5&quot; R)
+      </div>
+    </button>
+
+    {/* Foam material (in left bar) */}
+    <div className="mt-2">
+      <div className="text-xs font-semibold text-slate-100 mb-1">
+        Foam material
+      </div>
+      <div className="text-[11px] text-slate-400 mb-2">
+        Choose the foam family and grade used for this layout.
+      </div>
+      <select
+        value={selectedMaterialId ?? ""}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (!v) {
+            setSelectedMaterialId(null);
+          } else {
+            const parsed = Number(v);
+            if (Number.isFinite(parsed)) {
+              setSelectedMaterialId(parsed);
+            }
+          }
+        }}
+        className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+      >
+        <option value="">
+          {materialsLoading ? "Loading materials…" : "Select material (optional)"}
+        </option>
+        {materialsByFamily.map(([family, list]) => (
+          <optgroup key={family} label={family}>
+            {list.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+                {m.density_lb_ft3 != null
+                  ? ` · ${m.density_lb_ft3.toFixed(1)} lb/ft³`
+                  : ""}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      {materialsError && (
+        <div className="mt-1 text-[11px] text-amber-300">{materialsError}</div>
+      )}
+    </div>
+
+    {/* Closest matching cartons (live suggester, always visible) */}
+    <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-xs font-semibold text-slate-100">
+          Closest matching cartons
+        </div>
+        <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+          Box suggester · BETA
+        </span>
+      </div>
+
+      <p className="text-[11px] text-slate-400 mb-2">
+        Uses the foam footprint{" "}
+        <span className="font-mono text-sky-200">{footprintLabel}</span>, stack
+        depth{" "}
+        <span className="font-mono text-sky-200">{stackDepthLabel}</span> and
+        quoted qty{" "}
+        <span className="font-mono text-sky-200">{qtyLabel}</span> to suggest a
+        best-fit <span className="text-sky-300 font-medium">RSC</span> and{" "}
+        <span className="text-sky-300 font-medium">mailer</span>.
+      </p>
+
+      {selectedCartonKind && (
+        <div className="mb-2 text-[11px] text-sky-200">
+          Selected carton:{" "}
+          <span className="font-mono">
+            {selectedCartonKind === "RSC"
+              ? boxSuggest.bestRsc?.sku
+              : boxSuggest.bestMailer?.sku}
+          </span>
+        </div>
+      )}
+
+      {!suggesterReady ? (
+        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+          <div className="font-semibold text-slate-100 mb-1">
+            Waiting for layout &amp; customer info…
+          </div>
+          <ul className="list-disc list-inside space-y-0.5">
+            <li>Set block length, width and stack depth.</li>
+            <li>Enter customer name + email.</li>
+            {hasRealQuoteNo ? null : <li>Link this layout to a real quote.</li>}
+          </ul>
+        </div>
+      ) : boxSuggest.loading ? (
+        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-200">
+          Calculating best-fit cartons…
+        </div>
+      ) : boxSuggest.error ? (
+        <div className="rounded-xl border border-amber-500/70 bg-amber-900/40 px-3 py-2 text-[11px] text-amber-50">
+          {boxSuggest.error}
+        </div>
+      ) : !boxSuggest.bestRsc && !boxSuggest.bestMailer ? (
+        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+          No good carton matches found in the current stub catalog.
+        </div>
+      ) : (
+        <div className="space-y-2 text-[11px]">
+          {boxSuggest.bestRsc && (
+            <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+              <div className="flex items-center justify-between mb-0.5">
+                <div className="font-semibold text-slate-100">Best RSC match</div>
+                <span className="font-mono text-sky-300 text-[10px]">
+                  {boxSuggest.bestRsc.sku}
+                </span>
+              </div>
+              <div className="text-slate-300">{boxSuggest.bestRsc.description}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                <span>
+                  Inside{" "}
+                  <span className="font-mono text-slate-50">
+                    {boxSuggest.bestRsc.inside_length_in}" ×{" "}
+                    {boxSuggest.bestRsc.inside_width_in}" ×{" "}
+                    {boxSuggest.bestRsc.inside_height_in}"
+                  </span>
+                </span>
+                <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                  Fit score: {boxSuggest.bestRsc.fit_score}
+                </span>
+              </div>
+
+              {boxSuggest.bestRsc.notes && (
+                <div className="mt-0.5 text-slate-400">{boxSuggest.bestRsc.notes}</div>
+              )}
+
+              <div className="mt-2 flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => handleAddPreset("rect")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                  onClick={() => handlePickCarton("RSC")}
+                  className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+                    selectedCartonKind === "RSC"
+                      ? "border-sky-400 bg-sky-500/20 text-sky-50"
+                      : "border-slate-600 bg-slate-9...200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+                  }`}
                 >
-                  <div className="font-semibold text-slate-50 flex items-center gap-2">
-                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-slate-400/70 bg-slate-900/80" />
-                    Rectangle
-                  </div>
-                  <div className="text-[11px] text-slate-400">Rectangular pocket (4&quot; × 2&quot;)</div>
+                  {selectedCartonKind === "RSC" ? "Selected carton" : "Pick this box"}
                 </button>
+              </div>
+            </div>
+          )}
 
+          {boxSuggest.bestMailer && (
+            <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+              <div className="flex items-center justify-between mb-0.5">
+                <div className="font-semibold text-slate-100">Best mailer match</div>
+                <span className="font-mono text-sky-300 text-[10px]">
+                  {boxSuggest.bestMailer.sku}
+                </span>
+              </div>
+              <div className="text-slate-300">
+                {boxSuggest.bestMailer.description}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                <span>
+                  Inside{" "}
+                  <span className="font-mono text-slate-50">
+                    {boxSuggest.bestMailer.inside_length_in}" ×{" "}
+                    {boxSuggest.bestMailer.inside_width_in}" ×{" "}
+                    {boxSuggest.bestMailer.inside_height_in}"
+                  </span>
+                </span>
+                <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                  Fit score: {boxSuggest.bestMailer.fit_score}
+                </span>
+              </div>
+
+              {boxSuggest.bestMailer.notes && (
+                <div className="mt-0.5 text-slate-400">
+                  {boxSuggest.bestMailer.notes}
+                </div>
+              )}
+
+              <div className="mt-2 flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => handleAddPreset("circle")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                  onClick={() => handlePickCarton("MAILER")}
+                  className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+                    selectedCartonKind === "MAILER"
+                      ? "border-sky-400 bg-sky-500/20 text-sky-50"
+                      : "border-slate-600 bg-slate-9...200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+                  }`}
                 >
-                  <div className="font-semibold text-slate-50 flex items-center gap-2">
-                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 bg-slate-900/80" />
-                    Circle
-                  </div>
-                  <div className="text-[11px] text-slate-400">Round pocket (3&quot; Ø)</div>
+                  {selectedCartonKind === "MAILER"
+                    ? "Selected carton"
+                    : "Pick this box"}
                 </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleAddPreset("roundedRect")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
-                >
-                  <div className="font-semibold text-slate-50 flex items-center gap-2">
-                    <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
-                    Rounded rectangle
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    Rounded corners (4&quot; × 3&quot;, 0.5&quot; R)
-                  </div>
-                </button>
+    {/* Notes / special instructions */}
+    <div className="mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
+      <div className="text-xs font-semibold text-slate-100 mb-1">
+        Notes / special instructions
+      </div>
+      <div className="text-[11px] text-slate-400 mb-2">
+        Optional text for anything the foam layout needs to call out (loose
+        parts, labels, extra protection, etc.). This will be saved with the quote
+        when you apply.
+      </div>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={4}
+        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 resize-vertical"
+      />
+    </div>
 
-                {/* Foam material */}
-                <div className="mt-2">
-                  <div className="text-xs font-semibold text-slate-100 mb-1">Foam material</div>
-                  <div className="text-[11px] text-slate-400 mb-2">
-                    Choose the foam family and grade used for this layout.
-                  </div>
-                  <select
-                    value={selectedMaterialId ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (!v) return setSelectedMaterialId(null);
-                      const parsed = Number(v);
-                      if (Number.isFinite(parsed)) setSelectedMaterialId(parsed);
-                    }}
-                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                  >
-                    <option value="">
-                      {materialsLoading ? "Loading materials…" : "Select material (optional)"}
-                    </option>
-                    {materialsByFamily.map(([family, list]) => (
-                      <optgroup key={family} label={family}>
-                        {list.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name}
-                            {m.density_lb_ft3 != null ? ` · ${m.density_lb_ft3.toFixed(1)} lb/ft³` : ""}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  {materialsError && <div className="mt-1 text-[11px] text-amber-300">{materialsError}</div>}
-                </div>
+    <div className="mt-1 border-t border-slate-800 pt-2 text-[11px] text-slate-500">
+      Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block edges and
+      between pockets.
+    </div>
 
-                {/* Closest matching cartons */}
-                <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-xs font-semibold text-slate-100">Closest matching cartons</div>
-                    <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
-                      Box suggester · BETA
-                    </span>
-                  </div>
+    {!hasRealQuoteNo && (
+      <div className="mt-3 rounded-xl border border-amber-500/70 bg-amber-900/50 px-3 py-2 text-[11px] text-amber-50">
+        No quote is linked yet. Open this page from an emailed quote or the
+        /quote print view to save layouts back to a real quote.
+      </div>
+    )}
+  </aside>
 
-                  {!suggesterReady ? (
-                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
-                      Waiting for layout &amp; customer info…
-                    </div>
-                  ) : boxSuggest.loading ? (
-                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-200">
-                      Calculating best-fit cartons…
-                    </div>
-                  ) : boxSuggest.error ? (
-                    <div className="rounded-xl border border-amber-500/70 bg-amber-900/40 px-3 py-2 text-[11px] text-amber-50">
-                      {boxSuggest.error}
-                    </div>
-                  ) : !boxSuggest.bestRsc && !boxSuggest.bestMailer ? (
-                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
-                      No good carton matches found in the current stub catalog.
-                    </div>
-                  ) : (
-                    <div className="space-y-2 text-[11px]">
-                      {boxSuggest.bestRsc && (
-                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-                          <div className="flex items-center justify-between mb-0.5">
-                            <div className="font-semibold text-slate-100">Best RSC match</div>
-                            <span className="font-mono text-sky-300 text-[10px]">{boxSuggest.bestRsc.sku}</span>
-                          </div>
-                          <div className="text-slate-300">{boxSuggest.bestRsc.description}</div>
+  {/* CENTER: Big visualizer */}
+  <section className="flex-1 flex flex-col gap-3">
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <div className="flex items-center gap-2 text-sm text-slate-50">
+          <span className="font-semibold">Foam layout preview</span>
+          <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium">
+            Interactive layout
+          </span>
+        </div>
+        {!hasRealQuoteNo && (
+          <div className="text-[11px] text-amber-300 mt-1">
+            Demo only – link from a real quote email to apply layouts.
+          </div>
+        )}
+      </div>
+    </div>
 
-                          <div className="mt-2 flex items-center justify-between">
-                            <button
-                              type="button"
-                              onClick={() => handlePickCarton("RSC")}
-                              className={[
-                                cartonButtonBase,
-                                selectedCartonKind === "RSC" ? cartonButtonActive : cartonButtonIdle,
-                              ].join(" ")}
-                            >
-                              {selectedCartonKind === "RSC" ? "Selected carton" : "Pick this box"}
-                            </button>
-                          </div>
-                        </div>
-                      )}
+    <p className="text-[11px] text-slate-400 leading-snug">
+      Drag cavities to adjust placement. Use the square handle at the
+      bottom-right of each cavity to resize. Cavities are placed inside a
+      0.5&quot; wall on all sides. When a cavity is selected, the nearest
+      horizontal and vertical gaps to other cavities and to the block edges are
+      dimensioned.
+    </p>
 
-                      {boxSuggest.bestMailer && (
-                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-                          <div className="flex items-center justify-between mb-0.5">
-                            <div className="font-semibold text-slate-100">Best mailer match</div>
-                            <span className="font-mono text-sky-300 text-[10px]">{boxSuggest.bestMailer.sku}</span>
-                          </div>
-                          <div className="text-slate-300">{boxSuggest.bestMailer.description}</div>
+    {/* canvas wrapper */}
+    <div className="relative flex-1 rounded-2xl border border-slate-800/90 bg-slate-950 overflow-hidden shadow-[0_22px_55px_rgba(15,23,42,0.95)]">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,rgba(30,64,175,0.3)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.3)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
+      />
+      <div className="relative p-4 overflow-auto">
+        <InteractiveCanvas
+          layout={layout}
+          selectedId={selectedId}
+          selectAction={selectCavity}
+          moveAction={(id, xNorm, yNorm) => {
+            // Keep the cavity selected while dragging so
+            // dimension lines stay visible during movement.
+            selectCavity(id);
+            updateCavityPosition(id, xNorm, yNorm);
+          }}
+          resizeAction={(id, lengthIn, widthIn) =>
+            updateCavityDims(id, { lengthIn, widthIn })
+          }
+          zoom={zoom}
+          croppedCorners={croppedCorners}
+        />
+      </div>
+    </div>
 
-                          <div className="mt-2 flex items-center justify-between">
-                            <button
-                              type="button"
-                              onClick={() => handlePickCarton("MAILER")}
-                              className={[
-                                cartonButtonBase,
-                                selectedCartonKind === "MAILER" ? cartonButtonActive : cartonButtonIdle,
-                              ].join(" ")}
-                            >
-                              {selectedCartonKind === "MAILER" ? "Selected carton" : "Pick this box"}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+    {/* Box suggester preview + bottom cartons row (hidden for now, JSX preserved) */}
+    {false && (
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs font-semibold text-slate-100">
+              Box suggester inputs
+            </div>
+            <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+              Preview only
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 mb-2">
+            These are the dimensions and quantity the box suggester will use.
+            Next step is wiring this into the real Box Partners lookup.
+          </p>
+          <div className="space-y-1.5 text-[11px]">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Foam footprint (L × W)</span>
+              <span className="font-mono text-slate-50">
+                {Number(block.lengthIn).toFixed(2)}" ×{" "}
+                {Number(block.widthIn).toFixed(2)}"
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Stack depth</span>
+              <span className="font-mono text-slate-50">
+                {totalStackThicknessIn.toFixed(2)}"
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Quoted quantity</span>
+              <span className="font-mono text-slate-50">{qtyLabel}</span>
+            </div>
+          </div>
+        </div>
 
-                {/* Notes */}
-                <div className="mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
-                  <div className="text-xs font-semibold text-slate-100 mb-1">Notes / special instructions</div>
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={4}
-                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 resize-vertical"
-                  />
-                </div>
-              </aside>
-
-              {/* CENTER */}
-              <section className="flex-1 flex flex-col gap-3">
-                <div className="relative flex-1 rounded-2xl border border-slate-800/90 bg-slate-950 overflow-hidden shadow-[0_22px_55px_rgba(15,23,42,0.95)]">
-                  <div className="relative p-4 overflow-auto">
-                    <InteractiveCanvas
-                      layout={layout}
-                      selectedId={selectedId}
-                      selectAction={selectCavity}
-                      moveAction={(id, xNorm, yNorm) => {
-                        selectCavity(id);
-                        updateCavityPosition(id, xNorm, yNorm);
-                      }}
-                      resizeAction={(id, lengthIn, widthIn) => updateCavityDims(id, { lengthIn, widthIn })}
-                      zoom={zoom}
-                      croppedCorners={croppedCorners}
-                    />
-                  </div>
-                </div>
-              </section>
-
-              {/* RIGHT */}
-              <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
-                {/* Customer info (RESTORED fields) */}
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                  <div className="text-xs font-semibold text-slate-100 mb-1">Customer info</div>
-                  <div className="space-y-2 text-xs">
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-300">Customer name *</span>
-                      <input
-                        type="text"
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-300">Email *</span>
-                      <input
-                        type="email"
-                        value={customerEmail}
-                        onChange={(e) => setCustomerEmail(e.target.value)}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                      />
-                    </label>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="flex flex-col gap-1">
-                        <span className="text-[11px] text-slate-300">Company</span>
-                        <input
-                          type="text"
-                          value={customerCompany}
-                          onChange={(e) => setCustomerCompany(e.target.value)}
-                          className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-[11px] text-slate-300">Phone</span>
-                        <input
-                          type="text"
-                          value={customerPhone}
-                          onChange={(e) => setCustomerPhone(e.target.value)}
-                          className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Cavities editor (RESTORED) */}
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-slate-100">Cavities</div>
-                    <div className="text-[11px] text-slate-400">
-                      {activeCavities.length} total in active layer
-                    </div>
-                  </div>
-
-                  {activeCavities.length === 0 ? (
-                    <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-[11px] text-slate-400">
-                      No cavities in this layer yet. Use the palette on the left to add one.
-                    </div>
-                  ) : (
-                    <div className="mt-3 space-y-2">
-                      <div className="max-h-40 overflow-auto space-y-1 pr-1">
-                        {activeCavities.map((cav, idx) => {
-                          const isSel = cav.id === selectedId;
-                          const color = CAVITY_COLORS[idx % CAVITY_COLORS.length];
-
-                          return (
-                            <button
-                              key={cav.id}
-                              type="button"
-                              onClick={() => selectCavity(cav.id)}
-                              className={[
-                                "w-full rounded-xl border px-3 py-2 text-left transition",
-                                isSel
-                                  ? "border-sky-500/80 bg-sky-500/10"
-                                  : "border-slate-800 bg-slate-950/60 hover:border-sky-400/60",
-                              ].join(" ")}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className="inline-flex h-2 w-2 rounded-full"
-                                    style={{ backgroundColor: color }}
-                                  />
-                                  <span className="text-xs font-semibold text-slate-100">
-                                    {cav.label || cav.id}
-                                  </span>
-                                </div>
-                                <span className="text-[10px] uppercase tracking-[0.12em] text-slate-400">
-                                  {cav.shape === "circle"
-                                    ? "Circle"
-                                    : cav.shape === "roundedRect"
-                                      ? "Rnd rect"
-                                      : "Rect"}
-                                </span>
-                              </div>
-
-                              <div className="mt-1 text-[11px] text-slate-400">
-                                {Number(cav.lengthIn || 0).toFixed(2)} ×{" "}
-                                {Number(cav.widthIn || 0).toFixed(2)} ×{" "}
-                                {Number(cav.depthIn || 0).toFixed(2)} in
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-semibold text-slate-100">
-                            {selectedCavity ? "Selected cavity" : "Select a cavity"}
-                          </div>
-                          {selectedCavity && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                deleteCavity(selectedCavity.id);
-                                selectCavity(null);
-                              }}
-                              className="text-[11px] text-slate-400 hover:text-red-400"
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
-
-                        {!selectedCavity ? (
-                          <div className="mt-2 text-[11px] text-slate-400">
-                            Click a cavity above to edit its dimensions.
-                          </div>
-                        ) : (
-                          <div className="mt-2 space-y-2">
-                            <div className="grid grid-cols-3 gap-2">
-                              <label className="flex flex-col gap-1">
-                                <span className="text-[11px] text-slate-300">
-                                  {selectedCavity.shape === "circle" ? "Diameter" : "Length"}
-                                </span>
-                                <input
-                                  type="number"
-                                  step={0.125}
-                                  value={Number(selectedCavity.lengthIn) || 0}
-                                  onChange={(e) => handleCavityLength(selectedCavity.id, e.target.value)}
-                                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                                />
-                              </label>
-
-                              <label className="flex flex-col gap-1">
-                                <span className="text-[11px] text-slate-300">
-                                  {selectedCavity.shape === "circle" ? "Diameter" : "Width"}
-                                </span>
-                                <input
-                                  type="number"
-                                  step={0.125}
-                                  disabled={selectedCavity.shape === "circle"}
-                                  value={Number(selectedCavity.widthIn) || 0}
-                                  onChange={(e) => handleCavityWidth(selectedCavity.id, e.target.value)}
-                                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
-                                />
-                              </label>
-
-                              <label className="flex flex-col gap-1">
-                                <span className="text-[11px] text-slate-300">Depth</span>
-                                <input
-                                  type="number"
-                                  step={0.125}
-                                  value={Number(selectedCavity.depthIn) || 0}
-                                  onChange={(e) => handleCavityDepth(selectedCavity.id, e.target.value)}
-                                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                                />
-                              </label>
-                            </div>
-
-                            {selectedCavity.shape === "roundedRect" && (
-                              <label className="flex flex-col gap-1">
-                                <span className="text-[11px] text-slate-300">Corner radius (in)</span>
-                                <input
-                                  type="number"
-                                  step={0.125}
-                                  value={Number(selectedCavity.cornerRadiusIn) || 0}
-                                  onChange={(e) => handleCornerRadius(selectedCavity.id, e.target.value)}
-                                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                                />
-                              </label>
-                            )}
-
-                            <div className="flex items-center gap-2 pt-1">
-                              <button
-                                type="button"
-                                onClick={() => centerCavityInBlock(selectedCavity.id)}
-                                className="inline-flex flex-1 items-center justify-center rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
-                              >
-                                Center cavity
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </aside>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+          <div className="text-xs font-semibold text-slate-100 mb-1">
+            Closest matching cartons (coming soon)
+          </div>
+          <p className="text-[11px] text-slate-400 mb-2">
+            This panel will show the best fit{" "}
+            <span className="text-sky-300 font-medium">RSC</span> and{" "}
+            <span className="text-sky-300 font-medium">mailer</span> for the foam
+            stack above, based on the Box Partners catalog. The selection will be
+            saved back to the quote when you apply.
+          </p>
+          <div className="grid grid-cols-1 gap-2">
+            <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+              <div className="text-[11px] font-semibold text-slate-100">
+                Best RSC match
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Will show: part number, inside dims, and fit score.
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+              <div className="text-[11px] font-semibold text-slate-100">
+                Best Mailer match
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Will show: part number, inside dims, and fit score.
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </main>
-  );
+    )}
+  </section>
+
+  {/* RIGHT: Customer info + cavities list */}
+  <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
+    {/* Customer info card */}
+    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-xs font-semibold text-slate-100">Customer info</div>
+        <span
+          className={
+            "inline-flex h-1.5 w-1.5 rounded-full " +
+            (missingCustomerInfo && hasRealQuoteNo
+              ? "bg-rose-400 shadow-[0_0_8px_rgba(248,113,113,0.9)]"
+              : "bg-emerald-400/70 shadow-[0_0_7px_rgba(52,211,153,0.85)]")
+          }
+        />
+      </div>
+      <div className="text-[11px] text-slate-400 mb-2">
+        Add who this foam layout is for.{" "}
+        <span className="text-sky-300">
+          Name + email are required before recommending foam or applying to the
+          quote.
+        </span>
+      </div>
+
+      <div className="space-y-2 text-xs">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-300">
+            Customer name <span className="text-rose-300">*</span>
+          </span>
+          <input
+            type="text"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-300">Company (optional)</span>
+          <input
+            type="text"
+            value={customerCompany}
+            onChange={(e) => setCustomerCompany(e.target.value)}
+            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-300">
+            Email <span className="text-rose-300">*</span>
+          </span>
+          <input
+            type="email"
+            value={customerEmail}
+            onChange={(e) => setCustomerEmail(e.target.value)}
+            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-300">Phone (optional)</span>
+          <input
+            type="tel"
+            value={customerPhone}
+            onChange={(e) => setCustomerPhone(e.target.value)}
+            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+          />
+        </label>
+      </div>
+
+      {missingCustomerInfo && hasRealQuoteNo && (
+        <div className="mt-2 text-[11px] text-amber-300">
+          Enter a name and email to enable{" "}
+          <span className="font-semibold">Recommend my foam</span> and{" "}
+          <span className="font-semibold">Apply to quote</span>.
+        </div>
+      )}
+    </div>
+
+    {/* Cavities list + editor */}
+    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
+      <div className="text-xs font-semibold text-slate-100">
+        Cavities
+        {activeLayerLabel && (
+          <span className="ml-1 text-[11px] font-normal text-slate-400">
+            — {activeLayerLabel}
+          </span>
+        )}
+      </div>
+
+      {cavities.length === 0 ? (
+        <div className="mt-2 text-xs text-slate-400">
+          No cavities yet. Use the palette on the left to add a pocket.
+        </div>
+      ) : (
+        <ul className="mt-2 space-y-1.5 mb-3 max-h-40 overflow-auto">
+          {cavities.map((cav, cavIndex) => {
+            const isActive = cav.id === selectedId;
+
+            const color = CAVITY_COLORS[cavIndex % CAVITY_COLORS.length];
+            const inactiveBg = `${color}33`;
+            const chipStyle = {
+              backgroundColor: isActive ? color : inactiveBg,
+              color: isActive ? "#020617" : "#e5e7eb",
+            } as React.CSSProperties;
+
+            return (
+              <li
+                key={cav.id}
+                className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
+                  isActive
+                    ? "bg-slate-800/80"
+                    : "bg-slate-900/40 hover:bg-slate-800/50"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    isActive ? selectCavity(null) : selectCavity(cav.id)
+                  }
+                  className="flex-1 flex items-center gap-2 text-xs text-left"
+                >
+                  <span
+                    style={chipStyle}
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
+                  >
+                    {cav.id.replace("cav-", "C")}
+                  </span>
+                  <span
+                    className={
+                      isActive
+                        ? "text-slate-50 font-medium"
+                        : "text-slate-200"
+                    }
+                  >
+                    {cav.label}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteCavity(cav.id)}
+                  className="text-[11px] text-slate-500 hover:text-red-400"
+                  title="Delete cavity"
+                >
+                  ✕
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <div className="mt-2 border-t border-slate-800 pt-2 text-[11px] text-slate-400">
+        {selectedCavity ? (
+          <span>
+            Editing{" "}
+            <strong className="text-slate-100">{selectedCavity.label}</strong>
+          </span>
+        ) : (
+          <span>Select a cavity above to edit its size and depth.</span>
+        )}
+      </div>
+
+      {selectedCavity && (
+        <>
+          {selectedCavity.shape === "circle" ? (
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-400">Diameter (in)</span>
+                <input
+                  type="number"
+                  step={0.125}
+                  value={cavityInputs.length}
+                  onChange={(e) =>
+                    setCavityInputs((prev) => ({ ...prev, length: e.target.value }))
+                  }
+                  onBlur={() => commitCavityField("length")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitCavityField("length");
+                    }
+                  }}
+                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-400">Depth (in)</span>
+                <input
+                  type="number"
+                  step={0.125}
+                  value={cavityInputs.depth}
+                  onChange={(e) =>
+                    setCavityInputs((prev) => ({ ...prev, depth: e.target.value }))
+                  }
+                  onBlur={() => commitCavityField("depth")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitCavityField("depth");
+                    }
+                  }}
+                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                />
+              </label>
+            </div>
+          ) : (
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-400">Length (in)</span>
+                <input
+                  type="number"
+                  step={0.125}
+                  value={cavityInputs.length}
+                  onChange={(e) =>
+                    setCavityInputs((prev) => ({ ...prev, length: e.target.value }))
+                  }
+                  onBlur={() => commitCavityField("length")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitCavityField("length");
+                    }
+                  }}
+                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-400">Width (in)</span>
+                <input
+                  type="number"
+                  step={0.125}
+                  value={cavityInputs.width}
+                  onChange={(e) =>
+                    setCavityInputs((prev) => ({ ...prev, width: e.target.value }))
+                  }
+                  onBlur={() => commitCavityField("width")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitCavityField("width");
+                    }
+                  }}
+                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-400">Depth (in)</span>
+                <input
+                  type="number"
+                  step={0.125}
+                  value={cavityInputs.depth}
+                  onChange={(e) =>
+                    setCavityInputs((prev) => ({ ...prev, depth: e.target.value }))
+                  }
+                  onBlur={() => commitCavityField("depth")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitCavityField("depth");
+                    }
+                  }}
+                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-400">
+                  Corner radius (in)
+                </span>
+                <input
+                  type="number"
+                  step={0.125}
+                  value={cavityInputs.cornerRadius}
+                  onChange={(e) =>
+                    setCavityInputs((prev) => ({
+                      ...prev,
+                      cornerRadius: e.target.value,
+                    }))
+                  }
+                  onBlur={() => commitCavityField("cornerRadius")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitCavityField("cornerRadius");
+                    }
+                  }}
+                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                />
+              </label>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleCenterSelectedCavity}
+            className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-100 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+          >
+            Center this cavity in block
+          </button>
+        </>
+      )}
+    </div>
+  </aside>
+</div>
+</div>
+</div>
+</div>
+
+</main>
+);
 }
 
 /* ---------- SVG export helper ---------- */
@@ -1661,7 +2603,7 @@ function buildSvgFromLayout(
 
   const cavects: string[] = [];
 
-  for (const c of cavities as any[]) {
+  for (const c of cavities) {
     const cavW = c.lengthIn * scale;
     const cavH = c.widthIn * scale;
     const x = blockX + c.x * blockW;
@@ -1676,10 +2618,14 @@ function buildSvgFromLayout(
       cavects.push(
         [
           `<g>`,
-          `  <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
+          `  <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(
+            2,
+          )}" r="${r.toFixed(
             2,
           )}" fill="none" stroke="#111827" stroke-width="1" />`,
-          `  <text x="${cx.toFixed(2)}" y="${cy.toFixed(
+          `  <text x="${cx.toFixed(
+            2,
+          )}" y="${cy.toFixed(
             2,
           )}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#111827">${escapeText(
             label,
@@ -1691,7 +2637,11 @@ function buildSvgFromLayout(
       cavects.push(
         [
           `<g>`,
-          `  <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${cavW.toFixed(
+          `  <rect x="${x.toFixed(
+            2,
+          )}" y="${y.toFixed(
+            2,
+          )}" width="${cavW.toFixed(
             2,
           )}" height="${cavH.toFixed(
             2,
@@ -1713,18 +2663,27 @@ function buildSvgFromLayout(
 
   const headerLines: string[] = [];
   headerLines.push("NOT TO SCALE");
-  if (T > 0) headerLines.push(`BLOCK: ${L}" × ${W}" × ${T}"`);
-  else headerLines.push(`BLOCK: ${L}" × ${W}" (thickness see quote)`);
+  if (T > 0) {
+    headerLines.push(`BLOCK: ${L}" × ${W}" × ${T}"`);
+  } else {
+    headerLines.push(`BLOCK: ${L}" × ${W}" (thickness see quote)`);
+  }
 
-  if (meta?.materialLabel) headerLines.push(`MATERIAL: ${meta.materialLabel}`);
+  if (meta?.materialLabel) {
+    headerLines.push(`MATERIAL: ${meta.materialLabel}`);
+  }
 
   const headerTexts = headerLines
     .map((line, idx) => {
       const y = PADDING + idx * 14;
       const fontSize = idx === 0 ? 11 : 10;
-      return `<text x="${PADDING.toFixed(2)}" y="${y.toFixed(
+      return `<text x="${PADDING.toFixed(
         2,
-      )}" font-size="${fontSize}" fill="#111827">${escapeText(line)}</text>`;
+      )}" y="${y.toFixed(
+        2,
+      )}" font-size="${fontSize}" fill="#111827">${escapeText(
+        line,
+      )}</text>`;
     })
     .join("\n    ");
 
@@ -1732,19 +2691,79 @@ function buildSvgFromLayout(
     ${headerTexts}
   </g>`;
 
+  const metaLines: string[] = [];
+
+  if (meta?.notes && meta.notes.trim().length > 0) {
+    const rawNotes = meta.notes.trim();
+
+    const cleaned = rawNotes
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(
+        (line) =>
+          line &&
+          !/^FOAM(?:\s+BLOCK)?:/i.test(line) &&
+          !/^BLOCK:/i.test(line) &&
+          !/^CAVITY/i.test(line) &&
+          !/^FOAM:/i.test(line) &&
+          !/^MATERIAL:/i.test(line),
+      );
+
+    if (cleaned.length > 0) {
+      metaLines.push(`Notes: ${cleaned.join("  ")}`);
+    }
+  }
+
+  let metaSection = "";
+  if (metaLines.length > 0) {
+    const notesTexts = metaLines
+      .map((line, idx) => {
+        const y = VIEW_H - PADDING + idx * 14;
+        return `<text x="${PADDING.toFixed(
+          2,
+        )}" y="${y.toFixed(
+          2,
+        )}" font-size="10" fill="#111827">${escapeText(
+          line,
+        )}</text>`;
+      })
+      .join("\n    ");
+
+    metaSection = `<g>
+    ${notesTexts}
+  </g>`;
+  }
+
   const svgParts: string[] = [];
+
   svgParts.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}">`,
   );
+
   svgParts.push(`  ${headerSection}`);
+
   svgParts.push(
-    `  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(
+    `  <rect x="${blockX.toFixed(
       2,
-    )}" width="${blockW.toFixed(2)}" height="${blockH.toFixed(
+    )}" y="${blockY.toFixed(
+      2,
+    )}" width="${blockW.toFixed(
+      2,
+    )}" height="${blockH.toFixed(
       2,
     )}" rx="0" ry="0" fill="#e5e7eb" stroke="#111827" stroke-width="2" />`,
   );
-  if (cavRects) svgParts.push(cavRects);
+
+  if (cavRects) {
+    svgParts.push(cavRects);
+  }
+
+  if (metaSection) {
+    svgParts.push(metaSection);
+  }
+
   svgParts.push(`</svg>`);
+
   return svgParts.join("\n");
 }
+
