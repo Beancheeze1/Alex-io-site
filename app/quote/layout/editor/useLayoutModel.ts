@@ -2,9 +2,9 @@
 //
 // React hook for managing the layout model in the browser.
 // HARDENED:
-//  - Infers layers from email intent on first open
+//  - Infers layers + thickness from email intent on first open
 //  - Single source of truth for cavities = stack[layer].cavities
-//  - layout.cavities ALWAYS mirrors active layer
+//  - layout.cavities ALWAYS mirrors active layer (never seeded)
 //  - Prevents double-seeding on editor open
 //  - Legacy layouts normalized exactly once
 //  - Path A safe
@@ -12,21 +12,18 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { BlockDims, LayoutModel, Cavity, CavityShape } from "./layoutTypes";
+import type { BlockDims, LayoutModel, Cavity, CavityShape, LayoutLayer } from "./layoutTypes";
 
-type LayoutLayerLike = {
-  id: string;
-  label: string;
-  cavities: Cavity[];
-};
+
+
 
 type LayoutState = {
-  layout: LayoutModel & { stack: LayoutLayerLike[] };
+  layout: LayoutModel & { stack: LayoutLayer[] };
   activeLayerId: string;
 };
 
 export type UseLayoutModelResult = {
-  layout: LayoutModel & { stack: LayoutLayerLike[] };
+  layout: LayoutModel & { stack: LayoutLayer[] };
   selectedId: string | null;
   activeLayerId: string;
   selectCavity: (id: string | null) => void;
@@ -207,7 +204,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       const id = `layer-${idx}`;
       const nextStack = [
         ...prev.layout.stack,
-        { id, label: `Layer ${idx}`, cavities: [] },
+        { id, label: `Layer ${idx}`, thicknessIn: 1, cavities: [] },
       ];
 
       return {
@@ -275,11 +272,12 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   const block = { ...initial.block };
 
-  // If stack already exists, trust it fully
+  // Trust pre-existing stack fully
   if (Array.isArray((initial as any).stack) && (initial as any).stack.length) {
     const stack = (initial as any).stack.map((l: any) => ({
       id: l.id,
       label: l.label,
+      thicknessIn: l.thicknessIn ?? 1,
       cavities: [...l.cavities],
     }));
 
@@ -295,12 +293,12 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 
   const cavs = Array.isArray(initial.cavities) ? [...initial.cavities] : [];
 
-  // Infer 3-layer intent when cavities exist but stack does not
+  // Infer 3-layer intent: 1" / 4" / 1"
   if (cavs.length) {
-    const stack: LayoutLayerLike[] = [
-      { id: "layer-1", label: "Layer 1", cavities: [] },
-      { id: "layer-2", label: "Layer 2", cavities: cavs },
-      { id: "layer-3", label: "Layer 3", cavities: [] },
+    const stack: LayoutLayer[] = [
+      { id: "layer-1", label: "Layer 1", thicknessIn: 1, cavities: [] },
+      { id: "layer-2", label: "Layer 2", thicknessIn: 4, cavities: cavs },
+      { id: "layer-3", label: "Layer 3", thicknessIn: 1, cavities: [] },
     ];
 
     return {
@@ -313,11 +311,11 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     };
   }
 
-  // Legacy fallback: single layer
+  // Legacy single-layer fallback
   return {
     layout: {
       block,
-      stack: [{ id: "layer-1", label: "Layer 1", cavities: [] }],
+      stack: [{ id: "layer-1", label: "Layer 1", thicknessIn: block.thicknessIn ?? 1, cavities: [] }],
       cavities: [],
     },
     activeLayerId: "layer-1",

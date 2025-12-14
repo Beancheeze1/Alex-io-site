@@ -37,11 +37,11 @@ export type Cavity = {
  *   cavities array.
  */
 export type LayoutLayer = {
-  id: string;          // e.g. "bottom", "center", "top" or a GUID
-  label: string;       // e.g. "Bottom pad", "Center layer", "Top pad"
-  cavities: Cavity[];  // cavities belonging to this layer
+  id: string;
+  label: string;
+  thicknessIn: number;
+  cavities: Cavity[];
 };
-
 export type LayoutModel = {
   block: BlockDims;
 
