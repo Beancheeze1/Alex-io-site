@@ -269,117 +269,6 @@ function applyCavityNormalization(facts: Mem): Mem {
 }
 
 /* ============================================================
-   Step 2: Layer intent extraction (minimal, regex-only)
-   ============================================================ */
-
-function extractLayerIntent(textRaw: string): Mem {
-  const text = String(textRaw || "");
-  if (!text.trim()) return {};
-
-  // Keep original text for sentence-ish scanning, but also a lowercased version
-  const lower = text.toLowerCase();
-
-  const out: Mem = {};
-
-  // (3) 12"x12" layers  OR  3 12x12 layers  OR  3 layers of 12x12
-  const mCountFoot =
-    text.match(
-      new RegExp(
-        `\\((\\d{1,2})\\)\\s*(${NUM})\\s*"?\\s*[x×]\\s*(${NUM})\\s*"?\\s*layers?`,
-        "i",
-      ),
-    ) ||
-    text.match(
-      new RegExp(
-        `\\b(\\d{1,2})\\s+(${NUM})\\s*"?\\s*[x×]\\s*(${NUM})\\s*"?\\s*layers?\\b`,
-        "i",
-      ),
-    ) ||
-    text.match(
-      new RegExp(
-        `\\b(\\d{1,2})\\s+layers?\\s+(?:of|at|are)\\s*\\(?\\s*(${NUM})\\s*"?\\s*[x×]\\s*(${NUM})\\s*"?\\s*\\)?`,
-        "i",
-      ),
-    );
-
-  if (mCountFoot) {
-    const cnt = Number(mCountFoot[1]);
-    const L = canonNumStr(mCountFoot[2]);
-    const W = canonNumStr(mCountFoot[3]);
-
-    if (Number.isFinite(cnt) && cnt > 0) out.layer_count = cnt;
-    if (Number(L) > 0) out.layer_length_in = Number(L);
-    if (Number(W) > 0) out.layer_width_in = Number(W);
-    if (Number(L) > 0 && Number(W) > 0) out.layer_footprint_in = `${L}x${W}`;
-  }
-
-  // bottom/middle/top layer thickness: "... will be 1\" thick"
-  // We search whole text, but we only accept the first match for each position.
-  type Pos = "bottom" | "middle" | "top";
-  const posToIndex: Record<Pos, number> = { bottom: 0, middle: 1, top: 2 };
-
-  const thicknessByPos: Partial<Record<Pos, number>> = {};
-
-  const rePos = new RegExp(
-    `\\b(bottom|middle|top)\\s+layer\\b[^\\n\\.]{0,120}?\\b(${NUM})\\s*"?\\s*(?:in|inch|inches)?\\s*thick\\b`,
-    "gi",
-  );
-
-  let mm: RegExpExecArray | null;
-  while ((mm = rePos.exec(text))) {
-    const pos = String(mm[1]).toLowerCase() as Pos;
-    if (thicknessByPos[pos] != null) continue;
-
-    const n = Number(mm[2]);
-    if (!Number.isFinite(n) || n <= 0) continue;
-
-    thicknessByPos[pos] = n;
-  }
-
-  const layerCount = Number(out.layer_count || 0);
-  if (layerCount > 0 || Object.keys(thicknessByPos).length > 0) {
-    // Build thickness array if we can
-    const arr: (number | null)[] = [];
-    const n = layerCount > 0 ? layerCount : 3; // conservative default for bottom/middle/top phrasing
-    for (let i = 0; i < n; i++) arr.push(null);
-
-    for (const [pos, idx] of Object.entries(posToIndex) as Array<[Pos, number]>) {
-      const val = thicknessByPos[pos];
-      if (val != null && idx < arr.length) arr[idx] = val;
-    }
-
-    // Only store if we have at least one thickness
-    if (arr.some((x) => typeof x === "number" && Number(x) > 0)) {
-      out.layer_thicknesses_in = arr;
-    }
-  }
-
-  // Cavity-to-layer hint:
-  // If the text mentions cavities in the "middle layer" sentence, hint middle layer index=1.
-  // (We keep this minimal; editor can decide how to consume it.)
-  const hasCav = /\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(lower);
-  if (hasCav) {
-    // Prefer "middle layer ... cavities"
-    const midCav = /\bmiddle\s+layer\b[^\.]{0,200}\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(text);
-    const botCav = /\bbottom\s+layer\b[^\.]{0,200}\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(text);
-    const topCav = /\btop\s+layer\b[^\.]{0,200}\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(text);
-
-    if (midCav) {
-      out.layer_cavity_layer_index = 1;
-      out.layer_cavity_layer = "middle";
-    } else if (botCav) {
-      out.layer_cavity_layer_index = 0;
-      out.layer_cavity_layer = "bottom";
-    } else if (topCav) {
-      out.layer_cavity_layer_index = 0; // if only 1 layer, still safe
-      out.layer_cavity_layer = "top";
-    }
-  }
-
-  return compact(out);
-}
-
-/* ============================================================
    DB enrichment (material)
    ============================================================ */
 
@@ -441,6 +330,12 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     const wantsChar = /\bchar\b/.test(materialToken) || materialToken.includes("charcoal");
 
     // ---- HARDENING: grade-first match when present ----
+    // If we have a grade like "1560" and we're in Polyurethane context,
+    // we must prefer a grade name match BEFORE density fallback.
+    //
+    // Additionally: when multiple 1560 PU rows exist (ester/ether/char),
+    // choose the subtype based on the email text; otherwise avoid "ester"
+    // unless the customer explicitly asked for it.
     let row: any = null;
 
     if (hasGrade && hasPolyurethane && gradeLike) {
@@ -464,20 +359,24 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
             OR subcategory ILIKE $1
           )
         ORDER BY
+          -- 0) Explicit subtype wins
           CASE
             WHEN $2::boolean = true AND (name ILIKE '%ester%' OR category ILIKE '%ester%' OR subcategory ILIKE '%ester%') THEN 0
             WHEN $3::boolean = true AND (name ILIKE '%ether%' OR category ILIKE '%ether%' OR subcategory ILIKE '%ether%') THEN 0
             WHEN $4::boolean = true AND (name ILIKE '%char%'  OR category ILIKE '%char%'  OR subcategory ILIKE '%char%')  THEN 0
             ELSE 5
           END,
+          -- 1) If NO explicit ester request, penalize ester so we don't auto-pick it
           CASE
             WHEN $2::boolean = false AND (name ILIKE '%ester%' OR category ILIKE '%ester%' OR subcategory ILIKE '%ester%') THEN 50
             ELSE 0
           END,
+          -- 2) If NO explicit char request, lightly penalize char so it doesn't steal generic 1560
           CASE
             WHEN $4::boolean = false AND (name ILIKE '%char%' OR category ILIKE '%char%' OR subcategory ILIKE '%char%') THEN 10
             ELSE 0
           END,
+          -- 3) Density closeness as a tiebreaker only
           ABS(COALESCE(density_lb_ft3, 0) - $5)
         LIMIT 1;
         `,
@@ -485,6 +384,8 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       );
     }
 
+    // 1) Next pass: token LIKE across name/family/category/subcategory (existing behavior)
+    // We keep this for non-grade materials and as a fallback when grade match fails.
     if (!row) {
       row = await one<any>(
         `
@@ -513,6 +414,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       );
     }
 
+    // 2) Final fallback: family + density only (robust to naming noise).
     if (!row) {
       row = await one<any>(
         `
@@ -536,9 +438,12 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     }
 
     if (!row) {
+      // Nothing we can do; leave facts alone.
       return f;
     }
 
+    // If grade exists, we treat DB row as authoritative and overwrite any earlier wrong selection.
+    // This fixes cases where a generic density match grabbed the wrong "1560" subtype.
     if (hasGrade && !f.material_id) {
       f.material_id = row.id;
     } else if (hasGrade && f.material_id && Number(f.material_id) !== Number(row.id)) {
@@ -557,6 +462,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       f.material_family = row.material_family;
     }
 
+    // Only fill material from the DB if we had *nothing*.
     const familyFromRow: string | null =
       row.material_family ||
       row.category ||
@@ -576,6 +482,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
 
     return f;
   } catch {
+    // On any error, don’t block the quote; just return current facts.
     return f;
   }
 }
@@ -617,6 +524,7 @@ async function hydrateFromDBByQuoteNo(
     );
 
     if (primaryItem) {
+      // Qty: only hydrate from DB if this turn did NOT explicitly provide a qty
       if (!opts.lockQty) {
         const dbQty = Number(primaryItem.qty);
         if (Number.isFinite(dbQty) && dbQty > 0) {
@@ -624,6 +532,7 @@ async function hydrateFromDBByQuoteNo(
         }
       }
 
+      // Dims: if we don't already have dims (or they are clearly bogus), hydrate from DB
       if (!opts.lockDims) {
         const hasDims = typeof out.dims === "string" && out.dims.trim().length > 0;
         if (!hasDims) {
@@ -677,6 +586,7 @@ async function hydrateFromDBByQuoteNo(
 
     return out;
   } catch {
+    // If anything goes wrong, fall back to existing facts
     return out;
   }
 }
@@ -729,6 +639,10 @@ async function fetchCalcQuote(opts: {
   const { L, W, H } = parseDimsNums(opts.dims);
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
+  // IMPORTANT 11/27:
+  // For now we IGNORE cavity volume in pricing so that the
+  // first-response email, quote print page, and layout snapshot
+  // all show the same totals (full block volume pricing).
   const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -764,6 +678,7 @@ async function buildPriceBreaks(
   const baseQty = baseOpts.qty;
   if (!baseQty || baseQty <= 0) return null;
 
+  // fixed ladder + always include requested qty
   const ladder = Array.from(
     new Set([1, 10, 25, 50, 100, 150, 250, baseQty].map((q) => Math.round(q)).filter((q) => q > 0)),
   ).sort((a, b) => a - b);
@@ -886,10 +801,12 @@ function grabMaterialGrade(raw: string): string | undefined {
 function grabMaterial(raw: string): string | undefined {
   const t = raw.toLowerCase();
 
+  // Expanded Polyethylene / EPE
   if (/\bepe\b/.test(t) || /\bepe\s+foam\b/.test(t) || t.includes("expanded polyethylene")) {
     return "epe";
   }
 
+  // XLPE / cross-linked PE
   if (
     /\bxlpe\b/.test(t) ||
     t.includes("cross-linked polyethylene") ||
@@ -899,27 +816,107 @@ function grabMaterial(raw: string): string | undefined {
     return "xlpe";
   }
 
+  // Polyurethane family
   if (t.includes("polyurethane") || /\bpu\b/.test(t) || /\burethane\b/.test(t) || t.includes("urethane foam")) {
     return "polyurethane";
   }
 
+  // Kaizen inserts
   if (/\bkaizen\b/.test(t)) {
     return "kaizen";
   }
 
+  // Polystyrene / EPS
   if (t.includes("polystyrene") || /\beps\b/.test(t)) {
     return "eps";
   }
 
+  // Polypropylene
   if (/\bpp\b/.test(t)) {
     return "pp";
   }
 
+  // Plain Polyethylene / PE
   if (t.includes("polyethylene") || t.includes("pe foam") || /\bpe\b/.test(t)) {
     return "pe";
   }
 
   return undefined;
+}
+
+/**
+ * Step 2: layer intent extraction (Top = index 0)
+ * - Detect: "(3) 12\"x12\" layers" (or close variants)
+ * - Detect per-layer thickness: "top/bottom/middle layer will be 1\" thick"
+ * - Store ONLY facts.* fields (no editor changes here)
+ */
+function grabLayerSummary(raw: string): { layer_count?: number; footprint?: string } {
+  const t = (raw || "").toLowerCase();
+
+  // Examples supported:
+  // "(3) 12\"x12\" layers"
+  // "3 12x12 layers"
+  // "made up of (3) 12 x 12 layers"
+  const re = new RegExp(
+    `\\b\\(?\\s*(\\d{1,2})\\s*\\)?\\s*(${NUM})\\s*["']?\\s*[x×]\\s*(${NUM})\\s*["']?\\s*(?:layers?|pcs?\\s+of\\s+layers?)\\b`,
+    "i",
+  );
+  const m = t.match(re);
+  if (!m) return {};
+  const count = Number(m[1]);
+  const L = canonNumStr(m[2]);
+  const W = canonNumStr(m[3]);
+  if (!Number.isFinite(count) || count <= 0) return {};
+  return { layer_count: count, footprint: `${L}x${W}` };
+}
+
+function grabLayerThicknesses(raw: string): {
+  top?: number;
+  middle?: number;
+  bottom?: number;
+  cavityLayerHint?: "top" | "middle" | "bottom";
+} {
+  const s = raw || "";
+  const out: any = {};
+
+  // We search globally for phrases like:
+  // "The top layer will be 1\" thick"
+  // "bottom layer is 1 inch thick"
+  // "middle layer will be 4\" thick with 3 cavities ..."
+  const re = new RegExp(
+    `\\b(top|middle|bottom)\\s+layer\\b[^.\\n\\r]{0,120}?\\b(${NUM})\\s*(?:"|inches?|inch)\\b[^.\\n\\r]{0,40}?\\bthick\\b`,
+    "gi",
+  );
+
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    const pos = String(m[1]).toLowerCase();
+    const th = Number(m[2]);
+    if (!Number.isFinite(th) || th <= 0) continue;
+    if (pos === "top") out.top = th;
+    if (pos === "middle") out.middle = th;
+    if (pos === "bottom") out.bottom = th;
+
+    // If this same clause mentions cavities, treat it as the cavity-layer hint.
+    const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 200)).toLowerCase();
+    if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText)) {
+      out.cavityLayerHint = pos;
+    }
+  }
+
+  // If we didn't catch the cavity-layer hint above, do a softer scan:
+  if (!out.cavityLayerHint) {
+    const t = s.toLowerCase();
+    const cavIdx = t.search(/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/);
+    if (cavIdx >= 0) {
+      const windowText = t.slice(Math.max(0, cavIdx - 120), Math.min(t.length, cavIdx + 120));
+      if (windowText.includes("middle layer")) out.cavityLayerHint = "middle";
+      else if (windowText.includes("top layer")) out.cavityLayerHint = "top";
+      else if (windowText.includes("bottom layer")) out.cavityLayerHint = "bottom";
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -1066,13 +1063,6 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
     }
   }
 
-  // Step 2: extract layer intent (count, footprint, thicknesses, cavity layer hint)
-  const layerFacts = extractLayerIntent(text);
-  for (const [k, v] of Object.entries(layerFacts)) {
-    // Only set if not already present (Path-A conservative)
-    if ((facts as any)[k] == null) (facts as any)[k] = v;
-  }
-
   // HARDENING: preserve full material phrase if present (helps grade enrichment)
   // Example: "1560 black polyurethane" -> keep it (not just "polyurethane")
   const mMaterialPhrase = text.match(
@@ -1082,6 +1072,51 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
     facts.material = `${mMaterialPhrase[1]} ${mMaterialPhrase[2]} polyurethane`.toLowerCase();
     (facts as any).material_grade = mMaterialPhrase[1];
     facts.color = String(mMaterialPhrase[2]).toLowerCase();
+  }
+
+  /* ------------------- Step 2: Layer intent extraction (Top = index 0) ------------------- */
+
+  // Only set these when we see a clear layer summary.
+  const layerSummary = grabLayerSummary(text);
+  if (layerSummary.layer_count && layerSummary.footprint) {
+    facts.layer_count = layerSummary.layer_count;
+    facts.layer_footprint = layerSummary.footprint;
+
+    // Capture thicknesses for top/middle/bottom if present.
+    const th = grabLayerThicknesses(text);
+
+    // Build facts.layers with indices where: top=0, middle=1, bottom=2 (for 3 layers).
+    // For now, we only populate what we can confidently infer.
+    const layers: any[] = [];
+
+    if (layerSummary.layer_count === 3) {
+      // index mapping per your instruction:
+      //   0 = top
+      //   1 = middle
+      //   2 = bottom
+      layers.push({ index: 0, position: "top", thickness_in: th.top ?? null });
+      layers.push({ index: 1, position: "middle", thickness_in: th.middle ?? null });
+      layers.push({ index: 2, position: "bottom", thickness_in: th.bottom ?? null });
+
+      // Cavity layer hint
+      if (th.cavityLayerHint === "top") facts.layer_cavity_layer_index = 0;
+      else if (th.cavityLayerHint === "middle") facts.layer_cavity_layer_index = 1;
+      else if (th.cavityLayerHint === "bottom") facts.layer_cavity_layer_index = 2;
+    } else {
+      // If not exactly 3 layers, store count + footprint only (safe),
+      // and do not guess positions.
+      // (We can extend later if needed.)
+    }
+
+    // Only store layers if we added any.
+    if (layers.length) {
+      // Remove null thickness fields (cleaner facts)
+      facts.layers = layers.map((l) => ({
+        index: l.index,
+        position: l.position,
+        ...(l.thickness_in != null ? { thickness_in: l.thickness_in } : {}),
+      }));
+    }
   }
 
   return compact(facts);
