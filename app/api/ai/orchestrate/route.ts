@@ -151,7 +151,6 @@ function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
 
   return null;
 }
-
 /* ============================================================
    Cavity normalization
    ============================================================ */
@@ -184,12 +183,19 @@ function normalizeCavity(raw: string): string {
   return rect || raw.trim();
 }
 
+function canonNumStr(raw: string): string {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return raw;
+  // Number(".5") => 0.5, Number("1.0") => 1
+  return n.toString();
+}
+
 /**
- * Option 1 behavior:
- * - Clean up cavity dims
- * - Preserve the user's stated cavityCount when possible
- * - If they said "2 cavities" but only gave one size, duplicate that size
- *   so lengths match (e.g. ["2x1x1", "2x1x1"]).
+ * Step 1 fix:
+ * - Parse ALL valid cavity dims first (3-number LxWxH)
+ * - De-dupe conservatively (exact same L/W/H only), preserve order
+ * - Only duplicate if still fewer than cavityCount
+ * - Canonicalize decimals so ".5" => "0.5"
  */
 function applyCavityNormalization(facts: Mem): Mem {
   if (!facts) return facts;
@@ -200,53 +206,59 @@ function applyCavityNormalization(facts: Mem): Mem {
       ? facts.cavityCount
       : undefined;
 
-  const cleaned: string[] = [];
+  // 1) Parse all valid cavity dims first (preserve order)
+  const parsed: { L: string; W: string; H: string; key: string; dims: string }[] = [];
 
   for (const raw of facts.cavityDims as string[]) {
     if (!raw) continue;
 
-    // First basic normalization (DIA, quotes, etc.)
     const norm = normalizeCavity(String(raw));
 
-    // Require exactly 3 numeric components L x W x H
     const m = norm
       .toLowerCase()
       .replace(/"/g, "")
       .match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`, "i"));
 
-    if (!m) {
-      // Can't see 3 numbers => skip this cavity
-      continue;
-    }
+    if (!m) continue;
 
-    const L = m[1];
-    const W = m[2];
-    const H = m[3];
+    const L = canonNumStr(m[1]);
+    const W = canonNumStr(m[2]);
+    const H = canonNumStr(m[3]);
 
-    cleaned.push(`${L}x${W}x${H}`);
+    // Conservative key: exact numeric triple after canonicalization
+    const key = `${L}|${W}|${H}`;
+    parsed.push({ L, W, H, key, dims: `${L}x${W}x${H}` });
   }
 
-  if (!cleaned.length) {
-    // Nothing valid left — drop cavity info
+  if (!parsed.length) {
     delete (facts as any).cavityDims;
     delete (facts as any).cavityCount;
     return facts;
   }
 
-  // Target count: prefer the user's stated count if it's reasonable,
-  // otherwise just use however many unique dims we parsed.
-  let targetCount = originalCount && originalCount > 0 ? originalCount : cleaned.length;
+  // 2) De-dupe conservatively (first seen wins, order preserved)
+  const seen = new Set<string>();
+  const distinct: string[] = [];
 
-  if (targetCount < 1) {
-    targetCount = cleaned.length;
+  for (const p of parsed) {
+    if (seen.has(p.key)) continue;
+    seen.add(p.key);
+    distinct.push(p.dims);
   }
 
-  const finalDims: string[] = [...cleaned];
+  // 3) Decide target count:
+  // - Never drop distinct dims just because cavityCount is smaller/incorrect.
+  // - If cavityCount is larger, we will duplicate to satisfy it.
+  let targetCount = distinct.length;
+  if (originalCount && originalCount > targetCount) {
+    targetCount = originalCount;
+  }
 
-  // If they said "2 cavities" but only one size parsed,
-  // duplicate the sizes in a simple repeating pattern.
+  const finalDims: string[] = [...distinct];
+
+  // 4) Duplicate only if still fewer than cavityCount
   while (finalDims.length < targetCount) {
-    finalDims.push(cleaned[finalDims.length % cleaned.length]);
+    finalDims.push(distinct[finalDims.length % distinct.length]);
   }
 
   (facts as any).cavityDims = finalDims;
@@ -472,7 +484,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     return f;
   }
 }
-
 /* ============================================================
    NEW: hydrateFromDBByQuoteNo
    Keeps facts in sync with DB qty + cavities
@@ -827,12 +838,15 @@ function grabMaterial(raw: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Step 1 fix:
+ * - Parse ALL cavity dims first (including "..., 4x4x1 and 2x3x1")
+ * - Do NOT run any destructive decimal rewrites here
+ * - Leave de-dupe + duplication to applyCavityNormalization()
+ */
 function extractCavities(raw: string): { cavityCount?: number; cavityDims?: string[] } {
-  const t = raw.toLowerCase();
-  const lines = raw.split(/\r?\n/);
-
-  // PROTECT DECIMALS
-  raw = raw.replace(/x\.(\d+)/g, "x0.$1").replace(/\.([0-9]+)/g, "0.$1");
+  const t = (raw || "").toLowerCase();
+  const lines = (raw || "").split(/\r?\n/);
 
   const cavityDims: string[] = [];
   let cavityCount: number | undefined;
@@ -845,22 +859,32 @@ function extractCavities(raw: string): { cavityCount?: number; cavityDims?: stri
   }
 
   for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (!/\bcavity|cavities|cutout|pocket\b/.test(lower)) continue;
+    const lower = (line || "").toLowerCase();
+    if (!/\b(cavity|cavities|cutout|pocket)\b/.test(lower)) continue;
 
-    // split on commas / semicolons only
-    const tokens = line.split(/[;,]/);
+    // 1) Capture ALL triples on the line (handles "4x4x1 and 2x3x1")
+    const lineNoQuotes = (line || "").replace(/"/g, " ");
+    const reTriple = new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`, "gi");
+    let m: RegExpExecArray | null;
+    while ((m = reTriple.exec(lineNoQuotes))) {
+      cavityDims.push(`${m[1]}x${m[2]}x${m[3]}`);
+    }
 
-    for (const tok of tokens) {
-      const dd = grabDims(tok);
-      if (dd) {
-        cavityDims.push(dd);
-        continue;
-      }
+    // 2) Fallback: if no triples found, keep the older token logic for pairs
+    if (!cavityDims.length) {
+      const tokens = line.split(/[;,]/);
 
-      const mPair = tok.trim().match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`));
-      if (mPair) {
-        cavityDims.push(`${mPair[1]}x${mPair[2]}x1`);
+      for (const tok of tokens) {
+        const dd = grabDims(tok);
+        if (dd) {
+          cavityDims.push(dd);
+          continue;
+        }
+
+        const mPair = tok.trim().match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`));
+        if (mPair) {
+          cavityDims.push(`${mPair[1]}x${mPair[2]}x1`);
+        }
       }
     }
   }
