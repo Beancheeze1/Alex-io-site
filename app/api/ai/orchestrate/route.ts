@@ -50,8 +50,12 @@ type In = {
 type Mem = Record<string, any>;
 
 function ok(extra: Record<string, any> = {}) {
-  return NextResponse.json({ ok: true, ...extra }, { status: 200 });
+  return NextResponse.json(
+    { ok: true, build: "orchestrate-2025-12-14a", ...extra },
+    { status: 200 },
+  );
 }
+
 
 function err(error: string, detail?: any) {
   return NextResponse.json({ ok: false, error, detail }, { status: 200 });
