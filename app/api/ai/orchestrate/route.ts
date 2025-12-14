@@ -1469,6 +1469,7 @@ export async function POST(req: NextRequest) {
     if (dryRun) {
       return ok({
         mode: "dryrun",
+        build: "orchestrate-2025-12-14a", // <-- proof stamp
         debug_in,
         debug_newly,
         htmlPreview: htmlBody,
