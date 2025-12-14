@@ -151,6 +151,7 @@ function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
 
   return null;
 }
+
 /* ============================================================
    Cavity normalization
    ============================================================ */
@@ -266,6 +267,118 @@ function applyCavityNormalization(facts: Mem): Mem {
 
   return facts;
 }
+
+/* ============================================================
+   Step 2: Layer intent extraction (minimal, regex-only)
+   ============================================================ */
+
+function extractLayerIntent(textRaw: string): Mem {
+  const text = String(textRaw || "");
+  if (!text.trim()) return {};
+
+  // Keep original text for sentence-ish scanning, but also a lowercased version
+  const lower = text.toLowerCase();
+
+  const out: Mem = {};
+
+  // (3) 12"x12" layers  OR  3 12x12 layers  OR  3 layers of 12x12
+  const mCountFoot =
+    text.match(
+      new RegExp(
+        `\\((\\d{1,2})\\)\\s*(${NUM})\\s*"?\\s*[x×]\\s*(${NUM})\\s*"?\\s*layers?`,
+        "i",
+      ),
+    ) ||
+    text.match(
+      new RegExp(
+        `\\b(\\d{1,2})\\s+(${NUM})\\s*"?\\s*[x×]\\s*(${NUM})\\s*"?\\s*layers?\\b`,
+        "i",
+      ),
+    ) ||
+    text.match(
+      new RegExp(
+        `\\b(\\d{1,2})\\s+layers?\\s+(?:of|at|are)\\s*\\(?\\s*(${NUM})\\s*"?\\s*[x×]\\s*(${NUM})\\s*"?\\s*\\)?`,
+        "i",
+      ),
+    );
+
+  if (mCountFoot) {
+    const cnt = Number(mCountFoot[1]);
+    const L = canonNumStr(mCountFoot[2]);
+    const W = canonNumStr(mCountFoot[3]);
+
+    if (Number.isFinite(cnt) && cnt > 0) out.layer_count = cnt;
+    if (Number(L) > 0) out.layer_length_in = Number(L);
+    if (Number(W) > 0) out.layer_width_in = Number(W);
+    if (Number(L) > 0 && Number(W) > 0) out.layer_footprint_in = `${L}x${W}`;
+  }
+
+  // bottom/middle/top layer thickness: "... will be 1\" thick"
+  // We search whole text, but we only accept the first match for each position.
+  type Pos = "bottom" | "middle" | "top";
+  const posToIndex: Record<Pos, number> = { bottom: 0, middle: 1, top: 2 };
+
+  const thicknessByPos: Partial<Record<Pos, number>> = {};
+
+  const rePos = new RegExp(
+    `\\b(bottom|middle|top)\\s+layer\\b[^\\n\\.]{0,120}?\\b(${NUM})\\s*"?\\s*(?:in|inch|inches)?\\s*thick\\b`,
+    "gi",
+  );
+
+  let mm: RegExpExecArray | null;
+  while ((mm = rePos.exec(text))) {
+    const pos = String(mm[1]).toLowerCase() as Pos;
+    if (thicknessByPos[pos] != null) continue;
+
+    const n = Number(mm[2]);
+    if (!Number.isFinite(n) || n <= 0) continue;
+
+    thicknessByPos[pos] = n;
+  }
+
+  const layerCount = Number(out.layer_count || 0);
+  if (layerCount > 0 || Object.keys(thicknessByPos).length > 0) {
+    // Build thickness array if we can
+    const arr: (number | null)[] = [];
+    const n = layerCount > 0 ? layerCount : 3; // conservative default for bottom/middle/top phrasing
+    for (let i = 0; i < n; i++) arr.push(null);
+
+    for (const [pos, idx] of Object.entries(posToIndex) as Array<[Pos, number]>) {
+      const val = thicknessByPos[pos];
+      if (val != null && idx < arr.length) arr[idx] = val;
+    }
+
+    // Only store if we have at least one thickness
+    if (arr.some((x) => typeof x === "number" && Number(x) > 0)) {
+      out.layer_thicknesses_in = arr;
+    }
+  }
+
+  // Cavity-to-layer hint:
+  // If the text mentions cavities in the "middle layer" sentence, hint middle layer index=1.
+  // (We keep this minimal; editor can decide how to consume it.)
+  const hasCav = /\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(lower);
+  if (hasCav) {
+    // Prefer "middle layer ... cavities"
+    const midCav = /\bmiddle\s+layer\b[^\.]{0,200}\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(text);
+    const botCav = /\bbottom\s+layer\b[^\.]{0,200}\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(text);
+    const topCav = /\btop\s+layer\b[^\.]{0,200}\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(text);
+
+    if (midCav) {
+      out.layer_cavity_layer_index = 1;
+      out.layer_cavity_layer = "middle";
+    } else if (botCav) {
+      out.layer_cavity_layer_index = 0;
+      out.layer_cavity_layer = "bottom";
+    } else if (topCav) {
+      out.layer_cavity_layer_index = 0; // if only 1 layer, still safe
+      out.layer_cavity_layer = "top";
+    }
+  }
+
+  return compact(out);
+}
+
 /* ============================================================
    DB enrichment (material)
    ============================================================ */
@@ -328,12 +441,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     const wantsChar = /\bchar\b/.test(materialToken) || materialToken.includes("charcoal");
 
     // ---- HARDENING: grade-first match when present ----
-    // If we have a grade like "1560" and we're in Polyurethane context,
-    // we must prefer a grade name match BEFORE density fallback.
-    //
-    // Additionally: when multiple 1560 PU rows exist (ester/ether/char),
-    // choose the subtype based on the email text; otherwise avoid "ester"
-    // unless the customer explicitly asked for it.
     let row: any = null;
 
     if (hasGrade && hasPolyurethane && gradeLike) {
@@ -357,24 +464,20 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
             OR subcategory ILIKE $1
           )
         ORDER BY
-          -- 0) Explicit subtype wins
           CASE
             WHEN $2::boolean = true AND (name ILIKE '%ester%' OR category ILIKE '%ester%' OR subcategory ILIKE '%ester%') THEN 0
             WHEN $3::boolean = true AND (name ILIKE '%ether%' OR category ILIKE '%ether%' OR subcategory ILIKE '%ether%') THEN 0
             WHEN $4::boolean = true AND (name ILIKE '%char%'  OR category ILIKE '%char%'  OR subcategory ILIKE '%char%')  THEN 0
             ELSE 5
           END,
-          -- 1) If NO explicit ester request, penalize ester so we don't auto-pick it
           CASE
             WHEN $2::boolean = false AND (name ILIKE '%ester%' OR category ILIKE '%ester%' OR subcategory ILIKE '%ester%') THEN 50
             ELSE 0
           END,
-          -- 2) If NO explicit char request, lightly penalize char so it doesn't steal generic 1560
           CASE
             WHEN $4::boolean = false AND (name ILIKE '%char%' OR category ILIKE '%char%' OR subcategory ILIKE '%char%') THEN 10
             ELSE 0
           END,
-          -- 3) Density closeness as a tiebreaker only
           ABS(COALESCE(density_lb_ft3, 0) - $5)
         LIMIT 1;
         `,
@@ -382,8 +485,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       );
     }
 
-    // 1) Next pass: token LIKE across name/family/category/subcategory (existing behavior)
-    // We keep this for non-grade materials and as a fallback when grade match fails.
     if (!row) {
       row = await one<any>(
         `
@@ -412,7 +513,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       );
     }
 
-    // 2) Final fallback: family + density only (robust to naming noise).
     if (!row) {
       row = await one<any>(
         `
@@ -436,12 +536,9 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     }
 
     if (!row) {
-      // Nothing we can do; leave facts alone.
       return f;
     }
 
-    // If grade exists, we treat DB row as authoritative and overwrite any earlier wrong selection.
-    // This fixes cases where a generic density match grabbed the wrong "1560" subtype.
     if (hasGrade && !f.material_id) {
       f.material_id = row.id;
     } else if (hasGrade && f.material_id && Number(f.material_id) !== Number(row.id)) {
@@ -460,7 +557,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       f.material_family = row.material_family;
     }
 
-    // Only fill material from the DB if we had *nothing*.
     const familyFromRow: string | null =
       row.material_family ||
       row.category ||
@@ -480,10 +576,10 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
 
     return f;
   } catch {
-    // On any error, don’t block the quote; just return current facts.
     return f;
   }
 }
+
 /* ============================================================
    NEW: hydrateFromDBByQuoteNo
    Keeps facts in sync with DB qty + cavities
@@ -521,7 +617,6 @@ async function hydrateFromDBByQuoteNo(
     );
 
     if (primaryItem) {
-      // Qty: only hydrate from DB if this turn did NOT explicitly provide a qty
       if (!opts.lockQty) {
         const dbQty = Number(primaryItem.qty);
         if (Number.isFinite(dbQty) && dbQty > 0) {
@@ -529,7 +624,6 @@ async function hydrateFromDBByQuoteNo(
         }
       }
 
-      // Dims: if we don't already have dims (or they are clearly bogus), hydrate from DB
       if (!opts.lockDims) {
         const hasDims = typeof out.dims === "string" && out.dims.trim().length > 0;
         if (!hasDims) {
@@ -583,10 +677,10 @@ async function hydrateFromDBByQuoteNo(
 
     return out;
   } catch {
-    // If anything goes wrong, fall back to existing facts
     return out;
   }
 }
+
 /* ============================================================
    Dimension / density helpers
    ============================================================ */
@@ -635,10 +729,6 @@ async function fetchCalcQuote(opts: {
   const { L, W, H } = parseDimsNums(opts.dims);
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
-  // IMPORTANT 11/27:
-  // For now we IGNORE cavity volume in pricing so that the
-  // first-response email, quote print page, and layout snapshot
-  // all show the same totals (full block volume pricing).
   const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -674,7 +764,6 @@ async function buildPriceBreaks(
   const baseQty = baseOpts.qty;
   if (!baseQty || baseQty <= 0) return null;
 
-  // fixed ladder + always include requested qty
   const ladder = Array.from(
     new Set([1, 10, 25, 50, 100, 150, 250, baseQty].map((q) => Math.round(q)).filter((q) => q > 0)),
   ).sort((a, b) => a - b);
@@ -755,7 +844,9 @@ function grabQty(raw: string): number | undefined {
   if (m) return Number(m[1]);
 
   const norm = t.replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/g, "$1 ");
-  m = norm.match(new RegExp(`\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?))?\\b`, "i"));
+  m = norm.match(
+    new RegExp(`\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?))?\\b`, "i"),
+  );
   if (m) return Number(m[1]);
 
   m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?)?\b/);
@@ -795,12 +886,10 @@ function grabMaterialGrade(raw: string): string | undefined {
 function grabMaterial(raw: string): string | undefined {
   const t = raw.toLowerCase();
 
-  // Expanded Polyethylene / EPE
   if (/\bepe\b/.test(t) || /\bepe\s+foam\b/.test(t) || t.includes("expanded polyethylene")) {
     return "epe";
   }
 
-  // XLPE / cross-linked PE
   if (
     /\bxlpe\b/.test(t) ||
     t.includes("cross-linked polyethylene") ||
@@ -810,27 +899,22 @@ function grabMaterial(raw: string): string | undefined {
     return "xlpe";
   }
 
-  // Polyurethane family
   if (t.includes("polyurethane") || /\bpu\b/.test(t) || /\burethane\b/.test(t) || t.includes("urethane foam")) {
     return "polyurethane";
   }
 
-  // Kaizen inserts
   if (/\bkaizen\b/.test(t)) {
     return "kaizen";
   }
 
-  // Polystyrene / EPS
   if (t.includes("polystyrene") || /\beps\b/.test(t)) {
     return "eps";
   }
 
-  // Polypropylene
   if (/\bpp\b/.test(t)) {
     return "pp";
   }
 
-  // Plain Polyethylene / PE
   if (t.includes("polyethylene") || t.includes("pe foam") || /\bpe\b/.test(t)) {
     return "pe";
   }
@@ -980,6 +1064,13 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
       facts.cavityDims = recovered;
       facts.cavityCount = recovered.length;
     }
+  }
+
+  // Step 2: extract layer intent (count, footprint, thicknesses, cavity layer hint)
+  const layerFacts = extractLayerIntent(text);
+  for (const [k, v] of Object.entries(layerFacts)) {
+    // Only set if not already present (Path-A conservative)
+    if ((facts as any)[k] == null) (facts as any)[k] = v;
   }
 
   // HARDENING: preserve full material phrase if present (helps grade enrichment)
