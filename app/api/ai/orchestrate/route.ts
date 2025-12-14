@@ -19,6 +19,9 @@
 //       so “change qty to 250” in the email still wins over DB.
 // - NEW 11/27: Pricing calc now ignores cavity volume so that the
 //   first-response email, quote page, and layout snapshot all match.
+// - HARDENING 12/13: If material_grade is present (e.g. "1560"),
+//   DB enrichment must prefer materials.name ILIKE '%1560%' within
+//   the correct foam family bucket BEFORE density fallback.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -66,44 +69,6 @@ function mergeFacts(a: Mem, b: Mem): Mem {
   return { ...(a || {}), ...compact(b || {}) };
 }
 
-// Extract common foam grade tokens like "1560", "1030", etc.
-// We only treat 4-digit tokens as a "grade" when they appear near
-// polyurethane/urethane wording to avoid accidentally treating dates/IDs as grades.
-function extractMaterialGradeFromText(text: string): string | null {
-  const t = String(text || "").toLowerCase();
-
-  // Only consider this if the email is clearly talking about polyurethane
-  const isPU =
-    t.includes("polyurethane") || /\bpu\b/.test(t) || /\burethane\b/.test(t);
-
-  if (!isPU) return null;
-
-  // Look for 4-digit tokens (e.g. 1560)
-  // Guard: require it to appear within ~40 chars of "polyurethane/urethane/pu"
-  const re = /(\d{4})/g;
-  let m: RegExpExecArray | null;
-
-  while ((m = re.exec(t))) {
-    const grade = m[1];
-    const idx = m.index ?? 0;
-    const windowStart = Math.max(0, idx - 40);
-    const windowEnd = Math.min(t.length, idx + 40);
-    const window = t.slice(windowStart, windowEnd);
-
-    if (
-      window.includes("polyurethane") ||
-      window.includes("urethane") ||
-      /\bpu\b/.test(window)
-    ) {
-      return grade;
-    }
-  }
-
-  return null;
-}
-
-
-
 function pickThreadContext(threadMsgs: any[] = []) {
   const take = threadMsgs.slice(-3);
   const snippets = take
@@ -150,6 +115,10 @@ function extractRepSlugFromSubject(subject: string, body?: string): string | nul
 }
 
 // Infer rep slug from thread messages (mailbox / "to" address).
+// Option C behavior: if no explicit subject tag, we look at which
+// mailbox the customer emailed.
+//
+// You can extend this map as you add more seats.
 function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
   if (!Array.isArray(threadMsgs) || !threadMsgs.length) return null;
 
@@ -215,6 +184,13 @@ function normalizeCavity(raw: string): string {
   return rect || raw.trim();
 }
 
+/**
+ * Option 1 behavior:
+ * - Clean up cavity dims
+ * - Preserve the user's stated cavityCount when possible
+ * - If they said "2 cavities" but only gave one size, duplicate that size
+ *   so lengths match (e.g. ["2x1x1", "2x1x1"]).
+ */
 function applyCavityNormalization(facts: Mem): Mem {
   if (!facts) return facts;
   if (!Array.isArray(facts.cavityDims)) return facts;
@@ -236,12 +212,7 @@ function applyCavityNormalization(facts: Mem): Mem {
     const m = norm
       .toLowerCase()
       .replace(/"/g, "")
-      .match(
-        new RegExp(
-          `(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`,
-          "i",
-        ),
-      );
+      .match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`, "i"));
 
     if (!m) {
       // Can't see 3 numbers => skip this cavity
@@ -264,8 +235,7 @@ function applyCavityNormalization(facts: Mem): Mem {
 
   // Target count: prefer the user's stated count if it's reasonable,
   // otherwise just use however many unique dims we parsed.
-  let targetCount =
-    originalCount && originalCount > 0 ? originalCount : cleaned.length;
+  let targetCount = originalCount && originalCount > 0 ? originalCount : cleaned.length;
 
   if (targetCount < 1) {
     targetCount = cleaned.length;
@@ -284,46 +254,6 @@ function applyCavityNormalization(facts: Mem): Mem {
 
   return facts;
 }
-
-/* ============================================================
-   NEW: Color parsing (Path A)
-   ============================================================ */
-
-// Only capture a simple base color word for now.
-function grabColor(raw: string): string | undefined {
-  const t = String(raw || "").toLowerCase();
-
-  // If customer says "black PE" etc., we want "black"
-  const colors = [
-    "black",
-    "white",
-    "gray",
-    "grey",
-    "blue",
-    "red",
-    "green",
-    "yellow",
-    "orange",
-    "purple",
-    "pink",
-    "tan",
-    "beige",
-    "brown",
-    "natural",
-    "clear",
-  ];
-
-  for (const c of colors) {
-    const re = new RegExp(`\\b${c}\\b`, "i");
-    if (re.test(t)) {
-      if (c === "grey") return "gray";
-      return c;
-    }
-  }
-
-  return undefined;
-}
-
 /* ============================================================
    DB enrichment (material)
    ============================================================ */
@@ -333,10 +263,21 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     if (!f.material) return f;
 
     const materialToken = String(f.material).toLowerCase().trim();
+
+    // HARDENING: if we extracted a grade like "1560", prefer it for matching.
+    const materialGradeRaw = String((f as any).material_grade || "").trim();
+    const hasGrade = !!materialGradeRaw && /^\d{3,5}$/.test(materialGradeRaw);
+    const gradeLike = hasGrade ? `%${materialGradeRaw}%` : null;
+
     const like = `%${materialToken}%`;
     const densNum = Number((f.density || "").match(/(\d+(\.\d+)?)/)?.[1] || 0);
 
-    // Family guard (PE vs EPE must remain separate; DB is source of truth)
+    // Family guard:
+    // - If the email says PE → only allow Polyethylene rows.
+    // - If the email says EPE → only allow Expanded Polyethylene rows.
+    // - If it clearly says polyurethane or EPS → strongly prefer those families.
+    // We are NOT renaming families; we’re just making sure we only ever
+    // pull from the correct bucket.
     let familyFilter = "";
 
     const hasEpe =
@@ -361,20 +302,21 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     } else if (hasPe) {
       familyFilter = "AND material_family = 'Polyethylene'";
     } else if (hasPolyurethane) {
+      // Your DB uses names like "Polyurethane Foam" as the family;
+      // this keeps us in that bucket without renaming anything.
       familyFilter = "AND material_family ILIKE 'Polyurethane%'";
     } else if (hasPolystyrene) {
       familyFilter = "AND material_family ILIKE 'Polystyrene%'";
     }
 
-    // NEW: If we have a polyurethane grade (e.g. "1560") and we are in the PU family,
-    // try to match it by name FIRST. This prevents falling back to "closest density to 0"
-    // when the email provided a grade but not a density marker.
-    const materialGrade =
-      typeof f.material_grade === "string" ? f.material_grade.trim() : "";
+    // ---- HARDENING: grade-first match when present ----
+    // If we have a grade like "1560" and we're in Polyurethane context,
+    // we must prefer a name match containing that grade BEFORE density fallback.
+    // This prevents generic density matching from landing on "S82C" etc.
+    let row: any = null;
 
-    if (materialGrade && hasPolyurethane) {
-      const gradeLike = `%${materialGrade}%`;
-      const gradeRow = await one<any>(
+    if (hasGrade && hasPolyurethane && gradeLike) {
+      row = await one<any>(
         `
         SELECT
           id,
@@ -393,48 +335,39 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         `,
         [gradeLike],
       );
-
-      if (gradeRow) {
-        // If grade hit, use it and skip the density-based fallbacks.
-
-let row: any = null;
-
-        row = gradeRow;
-      }
     }
 
+    // 1) First pass: LIKE + density (what we had before, but with is_active)
+    if (!row) {
+      row = await one<any>(
+        `
+        SELECT
+          id,
+          name,
+          material_family,
+          category,
+          subcategory,
+          density_lb_ft3,
+          kerf_waste_pct AS kerf_pct,
+          min_charge_usd AS min_charge
+        FROM materials
+        WHERE is_active = true
+          ${familyFilter}
+          AND (
+            name ILIKE $1
+            OR material_family ILIKE $1
+            OR category ILIKE $1
+            OR subcategory ILIKE $1
+          )
+        ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $2)
+        LIMIT 1;
+        `,
+        [like, densNum],
+      );
+    }
 
-let row: any = null;
-
-// 1) First pass: LIKE + density (what we had before, but with is_active)
-row = await one<any>(
-
-      `
-      SELECT
-        id,
-        name,
-        material_family,
-        category,
-        subcategory,
-        density_lb_ft3,
-        kerf_waste_pct AS kerf_pct,
-        min_charge_usd AS min_charge
-      FROM materials
-      WHERE is_active = true
-        ${familyFilter}
-        AND (
-          name ILIKE $1
-          OR material_family ILIKE $1
-          OR category ILIKE $1
-          OR subcategory ILIKE $1
-        )
-      ORDER BY ABS(COALESCE(density_lb_ft3, 0) - $2)
-      LIMIT 1;
-      `,
-      [like, densNum],
-    );
-
-    // 2) Fallback: family + density
+    // 2) Fallback: if LIKE didn’t hit anything, just use family + density.
+    // This keeps PE and EPE separated, but makes us robust to naming noise.
     if (!row) {
       row = await one<any>(
         `
@@ -458,8 +391,7 @@ row = await one<any>(
     }
 
     if (!row) {
-      
-      
+      // Nothing we can do; leave facts alone.
       return f;
     }
 
@@ -469,6 +401,8 @@ row = await one<any>(
       f.material_family = row.material_family;
     }
 
+    // Only fill material from the DB if we had *nothing*.
+    // No PE/EPE cross-mapping here.
     const familyFromRow: string | null =
       row.material_family ||
       row.category ||
@@ -483,10 +417,8 @@ row = await one<any>(
     if (!f.density && row.density_lb_ft3 != null) {
       f.density = `${row.density_lb_ft3}lb`;
     }
-    if (f.kerf_pct == null && row.kerf_pct != null)
-      f.kerf_pct = row.kerf_pct;
-    if (f.min_charge == null && row.min_charge != null)
-      f.min_charge = row.min_charge;
+    if (f.kerf_pct == null && row.kerf_pct != null) f.kerf_pct = row.kerf_pct;
+    if (f.min_charge == null && row.min_charge != null) f.min_charge = row.min_charge;
 
     return f;
   } catch {
@@ -494,7 +426,6 @@ row = await one<any>(
     return f;
   }
 }
-
 /* ============================================================
    NEW: hydrateFromDBByQuoteNo
    Keeps facts in sync with DB qty + cavities
@@ -532,7 +463,7 @@ async function hydrateFromDBByQuoteNo(
     );
 
     if (primaryItem) {
-      // Qty
+      // Qty: only hydrate from DB if this turn did NOT explicitly provide a qty
       if (!opts.lockQty) {
         const dbQty = Number(primaryItem.qty);
         if (Number.isFinite(dbQty) && dbQty > 0) {
@@ -540,10 +471,9 @@ async function hydrateFromDBByQuoteNo(
         }
       }
 
-      // Dims
+      // Dims: if we don't already have dims (or they are clearly bogus), hydrate from DB
       if (!opts.lockDims) {
-        const hasDims =
-          typeof out.dims === "string" && out.dims.trim().length > 0;
+        const hasDims = typeof out.dims === "string" && out.dims.trim().length > 0;
         if (!hasDims) {
           const L = Number(primaryItem.length_in) || 0;
           const W = Number(primaryItem.width_in) || 0;
@@ -571,11 +501,7 @@ async function hydrateFromDBByQuoteNo(
 
       if (layoutPkg && layoutPkg.layout_json && !out.cavityDims) {
         const layout = layoutPkg.layout_json as {
-          cavities?: {
-            lengthIn: number;
-            widthIn: number;
-            depthIn: number;
-          }[];
+          cavities?: { lengthIn: number; widthIn: number; depthIn: number }[];
         };
 
         if (layout && Array.isArray(layout.cavities) && layout.cavities.length) {
@@ -599,6 +525,7 @@ async function hydrateFromDBByQuoteNo(
 
     return out;
   } catch {
+    // If anything goes wrong, fall back to existing facts
     return out;
   }
 }
@@ -634,14 +561,9 @@ function densityToPcf(density: string | null | undefined) {
   return m ? Number(m[1]) : null;
 }
 
-function specsCompleteForQuote(s: {
-  dims: string | null;
-  qty: number | string | null;
-  material_id: number | null;
-}) {
+function specsCompleteForQuote(s: { dims: string | null; qty: number | string | null; material_id: number | null }) {
   return !!(s.dims && s.qty && s.material_id);
 }
-
 /* ============================================================
    Quote calc via internal API
    ============================================================ */
@@ -688,24 +610,15 @@ type PriceBreak = {
 };
 
 async function buildPriceBreaks(
-  baseOpts: {
-    dims: string;
-    qty: number;
-    material_id: number;
-    round_to_bf: boolean;
-  },
+  baseOpts: { dims: string; qty: number; material_id: number; round_to_bf: boolean },
   baseCalc: any,
 ): Promise<PriceBreak[] | null> {
   const baseQty = baseOpts.qty;
   if (!baseQty || baseQty <= 0) return null;
 
-  // fixed ladder
+  // fixed ladder + always include requested qty
   const ladder = Array.from(
-    new Set(
-      [1, 10, 25, 50, 100, 150, 250, baseQty]
-        .map((q) => Math.round(q))
-        .filter((q) => q > 0),
-    ),
+    new Set([1, 10, 25, 50, 100, 150, 250, baseQty].map((q) => Math.round(q)).filter((q) => q > 0)),
   ).sort((a, b) => a - b);
 
   const out: PriceBreak[] = [];
@@ -714,27 +627,20 @@ async function buildPriceBreaks(
     let calcForQ = baseCalc;
 
     if (q !== baseQty) {
-      calcForQ = await fetchCalcQuote({
-        ...baseOpts,
-        qty: q,
-      });
+      calcForQ = await fetchCalcQuote({ ...baseOpts, qty: q });
       if (!calcForQ) continue;
     } else if (!calcForQ) {
       continue;
     }
 
-    const total = (calcForQ.price_total ??
-      calcForQ.total ??
-      calcForQ.order_total ??
-      0) as number | 0;
+    const total = (calcForQ.price_total ?? calcForQ.total ?? calcForQ.order_total ?? 0) as number | 0;
     const piece = total && q > 0 ? total / q : null;
 
     out.push({
       qty: q,
       total,
       piece,
-      used_min_charge: (calcForQ.min_charge_applied ??
-        null) as boolean | null,
+      used_min_charge: (calcForQ.min_charge_applied ?? null) as boolean | null,
     });
   }
 
@@ -749,10 +655,7 @@ function grabDims(raw: string): string | undefined {
   const text = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
   const m =
     text.match(
-      new RegExp(
-        `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
-        "i",
-      ),
+      new RegExp(`\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`, "i"),
     ) ||
     text.match(
       new RegExp(
@@ -789,21 +692,15 @@ function grabQty(raw: string): number | undefined {
     t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
     t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
     t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
-    // include common misspellings
-    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|pices|peices|parts?)\b/);
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
 
   if (m) return Number(m[1]);
 
   const norm = t.replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/g, "$1 ");
-  m = norm.match(
-    new RegExp(
-      `\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?|pices|peices))?\\b`,
-      "i",
-    ),
-  );
+  m = norm.match(new RegExp(`\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?))?\\b`, "i"));
   if (m) return Number(m[1]);
 
-  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|pices|peices|parts?)?\b/);
+  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?)?\b/);
   if (m) return Number(m[1]);
 
   return undefined;
@@ -812,24 +709,40 @@ function grabQty(raw: string): number | undefined {
 function grabDensity(raw: string): string | undefined {
   const t = raw.toLowerCase();
   const m =
-    t.match(
-      /(\d+(\.\d+)?)\s*(?:pcf|lb\/?ft3?|pound(?:s)?\s*per\s*cubic\s*foot)/,
-    ) || t.match(/(\d+(\.\d+)?)\s*#\s*(?:foam)?\b/);
+    t.match(/(\d+(\.\d+)?)\s*(?:pcf|lb\/?ft3?|pound(?:s)?\s*per\s*cubic\s*foot)/) ||
+    t.match(/(\d+(\.\d+)?)\s*#\s*(?:foam)?\b/);
   if (!m) return undefined;
   return `${m[1]}#`;
+}
+
+// HARDENING: capture color words safely (simple + conservative)
+function grabColor(raw: string): string | undefined {
+  const t = raw.toLowerCase();
+  const m = t.match(/\b(black|white|gray|grey|blue|red|green|yellow|orange|tan|natural)\b/);
+  if (!m) return undefined;
+  return m[1];
+}
+
+// HARDENING: capture grade like 1560 when polyurethane context exists.
+function grabMaterialGrade(raw: string): string | undefined {
+  const t = raw.toLowerCase();
+  const hasPU = t.includes("polyurethane") || /\bpu\b/.test(t) || /\burethane\b/.test(t);
+  if (!hasPU) return undefined;
+
+  const m = t.match(/\b(1\d{3})\b/); // conservative: 1000-1999 style grades
+  if (!m) return undefined;
+  return m[1];
 }
 
 function grabMaterial(raw: string): string | undefined {
   const t = raw.toLowerCase();
 
-  if (
-    /\bepe\b/.test(t) ||
-    /\bepe\s+foam\b/.test(t) ||
-    t.includes("expanded polyethylene")
-  ) {
+  // Expanded Polyethylene / EPE
+  if (/\bepe\b/.test(t) || /\bepe\s+foam\b/.test(t) || t.includes("expanded polyethylene")) {
     return "epe";
   }
 
+  // XLPE / cross-linked PE
   if (
     /\bxlpe\b/.test(t) ||
     t.includes("cross-linked polyethylene") ||
@@ -839,42 +752,37 @@ function grabMaterial(raw: string): string | undefined {
     return "xlpe";
   }
 
-  if (
-    t.includes("polyurethane") ||
-    /\bpu\b/.test(t) ||
-    /\burethane\b/.test(t) ||
-    t.includes("urethane foam")
-  ) {
+  // Polyurethane family
+  if (t.includes("polyurethane") || /\bpu\b/.test(t) || /\burethane\b/.test(t) || t.includes("urethane foam")) {
+    // Keep full phrase if provided (helps enrichment)
+    // e.g. "1560 black polyurethane" is captured by higher-level extraction
     return "polyurethane";
   }
 
+  // Kaizen inserts
   if (/\bkaizen\b/.test(t)) {
     return "kaizen";
   }
 
+  // Polystyrene / EPS
   if (t.includes("polystyrene") || /\beps\b/.test(t)) {
     return "eps";
   }
 
+  // Polypropylene
   if (/\bpp\b/.test(t)) {
     return "pp";
   }
 
-  if (
-    t.includes("polyethylene") ||
-    t.includes("pe foam") ||
-    /\bpe\b/.test(t)
-  ) {
+  // Plain Polyethylene / PE
+  if (t.includes("polyethylene") || t.includes("pe foam") || /\bpe\b/.test(t)) {
     return "pe";
   }
 
   return undefined;
 }
 
-function extractCavities(raw: string): {
-  cavityCount?: number;
-  cavityDims?: string[];
-} {
+function extractCavities(raw: string): { cavityCount?: number; cavityDims?: string[] } {
   const t = raw.toLowerCase();
   const lines = raw.split(/\r?\n/);
 
@@ -886,9 +794,7 @@ function extractCavities(raw: string): {
 
   const mCount =
     t.match(/\b(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/) ||
-    t.match(
-      /\btotal\s+of\s+(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/,
-    );
+    t.match(/\btotal\s+of\s+(\d{1,3})\s*(?:cavities|cavity|pockets?|cutouts?)\b/);
   if (mCount) {
     cavityCount = Number(mCount[1]);
   }
@@ -897,7 +803,7 @@ function extractCavities(raw: string): {
     const lower = line.toLowerCase();
     if (!/\bcavity|cavities|cutout|pocket\b/.test(lower)) continue;
 
-    // split on commas / semicolons only so decimals stay intact
+    // split on commas / semicolons only
     const tokens = line.split(/[;,]/);
 
     for (const tok of tokens) {
@@ -909,24 +815,16 @@ function extractCavities(raw: string): {
 
       const mPair = tok.trim().match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`));
       if (mPair) {
-        // missing depth -> assume 1"
         cavityDims.push(`${mPair[1]}x${mPair[2]}x1`);
       }
     }
   }
 
-  return {
-    cavityCount,
-    cavityDims: cavityDims.length ? cavityDims : undefined,
-  };
+  return { cavityCount, cavityDims: cavityDims.length ? cavityDims : undefined };
 }
 
-// Fallback: if we know there are cavities but no sizes, scan the text for
-// all LxWxH patterns and drop anything that matches the main outside dims.
-function recoverCavityDimsFromText(
-  rawText: string,
-  mainDims?: string | null,
-): string[] {
+// Fallback: if we know there are cavities but no sizes, scan the text for patterns.
+function recoverCavityDimsFromText(rawText: string, mainDims?: string | null): string[] {
   if (!rawText) return [];
 
   const text = rawText.toLowerCase().replace(/"/g, " ").replace(/\s+/g, " ");
@@ -945,7 +843,6 @@ function recoverCavityDimsFromText(
     const dims = `${m[1]}x${m[2]}x${m[3]}`;
     const norm = dims.toLowerCase().trim();
 
-    // Skip the main outside size
     if (mainNorm && norm === mainNorm) continue;
 
     if (!seen.has(norm)) {
@@ -974,13 +871,8 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
     facts.dims = normDims(outsideDims) || outsideDims;
   } else {
     const bodyNoCavity = rawBody
-  .split(/\r?\n/)
-      .filter(
-        (ln) =>
-          !/\bcavity\b|\bcavities\b|\bpocket\b|\bpockets\b|\bcutout\b|\bcutouts\b/i.test(
-            ln,
-          ),
-      )
+      .split(/\r?\n/)
+      .filter((ln) => !/\bcavity\b|\bcavities\b|\bpocket\b|\bpockets\b|\bcutout\b|\bcutouts\b/i.test(ln))
       .join("\n");
 
     const dimsSource = `${subject}\n\n${bodyNoCavity}`;
@@ -990,7 +882,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
     }
   }
 
-  // 2) qty/density/material/color/cavities
+  // 2) qty/density/material/cavities/color/grade
   const qtyVal = grabQty(text);
   if (qtyVal) facts.qty = qtyVal;
 
@@ -998,16 +890,13 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   if (density) facts.density = density;
 
   const material = grabMaterial(text);
-if (material) facts.material = material;
+  if (material) facts.material = material;
 
-// NEW: capture polyurethane grade like "1560" when present
-const grade = extractMaterialGradeFromText(text);
-if (grade) facts.material_grade = grade;
-
-
-  // NEW: color
   const color = grabColor(text);
   if (color) facts.color = color;
+
+  const grade = grabMaterialGrade(text);
+  if (grade) (facts as any).material_grade = grade;
 
   const { cavityCount, cavityDims } = extractCavities(text);
   if (cavityCount != null) facts.cavityCount = cavityCount;
@@ -1016,13 +905,22 @@ if (grade) facts.material_grade = grade;
   const mEmail = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   if (mEmail) facts.customerEmail = mEmail[0];
 
-  // fallback cavity recovery
   if (facts.dims && (!facts.cavityDims || facts.cavityDims.length === 0)) {
     const recovered = recoverCavityDimsFromText(text, facts.dims);
     if (recovered.length > 0) {
       facts.cavityDims = recovered;
       facts.cavityCount = recovered.length;
     }
+  }
+
+  // HARDENING: preserve full material phrase if present (helps grade enrichment)
+  // Example: "1560 black polyurethane" -> keep it (not just "polyurethane")
+  // This is safe because enrichFromDB now handles grade-first matching.
+  const mMaterialPhrase = text.match(/\b(\d{3,5})\s+(black|white|gray|grey|blue|red|green|yellow|orange|tan|natural)\s+(polyurethane|urethane)\b/i);
+  if (mMaterialPhrase) {
+    facts.material = `${mMaterialPhrase[1]} ${mMaterialPhrase[2]} polyurethane`.toLowerCase();
+    (facts as any).material_grade = mMaterialPhrase[1];
+    facts.color = String(mMaterialPhrase[2]).toLowerCase();
   }
 
   return compact(facts);
@@ -1032,11 +930,7 @@ if (grade) facts.material_grade = grade;
    LLM helpers (facts + opener)
    ============================================================ */
 
-async function aiParseFacts(
-  model: string,
-  body: string,
-  subject: string,
-): Promise<Mem> {
+async function aiParseFacts(model: string, body: string, subject: string): Promise<Mem> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return {};
   if (!body && !subject) return {};
@@ -1050,9 +944,10 @@ Valid keys:
 - qty: integer
 - material: string
 - density: string like "1.7#"
-- color: string like "black"
 - cavityCount: integer
 - cavityDims: array of strings
+- color: string (if present)
+- material_grade: string/number like "1560" (if present)
 
 Subject:
 ${subject}
@@ -1075,31 +970,23 @@ ${body}
       }),
     });
 
-    const j = await r.json().catch(() => ({} as any));
-    const txt: string =
-      j.output?.[0]?.content?.[0]?.text ??
-      j.output_text ??
-      j.choices?.[0]?.message?.content ??
-      "";
-
-    const s = String(txt || "").trim();
-    const start = s.indexOf("{");
-    const end = s.lastIndexOf("}");
+    const raw = await r.text();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
     if (start === -1 || end === -1) return {};
 
-    const parsed = JSON.parse(s.slice(start, end + 1));
+    const parsed = JSON.parse(raw.slice(start, end + 1));
     const out: Mem = {};
 
     if (parsed.dims) out.dims = normDims(parsed.dims) || parsed.dims;
     if (parsed.qty) out.qty = parsed.qty;
     if (parsed.material) out.material = parsed.material;
     if (parsed.density) out.density = parsed.density;
-    if (parsed.color) out.color = String(parsed.color).toLowerCase().trim();
+    if (parsed.color) out.color = parsed.color;
+    if (parsed.material_grade != null) (out as any).material_grade = String(parsed.material_grade);
     if (parsed.cavityCount != null) out.cavityCount = parsed.cavityCount;
     if (Array.isArray(parsed.cavityDims)) {
-      out.cavityDims = parsed.cavityDims.map((x: string) =>
-        normalizeCavity(normDims(x) || x),
-      );
+      out.cavityDims = parsed.cavityDims.map((x: string) => normalizeCavity(normDims(x) || x));
     }
 
     return compact(out);
@@ -1129,11 +1016,7 @@ function chooseOpener(seed: string) {
   return HUMAN_OPENERS[h % HUMAN_OPENERS.length];
 }
 
-async function aiOpener(
-  model: string,
-  lastInbound: string,
-  context: string,
-): Promise<string | null> {
+async function aiOpener(model: string, lastInbound: string, context: string): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) return null;
 
@@ -1196,6 +1079,7 @@ export async function POST(req: NextRequest) {
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
     const dryRun = !!p.dryRun;
 
+    // NEW: Option C rep resolution
     const salesRepSlugFromSubject = extractRepSlugFromSubject(subject, lastText);
     const salesRepSlugFromThread = inferRepSlugFromThreadMsgs(threadMsgs);
     const salesRepSlugResolved =
@@ -1215,7 +1099,6 @@ export async function POST(req: NextRequest) {
 
     let newly = extractAllFromTextAndSubject(lastText, subject);
 
-    // If the regex pass already found a main block size, don't let LLM override.
     const regexDims = newly.dims || null;
 
     const needsLLM =
@@ -1223,9 +1106,7 @@ export async function POST(req: NextRequest) {
       !newly.qty ||
       !newly.material ||
       !newly.density ||
-      (!newly.color) ||
-      (newly.cavityCount &&
-        (!newly.cavityDims || newly.cavityDims.length === 0));
+      (newly.cavityCount && (!newly.cavityDims || newly.cavityDims.length === 0));
 
     if (needsLLM) {
       const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
@@ -1237,8 +1118,7 @@ export async function POST(req: NextRequest) {
     }
 
     const hadNewQty = newly.qty != null;
-    const hadNewCavities =
-      Array.isArray(newly.cavityDims) && newly.cavityDims.length > 0;
+    const hadNewCavities = Array.isArray(newly.cavityDims) && newly.cavityDims.length > 0;
     const hadNewDims = !!newly.dims;
 
     /* ------------------- Merge with memory ------------------- */
@@ -1246,12 +1126,8 @@ export async function POST(req: NextRequest) {
     let loadedThread: Mem = {};
     let loadedQuote: Mem = {};
 
-    if (threadKey) {
-      loadedThread = await loadFacts(threadKey);
-    }
-    if (subjectQuoteNo) {
-      loadedQuote = await loadFacts(subjectQuoteNo);
-    }
+    if (threadKey) loadedThread = await loadFacts(threadKey);
+    if (subjectQuoteNo) loadedQuote = await loadFacts(subjectQuoteNo);
 
     let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
 
@@ -1259,16 +1135,8 @@ export async function POST(req: NextRequest) {
       merged.sales_rep_slug = salesRepSlugResolved;
     }
 
-    // Fallback cavity recovery
-    if (
-      merged.cavityCount &&
-      (!Array.isArray(merged.cavityDims) ||
-        merged.cavityDims.length === 0)
-    ) {
-      const recovered = recoverCavityDimsFromText(
-        `${subject}\n\n${lastText}`,
-        merged.dims,
-      );
+    if (merged.cavityCount && (!Array.isArray(merged.cavityDims) || merged.cavityDims.length === 0)) {
+      const recovered = recoverCavityDimsFromText(`${subject}\n\n${lastText}`, merged.dims);
       if (recovered.length > 0) {
         merged.cavityDims = recovered;
       }
@@ -1276,12 +1144,9 @@ export async function POST(req: NextRequest) {
 
     merged = applyCavityNormalization(merged);
 
-    // Drop bogus cavities equal to main dims
     if (merged.dims && Array.isArray(merged.cavityDims)) {
       const dimsNorm = String(merged.dims).toLowerCase().trim();
-      const filtered = (merged.cavityDims as string[]).filter(
-        (c) => String(c).toLowerCase().trim() !== dimsNorm,
-      );
+      const filtered = (merged.cavityDims as string[]).filter((c) => String(c).toLowerCase().trim() !== dimsNorm);
       if (filtered.length > 0) {
         merged.cavityDims = filtered;
         merged.cavityCount = filtered.length;
@@ -1313,7 +1178,6 @@ export async function POST(req: NextRequest) {
       merged.quoteNumber = merged.quote_no;
     }
 
-    // If subject contained quote number, adopt it
     if (subjectQuoteNo && !merged.quote_no) {
       merged.quote_no = subjectQuoteNo;
       merged.quoteNumber = subjectQuoteNo;
@@ -1323,7 +1187,7 @@ export async function POST(req: NextRequest) {
 
     merged = await enrichFromDB(merged);
 
-    // hydrate from DB so qty + cavities match latest saved quote
+    // 🔁 hydrate from DB so qty + cavities match the latest saved quote
     merged = await hydrateFromDBByQuoteNo(merged, {
       lockQty: hadNewQty,
       lockCavities: hadNewCavities,
@@ -1338,8 +1202,7 @@ export async function POST(req: NextRequest) {
 
     const context = pickThreadContext(threadMsgs);
     const opener =
-      (await aiOpener("gpt-4.1-mini", lastText, context)) ||
-      chooseOpener(threadKey || subject || "default");
+      (await aiOpener("gpt-4.1-mini", lastText, context)) || chooseOpener(threadKey || subject || "default");
 
     /* ------------------- Specs for template ------------------- */
 
@@ -1398,23 +1261,11 @@ export async function POST(req: NextRequest) {
     let quoteId = merged.quote_id;
 
     const salesRepSlugForHeader: string | undefined =
-      (merged.sales_rep_slug as string | undefined) ||
-      salesRepSlugResolved ||
-      undefined;
-
-    // NEW (Path A): send color through header write if present
-    const colorForPersist: string | null =
-      typeof merged.color === "string" && merged.color.trim()
-        ? merged.color.trim()
-        : null;
+      (merged.sales_rep_slug as string | undefined) || salesRepSlugResolved || undefined;
 
     if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
       try {
-        const customerName =
-          merged.customerName ||
-          merged.customer_name ||
-          merged.name ||
-          "Customer";
+        const customerName = merged.customerName || merged.customer_name || merged.name || "Customer";
         const customerEmail = merged.customerEmail || merged.email || null;
         const phone = merged.phone || null;
         const status = merged.status || "draft";
@@ -1429,8 +1280,8 @@ export async function POST(req: NextRequest) {
             phone,
             status,
             sales_rep_slug: salesRepSlugForHeader,
-            // pass-through (safe if ignored by API)
-            color: colorForPersist,
+            // HARDENING: persist color on the quote header if your /api/quotes supports it
+            color: merged.color || null,
           }),
         });
 
@@ -1453,13 +1304,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Primary item: only when we have material_id, and only once
-    if (
-      !dryRun &&
-      quoteId &&
-      canCalc &&
-      specs.material_id &&
-      !merged.__primary_item_created
-    ) {
+    if (!dryRun && quoteId && canCalc && specs.material_id && !merged.__primary_item_created) {
       try {
         const { L, W, H } = parseDimsNums(specs.dims);
         const itemBody: any = {
@@ -1468,8 +1313,8 @@ export async function POST(req: NextRequest) {
           height_in: H,
           material_id: Number(specs.material_id),
           qty: Number(specs.qty),
-          // pass-through (safe if ignored by API)
-          color: colorForPersist,
+          // HARDENING: persist color on the item if your DB supports it
+          color: merged.color || null,
         };
 
         await fetch(`${base}/api/quotes/${quoteId}/items`, {
@@ -1506,12 +1351,8 @@ export async function POST(req: NextRequest) {
         color: merged.color,
         cavityCount:
           merged.cavityCount ??
-          (Array.isArray(merged.cavityDims)
-            ? merged.cavityDims.length
-            : null),
-        cavityDims: Array.isArray(merged.cavityDims)
-          ? (merged.cavityDims as string[])
-          : [],
+          (Array.isArray(merged.cavityDims) ? merged.cavityDims.length : null),
+        cavityDims: Array.isArray(merged.cavityDims) ? (merged.cavityDims as string[]) : [],
       },
 
       material: {
@@ -1536,11 +1377,7 @@ export async function POST(req: NextRequest) {
         if (!merged.qty) miss.push("Quantity");
         if (!foamFamily) miss.push("Material");
         if (!merged.density) miss.push("Density");
-        if (!merged.color) miss.push("Color");
-        if (
-          merged.cavityCount > 0 &&
-          (!merged.cavityDims || merged.cavityDims.length === 0)
-        ) {
+        if (merged.cavityCount > 0 && (!merged.cavityDims || merged.cavityDims.length === 0)) {
           miss.push("Cavity sizes");
         }
         return miss;
@@ -1595,10 +1432,8 @@ export async function POST(req: NextRequest) {
     const sent = await r.json().catch(() => ({} as any));
 
     if (threadKey && (sent.messageId || sent.internetMessageId)) {
-      merged.__lastGraphMessageId =
-        sent.messageId || merged.__lastGraphMessageId;
-      merged.__lastInternetMessageId =
-        sent.internetMessageId || merged.__lastInternetMessageId;
+      merged.__lastGraphMessageId = sent.messageId || merged.__lastGraphMessageId;
+      merged.__lastInternetMessageId = sent.internetMessageId || merged.__lastInternetMessageId;
       await saveFacts(threadKey, merged);
       if (merged.quote_no) await saveFacts(merged.quote_no, merged);
     }

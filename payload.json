@@ -1,8 +1,6 @@
 ﻿{
   "mode": "ai",
-  "toEmail": "customer@example.com",
-  "subject": "Foam Quote",
-  "text": "Need foam 10x8x2 PE 1.7 lb qty 12",
-  "threadId": "thread001@mx.example",
-  "dryRun": true
+  "dryRun": true,
+  "subject": "ai quote test 7.48",
+  "text": "please quote 30 pieces of 12x12x2 foam. the material is 1560 black polyurethane. There will be 1 cavity that is 4x3x1."
 }
