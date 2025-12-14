@@ -1,4 +1,3 @@
-// ===== CHUNK 1 / 4 =====
 // app/api/ai/orchestrate/route.ts
 //
 // PATH-A SAFE VERSION
@@ -23,6 +22,9 @@
 // - HARDENING 12/13: If material_grade is present (e.g. "1560"),
 //   DB enrichment must prefer materials.name ILIKE '%1560%' within
 //   the correct foam family bucket BEFORE density fallback.
+// - HARDENING 12/14: If grade-first match hits, FORCE overwrite cached
+//   material_id/material_name (fixes “stuck wrong material”).
+// - HARDENING 12/14: Add debug_in/debug_newly to missing_toEmail early return.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -315,6 +317,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     // we must prefer a name match containing that grade BEFORE density fallback.
     // This prevents generic density matching from landing on "S82C" etc.
     let row: any = null;
+    let rowSource: "grade" | "like_density" | "family_density" | null = null;
 
     if (hasGrade && hasPolyurethane && gradeLike) {
       row = await one<any>(
@@ -332,10 +335,15 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         WHERE is_active = true
           ${familyFilter}
           AND name ILIKE $1
+        ORDER BY
+          CASE WHEN name ILIKE $1 THEN 0 ELSE 1 END,
+          CHAR_LENGTH(name) ASC,
+          id ASC
         LIMIT 1;
         `,
         [gradeLike],
       );
+      if (row) rowSource = "grade";
     }
 
     // 1) First pass: LIKE + density (what we had before, but with is_active)
@@ -365,6 +373,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         `,
         [like, densNum],
       );
+      if (row) rowSource = "like_density";
     }
 
     // 2) Fallback: if LIKE didn’t hit anything, just use family + density.
@@ -389,6 +398,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         `,
         [densNum],
       );
+      if (row) rowSource = "family_density";
     }
 
     if (!row) {
@@ -396,9 +406,20 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       return f;
     }
 
-    if (!f.material_id) f.material_id = row.id;
-    if (!f.material_name) f.material_name = row.name;
+    // ✅ KEY FIX:
+    // If we hit a grade match, we MUST override any cached wrong material_id/material_name.
+    if (rowSource === "grade") {
+      f.material_id = row.id;
+      f.material_name = row.name;
+    } else {
+      if (!f.material_id) f.material_id = row.id;
+      if (!f.material_name) f.material_name = row.name;
+    }
+
     if (!f.material_family && row.material_family) {
+      f.material_family = row.material_family;
+    } else if (rowSource === "grade" && row.material_family) {
+      // Grade match should also correct the family if it was previously wrong.
       f.material_family = row.material_family;
     }
 
@@ -427,7 +448,6 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     return f;
   }
 }
-// ===== CHUNK 2 / 4 =====
 /* ============================================================
    NEW: hydrateFromDBByQuoteNo
    Keeps facts in sync with DB qty + cavities
@@ -648,7 +668,7 @@ async function buildPriceBreaks(
 
   return out.length ? out : null;
 }
-// ===== CHUNK 3 / 4 =====
+
 /* ============================================================
    Regex-based parsing helpers
    ============================================================ */
@@ -918,7 +938,9 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   // HARDENING: preserve full material phrase if present (helps grade enrichment)
   // Example: "1560 black polyurethane" -> keep it (not just "polyurethane")
   // This is safe because enrichFromDB now handles grade-first matching.
-  const mMaterialPhrase = text.match(/\b(\d{3,5})\s+(black|white|gray|grey|blue|red|green|yellow|orange|tan|natural)\s+(polyurethane|urethane)\b/i);
+  const mMaterialPhrase = text.match(
+    /\b(\d{3,5})\s+(black|white|gray|grey|blue|red|green|yellow|orange|tan|natural)\s+(polyurethane|urethane)\b/i,
+  );
   if (mMaterialPhrase) {
     facts.material = `${mMaterialPhrase[1]} ${mMaterialPhrase[2]} polyurethane`.toLowerCase();
     (facts as any).material_grade = mMaterialPhrase[1];
@@ -927,7 +949,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   return compact(facts);
 }
-// ===== CHUNK 4 / 4 =====
+
 /* ============================================================
    LLM helpers (facts + opener)
    ============================================================ */
@@ -1076,11 +1098,8 @@ export async function POST(req: NextRequest) {
       subjectType: typeof (p as any).subject,
       textType: typeof (p as any).text,
       subjectLen: String((p as any).subject || "").length,
-      textLen: typeof (p as any).text === "string" ? (p as any).text.length : -1,
-      textHead:
-        typeof (p as any).text === "string"
-          ? String((p as any).text).slice(0, 120)
-          : String((p as any).text),
+      textLen: typeof (p as any).text === "string" ? (p as any).text.length : null,
+      textHead: typeof (p as any).text === "string" ? String((p as any).text).slice(0, 120) : null,
     };
 
     if (mode !== "ai") {
@@ -1113,6 +1132,7 @@ export async function POST(req: NextRequest) {
     /* ------------------- Parse new turn ------------------- */
 
     let newly = extractAllFromTextAndSubject(lastText, subject);
+    const debug_newly = { ...(newly || {}) };
 
     const regexDims = newly.dims || null;
 
@@ -1409,9 +1429,13 @@ export async function POST(req: NextRequest) {
 
     const toEmail = p.toEmail || merged.email || merged.customerEmail;
     if (!toEmail) {
+      // ✅ include debug so we can always see what parsing saw
       return ok({
+        mode: "dryrun",
         dryRun: true,
         reason: "missing_toEmail",
+        debug_in: dryRun ? debug_in : undefined,
+        debug_newly: dryRun ? debug_newly : undefined,
         htmlPreview: htmlBody,
         specs,
         calc,
@@ -1425,7 +1449,7 @@ export async function POST(req: NextRequest) {
       return ok({
         mode: "dryrun",
         debug_in,
-        debug_newly: newly,
+        debug_newly,
         htmlPreview: htmlBody,
         specs,
         calc,
