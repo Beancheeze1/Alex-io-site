@@ -66,6 +66,44 @@ function mergeFacts(a: Mem, b: Mem): Mem {
   return { ...(a || {}), ...compact(b || {}) };
 }
 
+// Extract common foam grade tokens like "1560", "1030", etc.
+// We only treat 4-digit tokens as a "grade" when they appear near
+// polyurethane/urethane wording to avoid accidentally treating dates/IDs as grades.
+function extractMaterialGradeFromText(text: string): string | null {
+  const t = String(text || "").toLowerCase();
+
+  // Only consider this if the email is clearly talking about polyurethane
+  const isPU =
+    t.includes("polyurethane") || /\bpu\b/.test(t) || /\burethane\b/.test(t);
+
+  if (!isPU) return null;
+
+  // Look for 4-digit tokens (e.g. 1560)
+  // Guard: require it to appear within ~40 chars of "polyurethane/urethane/pu"
+  const re = /(\d{4})/g;
+  let m: RegExpExecArray | null;
+
+  while ((m = re.exec(t))) {
+    const grade = m[1];
+    const idx = m.index ?? 0;
+    const windowStart = Math.max(0, idx - 40);
+    const windowEnd = Math.min(t.length, idx + 40);
+    const window = t.slice(windowStart, windowEnd);
+
+    if (
+      window.includes("polyurethane") ||
+      window.includes("urethane") ||
+      /\bpu\b/.test(window)
+    ) {
+      return grade;
+    }
+  }
+
+  return null;
+}
+
+
+
 function pickThreadContext(threadMsgs: any[] = []) {
   const take = threadMsgs.slice(-3);
   const snippets = take
@@ -328,8 +366,49 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
       familyFilter = "AND material_family ILIKE 'Polystyrene%'";
     }
 
-    // 1) First pass: LIKE + density (with is_active)
-    let row = await one<any>(
+    // NEW: If we have a polyurethane grade (e.g. "1560") and we are in the PU family,
+    // try to match it by name FIRST. This prevents falling back to "closest density to 0"
+    // when the email provided a grade but not a density marker.
+    const materialGrade =
+      typeof f.material_grade === "string" ? f.material_grade.trim() : "";
+
+    if (materialGrade && hasPolyurethane) {
+      const gradeLike = `%${materialGrade}%`;
+      const gradeRow = await one<any>(
+        `
+        SELECT
+          id,
+          name,
+          material_family,
+          category,
+          subcategory,
+          density_lb_ft3,
+          kerf_waste_pct AS kerf_pct,
+          min_charge_usd AS min_charge
+        FROM materials
+        WHERE is_active = true
+          ${familyFilter}
+          AND name ILIKE $1
+        LIMIT 1;
+        `,
+        [gradeLike],
+      );
+
+      if (gradeRow) {
+        // If grade hit, use it and skip the density-based fallbacks.
+
+let row: any = null;
+
+        row = gradeRow;
+      }
+    }
+
+
+let row: any = null;
+
+// 1) First pass: LIKE + density (what we had before, but with is_active)
+row = await one<any>(
+
       `
       SELECT
         id,
@@ -379,6 +458,8 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     }
 
     if (!row) {
+      
+      
       return f;
     }
 
@@ -917,7 +998,12 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   if (density) facts.density = density;
 
   const material = grabMaterial(text);
-  if (material) facts.material = material;
+if (material) facts.material = material;
+
+// NEW: capture polyurethane grade like "1560" when present
+const grade = extractMaterialGradeFromText(text);
+if (grade) facts.material_grade = grade;
+
 
   // NEW: color
   const color = grabColor(text);
