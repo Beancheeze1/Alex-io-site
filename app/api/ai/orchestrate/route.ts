@@ -1,3 +1,4 @@
+// ===== CHUNK 1 / 4 =====
 // app/api/ai/orchestrate/route.ts
 //
 // PATH-A SAFE VERSION
@@ -310,18 +311,12 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     }
 
     // ---- HARDENING: grade-first match when present ----
-    // If we have a grade like "1560", we must prefer a name match containing that grade
-    // (within the Polyurethane family bucket) BEFORE density fallback.
+    // If we have a grade like "1560" and we're in Polyurethane context,
+    // we must prefer a name match containing that grade BEFORE density fallback.
     // This prevents generic density matching from landing on "S82C" etc.
     let row: any = null;
 
-    const colorRaw = String(f.color || "").trim().toLowerCase();
-    const colorLike = colorRaw ? `%${colorRaw}%` : "";
-
-    const isPolyurethaneContext =
-      hasPolyurethane || familyFilter.toLowerCase().includes("polyurethane");
-
-    if (hasGrade && gradeLike && isPolyurethaneContext) {
+    if (hasGrade && hasPolyurethane && gradeLike) {
       row = await one<any>(
         `
         SELECT
@@ -337,17 +332,12 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
         WHERE is_active = true
           ${familyFilter}
           AND name ILIKE $1
-        ORDER BY
-          -- If we also know color, prefer rows that include it in the name.
-          CASE WHEN $2 = '' THEN 0 WHEN name ILIKE $2 THEN 0 ELSE 1 END,
-          -- Then prefer density closeness (if density was provided/extracted).
-          ABS(COALESCE(density_lb_ft3, 0) - $3),
-          id ASC
         LIMIT 1;
         `,
-        [gradeLike, colorLike, densNum],
+        [gradeLike],
       );
     }
+
     // 1) First pass: LIKE + density (what we had before, but with is_active)
     if (!row) {
       row = await one<any>(
@@ -437,6 +427,7 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
     return f;
   }
 }
+// ===== CHUNK 2 / 4 =====
 /* ============================================================
    NEW: hydrateFromDBByQuoteNo
    Keeps facts in sync with DB qty + cavities
@@ -540,6 +531,7 @@ async function hydrateFromDBByQuoteNo(
     return out;
   }
 }
+
 /* ============================================================
    Dimension / density helpers
    ============================================================ */
@@ -656,7 +648,7 @@ async function buildPriceBreaks(
 
   return out.length ? out : null;
 }
-
+// ===== CHUNK 3 / 4 =====
 /* ============================================================
    Regex-based parsing helpers
    ============================================================ */
@@ -935,7 +927,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   return compact(facts);
 }
-
+// ===== CHUNK 4 / 4 =====
 /* ============================================================
    LLM helpers (facts + opener)
    ============================================================ */
@@ -1077,6 +1069,19 @@ export async function POST(req: NextRequest) {
   try {
     const p = (await req.json().catch(() => ({}))) as In;
     const mode = String(p.mode || "ai");
+
+    // DEBUG (dryRun only): prove what the server actually received
+    const debug_in = {
+      keys: Object.keys(p || {}),
+      subjectType: typeof (p as any).subject,
+      textType: typeof (p as any).text,
+      subjectLen: String((p as any).subject || "").length,
+      textLen: typeof (p as any).text === "string" ? (p as any).text.length : -1,
+      textHead:
+        typeof (p as any).text === "string"
+          ? String((p as any).text).slice(0, 120)
+          : String((p as any).text),
+    };
 
     if (mode !== "ai") {
       return err("unsupported_mode", { mode });
@@ -1419,6 +1424,8 @@ export async function POST(req: NextRequest) {
     if (dryRun) {
       return ok({
         mode: "dryrun",
+        debug_in,
+        debug_newly: newly,
         htmlPreview: htmlBody,
         specs,
         calc,
