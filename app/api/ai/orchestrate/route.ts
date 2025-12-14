@@ -25,6 +25,13 @@
 // - HARDENING 12/14 (THIS FIX): Move NUM above any helpers that reference it,
 //   and add layer-intent facts so the layout editor can show multiple layers
 //   when the email describes them (Top = index 0).
+//
+// HARDENING 12/14 (FOLLOW-ON FIX):
+//   - Recognize "sets" as qty.
+//   - If layer intent exists (footprint + thicknesses) and outside dims were NOT explicit,
+//     infer dims = footprintL x footprintW x sum(thicknesses).
+//   - Prevent phantom cavity duplication in editor: only duplicate when there is
+//     exactly ONE distinct cavity size (the "many identical pockets" case).
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -201,6 +208,10 @@ function canonNumStr(raw: string): string {
  * - De-dupe conservatively (exact same L/W/H only), preserve order
  * - Only duplicate if still fewer than cavityCount
  * - Canonicalize decimals so ".5" => "0.5"
+ *
+ * HARDENING: Only duplicate when there is EXACTLY ONE distinct cavity size.
+ * If there are 2+ distinct sizes, do NOT inflate by cavityCount (prevents
+ * phantom duplicates in the editor when count drifts in memory/LLM).
  */
 function applyCavityNormalization(facts: Mem): Mem {
   if (!facts) return facts;
@@ -252,16 +263,23 @@ function applyCavityNormalization(facts: Mem): Mem {
   }
 
   // 3) Decide target count:
-  // - Never drop distinct dims just because cavityCount is smaller/incorrect.
-  // - If cavityCount is larger, we will duplicate to satisfy it.
+  // - Default to distinct list length.
+  // - Only allow duplication when there is exactly ONE distinct size.
   let targetCount = distinct.length;
+
   if (originalCount && originalCount > targetCount) {
-    targetCount = originalCount;
+    if (distinct.length === 1) {
+      // This is the "many identical cavities" case; OK to duplicate.
+      targetCount = originalCount;
+    } else {
+      // Multiple distinct cavity sizes were provided; do NOT inflate.
+      targetCount = distinct.length;
+    }
   }
 
   const finalDims: string[] = [...distinct];
 
-  // 4) Duplicate only if still fewer than cavityCount
+  // 4) Duplicate only if still fewer than targetCount
   while (finalDims.length < targetCount) {
     finalDims.push(distinct[finalDims.length % distinct.length]);
   }
@@ -271,6 +289,7 @@ function applyCavityNormalization(facts: Mem): Mem {
 
   return facts;
 }
+
 /* ============================================================
    DB enrichment (material)
    ============================================================ */
@@ -510,6 +529,7 @@ async function hydrateFromDBByQuoteNo(
     return out;
   }
 }
+
 /* ============================================================
    Dimension / density helpers
    ============================================================ */
@@ -669,17 +689,17 @@ function grabQty(raw: string): number | undefined {
     t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
     t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
     t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
-    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?)\b/);
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?|sets?)\b/); // <-- HARDENING: include sets
 
   if (m) return Number(m[1]);
 
   const norm = t.replace(/(\d+(?:\.\d+)?)\s*"\s*(?=[x×])/g, "$1 ");
   m = norm.match(
-    new RegExp(`\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?))?\\b`, "i"),
+    new RegExp(`\\b(\\d{1,6})\\s+(?:${NUM}\\s*[x×]\\s*${NUM}\\s*[x×]\\s*${NUM})(?:\\s*(?:pcs?|pieces?|sets?))?\\b`, "i"),
   );
   if (m) return Number(m[1]);
 
-  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?)?\b/);
+  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?|sets?)?\b/); // <-- HARDENING: include sets
   if (m) return Number(m[1]);
 
   return undefined;
@@ -749,6 +769,7 @@ function grabMaterial(raw: string): string | undefined {
 
   return undefined;
 }
+
 /* ============================================================
    Step 2: Layer intent extraction helpers (Top = index 0)
    ============================================================ */
@@ -842,6 +863,12 @@ function extractCavities(raw: string): { cavityCount?: number; cavityDims?: stri
     }
   }
 
+  // If we got explicit sizes, trust that list length as the authoritative count.
+  // (Prevents count drift from LLM/memory inflating the editor.)
+  if (cavityDims.length) {
+    cavityCount = cavityDims.length;
+  }
+
   return { cavityCount, cavityDims: cavityDims.length ? cavityDims : undefined };
 }
 
@@ -872,6 +899,7 @@ function recoverCavityDimsFromText(rawText: string, mainDims?: string | null): s
 
   return out;
 }
+
 /* ============================================================
    Initial fact extraction from subject + body
    ============================================================ */
@@ -881,10 +909,14 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const facts: Mem = {};
   const text = `${subject}\n\n${rawBody}`;
 
+  // Track whether outside dims were explicitly stated (so we don't override).
+  let outsideDimsWasExplicit = false;
+
   // 1) OUTSIDE / MAIN DIMS
   const outsideDims = grabOutsideDims(text);
   if (outsideDims) {
     facts.dims = normDims(outsideDims) || outsideDims;
+    outsideDimsWasExplicit = true;
   } else {
     const bodyNoCavity = rawBody
       .split(/\r?\n/)
@@ -965,10 +997,31 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
         ...(l.thickness_in != null ? { thickness_in: l.thickness_in } : {}),
       }));
     }
+
+    // HARDENING: If outside dims were NOT explicit, and we have footprint + thicknesses,
+    // infer the overall dims so the quote + editor seed correctly.
+    if (!outsideDimsWasExplicit && facts.layer_footprint && Array.isArray(facts.layers)) {
+      const fp = String(facts.layer_footprint || "").trim();
+      const [fpLRaw, fpWRaw] = fp.split("x");
+      const fpL = Number(fpLRaw);
+      const fpW = Number(fpWRaw);
+
+      const sumTh = (facts.layers as any[])
+        .map((l) => Number(l?.thickness_in))
+        .filter((n) => Number.isFinite(n) && n > 0)
+        .reduce((a, b) => a + b, 0);
+
+      if (Number.isFinite(fpL) && fpL > 0 && Number.isFinite(fpW) && fpW > 0 && sumTh > 0) {
+        // Only set/override dims when we don't already have a confident explicit outside dims.
+        // (If an earlier dims parse grabbed something weak, this corrects it.)
+        facts.dims = `${canonNumStr(String(fpL))}x${canonNumStr(String(fpW))}x${canonNumStr(String(sumTh))}`;
+      }
+    }
   }
 
   return compact(facts);
 }
+
 /* ============================================================
    LLM helpers (facts + opener)
    ============================================================ */
