@@ -5,17 +5,22 @@
 //  - Infers layers + thickness from email intent on first open
 //  - Single source of truth for cavities = stack[layer].cavities
 //  - layout.cavities ALWAYS mirrors active layer (never seeded)
-//  - Prevents double-seeding on editor open
+//  - Seeded cavities use stable ids (seed-cav-*) to prevent phantom duplication
+//  - De-dupes cavities defensively when mirroring active layer
+//  - Mirrors active layer thickness into layout.block.thicknessIn for UI controls
 //  - Legacy layouts normalized exactly once
 //  - Path A safe
 
 "use client";
 
 import { useState, useCallback } from "react";
-import type { BlockDims, LayoutModel, Cavity, CavityShape, LayoutLayer } from "./layoutTypes";
-
-
-
+import type {
+  BlockDims,
+  LayoutModel,
+  Cavity,
+  CavityShape,
+  LayoutLayer,
+} from "./layoutTypes";
 
 type LayoutState = {
   layout: LayoutModel & { stack: LayoutLayer[] };
@@ -61,10 +66,14 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   const setActiveLayerId = useCallback((id: string) => {
     setState((prev) => {
       const layer = prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
+      const mirrored = dedupeCavities(layer.cavities);
+
       return {
         layout: {
           ...prev.layout,
-          cavities: [...layer.cavities],
+          // Mirror active layer thickness into block.thicknessIn for UI that binds to block dims
+          block: { ...prev.layout.block, thicknessIn: safeInch(layer.thicknessIn, 0.5) },
+          cavities: [...mirrored],
         },
         activeLayerId: layer.id,
       };
@@ -86,12 +95,13 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       );
 
       const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
+      const mirrored = dedupeCavities(active.cavities);
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: [...active.cavities],
+          cavities: [...mirrored],
         },
         activeLayerId: active.id,
       };
@@ -99,16 +109,31 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   }, []);
 
   const updateBlockDims = useCallback((patch: Partial<BlockDims>) => {
-    setState((prev) => ({
-      ...prev,
-      layout: {
-        ...prev.layout,
-        block: {
-          ...prev.layout.block,
-          ...normalizeBlockPatch(patch),
+    setState((prev) => {
+      const nextBlock = {
+        ...prev.layout.block,
+        ...normalizeBlockPatch(patch),
+      };
+
+      // If thicknessIn was changed via UI, apply it to the active layer thickness too.
+      const nextStack =
+        patch.thicknessIn == null
+          ? prev.layout.stack
+          : prev.layout.stack.map((l) =>
+              l.id !== prev.activeLayerId
+                ? l
+                : { ...l, thicknessIn: safeInch(patch.thicknessIn, 0.5) },
+            );
+
+      return {
+        ...prev,
+        layout: {
+          ...prev.layout,
+          block: nextBlock,
+          stack: nextStack,
         },
-      },
-    }));
+      };
+    });
   }, []);
 
   const updateCavityDims = useCallback((id: string, patch: Partial<Cavity>) => {
@@ -125,12 +150,13 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       );
 
       const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
+      const mirrored = dedupeCavities(active.cavities);
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: [...active.cavities],
+          cavities: [...mirrored],
         },
         activeLayerId: active.id,
       };
@@ -139,11 +165,10 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
   const addCavity = useCallback((shape: CavityShape, size: any) => {
     setState((prev) => {
-      const total =
-        prev.layout.stack.reduce((s, l) => s + l.cavities.length, 0) + 1;
+      const nextN = nextCavityNumber(prev.layout.stack);
 
       const base: Cavity = {
-        id: `cav-${total}`,
+        id: `cav-${nextN}`,
         shape,
         lengthIn: safeInch(size.lengthIn, 0.5),
         widthIn: safeInch(size.widthIn, 0.5),
@@ -158,18 +183,17 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       const cavity = { ...base, label: formatCavityLabel(base) };
 
       const nextStack = prev.layout.stack.map((l) =>
-        l.id !== prev.activeLayerId
-          ? l
-          : { ...l, cavities: [...l.cavities, cavity] },
+        l.id !== prev.activeLayerId ? l : { ...l, cavities: [...l.cavities, cavity] },
       );
 
       const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
+      const mirrored = dedupeCavities(active.cavities);
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: [...active.cavities],
+          cavities: [...mirrored],
         },
         activeLayerId: active.id,
       };
@@ -183,14 +207,14 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         cavities: l.cavities.filter((c) => c.id !== id),
       }));
 
-      const active =
-        nextStack.find((l) => l.id === prev.activeLayerId) ?? nextStack[0];
+      const active = nextStack.find((l) => l.id === prev.activeLayerId) ?? nextStack[0];
+      const mirrored = dedupeCavities(active.cavities);
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: [...active.cavities],
+          cavities: [...mirrored],
         },
         activeLayerId: active.id,
       };
@@ -211,6 +235,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         layout: {
           ...prev.layout,
           stack: nextStack,
+          block: { ...prev.layout.block, thicknessIn: 1 }, // mirror new active thickness
           cavities: [],
         },
         activeLayerId: id,
@@ -236,13 +261,15 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       if (prev.layout.stack.length <= 1) return prev;
 
       const nextStack = prev.layout.stack.filter((l) => l.id !== id);
-      const active = nextStack[0];
+      const active = nextStack.find((l) => l.id === prev.activeLayerId) ?? nextStack[0];
+      const mirrored = dedupeCavities(active.cavities);
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: [...active.cavities],
+          block: { ...prev.layout.block, thicknessIn: safeInch(active.thicknessIn, 0.5) },
+          cavities: [...mirrored],
         },
         activeLayerId: active.id,
       };
@@ -278,33 +305,43 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
       id: l.id,
       label: l.label,
       thicknessIn: l.thicknessIn ?? 1,
-      cavities: [...l.cavities],
-    }));
+      cavities: dedupeCavities([...(l.cavities ?? [])]),
+    })) as LayoutLayer[];
+
+    const active = stack[0];
+    const mirrored = dedupeCavities(active.cavities);
 
     return {
       layout: {
-        block,
+        block: { ...block, thicknessIn: safeInch(active.thicknessIn ?? block.thicknessIn ?? 1, 0.5) },
         stack,
-        cavities: [...stack[0].cavities],
+        cavities: [...mirrored],
       },
-      activeLayerId: stack[0].id,
+      activeLayerId: active.id,
     };
   }
 
-  const cavs = Array.isArray(initial.cavities) ? [...initial.cavities] : [];
+  const cavsRaw = Array.isArray(initial.cavities) ? [...initial.cavities] : [];
 
   // Infer 3-layer intent: 1" / 4" / 1"
-  if (cavs.length) {
+  if (cavsRaw.length) {
+    // Seed stable IDs to prevent phantom duplicates on mount
+    const seeded = cavsRaw.map((c, i) => ({ ...c, id: `seed-cav-${i + 1}` }));
+    const cavs = dedupeCavities(seeded);
+
     const stack: LayoutLayer[] = [
       { id: "layer-1", label: "Layer 1", thicknessIn: 1, cavities: [] },
       { id: "layer-2", label: "Layer 2", thicknessIn: 4, cavities: cavs },
       { id: "layer-3", label: "Layer 3", thicknessIn: 1, cavities: [] },
     ];
 
+    // Active layer is Layer 2 (middle)
     return {
       layout: {
-        block,
+        // Mirror active thickness into block.thicknessIn for UI controls that bind to block dims
+        block: { ...block, thicknessIn: 4 },
         stack,
+        // Mirror active layer cavities ONLY (never seed globally from initial list)
         cavities: [...cavs],
       },
       activeLayerId: "layer-2",
@@ -314,12 +351,47 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   // Legacy single-layer fallback
   return {
     layout: {
-      block,
-      stack: [{ id: "layer-1", label: "Layer 1", thicknessIn: block.thicknessIn ?? 1, cavities: [] }],
+      block: { ...block, thicknessIn: safeInch(block.thicknessIn ?? 1, 0.5) },
+      stack: [{ id: "layer-1", label: "Layer 1", thicknessIn: safeInch(block.thicknessIn ?? 1, 0.5), cavities: [] }],
       cavities: [],
     },
     activeLayerId: "layer-1",
   };
+}
+
+function cavitySig(c: Cavity) {
+  // Signature used for de-dupe: shape + dims + corner radius (rounded to 1/8")
+  const r8 = (n: number) => Math.round((Number(n) || 0) * 8) / 8;
+  return [
+    c.shape,
+    r8(c.lengthIn),
+    r8(c.widthIn),
+    r8(c.depthIn),
+    r8((c as any).cornerRadiusIn ?? 0),
+  ].join("|");
+}
+
+function dedupeCavities(list: Cavity[]) {
+  const seen = new Set<string>();
+  const out: Cavity[] = [];
+  for (const c of list || []) {
+    const k = cavitySig(c);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(c);
+  }
+  return out;
+}
+
+function nextCavityNumber(stack: LayoutLayer[]) {
+  let max = 0;
+  for (const layer of stack) {
+    for (const c of layer.cavities) {
+      const m = String(c.id || "").match(/(?:seed-cav-|cav-)(\d+)/);
+      if (m) max = Math.max(max, Number(m[1]) || 0);
+    }
+  }
+  return max + 1;
 }
 
 function clamp01(v: number) {
