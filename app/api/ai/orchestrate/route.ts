@@ -606,6 +606,7 @@ type PriceBreak = {
   total: number;
   piece: number | null;
   used_min_charge?: boolean | null;
+_attach?: never;
 };
 
 async function buildPriceBreaks(
@@ -689,7 +690,7 @@ function grabQty(raw: string): number | undefined {
     t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
     t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
     t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
-    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?|sets?)\b/); // <-- HARDENING: include sets
+    t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?|sets?)\b/);
 
   if (m) return Number(m[1]);
 
@@ -699,7 +700,7 @@ function grabQty(raw: string): number | undefined {
   );
   if (m) return Number(m[1]);
 
-  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?|sets?)?\b/); // <-- HARDENING: include sets
+  m = norm.match(/\bfor\s+(\d{1,6})\s*(?:pcs?|pieces?|parts?|sets?)?\b/);
   if (m) return Number(m[1]);
 
   return undefined;
@@ -1012,8 +1013,6 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
         .reduce((a, b) => a + b, 0);
 
       if (Number.isFinite(fpL) && fpL > 0 && Number.isFinite(fpW) && fpW > 0 && sumTh > 0) {
-        // Only set/override dims when we don't already have a confident explicit outside dims.
-        // (If an earlier dims parse grabbed something weak, this corrects it.)
         facts.dims = `${canonNumStr(String(fpL))}x${canonNumStr(String(fpW))}x${canonNumStr(String(sumTh))}`;
       }
     }
@@ -1387,15 +1386,14 @@ export async function POST(req: NextRequest) {
       merged.price_breaks = priceBreaks;
     }
 
-    const hasDimsQty = !!(specs.dims && specs.qty);
-
-    // Header: store whenever we have dims + qty + quoteNumber
+    // Header: store whenever we have a quoteNumber.
+    // Path A fix: this prevents sending emails with quote_no links that don't exist in DB.
     let quoteId = merged.quote_id;
 
     const salesRepSlugForHeader: string | undefined =
       (merged.sales_rep_slug as string | undefined) || salesRepSlugResolved || undefined;
 
-    if (!dryRun && merged.quoteNumber && hasDimsQty && !quoteId) {
+    if (!dryRun && merged.quoteNumber && !quoteId) {
       try {
         const customerName = merged.customerName || merged.customer_name || merged.name || "Customer";
         const customerEmail = merged.customerEmail || merged.email || null;
