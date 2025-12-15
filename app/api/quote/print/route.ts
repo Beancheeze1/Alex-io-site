@@ -40,6 +40,9 @@ type ItemRow = {
   material_family?: string | null;
   density_lb_ft3?: number | null;
 
+  // NEW: bring notes through so we can detect [LAYOUT-LAYER] rows
+  notes?: string | null;
+
   // NEW (Path A): optional hydrated field for UI
   color?: string | null;
 
@@ -234,14 +237,18 @@ function computeLayoutThicknessMetrics(layoutJson: any) {
     }
 
     if (cavityLayerIndex == null) {
-      const idx = layers.findIndex((ly) => Array.isArray(ly?.cavities) && (ly.cavities?.length ?? 0) > 0);
+      const idx = layers.findIndex(
+        (ly) => Array.isArray(ly?.cavities) && (ly.cavities?.length ?? 0) > 0,
+      );
       if (idx >= 0) cavityLayerIndex = idx;
     }
   }
 
   const cavityLayer = cavityLayerIndex != null ? layers[cavityLayerIndex] : null;
   const cavity_layer_thickness_in =
-    cavityLayerIndex != null ? pickThicknessIn(cavityLayer) ?? perLayerThickness[cavityLayerIndex] ?? null : null;
+    cavityLayerIndex != null
+      ? pickThicknessIn(cavityLayer) ?? perLayerThickness[cavityLayerIndex] ?? null
+      : null;
 
   // Max cavity depth in that layer
   let maxCavityDepth = 0;
@@ -273,6 +280,11 @@ function computeLayoutThicknessMetrics(layoutJson: any) {
     max_cavity_depth_in_layer_in,
     min_thickness_under_cavities_in,
   };
+}
+
+function isLayoutLayerItem(it: ItemRow): boolean {
+  const n = typeof it.notes === "string" ? it.notes : "";
+  return n.startsWith("[LAYOUT-LAYER]");
 }
 
 async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
@@ -333,10 +345,6 @@ async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
       material_name: result.material_name ?? null,
     };
 
-    // Optional pricing_breakdown is currently disabled because the old
-    // cost_per_lb column was removed from the materials table. Once we
-    // have a new, stable source for cost data (price books, etc.), this
-    // can be re-enabled using those fields instead of cost_per_lb.
     let pricing_breakdown: any = undefined;
 
     return {
@@ -396,8 +404,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // NEW (Path A): always hydrate facts for this quote_no so UI fields
-    // like color can be shown even when DB items exist.
+    // hydrate facts (color, etc.)
     let facts: any = null;
     try {
       facts = await loadFacts(quote.quote_no);
@@ -410,7 +417,6 @@ export async function GET(req: NextRequest) {
         ? String(facts.color).trim()
         : null;
 
-    // Attach color to the quote object so the client has a stable place to read it.
     (quote as any).color = hydratedColor;
 
     const itemsRaw = await q<ItemRow>(
@@ -423,6 +429,7 @@ export async function GET(req: NextRequest) {
           qi.height_in::text,
           qi.qty,
           qi.material_id,
+          qi.notes,
           m.name as material_name,
           m.material_family,
           m.density_lb_ft3
@@ -437,11 +444,9 @@ export async function GET(req: NextRequest) {
     let items: ItemRow[] = [];
 
     if (itemsRaw.length > 0) {
-      // Normal path: we have stored items in the DB, attach pricing to each.
       items = await Promise.all(itemsRaw.map((it) => attachPricingToItem(it)));
     } else {
-      // FALLBACK: no items stored yet. Pull facts from memory (same source as email)
-      // and synthesize a primary line item so the print page still shows numbers.
+      // fallback from memory if no DB items exist
       try {
         const dims = String(facts?.dims || "");
         const [Lraw, Wraw, Hraw] = dims.split("x");
@@ -466,26 +471,19 @@ export async function GET(req: NextRequest) {
               ? Number(facts.material_density_lb_ft3)
               : undefined,
             color: hydratedColor,
+            notes: null,
             price_total_usd: null,
             price_unit_usd: null,
           };
 
           const withPricing = await attachPricingToItem(synthetic);
           items = [withPricing];
-        } else {
-          console.warn(
-            "quote/print: no DB items and incomplete facts for quote_no",
-            quote.quote_no,
-            { dims, qtyFact, matId },
-          );
         }
       } catch (err) {
         console.error("quote/print: fallback from memory failed:", err);
       }
     }
 
-    // NEW (Path A): attach color onto each returned item so the UI can read it
-    // regardless of whether it looks at quote-level or item-level fields.
     if (hydratedColor) {
       items = items.map((it) => ({ ...it, color: it.color ?? hydratedColor }));
     }
@@ -509,69 +507,87 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // NEW (Path A): compute thickness metrics from layout stack (if present)
     const layoutMetrics =
-      layoutPkg && layoutPkg.layout_json ? computeLayoutThicknessMetrics(layoutPkg.layout_json) : null;
+      layoutPkg && layoutPkg.layout_json
+        ? computeLayoutThicknessMetrics(layoutPkg.layout_json)
+        : null;
 
-    // ---------- treat layout block as source of truth for primary dims ----------
+    // ------------------------------------------------------------
+    // FIX (Path A): If this quote's DB items are [LAYOUT-LAYER] rows,
+    // build a single "Foam set" priced as the SUM of the priced layers,
+    // and mark the layer rows as Included (no price fields).
+    // ------------------------------------------------------------
+    const layerItems = items.filter(isLayoutLayerItem);
+    if (layerItems.length > 0) {
+      const layerTotal = layerItems.reduce((sum, it) => {
+        const n = typeof it.price_total_usd === "number" ? it.price_total_usd : Number(it.price_total_usd ?? 0);
+        return Number.isFinite(n) ? sum + n : sum;
+      }, 0);
 
-    // If we have a layout package with a block that has valid dims,
-    // override the primary item (items[0]) L/W/H for display + pricing.
-    //
-    // IMPORTANT (Path A): If a multi-layer stack exists, thickness (H) must
-    // come from the stack total (not a single-layer thickness).
-    if (layoutPkg && layoutPkg.layout_json && items.length > 0) {
+      const baseQty =
+        layerItems.length > 0 && Number.isFinite(Number(layerItems[0].qty)) && Number(layerItems[0].qty) > 0
+          ? Number(layerItems[0].qty)
+          : 1;
+
+      // Prefer layout block dims for display (L/W) and stack total thickness (H)
+      let setL = Number(layerItems[0].length_in);
+      let setW = Number(layerItems[0].width_in);
+      let setH = Number(layerItems[0].height_in);
+
       try {
-        const block = layoutPkg.layout_json.block || {};
-
+        const block = layoutPkg?.layout_json?.block || {};
         const rawLength = block.lengthIn ?? block.length ?? block.L ?? block.l;
         const rawWidth = block.widthIn ?? block.width ?? block.W ?? block.w;
-
-        // Height/thickness selection:
-        // - If stack_total_thickness_in exists, that is the source of truth.
-        // - Otherwise, fall back to legacy block thickness fields (unchanged behavior).
         const stackH = layoutMetrics?.stack_total_thickness_in ?? null;
 
-        const rawHeightLegacy =
-          block.thicknessIn ??
-          block.heightIn ??
-          block.height ??
-          block.H ??
-          block.h ??
-          block.T ??
-          block.t;
+        const Lb = Number(rawLength);
+        const Wb = Number(rawWidth);
 
-        const L = Number(rawLength);
-        const W = Number(rawWidth);
-        const H = stackH != null ? Number(stackH) : Number(rawHeightLegacy);
-
-        const allFinite = [L, W, H].every((n) => Number.isFinite(n) && n > 0);
-
-        if (allFinite) {
-          const primary = items[0];
-
-          const overridden: ItemRow = {
-            ...primary,
-            length_in: L.toString(),
-            width_in: W.toString(),
-            height_in: H.toString(),
-          };
-
-          const pricedPrimary = await attachPricingToItem(overridden);
-          items = [pricedPrimary, ...items.slice(1)];
-
-          // keep color on the priced primary if we had it
-          if (hydratedColor) {
-            items = items.map((it) => ({ ...it, color: it.color ?? hydratedColor }));
-          }
+        if (Number.isFinite(Lb) && Lb > 0) setL = Lb;
+        if (Number.isFinite(Wb) && Wb > 0) setW = Wb;
+        if (stackH != null && Number.isFinite(Number(stackH)) && Number(stackH) > 0) {
+          setH = Number(stackH);
         }
-      } catch (overrideErr) {
-        console.error("quote/print: failed to override dims from layout block:", overrideErr);
+      } catch {
+        // keep defaults
       }
+
+      const foamSet: ItemRow = {
+        id: -1,
+        quote_id: quote.id,
+        length_in: setL.toString(),
+        width_in: setW.toString(),
+        height_in: setH.toString(),
+        qty: baseQty,
+        material_id: layerItems[0].material_id,
+        material_name: layerItems[0].material_name ?? null,
+        material_family: layerItems[0].material_family,
+        density_lb_ft3: layerItems[0].density_lb_ft3,
+        notes: "[FOAM-SET] Foam set — layered construction",
+        color: layerItems[0].color ?? hydratedColor ?? null,
+        price_total_usd: Math.round(layerTotal * 100) / 100,
+        price_unit_usd: baseQty > 0 ? Math.round((layerTotal / baseQty) * 100) / 100 : null,
+        pricing_meta: {
+          variant_used: "layer_sum",
+          total: Math.round(layerTotal * 100) / 100,
+          used_min_charge: false,
+        },
+      };
+
+      // Mark layers as included for UI + subtotal (do not double count)
+      const includedLayers = layerItems.map((it) => ({
+        ...it,
+        price_total_usd: null,
+        price_unit_usd: null,
+      }));
+
+      // Keep any non-layer items (packaging etc.) after
+      const nonLayer = items.filter((it) => !isLayoutLayerItem(it));
+
+      items = [foamSet, ...includedLayers, ...nonLayer];
     }
 
     // ---------- packaging lines: quote_box_selections + boxes ----------
-
     const packagingSelectionsRaw = await q<any>(
       `
         select
@@ -654,23 +670,14 @@ export async function GET(req: NextRequest) {
 
     // ---------- subtotals: foam + packaging ----------
 
-    // Foam subtotal:
-// IMPORTANT (Path A):
-// - Only the PRIMARY item contributes to foamSubtotal.
-// - [LAYOUT-LAYER] rows are display-only and must NOT be double-counted.
-const foamSubtotal = items.reduce((sum, it) => {
-  const notes = String((it as any).notes || "");
-  if (notes.startsWith("[LAYOUT-LAYER]")) {
-    return sum;
-  }
+    // Foam subtotal: sum only items that actually have a numeric price_total_usd.
+    // (Layer rows are now Included → null, so they won't double count.)
+    const foamSubtotal = items.reduce((sum, it) => {
+      const raw = (it as any).price_total_usd;
+      const n = typeof raw === "number" ? raw : raw != null ? Number(raw) : 0;
+      return Number.isFinite(n) ? sum + n : sum;
+    }, 0);
 
-  const raw = (it as any).price_total_usd;
-  const n = typeof raw === "number" ? raw : raw != null ? Number(raw) : 0;
-  return Number.isFinite(n) ? sum + n : sum;
-}, 0);
-
-
-    // Packaging subtotal: sum of carton extended prices.
     const packagingSubtotal = packagingLines.reduce((sum, line) => {
       const n = line.extended_price_usd != null ? Number(line.extended_price_usd) : 0;
       return Number.isFinite(n) ? sum + n : sum;
@@ -684,7 +691,6 @@ const foamSubtotal = items.reduce((sum, it) => {
         quote,
         items,
         layoutPkg,
-        // NEW (Path A): expose computed thickness metrics for the client Specs UI
         layoutMetrics,
         packagingLines,
         foamSubtotal,
@@ -699,8 +705,7 @@ const foamSubtotal = items.reduce((sum, it) => {
       {
         ok: false,
         error: "SERVER_ERROR",
-        message:
-          "There was an unexpected problem loading this quote. Please try again.",
+        message: "There was an unexpected problem loading this quote. Please try again.",
       },
       500,
     );
