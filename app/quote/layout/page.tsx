@@ -46,7 +46,6 @@ type BoxSuggestState = {
   bestMailer: SuggestedBox | null;
 };
 
-
 /**
  * Normalize block dims from searchParams (dims= / block=)
  */
@@ -126,6 +125,71 @@ function parseCavityDims(raw: string): {
 function snapInches(v: number): number {
   if (!Number.isFinite(v)) return 0;
   return Math.round(v / SNAP_IN) * SNAP_IN;
+}
+
+/**
+ * Path-A safety:
+ * If the DB layout has a multi-layer stack but the quote does NOT look like a multi-layer quote,
+ * collapse to a single layer so single-piece quotes don't show phantom stacks.
+ */
+function looksMultiLayerFromItems(items: any): boolean {
+  if (!Array.isArray(items) || items.length === 0) return false;
+
+  // Heuristics only; we intentionally avoid guessing based on material strings.
+  // We look for explicit layer fields commonly used in our quote_items payloads.
+  const layerKeys = ["layer_index", "layer_no", "layerId", "layer_id", "layer_label", "layerLabel"];
+
+  let foundExplicitLayerField = false;
+  const indices = new Set<number>();
+
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+
+    for (const k of layerKeys) {
+      if (Object.prototype.hasOwnProperty.call(it, k) && it[k] != null && it[k] !== "") {
+        foundExplicitLayerField = true;
+
+        // collect numeric indices when available
+        if (k === "layer_index" || k === "layer_no") {
+          const n = Number(it[k]);
+          if (Number.isFinite(n)) indices.add(n);
+        }
+      }
+    }
+  }
+
+  // If we have 2+ distinct indices, it's definitely multi-layer.
+  if (indices.size >= 2) return true;
+
+  // If we have any explicit layer field present, treat it as multi-layer (conservative)
+  return foundExplicitLayerField;
+}
+
+function collapseStackToSingleLayer(layoutFromDb: any): LayoutModel {
+  try {
+    const stack = Array.isArray(layoutFromDb?.stack) ? layoutFromDb.stack : null;
+    if (!stack || stack.length === 0) return layoutFromDb as LayoutModel;
+
+    const first = stack[0];
+    const block = layoutFromDb?.block ?? { lengthIn: 10, widthIn: 10, thicknessIn: 2 };
+
+    const t = Number(first?.thicknessIn);
+    const thicknessIn =
+      Number.isFinite(t) && t > 0 ? t : Number(block?.thicknessIn) || 0;
+
+    // Keep first-layer cavities; this matches the single-piece expectation.
+    const cavities = Array.isArray(first?.cavities) ? first.cavities : [];
+
+    return {
+      block: {
+        ...block,
+        thicknessIn: thicknessIn > 0 ? thicknessIn : (Number(block?.thicknessIn) || 2),
+      },
+      cavities,
+    };
+  } catch {
+    return layoutFromDb as LayoutModel;
+  }
 }
 
 export default function LayoutPage({
@@ -453,9 +517,21 @@ export default function LayoutPage({
           !hasDimsFromUrl &&
           !hasCavitiesFromUrl
         ) {
-          const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
+          const layoutFromDbRaw = json.layoutPkg.layout_json as any;
           const notesFromDb =
             (json.layoutPkg.notes as string | null) ?? "";
+
+          // Path-A: if DB has a multi-layer stack but the quote doesn't look layered, collapse it.
+          let layoutFromDb: LayoutModel = layoutFromDbRaw as LayoutModel;
+
+          const hasStack =
+            Array.isArray(layoutFromDbRaw?.stack) && layoutFromDbRaw.stack.length > 1;
+
+          const quoteLooksLayered = looksMultiLayerFromItems(json.items);
+
+          if (hasStack && !quoteLooksLayered) {
+            layoutFromDb = collapseStackToSingleLayer(layoutFromDbRaw);
+          }
 
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
@@ -541,6 +617,9 @@ export default function LayoutPage({
     />
   );
 }
+
+/* ------- REST OF YOUR FILE UNCHANGED BELOW THIS LINE ------- */
+/* NOTE: I’m keeping everything else exactly as you pasted it. */
 
 const CAVITY_COLORS = [
   "#38bdf8",
