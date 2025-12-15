@@ -771,7 +771,24 @@ export default function QuotePrintClient() {
     };
   }, []);
 
-  const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
+  // Path A (presentation): if multiple foam rows share the same qty, show the primary qty
+  // instead of summing (prevents "75" when it's really 25 sets).
+  const overallQty = React.useMemo(() => {
+    if (items && items.length > 0) {
+      const q0 = Number(items[0]?.qty ?? 0);
+      const allSame =
+        Number.isFinite(q0) &&
+        q0 > 0 &&
+        items.every((i) => {
+          const qi = Number(i?.qty ?? 0);
+          return Number.isFinite(qi) && qi === q0;
+        });
+
+      if (allSame) return q0;
+    }
+
+    return items.reduce((sum, i) => sum + (i.qty || 0), 0);
+  }, [items]);
 
   // Planning notes from layout
   const notesPreview =
@@ -977,13 +994,6 @@ export default function QuotePrintClient() {
       return prev;
     });
   }, [layersForPreview]);
-
-  // NEW (Path A): Customer-facing construction sentence (hybrid model; no pricing changes)
-  const showConstructionNote = !!layoutPkg && ((layersForPreview?.length || 0) > 0 || layerDisplayRows.length > 0);
-  const constructionNote =
-    "This foam set is constructed using multiple bonded layers as required at manufacturer discretion to achieve the specified geometry. " +
-    "The top-most layer is packed loose unless explicitly noted otherwise. " +
-    "If you have specific construction requirements, please include them in the notes section.";
 
   // ===================== RENDER =====================
 
@@ -1256,13 +1266,16 @@ export default function QuotePrintClient() {
                       {primaryMaterialSubline && (
                         <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{primaryMaterialSubline}</div>
                       )}
+                    </div>
 
-                      {/* NEW (Path A): customer-facing construction clarity (hybrid pricing semantics) */}
-                      {showConstructionNote && (
-                        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8, lineHeight: 1.4 }}>
-                          <span style={{ fontWeight: 600, color: "#374151" }}>Construction:</span> {constructionNote}
-                        </div>
-                      )}
+                    {/* Construction copy (customer clarity) */}
+                    <div style={{ marginTop: 2 }}>
+                      <div style={labelStyle}>Construction</div>
+                      <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.45 }}>
+                        This foam set is built from multiple bonded layers as needed at manufacturer discretion. Top-most
+                        layer will always be packed loose unless specifically called out otherwise in notes area. If you
+                        have any other construction requirement, please explain in the notes area.
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1493,7 +1506,7 @@ export default function QuotePrintClient() {
                     </thead>
 
                     <tbody>
-                      {/* Foam / core quote items (priced) */}
+                      {/* Foam / core quote items (priced as a set; additional rows shown as Included layers) */}
                       {items.length > 0 && (
                         <tr>
                           <td
@@ -1513,6 +1526,7 @@ export default function QuotePrintClient() {
                           </td>
                         </tr>
                       )}
+
                       {items.map((item, idx) => {
                         const dims = `${formatDims(item.length_in, item.width_in, item.height_in)} in`;
 
@@ -1528,22 +1542,43 @@ export default function QuotePrintClient() {
                         const unit = parsePriceField(item.price_unit_usd ?? null);
                         const total = parsePriceField(item.price_total_usd ?? null);
 
+                        const isPrimary = idx === 0;
+
                         return (
                           <tr key={item.id}>
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
-                              <div style={{ fontWeight: 500 }}>Line {idx + 1}</div>
-                              <div style={{ color: "#6b7280" }}>
-                                {baseLabel}
-                                {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
-                              </div>
+                              {isPrimary ? (
+                                <>
+                                  <div style={{ fontWeight: 600 }}>Foam set — layered construction</div>
+                                  <div style={{ color: "#6b7280" }}>
+                                    {baseLabel}
+                                    {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, lineHeight: 1.35 }}>
+                                    Includes all bonded layers shown below (for reference).
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div style={{ fontWeight: 500 }}>Included layer</div>
+                                  <div style={{ color: "#6b7280" }}>
+                                    {baseLabel}
+                                    {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
+                                  </div>
+                                </>
+                              )}
                             </td>
+
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
+
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{item.qty}</td>
+
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {formatUsd(unit)}
+                              {isPrimary ? formatUsd(unit) : <span style={{ color: "#6b7280" }}>Included</span>}
                             </td>
+
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {formatUsd(total)}
+                              {isPrimary ? formatUsd(total) : <span style={{ color: "#6b7280" }}>Included</span>}
                             </td>
                           </tr>
                         );
@@ -1749,14 +1784,6 @@ export default function QuotePrintClient() {
                       <div style={{ marginTop: 6, color: "#4b5563", fontSize: 12 }}>
                         <span style={{ fontWeight: 500 }}>Notes: </span>
                         {notesPreview}
-                      </div>
-                    )}
-
-                    {/* NEW: repeat construction note here too (so it’s visible even if user scrolls past Specs) */}
-                    {showConstructionNote && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: "#4b5563", lineHeight: 1.45 }}>
-                        <span style={{ fontWeight: 600, color: "#111827" }}>Construction:</span>{" "}
-                        <span style={{ color: "#6b7280" }}>{constructionNote}</span>
                       </div>
                     )}
 
