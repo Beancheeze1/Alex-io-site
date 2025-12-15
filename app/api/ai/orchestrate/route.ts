@@ -775,13 +775,21 @@ function grabMaterial(raw: string): string | undefined {
    Step 2: Layer intent extraction helpers (Top = index 0)
    ============================================================ */
 
+// CHANGED: make summary regex more forgiving
 function grabLayerSummary(raw: string): { layer_count?: number; footprint?: string } {
   const t = (raw || "").toLowerCase();
 
+  // Accept:
+  // - "made up of (3) 12x12 layers"
+  // - "(3) 12\"x12\" layers"
+  // - "3 12 x 12 layers"
   const re = new RegExp(
-    `\\b\\(?\\s*(\\d{1,2})\\s*\\)?\\s*(${NUM})\\s*["']?\\s*[x×]\\s*(${NUM})\\s*["']?\\s*(?:layers?|pcs?\\s+of\\s+layers?)\\b`,
+    `\\b(?:made\\s+up\\s+of\\s+)?\\(?\\s*(\\d{1,2})\\s*\\)?\\s*` +
+      `(${NUM})\\s*["']?\\s*[x×]\\s*(${NUM})\\s*["']?\\s*` +
+      `(?:layers?|layer)\\b`,
     "i",
   );
+
   const m = t.match(re);
   if (!m) return {};
   const count = Number(m[1]);
@@ -789,6 +797,20 @@ function grabLayerSummary(raw: string): { layer_count?: number; footprint?: stri
   const W = canonNumStr(m[3]);
   if (!Number.isFinite(count) || count <= 0) return {};
   return { layer_count: count, footprint: `${L}x${W}` };
+}
+
+// NEW: footprint-only fallback (covers cases where layer_count regex misses)
+function grabLayerFootprintOnly(raw: string): { footprint?: string } {
+  const t = (raw || "").toLowerCase();
+  const re = new RegExp(
+    `\\b(${NUM})\\s*["']?\\s*[x×]\\s*(${NUM})\\s*["']?\\s*(?:layers?|layer)\\b`,
+    "i",
+  );
+  const m = t.match(re);
+  if (!m) return {};
+  const L = canonNumStr(m[1]);
+  const W = canonNumStr(m[2]);
+  return { footprint: `${L}x${W}` };
 }
 
 function grabLayerThicknesses(raw: string): {
@@ -973,15 +995,27 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   /* ------------------- STEP 2: LAYER INTENT EXTRACTION ------------------- */
 
   const layerSummary = grabLayerSummary(text);
-  if (layerSummary.layer_count && layerSummary.footprint) {
-    facts.layer_count = layerSummary.layer_count;
-    facts.layer_footprint = layerSummary.footprint;
 
+  // NEW: footprint-only fallback
+  const layerFootOnly = !layerSummary.footprint ? grabLayerFootprintOnly(text) : {};
+
+  const layerCount = layerSummary.layer_count;
+  const footprint = layerSummary.footprint || layerFootOnly.footprint;
+
+  if (layerCount && footprint) {
+    facts.layer_count = layerCount;
+    facts.layer_footprint = footprint;
+  } else if (!layerCount && footprint) {
+    // We still store footprint if we found it; layer_count can be absent in some emails.
+    facts.layer_footprint = footprint;
+  }
+
+  if (facts.layer_footprint) {
     const th = grabLayerThicknesses(text);
     const layers: any[] = [];
 
-    // TOP = index 0
-    if (layerSummary.layer_count === 3) {
+    // TOP = index 0 (only structure the 3-layer stack when we have 3)
+    if (facts.layer_count === 3) {
       layers.push({ index: 0, position: "top", thickness_in: th.top ?? null });
       layers.push({ index: 1, position: "middle", thickness_in: th.middle ?? null });
       layers.push({ index: 2, position: "bottom", thickness_in: th.bottom ?? null });
@@ -1001,16 +1035,22 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
     // HARDENING: If outside dims were NOT explicit, and we have footprint + thicknesses,
     // infer the overall dims so the quote + editor seed correctly.
-    if (!outsideDimsWasExplicit && facts.layer_footprint && Array.isArray(facts.layers)) {
+    if (!outsideDimsWasExplicit && facts.layer_footprint) {
       const fp = String(facts.layer_footprint || "").trim();
       const [fpLRaw, fpWRaw] = fp.split("x");
       const fpL = Number(fpLRaw);
       const fpW = Number(fpWRaw);
 
-      const sumTh = (facts.layers as any[])
-        .map((l) => Number(l?.thickness_in))
-        .filter((n) => Number.isFinite(n) && n > 0)
-        .reduce((a, b) => a + b, 0);
+      const sumTh =
+        Array.isArray(facts.layers) && facts.layers.length
+          ? (facts.layers as any[])
+              .map((l) => Number(l?.thickness_in))
+              .filter((n) => Number.isFinite(n) && n > 0)
+              .reduce((a, b) => a + b, 0)
+          : [th.top, th.middle, th.bottom]
+              .map((n) => Number(n))
+              .filter((n) => Number.isFinite(n) && n > 0)
+              .reduce((a, b) => a + b, 0);
 
       if (Number.isFinite(fpL) && fpL > 0 && Number.isFinite(fpW) && fpW > 0 && sumTh > 0) {
         facts.dims = `${canonNumStr(String(fpL))}x${canonNumStr(String(fpW))}x${canonNumStr(String(sumTh))}`;
