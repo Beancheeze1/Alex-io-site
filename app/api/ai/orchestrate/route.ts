@@ -827,9 +827,10 @@ function grabLayerThicknesses(raw: string): {
   const out: any = {};
 
   const re = new RegExp(
-    `\\b(top|middle|bottom)\\s+layer\\b[^.\\n\\r]{0,120}?\\b(${NUM})\\s*(?:"|inches?|inch)\\b[^.\\n\\r]{0,40}?\\bthick\\b`,
-    "gi",
-  );
+  `\\b(top|middle|bottom)\\s+layer\\b[^.\\n\\r]{0,120}?\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,40}?\\bthick\\b`,
+  "gi",
+);
+
 
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
