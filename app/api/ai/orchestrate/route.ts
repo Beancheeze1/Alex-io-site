@@ -195,14 +195,14 @@ function hasExplicitLayerSignals(text: string): boolean {
   );
   if (reCountFootprint.test(t)) return true;
 
-  // Explicit "layers" word is a strong signal (but keep strict context)
-  // Example: "3 layers", "layers: 1,4,1", etc.
+  // Explicit "3 layers"
   if (/\b\d{1,2}\s+layers?\b/.test(t)) return true;
 
   return false;
 }
 
 // Remove all layer-related keys so the editor seeds ONE layer.
+// Also clears any alternate "carrier" fields that could seed stacks.
 function stripLayerFacts(f: Mem): Mem {
   if (!f) return f;
 
@@ -210,6 +210,9 @@ function stripLayerFacts(f: Mem): Mem {
   delete (f as any).layer_footprint;
   delete (f as any).layers;
   delete (f as any).layer_cavity_layer_index;
+
+  // Alternate carriers that have historically affected display/seed behavior:
+  delete (f as any).foamLayers;
 
   return f;
 }
@@ -1439,7 +1442,7 @@ export async function POST(req: NextRequest) {
     }
 
     // PATH A: If this inbound email does NOT mention layers, strip any layer fields
-    // that may have been hallucinated by LLM or carried in.
+    // that may have been hallucinated by LLM.
     if (!thisTurnHasLayerIntent) {
       newly = stripLayerFacts(newly);
     }
@@ -1461,35 +1464,33 @@ export async function POST(req: NextRequest) {
     // ============================================================
     // PATH A: Layer-intent isolation (prevents phantom layers)
     //
-    // Rule A:
     // If THIS inbound message does NOT mention layers, we MUST wipe
     // any previously-memorized layer intent so single-piece quotes
     // do not inherit a past 3-layer stack (threadKey memory reuse).
+    //
+    // CRITICAL SAFETY: Layered emails are untouched.
     // ============================================================
+    const layerGateDebugBefore = dryRun
+      ? {
+          layer_count: (merged as any).layer_count ?? null,
+          layer_footprint: (merged as any).layer_footprint ?? null,
+          layers_len: Array.isArray((merged as any).layers) ? (merged as any).layers.length : 0,
+          foamLayers_len: Array.isArray((merged as any).foamLayers) ? (merged as any).foamLayers.length : 0,
+        }
+      : null;
 
-    const turnMentionsLayers =
-      /\b(layers?|layered)\b/i.test(`${subject}\n\n${lastText}`) ||
-      newly.layer_count != null ||
-      (typeof newly.layer_footprint === "string" && newly.layer_footprint.trim().length > 0) ||
-      (Array.isArray((newly as any).layers) && (newly as any).layers.length > 0);
-
-    if (!turnMentionsLayers) {
-      delete (merged as any).layer_count;
-      delete (merged as any).layer_footprint;
-      delete (merged as any).layers;
-      delete (merged as any).layer_cavity_layer_index;
-
-      // Also clear any alternate carriers that could affect display seeding.
-      delete (merged as any).foamLayers;
-    }
-
-
-
-    // PATH A: Gate again at merged-level before we persist, so old memory can't leak layers
-    // into a single-piece request.
     if (!thisTurnHasLayerIntent) {
       merged = stripLayerFacts(merged);
     }
+
+    const layerGateDebugAfter = dryRun
+      ? {
+          layer_count: (merged as any).layer_count ?? null,
+          layer_footprint: (merged as any).layer_footprint ?? null,
+          layers_len: Array.isArray((merged as any).layers) ? (merged as any).layers.length : 0,
+          foamLayers_len: Array.isArray((merged as any).foamLayers) ? (merged as any).foamLayers.length : 0,
+        }
+      : null;
 
     if (salesRepSlugResolved && !merged.sales_rep_slug) {
       merged.sales_rep_slug = salesRepSlugResolved;
@@ -1792,6 +1793,13 @@ export async function POST(req: NextRequest) {
         specs,
         calc,
         facts: merged,
+        _layerGate: dryRun
+          ? {
+              thisTurnHasLayerIntent,
+              before: layerGateDebugBefore,
+              after: layerGateDebugAfter,
+            }
+          : undefined,
       });
     }
 
@@ -1804,6 +1812,11 @@ export async function POST(req: NextRequest) {
         specs,
         calc,
         facts: merged,
+        _layerGate: {
+          thisTurnHasLayerIntent,
+          before: layerGateDebugBefore,
+          after: layerGateDebugAfter,
+        },
       });
     }
 
