@@ -654,12 +654,21 @@ export async function GET(req: NextRequest) {
 
     // ---------- subtotals: foam + packaging ----------
 
-    // Foam subtotal: sum of item.price_total_usd across quote_items.
-    const foamSubtotal = items.reduce((sum, it) => {
-      const raw = (it as any).price_total_usd;
-      const n = typeof raw === "number" ? raw : raw != null ? Number(raw) : 0;
-      return Number.isFinite(n) ? sum + n : sum;
-    }, 0);
+    // Foam subtotal:
+// IMPORTANT (Path A):
+// - Only the PRIMARY item contributes to foamSubtotal.
+// - [LAYOUT-LAYER] rows are display-only and must NOT be double-counted.
+const foamSubtotal = items.reduce((sum, it) => {
+  const notes = String((it as any).notes || "");
+  if (notes.startsWith("[LAYOUT-LAYER]")) {
+    return sum;
+  }
+
+  const raw = (it as any).price_total_usd;
+  const n = typeof raw === "number" ? raw : raw != null ? Number(raw) : 0;
+  return Number.isFinite(n) ? sum + n : sum;
+}, 0);
+
 
     // Packaging subtotal: sum of carton extended prices.
     const packagingSubtotal = packagingLines.reduce((sum, line) => {
