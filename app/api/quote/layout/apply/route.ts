@@ -841,33 +841,6 @@ export async function POST(req: NextRequest) {
       quoteNo,
     );
 
-    // ===================== FIX: persist layer thickness into layout_json =====================
-    if (layout && Array.isArray(layout.stack)) {
-      layout.stack = layout.stack.map((layer: any) => {
-        if (!layer || typeof layer !== "object") return layer;
-
-        const raw =
-          layer.thicknessIn ??
-          layer.thickness_in ??
-          layer.thickness ??
-          null;
-
-        const n = Number(raw);
-
-        if (Number.isFinite(n) && n > 0) {
-          return {
-            ...layer,
-            thicknessIn: n, // canonical, numeric, admin-safe
-          };
-        }
-
-        return layer;
-      });
-    }
-    // ===================== END FIX =====================
-
-
-
     const pkg = await one<LayoutPkgRow>(
       `
       insert into quote_layout_packages (
@@ -938,23 +911,26 @@ export async function POST(req: NextRequest) {
         ? (body as any).foamLayers
         : null;
 
-            // IMPORTANT (Path A): Prefer the layout we are actually saving (layoutForSave)
-      // for layer thickness. body.foamLayers can contain "stack total" thickness
-      // depending on caller payload shape.
-      const layersFromLayout =
-        Array.isArray(layoutForSave?.stack) && layoutForSave.stack.length > 0
-          ? layoutForSave.stack
-          : Array.isArray(layoutForSave?.layers) && layoutForSave.layers.length > 0
-          ? layoutForSave.layers
-          : [];
+      // ---- PATH A FIX:
+      // Only trust body.foamLayers if it matches the saved stack length.
+      // Otherwise use layoutForSave.stack (source of truth).
+      const stackLayers = Array.isArray(layoutForSave?.stack) ? layoutForSave.stack : null;
+
+      const useFoamLayers =
+        Array.isArray(foamLayers) &&
+        foamLayers.length > 0 &&
+        Array.isArray(stackLayers) &&
+        stackLayers.length > 0 &&
+        foamLayers.length === stackLayers.length;
 
       const layers =
-        layersFromLayout.length > 0
-          ? layersFromLayout
-          : Array.isArray(foamLayers) && foamLayers.length > 0
-          ? foamLayers
+        useFoamLayers
+          ? stackLayers // still iterate stack so labels/ordering match; foamLayers used only as thickness fallback
+          : Array.isArray(stackLayers) && stackLayers.length > 0
+          ? stackLayers
+          : Array.isArray(layoutForSave?.layers)
+          ? layoutForSave.layers
           : [];
-
 
       let baseQty: number | null = null;
 
@@ -1010,15 +986,31 @@ export async function POST(req: NextRequest) {
 
         let layerIndex = 0;
 
-        for (const rawLayer of layers) {
+        for (let i = 0; i < layers.length; i++) {
+          const rawLayer = layers[i];
           if (!rawLayer) continue;
 
-          const thicknessRaw =
+          // thickness resolution:
+          // 1) use thickness already on the saved stack layer
+          // 2) if missing AND foamLayers matches stack length, fallback to foamLayers[i]
+          const thicknessFromLayer =
             (rawLayer as any).thicknessIn ??
             (rawLayer as any).thickness_in ??
             (rawLayer as any).thickness;
 
-          const thickness = Number(thicknessRaw) || 0;
+          let thickness = Number(thicknessFromLayer) || 0;
+
+          if (!(thickness > 0) && useFoamLayers && Array.isArray(foamLayers) && foamLayers[i]) {
+            const fallback =
+              (foamLayers[i] as any).thicknessIn ??
+              (foamLayers[i] as any).thickness_in ??
+              (foamLayers[i] as any).thickness ??
+              (foamLayers[i] as any).heightIn ??
+              (foamLayers[i] as any).height_in;
+
+            thickness = Number(fallback) || 0;
+          }
+
           if (!(thickness > 0)) continue;
 
           layerIndex += 1;
