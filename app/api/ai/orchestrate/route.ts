@@ -1458,6 +1458,33 @@ export async function POST(req: NextRequest) {
 
     let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
 
+    // ============================================================
+    // PATH A: Layer-intent isolation (prevents phantom layers)
+    //
+    // Rule A:
+    // If THIS inbound message does NOT mention layers, we MUST wipe
+    // any previously-memorized layer intent so single-piece quotes
+    // do not inherit a past 3-layer stack (threadKey memory reuse).
+    // ============================================================
+
+    const turnMentionsLayers =
+      /\b(layers?|layered)\b/i.test(`${subject}\n\n${lastText}`) ||
+      newly.layer_count != null ||
+      (typeof newly.layer_footprint === "string" && newly.layer_footprint.trim().length > 0) ||
+      (Array.isArray((newly as any).layers) && (newly as any).layers.length > 0);
+
+    if (!turnMentionsLayers) {
+      delete (merged as any).layer_count;
+      delete (merged as any).layer_footprint;
+      delete (merged as any).layers;
+      delete (merged as any).layer_cavity_layer_index;
+
+      // Also clear any alternate carriers that could affect display seeding.
+      delete (merged as any).foamLayers;
+    }
+
+
+
     // PATH A: Gate again at merged-level before we persist, so old memory can't leak layers
     // into a single-piece request.
     if (!thisTurnHasLayerIntent) {
