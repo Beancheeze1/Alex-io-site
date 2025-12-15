@@ -771,24 +771,14 @@ export default function QuotePrintClient() {
     };
   }, []);
 
-  // Path A (presentation): if multiple foam rows share the same qty, show the primary qty
-  // instead of summing (prevents "75" when it's really 25 sets).
+  const primaryItem = items[0] || null;
+
+  // Path A (presentation): show set quantity (primary qty) in totals.
   const overallQty = React.useMemo(() => {
-    if (items && items.length > 0) {
-      const q0 = Number(items[0]?.qty ?? 0);
-      const allSame =
-        Number.isFinite(q0) &&
-        q0 > 0 &&
-        items.every((i) => {
-          const qi = Number(i?.qty ?? 0);
-          return Number.isFinite(qi) && qi === q0;
-        });
-
-      if (allSame) return q0;
-    }
-
+    const q0 = Number(primaryItem?.qty ?? 0);
+    if (Number.isFinite(q0) && q0 > 0) return q0;
     return items.reduce((sum, i) => sum + (i.qty || 0), 0);
-  }, [items]);
+  }, [items, primaryItem]);
 
   // Planning notes from layout
   const notesPreview =
@@ -798,7 +788,6 @@ export default function QuotePrintClient() {
         : layoutPkg.notes.trim()
       : null;
 
-  const primaryItem = items[0] || null;
   const primaryPricing = primaryItem?.pricing_meta || null;
   const minChargeApplied = !!primaryPricing?.used_min_charge;
   const setupFee = typeof primaryPricing?.setup_fee === "number" ? primaryPricing.setup_fee : null;
@@ -1164,7 +1153,9 @@ export default function QuotePrintClient() {
                 >
                   <button
                     type="button"
-                    onClick={handlePrint}
+                    onClick={() => {
+                      if (typeof window !== "undefined") window.print();
+                    }}
                     style={{
                       padding: "6px 12px",
                       borderRadius: 999,
@@ -1528,7 +1519,14 @@ export default function QuotePrintClient() {
                       )}
 
                       {items.map((item, idx) => {
-                        const dims = `${formatDims(item.length_in, item.width_in, item.height_in)} in`;
+                        const isPrimary = idx === 0;
+
+                        // Path A: primary row should show the *stack total thickness* when available,
+                        // so the table matches the Specs card.
+                        const stackH = layoutMetrics?.stack_total_thickness_in;
+                        const hForRow = isPrimary && typeof stackH === "number" && Number.isFinite(stackH) ? stackH : item.height_in;
+
+                        const dims = `${formatDims(item.length_in, item.width_in, hForRow)} in`;
 
                         const baseLabel = item.material_name || "Material #" + item.material_id;
 
@@ -1539,10 +1537,21 @@ export default function QuotePrintClient() {
                         if (Number.isFinite(densNum) && densNum > 0) subParts.push(`${densNum.toFixed(1)} lb/ft³`);
                         const subLabel = subParts.length > 0 ? subParts.join(" · ") : null;
 
-                        const unit = parsePriceField(item.price_unit_usd ?? null);
-                        const total = parsePriceField(item.price_total_usd ?? null);
+                        // Path A: primary row pricing should always match server rollup foamSubtotal.
+                        const primaryQty = Number(primaryItem?.qty ?? item.qty ?? 0);
+                        const primaryQtySafe = Number.isFinite(primaryQty) && primaryQty > 0 ? primaryQty : 0;
 
-                        const isPrimary = idx === 0;
+                        const unitFromItem = parsePriceField(item.price_unit_usd ?? null);
+                        const totalFromItem = parsePriceField(item.price_total_usd ?? null);
+
+                        const unitForPrimary =
+                          breakdownUnitPrice != null
+                            ? breakdownUnitPrice
+                            : primaryQtySafe > 0 && foamSubtotal > 0
+                              ? Math.round((foamSubtotal / primaryQtySafe) * 100) / 100
+                              : unitFromItem;
+
+                        const totalForPrimary = foamSubtotal > 0 ? foamSubtotal : totalFromItem;
 
                         return (
                           <tr key={item.id}>
@@ -1574,11 +1583,11 @@ export default function QuotePrintClient() {
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{item.qty}</td>
 
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {isPrimary ? formatUsd(unit) : <span style={{ color: "#6b7280" }}>Included</span>}
+                              {isPrimary ? formatUsd(unitForPrimary ?? null) : <span style={{ color: "#6b7280" }}>Included</span>}
                             </td>
 
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {isPrimary ? formatUsd(total) : <span style={{ color: "#6b7280" }}>Included</span>}
+                              {isPrimary ? formatUsd(totalForPrimary ?? null) : <span style={{ color: "#6b7280" }}>Included</span>}
                             </td>
                           </tr>
                         );
@@ -1595,12 +1604,8 @@ export default function QuotePrintClient() {
                           </td>
                           <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{layer.dims}</td>
                           <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{layer.qty}</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                            {formatUsd(null)}
-                          </td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                            {formatUsd(null)}
-                          </td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(null)}</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(null)}</td>
                         </tr>
                       ))}
 
@@ -1625,6 +1630,7 @@ export default function QuotePrintClient() {
                           </td>
                         </tr>
                       )}
+
                       {requestedBoxes.map((rb) => {
                         const mainLabel =
                           (rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) ||
@@ -1701,12 +1707,8 @@ export default function QuotePrintClient() {
                             </td>
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{dimsDisplay}</td>
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{qty}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {formatUsd(unitPrice)}
-                            </td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {formatUsd(lineTotal)}
-                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(unitPrice)}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(lineTotal)}</td>
                           </tr>
                         );
                       })}
