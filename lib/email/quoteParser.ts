@@ -31,10 +31,25 @@ const INCH_SYM = "(?:\\s*(?:\\\"|in\\.?|inch(?:es)?))?"; // allow ", in, inch
 function toInches(raw?: string): number | undefined {
   if (!raw) return undefined;
   const t = raw.trim();
-  if (/^\\d+\\s*\\/\\s*\\d+$/.test(t)) {
-    const [a, b] = t.split("/").map(Number);
-    return b ? a / b : undefined;
+
+  // IMPORTANT:
+  // Avoid regex escapes like \d and \s here because copy/paste sometimes
+  // introduces a Unicode "lookalike" backslash that breaks TS parsing.
+  const slash = t.indexOf("/");
+  if (slash !== -1) {
+    const aStr = t.slice(0, slash).trim();
+    const bStr = t.slice(slash + 1).trim();
+
+    // digits-only check (no backslashes)
+    const isDigits = (s: string) => s.length > 0 && /^[0-9]+$/.test(s);
+
+    if (isDigits(aStr) && isDigits(bStr)) {
+      const a = Number(aStr);
+      const b = Number(bStr);
+      return b ? a / b : undefined;
+    }
   }
+
   const n = Number(t);
   return isFinite(n) ? n : undefined;
 }
@@ -44,18 +59,18 @@ export function parseEmailQuote(text: string): ParsedEmailQuote {
   const out: ParsedEmailQuote = { cavities: [], notes: [] };
 
   // qty
-  const mQty = src.match(/\\bqty[:\\s]*([0-9]{1,5})\\b/);
+  const mQty = src.match(/\bqty[:\s]*([0-9]{1,5})\b/);
   if (mQty) out.qty = Number(mQty[1]);
 
   // material / density hints
-  const mPE = src.match(/\\b(pe|epe|polyethylene|pp|pu|urethane|zote)\\b/);
+  const mPE = src.match(/\b(pe|epe|polyethylene|pp|pu|urethane|zote)\b/);
   if (mPE) out.material_hint = mPE[1];
-  const mDen = src.match(/\\b([1-9](?:\\.[05])?)\\s*#\\b/);
+  const mDen = src.match(/\b([1-9](?:\.[05])?)\s*#\b/);
   out.density_hint = mDen ? Number(mDen[1]) : null;
 
   // OUTER block dims (20 x 16 x 2 ; 20" x 16" x 2")
   const reLWH = new RegExp(
-    "\\\\b(" + INCH + ")" + INCH_SYM + SEP +
+    "\\b(" + INCH + ")" + INCH_SYM + SEP +
     "(" + INCH + ")" + INCH_SYM + SEP +
     "(" + INCH + ")" + INCH_SYM,
     "i"
@@ -66,30 +81,12 @@ export function parseEmailQuote(text: string): ParsedEmailQuote {
     out.width_in  = toInches(mBox[2]);
     out.height_in = toInches(mBox[3]);
   } else {
-    const l = src.match(new RegExp("(?:length|long|l)[:\\\\s]*(" + INCH + ")"));
-    const w = src.match(new RegExp("(?:width|wide|w)[:\\\\s]*("  + INCH + ")"));
-    const h = src.match(new RegExp("(?:height|thick|t|h)[:\\\\s]*(" + INCH + ")"));
+    const l = src.match(new RegExp("(?:length|long|l)[:\\s]*(" + INCH + ")"));
+    const w = src.match(new RegExp("(?:width|wide|w)[:\\s]*("  + INCH + ")"));
+    const h = src.match(new RegExp("(?:height|thick|t|h)[:\\s]*(" + INCH + ")"));
     out.length_in = toInches(l?.[1]);
     out.width_in  = toInches(w?.[1]);
     out.height_in = toInches(h?.[1]);
-  }
-
-  // NEW: L x W "layers" footprint, e.g.:
-  //  - (3) 12"x12" layers
-  //  - three 12 x 12 layers
-  // Only fills L/W if they are missing (Path A safe).
-  if (!out.length_in || !out.width_in) {
-    const reLayerFootprint = new RegExp(
-      "\\\\b(" + INCH + ")" + INCH_SYM + SEP +
-      "(" + INCH + ")" + INCH_SYM +
-      "\\\\s*(?:layers?|layer)\\\\b",
-      "i"
-    );
-    const mFoot = src.match(reLayerFootprint);
-    if (mFoot) {
-      out.length_in = out.length_in ?? toInches(mFoot[1]);
-      out.width_in  = out.width_in  ?? toInches(mFoot[2]);
-    }
   }
 
   // CAVITIES — several phrase styles
@@ -97,18 +94,18 @@ export function parseEmailQuote(text: string): ParsedEmailQuote {
 
   // Squares/rectangles like “two 2 x 2 x 1 deep square pockets”
   const reRect = new RegExp(
-    "(?:(\\\\d{1,3})\\\\s*)?(?:cav(?:ity|ities)?|slots?|rects?|rectangles?|pockets?)?\\\\D*" +
-    "\\\\b(?:square|rect(?:angle)?)\\\\b\\\\D*" +
+    "(?:(\\d{1,3})\\s*)?(?:cav(?:ity|ities)?|slots?|rects?|rectangles?|pockets?)?\\D*" +
+    "\\b(?:square|rect(?:angle)?)\\b\\D*" +
     "(" + INCH + ")" + INCH_SYM + SEP +
     "(" + INCH + ")" + INCH_SYM +
     "(?:" + SEP + "(" + INCH + ")" + INCH_SYM + ")?" +
-    "(?:\\\\D{0,15}\\\\b(?:deep|depth)\\\\b)?",
+    "(?:\\D{0,15}\\b(?:deep|depth)\\b)?",
     "g"
   );
 
   // Generic L x W x D “slots/pockets/cavities”
   const reSlot = new RegExp(
-    "(?:(\\\\d{1,3})\\\\s*)?(?:slots?|pockets?|cav(?:ity|ities)?)\\\\D+" +
+    "(?:(\\d{1,3})\\s*)?(?:slots?|pockets?|cav(?:ity|ities)?)\\D+" +
     "(" + INCH + ")" + INCH_SYM + SEP +
     "(" + INCH + ")" + INCH_SYM + SEP +
     "(" + INCH + ")" + INCH_SYM,
@@ -117,17 +114,17 @@ export function parseEmailQuote(text: string): ParsedEmailQuote {
 
   // Circles/Rounds like “two 3\" round x 1\" deep” / “1 circle dia 3 x 1”
   const reRound = new RegExp(
-    "(?:(\\\\d{1,3})\\\\s*)?(?:holes?|circles?|rounds?)\\\\D+" +
-    "(?:dia(?:meter)?\\\\D*)?(" + INCH + ")" + INCH_SYM +
-    "(?:\\\\D+(" + INCH + ")" + INCH_SYM + ")?",
+    "(?:(\\d{1,3})\\s*)?(?:holes?|circles?|rounds?)\\D+" +
+    "(?:dia(?:meter)?\\D*)?(" + INCH + ")" + INCH_SYM +
+    "(?:\\D+(" + INCH + ")" + INCH_SYM + ")?",
     "g"
   );
 
   // Loose “N 2 x 2 x 1 deep”
   const reLooseRect = new RegExp(
-    "\\\\b(\\\\d{1,3})\\\\b\\\\D+(" + INCH + ")" + INCH_SYM + SEP +
+    "\\b(\\d{1,3})\\b\\D+(" + INCH + ")" + INCH_SYM + SEP +
     "(" + INCH + ")" + INCH_SYM + SEP +
-    "(" + INCH + ")" + INCH_SYM + "\\\\D*(?:deep|depth)?",
+    "(" + INCH + ")" + INCH_SYM + "\\D*(?:deep|depth)?",
     "g"
   );
 
