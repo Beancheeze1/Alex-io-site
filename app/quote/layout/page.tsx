@@ -469,20 +469,49 @@ export default function LayoutPage({
 
         const json = await res.json();
 
-        // Pull qty + material from primary line item (if present)
-        let qtyFromItems: number | null = null;
-        let materialIdFromItems: number | null = null;
-        if (Array.isArray(json.items) && json.items.length > 0) {
-          const first = json.items[0];
-          const rawQty = Number(first?.qty);
-          if (Number.isFinite(rawQty) && rawQty > 0) {
-            qtyFromItems = rawQty;
-          }
-          const mid = Number(first?.material_id);
-          if (Number.isFinite(mid) && mid > 0) {
-            materialIdFromItems = mid;
-          }
-        }
+   // Pull qty + material (+ thickness) from primary line item (if present)
+let qtyFromItems: number | null = null;
+let materialIdFromItems: number | null = null;
+let thicknessFromItems: number | null = null;
+
+if (Array.isArray(json.items) && json.items.length > 0) {
+  const first = json.items[0];
+
+  const rawQty = Number(first?.qty);
+  if (Number.isFinite(rawQty) && rawQty > 0) {
+    qtyFromItems = rawQty;
+  }
+
+  const mid = Number(first?.material_id);
+  if (Number.isFinite(mid) && mid > 0) {
+    materialIdFromItems = mid;
+  }
+
+  // Try to recover thickness from the foam line item.
+  // Preferred: outside_size like "12x12x2"
+  const outside = (first?.outside_size ?? first?.outsideSize ?? "") as string;
+  const parsedOutside = parseDimsTriple(typeof outside === "string" ? outside : "");
+  if (parsedOutside && Number.isFinite(parsedOutside.H) && parsedOutside.H > 0) {
+    thicknessFromItems = parsedOutside.H;
+  } else {
+    // Fallback: explicit thickness fields if present
+    const t =
+      Number(first?.thickness_in) ||
+      Number(first?.thicknessIn) ||
+      Number(first?.thickness);
+    if (Number.isFinite(t) && t > 0) thicknessFromItems = t;
+  }
+}
+
+// If this is a real quote and we don't have a saved layoutPkg yet,
+// trust the quote item's thickness over whatever the URL passed.
+if (hasRealQuoteNo && thicknessFromItems && thicknessFromItems > 0) {
+  const fromUrl = parseDimsTriple(effectiveBlockStr);
+  if (fromUrl && fromUrl.L > 0 && fromUrl.W > 0) {
+    effectiveBlockStr = `${fromUrl.L}x${fromUrl.W}x${thicknessFromItems}`;
+  }
+}
+
 
         // pull customer info from quote header when present
         if (json && json.quote && typeof json.quote === "object") {
