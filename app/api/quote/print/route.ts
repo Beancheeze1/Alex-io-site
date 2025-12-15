@@ -133,6 +133,148 @@ function parseDimsNums(item: ItemRow) {
   return { L, W, H };
 }
 
+// -------------------------------
+// NEW (Path A): layout thickness helpers
+// -------------------------------
+
+type LayoutLayerLike = {
+  id?: string;
+  label?: string;
+  thicknessIn?: number;
+  thickness_in?: number;
+  thickness?: number;
+  heightIn?: number;
+  height_in?: number;
+  height?: number;
+  cavities?: any[];
+};
+
+function asPositiveNumber(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function pickThicknessIn(layer: any): number | null {
+  if (!layer) return null;
+  return (
+    asPositiveNumber(layer.thicknessIn) ??
+    asPositiveNumber(layer.thickness_in) ??
+    asPositiveNumber(layer.thickness) ??
+    asPositiveNumber(layer.heightIn) ??
+    asPositiveNumber(layer.height_in) ??
+    asPositiveNumber(layer.height) ??
+    null
+  );
+}
+
+function pickCavityDepthIn(cav: any): number | null {
+  if (!cav) return null;
+  return (
+    asPositiveNumber(cav.depthIn) ??
+    asPositiveNumber(cav.depth_in) ??
+    asPositiveNumber(cav.depth) ??
+    asPositiveNumber(cav.heightIn) ??
+    asPositiveNumber(cav.height_in) ??
+    asPositiveNumber(cav.h) ??
+    asPositiveNumber(cav.H) ??
+    null
+  );
+}
+
+function getLayersFromLayout(layoutJson: any): LayoutLayerLike[] {
+  if (!layoutJson) return [];
+  // Common shapes we’ve used/seen:
+  // - layout.stack (array of layers)
+  // - layout.layers (array of layers)
+  // - legacy: no layers
+  const stack = Array.isArray(layoutJson.stack) ? layoutJson.stack : null;
+  const layers = Array.isArray(layoutJson.layers) ? layoutJson.layers : null;
+  return (stack ?? layers ?? []) as LayoutLayerLike[];
+}
+
+function getActiveLayerId(layoutJson: any): string | null {
+  if (!layoutJson) return null;
+  const v = layoutJson.activeLayerId ?? layoutJson.active_layer_id ?? null;
+  return typeof v === "string" && v.trim() ? v : null;
+}
+
+function computeLayoutThicknessMetrics(layoutJson: any) {
+  const layers = getLayersFromLayout(layoutJson);
+  const activeLayerId = getActiveLayerId(layoutJson);
+
+  // Sum stack thickness
+  let stackTotal = 0;
+  let stackHasAny = false;
+
+  const perLayerThickness: number[] = layers.map((ly) => {
+    const t = pickThicknessIn(ly);
+    if (t != null) {
+      stackHasAny = true;
+      stackTotal += t;
+      return t;
+    }
+    return 0;
+  });
+
+  const stack_total_thickness_in = stackHasAny ? stackTotal : null;
+
+  // Choose cavity layer:
+  // 1) Prefer active layer (by id) if it has any cavities
+  // 2) Else first layer with cavities
+  // 3) Else null
+  let cavityLayerIndex: number | null = null;
+
+  if (layers.length > 0) {
+    if (activeLayerId) {
+      const idx = layers.findIndex((ly) => String(ly?.id ?? "") === activeLayerId);
+      if (idx >= 0) {
+        const cavs = Array.isArray(layers[idx]?.cavities) ? layers[idx]!.cavities! : [];
+        if (cavs.length > 0) cavityLayerIndex = idx;
+      }
+    }
+
+    if (cavityLayerIndex == null) {
+      const idx = layers.findIndex((ly) => Array.isArray(ly?.cavities) && (ly.cavities?.length ?? 0) > 0);
+      if (idx >= 0) cavityLayerIndex = idx;
+    }
+  }
+
+  const cavityLayer = cavityLayerIndex != null ? layers[cavityLayerIndex] : null;
+  const cavity_layer_thickness_in =
+    cavityLayerIndex != null ? pickThicknessIn(cavityLayer) ?? perLayerThickness[cavityLayerIndex] ?? null : null;
+
+  // Max cavity depth in that layer
+  let maxCavityDepth = 0;
+  let hasDepth = false;
+
+  if (cavityLayer && Array.isArray(cavityLayer.cavities)) {
+    for (const cav of cavityLayer.cavities) {
+      const d = pickCavityDepthIn(cav);
+      if (d != null) {
+        hasDepth = true;
+        if (d > maxCavityDepth) maxCavityDepth = d;
+      }
+    }
+  }
+
+  const max_cavity_depth_in_layer_in = hasDepth ? maxCavityDepth : null;
+
+  // Min thickness under cavities = layer thickness - deepest cavity (clamp at 0)
+  let min_thickness_under_cavities_in: number | null = null;
+  if (cavity_layer_thickness_in != null && max_cavity_depth_in_layer_in != null) {
+    const raw = cavity_layer_thickness_in - max_cavity_depth_in_layer_in;
+    min_thickness_under_cavities_in = raw >= 0 ? raw : 0;
+  }
+
+  return {
+    stack_total_thickness_in,
+    cavity_layer_index: cavityLayerIndex,
+    cavity_layer_thickness_in,
+    max_cavity_depth_in_layer_in,
+    min_thickness_under_cavities_in,
+  };
+}
+
 async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
   try {
     const { L, W, H } = parseDimsNums(item);
@@ -367,17 +509,30 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
+    // NEW (Path A): compute thickness metrics from layout stack (if present)
+    const layoutMetrics =
+      layoutPkg && layoutPkg.layout_json ? computeLayoutThicknessMetrics(layoutPkg.layout_json) : null;
+
     // ---------- treat layout block as source of truth for primary dims ----------
 
     // If we have a layout package with a block that has valid dims,
     // override the primary item (items[0]) L/W/H for display + pricing.
+    //
+    // IMPORTANT (Path A): If a multi-layer stack exists, thickness (H) must
+    // come from the stack total (not a single-layer thickness).
     if (layoutPkg && layoutPkg.layout_json && items.length > 0) {
       try {
         const block = layoutPkg.layout_json.block || {};
 
         const rawLength = block.lengthIn ?? block.length ?? block.L ?? block.l;
         const rawWidth = block.widthIn ?? block.width ?? block.W ?? block.w;
-        const rawHeight =
+
+        // Height/thickness selection:
+        // - If stack_total_thickness_in exists, that is the source of truth.
+        // - Otherwise, fall back to legacy block thickness fields (unchanged behavior).
+        const stackH = layoutMetrics?.stack_total_thickness_in ?? null;
+
+        const rawHeightLegacy =
           block.thicknessIn ??
           block.heightIn ??
           block.height ??
@@ -388,7 +543,7 @@ export async function GET(req: NextRequest) {
 
         const L = Number(rawLength);
         const W = Number(rawWidth);
-        const H = Number(rawHeight);
+        const H = stackH != null ? Number(stackH) : Number(rawHeightLegacy);
 
         const allFinite = [L, W, H].every((n) => Number.isFinite(n) && n > 0);
 
@@ -520,6 +675,8 @@ export async function GET(req: NextRequest) {
         quote,
         items,
         layoutPkg,
+        // NEW (Path A): expose computed thickness metrics for the client Specs UI
+        layoutMetrics,
         packagingLines,
         foamSubtotal,
         packagingSubtotal,
