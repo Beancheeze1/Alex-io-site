@@ -938,14 +938,23 @@ export async function POST(req: NextRequest) {
         ? (body as any).foamLayers
         : null;
 
-      const layers =
-        Array.isArray(foamLayers) && foamLayers.length > 0
-          ? foamLayers
-          : Array.isArray(layoutForSave?.stack)
+            // IMPORTANT (Path A): Prefer the layout we are actually saving (layoutForSave)
+      // for layer thickness. body.foamLayers can contain "stack total" thickness
+      // depending on caller payload shape.
+      const layersFromLayout =
+        Array.isArray(layoutForSave?.stack) && layoutForSave.stack.length > 0
           ? layoutForSave.stack
-          : Array.isArray(layoutForSave?.layers)
+          : Array.isArray(layoutForSave?.layers) && layoutForSave.layers.length > 0
           ? layoutForSave.layers
           : [];
+
+      const layers =
+        layersFromLayout.length > 0
+          ? layersFromLayout
+          : Array.isArray(foamLayers) && foamLayers.length > 0
+          ? foamLayers
+          : [];
+
 
       let baseQty: number | null = null;
 
