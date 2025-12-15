@@ -32,6 +32,13 @@
 //     infer dims = footprintL x footprintW x sum(thicknesses).
 //   - Prevent phantom cavity duplication in editor: only duplicate when there is
 //     exactly ONE distinct cavity size (the "many identical pockets" case).
+//
+// HARDENING 12/15 (THIS FIX):
+//   - Layer Intent Gate:
+//     If the *current inbound email* does NOT explicitly mention layers,
+//     strip any layer-related keys (often hallucinated by LLM or inherited memory)
+//     BEFORE saving facts. This prevents single-piece emails from pre-filling
+//     the layout editor with phantom 3-layer stacks.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -165,6 +172,46 @@ function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
   }
 
   return null;
+}
+
+/* ============================================================
+   PATH A: Layer Intent Gate helpers
+   ============================================================ */
+
+// Decide whether THIS inbound email explicitly indicates a layered stack.
+// We keep this intentionally strict to prevent single-piece emails from
+// inheriting/keeping layer fields (often from LLM hallucinations or stale memory).
+function hasExplicitLayerSignals(text: string): boolean {
+  const t = String(text || "").toLowerCase();
+
+  // Clear "layered stack" phrases
+  if (/\b(top|middle|bottom)\s+layer\b/.test(t)) return true;
+  if (/\bmade\s+up\s+of\b/.test(t) && /\blayers?\b/.test(t)) return true;
+
+  // "(3) 12x12 layers" or "3 12 x 12 layers" patterns
+  const reCountFootprint = new RegExp(
+    `\\b\\(?\\s*\\d{1,2}\\s*\\)?\\s*${NUM}\\s*["']?\\s*[x×]\\s*${NUM}\\s*["']?\\s*(?:layers?|layer)\\b`,
+    "i",
+  );
+  if (reCountFootprint.test(t)) return true;
+
+  // Explicit "layers" word is a strong signal (but keep strict context)
+  // Example: "3 layers", "layers: 1,4,1", etc.
+  if (/\b\d{1,2}\s+layers?\b/.test(t)) return true;
+
+  return false;
+}
+
+// Remove all layer-related keys so the editor seeds ONE layer.
+function stripLayerFacts(f: Mem): Mem {
+  if (!f) return f;
+
+  delete (f as any).layer_count;
+  delete (f as any).layer_footprint;
+  delete (f as any).layers;
+  delete (f as any).layer_cavity_layer_index;
+
+  return f;
 }
 
 /* ============================================================
@@ -531,8 +578,6 @@ async function hydrateFromDBByQuoteNo(
   }
 }
 
-
-
 async function getLatestStackTotalThicknessIn(quoteNo: string): Promise<number | null> {
   if (!quoteNo) return null;
   try {
@@ -561,13 +606,6 @@ async function getLatestStackTotalThicknessIn(quoteNo: string): Promise<number |
     return null;
   }
 }
-
-
-
-
-
-
-
 
 /* ============================================================
    Dimension / density helpers
@@ -714,7 +752,7 @@ type PriceBreak = {
   total: number;
   piece: number | null;
   used_min_charge?: boolean | null;
-_attach?: never;
+  _attach?: never;
 };
 
 async function buildPriceBreaks(
@@ -1045,11 +1083,11 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   // 1) OUTSIDE / MAIN DIMS
   const outsideDims = grabOutsideDims(text);
-if (outsideDims) {
-  facts.dims = normDims(outsideDims) || outsideDims;
-  outsideDimsWasExplicit = true;
-  facts.__outside_dims_explicit = true;
-} else {
+  if (outsideDims) {
+    facts.dims = normDims(outsideDims) || outsideDims;
+    outsideDimsWasExplicit = true;
+    facts.__outside_dims_explicit = true;
+  } else {
     const bodyNoCavity = rawBody
       .split(/\r?\n/)
       .filter((ln) => !/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(ln))
@@ -1359,6 +1397,9 @@ export async function POST(req: NextRequest) {
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
     const dryRun = !!p.dryRun;
 
+    // Layer intent is evaluated ONLY from THIS inbound email.
+    const thisTurnHasLayerIntent = hasExplicitLayerSignals(`${subject}\n\n${lastText}`);
+
     // NEW: Option C rep resolution
     const salesRepSlugFromSubject = extractRepSlugFromSubject(subject, lastText);
     const salesRepSlugFromThread = inferRepSlugFromThreadMsgs(threadMsgs);
@@ -1397,6 +1438,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // PATH A: If this inbound email does NOT mention layers, strip any layer fields
+    // that may have been hallucinated by LLM or carried in.
+    if (!thisTurnHasLayerIntent) {
+      newly = stripLayerFacts(newly);
+    }
+
     const hadNewQty = newly.qty != null;
     const hadNewCavities = Array.isArray(newly.cavityDims) && newly.cavityDims.length > 0;
     const hadNewDims = !!newly.dims;
@@ -1410,6 +1457,12 @@ export async function POST(req: NextRequest) {
     if (subjectQuoteNo) loadedQuote = await loadFacts(subjectQuoteNo);
 
     let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
+
+    // PATH A: Gate again at merged-level before we persist, so old memory can't leak layers
+    // into a single-piece request.
+    if (!thisTurnHasLayerIntent) {
+      merged = stripLayerFacts(merged);
+    }
 
     if (salesRepSlugResolved && !merged.sales_rep_slug) {
       merged.sales_rep_slug = salesRepSlugResolved;
@@ -1474,39 +1527,36 @@ export async function POST(req: NextRequest) {
       lockDims: hadNewDims,
     });
 
-/* ------------------- FIX: Outside size total thickness ------------------- */
+    /* ------------------- FIX: Outside size total thickness ------------------- */
 
-const outsideDimsExplicit = !!merged.__outside_dims_explicit;
+    const outsideDimsExplicit = !!merged.__outside_dims_explicit;
 
-// Only override height when outside dims were NOT explicitly stated
-if (!outsideDimsExplicit && merged.dims) {
-  const { L, W } = parseDimsNums(merged.dims);
+    // Only override height when outside dims were NOT explicitly stated
+    if (!outsideDimsExplicit && merged.dims) {
+      const { L, W } = parseDimsNums(merged.dims);
 
-  let totalThickness: number | null = null;
+      let totalThickness: number | null = null;
 
-  // 1) Preferred: sum of email-parsed layer intent thicknesses
-  if (Array.isArray(merged.layers) && merged.layers.length > 0) {
-    const sum = (merged.layers as any[])
-      .map((l) => Number(l?.thickness_in))
-      .filter((n) => Number.isFinite(n) && n > 0)
-      .reduce((a, b) => a + b, 0);
+      // 1) Preferred: sum of email-parsed layer intent thicknesses
+      if (Array.isArray(merged.layers) && merged.layers.length > 0) {
+        const sum = (merged.layers as any[])
+          .map((l) => Number(l?.thickness_in))
+          .filter((n) => Number.isFinite(n) && n > 0)
+          .reduce((a, b) => a + b, 0);
 
-    if (sum > 0) totalThickness = sum;
-  }
+        if (sum > 0) totalThickness = sum;
+      }
 
-  // 2) Fallback: sum of latest saved layout stack thickness
-  if (totalThickness == null && merged.quote_no) {
-    totalThickness = await getLatestStackTotalThicknessIn(String(merged.quote_no));
-  }
+      // 2) Fallback: sum of latest saved layout stack thickness
+      if (totalThickness == null && merged.quote_no) {
+        totalThickness = await getLatestStackTotalThicknessIn(String(merged.quote_no));
+      }
 
-  // 3) Apply if we found a valid total
-  if (totalThickness != null && L > 0 && W > 0) {
-    merged.dims = `${canonNumStr(String(L))}x${canonNumStr(String(W))}x${canonNumStr(String(totalThickness))}`;
-  }
-}
-
-
-    
+      // 3) Apply if we found a valid total
+      if (totalThickness != null && L > 0 && W > 0) {
+        merged.dims = `${canonNumStr(String(L))}x${canonNumStr(String(W))}x${canonNumStr(String(totalThickness))}`;
+      }
+    }
 
     // Save early baseline facts (pre-pricing) under keys
     if (threadKey) await saveFacts(threadKey, merged);
