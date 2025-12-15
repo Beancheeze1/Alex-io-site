@@ -323,30 +323,30 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 
   const cavsRaw = Array.isArray(initial.cavities) ? [...initial.cavities] : [];
 
-  // Infer 3-layer intent: 1" / 4" / 1"
-  if (cavsRaw.length) {
-    // Seed stable IDs to prevent phantom duplicates on mount
-    const seeded = cavsRaw.map((c, i) => ({ ...c, id: `seed-cav-${i + 1}` }));
-    const cavs = dedupeCavities(seeded);
+// Legacy single-piece layout WITH cavities (NO auto layers)
+if (cavsRaw.length) {
+  const seeded = cavsRaw.map((c, i) => ({ ...c, id: `seed-cav-${i + 1}` }));
+  const cavs = dedupeCavities(seeded);
 
-    const stack: LayoutLayer[] = [
-      { id: "layer-1", label: "Layer 1", thicknessIn: 1, cavities: [] },
-      { id: "layer-2", label: "Layer 2", thicknessIn: 4, cavities: cavs },
-      { id: "layer-3", label: "Layer 3", thicknessIn: 1, cavities: [] },
-    ];
+  const thickness = safeInch(block.thicknessIn ?? 1, 0.5);
 
-    // Active layer is Layer 2 (middle)
-    return {
-      layout: {
-        // Mirror active thickness into block.thicknessIn for UI controls that bind to block dims
-        block: { ...block, thicknessIn: 4 },
-        stack,
-        // Mirror active layer cavities ONLY (never seed globally from initial list)
-        cavities: [...cavs],
-      },
-      activeLayerId: "layer-2",
-    };
-  }
+  return {
+    layout: {
+      block: { ...block, thicknessIn: thickness },
+      stack: [
+        {
+          id: "layer-1",
+          label: "Layer 1",
+          thicknessIn: thickness,
+          cavities: cavs,
+        },
+      ],
+      cavities: [...cavs],
+    },
+    activeLayerId: "layer-1",
+  };
+}
+
 
   // Legacy single-layer fallback
   return {
