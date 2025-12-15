@@ -168,79 +168,6 @@ function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
 }
 
 /* ============================================================
-   Outside-size thickness selection (DISPLAY ONLY)
-   ============================================================ */
-
-/**
- * PATH-A: This ONLY affects what the email template displays as the outside thickness.
- * It does NOT change pricing dims, DB-stored dims, quote items, DXF/STEP, etc.
- *
- * Rule:
- * 1) sum foamLayers[].thicknessIn (or thickness_in) if present
- * 2) else sum latest layout.stack[].thicknessIn from DB (or thickness_in)
- * 3) else fallback to dims H
- */
-function sumLayerThicknessFromFacts(merged: Mem): number | null {
-  const trySum = (arr: any[], keyA: string, keyB: string) => {
-    const nums = arr
-      .map((x) => Number(x?.[keyA] ?? x?.[keyB]))
-      .filter((n) => Number.isFinite(n) && n > 0);
-    if (!nums.length) return null;
-    const s = nums.reduce((a, b) => a + b, 0);
-    return s > 0 ? s : null;
-  };
-
-  // 1) foamLayers (preferred if present)
-  const foamLayers = (merged as any).foamLayers || (merged as any).foam_layers;
-  if (Array.isArray(foamLayers)) {
-    const s = trySum(foamLayers, "thicknessIn", "thickness_in");
-    if (s != null) return s;
-  }
-
-  // Also allow our existing "layers" shape: { thickness_in }
-  const layers = (merged as any).layers;
-  if (Array.isArray(layers)) {
-    const s = trySum(layers, "thicknessIn", "thickness_in");
-    if (s != null) return s;
-  }
-
-  return null;
-}
-
-async function sumStackThicknessFromLatestLayoutPkgByQuoteNo(quoteNo: string): Promise<number | null> {
-  if (!quoteNo) return null;
-  try {
-    const row = await one<any>(
-      `
-      select lp.layout_json
-      from quote_layout_packages lp
-      join quotes q on lp.quote_id = q.id
-      where q.quote_no = $1
-      order by lp.created_at desc
-      limit 1;
-      `,
-      [quoteNo],
-    );
-
-    const layout = row?.layout_json;
-    const stack = layout?.stack;
-
-    if (!Array.isArray(stack)) return null;
-
-    const nums = stack
-      .map((l: any) => Number(l?.thicknessIn ?? l?.thickness_in))
-      .filter((n: number) => Number.isFinite(n) && n > 0);
-
-    if (!nums.length) return null;
-
-    const s = nums.reduce((a: number, b: number) => a + b, 0);
-    return s > 0 ? s : null;
-  } catch {
-    return null;
-  }
-}
-
-/* ============================================================
    Cavity normalization
    ============================================================ */
 
@@ -640,6 +567,75 @@ function specsCompleteForQuote(s: { dims: string | null; qty: number | string | 
 }
 
 /* ============================================================
+   PATH A: Outside size thickness (display-only)
+   ============================================================ */
+
+// Outside-size thickness source of truth (display only):
+// 1) Sum merged.foamLayers[].thicknessIn (if present)
+// 2) Else sum latest layout.stack[].thicknessIn from DB by quote_no
+// 3) Else fallback to parsed dims height
+function sumPositive(nums: any[]): number | null {
+  const list = (nums || [])
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (!list.length) return null;
+  const s = list.reduce((a, b) => a + b, 0);
+  return Number.isFinite(s) && s > 0 ? s : null;
+}
+
+async function getLatestLayoutStackThicknessByQuoteNo(quoteNo: string): Promise<number | null> {
+  try {
+    if (!quoteNo) return null;
+
+    const row = await one<any>(
+      `
+      select lp.layout_json
+      from quote_layout_packages lp
+      join quotes q on lp.quote_id = q.id
+      where q.quote_no = $1
+      order by lp.created_at desc
+      limit 1;
+      `,
+      [quoteNo],
+    );
+
+    const stack = row?.layout_json?.stack;
+    if (!Array.isArray(stack) || stack.length === 0) return null;
+
+    const th = sumPositive(stack.map((l: any) => l?.thicknessIn));
+    return th;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveOutsideThicknessInForDisplay(merged: Mem, fallbackH: number): Promise<number> {
+  // 1) orchestrate payload (if present)
+  const foamLayers = (merged as any)?.foamLayers;
+  if (Array.isArray(foamLayers) && foamLayers.length) {
+    const th = sumPositive(foamLayers.map((l: any) => l?.thicknessIn));
+    if (th != null) return th;
+  }
+
+  // Also allow "layers" (from your layer intent) if someone stored thickness_in there.
+  const layers = (merged as any)?.layers;
+  if (Array.isArray(layers) && layers.length) {
+    const th = sumPositive(layers.map((l: any) => l?.thickness_in));
+    if (th != null) return th;
+  }
+
+  // 2) DB latest layout package stack
+  const quoteNo = String(merged.quote_no || merged.quoteNumber || "").trim();
+  if (quoteNo) {
+    const th = await getLatestLayoutStackThicknessByQuoteNo(quoteNo);
+    if (th != null) return th;
+  }
+
+  // 3) legacy fallback
+  return Number.isFinite(Number(fallbackH)) && Number(fallbackH) > 0 ? Number(fallbackH) : 0;
+}
+
+/* ============================================================
    Quote calc via internal API
    ============================================================ */
 
@@ -680,7 +676,7 @@ type PriceBreak = {
   total: number;
   piece: number | null;
   used_min_charge?: boolean | null;
-  _attach?: never;
+_attach?: never;
 };
 
 async function buildPriceBreaks(
@@ -1578,15 +1574,8 @@ export async function POST(req: NextRequest) {
     const dimsNums = parseDimsNums(specs.dims);
     const densityPcf = densityToPcf(specs.density);
 
-    // ✅ PATH-A FIX (display only): choose the thickness shown as "Outside size"
-    let outsideThicknessForDisplay = sumLayerThicknessFromFacts(merged);
-
-    if (outsideThicknessForDisplay == null) {
-      const qn = String(merged.quote_no || merged.quoteNumber || "").trim();
-      if (qn) {
-        outsideThicknessForDisplay = await sumStackThicknessFromLatestLayoutPkgByQuoteNo(qn);
-      }
-    }
+    // PATH A: compute outside thickness for display only (does NOT change specs.dims / pricing inputs)
+    const outsideThicknessDisplayIn = await resolveOutsideThicknessInForDisplay(merged, dimsNums.H);
 
     const templateInput = {
       customerLine: opener,
@@ -1595,8 +1584,7 @@ export async function POST(req: NextRequest) {
       specs: {
         L_in: dimsNums.L,
         W_in: dimsNums.W,
-        // ✅ Only affects displayed outside size thickness in the email template:
-        H_in: outsideThicknessForDisplay ?? dimsNums.H,
+        H_in: outsideThicknessDisplayIn,
         qty: specs.qty,
         density_pcf: densityPcf,
         foam_family: foamFamily,
