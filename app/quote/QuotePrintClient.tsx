@@ -90,11 +90,24 @@ type LayoutPkgRow = {
   created_at: string;
 };
 
+// NEW (Path A): server-computed thickness metrics (deterministic)
+type LayoutMetrics = {
+  stack_total_thickness_in: number | null;
+  cavity_layer_index: number | null;
+  cavity_layer_thickness_in: number | null;
+  max_cavity_depth_in_layer_in: number | null;
+  min_thickness_under_cavities_in: number | null;
+};
+
 type ApiOk = {
   ok: true;
   quote: QuoteRow;
   items: ItemRow[];
   layoutPkg: LayoutPkgRow | null;
+
+  // NEW (Path A): thickness + cavity-under thickness metrics
+  layoutMetrics?: LayoutMetrics | null;
+
   foamSubtotal: number;
   packagingSubtotal: number;
   grandSubtotal: number;
@@ -481,6 +494,9 @@ export default function QuotePrintClient() {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
+  // NEW (Path A): layout thickness metrics from server
+  const [layoutMetrics, setLayoutMetrics] = React.useState<LayoutMetrics | null>(null);
+
   // Requested cartons stored in DB (from /api/boxes/for-quote)
   const [requestedBoxes, setRequestedBoxes] = React.useState<RequestedBox[]>([]);
 
@@ -614,8 +630,11 @@ export default function QuotePrintClient() {
         setItems(json.items || []);
         setLayoutPkg(json.layoutPkg || null);
 
-        // Subtotals from server (fallback to 0 if missing)
+        // NEW (Path A): layoutMetrics payload (may be null)
         const asOk = json as ApiOk;
+        setLayoutMetrics(asOk.layoutMetrics ?? null);
+
+        // Subtotals from server (fallback to 0 if missing)
         setFoamSubtotal(typeof asOk.foamSubtotal === "number" ? asOk.foamSubtotal : 0);
         setPackagingSubtotal(typeof asOk.packagingSubtotal === "number" ? asOk.packagingSubtotal : 0);
         setGrandSubtotal(typeof asOk.grandSubtotal === "number" ? asOk.grandSubtotal : 0);
@@ -693,6 +712,7 @@ export default function QuotePrintClient() {
       setQuote(null);
       setItems([]);
       setLayoutPkg(null);
+      setLayoutMetrics(null);
 
       try {
         await reloadQuoteData(quoteNo);
@@ -837,7 +857,8 @@ export default function QuotePrintClient() {
 
   // anyPricing: use effective grandSubtotal (foam + packaging) if available,
   // but still works if only foam is priced.
-  const anyPricing = (effectiveGrandSubtotal ?? 0) > 0 || (foamSubtotal ?? 0) > 0 || (breakdownUnitPrice ?? null) != null;
+  const anyPricing =
+    (effectiveGrandSubtotal ?? 0) > 0 || (foamSubtotal ?? 0) > 0 || (breakdownUnitPrice ?? null) != null;
 
   // Rough shipping estimate from admin knob:
   //   shippingEstimate = (foam+packaging subtotal) * roughShipPct / 100
@@ -1195,9 +1216,28 @@ export default function QuotePrintClient() {
                     <div>
                       <div style={labelStyle}>Dimensions</div>
                       <div style={{ fontSize: 13, color: "#111827" }}>
-                        {formatDims(primaryItem.length_in, primaryItem.width_in, primaryItem.height_in)} in
+                        {(() => {
+                          // Path A: Outside size / total thickness should reflect the layer stack total.
+                          const stackH = layoutMetrics?.stack_total_thickness_in;
+                          const h = stackH != null ? stackH : primaryItem.height_in;
+                          return `${formatDims(primaryItem.length_in, primaryItem.width_in, h)} in`;
+                        })()}
                       </div>
                     </div>
+
+                    {/* NEW (Path A): min thickness under cavities from server metric */}
+                    {(() => {
+                      const v = layoutMetrics?.min_thickness_under_cavities_in;
+                      if (typeof v === "number" && Number.isFinite(v)) {
+                        return (
+                          <div>
+                            <div style={labelStyle}>Min thickness under cavities</div>
+                            <div style={{ fontSize: 13, color: "#111827" }}>{v.toFixed(3)} in</div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
 
                     <div>
                       <div style={labelStyle}>Quantity</div>
