@@ -92,12 +92,10 @@ function pickThreadContext(threadMsgs: any[] = []) {
   return snippets.join("\n\n");
 }
 
-
 // Allow "1", "1.5" and also ".5" style numbers
 // IMPORTANT: used by multiple helpers (dims, cavities, layers) so define it early.
 // NOTE: Use [0-9] instead of \d to avoid Unicode backslash paste issues breaking regex matching at runtime.
 const NUM = "(?:[0-9]{1,4}(?:\\.[0-9]+)?|\\.[0-9]+)";
-
 
 // Detect Q-AI-* style quote numbers in subject/body so we can
 // pull sketch facts that were stored under quote_no.
@@ -167,6 +165,79 @@ function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
   }
 
   return null;
+}
+
+/* ============================================================
+   Outside-size thickness selection (DISPLAY ONLY)
+   ============================================================ */
+
+/**
+ * PATH-A: This ONLY affects what the email template displays as the outside thickness.
+ * It does NOT change pricing dims, DB-stored dims, quote items, DXF/STEP, etc.
+ *
+ * Rule:
+ * 1) sum foamLayers[].thicknessIn (or thickness_in) if present
+ * 2) else sum latest layout.stack[].thicknessIn from DB (or thickness_in)
+ * 3) else fallback to dims H
+ */
+function sumLayerThicknessFromFacts(merged: Mem): number | null {
+  const trySum = (arr: any[], keyA: string, keyB: string) => {
+    const nums = arr
+      .map((x) => Number(x?.[keyA] ?? x?.[keyB]))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (!nums.length) return null;
+    const s = nums.reduce((a, b) => a + b, 0);
+    return s > 0 ? s : null;
+  };
+
+  // 1) foamLayers (preferred if present)
+  const foamLayers = (merged as any).foamLayers || (merged as any).foam_layers;
+  if (Array.isArray(foamLayers)) {
+    const s = trySum(foamLayers, "thicknessIn", "thickness_in");
+    if (s != null) return s;
+  }
+
+  // Also allow our existing "layers" shape: { thickness_in }
+  const layers = (merged as any).layers;
+  if (Array.isArray(layers)) {
+    const s = trySum(layers, "thicknessIn", "thickness_in");
+    if (s != null) return s;
+  }
+
+  return null;
+}
+
+async function sumStackThicknessFromLatestLayoutPkgByQuoteNo(quoteNo: string): Promise<number | null> {
+  if (!quoteNo) return null;
+  try {
+    const row = await one<any>(
+      `
+      select lp.layout_json
+      from quote_layout_packages lp
+      join quotes q on lp.quote_id = q.id
+      where q.quote_no = $1
+      order by lp.created_at desc
+      limit 1;
+      `,
+      [quoteNo],
+    );
+
+    const layout = row?.layout_json;
+    const stack = layout?.stack;
+
+    if (!Array.isArray(stack)) return null;
+
+    const nums = stack
+      .map((l: any) => Number(l?.thicknessIn ?? l?.thickness_in))
+      .filter((n: number) => Number.isFinite(n) && n > 0);
+
+    if (!nums.length) return null;
+
+    const s = nums.reduce((a: number, b: number) => a + b, 0);
+    return s > 0 ? s : null;
+  } catch {
+    return null;
+  }
 }
 
 /* ============================================================
@@ -609,7 +680,7 @@ type PriceBreak = {
   total: number;
   piece: number | null;
   used_min_charge?: boolean | null;
-_attach?: never;
+  _attach?: never;
 };
 
 async function buildPriceBreaks(
@@ -816,7 +887,6 @@ function grabLayerFootprintOnly(raw: string): { footprint?: string } {
   return { footprint: `${L}x${W}` };
 }
 
-
 function grabLayerThicknesses(raw: string): {
   top?: number;
   middle?: number;
@@ -827,10 +897,9 @@ function grabLayerThicknesses(raw: string): {
   const out: any = {};
 
   const re = new RegExp(
-  `\\b(top|middle|bottom)\\s+layer\\b[^.\\n\\r]{0,120}?\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,40}?\\bthick\\b`,
-  "gi",
-);
-
+    `\\b(top|middle|bottom)\\s+layer\\b[^.\\n\\r]{0,120}?\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,40}?\\bthick\\b`,
+    "gi",
+  );
 
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
@@ -932,13 +1001,10 @@ function recoverCavityDimsFromText(rawText: string, mainDims?: string | null): s
    Initial fact extraction from subject + body
    ============================================================ */
 
-   
-
 function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const rawBody = body || "";
   const facts: Mem = {};
   const text = `${subject}\n\n${rawBody}`.replace(/[”“]/g, '"');
-
 
   // Track whether outside dims were explicitly stated (so we don't override).
   let outsideDimsWasExplicit = false;
@@ -1512,6 +1578,16 @@ export async function POST(req: NextRequest) {
     const dimsNums = parseDimsNums(specs.dims);
     const densityPcf = densityToPcf(specs.density);
 
+    // ✅ PATH-A FIX (display only): choose the thickness shown as "Outside size"
+    let outsideThicknessForDisplay = sumLayerThicknessFromFacts(merged);
+
+    if (outsideThicknessForDisplay == null) {
+      const qn = String(merged.quote_no || merged.quoteNumber || "").trim();
+      if (qn) {
+        outsideThicknessForDisplay = await sumStackThicknessFromLatestLayoutPkgByQuoteNo(qn);
+      }
+    }
+
     const templateInput = {
       customerLine: opener,
       quoteNumber: merged.quoteNumber || merged.quote_no,
@@ -1519,7 +1595,8 @@ export async function POST(req: NextRequest) {
       specs: {
         L_in: dimsNums.L,
         W_in: dimsNums.W,
-        H_in: dimsNums.H,
+        // ✅ Only affects displayed outside size thickness in the email template:
+        H_in: outsideThicknessForDisplay ?? dimsNums.H,
         qty: specs.qty,
         density_pcf: densityPcf,
         foam_family: foamFamily,
