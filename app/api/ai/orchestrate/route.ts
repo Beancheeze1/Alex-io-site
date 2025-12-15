@@ -92,9 +92,12 @@ function pickThreadContext(threadMsgs: any[] = []) {
   return snippets.join("\n\n");
 }
 
+
 // Allow "1", "1.5" and also ".5" style numbers
 // IMPORTANT: used by multiple helpers (dims, cavities, layers) so define it early.
-const NUM = "(?:\\d{1,4}(?:\\.\\d+)?|\\.\\d+)";
+// NOTE: Use [0-9] instead of \d to avoid Unicode backslash paste issues breaking regex matching at runtime.
+const NUM = "(?:[0-9]{1,4}(?:\\.[0-9]+)?|\\.[0-9]+)";
+
 
 // Detect Q-AI-* style quote numbers in subject/body so we can
 // pull sketch facts that were stored under quote_no.
