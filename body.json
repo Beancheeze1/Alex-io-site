@@ -1,1 +1,7 @@
-{"subject":"Graph send test","toEmail":"25thhourdesign@gmail.com","text":"Hello from Alex-IO (direct Graph)."}
+﻿{
+  "mode": "ai",
+  "dryRun": true,
+  "toEmail": "chuck.johnson.25thhourdesign@gmail.com",
+  "subject": "test layers",
+  "text": "Please quote 25 sets of 1.7# white PE foam that are made up of (3) 12\"x12\" layers. The bottom layer will be 1\" thick, the middle layer will be 4\" thick with 3 cavities that are 1x1x.5, 4x4x1 and 2x3x1. The top layer will be 1\" thick."
+}

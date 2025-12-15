@@ -816,6 +816,7 @@ function grabLayerFootprintOnly(raw: string): { footprint?: string } {
   return { footprint: `${L}x${W}` };
 }
 
+
 function grabLayerThicknesses(raw: string): {
   top?: number;
   middle?: number;
@@ -930,10 +931,13 @@ function recoverCavityDimsFromText(rawText: string, mainDims?: string | null): s
    Initial fact extraction from subject + body
    ============================================================ */
 
+   
+
 function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const rawBody = body || "";
   const facts: Mem = {};
-  const text = `${subject}\n\n${rawBody}`;
+  const text = `${subject}\n\n${rawBody}`.replace(/[”“]/g, '"');
+
 
   // Track whether outside dims were explicitly stated (so we don't override).
   let outsideDimsWasExplicit = false;
