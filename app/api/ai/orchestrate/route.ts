@@ -531,6 +531,44 @@ async function hydrateFromDBByQuoteNo(
   }
 }
 
+
+
+async function getLatestStackTotalThicknessIn(quoteNo: string): Promise<number | null> {
+  if (!quoteNo) return null;
+  try {
+    const row = await one<any>(
+      `
+      select lp.layout_json
+      from quote_layout_packages lp
+      join quotes q on lp.quote_id = q.id
+      where q.quote_no = $1
+      order by lp.created_at desc
+      limit 1;
+      `,
+      [quoteNo],
+    );
+
+    const stack = row?.layout_json?.stack;
+    if (!Array.isArray(stack) || stack.length === 0) return null;
+
+    const sum = stack
+      .map((l: any) => Number(l?.thicknessIn))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .reduce((a, b) => a + b, 0);
+
+    return sum > 0 ? sum : null;
+  } catch {
+    return null;
+  }
+}
+
+
+
+
+
+
+
+
 /* ============================================================
    Dimension / density helpers
    ============================================================ */
@@ -1007,10 +1045,11 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   // 1) OUTSIDE / MAIN DIMS
   const outsideDims = grabOutsideDims(text);
-  if (outsideDims) {
-    facts.dims = normDims(outsideDims) || outsideDims;
-    outsideDimsWasExplicit = true;
-  } else {
+if (outsideDims) {
+  facts.dims = normDims(outsideDims) || outsideDims;
+  outsideDimsWasExplicit = true;
+  facts.__outside_dims_explicit = true;
+} else {
     const bodyNoCavity = rawBody
       .split(/\r?\n/)
       .filter((ln) => !/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(ln))
@@ -1434,6 +1473,40 @@ export async function POST(req: NextRequest) {
       lockCavities: hadNewCavities,
       lockDims: hadNewDims,
     });
+
+/* ------------------- FIX: Outside size total thickness ------------------- */
+
+const outsideDimsExplicit = !!merged.__outside_dims_explicit;
+
+// Only override height when outside dims were NOT explicitly stated
+if (!outsideDimsExplicit && merged.dims) {
+  const { L, W } = parseDimsNums(merged.dims);
+
+  let totalThickness: number | null = null;
+
+  // 1) Preferred: sum of email-parsed layer intent thicknesses
+  if (Array.isArray(merged.layers) && merged.layers.length > 0) {
+    const sum = (merged.layers as any[])
+      .map((l) => Number(l?.thickness_in))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .reduce((a, b) => a + b, 0);
+
+    if (sum > 0) totalThickness = sum;
+  }
+
+  // 2) Fallback: sum of latest saved layout stack thickness
+  if (totalThickness == null && merged.quote_no) {
+    totalThickness = await getLatestStackTotalThicknessIn(String(merged.quote_no));
+  }
+
+  // 3) Apply if we found a valid total
+  if (totalThickness != null && L > 0 && W > 0) {
+    merged.dims = `${canonNumStr(String(L))}x${canonNumStr(String(W))}x${canonNumStr(String(totalThickness))}`;
+  }
+}
+
+
+    
 
     // Save early baseline facts (pre-pricing) under keys
     if (threadKey) await saveFacts(threadKey, merged);
