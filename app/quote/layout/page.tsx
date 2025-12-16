@@ -73,6 +73,97 @@ function normalizeCavitiesParam(raw: string | string[] | undefined): string {
   return raw.trim();
 }
 
+/**
+ * Normalize layers from searchParams
+ * Supports:
+ *  - layers=1,4,1
+ *  - layers=1;4;1
+ *  - layer=1&layer=4&layer=1
+ *  - layers=[{"thicknessIn":1,"label":"Bottom"},{"thicknessIn":4,"label":"Middle"},{"thicknessIn":1,"label":"Top"}]
+ */
+function parseLayersParam(
+  raw: string | string[] | undefined,
+): { thicknesses: number[]; labels: string[] } | null {
+  if (!raw) return null;
+
+  const first = Array.isArray(raw) ? raw.find((s) => s && s.trim()) : raw;
+  if (!first) return null;
+
+  const s = first.trim();
+  if (!s) return null;
+
+  // JSON forms
+  if (s.startsWith("[") || s.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(s);
+
+      // Array of objects
+      if (Array.isArray(parsed)) {
+        const thicknesses: number[] = [];
+        const labels: string[] = [];
+
+        for (const item of parsed) {
+          const t = Number(item?.thicknessIn ?? item?.thickness ?? item?.t);
+          if (Number.isFinite(t) && t > 0) {
+            thicknesses.push(t);
+            const lbl = (item?.label ?? item?.name ?? "").toString().trim();
+            labels.push(lbl || `Layer ${thicknesses.length}`);
+          }
+        }
+
+        return thicknesses.length > 0 ? { thicknesses, labels } : null;
+      }
+
+      // Object with thicknesses
+      if (parsed && typeof parsed === "object") {
+        const arr = parsed.thicknesses ?? parsed.layers ?? null;
+        if (Array.isArray(arr)) {
+          const thicknesses = arr
+            .map((x: any) => Number(x))
+            .filter((n: number) => Number.isFinite(n) && n > 0);
+          if (thicknesses.length === 0) return null;
+
+          const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
+          return { thicknesses, labels };
+        }
+      }
+    } catch {
+      // fall through to delimited
+    }
+  }
+
+  // Delimited numeric list
+  const parts = s.split(/[;,|]/).map((x) => x.trim()).filter(Boolean);
+  const thicknesses = parts
+    .map((x) => Number(x))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  if (thicknesses.length === 0) return null;
+
+  const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
+  return { thicknesses, labels };
+}
+
+/**
+ * Read per-layer cavities from search params:
+ *  - cavities_l1=1x1x.5;2x2x1
+ *  - cavity_l2=... (repeatable)
+ */
+function readLayerCavitiesFromUrl(url: URL, layerIndex1Based: number): string {
+  const keyA = `cavities_l${layerIndex1Based}`;
+  const keyB = `cavity_l${layerIndex1Based}`;
+
+  const parts: string[] = [];
+  const a = url.searchParams.getAll(keyA).filter(Boolean);
+  const b = url.searchParams.getAll(keyB).filter(Boolean);
+  parts.push(...a, ...b);
+
+  return normalizeCavitiesParam(parts);
+}
+
+
+
+
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
 
@@ -229,7 +320,13 @@ export default function LayoutPage({
    * Fallback layout builder, driven by arbitrary dims/cavities strings.
    */
   const buildFallbackLayout = React.useCallback(
-    (blockStr: string, cavityStr: string): LayoutModel => {
+  (
+    blockStr: string,
+    cavityStr: string,
+    layersInfo?: { thicknesses: number[]; labels: string[] } | null,
+    perLayerCavityStrs?: string[] | null,
+  ): LayoutModel => {
+
       // Block from dims=..., default 10x10x2 if missing.
       const parsedBlock = parseDimsTriple(blockStr) ?? {
         L: 10,
@@ -238,10 +335,19 @@ export default function LayoutPage({
       };
 
       const block = {
-        lengthIn: parsedBlock.L,
-        widthIn: parsedBlock.W,
-        thicknessIn: parsedBlock.H,
-      };
+  lengthIn: parsedBlock.L,
+  widthIn: parsedBlock.W,
+  thicknessIn: parsedBlock.H,
+};
+
+// If layers are provided, block thickness becomes total stack thickness.
+if (layersInfo && Array.isArray(layersInfo.thicknesses) && layersInfo.thicknesses.length > 0) {
+  const sum = layersInfo.thicknesses.reduce((acc, n) => acc + (Number(n) || 0), 0);
+  if (Number.isFinite(sum) && sum > 0) {
+    block.thicknessIn = sum;
+  }
+}
+
 
       // Cavities from cavities=... string (can be "1x1x1;2x2x1" etc).
       const cavTokens = (cavityStr || "")
@@ -307,10 +413,52 @@ export default function LayoutPage({
       }
 
       // If we can’t build any cavities, just return a bare block.
-      return {
-        block,
-        cavities,
-      };
+    // If no layers, legacy single-layer return.
+if (!layersInfo || !layersInfo.thicknesses || layersInfo.thicknesses.length === 0) {
+  return { block, cavities };
+}
+
+// Multi-layer: build stack and assign cavities.
+// If per-layer cavities exist, use them; otherwise assign the generic cavities to the middle layer.
+const n = layersInfo.thicknesses.length;
+const midIdx = Math.max(0, Math.min(n - 1, Math.floor((n - 1) / 2)));
+
+const stack = layersInfo.thicknesses.map((t, i) => {
+  const id = `layer-${i + 1}`;
+  const label = (layersInfo.labels && layersInfo.labels[i]) ? layersInfo.labels[i] : `Layer ${i + 1}`;
+
+  let layerCavityStr = "";
+  if (perLayerCavityStrs && perLayerCavityStrs[i]) {
+    layerCavityStr = perLayerCavityStrs[i];
+  }
+
+  // Build cavities for this layer:
+  // - If layer-specific cavities exist -> build them
+  // - Else if we have generic cavities -> only assign them to the middle layer
+  const cavStrToUse = layerCavityStr.trim()
+    ? layerCavityStr
+    : (cavityStr && cavityStr.trim() && i === midIdx ? cavityStr : "");
+
+  const layerLayout = cavStrToUse
+    ? buildFallbackLayout(blockStr, cavStrToUse, null, null) // legacy builder recursion, no layers
+    : { block, cavities: [] as LayoutModel["cavities"] };
+
+  return {
+    id,
+    label,
+    thicknessIn: snapInches(Number(t) || 0),
+    cavities: layerLayout.cavities,
+  };
+});
+
+// IMPORTANT: layout.cavities should reflect the active layer’s cavities initially.
+// Default active layer = first layer.
+return {
+  block,
+  cavities: stack[0]?.cavities ?? [],
+  stack,
+} as any;
+
     },
     [],
   );
@@ -325,6 +473,12 @@ export default function LayoutPage({
       // Re-read dims/cavities from the actual address bar.
       let effectiveBlockStr = serverBlockStr;
       let effectiveCavityStr = serverCavityStr;
+
+  // NEW: optional multi-layer info from URL (used by fallback builder)
+  let layersInfo: { thicknesses: number[]; labels: string[] } | null = null;
+  let perLayerCavityStrs: string[] | null = null;
+
+
 
       try {
         if (typeof window !== "undefined") {
@@ -352,6 +506,47 @@ export default function LayoutPage({
           if (cavityParts.length > 0) {
             effectiveCavityStr = normalizeCavitiesParam(cavityParts);
           }
+
+    const layersRaw =
+      url.searchParams.get("layers") ??
+      (url.searchParams.getAll("layer").length > 0
+        ? url.searchParams.getAll("layer").join(",")
+        : null);
+
+    layersInfo = layersRaw ? parseLayersParam(layersRaw) : null;
+
+    if (layersInfo && layersInfo.thicknesses.length > 0) {
+      perLayerCavityStrs = layersInfo.thicknesses.map((_, i) =>
+        readLayerCavitiesFromUrl(url, i + 1),
+      );
+    }
+
+
+try {
+  if (typeof window !== "undefined") {
+    const url = new URL(window.location.href);
+
+    // Support layers=... and repeated layer=...
+    const layersRaw =
+      url.searchParams.get("layers") ??
+      (url.searchParams.getAll("layer").length > 0
+        ? url.searchParams.getAll("layer").join(",")
+        : null);
+
+    layersInfo = layersRaw ? parseLayersParam(layersRaw) : null;
+
+    if (layersInfo && layersInfo.thicknesses.length > 0) {
+      perLayerCavityStrs = layersInfo.thicknesses.map((_, i) =>
+        readLayerCavitiesFromUrl(url, i + 1),
+      );
+    }
+  }
+} catch {
+  // ignore
+}
+
+
+
         }
       } catch {
         // if anything goes wrong, we fall back to serverBlockStr/serverCavityStr
@@ -360,7 +555,12 @@ export default function LayoutPage({
       try {
         // If we don't have a real quote number, just use fallback layout
         if (!hasRealQuoteNo) {
-          const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+          const fallback = buildFallbackLayout(
+  effectiveBlockStr,
+  effectiveCavityStr,
+  layersInfo,
+  perLayerCavityStrs,
+);
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
@@ -383,7 +583,12 @@ export default function LayoutPage({
         );
 
         if (!res.ok) {
-          const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+          const fallback = buildFallbackLayout(
+  effectiveBlockStr,
+  effectiveCavityStr,
+  layersInfo,
+  perLayerCavityStrs,
+);
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
@@ -484,7 +689,12 @@ export default function LayoutPage({
 
 
         // Otherwise, use layout from URL (dims/cavities) and keep qty/material.
-        const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+        const fallback = buildFallbackLayout(
+  effectiveBlockStr,
+  effectiveCavityStr,
+  layersInfo,
+  perLayerCavityStrs,
+);
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
@@ -494,7 +704,12 @@ export default function LayoutPage({
         }
       } catch (err) {
         console.error("Error loading layout for /quote/layout:", err);
-        const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+        const fallback = buildFallbackLayout(
+  effectiveBlockStr,
+  effectiveCavityStr,
+  layersInfo,
+  perLayerCavityStrs,
+);
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
