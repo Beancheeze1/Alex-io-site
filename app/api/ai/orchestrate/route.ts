@@ -1181,6 +1181,19 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
         position: l.position,
         ...(l.thickness_in != null ? { thickness_in: l.thickness_in } : {}),
       }));
+
+      // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      // PATH A FIX (NEW): Provide a canonical layer carrier for the editor.
+      // - Top = index 0
+      // - thicknessIn is the field other parts of the system already expect
+      // - This does NOT create layout_json.stack here; it just preserves intent
+      //   in a stable shape so the layout editor seed path can build stack.
+      // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      facts.foamLayers = layers.map((l) => ({
+        index: l.index,
+        position: l.position,
+        thicknessIn: l.thickness_in != null ? Number(l.thickness_in) : undefined,
+      }));
     }
 
     // HARDENING: If outside dims were NOT explicit, and we have footprint + thicknesses,
@@ -1463,12 +1476,6 @@ export async function POST(req: NextRequest) {
 
     // ============================================================
     // PATH A: Layer-intent isolation (prevents phantom layers)
-    //
-    // If THIS inbound message does NOT mention layers, we MUST wipe
-    // any previously-memorized layer intent so single-piece quotes
-    // do not inherit a past 3-layer stack (threadKey memory reuse).
-    //
-    // CRITICAL SAFETY: Layered emails are untouched.
     // ============================================================
     const layerGateDebugBefore = dryRun
       ? {
