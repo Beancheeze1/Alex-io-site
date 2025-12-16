@@ -521,6 +521,65 @@ return {
       );
     }
 
+    // ALSO support Alex-IO link params:
+// layer_count=3&layer_thicknesses=3,1&layer_cavity_layer_index=1
+if (!layersInfo || !layersInfo.thicknesses || layersInfo.thicknesses.length === 0) {
+  const lcRaw = url.searchParams.get("layer_count");
+  const thRaw = url.searchParams.get("layer_thicknesses");
+  const cliRaw = url.searchParams.get("layer_cavity_layer_index");
+
+  const lc = lcRaw ? Number(lcRaw) : NaN;
+  const cli = cliRaw ? Number(cliRaw) : NaN;
+
+  if (Number.isFinite(lc) && lc > 1) {
+    const parsed = (thRaw || "")
+      .split(/[,;]/)
+      .map((s) => Number(String(s).trim()))
+      .filter((n) => Number.isFinite(n) && n > 0);
+
+    let thicknesses = parsed.slice(0, lc);
+
+    // If we got fewer thicknesses than layer_count:
+    // 1) try to infer from dims height if there's a positive remainder
+    // 2) otherwise fill missing layers with 0.5" (safe default)
+    if (thicknesses.length < lc) {
+      const blockParsed = parseDimsTriple(effectiveBlockStr);
+      const H = blockParsed?.H;
+
+      if (Number.isFinite(H) && (H as number) > 0) {
+        const used = thicknesses.reduce((a, b) => a + b, 0);
+        const remaining = (H as number) - used;
+
+        if (remaining > 0.01) {
+          thicknesses = [...thicknesses, remaining];
+        }
+      }
+
+      while (thicknesses.length < lc) {
+        thicknesses = [...thicknesses, 0.5];
+      }
+    }
+
+    const labels = thicknesses.map((_, i) =>
+      i === 0 ? "Bottom" : i === thicknesses.length - 1 ? "Top" : `Layer ${i + 1}`,
+    );
+
+    layersInfo = { thicknesses, labels };
+
+    const cavityIdx =
+      Number.isFinite(cli) && cli >= 0 && cli < thicknesses.length
+        ? Math.floor(cli)
+        : thicknesses.length === 3
+          ? 1
+          : 0;
+
+    // Put *all* generic cavities onto cavityIdx (matches your current email-link behavior)
+    perLayerCavityStrs = thicknesses.map((_, i) =>
+      i === cavityIdx ? effectiveCavityStr : "",
+    );
+  }
+}
+
 
 try {
   if (typeof window !== "undefined") {
