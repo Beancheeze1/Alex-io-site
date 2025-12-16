@@ -37,8 +37,8 @@
 //     use the latest layout, not stale test data.
 //   - NEW: syncs each foam layer in layout.stack into quote_items as separate
 //     rows marked with notes starting "[LAYOUT-LAYER] ...".
-//
- // GET (debug helper):
+// 
+// GET (debug helper):
 //   - /api/quote/layout/apply?quote_no=Q-...   -> latest package for that quote
 
 import { NextRequest, NextResponse } from "next/server";
@@ -138,6 +138,18 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
 
 /* ===================== NEW: Normalize/persist layer thickness into layout_json ===================== */
 
+/**
+ * Your current stored layout_json.stack[] layers are missing thickness.
+ * The editor clearly has thickness (admin/quote_items sync sees it), but it is
+ * not being persisted into the layout package JSON.
+ *
+ * Path A fix:
+ * - Make a defensive copy of the layout before saving.
+ * - Ensure each layer has thicknessIn when we can resolve it.
+ * - Prefer values already on the layer, otherwise pull from body.foamLayers by index.
+ *
+ * This does NOT touch cavities; it only fills in a missing thickness field.
+ */
 function coercePositiveNumber(raw: any): number | null {
   if (raw == null) return null;
   const n = typeof raw === "number" ? raw : Number(raw);
@@ -208,7 +220,10 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
 }
 
 /* ===================== DXF builder from layout (fallback) ===================== */
-
+/**
+ * Layout-based DXF fallback (rectangles only).
+ * We keep this as a fallback if SVG is missing.
+ */
 function buildDxfFromLayout(layout: any): string | null {
   if (!layout || !layout.block) return null;
 
@@ -217,7 +232,6 @@ function buildDxfFromLayout(layout: any): string | null {
   let W = Number(block.widthIn);
 
   if (!Number.isFinite(L) || L <= 0) return null;
-  if (!Number.isFinite(W) || L <= 0) return null;
   if (!Number.isFinite(W) || W <= 0) W = L;
 
   function fmt(n: number) {
@@ -319,7 +333,17 @@ function buildDxfFromLayout(layout: any): string | null {
 }
 
 /* ===================== DXF builder from SVG (preferred) ===================== */
-
+/**
+ * Canonical DXF generation from SVG (editor truth).
+ * Supports:
+ *  - <rect> (as 4 LINEs)
+ *  - <circle> (as DXF CIRCLE)
+ *
+ * IMPORTANT:
+ *  - SVG is top-left origin (y down)
+ *  - DXF is bottom-left origin (y up)
+ * We flip Y using the SVG viewBox height.
+ */
 function buildDxfFromSvg(svgRaw: string | null): string | null {
   if (!svgRaw || typeof svgRaw !== "string") return null;
 
@@ -379,6 +403,7 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
   const entities: string[] = [];
 
   // --- rects ---
+  // Note: handle x/y/width/height. Ignore rx/ry for now (we can add arcs later).
   const rectRe = /<rect\b([^>]*)\/?>/gi;
   let rectM: RegExpExecArray | null = null;
   while ((rectM = rectRe.exec(svg))) {
@@ -934,27 +959,7 @@ export async function POST(req: NextRequest) {
         if (Number.isFinite(mid) && mid > 0) baseMaterialId = mid;
       }
 
-      // ===================== PATH A FIX (THIS IS THE BUG FIX) =====================
-      // If the layout is SINGLE-LAYER, we should NOT create "[LAYOUT-LAYER]" quote_items rows.
-      // But we SHOULD delete any existing ones from earlier runs, to eliminate phantom extra layers.
-      const isMultiLayer = Array.isArray(layers) && layers.length > 1;
-
-      if (!isMultiLayer) {
-        await q(
-          `
-          delete from quote_items
-          where quote_id = $1
-            and notes like '[LAYOUT-LAYER] %'
-          `,
-          [quote.id],
-        );
-
-        console.log("[layout/apply] Single-layer layout: cleaned up [LAYOUT-LAYER] rows and skipped insert", {
-          quoteId: quote.id,
-          quoteNo,
-          layersLen: Array.isArray(layers) ? layers.length : 0,
-        });
-      } else if (
+      if (
         !baseMaterialId ||
         blockL <= 0 ||
         blockW <= 0 ||
@@ -1049,7 +1054,6 @@ export async function POST(req: NextRequest) {
           );
         }
       }
-      // =================== END PATH A FIX ===================
     } catch (layerErr) {
       console.error(
         "Warning: failed to sync foam layers into quote_items for",
