@@ -46,6 +46,14 @@ type BoxSuggestState = {
   bestMailer: SuggestedBox | null;
 };
 
+type LayerIntent = {
+  layerCount?: number | null;
+  thicknesses?: number[] | null;
+  cavityLayerIndex?: number | null;
+};
+
+
+
 /**
  * Normalize block dims from searchParams (dims= / block=)
  */
@@ -476,6 +484,10 @@ return {
       let effectiveBlockStr = serverBlockStr;
       let effectiveCavityStr = serverCavityStr;
 
+      // Parsed once from URL (if present), then passed into buildFallbackLayout.
+let layerIntent: LayerIntent | undefined = undefined;
+
+
   // NEW: optional multi-layer info from URL (used by fallback builder)
   let layersInfo: { thicknesses: number[]; labels: string[] } | null = null;
   let perLayerCavityStrs: string[] | null = null;
@@ -767,16 +779,19 @@ if (layersInfo && layersInfo.thicknesses.length > 0) {
           return;
         }
 
-        // Otherwise: Only use DB layout geometry when NO URL dims/cavities are present.
-        if (
-          json &&
-          json.ok &&
-          json.layoutPkg &&
-          json.layoutPkg.layout_json &&
-          !hasExplicitCavities &&
-          !hasDimsFromUrl &&
-          !hasCavitiesFromUrl
-        ) {
+    // Only use DB layout geometry when NO URL dims/cavities are present
+// AND there is no multi-layer intent coming from the original email link.
+if (
+  json &&
+  json.ok &&
+  json.layoutPkg &&
+  json.layoutPkg.layout_json &&
+  !hasExplicitCavities &&
+  !hasDimsFromUrl &&
+  !hasCavitiesFromUrl &&
+  !layerIntent
+) {
+
           const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
           const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
 
