@@ -526,20 +526,62 @@ try {
   if (typeof window !== "undefined") {
     const url = new URL(window.location.href);
 
-    // Support layers=... and repeated layer=...
-    const layersRaw =
-      url.searchParams.get("layers") ??
-      (url.searchParams.getAll("layer").length > 0
-        ? url.searchParams.getAll("layer").join(",")
-        : null);
+ // Support layers=... and repeated layer=...
+const layersRaw =
+  url.searchParams.get("layers") ??
+  (url.searchParams.getAll("layer").length > 0
+    ? url.searchParams.getAll("layer").join(",")
+    : null);
 
-    layersInfo = layersRaw ? parseLayersParam(layersRaw) : null;
+layersInfo = layersRaw ? parseLayersParam(layersRaw) : null;
 
-    if (layersInfo && layersInfo.thicknesses.length > 0) {
-      perLayerCavityStrs = layersInfo.thicknesses.map((_, i) =>
-        readLayerCavitiesFromUrl(url, i + 1),
+if (layersInfo && layersInfo.thicknesses.length > 0) {
+  perLayerCavityStrs = layersInfo.thicknesses.map((_, i) =>
+    readLayerCavitiesFromUrl(url, i + 1),
+  );
+} else {
+  // ALSO support Alex-IO link params:
+  // layer_count=3&layer_thicknesses=3,1&layer_cavity_layer_index=1
+  const lc = Number(url.searchParams.get("layer_count") || "0");
+  const ltRaw = (url.searchParams.get("layer_thicknesses") || "").trim();
+  const lci = Number(url.searchParams.get("layer_cavity_layer_index") || "0");
+
+  if (lc > 1) {
+    const parsed = ltRaw
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => !Number.isNaN(n) && n > 0);
+
+    // If only first N-1 thicknesses provided, infer last thickness
+    // from block height (dims= LxWxH).
+    let thicknesses = parsed.slice(0, lc);
+
+    if (thicknesses.length < lc) {
+      const parts = String(effectiveBlockStr || "").split("x");
+      const h = Number(parts[2]);
+      if (!Number.isNaN(h) && h > 0) {
+        const used = thicknesses.reduce((a, b) => a + b, 0);
+        const remaining = Math.max(0, h - used);
+        if (remaining > 0) thicknesses = [...thicknesses, remaining];
+      }
+    }
+
+    if (thicknesses.length === lc) {
+      const labels = thicknesses.map((_, i) =>
+        i === 0 ? "Bottom" : i === lc - 1 ? "Top" : `Layer ${i + 1}`,
+      );
+
+      layersInfo = { thicknesses, labels };
+
+      // Put the main cavities string onto the requested layer index
+      // (0-based index in URL param)
+      perLayerCavityStrs = thicknesses.map((_, i) =>
+        i === lci ? effectiveCavityStr : "",
       );
     }
+  }
+}
+
   }
 } catch {
   // ignore
