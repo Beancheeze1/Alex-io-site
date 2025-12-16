@@ -1547,7 +1547,7 @@ function LayoutEditorHost(props: {
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 opacity-65 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),transparent_55%),linear-gradient(to_right,rgba(15,23,42,0.95)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.95)_1px,transparent_1px)] [background-size:460px_460px,28px_28px,28px_28px]"
           />
-          <div className="relative">
+          <div className="relative flex flex-col flex-1 min-h-0">
             {/* Header */}
             <div className="border-b border-slate-800/80 bg-gradient-to-r from-sky-500 via-sky-500/80 to-slate-900 px-6 py-4">
               <div className="flex items-center gap-4 w-full">
