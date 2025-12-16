@@ -150,6 +150,32 @@ function buildLayoutUrl(input: TemplateInput): string | null {
 
   params.set("quote_no", qno);
 
+// If the original email described layers, we need the editor to boot in
+// multi-layer mode immediately (before "Apply to quote").
+// Orchestrate stores this intent in facts (layer_count / layers).
+const layerCountRaw = Number(input.facts?.layer_count);
+const layersArr = Array.isArray(input.facts?.layers) ? (input.facts?.layers as any[]) : [];
+const hasLayerIntent = (Number.isFinite(layerCountRaw) && layerCountRaw > 1) || layersArr.length > 0;
+
+if (hasLayerIntent) {
+  const count = Number.isFinite(layerCountRaw) && layerCountRaw > 1 ? layerCountRaw : layersArr.length;
+  if (count && count > 1) params.set("layer_count", String(count));
+
+  // Pass per-layer thicknesses when known (comma-separated inches).
+  // Example: "1,4,1" (top,middle,bottom order) — editor treats this as an intent hint.
+  const th = layersArr
+    .map((l) => Number((l as any)?.thickness_in))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (th.length) params.set("layer_thicknesses", th.join(","));
+
+  const cavLayerIndex = Number(input.facts?.layer_cavity_layer_index);
+  if (Number.isFinite(cavLayerIndex) && cavLayerIndex >= 0) {
+    params.set("layer_cavity_layer_index", String(cavLayerIndex));
+  }
+}
+
+
+
   if (L_in && W_in && H_in) {
     params.set("dims", `${L_in}x${W_in}x${H_in}`);
   }
