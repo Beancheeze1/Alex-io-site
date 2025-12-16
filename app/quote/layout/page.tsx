@@ -191,7 +191,6 @@ function collapseStackToSingleLayer(layoutFromDb: any): LayoutModel {
     return layoutFromDb as LayoutModel;
   }
 }
-
 export default function LayoutPage({
   searchParams,
 }: {
@@ -375,7 +374,6 @@ export default function LayoutPage({
     },
     [],
   );
-
   React.useEffect(() => {
     let cancelled = false;
 
@@ -469,49 +467,48 @@ export default function LayoutPage({
 
         const json = await res.json();
 
-   // Pull qty + material (+ thickness) from primary line item (if present)
-let qtyFromItems: number | null = null;
-let materialIdFromItems: number | null = null;
-let thicknessFromItems: number | null = null;
+        // Pull qty + material (+ thickness) from primary line item (if present)
+        let qtyFromItems: number | null = null;
+        let materialIdFromItems: number | null = null;
+        let thicknessFromItems: number | null = null;
 
-if (Array.isArray(json.items) && json.items.length > 0) {
-  const first = json.items[0];
+        if (Array.isArray(json.items) && json.items.length > 0) {
+          const first = json.items[0];
 
-  const rawQty = Number(first?.qty);
-  if (Number.isFinite(rawQty) && rawQty > 0) {
-    qtyFromItems = rawQty;
-  }
+          const rawQty = Number(first?.qty);
+          if (Number.isFinite(rawQty) && rawQty > 0) {
+            qtyFromItems = rawQty;
+          }
 
-  const mid = Number(first?.material_id);
-  if (Number.isFinite(mid) && mid > 0) {
-    materialIdFromItems = mid;
-  }
+          const mid = Number(first?.material_id);
+          if (Number.isFinite(mid) && mid > 0) {
+            materialIdFromItems = mid;
+          }
 
-  // Try to recover thickness from the foam line item.
-  // Preferred: outside_size like "12x12x2"
-  const outside = (first?.outside_size ?? first?.outsideSize ?? "") as string;
-  const parsedOutside = parseDimsTriple(typeof outside === "string" ? outside : "");
-  if (parsedOutside && Number.isFinite(parsedOutside.H) && parsedOutside.H > 0) {
-    thicknessFromItems = parsedOutside.H;
-  } else {
-    // Fallback: explicit thickness fields if present
-    const t =
-      Number(first?.thickness_in) ||
-      Number(first?.thicknessIn) ||
-      Number(first?.thickness);
-    if (Number.isFinite(t) && t > 0) thicknessFromItems = t;
-  }
-}
+          // Try to recover thickness from the foam line item.
+          // Preferred: outside_size like "12x12x2"
+          const outside = (first?.outside_size ?? first?.outsideSize ?? "") as string;
+          const parsedOutside = parseDimsTriple(typeof outside === "string" ? outside : "");
+          if (parsedOutside && Number.isFinite(parsedOutside.H) && parsedOutside.H > 0) {
+            thicknessFromItems = parsedOutside.H;
+          } else {
+            // Fallback: explicit thickness fields if present
+            const t =
+              Number(first?.thickness_in) ||
+              Number(first?.thicknessIn) ||
+              Number(first?.thickness);
+            if (Number.isFinite(t) && t > 0) thicknessFromItems = t;
+          }
+        }
 
-// If this is a real quote and we don't have a saved layoutPkg yet,
-// trust the quote item's thickness over whatever the URL passed.
-if (hasRealQuoteNo && thicknessFromItems && thicknessFromItems > 0) {
-  const fromUrl = parseDimsTriple(effectiveBlockStr);
-  if (fromUrl && fromUrl.L > 0 && fromUrl.W > 0) {
-    effectiveBlockStr = `${fromUrl.L}x${fromUrl.W}x${thicknessFromItems}`;
-  }
-}
-
+        // If this is a real quote and we don't have a saved layoutPkg yet,
+        // trust the quote item's thickness over whatever the URL passed.
+        if (hasRealQuoteNo && thicknessFromItems && thicknessFromItems > 0) {
+          const fromUrl = parseDimsTriple(effectiveBlockStr);
+          if (fromUrl && fromUrl.L > 0 && fromUrl.W > 0) {
+            effectiveBlockStr = `${fromUrl.L}x${fromUrl.W}x${thicknessFromItems}`;
+          }
+        }
 
         // pull customer info from quote header when present
         if (json && json.quote && typeof json.quote === "object") {
@@ -647,9 +644,6 @@ if (hasRealQuoteNo && thicknessFromItems && thicknessFromItems > 0) {
   );
 }
 
-/* ------- REST OF YOUR FILE UNCHANGED BELOW THIS LINE ------- */
-/* NOTE: I’m keeping everything else exactly as you pasted it. */
-
 const CAVITY_COLORS = [
   "#38bdf8",
   "#a855f7",
@@ -777,6 +771,7 @@ function LayoutEditorHost(props: {
       setThicknessTick((t) => t + 1);
     }
   }, [stack, blockThicknessIn]);
+
   const activeLayer =
     stack && stack.length > 0
       ? stack.find((layer) => layer.id === activeLayerId) ?? stack[0]
@@ -1050,10 +1045,8 @@ function LayoutEditorHost(props: {
     [boxSuggest.bestRsc, boxSuggest.bestMailer, quoteNo, qty],
   );
 
-
   // Local input state for selected cavity dims (to avoid "wonky" inputs)
   const [cavityInputs, setCavityInputs] = React.useState<{
-
     id: string | null;
     length: string;
     width: string;
@@ -1094,7 +1087,6 @@ function LayoutEditorHost(props: {
           : "",
     });
   }, [selectedCavity]);
-
   const commitCavityField = React.useCallback(
     (field: "length" | "width" | "depth" | "cornerRadius") => {
       if (
@@ -1387,7 +1379,7 @@ function LayoutEditorHost(props: {
         },
       };
 
-            // Attach chosen carton (if any) so the backend can add a box line item
+      // Attach chosen carton (if any) so the backend can add a box line item
       if (selectedCartonKind && (boxSuggest.bestRsc || boxSuggest.bestMailer)) {
         const chosen =
           selectedCartonKind === "RSC"
@@ -1416,7 +1408,6 @@ function LayoutEditorHost(props: {
           thicknessIn: getLayerThickness(layer.id),
         }));
       }
-
 
       const nQty = Number(qty);
       if (Number.isFinite(nQty) && nQty > 0) {
@@ -1461,12 +1452,13 @@ function LayoutEditorHost(props: {
       setTimeout(() => setApplyStatus("idle"), 3000);
     }
   };
+
   /* ---------- Layout ---------- */
 
   const canApplyButton =
     hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
 
-    // Qty used for box/carton suggestions (null when not set)
+  // Qty used for box/carton suggestions (null when not set)
   const effectiveQty =
     typeof qty === "number" && Number.isFinite(qty) && qty > 0 ? qty : null;
 
@@ -1586,8 +1578,6 @@ function LayoutEditorHost(props: {
     Number(block.lengthIn) > 0 &&
     Number(block.widthIn) > 0 &&
     totalStackThicknessIn > 0;
-
-
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
       <div className="w-full max-w-none mx-auto">
@@ -1772,7 +1762,6 @@ function LayoutEditorHost(props: {
                     </label>
                   </div>
                 </div>
-
                 {/* CENTER: Layout controls (Zoom + Qty + CTA buttons) */}
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 flex flex-col justify-between">
                   <div className="flex items-center justify-between mb-1.5">
@@ -1962,719 +1951,718 @@ function LayoutEditorHost(props: {
               </div>
             </div>
 
-{/* Body: three-column layout */}
-<div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
-  {/* LEFT: Cavity palette + material + cartons + notes */}
-  <aside className="w-52 shrink-0 flex flex-col gap-3">
-    <div>
-      <div className="text-xs font-semibold text-slate-100 mb-1">
-        Cavity palette
-      </div>
-      <p className="text-[11px] text-slate-400 mb-2">
-        Click a style to add a new pocket, then drag and resize it in the block.
-      </p>
-    </div>
-
-    <button
-      type="button"
-      onClick={() => handleAddPreset("rect")}
-      className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
-    >
-      <div className="font-semibold text-slate-50 flex items-center gap-2">
-        <span className="inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-slate-400/70 bg-slate-900/80" />
-        Rectangle
-      </div>
-      <div className="text-[11px] text-slate-400">
-        Rectangular pocket (4&quot; × 2&quot;)
-      </div>
-    </button>
-
-    <button
-      type="button"
-      onClick={() => handleAddPreset("circle")}
-      className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
-    >
-      <div className="font-semibold text-slate-50 flex items-center gap-2">
-        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 bg-slate-900/80" />
-        Circle
-      </div>
-      <div className="text-[11px] text-slate-400">Round pocket (3&quot; Ø)</div>
-    </button>
-
-    <button
-      type="button"
-      onClick={() => handleAddPreset("roundedRect")}
-      className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
-    >
-      <div className="font-semibold text-slate-50 flex items-center gap-2">
-        <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
-        Rounded rectangle
-      </div>
-      <div className="text-[11px] text-slate-400">
-        Rounded corners (4&quot; × 3&quot;, 0.5&quot; R)
-      </div>
-    </button>
-
-    {/* Foam material (in left bar) */}
-    <div className="mt-2">
-      <div className="text-xs font-semibold text-slate-100 mb-1">
-        Foam material
-      </div>
-      <div className="text-[11px] text-slate-400 mb-2">
-        Choose the foam family and grade used for this layout.
-      </div>
-      <select
-        value={selectedMaterialId ?? ""}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (!v) {
-            setSelectedMaterialId(null);
-          } else {
-            const parsed = Number(v);
-            if (Number.isFinite(parsed)) {
-              setSelectedMaterialId(parsed);
-            }
-          }
-        }}
-        className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-      >
-        <option value="">
-          {materialsLoading ? "Loading materials…" : "Select material (optional)"}
-        </option>
-        {materialsByFamily.map(([family, list]) => (
-          <optgroup key={family} label={family}>
-            {list.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-                {m.density_lb_ft3 != null
-                  ? ` · ${m.density_lb_ft3.toFixed(1)} lb/ft³`
-                  : ""}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-      {materialsError && (
-        <div className="mt-1 text-[11px] text-amber-300">{materialsError}</div>
-      )}
-    </div>
-
-    {/* Closest matching cartons (live suggester, always visible) */}
-    <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="text-xs font-semibold text-slate-100">
-          Closest matching cartons
-        </div>
-        <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
-          Box suggester · BETA
-        </span>
-      </div>
-
-      <p className="text-[11px] text-slate-400 mb-2">
-        Uses the foam footprint{" "}
-        <span className="font-mono text-sky-200">{footprintLabel}</span>, stack
-        depth{" "}
-        <span className="font-mono text-sky-200">{stackDepthLabel}</span> and
-        quoted qty{" "}
-        <span className="font-mono text-sky-200">{qtyLabel}</span> to suggest a
-        best-fit <span className="text-sky-300 font-medium">RSC</span> and{" "}
-        <span className="text-sky-300 font-medium">mailer</span>.
-      </p>
-
-      {selectedCartonKind && (
-        <div className="mb-2 text-[11px] text-sky-200">
-          Selected carton:{" "}
-          <span className="font-mono">
-            {selectedCartonKind === "RSC"
-              ? boxSuggest.bestRsc?.sku
-              : boxSuggest.bestMailer?.sku}
-          </span>
-        </div>
-      )}
-
-      {!suggesterReady ? (
-        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
-          <div className="font-semibold text-slate-100 mb-1">
-            Waiting for layout &amp; customer info…
-          </div>
-          <ul className="list-disc list-inside space-y-0.5">
-            <li>Set block length, width and stack depth.</li>
-            <li>Enter customer name + email.</li>
-            {hasRealQuoteNo ? null : <li>Link this layout to a real quote.</li>}
-          </ul>
-        </div>
-      ) : boxSuggest.loading ? (
-        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-200">
-          Calculating best-fit cartons…
-        </div>
-      ) : boxSuggest.error ? (
-        <div className="rounded-xl border border-amber-500/70 bg-amber-900/40 px-3 py-2 text-[11px] text-amber-50">
-          {boxSuggest.error}
-        </div>
-      ) : !boxSuggest.bestRsc && !boxSuggest.bestMailer ? (
-        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
-          No good carton matches found in the current stub catalog.
-        </div>
-      ) : (
-        <div className="space-y-2 text-[11px]">
-          {boxSuggest.bestRsc && (
-            <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-              <div className="flex items-center justify-between mb-0.5">
-                <div className="font-semibold text-slate-100">Best RSC match</div>
-                <span className="font-mono text-sky-300 text-[10px]">
-                  {boxSuggest.bestRsc.sku}
-                </span>
-              </div>
-              <div className="text-slate-300">{boxSuggest.bestRsc.description}</div>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
-                <span>
-                  Inside{" "}
-                  <span className="font-mono text-slate-50">
-                    {boxSuggest.bestRsc.inside_length_in}" ×{" "}
-                    {boxSuggest.bestRsc.inside_width_in}" ×{" "}
-                    {boxSuggest.bestRsc.inside_height_in}"
-                  </span>
-                </span>
-                <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
-                  Fit score: {boxSuggest.bestRsc.fit_score}
-                </span>
-              </div>
-
-              {boxSuggest.bestRsc.notes && (
-                <div className="mt-0.5 text-slate-400">{boxSuggest.bestRsc.notes}</div>
-              )}
-
-              <div className="mt-2 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => handlePickCarton("RSC")}
-                  className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
-                    selectedCartonKind === "RSC"
-                      ? "border-sky-400 bg-sky-500/20 text-sky-50"
-                      : "border-slate-600 bg-slate-9...200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
-                  }`}
-                >
-                  {selectedCartonKind === "RSC" ? "Selected carton" : "Pick this box"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {boxSuggest.bestMailer && (
-            <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-              <div className="flex items-center justify-between mb-0.5">
-                <div className="font-semibold text-slate-100">Best mailer match</div>
-                <span className="font-mono text-sky-300 text-[10px]">
-                  {boxSuggest.bestMailer.sku}
-                </span>
-              </div>
-              <div className="text-slate-300">
-                {boxSuggest.bestMailer.description}
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
-                <span>
-                  Inside{" "}
-                  <span className="font-mono text-slate-50">
-                    {boxSuggest.bestMailer.inside_length_in}" ×{" "}
-                    {boxSuggest.bestMailer.inside_width_in}" ×{" "}
-                    {boxSuggest.bestMailer.inside_height_in}"
-                  </span>
-                </span>
-                <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
-                  Fit score: {boxSuggest.bestMailer.fit_score}
-                </span>
-              </div>
-
-              {boxSuggest.bestMailer.notes && (
-                <div className="mt-0.5 text-slate-400">
-                  {boxSuggest.bestMailer.notes}
+            {/* Body: three-column layout */}
+            <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
+              {/* LEFT: Cavity palette + material + cartons + notes */}
+              <aside className="w-52 shrink-0 flex flex-col gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-slate-100 mb-1">
+                    Cavity palette
+                  </div>
+                  <p className="text-[11px] text-slate-400 mb-2">
+                    Click a style to add a new pocket, then drag and resize it in the block.
+                  </p>
                 </div>
-              )}
 
-              <div className="mt-2 flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => handlePickCarton("MAILER")}
-                  className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
-                    selectedCartonKind === "MAILER"
-                      ? "border-sky-400 bg-sky-500/20 text-sky-50"
-                      : "border-slate-600 bg-slate-9...200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
-                  }`}
+                  onClick={() => handleAddPreset("rect")}
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
-                  {selectedCartonKind === "MAILER"
-                    ? "Selected carton"
-                    : "Pick this box"}
+                  <div className="font-semibold text-slate-50 flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-slate-400/70 bg-slate-900/80" />
+                    Rectangle
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Rectangular pocket (4&quot; × 2&quot;)
+                  </div>
                 </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
 
-    {/* Notes / special instructions */}
-    <div className="mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
-      <div className="text-xs font-semibold text-slate-100 mb-1">
-        Notes / special instructions
-      </div>
-      <div className="text-[11px] text-slate-400 mb-2">
-        Optional text for anything the foam layout needs to call out (loose
-        parts, labels, extra protection, etc.). This will be saved with the quote
-        when you apply.
-      </div>
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        rows={4}
-        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 resize-vertical"
-      />
-    </div>
-
-    <div className="mt-1 border-t border-slate-800 pt-2 text-[11px] text-slate-500">
-      Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block edges and
-      between pockets.
-    </div>
-
-    {!hasRealQuoteNo && (
-      <div className="mt-3 rounded-xl border border-amber-500/70 bg-amber-900/50 px-3 py-2 text-[11px] text-amber-50">
-        No quote is linked yet. Open this page from an emailed quote or the
-        /quote print view to save layouts back to a real quote.
-      </div>
-    )}
-  </aside>
-
-  {/* CENTER: Big visualizer */}
-  <section className="flex-1 flex flex-col gap-3">
-    <div className="flex items-center justify-between gap-3">
-      <div>
-        <div className="flex items-center gap-2 text-sm text-slate-50">
-          <span className="font-semibold">Foam layout preview</span>
-          <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium">
-            Interactive layout
-          </span>
-        </div>
-        {!hasRealQuoteNo && (
-          <div className="text-[11px] text-amber-300 mt-1">
-            Demo only – link from a real quote email to apply layouts.
-          </div>
-        )}
-      </div>
-    </div>
-
-    <p className="text-[11px] text-slate-400 leading-snug">
-      Drag cavities to adjust placement. Use the square handle at the
-      bottom-right of each cavity to resize. Cavities are placed inside a
-      0.5&quot; wall on all sides. When a cavity is selected, the nearest
-      horizontal and vertical gaps to other cavities and to the block edges are
-      dimensioned.
-    </p>
-
-    {/* canvas wrapper */}
-    <div className="relative flex-1 rounded-2xl border border-slate-800/90 bg-slate-950 overflow-hidden shadow-[0_22px_55px_rgba(15,23,42,0.95)]">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,rgba(30,64,175,0.3)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.3)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
-      />
-      <div className="relative p-4 overflow-auto">
-        <InteractiveCanvas
-          layout={layout}
-          selectedId={selectedId}
-          selectAction={selectCavity}
-          moveAction={(id, xNorm, yNorm) => {
-            // Keep the cavity selected while dragging so
-            // dimension lines stay visible during movement.
-            selectCavity(id);
-            updateCavityPosition(id, xNorm, yNorm);
-          }}
-          resizeAction={(id, lengthIn, widthIn) =>
-            updateCavityDims(id, { lengthIn, widthIn })
-          }
-          zoom={zoom}
-          croppedCorners={croppedCorners}
-        />
-      </div>
-    </div>
-
-    {/* Box suggester preview + bottom cartons row (hidden for now, JSX preserved) */}
-    {false && (
-      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-xs font-semibold text-slate-100">
-              Box suggester inputs
-            </div>
-            <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
-              Preview only
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-400 mb-2">
-            These are the dimensions and quantity the box suggester will use.
-            Next step is wiring this into the real Box Partners lookup.
-          </p>
-          <div className="space-y-1.5 text-[11px]">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-400">Foam footprint (L × W)</span>
-              <span className="font-mono text-slate-50">
-                {Number(block.lengthIn).toFixed(2)}" ×{" "}
-                {Number(block.widthIn).toFixed(2)}"
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-400">Stack depth</span>
-              <span className="font-mono text-slate-50">
-                {totalStackThicknessIn.toFixed(2)}"
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-400">Quoted quantity</span>
-              <span className="font-mono text-slate-50">{qtyLabel}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
-          <div className="text-xs font-semibold text-slate-100 mb-1">
-            Closest matching cartons (coming soon)
-          </div>
-          <p className="text-[11px] text-slate-400 mb-2">
-            This panel will show the best fit{" "}
-            <span className="text-sky-300 font-medium">RSC</span> and{" "}
-            <span className="text-sky-300 font-medium">mailer</span> for the foam
-            stack above, based on the Box Partners catalog. The selection will be
-            saved back to the quote when you apply.
-          </p>
-          <div className="grid grid-cols-1 gap-2">
-            <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-              <div className="text-[11px] font-semibold text-slate-100">
-                Best RSC match
-              </div>
-              <div className="text-[11px] text-slate-500">
-                Will show: part number, inside dims, and fit score.
-              </div>
-            </div>
-            <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-              <div className="text-[11px] font-semibold text-slate-100">
-                Best Mailer match
-              </div>
-              <div className="text-[11px] text-slate-500">
-                Will show: part number, inside dims, and fit score.
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )}
-  </section>
-
-  {/* RIGHT: Customer info + cavities list */}
-  <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
-    {/* Customer info card */}
-    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="text-xs font-semibold text-slate-100">Customer info</div>
-        <span
-          className={
-            "inline-flex h-1.5 w-1.5 rounded-full " +
-            (missingCustomerInfo && hasRealQuoteNo
-              ? "bg-rose-400 shadow-[0_0_8px_rgba(248,113,113,0.9)]"
-              : "bg-emerald-400/70 shadow-[0_0_7px_rgba(52,211,153,0.85)]")
-          }
-        />
-      </div>
-      <div className="text-[11px] text-slate-400 mb-2">
-        Add who this foam layout is for.{" "}
-        <span className="text-sky-300">
-          Name + email are required before recommending foam or applying to the
-          quote.
-        </span>
-      </div>
-
-      <div className="space-y-2 text-xs">
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-300">
-            Customer name <span className="text-rose-300">*</span>
-          </span>
-          <input
-            type="text"
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-          />
-        </label>
-
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-300">Company (optional)</span>
-          <input
-            type="text"
-            value={customerCompany}
-            onChange={(e) => setCustomerCompany(e.target.value)}
-            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-          />
-        </label>
-
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-300">
-            Email <span className="text-rose-300">*</span>
-          </span>
-          <input
-            type="email"
-            value={customerEmail}
-            onChange={(e) => setCustomerEmail(e.target.value)}
-            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-          />
-        </label>
-
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-300">Phone (optional)</span>
-          <input
-            type="tel"
-            value={customerPhone}
-            onChange={(e) => setCustomerPhone(e.target.value)}
-            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-          />
-        </label>
-      </div>
-
-      {missingCustomerInfo && hasRealQuoteNo && (
-        <div className="mt-2 text-[11px] text-amber-300">
-          Enter a name and email to enable{" "}
-          <span className="font-semibold">Recommend my foam</span> and{" "}
-          <span className="font-semibold">Apply to quote</span>.
-        </div>
-      )}
-    </div>
-
-    {/* Cavities list + editor */}
-    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
-      <div className="text-xs font-semibold text-slate-100">
-        Cavities
-        {activeLayerLabel && (
-          <span className="ml-1 text-[11px] font-normal text-slate-400">
-            — {activeLayerLabel}
-          </span>
-        )}
-      </div>
-
-      {cavities.length === 0 ? (
-        <div className="mt-2 text-xs text-slate-400">
-          No cavities yet. Use the palette on the left to add a pocket.
-        </div>
-      ) : (
-        <ul className="mt-2 space-y-1.5 mb-3 max-h-40 overflow-auto">
-          {cavities.map((cav, cavIndex) => {
-            const isActive = cav.id === selectedId;
-
-            const color = CAVITY_COLORS[cavIndex % CAVITY_COLORS.length];
-            const inactiveBg = `${color}33`;
-            const chipStyle = {
-              backgroundColor: isActive ? color : inactiveBg,
-              color: isActive ? "#020617" : "#e5e7eb",
-            } as React.CSSProperties;
-
-            return (
-              <li
-                key={cav.id}
-                className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
-                  isActive
-                    ? "bg-slate-800/80"
-                    : "bg-slate-900/40 hover:bg-slate-800/50"
-                }`}
-              >
                 <button
                   type="button"
-                  onClick={() =>
-                    isActive ? selectCavity(null) : selectCavity(cav.id)
-                  }
-                  className="flex-1 flex items-center gap-2 text-xs text-left"
+                  onClick={() => handleAddPreset("circle")}
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
                 >
-                  <span
-                    style={chipStyle}
-                    className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
+                  <div className="font-semibold text-slate-50 flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 bg-slate-900/80" />
+                    Circle
+                  </div>
+                  <div className="text-[11px] text-slate-400">Round pocket (3&quot; Ø)</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAddPreset("roundedRect")}
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                >
+                  <div className="font-semibold text-slate-50 flex items-center gap-2">
+                    <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
+                    Rounded rectangle
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Rounded corners (4&quot; × 3&quot;, 0.5&quot; R)
+                  </div>
+                </button>
+
+                {/* Foam material (in left bar) */}
+                <div className="mt-2">
+                  <div className="text-xs font-semibold text-slate-100 mb-1">
+                    Foam material
+                  </div>
+                  <div className="text-[11px] text-slate-400 mb-2">
+                    Choose the foam family and grade used for this layout.
+                  </div>
+                  <select
+                    value={selectedMaterialId ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) {
+                        setSelectedMaterialId(null);
+                      } else {
+                        const parsed = Number(v);
+                        if (Number.isFinite(parsed)) {
+                          setSelectedMaterialId(parsed);
+                        }
+                      }
+                    }}
+                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                   >
-                    {cav.id.replace("cav-", "C")}
-                  </span>
-                  <span
-                    className={
-                      isActive
-                        ? "text-slate-50 font-medium"
-                        : "text-slate-200"
-                    }
-                  >
-                    {cav.label}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => deleteCavity(cav.id)}
-                  className="text-[11px] text-slate-500 hover:text-red-400"
-                  title="Delete cavity"
-                >
-                  ✕
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                    <option value="">
+                      {materialsLoading ? "Loading materials…" : "Select material (optional)"}
+                    </option>
+                    {materialsByFamily.map(([family, list]) => (
+                      <optgroup key={family} label={family}>
+                        {list.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                            {m.density_lb_ft3 != null
+                              ? ` · ${m.density_lb_ft3.toFixed(1)} lb/ft³`
+                              : ""}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  {materialsError && (
+                    <div className="mt-1 text-[11px] text-amber-300">{materialsError}</div>
+                  )}
+                </div>
 
-      <div className="mt-2 border-t border-slate-800 pt-2 text-[11px] text-slate-400">
-        {selectedCavity ? (
-          <span>
-            Editing{" "}
-            <strong className="text-slate-100">{selectedCavity.label}</strong>
-          </span>
-        ) : (
-          <span>Select a cavity above to edit its size and depth.</span>
-        )}
+                {/* Closest matching cartons (live suggester, always visible) */}
+                <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-slate-100">
+                      Closest matching cartons
+                    </div>
+                    <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                      Box suggester · BETA
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 mb-2">
+                    Uses the foam footprint{" "}
+                    <span className="font-mono text-sky-200">{footprintLabel}</span>, stack
+                    depth{" "}
+                    <span className="font-mono text-sky-200">{stackDepthLabel}</span> and
+                    quoted qty{" "}
+                    <span className="font-mono text-sky-200">{qtyLabel}</span> to suggest a
+                    best-fit <span className="text-sky-300 font-medium">RSC</span> and{" "}
+                    <span className="text-sky-300 font-medium">mailer</span>.
+                  </p>
+
+                  {selectedCartonKind && (
+                    <div className="mb-2 text-[11px] text-sky-200">
+                      Selected carton:{" "}
+                      <span className="font-mono">
+                        {selectedCartonKind === "RSC"
+                          ? boxSuggest.bestRsc?.sku
+                          : boxSuggest.bestMailer?.sku}
+                      </span>
+                    </div>
+                  )}
+
+                  {!suggesterReady ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+                      <div className="font-semibold text-slate-100 mb-1">
+                        Waiting for layout &amp; customer info…
+                      </div>
+                      <ul className="list-disc list-inside space-y-0.5">
+                        <li>Set block length, width and stack depth.</li>
+                        <li>Enter customer name + email.</li>
+                        {hasRealQuoteNo ? null : <li>Link this layout to a real quote.</li>}
+                      </ul>
+                    </div>
+                  ) : boxSuggest.loading ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-200">
+                      Calculating best-fit cartons…
+                    </div>
+                  ) : boxSuggest.error ? (
+                    <div className="rounded-xl border border-amber-500/70 bg-amber-900/40 px-3 py-2 text-[11px] text-amber-50">
+                      {boxSuggest.error}
+                    </div>
+                  ) : !boxSuggest.bestRsc && !boxSuggest.bestMailer ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+                      No good carton matches found in the current stub catalog.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 text-[11px]">
+                      {boxSuggest.bestRsc && (
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <div className="font-semibold text-slate-100">Best RSC match</div>
+                            <span className="font-mono text-sky-300 text-[10px]">
+                              {boxSuggest.bestRsc.sku}
+                            </span>
+                          </div>
+                          <div className="text-slate-300">{boxSuggest.bestRsc.description}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                            <span>
+                              Inside{" "}
+                              <span className="font-mono text-slate-50">
+                                {boxSuggest.bestRsc.inside_length_in}" ×{" "}
+                                {boxSuggest.bestRsc.inside_width_in}" ×{" "}
+                                {boxSuggest.bestRsc.inside_height_in}"
+                              </span>
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                              Fit score: {boxSuggest.bestRsc.fit_score}
+                            </span>
+                          </div>
+
+                          {boxSuggest.bestRsc.notes && (
+                            <div className="mt-0.5 text-slate-400">{boxSuggest.bestRsc.notes}</div>
+                          )}
+
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => handlePickCarton("RSC")}
+                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+                                selectedCartonKind === "RSC"
+                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
+                                  : "border-slate-600 bg-slate-9...200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+                              }`}
+                            >
+                              {selectedCartonKind === "RSC" ? "Selected carton" : "Pick this box"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {boxSuggest.bestMailer && (
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <div className="font-semibold text-slate-100">Best mailer match</div>
+                            <span className="font-mono text-sky-300 text-[10px]">
+                              {boxSuggest.bestMailer.sku}
+                            </span>
+                          </div>
+                          <div className="text-slate-300">
+                            {boxSuggest.bestMailer.description}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                            <span>
+                              Inside{" "}
+                              <span className="font-mono text-slate-50">
+                                {boxSuggest.bestMailer.inside_length_in}" ×{" "}
+                                {boxSuggest.bestMailer.inside_width_in}" ×{" "}
+                                {boxSuggest.bestMailer.inside_height_in}"
+                              </span>
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                              Fit score: {boxSuggest.bestMailer.fit_score}
+                            </span>
+                          </div>
+
+                          {boxSuggest.bestMailer.notes && (
+                            <div className="mt-0.5 text-slate-400">
+                              {boxSuggest.bestMailer.notes}
+                            </div>
+                          )}
+
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => handlePickCarton("MAILER")}
+                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+                                selectedCartonKind === "MAILER"
+                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
+                                  : "border-slate-600 bg-slate-9...200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+                              }`}
+                            >
+                              {selectedCartonKind === "MAILER"
+                                ? "Selected carton"
+                                : "Pick this box"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Notes / special instructions */}
+                <div className="mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
+                  <div className="text-xs font-semibold text-slate-100 mb-1">
+                    Notes / special instructions
+                  </div>
+                  <div className="text-[11px] text-slate-400 mb-2">
+                    Optional text for anything the foam layout needs to call out (loose
+                    parts, labels, extra protection, etc.). This will be saved with the quote
+                    when you apply.
+                  </div>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    rows={4}
+                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 resize-vertical"
+                  />
+                </div>
+
+                <div className="mt-1 border-t border-slate-800 pt-2 text-[11px] text-slate-500">
+                  Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block edges and
+                  between pockets.
+                </div>
+
+                {!hasRealQuoteNo && (
+                  <div className="mt-3 rounded-xl border border-amber-500/70 bg-amber-900/50 px-3 py-2 text-[11px] text-amber-50">
+                    No quote is linked yet. Open this page from an emailed quote or the
+                    /quote print view to save layouts back to a real quote.
+                  </div>
+                )}
+              </aside>
+
+              {/* CENTER: Big visualizer */}
+              <section className="flex-1 flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm text-slate-50">
+                      <span className="font-semibold">Foam layout preview</span>
+                      <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium">
+                        Interactive layout
+                      </span>
+                    </div>
+                    {!hasRealQuoteNo && (
+                      <div className="text-[11px] text-amber-300 mt-1">
+                        Demo only – link from a real quote email to apply layouts.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Drag cavities to adjust placement. Use the square handle at the
+                  bottom-right of each cavity to resize. Cavities are placed inside a
+                  0.5&quot; wall on all sides. When a cavity is selected, the nearest
+                  horizontal and vertical gaps to other cavities and to the block edges are
+                  dimensioned.
+                </p>
+
+                {/* canvas wrapper */}
+                <div className="relative flex-1 rounded-2xl border border-slate-800/90 bg-slate-950 overflow-hidden shadow-[0_22px_55px_rgba(15,23,42,0.95)]">
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,rgba(30,64,175,0.3)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.3)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
+                  />
+                  <div className="relative p-4 overflow-auto">
+                    <InteractiveCanvas
+                      layout={layout}
+                      selectedId={selectedId}
+                      selectAction={selectCavity}
+                      moveAction={(id, xNorm, yNorm) => {
+                        // Keep the cavity selected while dragging so
+                        // dimension lines stay visible during movement.
+                        selectCavity(id);
+                        updateCavityPosition(id, xNorm, yNorm);
+                      }}
+                      resizeAction={(id, lengthIn, widthIn) =>
+                        updateCavityDims(id, { lengthIn, widthIn })
+                      }
+                      zoom={zoom}
+                      croppedCorners={croppedCorners}
+                    />
+                  </div>
+                </div>
+
+                {/* Box suggester preview + bottom cartons row (hidden for now, JSX preserved) */}
+                {false && (
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-xs font-semibold text-slate-100">
+                          Box suggester inputs
+                        </div>
+                        <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                          Preview only
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        These are the dimensions and quantity the box suggester will use.
+                        Next step is wiring this into the real Box Partners lookup.
+                      </p>
+                      <div className="space-y-1.5 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Foam footprint (L × W)</span>
+                          <span className="font-mono text-slate-50">
+                            {Number(block.lengthIn).toFixed(2)}" ×{" "}
+                            {Number(block.widthIn).toFixed(2)}"
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Stack depth</span>
+                          <span className="font-mono text-slate-50">
+                            {totalStackThicknessIn.toFixed(2)}"
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Quoted quantity</span>
+                          <span className="font-mono text-slate-50">{qtyLabel}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+                      <div className="text-xs font-semibold text-slate-100 mb-1">
+                        Closest matching cartons (coming soon)
+                      </div>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        This panel will show the best fit{" "}
+                        <span className="text-sky-300 font-medium">RSC</span> and{" "}
+                        <span className="text-sky-300 font-medium">mailer</span> for the foam
+                        stack above, based on the Box Partners catalog. The selection will be
+                        saved back to the quote when you apply.
+                      </p>
+                      <div className="grid grid-cols-1 gap-2">
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-slate-100">
+                            Best RSC match
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            Will show: part number, inside dims, and fit score.
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-slate-100">
+                            Best Mailer match
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            Will show: part number, inside dims, and fit score.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* RIGHT: Customer info + cavities list */}
+              <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
+                {/* Customer info card */}
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-slate-100">Customer info</div>
+                    <span
+                      className={
+                        "inline-flex h-1.5 w-1.5 rounded-full " +
+                        (missingCustomerInfo && hasRealQuoteNo
+                          ? "bg-rose-400 shadow-[0_0_8px_rgba(248,113,113,0.9)]"
+                          : "bg-emerald-400/70 shadow-[0_0_7px_rgba(52,211,153,0.85)]")
+                      }
+                    />
+                  </div>
+                  <div className="text-[11px] text-slate-400 mb-2">
+                    Add who this foam layout is for.{" "}
+                    <span className="text-sky-300">
+                      Name + email are required before recommending foam or applying to the
+                      quote.
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-300">
+                        Customer name <span className="text-rose-300">*</span>
+                      </span>
+                      <input
+                        type="text"
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-300">Company (optional)</span>
+                      <input
+                        type="text"
+                        value={customerCompany}
+                        onChange={(e) => setCustomerCompany(e.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-300">
+                        Email <span className="text-rose-300">*</span>
+                      </span>
+                      <input
+                        type="email"
+                        value={customerEmail}
+                        onChange={(e) => setCustomerEmail(e.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-300">Phone (optional)</span>
+                      <input
+                        type="tel"
+                        value={customerPhone}
+                        onChange={(e) => setCustomerPhone(e.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+                  </div>
+
+                  {missingCustomerInfo && hasRealQuoteNo && (
+                    <div className="mt-2 text-[11px] text-amber-300">
+                      Enter a name and email to enable{" "}
+                      <span className="font-semibold">Recommend my foam</span> and{" "}
+                      <span className="font-semibold">Apply to quote</span>.
+                    </div>
+                  )}
+                </div>
+
+                {/* Cavities list + editor */}
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
+                  <div className="text-xs font-semibold text-slate-100">
+                    Cavities
+                    {activeLayerLabel && (
+                      <span className="ml-1 text-[11px] font-normal text-slate-400">
+                        — {activeLayerLabel}
+                      </span>
+                    )}
+                  </div>
+
+                  {cavities.length === 0 ? (
+                    <div className="mt-2 text-xs text-slate-400">
+                      No cavities yet. Use the palette on the left to add a pocket.
+                    </div>
+                  ) : (
+                    <ul className="mt-2 space-y-1.5 mb-3 max-h-40 overflow-auto">
+                      {cavities.map((cav, cavIndex) => {
+                        const isActive = cav.id === selectedId;
+
+                        const color = CAVITY_COLORS[cavIndex % CAVITY_COLORS.length];
+                        const inactiveBg = `${color}33`;
+                        const chipStyle = {
+                          backgroundColor: isActive ? color : inactiveBg,
+                          color: isActive ? "#020617" : "#e5e7eb",
+                        } as React.CSSProperties;
+
+                        return (
+                          <li
+                            key={cav.id}
+                            className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
+                              isActive
+                                ? "bg-slate-800/80"
+                                : "bg-slate-900/40 hover:bg-slate-800/50"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                isActive ? selectCavity(null) : selectCavity(cav.id)
+                              }
+                              className="flex-1 flex items-center gap-2 text-xs text-left"
+                            >
+                              <span
+                                style={chipStyle}
+                                className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
+                              >
+                                {cav.id.replace("cav-", "C")}
+                              </span>
+                              <span
+                                className={
+                                  isActive
+                                    ? "text-slate-50 font-medium"
+                                    : "text-slate-200"
+                                }
+                              >
+                                {cav.label}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteCavity(cav.id)}
+                              className="text-[11px] text-slate-500 hover:text-red-400"
+                              title="Delete cavity"
+                            >
+                              ✕
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+
+                  <div className="mt-2 border-t border-slate-800 pt-2 text-[11px] text-slate-400">
+                    {selectedCavity ? (
+                      <span>
+                        Editing{" "}
+                        <strong className="text-slate-100">{selectedCavity.label}</strong>
+                      </span>
+                    ) : (
+                      <span>Select a cavity above to edit its size and depth.</span>
+                    )}
+                  </div>
+
+                  {selectedCavity && (
+                    <>
+                      {selectedCavity.shape === "circle" ? (
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Diameter (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.length}
+                              onChange={(e) =>
+                                setCavityInputs((prev) => ({ ...prev, length: e.target.value }))
+                              }
+                              onBlur={() => commitCavityField("length")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("length");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Depth (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.depth}
+                              onChange={(e) =>
+                                setCavityInputs((prev) => ({ ...prev, depth: e.target.value }))
+                              }
+                              onBlur={() => commitCavityField("depth")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("depth");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Length (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.length}
+                              onChange={(e) =>
+                                setCavityInputs((prev) => ({ ...prev, length: e.target.value }))
+                              }
+                              onBlur={() => commitCavityField("length")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("length");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Width (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.width}
+                              onChange={(e) =>
+                                setCavityInputs((prev) => ({ ...prev, width: e.target.value }))
+                              }
+                              onBlur={() => commitCavityField("width")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("width");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Depth (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.depth}
+                              onChange={(e) =>
+                                setCavityInputs((prev) => ({ ...prev, depth: e.target.value }))
+                              }
+                              onBlur={() => commitCavityField("depth")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("depth");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">
+                              Corner radius (in)
+                            </span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.cornerRadius}
+                              onChange={(e) =>
+                                setCavityInputs((prev) => ({
+                                  ...prev,
+                                  cornerRadius: e.target.value,
+                                }))
+                              }
+                              onBlur={() => commitCavityField("cornerRadius")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("cornerRadius");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleCenterSelectedCavity}
+                        className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-100 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                      >
+                        Center this cavity in block
+                      </button>
+                    </>
+                  )}
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
       </div>
-
-      {selectedCavity && (
-        <>
-          {selectedCavity.shape === "circle" ? (
-            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-slate-400">Diameter (in)</span>
-                <input
-                  type="number"
-                  step={0.125}
-                  value={cavityInputs.length}
-                  onChange={(e) =>
-                    setCavityInputs((prev) => ({ ...prev, length: e.target.value }))
-                  }
-                  onBlur={() => commitCavityField("length")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitCavityField("length");
-                    }
-                  }}
-                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-slate-400">Depth (in)</span>
-                <input
-                  type="number"
-                  step={0.125}
-                  value={cavityInputs.depth}
-                  onChange={(e) =>
-                    setCavityInputs((prev) => ({ ...prev, depth: e.target.value }))
-                  }
-                  onBlur={() => commitCavityField("depth")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitCavityField("depth");
-                    }
-                  }}
-                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                />
-              </label>
-            </div>
-          ) : (
-            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-slate-400">Length (in)</span>
-                <input
-                  type="number"
-                  step={0.125}
-                  value={cavityInputs.length}
-                  onChange={(e) =>
-                    setCavityInputs((prev) => ({ ...prev, length: e.target.value }))
-                  }
-                  onBlur={() => commitCavityField("length")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitCavityField("length");
-                    }
-                  }}
-                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-slate-400">Width (in)</span>
-                <input
-                  type="number"
-                  step={0.125}
-                  value={cavityInputs.width}
-                  onChange={(e) =>
-                    setCavityInputs((prev) => ({ ...prev, width: e.target.value }))
-                  }
-                  onBlur={() => commitCavityField("width")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitCavityField("width");
-                    }
-                  }}
-                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-slate-400">Depth (in)</span>
-                <input
-                  type="number"
-                  step={0.125}
-                  value={cavityInputs.depth}
-                  onChange={(e) =>
-                    setCavityInputs((prev) => ({ ...prev, depth: e.target.value }))
-                  }
-                  onBlur={() => commitCavityField("depth")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitCavityField("depth");
-                    }
-                  }}
-                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-slate-400">
-                  Corner radius (in)
-                </span>
-                <input
-                  type="number"
-                  step={0.125}
-                  value={cavityInputs.cornerRadius}
-                  onChange={(e) =>
-                    setCavityInputs((prev) => ({
-                      ...prev,
-                      cornerRadius: e.target.value,
-                    }))
-                  }
-                  onBlur={() => commitCavityField("cornerRadius")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitCavityField("cornerRadius");
-                    }
-                  }}
-                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                />
-              </label>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleCenterSelectedCavity}
-            className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-100 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
-          >
-            Center this cavity in block
-          </button>
-        </>
-      )}
-    </div>
-  </aside>
-</div>
-</div>
-</div>
-</div>
-
-</main>
-);
+    </main>
+  );
 }
 
 /* ---------- SVG export helper ---------- */
@@ -2874,4 +2862,3 @@ function buildSvgFromLayout(
 
   return svgParts.join("\n");
 }
-
