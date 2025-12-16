@@ -655,6 +655,37 @@ const CAVITY_COLORS = [
 
 /* ---------- Layout editor host (main body) ---------- */
 
+function ensureStack(layout: LayoutModel): LayoutModel {
+  if ((layout as any).stack && Array.isArray((layout as any).stack)) {
+    return layout;
+  }
+
+  const thickness =
+    Number(layout.block?.thicknessIn) && Number(layout.block.thicknessIn) > 0
+      ? Number(layout.block.thicknessIn)
+      : 1;
+
+  return {
+    ...layout,
+    stack: [
+      {
+        id: "layer-1",
+        label: "Layer 1",
+        thicknessIn: thickness,
+        cavities: Array.isArray(layout.cavities) ? layout.cavities : [],
+      },
+    ],
+  };
+}
+
+
+
+
+
+
+
+
+
 function LayoutEditorHost(props: {
   quoteNo: string;
   hasRealQuoteNo: boolean;
@@ -696,7 +727,7 @@ function LayoutEditorHost(props: {
     addLayer,
     renameLayer,
     deleteLayer,
-  } = useLayoutModel(initialLayout);
+  } = useLayoutModel(ensureStack(initialLayout));
 
   const { block, cavities, stack } = layout as LayoutModel & {
     stack?: {
@@ -1563,6 +1594,10 @@ function LayoutEditorHost(props: {
     </main>
   );
 }
+
+
+
+
 
 /* ---------- SVG export helper ---------- */
 
