@@ -1586,7 +1586,26 @@ function LayoutEditorHost(props: {
                 {/* ... rest of file unchanged ... */}
               </aside>
 
-              {/* CENTER + RIGHT sections unchanged ... */}
+              {/* CENTER: Interactive canvas */}
+<section className="flex-1 flex items-center justify-center">
+  <InteractiveCanvas
+    layout={layout}
+    selectedId={selectedId}
+    selectAction={selectCavity}
+    moveAction={updateCavityPosition}
+     resizeAction={(id, lengthIn, widthIn) =>
+    updateCavityDims(id, { lengthIn, widthIn })
+  }
+    zoom={zoom}
+    croppedCorners={croppedCorners}
+  />
+</section>
+
+{/* RIGHT: Inspector / layers / cavity list */}
+<section className="w-72 shrink-0">
+  {/* existing right-panel JSX stays exactly as it was */}
+</section>
+
             </div>
           </div>
         </div>
