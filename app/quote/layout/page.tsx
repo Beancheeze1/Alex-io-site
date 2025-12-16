@@ -438,7 +438,28 @@ export default function LayoutPage({
           setInitialCustomerPhone("");
         }
 
-        // Only use DB layout geometry when NO URL dims/cavities are present.
+               // Prefer DB layout when it contains a real multi-layer stack,
+        // even if URL dims/cavities are present (those are often legacy links).
+        const dbLayout = json?.layoutPkg?.layout_json as LayoutModel | undefined;
+        const dbHasStack =
+          !!dbLayout &&
+          Array.isArray((dbLayout as any).stack) &&
+          (dbLayout as any).stack.length > 0;
+
+        if (json && json.ok && dbLayout && dbHasStack) {
+          const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
+
+          if (!cancelled) {
+            setInitialLayout(dbLayout);
+            setInitialNotes(notesFromDb);
+            setInitialQty(qtyFromItems);
+            setInitialMaterialId(materialIdOverride ?? materialIdFromItems);
+            setLoadingLayout(false);
+          }
+          return;
+        }
+
+        // Otherwise: Only use DB layout geometry when NO URL dims/cavities are present.
         if (
           json &&
           json.ok &&
@@ -460,6 +481,7 @@ export default function LayoutPage({
           }
           return;
         }
+
 
         // Otherwise, use layout from URL (dims/cavities) and keep qty/material.
         const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
