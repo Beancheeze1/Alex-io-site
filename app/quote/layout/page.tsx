@@ -457,7 +457,9 @@ return {
   block,
   cavities: stack[0]?.cavities ?? [],
   stack,
+  activeLayerId: stack[0]?.id ?? null,
 } as any;
+
 
     },
     [],
