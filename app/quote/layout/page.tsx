@@ -2102,10 +2102,13 @@ function LayoutEditorHost(props: {
               )}
             </div>
           </aside>
+          </div>
         </div>
       </main>
     );
   }
+  
+  
 
 
 /* ---------- SVG export helper ---------- */
