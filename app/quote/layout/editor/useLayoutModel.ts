@@ -42,10 +42,11 @@ export type UseLayoutModelResult = {
       Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
     >
   ) => void;
-  addCavity: (
-    shape: CavityShape,
-    size: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
-  ) => void;
+ addCavity: (
+  shape: CavityShape,
+  size?: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
+) => void;
+
   deleteCavity: (id: string) => void;
 
   addLayer: () => void;
@@ -164,17 +165,20 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   }, []);
 
   const addCavity = useCallback((shape: CavityShape, size: any) => {
+const s = size ?? { lengthIn: 2, widthIn: 2, depthIn: 1, cornerRadiusIn: 0 };
+
+
     setState((prev) => {
       const nextN = nextCavityNumber(prev.layout.stack);
 
       const base: Cavity = {
         id: `cav-${nextN}`,
         shape,
-        lengthIn: safeInch(size.lengthIn, 0.5),
-        widthIn: safeInch(size.widthIn, 0.5),
-        depthIn: safeInch(size.depthIn, 0.5),
+        lengthIn: safeInch(s.lengthIn, 0.5),
+        widthIn: safeInch(s.widthIn, 0.5),
+        depthIn: safeInch(s.depthIn, 0.5),
         cornerRadiusIn:
-          shape === "roundedRect" ? safeInch(size.cornerRadiusIn ?? 0.25, 0) : 0,
+          shape === "roundedRect" ? safeInch(s.cornerRadiusIn ?? 0.25, 0) : 0,
         x: 0.2,
         y: 0.2,
         label: "",

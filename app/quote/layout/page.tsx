@@ -1258,6 +1258,24 @@ function LayoutEditorHost(props: {
       const raw = cavityInputs[field];
       const parsed = Number(raw);
 
+        const handleCenterSelectedCavity = React.useCallback(() => {
+    if (!selectedCavity) return;
+
+    const cavLen = Number(selectedCavity.lengthIn) || 0;
+    const cavWid = Number(selectedCavity.widthIn) || 0;
+    if (!block.lengthIn || !block.widthIn || cavLen <= 0 || cavWid <= 0) return;
+
+    const xIn = Math.max(WALL_IN, (block.lengthIn - cavLen) / 2);
+    const yIn = Math.max(WALL_IN, (block.widthIn - cavWid) / 2);
+
+    updateCavityPosition(
+      selectedCavity.id,
+      xIn / block.lengthIn,
+      yIn / block.widthIn,
+    );
+  }, [selectedCavity, block.lengthIn, block.widthIn, updateCavityPosition]);
+
+
       const resetToCurrent = () => {
         setCavityInputs((prev) => ({
           ...prev,
