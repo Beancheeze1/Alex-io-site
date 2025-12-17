@@ -81,6 +81,179 @@ function normalizeCavitiesParam(raw: string | string[] | undefined): string {
   return raw.trim();
 }
 
+/**
+ * Normalize layers from searchParams / URL
+ * Supports:
+ *  - layers=1,4,1
+ *  - layers=1;4;1
+ *  - layer=1&layer=4&layer=1
+ *  - layers=[{"thicknessIn":1,"label":"Bottom"},{"thicknessIn":4,"label":"Middle"},{"thicknessIn":1,"label":"Top"}]
+ */
+function parseLayersParam(
+  raw: string | string[] | undefined,
+): { thicknesses: number[]; labels: string[] } | null {
+  if (!raw) return null;
+
+  // If repeated params, join them
+  const first = Array.isArray(raw) ? raw.find((s) => s && s.trim()) : raw;
+  if (!first) return null;
+
+  const s = first.trim();
+  if (!s) return null;
+
+  // JSON forms
+  if (s.startsWith("[") || s.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(s);
+
+      // Array of objects
+      if (Array.isArray(parsed)) {
+        const thicknesses: number[] = [];
+        const labels: string[] = [];
+
+        for (const item of parsed) {
+          const t = Number(item?.thicknessIn ?? item?.thickness ?? item?.t);
+          if (Number.isFinite(t) && t > 0) {
+            thicknesses.push(t);
+            const lbl = (item?.label ?? item?.name ?? "").toString().trim();
+            labels.push(lbl || `Layer ${thicknesses.length}`);
+          }
+        }
+
+        return thicknesses.length > 0 ? { thicknesses, labels } : null;
+      }
+
+      // Object with thicknesses array
+      if (parsed && typeof parsed === "object") {
+        const arr = (parsed as any).thicknesses ?? (parsed as any).layers ?? null;
+        if (Array.isArray(arr)) {
+          const thicknesses = arr
+            .map((x: any) => Number(x))
+            .filter((n: number) => Number.isFinite(n) && n > 0);
+
+          if (thicknesses.length === 0) return null;
+          const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
+          return { thicknesses, labels };
+        }
+      }
+    } catch {
+      // fall through to delimited
+    }
+  }
+
+  // Delimited numeric list
+  const parts = s.split(/[;,|]/).map((x) => x.trim()).filter(Boolean);
+  const thicknesses = parts
+    .map((x) => Number(x))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  if (thicknesses.length === 0) return null;
+
+  const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
+  return { thicknesses, labels };
+}
+
+/**
+ * Layer-aware fallback layout builder:
+ * - builds layout.stack[] when layers are present in the URL
+ * - puts any URL cavities into the FIRST layer (safe/default)
+ * - keeps layout.cavities in sync with active layer (layer 1 initially)
+ */
+function buildLayeredFallbackLayout(
+  blockStr: string,
+  cavityStr: string,
+  thicknesses: number[],
+  labels: string[],
+): LayoutModel & {
+  stack: { id: string; label: string; cavities: LayoutModel["cavities"]; thicknessIn: number }[];
+} {
+  const parsedBlock = parseDimsTriple(blockStr) ?? { L: 10, W: 10, H: 2 };
+
+  const block = {
+    lengthIn: parsedBlock.L,
+    widthIn: parsedBlock.W,
+    // IMPORTANT: for multi-layer, store TOTAL thickness here (keeps outside-size math sane)
+    thicknessIn: thicknesses.reduce((a, b) => a + b, 0),
+  };
+
+  // Build cavities from generic cavities string (we seed them into layer 1)
+  const cavTokens = (cavityStr || "")
+    .split(/[;,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const firstLayerCavities: LayoutModel["cavities"] = [];
+
+  if (cavTokens.length > 0) {
+    const parsedCavs = cavTokens
+      .map((tok) => parseCavityDims(tok))
+      .filter(Boolean) as { L: number; W: number; D: number }[];
+
+    const count = parsedCavs.length;
+
+    if (count > 0) {
+      const cols = Math.ceil(Math.sqrt(count));
+      const rows = Math.ceil(count / cols);
+
+      const availW = Math.max(block.lengthIn - 2 * WALL_IN, 1) || block.lengthIn;
+      const availH = Math.max(block.widthIn - 2 * WALL_IN, 1) || block.widthIn;
+
+      const cellW = availW / cols;
+      const cellH = availH / rows;
+
+      parsedCavs.forEach((c, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+
+        const rawX = WALL_IN + col * cellW + (cellW - c.L) / 2;
+        const rawY = WALL_IN + row * cellH + (cellH - c.W) / 2;
+
+        const clamp = (v: number, min: number, max: number) =>
+          v < min ? min : v > max ? max : v;
+
+        const minX = WALL_IN;
+        const maxX = block.lengthIn - WALL_IN - c.L;
+        const minY = WALL_IN;
+        const maxY = block.widthIn - WALL_IN - c.W;
+
+        const xIn = clamp(rawX, minX, Math.max(minX, maxX));
+        const yIn = clamp(rawY, minY, Math.max(minY, maxY));
+
+        const xNorm = block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
+        const yNorm = block.widthIn > 0 ? yIn / block.widthIn : 0.1;
+
+        firstLayerCavities.push({
+          id: `cav-${idx + 1}`,
+          label: `${c.L}×${c.W}×${c.D} in`,
+          shape: "rect",
+          cornerRadiusIn: 0,
+          lengthIn: c.L,
+          widthIn: c.W,
+          depthIn: c.D,
+          x: xNorm,
+          y: yNorm,
+        });
+      });
+    }
+  }
+
+  const stack = thicknesses.map((t, i) => ({
+    id: `layer-${i + 1}`,
+    label: (labels[i] || `Layer ${i + 1}`),
+    thicknessIn: t,
+    cavities: i === 0 ? firstLayerCavities : [],
+  }));
+
+  // IMPORTANT: layout.cavities should reflect active layer (layer 1 on load)
+  return {
+    block,
+    cavities: stack[0]?.cavities ?? [],
+    stack,
+  };
+}
+
+
+
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
 
@@ -197,6 +370,12 @@ export default function LayoutPage({
     (searchParams?.cavities ??
       searchParams?.cavity) as string | string[] | undefined,
   );
+
+  const serverLayers = parseLayersParam(
+  (searchParams?.layers ??
+    (searchParams as any)?.layer) as string | string[] | undefined,
+);
+
 
   const hasExplicitCavities = hasCavitiesFromUrl && serverCavityStr.length > 0;
 
@@ -362,8 +541,15 @@ return {
       setLoadingLayout(true);
 
       // Re-read dims/cavities from the actual address bar.
-      let effectiveBlockStr = serverBlockStr;
-      let effectiveCavityStr = serverCavityStr;
+      // Re-read dims/cavities/layers from the actual address bar.
+let effectiveBlockStr = serverBlockStr;
+let effectiveCavityStr = serverCavityStr;
+
+// NEW: layer intent from URL (original email link)
+let effectiveLayers: { thicknesses: number[]; labels: string[] } | null = null;
+effectiveLayers = serverLayers ?? null;
+
+
 
       try {
         if (typeof window !== "undefined") {
@@ -383,6 +569,21 @@ return {
             .getAll("cavity")
             .filter((v) => v);
 
+// NEW: read layer params (supports layers=... OR repeated layer=...)
+const layersParts: string[] = [];
+const layersA = url.searchParams.getAll("layers").filter((v) => v);
+const layersB = url.searchParams.getAll("layer").filter((v) => v);
+
+// If repeated "layer", join into comma list so parseLayersParam can handle it
+if (layersA.length > 0) layersParts.push(layersA[0]);
+if (layersA.length === 0 && layersB.length > 0) layersParts.push(layersB.join(","));
+
+if (layersParts.length > 0) {
+  effectiveLayers = parseLayersParam(layersParts[0]);
+}
+
+
+
           // Merge both sets (cavities + cavity), then dedupe via normalizeCavitiesParam.
           cavityParts.push(...cavitiesParams, ...cavityParams);
 
@@ -399,26 +600,44 @@ return {
       }
 
       try {
-        // If we don't have a real quote number, just use fallback layout
-        if (!hasRealQuoteNo) {
-          const fallback = buildFallbackLayout(
-            effectiveBlockStr,
-            effectiveCavityStr,
-          );
-          if (!cancelled) {
-            setInitialLayout(fallback);
-            setInitialNotes("");
-            setInitialQty(null);
-            setInitialMaterialId(materialIdOverride ?? null);
-            // no header to pull customer info from in demo mode
-            setInitialCustomerName("");
-            setInitialCustomerEmail("");
-            setInitialCustomerCompany("");
-            setInitialCustomerPhone("");
-            setLoadingLayout(false);
-          }
-          return;
-        }
+     // If we don't have a real quote number, still honor URL layer intent (demo/testing).
+if (!hasRealQuoteNo) {
+  if (effectiveLayers && effectiveLayers.thicknesses.length > 0) {
+    const layered = buildLayeredFallbackLayout(
+      effectiveBlockStr,
+      effectiveCavityStr,
+      effectiveLayers.thicknesses,
+      effectiveLayers.labels,
+    );
+    if (!cancelled) {
+      setInitialLayout(layered as any);
+      setInitialNotes("");
+      setInitialQty(null);
+      setInitialMaterialId(materialIdOverride ?? null);
+      setInitialCustomerName("");
+      setInitialCustomerEmail("");
+      setInitialCustomerCompany("");
+      setInitialCustomerPhone("");
+      setLoadingLayout(false);
+    }
+    return;
+  }
+
+  const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+  if (!cancelled) {
+    setInitialLayout(fallback);
+    setInitialNotes("");
+    setInitialQty(null);
+    setInitialMaterialId(materialIdOverride ?? null);
+    setInitialCustomerName("");
+    setInitialCustomerEmail("");
+    setInitialCustomerCompany("");
+    setInitialCustomerPhone("");
+    setLoadingLayout(false);
+  }
+  return;
+}
+
         // Try to fetch the latest layout package via /api/quote/print
         const res = await fetch(
           "/api/quote/print?quote_no=" +
@@ -485,6 +704,28 @@ return {
           setInitialCustomerPhone("");
         }
 
+// NEW: If the original email link included layers, ALWAYS seed a stack from the URL.
+// This is the critical behavior: multi-layer must come from the email intent, not the DB.
+if (effectiveLayers && effectiveLayers.thicknesses.length > 0) {
+  const layered = buildLayeredFallbackLayout(
+    effectiveBlockStr,
+    effectiveCavityStr,
+    effectiveLayers.thicknesses,
+    effectiveLayers.labels,
+  );
+
+  if (!cancelled) {
+    setInitialLayout(layered as any);
+    setInitialNotes("");
+    setInitialQty(qtyFromItems);
+    setInitialMaterialId(materialIdOverride ?? materialIdFromItems);
+    setLoadingLayout(false);
+  }
+  return;
+}
+
+
+
         // Only use DB layout geometry when NO URL dims/cavities are present.
         if (
           json &&
@@ -550,6 +791,7 @@ return {
     hasRealQuoteNo,
     quoteNoFromUrl,
     buildFallbackLayout,
+    serverLayers,
     hasExplicitCavities,
     hasDimsFromUrl,
     hasCavitiesFromUrl,
