@@ -82,6 +82,63 @@ function normalizeCavitiesParam(raw: string | string[] | undefined): string {
 }
 
 /**
+ * NEW: Accept "layer_thicknesses" + "layer_count" params (from email links)
+ * and convert them into the same shape as parseLayersParam expects.
+ *
+ * Examples:
+ *  - layer_thicknesses=1,4,1
+ *  - layer_thicknesses=1;4;1
+ *  - layer_count=3 (thicknesses missing → we’ll still create 3 layers later if needed)
+ */
+function readLayersFromSearchParams(
+  sp: SearchParams | undefined,
+): { thicknesses: number[]; labels: string[] } | null {
+  // 1) Prefer existing supported params
+  const rawLayers = (sp?.layers ?? (sp as any)?.layer) as
+    | string
+    | string[]
+    | undefined;
+
+  // If layers/layer exists, use existing parser (your file already has parseLayersParam in the “ugly” version;
+  // if this file doesn’t, tell me and I’ll adapt to your exact current version)
+  // @ts-ignore
+  const parsedDirect = typeof parseLayersParam === "function"
+    ? // @ts-ignore
+      parseLayersParam(rawLayers)
+    : null;
+
+  if (parsedDirect) return parsedDirect;
+
+  // 2) Support the actual email params you’re using now
+  const rawThicknesses = sp?.layer_thicknesses as string | string[] | undefined;
+  const first = Array.isArray(rawThicknesses)
+    ? rawThicknesses.find((s) => s && s.trim())
+    : rawThicknesses;
+
+  if (first && first.trim()) {
+    const parts = first
+      .trim()
+      .split(/[;,|]/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+    const thicknesses = parts
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n) && n > 0);
+
+    if (thicknesses.length > 0) {
+      const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
+      return { thicknesses, labels };
+    }
+  }
+
+  // 3) If we only have layer_count, return null here; we’ll handle it where we know block thickness.
+  return null;
+}
+
+
+
+/**
  * Normalize layers from searchParams / URL
  * Supports:
  *  - layers=1,4,1
@@ -371,10 +428,14 @@ export default function LayoutPage({
       searchParams?.cavity) as string | string[] | undefined,
   );
 
-  const serverLayers = parseLayersParam(
-  (searchParams?.layers ??
-    (searchParams as any)?.layer) as string | string[] | undefined,
-);
+const serverLayers = readLayersFromSearchParams(searchParams);
+const serverLayerCountRaw = searchParams?.layer_count as string | string[] | undefined;
+const serverLayerCount = (() => {
+  const first = Array.isArray(serverLayerCountRaw) ? serverLayerCountRaw[0] : serverLayerCountRaw;
+  const n = Number(first);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+})();
+
 
 
   const hasExplicitCavities = hasCavitiesFromUrl && serverCavityStr.length > 0;
@@ -430,7 +491,15 @@ export default function LayoutPage({
    * Fallback layout builder, driven by arbitrary dims/cavities strings.
    */
   const buildFallbackLayout = React.useCallback(
-    (blockStr: string, cavityStr: string): LayoutModel => {
+  (
+    blockStr: string,
+    cavityStr: string,
+    layersInfo: { thicknesses: number[]; labels: string[] } | null,
+    layerCountHint: number | null,
+  ): LayoutModel => {
+
+
+
       // Block from dims=..., default 10x10x2 if missing.
       const parsedBlock = parseDimsTriple(blockStr) ?? {
         L: 10,
@@ -443,6 +512,25 @@ export default function LayoutPage({
         widthIn: parsedBlock.W,
         thicknessIn: parsedBlock.H,
       };
+
+      // NEW: Seed stack (layers) if present
+const thicknesses =
+  layersInfo?.thicknesses && layersInfo.thicknesses.length > 0
+    ? layersInfo.thicknesses
+    : layerCountHint && layerCountHint > 1
+    ? Array.from({ length: layerCountHint }, () => block.thicknessIn || 1)
+    : null;
+
+const stack =
+  thicknesses && thicknesses.length > 0
+    ? thicknesses.map((t, i) => ({
+        id: `layer-${i + 1}`,
+        label: layersInfo?.labels?.[i] || (i === 0 ? "Bottom" : i === thicknesses.length - 1 ? "Top" : `Layer ${i + 1}`),
+        thicknessIn: t,
+        cavities: [],
+      }))
+    : null;
+
 
 
 
@@ -524,10 +612,17 @@ if (layerIntent && layerIntent.thicknesses.length > 0) {
   };
 }
 
-return {
-  block,
-  cavities,
-};
+return stack
+  ? ({
+      block,
+      cavities, // keep legacy view (active layer cavities)
+      stack,
+    } as any)
+  : {
+      block,
+      cavities,
+    };
+
 
     },
     [],
@@ -623,7 +718,16 @@ if (!hasRealQuoteNo) {
     return;
   }
 
-  const fallback = buildFallbackLayout(effectiveBlockStr, effectiveCavityStr);
+  buildFallbackLayout(effectiveBlockStr, effectiveCavityStr, serverLayers, serverLayerCount)
+
+const fallback = buildFallbackLayout(
+  effectiveBlockStr,
+  effectiveCavityStr,
+  serverLayers,
+  serverLayerCount,
+);
+
+
   if (!cancelled) {
     setInitialLayout(fallback);
     setInitialNotes("");
@@ -646,10 +750,15 @@ if (!hasRealQuoteNo) {
         );
 
         if (!res.ok) {
+          buildFallbackLayout(effectiveBlockStr, effectiveCavityStr, serverLayers, serverLayerCount);
+
           const fallback = buildFallbackLayout(
-            effectiveBlockStr,
-            effectiveCavityStr,
-          );
+  effectiveBlockStr,
+  effectiveCavityStr,
+  serverLayers,
+  serverLayerCount,
+);
+
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
@@ -751,10 +860,17 @@ if (effectiveLayers && effectiveLayers.thicknesses.length > 0) {
         }
 
         // Otherwise, use layout from URL (dims/cavities) and keep qty/material.
-        const fallback = buildFallbackLayout(
-          effectiveBlockStr,
-          effectiveCavityStr,
-        );
+        buildFallbackLayout(effectiveBlockStr, effectiveCavityStr, serverLayers, serverLayerCount)
+;
+
+const fallback = buildFallbackLayout(
+  effectiveBlockStr,
+  effectiveCavityStr,
+  serverLayers,
+  serverLayerCount,
+);
+
+
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
@@ -764,10 +880,16 @@ if (effectiveLayers && effectiveLayers.thicknesses.length > 0) {
         }
       } catch (err) {
         console.error("Error loading layout for /quote/layout:", err);
-        const fallback = buildFallbackLayout(
-          effectiveBlockStr,
-          effectiveCavityStr,
-        );
+        buildFallbackLayout(effectiveBlockStr, effectiveCavityStr, serverLayers, serverLayerCount)
+;
+const fallback = buildFallbackLayout(
+  effectiveBlockStr,
+  effectiveCavityStr,
+  serverLayers,
+  serverLayerCount,
+);
+
+
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
