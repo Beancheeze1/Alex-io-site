@@ -1383,9 +1383,41 @@ export async function POST(req: NextRequest) {
 
     let newly = extractAllFromTextAndSubject(lastText, subject);
 
-    const regexDims = newly.dims || null;
+// Preserve regex-derived fields that must stay authoritative even if we call the LLM.
+const regexDims = newly.dims || null;
 
-    const needsLLM =
+const regexLayerCount = newly.layer_count ?? null;
+const regexLayerFootprint = newly.layer_footprint ?? null;
+const regexLayerThicknesses = Array.isArray(newly.layer_thicknesses)
+  ? [...(newly.layer_thicknesses as any[])]
+  : null;
+const regexLayerCavityIdx = newly.layer_cavity_layer_index ?? null;
+const regexLayers = Array.isArray(newly.layers) ? [...(newly.layers as any[])] : null;
+
+const needsLLM =
+  !newly.dims ||
+  !newly.qty ||
+  !newly.material ||
+  !newly.density ||
+  (newly.cavityCount && (!newly.cavityDims || newly.cavityDims.length === 0));
+
+if (needsLLM) {
+  const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
+  newly = mergeFacts(newly, llmFacts);
+
+  // Keep regex dims authoritative (existing behavior)
+  if (regexDims) {
+    newly.dims = regexDims;
+  }
+
+  // Keep regex layer intent authoritative (NEW: prevents LLM overwriting top/bottom thicknesses)
+  if (regexLayerCount != null) newly.layer_count = regexLayerCount;
+  if (regexLayerFootprint != null) newly.layer_footprint = regexLayerFootprint;
+  if (regexLayerThicknesses != null) (newly as any).layer_thicknesses = regexLayerThicknesses;
+  if (regexLayerCavityIdx != null) newly.layer_cavity_layer_index = regexLayerCavityIdx;
+  if (regexLayers != null) newly.layers = regexLayers;
+}
+
       !newly.dims ||
       !newly.qty ||
       !newly.material ||
