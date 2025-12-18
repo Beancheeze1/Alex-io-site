@@ -828,6 +828,19 @@ function grabLayerSummary(raw: string): { layer_count?: number; footprint?: stri
   return { layer_count: count, footprint: `${L}x${W}` };
 }
 
+
+// Count-only: "(3) layers" / "3 layers" (digits only for determinism)
+function grabLayerCountOnly(raw: string): { layer_count?: number } {
+  const t = (raw || "").toLowerCase();
+
+  // Prefer explicit digits to stay deterministic.
+  const m = t.match(/\b(?:made\s+up\s+of\s+)?\(?\s*(\d{1,2})\s*\)?\s*(?:layers?|layer)\b/i);
+  if (!m) return {};
+  const count = Number(m[1]);
+  if (!Number.isFinite(count) || count <= 1) return {}; // multi-layer intent only when >1
+  return { layer_count: count };
+}
+
 function grabLayerFootprintOnly(raw: string): { footprint?: string } {
   const t = (raw || "").toLowerCase();
   const re = new RegExp(
@@ -1085,19 +1098,25 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   const layerSummary = grabLayerSummary(text);
   const layerFootOnly = !layerSummary.footprint ? grabLayerFootprintOnly(text) : {};
+  const layerCountOnly = !layerSummary.layer_count ? grabLayerCountOnly(text) : {};
 
-  const layerCount = layerSummary.layer_count;
-  const footprint = layerSummary.footprint || layerFootOnly.footprint;
+  const layerCount = layerSummary.layer_count || layerCountOnly.layer_count;
+  let footprint = layerSummary.footprint || layerFootOnly.footprint;
 
-  if (layerCount && footprint) {
-    facts.layer_count = layerCount;
-    facts.layer_footprint = footprint;
-  } else if (!layerCount && footprint) {
-    facts.layer_footprint = footprint;
+  // If the email clearly describes multiple layers but doesn't restate the footprint,
+  // fall back to the outside dims footprint (LxW) if we have it.
+  if (!footprint && layerCount && facts.dims) {
+    const { L, W } = parseDimsNums(String(facts.dims));
+    if (Number.isFinite(L) && L > 0 && Number.isFinite(W) && W > 0) {
+      footprint = `${canonNumStr(String(L))}x${canonNumStr(String(W))}`;
+    }
   }
 
+  if (layerCount) facts.layer_count = layerCount;
+  if (footprint) facts.layer_footprint = footprint;
+
   // HARDENING: layer_count authoritative (when present)
-  if (facts.layer_count && facts.layer_footprint) {
+  if (facts.layer_count) {
     const n = Number(facts.layer_count);
     if (Number.isFinite(n) && n > 0) {
       // 1) build N-slot thickness list (Layer 1 = bottom ... Layer N = top)
@@ -1135,7 +1154,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
       const layers: any[] = [];
       for (let i = 0; i < n; i++) {
         const thv = thicknesses1[i];
-        const o: any = { index: i, label: `Layer ${i + 1}` };
+        const o: any = { layer_index: i + 1, label: `Layer ${i + 1}` };
         if (thv != null && Number.isFinite(Number(thv)) && Number(thv) > 0) {
           o.thickness_in = Number(thv);
         }
@@ -1158,7 +1177,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
       // 6) If outside dims were NOT explicit, and we have footprint + thicknesses,
       // infer overall dims using sum(thicknesses)
-      if (!outsideDimsWasExplicit) {
+      if (!outsideDimsWasExplicit && facts.layer_footprint) {
         const fp = String(facts.layer_footprint || "").trim();
         const [fpLRaw, fpWRaw] = fp.split("x");
         const fpL = Number(fpLRaw);
@@ -1379,6 +1398,20 @@ export async function POST(req: NextRequest) {
 
     const regexDims = newly.dims || null;
 
+    // If regex/heuristics already detected explicit multi-layer intent this turn,
+    // lock those fields so the LLM enrichment path cannot collapse or overwrite them.
+    const regexLayerCount = newly.layer_count ?? null;
+    const regexLayerFootprint = newly.layer_footprint ?? null;
+    const regexLayerThicknesses = (newly as any).layer_thicknesses ?? null;
+    const regexLayers = newly.layers ?? null;
+    const regexLayerCavityIdx = newly.layer_cavity_layer_index ?? null;
+
+    const hasRegexLayerIntent =
+      (Number.isFinite(Number(regexLayerCount)) && Number(regexLayerCount) > 1) ||
+      (Array.isArray(regexLayerThicknesses) && regexLayerThicknesses.length > 1) ||
+      (Array.isArray(regexLayers) && regexLayers.length > 1);
+
+
     const needsLLM =
       !newly.dims ||
       !newly.qty ||
@@ -1390,8 +1423,18 @@ export async function POST(req: NextRequest) {
       const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
       newly = mergeFacts(newly, llmFacts);
 
+      // Keep deterministic regex dims if we already had them.
       if (regexDims) {
         newly.dims = regexDims;
+      }
+
+      // Keep deterministic layer intent if the email described layers explicitly.
+      if (hasRegexLayerIntent) {
+        if (regexLayerCount != null) newly.layer_count = regexLayerCount;
+        if (regexLayerFootprint != null) newly.layer_footprint = regexLayerFootprint;
+        if (regexLayerThicknesses != null) (newly as any).layer_thicknesses = regexLayerThicknesses;
+        if (regexLayers != null) newly.layers = regexLayers;
+        if (regexLayerCavityIdx != null) newly.layer_cavity_layer_index = regexLayerCavityIdx;
       }
     }
 
@@ -1491,6 +1534,31 @@ export async function POST(req: NextRequest) {
         merged.layer_thicknesses = arr;
       }
     }
+
+// Ensure merged.layers exists (numeric) when layer_count is present.
+// This is used by the email template and by the editor intent logic.
+if (merged.layer_count && Array.isArray(merged.layer_thicknesses)) {
+  const n = Number(merged.layer_count);
+  if (Number.isFinite(n) && n > 0) {
+    const th = (merged.layer_thicknesses as any[])
+      .slice(0, n)
+      .map((x) => {
+        const v = Number(x);
+        return Number.isFinite(v) && v > 0 ? v : 1;
+      });
+
+    if (!Array.isArray(merged.layers) || (merged.layers as any[]).length !== n) {
+      const layers: any[] = [];
+      for (let i = 0; i < n; i++) {
+        layers.push({
+          label: `Layer ${i + 1}`,
+          thickness_in: th[i] ?? 1,
+        });
+      }
+      merged.layers = layers;
+    }
+  }
+}
 
     if (threadKey) await saveFacts(threadKey, merged);
     if (merged.quote_no) await saveFacts(merged.quote_no, merged);
