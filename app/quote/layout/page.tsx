@@ -524,10 +524,16 @@ const layersRaw =
 //  - layer_thicknesses=1,4,1
 //  - layer_count=3
 //  - layer_cavity_layer_index=2   (1-based)
+const legacyThicknessesAll = url.searchParams
+  .getAll("layer_thicknesses")
+  .map((s) => (s ?? "").trim())
+  .filter(Boolean);
+
+// Legacy single value fallback (older links)
 const legacyThicknessesRaw =
-  url.searchParams.get("layer_thicknesses") ??
-  url.searchParams.get("layer_thickness") ??
-  null;
+  legacyThicknessesAll.length > 0
+    ? legacyThicknessesAll
+    : url.searchParams.get("layer_thickness") ?? null;
 
 // 1) Parse layers from modern params first, then legacy thickness list
 layersInfo = layersRaw
