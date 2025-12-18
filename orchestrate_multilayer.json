@@ -1,0 +1,7 @@
+﻿{
+  "mode": "ai",
+  "dryRun": true,
+  "subject": "Test multilayer",
+  "text": "Please quote 50 sets of 1.7# white PE foam that are made up of (3) layers. The bottom layer will be 1 inch thick. The middle layer will be 3 inches thick with 3 cavities that are 2x1x.5, 5x4x1 and 3x3x1. The top layer will be 1 inch thick.",
+  "threadId": "dryrun-multilayer-1"
+}
