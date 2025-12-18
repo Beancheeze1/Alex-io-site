@@ -22,12 +22,11 @@
 // - HARDENING 12/13: If material_grade is present (e.g. "1560"),
 //   DB enrichment must prefer grade matching within the correct foam family
 //   BEFORE density fallback, and avoid wrong subtypes (e.g. Ester) unless asked.
-// - HARDENING 12/14 (THIS FIX): Move NUM above any helpers that reference it,
-//   and add layer-intent facts so the layout editor can show multiple layers
-//   when the email describes them.
 //
-// HARDENING 12/14 (FOLLOW-ON FIX):
-//   - Recognize "sets" as qty.
+// HARDENING 12/17 (THIS FIX):
+//   - Make layer model numeric (Layer 1..N) instead of top/middle/bottom.
+//   - Canonicalize thickness numbers so ".5" always becomes "0.5" and is NOT dropped.
+//   - Still parse top/middle/bottom (and "layer 1/2/3") as hints.
 //   - If layer intent exists (footprint + thicknesses) and outside dims were NOT explicit,
 //     infer dims = footprintL x footprintW x sum(thicknesses).
 //   - Prevent phantom cavity duplication in editor: only duplicate when there is
@@ -199,8 +198,13 @@ function normalizeCavity(raw: string): string {
 function canonNumStr(raw: string): string {
   const n = Number(raw);
   if (!Number.isFinite(n)) return raw;
-  // Number(".5") => 0.5, Number("1.0") => 1
-  return n.toString();
+  return n.toString(); // ".5" => "0.5"
+}
+
+function canonNum(n: any): number | null {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  return v;
 }
 
 /**
@@ -562,7 +566,11 @@ function densityToPcf(density: string | null | undefined) {
   return m ? Number(m[1]) : null;
 }
 
-function specsCompleteForQuote(s: { dims: string | null; qty: number | string | null; material_id: number | null }) {
+function specsCompleteForQuote(s: {
+  dims: string | null;
+  qty: number | string | null;
+  material_id: number | null;
+}) {
   return !!(s.dims && s.qty && s.material_id);
 }
 
@@ -773,17 +781,13 @@ function grabMaterial(raw: string): string | undefined {
 }
 
 /* ============================================================
-   Step 2: Layer intent extraction helpers (Canonical = numeric 1..N)
+   Layer intent extraction helpers (numeric Layer 1..N)
    ============================================================ */
 
-// CHANGED: make summary regex more forgiving
+// Summary: "(3) 10x10 layers"
 function grabLayerSummary(raw: string): { layer_count?: number; footprint?: string } {
   const t = (raw || "").toLowerCase();
 
-  // Accept:
-  // - "made up of (3) 12x12 layers"
-  // - "(3) 12\"x12\" layers"
-  // - "3 12 x 12 layers"
   const re = new RegExp(
     `\\b(?:made\\s+up\\s+of\\s+)?\\(?\\s*(\\d{1,2})\\s*\\)?\\s*` +
       `(${NUM})\\s*["']?\\s*[x×]\\s*(${NUM})\\s*["']?\\s*` +
@@ -800,7 +804,7 @@ function grabLayerSummary(raw: string): { layer_count?: number; footprint?: stri
   return { layer_count: count, footprint: `${L}x${W}` };
 }
 
-// NEW: footprint-only fallback (covers cases where layer_count regex misses)
+// footprint-only fallback
 function grabLayerFootprintOnly(raw: string): { footprint?: string } {
   const t = (raw || "").toLowerCase();
   const re = new RegExp(
@@ -814,82 +818,124 @@ function grabLayerFootprintOnly(raw: string): { footprint?: string } {
   return { footprint: `${L}x${W}` };
 }
 
-function grabLayerThicknesses(raw: string): {
-  // Named positions (still supported)
-  top?: number;
-  middle?: number;
-  bottom?: number;
-  cavityLayerHint?: "top" | "middle" | "bottom";
-  // Numeric layer mentions: "layer 4 will be 1.5 thick"
-  byIndex1?: Record<number, number>;
-  cavityLayerIndex1Hint?: number; // explicit numeric hint near cavities
+function grabLayerThicknessNumeric(raw: string): {
+  thicknessByIndex: Record<number, number>;
+  cavityLayerIndexHint?: number; // 0-based
 } {
   const s = raw || "";
-  const out: any = { byIndex1: {} as Record<number, number> };
+  const out: Record<number, number> = {};
+  let cavityLayerIndexHint: number | undefined = undefined;
 
-  // Named: top/middle/bottom ... 0.5 thick
-  const reNamed = new RegExp(
-    `\\b(top|middle|bottom)\\s+layer\\b[^.\\n\\r]{0,160}?\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
+  // 1) Explicit "Layer 1/2/3 ... X thick"
+  const reNum = new RegExp(
+    `\\blayer\\s*#?\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
     "gi",
   );
 
   let m: RegExpExecArray | null;
-  while ((m = reNamed.exec(s))) {
-    const pos = String(m[1]).toLowerCase();
-    const th = Number(m[2]);
-    if (!Number.isFinite(th) || th <= 0) continue;
-    if (pos === "top") out.top = th;
-    if (pos === "middle") out.middle = th;
-    if (pos === "bottom") out.bottom = th;
+  while ((m = reNum.exec(s))) {
+    const idx1 = Number(m[1]);
+    const th = canonNum(m[2]);
+    if (!Number.isFinite(idx1) || idx1 <= 0) continue;
+    if (!th) continue;
+    const idx0 = idx1 - 1;
+    out[idx0] = th;
 
     const windowText = s
       .slice(Math.max(0, m.index), Math.min(s.length, m.index + 220))
       .toLowerCase();
     if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText)) {
-      out.cavityLayerHint = pos;
+      cavityLayerIndexHint = idx0;
     }
   }
 
-  // Numeric: "Layer 2 will be 3 thick" / "Layer 2 ... 3\" thick"
-  const reNum = new RegExp(
-    `\\blayer\\s*(\\d{1,2})\\b[^.\\n\\r]{0,180}?\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
+  // 2) Top/Middle/Bottom hints (only meaningful when count=3, but we store as indices)
+  const rePos = new RegExp(
+    `\\b(top|middle|bottom)\\s+layer\\b[^.\\n\\r]{0,140}?\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
     "gi",
   );
 
-  while ((m = reNum.exec(s))) {
-    const idx1 = Number(m[1]);
-    const th = Number(m[2]);
-    if (!Number.isFinite(idx1) || idx1 <= 0) continue;
-    if (!Number.isFinite(th) || th <= 0) continue;
-    out.byIndex1[idx1] = th;
+  while ((m = rePos.exec(s))) {
+    const pos = String(m[1]).toLowerCase();
+    const th = canonNum(m[2]);
+    if (!th) continue;
+
+    // Map to numeric indices with a consistent convention:
+    // Layer 1 = bottom (index 0), Layer 2 = middle (index 1), Layer 3 = top (index 2)
+    // (This scales: customers can still say "top/middle/bottom" for 3-layer stacks.)
+    const idx0 =
+      pos === "bottom" ? 0 :
+      pos === "middle" ? 1 :
+      pos === "top" ? 2 :
+      null;
+
+    if (idx0 == null) continue;
+    out[idx0] = th;
 
     const windowText = s
       .slice(Math.max(0, m.index), Math.min(s.length, m.index + 220))
       .toLowerCase();
     if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText)) {
-      out.cavityLayerIndex1Hint = idx1;
+      cavityLayerIndexHint = idx0;
     }
   }
 
-  // If we didn't find a named hint, try a proximity hint around the cavity section
-  if (!out.cavityLayerHint && out.cavityLayerIndex1Hint == null) {
+  // 3) If cavities exist but we didn't catch which layer, try proximity hint
+  if (cavityLayerIndexHint == null) {
     const t = s.toLowerCase();
     const cavIdx = t.search(/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/);
     if (cavIdx >= 0) {
-      const windowText = t.slice(Math.max(0, cavIdx - 160), Math.min(t.length, cavIdx + 200));
-      if (windowText.includes("middle layer")) out.cavityLayerHint = "middle";
-      else if (windowText.includes("top layer")) out.cavityLayerHint = "top";
-      else if (windowText.includes("bottom layer")) out.cavityLayerHint = "bottom";
-
-      const mLayerNum = windowText.match(/\blayer\s*(\d{1,2})\b/);
-      if (mLayerNum) {
-        const idx1 = Number(mLayerNum[1]);
-        if (Number.isFinite(idx1) && idx1 > 0) out.cavityLayerIndex1Hint = idx1;
-      }
+      const windowText = t.slice(Math.max(0, cavIdx - 160), Math.min(t.length, cavIdx + 160));
+      if (windowText.includes("layer 1")) cavityLayerIndexHint = 0;
+      else if (windowText.includes("layer 2")) cavityLayerIndexHint = 1;
+      else if (windowText.includes("layer 3")) cavityLayerIndexHint = 2;
+      else if (windowText.includes("bottom layer")) cavityLayerIndexHint = 0;
+      else if (windowText.includes("middle layer")) cavityLayerIndexHint = 1;
+      else if (windowText.includes("top layer")) cavityLayerIndexHint = 2;
     }
   }
 
-  return out;
+  return { thicknessByIndex: out, cavityLayerIndexHint };
+}
+
+function buildLayersArrayFromThicknessMap(
+  layerCount: number | null | undefined,
+  thicknessByIndex: Record<number, number>,
+): { layers: any[]; thicknesses: number[] } {
+  const n = Number(layerCount || 0);
+  const count = Number.isFinite(n) && n > 0 ? n : 0;
+
+  if (!count) return { layers: [], thicknesses: [] };
+
+  const thicknesses: number[] = [];
+  const layers: any[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const th = canonNum(thicknessByIndex[i]);
+    if (th != null) {
+      thicknesses.push(th);
+      layers.push({
+        index: i,
+        label: `Layer ${i + 1}`,
+        thickness_in: th,
+      });
+    } else {
+      // We keep the layer record (label + index) even if thickness is missing,
+      // but do NOT invent a thickness.
+      layers.push({
+        index: i,
+        label: `Layer ${i + 1}`,
+      });
+    }
+  }
+
+  // thicknesses list must include *only* numeric thicknesses
+  // (used downstream for dims inference and URL param generation)
+  const numericThicknesses = layers
+    .map((l) => canonNum(l?.thickness_in))
+    .filter((x): x is number => x != null);
+
+  return { layers, thicknesses: numericThicknesses };
 }
 
 /* ============================================================
@@ -921,7 +967,6 @@ function extractCavities(raw: string): { cavityCount?: number; cavityDims?: stri
   }
 
   // If we got explicit sizes, trust that list length as the authoritative count.
-  // (Prevents count drift from LLM/memory inflating the editor.)
   if (cavityDims.length) {
     cavityCount = cavityDims.length;
   }
@@ -1026,11 +1071,9 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
     facts.color = String(mMaterialPhrase[2]).toLowerCase();
   }
 
-  /* ------------------- STEP 2: LAYER INTENT EXTRACTION ------------------- */
+  /* ------------------- LAYER INTENT EXTRACTION ------------------- */
 
   const layerSummary = grabLayerSummary(text);
-
-  // footprint-only fallback
   const layerFootOnly = !layerSummary.footprint ? grabLayerFootprintOnly(text) : {};
 
   const layerCount = layerSummary.layer_count;
@@ -1044,63 +1087,29 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   }
 
   if (facts.layer_footprint) {
-    const th = grabLayerThicknesses(text);
-    const n = Number(facts.layer_count || 0);
+    const { thicknessByIndex, cavityLayerIndexHint } = grabLayerThicknessNumeric(text);
 
-    // Build canonical numeric layers when we know count.
-    if (Number.isFinite(n) && n > 0) {
-      const layers: any[] = [];
+    // Build numeric layers (Layer 1..N). Do not invent missing thickness.
+    const { layers, thicknesses } = buildLayersArrayFromThicknessMap(
+      facts.layer_count || null,
+      thicknessByIndex,
+    );
 
-      for (let i = 1; i <= n; i++) {
-        let thickness: number | null = null;
-
-        // Prefer explicit "layer i" thickness if present
-        if (th.byIndex1 && th.byIndex1[i] != null) {
-          const v = Number(th.byIndex1[i]);
-          if (Number.isFinite(v) && v > 0) thickness = v;
-        }
-
-        // Named positions mapping still supported (for 3-layer emails)
-        if (thickness == null) {
-          if (i === 1 && th.bottom != null) thickness = th.bottom;
-          if (i === n && th.top != null) thickness = th.top;
-          if (n === 3 && i === 2 && th.middle != null) thickness = th.middle;
-
-          // For N>3, if they say "middle layer", map to ceil(N/2)
-          if (n > 3 && th.middle != null && i === Math.max(1, Math.ceil(n / 2))) {
-            thickness = th.middle;
-          }
-        }
-
-        const o: any = { index: i };
-        if (thickness != null) o.thickness_in = thickness;
-        layers.push(o);
-      }
-
-      if (layers.length) {
-        facts.layers = layers;
-      }
-
-      // Canonical cavity target layer index (1-based)
-      // Priority: explicit numeric hint, then named hint, then default middle
-      if (th.cavityLayerIndex1Hint != null) {
-        const idx1 = Number(th.cavityLayerIndex1Hint);
-        if (Number.isFinite(idx1) && idx1 >= 1 && idx1 <= n) {
-          facts.layer_cavity_layer_index = idx1;
-        }
-      } else if (th.cavityLayerHint) {
-        if (th.cavityLayerHint === "bottom") facts.layer_cavity_layer_index = 1;
-        else if (th.cavityLayerHint === "top") facts.layer_cavity_layer_index = n;
-        else if (th.cavityLayerHint === "middle") facts.layer_cavity_layer_index = Math.max(1, Math.ceil(n / 2));
-      } else if (
-        (facts.cavityCount && Number(facts.cavityCount) > 0) ||
-        (Array.isArray(facts.cavityDims) && facts.cavityDims.length > 0)
-      ) {
-        facts.layer_cavity_layer_index = Math.max(1, Math.ceil(n / 2));
-      }
+    if (layers.length) {
+      facts.layers = layers;
     }
 
-    // HARDENING: If outside dims were NOT explicit, and we have footprint + thicknesses,
+    // Canonical thickness list for downstream (link building / dims inference).
+    // IMPORTANT: this ensures ".5" becomes "0.5" and doesn’t get dropped later.
+    if (thicknesses.length) {
+      facts.layer_thicknesses = thicknesses.map((n) => canonNumStr(String(n)));
+    }
+
+    if (cavityLayerIndexHint != null && Number.isFinite(cavityLayerIndexHint) && cavityLayerIndexHint >= 0) {
+      facts.layer_cavity_layer_index = cavityLayerIndexHint;
+    }
+
+    // If outside dims were NOT explicit, and we have footprint + thicknesses,
     // infer the overall dims so the quote + editor seed correctly.
     if (!outsideDimsWasExplicit && facts.layer_footprint) {
       const fp = String(facts.layer_footprint || "").trim();
@@ -1109,15 +1118,12 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
       const fpW = Number(fpWRaw);
 
       const sumTh =
-        Array.isArray(facts.layers) && facts.layers.length
-          ? (facts.layers as any[])
-              .map((l) => Number(l?.thickness_in))
-              .filter((n2) => Number.isFinite(n2) && n2 > 0)
+        Array.isArray(facts.layer_thicknesses) && facts.layer_thicknesses.length
+          ? (facts.layer_thicknesses as any[])
+              .map((x) => Number(x))
+              .filter((n) => Number.isFinite(n) && n > 0)
               .reduce((a, b) => a + b, 0)
-          : [th.top, th.middle, th.bottom]
-              .map((n2) => Number(n2))
-              .filter((n2) => Number.isFinite(n2) && n2 > 0)
-              .reduce((a, b) => a + b, 0);
+          : 0;
 
       if (Number.isFinite(fpL) && fpL > 0 && Number.isFinite(fpW) && fpW > 0 && sumTh > 0) {
         facts.dims = `${canonNumStr(String(fpL))}x${canonNumStr(String(fpW))}x${canonNumStr(String(sumTh))}`;
@@ -1151,11 +1157,11 @@ Valid keys:
 - color: string (if present)
 - material_grade: string/number like "1560" (if present)
 
-Layer keys (CANONICAL: numeric layers are 1..N):
+Layer keys:
 - layer_count: integer
 - layer_footprint: string like "12x12"
-- layers: array of { index:number, thickness_in:number }   (index is 1-based)
-- layer_cavity_layer_index: integer (1-based)
+- layer_thicknesses: array of numbers/strings like ["1","3","0.5"]
+- layer_cavity_layer_index: integer (0-based)
 
 Subject:
 ${subject}
@@ -1198,33 +1204,27 @@ ${body}
       out.cavityDims = parsed.cavityDims.map((x: string) => normalizeCavity(normDims(x) || x));
     }
 
-    // Layer fields (optional)
     if (parsed.layer_count != null) {
       const n = Number(parsed.layer_count);
       if (Number.isFinite(n) && n > 0) out.layer_count = n;
     }
+
     if (parsed.layer_footprint) {
       const fp = String(parsed.layer_footprint || "").trim();
       if (fp) out.layer_footprint = fp;
     }
+
+    if (Array.isArray(parsed.layer_thicknesses)) {
+      const ths = parsed.layer_thicknesses
+        .map((x: any) => canonNumStr(String(x)))
+        .map((s: string) => Number(s))
+        .filter((n: number) => Number.isFinite(n) && n > 0);
+      if (ths.length) out.layer_thicknesses = ths.map((n: number) => canonNumStr(String(n)));
+    }
+
     if (parsed.layer_cavity_layer_index != null) {
       const idx = Number(parsed.layer_cavity_layer_index);
-      if (Number.isFinite(idx) && idx >= 1) out.layer_cavity_layer_index = idx;
-    }
-    if (Array.isArray(parsed.layers)) {
-      const cleaned = parsed.layers
-        .map((l: any) => {
-          // Accept either index (1-based) or legacy 0-based index from LLM; normalize to 1-based.
-          const idxRaw = Number(l?.index);
-          const idx1 = Number.isFinite(idxRaw) ? (idxRaw >= 1 ? idxRaw : idxRaw + 1) : NaN;
-          const th = Number(l?.thickness_in);
-          if (!Number.isFinite(idx1) || idx1 < 1) return null;
-          const o: any = { index: idx1 };
-          if (Number.isFinite(th) && th > 0) o.thickness_in = th;
-          return o;
-        })
-        .filter(Boolean);
-      if (cleaned.length) out.layers = cleaned;
+      if (Number.isFinite(idx) && idx >= 0) out.layer_cavity_layer_index = idx;
     }
 
     return compact(out);
@@ -1494,7 +1494,6 @@ export async function POST(req: NextRequest) {
     }
 
     // Header: store whenever we have a quoteNumber.
-    // Path A fix: this prevents sending emails with quote_no links that don't exist in DB.
     let quoteId = merged.quote_id;
 
     const salesRepSlugForHeader: string | undefined =
