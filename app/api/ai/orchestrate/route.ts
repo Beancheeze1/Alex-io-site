@@ -886,10 +886,11 @@ function grabLayerThicknessesCanonical(
 
   // 1) Positional wording: top/middle/bottom layer/pad
   // NOTE: allow ".5" numbers, allow quotes, allow "pad" synonym
-    const rePos = new RegExp(
-    `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
-    "gi",
-  );
+ const rePos = new RegExp(
+  `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*(?:[^.\\n\\r]{0,60}?\\bthick\\b)?`,
+  "gi",
+);
+
 
 
   let m: RegExpExecArray | null;
