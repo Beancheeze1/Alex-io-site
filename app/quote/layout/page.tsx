@@ -46,14 +46,6 @@ type BoxSuggestState = {
   bestMailer: SuggestedBox | null;
 };
 
-// Local helper type (page-level) for stack seeding
-type LayoutLayerSeed = {
-  id: string;
-  label: string;
-  cavities: LayoutModel["cavities"];
-  thicknessIn?: number;
-};
-
 /**
  * Normalize block dims from searchParams (dims= / block=)
  */
@@ -82,30 +74,91 @@ function normalizeCavitiesParam(raw: string | string[] | undefined): string {
 }
 
 /**
- * Parse layer thickness list from URL param:
+ * Normalize layers from searchParams
+ * Supports:
  *  - layers=1,4,1
- *  - layer_thicknesses=1;4;1
+ *  - layers=1;4;1
+ *  - layer=1&layer=4&layer=1
+ *  - layers=[{"thicknessIn":1,"label":"Bottom"},{"thicknessIn":4,"label":"Middle"},{"thicknessIn":1,"label":"Top"}]
  */
-function parseLayerThicknessesParam(
+function parseLayersParam(
   raw: string | string[] | undefined,
-): number[] | null {
+): { thicknesses: number[]; labels: string[] } | null {
   if (!raw) return null;
 
-  const s = Array.isArray(raw) ? raw[0] ?? "" : raw;
-  const t = String(s).trim();
-  if (!t) return null;
+  const first = Array.isArray(raw) ? raw.find((s) => s && s.trim()) : raw;
+  if (!first) return null;
 
-  const parts = t
-    .split(/[;,]/)
-    .map((x) => x.trim())
-    .filter(Boolean);
+  const s = first.trim();
+  if (!s) return null;
 
-  const nums = parts
-    .map((p) => Number(p))
+  // JSON forms
+  if (s.startsWith("[") || s.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(s);
+
+      // Array of objects
+      if (Array.isArray(parsed)) {
+        const thicknesses: number[] = [];
+        const labels: string[] = [];
+
+        for (const item of parsed) {
+          const t = Number(item?.thicknessIn ?? item?.thickness ?? item?.t);
+          if (Number.isFinite(t) && t > 0) {
+            thicknesses.push(t);
+            const lbl = (item?.label ?? item?.name ?? "").toString().trim();
+            labels.push(lbl || `Layer ${thicknesses.length}`);
+          }
+        }
+
+        return thicknesses.length > 0 ? { thicknesses, labels } : null;
+      }
+
+      // Object with thicknesses
+      if (parsed && typeof parsed === "object") {
+        const arr = (parsed as any).thicknesses ?? (parsed as any).layers ?? null;
+        if (Array.isArray(arr)) {
+          const thicknesses = arr
+            .map((x: any) => Number(x))
+            .filter((n: number) => Number.isFinite(n) && n > 0);
+          if (thicknesses.length === 0) return null;
+
+          const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
+          return { thicknesses, labels };
+        }
+      }
+    } catch {
+      // fall through to delimited
+    }
+  }
+
+  // Delimited numeric list
+  const parts = s.split(/[;,|]/).map((x) => x.trim()).filter(Boolean);
+  const thicknesses = parts
+    .map((x) => Number(x))
     .filter((n) => Number.isFinite(n) && n > 0);
 
-  if (nums.length === 0) return null;
-  return nums;
+  if (thicknesses.length === 0) return null;
+
+  const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
+  return { thicknesses, labels };
+}
+
+/**
+ * Read per-layer cavities from search params:
+ *  - cavities_l1=1x1x.5;2x2x1
+ *  - cavity_l2=... (repeatable)
+ */
+function readLayerCavitiesFromUrl(url: URL, layerIndex1Based: number): string {
+  const keyA = `cavities_l${layerIndex1Based}`;
+  const keyB = `cavity_l${layerIndex1Based}`;
+
+  const parts: string[] = [];
+  const a = url.searchParams.getAll(keyA).filter(Boolean);
+  const b = url.searchParams.getAll(keyB).filter(Boolean);
+  parts.push(...a, ...b);
+
+  return normalizeCavitiesParam(parts);
 }
 
 const SNAP_IN = 0.125;
@@ -198,13 +251,17 @@ export default function LayoutPage({
 
   // Server-side / initial guesses from Next searchParams
   const serverBlockStr = normalizeDimsParam(
-    (searchParams?.dims ??
-      searchParams?.block) as string | string[] | undefined,
+    (searchParams?.dims ?? searchParams?.block) as
+      | string
+      | string[]
+      | undefined,
   );
 
   const serverCavityStr = normalizeCavitiesParam(
-    (searchParams?.cavities ??
-      searchParams?.cavity) as string | string[] | undefined,
+    (searchParams?.cavities ?? searchParams?.cavity) as
+      | string
+      | string[]
+      | undefined,
   );
 
   const hasExplicitCavities = hasCavitiesFromUrl && serverCavityStr.length > 0;
@@ -257,14 +314,14 @@ export default function LayoutPage({
   const [loadingLayout, setLoadingLayout] = React.useState<boolean>(true);
 
   /**
-   * Fallback layout builder, driven by arbitrary dims/cavities strings,
-   * PLUS optional layer thickness list (single canonical seed).
+   * Fallback layout builder, driven by arbitrary dims/cavities strings.
    */
   const buildFallbackLayout = React.useCallback(
     (
       blockStr: string,
       cavityStr: string,
-      layerThicknessesIn?: number[] | null,
+      layersInfo?: { thicknesses: number[]; labels: string[] } | null,
+      perLayerCavityStrs?: string[] | null,
     ): LayoutModel => {
       // Block from dims=..., default 10x10x2 if missing.
       const parsedBlock = parseDimsTriple(blockStr) ?? {
@@ -272,6 +329,27 @@ export default function LayoutPage({
         W: 10,
         H: 2,
       };
+
+      const block = {
+        lengthIn: parsedBlock.L,
+        widthIn: parsedBlock.W,
+        thicknessIn: parsedBlock.H,
+      };
+
+      // If layers are provided, block thickness becomes total stack thickness.
+      if (
+        layersInfo &&
+        Array.isArray(layersInfo.thicknesses) &&
+        layersInfo.thicknesses.length > 0
+      ) {
+        const sum = layersInfo.thicknesses.reduce(
+          (acc, n) => acc + (Number(n) || 0),
+          0,
+        );
+        if (Number.isFinite(sum) && sum > 0) {
+          block.thicknessIn = sum;
+        }
+      }
 
       // Cavities from cavities=... string (can be "1x1x1;2x2x1" etc).
       const cavTokens = (cavityStr || "")
@@ -293,9 +371,9 @@ export default function LayoutPage({
           const rows = Math.ceil(count / cols);
 
           const availW =
-            Math.max(parsedBlock.L - 2 * WALL_IN, 1) || parsedBlock.L;
+            Math.max(block.lengthIn - 2 * WALL_IN, 1) || block.lengthIn;
           const availH =
-            Math.max(parsedBlock.W - 2 * WALL_IN, 1) || parsedBlock.W;
+            Math.max(block.widthIn - 2 * WALL_IN, 1) || block.widthIn;
 
           const cellW = availW / cols;
           const cellH = availH / rows;
@@ -311,15 +389,15 @@ export default function LayoutPage({
               v < min ? min : v > max ? max : v;
 
             const minX = WALL_IN;
-            const maxX = parsedBlock.L - WALL_IN - c.L;
+            const maxX = block.lengthIn - WALL_IN - c.L;
             const minY = WALL_IN;
-            const maxY = parsedBlock.W - WALL_IN - c.W;
+            const maxY = block.widthIn - WALL_IN - c.W;
 
             const xIn = clamp(rawX, minX, Math.max(minX, maxX));
             const yIn = clamp(rawY, minY, Math.max(minY, maxY));
 
-            const xNorm = parsedBlock.L > 0 ? xIn / parsedBlock.L : 0.1;
-            const yNorm = parsedBlock.W > 0 ? yIn / parsedBlock.W : 0.1;
+            const xNorm = block.lengthIn > 0 ? xIn / block.lengthIn : 0.1;
+            const yNorm = block.widthIn > 0 ? yIn / block.widthIn : 0.1;
 
             cavities.push({
               id: `cav-${idx + 1}`,
@@ -336,58 +414,56 @@ export default function LayoutPage({
         }
       }
 
-      // If we have explicit layers, build a stack (single canonical seed).
-      if (layerThicknessesIn && layerThicknessesIn.length > 0) {
-        const snappedLayers = layerThicknessesIn
-          .map((t) => snapInches(Number(t)))
-          .filter((t) => Number.isFinite(t) && t > 0);
-
-        if (snappedLayers.length > 0) {
-          // Typical rule: cavities usually live in the middle layer for 3+ layers.
-          const cavityLayerIndex =
-            snappedLayers.length >= 3 ? 1 : 0; // 0-based
-
-          const stack: LayoutLayerSeed[] = snappedLayers.map((t, i) => ({
-            id: `layer-${i + 1}`,
-            label: `Layer ${i + 1}`,
-            thicknessIn: t,
-            cavities: i === cavityLayerIndex ? cavities : [],
-          }));
-
-          const totalT = stack.reduce(
-            (acc, l) => acc + (Number(l.thicknessIn) || 0),
-            0,
-          );
-
-          const block = {
-            lengthIn: parsedBlock.L,
-            widthIn: parsedBlock.W,
-            thicknessIn: totalT > 0 ? totalT : parsedBlock.H,
-          };
-
-          // IMPORTANT: top-level cavities mirrors the active layer’s cavities (layer-2 for 3+).
-          const activeCavs = stack[cavityLayerIndex]?.cavities ?? [];
-
-          return {
-            block,
-            cavities: activeCavs,
-            // LayoutModel doesn’t type stack, but the editor uses it (as in your file).
-            ...( { stack } as any ),
-          } as LayoutModel;
-        }
+      // If no layers, legacy single-layer return.
+      if (!layersInfo || !layersInfo.thicknesses || layersInfo.thicknesses.length === 0) {
+        return { block, cavities };
       }
 
-      // Legacy single block (no explicit layers)
-      const block = {
-        lengthIn: parsedBlock.L,
-        widthIn: parsedBlock.W,
-        thicknessIn: parsedBlock.H,
-      };
+      // Multi-layer: build stack and assign cavities.
+      // If per-layer cavities exist, use them; otherwise assign the generic cavities to the middle layer.
+      const n = layersInfo.thicknesses.length;
+      const midIdx = Math.max(0, Math.min(n - 1, Math.floor((n - 1) / 2)));
 
+      const stack = layersInfo.thicknesses.map((t, i) => {
+        const id = `layer-${i + 1}`;
+        const label =
+          layersInfo.labels && layersInfo.labels[i]
+            ? layersInfo.labels[i]
+            : `Layer ${i + 1}`;
+
+        let layerCavityStr = "";
+        if (perLayerCavityStrs && perLayerCavityStrs[i]) {
+          layerCavityStr = perLayerCavityStrs[i];
+        }
+
+        // Build cavities for this layer:
+        // - If layer-specific cavities exist -> build them
+        // - Else if we have generic cavities -> only assign them to the middle layer
+        const cavStrToUse = layerCavityStr.trim()
+          ? layerCavityStr
+          : cavityStr && cavityStr.trim() && i === midIdx
+          ? cavityStr
+          : "";
+
+        const layerLayout = cavStrToUse
+          ? buildFallbackLayout(blockStr, cavStrToUse, null, null) // legacy builder recursion, no layers
+          : { block, cavities: [] as LayoutModel["cavities"] };
+
+        return {
+          id,
+          label,
+          thicknessIn: snapInches(Number(t) || 0),
+          cavities: layerLayout.cavities,
+        };
+      });
+
+      // IMPORTANT: layout.cavities should reflect the active layer’s cavities initially.
+      // Default active layer = first layer.
       return {
         block,
-        cavities,
-      };
+        cavities: stack[0]?.cavities ?? [],
+        stack,
+      } as any;
     },
     [],
   );
@@ -399,30 +475,32 @@ export default function LayoutPage({
       const materialIdOverride = materialIdFromUrl;
       setLoadingLayout(true);
 
-      // Re-read dims/cavities/layers from the actual address bar.
+      // Re-read dims/cavities/layers from the actual address bar (canonical seed read).
       let effectiveBlockStr = serverBlockStr;
       let effectiveCavityStr = serverCavityStr;
-      let effectiveLayerThicknesses: number[] | null = null;
+
+      // NEW: optional multi-layer info from URL (used by fallback builder)
+      let layersInfo: { thicknesses: number[]; labels: string[] } | null = null;
+      let perLayerCavityStrs: string[] | null = null;
 
       try {
         if (typeof window !== "undefined") {
           const url = new URL(window.location.href);
 
+          // dims / block (canonical)
           const dimsCandidates: string[] = [];
           const dimsA = url.searchParams.get("dims");
           const dimsB = url.searchParams.get("block");
           if (dimsA) dimsCandidates.push(dimsA);
           if (!dimsA && dimsB) dimsCandidates.push(dimsB);
 
+          // cavities / cavity (canonical)
           const cavityParts: string[] = [];
           const cavitiesParams = url.searchParams
             .getAll("cavities")
             .filter((v) => v);
-          const cavityParams = url.searchParams
-            .getAll("cavity")
-            .filter((v) => v);
+          const cavityParams = url.searchParams.getAll("cavity").filter((v) => v);
 
-          // Merge both sets (cavities + cavity), then dedupe via normalizeCavitiesParam.
           cavityParts.push(...cavitiesParams, ...cavityParams);
 
           if (dimsCandidates.length > 0) {
@@ -433,12 +511,20 @@ export default function LayoutPage({
             effectiveCavityStr = normalizeCavitiesParam(cavityParts);
           }
 
-          // Layers (canonical seed)
+          // layers + per-layer cavities (canonical) — ONLY ONCE
           const layersRaw =
-            url.searchParams.get("layers") ||
-            url.searchParams.get("layer_thicknesses") ||
-            "";
-          effectiveLayerThicknesses = parseLayerThicknessesParam(layersRaw);
+            url.searchParams.get("layers") ??
+            (url.searchParams.getAll("layer").length > 0
+              ? url.searchParams.getAll("layer").join(",")
+              : null);
+
+          layersInfo = layersRaw ? parseLayersParam(layersRaw) : null;
+
+          if (layersInfo && layersInfo.thicknesses.length > 0) {
+            perLayerCavityStrs = layersInfo.thicknesses.map((_, i) =>
+              readLayerCavitiesFromUrl(url, i + 1),
+            );
+          }
         }
       } catch {
         // if anything goes wrong, we fall back to serverBlockStr/serverCavityStr
@@ -450,7 +536,8 @@ export default function LayoutPage({
           const fallback = buildFallbackLayout(
             effectiveBlockStr,
             effectiveCavityStr,
-            effectiveLayerThicknesses,
+            layersInfo,
+            perLayerCavityStrs,
           );
           if (!cancelled) {
             setInitialLayout(fallback);
@@ -477,7 +564,8 @@ export default function LayoutPage({
           const fallback = buildFallbackLayout(
             effectiveBlockStr,
             effectiveCavityStr,
-            effectiveLayerThicknesses,
+            layersInfo,
+            perLayerCavityStrs,
           );
           if (!cancelled) {
             setInitialLayout(fallback);
@@ -533,18 +621,20 @@ export default function LayoutPage({
           setInitialCustomerPhone("");
         }
 
-        // If URL has explicit layers OR cavities/dims, prefer canonical URL-seed.
-        // (This ensures multi-layer can be seeded before "Apply to quote".)
-        const urlHasLayerSeed = !!(effectiveLayerThicknesses && effectiveLayerThicknesses.length > 0);
-        if (urlHasLayerSeed || hasDimsFromUrl || hasCavitiesFromUrl) {
-          const fallback = buildFallbackLayout(
-            effectiveBlockStr,
-            effectiveCavityStr,
-            effectiveLayerThicknesses,
-          );
+        // Prefer DB layout when it contains a real multi-layer stack,
+        // even if URL dims/cavities are present (those are often legacy links).
+        const dbLayout = json?.layoutPkg?.layout_json as LayoutModel | undefined;
+        const dbHasStack =
+          !!dbLayout &&
+          Array.isArray((dbLayout as any).stack) &&
+          (dbLayout as any).stack.length > 0;
+
+        if (json && json.ok && dbLayout && dbHasStack) {
+          const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
+
           if (!cancelled) {
-            setInitialLayout(fallback);
-            setInitialNotes("");
+            setInitialLayout(dbLayout);
+            setInitialNotes(notesFromDb);
             setInitialQty(qtyFromItems);
             setInitialMaterialId(materialIdOverride ?? materialIdFromItems);
             setLoadingLayout(false);
@@ -552,8 +642,16 @@ export default function LayoutPage({
           return;
         }
 
-        // Only use DB layout geometry when NO URL dims/cavities/layers are present.
-        if (json && json.ok && json.layoutPkg && json.layoutPkg.layout_json && !hasExplicitCavities && !hasDimsFromUrl && !hasCavitiesFromUrl) {
+        // Otherwise: Only use DB layout geometry when NO URL dims/cavities are present.
+        if (
+          json &&
+          json.ok &&
+          json.layoutPkg &&
+          json.layoutPkg.layout_json &&
+          !hasExplicitCavities &&
+          !hasDimsFromUrl &&
+          !hasCavitiesFromUrl
+        ) {
           const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
           const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
 
@@ -567,11 +665,12 @@ export default function LayoutPage({
           return;
         }
 
-        // Otherwise, use fallback.
+        // Otherwise, use layout from URL (dims/cavities) and keep qty/material.
         const fallback = buildFallbackLayout(
           effectiveBlockStr,
           effectiveCavityStr,
-          effectiveLayerThicknesses,
+          layersInfo,
+          perLayerCavityStrs,
         );
         if (!cancelled) {
           setInitialLayout(fallback);
@@ -585,7 +684,8 @@ export default function LayoutPage({
         const fallback = buildFallbackLayout(
           effectiveBlockStr,
           effectiveCavityStr,
-          effectiveLayerThicknesses,
+          layersInfo,
+          perLayerCavityStrs,
         );
         if (!cancelled) {
           setInitialLayout(fallback);
@@ -704,7 +804,7 @@ function LayoutEditorHost(props: {
 
   // Thickness source of truth:
   // - layout.stack[].thicknessIn
-  // - fallback: block.thicknessIn only for legacy / single-layer layouts
+  // - fallback: block.thicknessIn only for legacy / single-layer layouts without thicknessIn seeded
   const [thicknessTick, setThicknessTick] = React.useState(0);
 
   const getLayerThickness = React.useCallback(
@@ -742,6 +842,26 @@ function LayoutEditorHost(props: {
     },
     [stack, updateBlockDims],
   );
+
+  // Seed missing per-layer thickness from block thickness (one-time / as stack changes).
+  React.useEffect(() => {
+    if (!stack || stack.length === 0) return;
+
+    let changed = false;
+
+    for (const layer of stack) {
+      const raw = Number(layer.thicknessIn);
+      if (!Number.isFinite(raw) || raw <= 0) {
+        // fallback seed
+        layer.thicknessIn = blockThicknessIn;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      setThicknessTick((t) => t + 1);
+    }
+  }, [stack, blockThicknessIn]);
 
   const activeLayer =
     stack && stack.length > 0
@@ -909,14 +1029,26 @@ function LayoutEditorHost(props: {
   const [zoom, setZoom] = React.useState(1);
   const [croppedCorners, setCroppedCorners] = React.useState(false);
   const [notes, setNotes] = React.useState(initialNotes || "");
-  const [applyStatus, setApplyStatus] = React.useState<"idle" | "saving" | "done" | "error">("idle");
-  const [qty, setQty] = React.useState<number | "">(initialQty != null ? initialQty : "");
+  const [applyStatus, setApplyStatus] = React.useState<
+    "idle" | "saving" | "done" | "error"
+  >("idle");
+  const [qty, setQty] = React.useState<number | "">(
+    initialQty != null ? initialQty : "",
+  );
 
   // Customer info
-  const [customerName, setCustomerName] = React.useState<string>(initialCustomerName || "");
-  const [customerEmail, setCustomerEmail] = React.useState<string>(initialCustomerEmail || "");
-  const [customerCompany, setCustomerCompany] = React.useState<string>(initialCustomerCompany || "");
-  const [customerPhone, setCustomerPhone] = React.useState<string>(initialCustomerPhone || "");
+  const [customerName, setCustomerName] = React.useState<string>(
+    initialCustomerName || "",
+  );
+  const [customerEmail, setCustomerEmail] = React.useState<string>(
+    initialCustomerEmail || "",
+  );
+  const [customerCompany, setCustomerCompany] = React.useState<string>(
+    initialCustomerCompany || "",
+  );
+  const [customerPhone, setCustomerPhone] = React.useState<string>(
+    initialCustomerPhone || "",
+  );
 
   const [materials, setMaterials] = React.useState<MaterialOption[]>([]);
   const [materialsLoading, setMaterialsLoading] = React.useState<boolean>(true);
@@ -940,8 +1072,7 @@ function LayoutEditorHost(props: {
       // Update the visual selection immediately
       setSelectedCartonKind(kind);
 
-      const sku =
-        kind === "RSC" ? boxSuggest.bestRsc?.sku : boxSuggest.bestMailer?.sku;
+      const sku = kind === "RSC" ? boxSuggest.bestRsc?.sku : boxSuggest.bestMailer?.sku;
 
       // We need a quote number and a SKU to do anything useful
       if (!quoteNo || !sku) {
@@ -971,7 +1102,9 @@ function LayoutEditorHost(props: {
           body: JSON.stringify(payload),
         });
 
-        const data = await res.json().catch(() => ({ ok: false, error: "non_json_response" }));
+        const data = await res
+          .json()
+          .catch(() => ({ ok: false, error: "non_json_response" }));
 
         console.log("[layout] /api/boxes/add-to-quote response", res.status, data);
 
@@ -1017,7 +1150,8 @@ function LayoutEditorHost(props: {
       length: selectedCavity.lengthIn != null ? String(selectedCavity.lengthIn) : "",
       width: selectedCavity.widthIn != null ? String(selectedCavity.widthIn) : "",
       depth: selectedCavity.depthIn != null ? String(selectedCavity.depthIn) : "",
-      cornerRadius: selectedCavity.cornerRadiusIn != null ? String(selectedCavity.cornerRadiusIn) : "",
+      cornerRadius:
+        selectedCavity.cornerRadiusIn != null ? String(selectedCavity.cornerRadiusIn) : "",
     });
   }, [selectedCavity]);
 
@@ -1081,7 +1215,6 @@ function LayoutEditorHost(props: {
     },
     [cavityInputs, selectedCavity, updateCavityDims],
   );
-
   React.useEffect(() => {
     let cancelled = false;
 
@@ -1099,7 +1232,8 @@ function LayoutEditorHost(props: {
         if (!cancelled && Array.isArray(json.materials)) {
           const mapped: MaterialOption[] = json.materials.map((m: any) => ({
             id: m.id,
-            name: (m.name ?? m.material_name ?? `Material #${m.id}`) || `Material #${m.id}`,
+            name:
+              (m.name ?? m.material_name ?? `Material #${m.id}`) || `Material #${m.id}`,
             family: m.material_family || "Uncategorized",
             density_lb_ft3:
               typeof m.density_lb_ft3 === "number"
@@ -1135,7 +1269,8 @@ function LayoutEditorHost(props: {
 
     for (const m of materials) {
       const safeName =
-        (m.name && m.name.trim().length > 0 ? m.name : `Material #${m.id}`) || `Material #${m.id}`;
+        (m.name && m.name.trim().length > 0 ? m.name : `Material #${m.id}`) ||
+        `Material #${m.id}`;
       const key = m.family || "Other";
 
       const entry: MaterialOption = {
@@ -1193,7 +1328,8 @@ function LayoutEditorHost(props: {
     const minYIn = WALL_IN;
     const maxYIn = block.widthIn - WALL_IN - wid;
 
-    const clamp = (v: number, min: number, max: number) => (v < min ? min : v > max ? max : v);
+    const clamp = (v: number, min: number, max: number) =>
+      v < min ? min : v > max ? max : v;
 
     xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
     yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
@@ -1246,7 +1382,9 @@ function LayoutEditorHost(props: {
       setApplyStatus("saving");
 
       const selectedMaterial =
-        selectedMaterialId != null ? materials.find((m) => m.id === selectedMaterialId) || null : null;
+        selectedMaterialId != null
+          ? materials.find((m) => m.id === selectedMaterialId) || null
+          : null;
 
       let materialLabel: string | null = null;
       if (selectedMaterial) {
@@ -1330,7 +1468,9 @@ function LayoutEditorHost(props: {
         try {
           payloadJson = await res.json();
           if (payloadJson?.error === "quote_not_found") {
-            alert(`Couldn’t find a quote header for ${quoteNo}.\nOpen this link from a real quote email.`);
+            alert(
+              `Couldn’t find a quote header for ${quoteNo}.\nOpen this link from a real quote email.`,
+            );
           }
         } catch {
           // ignore
@@ -1351,7 +1491,6 @@ function LayoutEditorHost(props: {
       setTimeout(() => setApplyStatus("idle"), 3000);
     }
   };
-
   /* ---------- Layout ---------- */
 
   const canApplyButton = hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
@@ -1409,7 +1548,8 @@ function LayoutEditorHost(props: {
           setBoxSuggest({
             loading: false,
             error:
-              (json && typeof json.error === "string" && json.error) || "No carton suggestion returned.",
+              (json && typeof json.error === "string" && json.error) ||
+              "No carton suggestion returned.",
             bestRsc: null,
             bestMailer: null,
           });
@@ -1439,7 +1579,14 @@ function LayoutEditorHost(props: {
     return () => {
       cancelled = true;
     };
-  }, [hasRealQuoteNo, missingCustomerInfo, block.lengthIn, block.widthIn, totalStackThicknessIn, effectiveQty]);
+  }, [
+    hasRealQuoteNo,
+    missingCustomerInfo,
+    block.lengthIn,
+    block.widthIn,
+    totalStackThicknessIn,
+    effectiveQty,
+  ]);
 
   // Derived labels used in multiple spots
   const footprintLabel =
@@ -1460,32 +1607,959 @@ function LayoutEditorHost(props: {
 
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
-      {/* NOTE: remainder of your file continues exactly as you pasted,
-          with ONLY the two button className truncations fixed below. */}
-      {/* ... YOUR EXISTING JSX CONTINUES ... */}
+      <div className="w-full max-w-none mx-auto">
+        <div className="relative rounded-2xl border border-slate-800/80 bg-slate-950/90 shadow-[0_26px_60px_rgba(15,23,42,0.95)] overflow-hidden">
+          {/* global grid/glow overlay */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 opacity-65 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),transparent_55%),linear-gradient(to_right,rgba(15,23,42,0.95)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.95)_1px,transparent_1px)] [background-size:460px_460px,28px_28px,28px_28px]"
+          />
+          <div className="relative">
+            {/* Header */}
+            <div className="border-b border-slate-800/80 bg-gradient-to-r from-sky-500 via-sky-500/80 to-slate-900 px-6 py-4">
+              <div className="flex items-center gap-4 w-full">
+                {/* LEFT: powered by + quote */}
+                <div className="flex flex-col">
+                  <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-sky-50/90">
+                    Powered by Alex-IO
+                  </div>
+                  <div className="mt-1 text-xs text-sky-50/95">
+                    Quote{" "}
+                    <span className="font-mono font-semibold text-slate-50">{quoteNo}</span>
+                    {hasRealQuoteNo ? (
+                      <span className="ml-1 text-sky-100/90">· Linked to active quote</span>
+                    ) : (
+                      <span className="ml-1 text-amber-50/90">· Demo view (no quote linked)</span>
+                    )}
+                  </div>
+                </div>
 
-      {/* --- SNIP: your pasted JSX remains unchanged up to the two buttons --- */}
+                {/* CENTER: stylized title */}
+                <div className="flex-1 text-center">
+                  <div className="inline-flex flex-col items-center gap-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-100/70">
+                      Foam layout tools
+                    </div>
+                    <div className="text-2xl md:text-[26px] font-extrabold leading-snug bg-gradient-to-r from-sky-50 via-cyan-200 to-sky-100 bg-clip-text text-transparent drop-shadow-[0_0_18px_rgba(15,23,42,0.9)]">
+                      Interactive foam layout editor
+                    </div>
+                  </div>
+                </div>
 
-      {/* FIX #1: RSC button className truncation */}
-      {/* (This is the same structure you pasted; only the truncated tail is restored.) */}
+                {/* RIGHT: BETA pill */}
+                <div className="flex items-center justify-end">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
+                    Layout editor · BETA
+                  </span>
+                </div>
+              </div>
+            </div>
 
-      {/* FIX #2: MAILER button className truncation */}
+            {/* How this works */}
+            <div className="border-b border-slate-800/80 bg-slate-950/95 px-6 py-3 text-[11px] text-slate-200 flex flex-wrap items-start gap-4">
+              <div className="flex items-center gap-2 font-semibold text-sky-200">
+                <span className="inline-flex h-5 w-1.5 items-center justify-center rounded-full border border-sky-400/70 bg-sky-500/20 text-[10px] font-bold shadow-[0_0_14px_rgba(56,189,248,0.7)]">
+                  ?
+                </span>
+                How this layout editor works
+              </div>
 
-      {/* IMPORTANT: Because your pasted file is extremely large, and you already confirmed
-          everything else is correct, I’m not reprinting the entire remaining JSX here
-          inside the message. The ONLY two changes inside that JSX are these exact
-          className replacements:
+              <ul className="flex flex-wrap gap-x-4 gap-y-1">
+                <li>
+                  <span className="text-sky-300 mr-1">1.</span>
+                  Adjust the foam block, add cavities from the left palette.
+                </li>
+                <li>
+                  <span className="text-sky-300 mr-1">2.</span>
+                  Drag / resize in the center canvas to fine-tune placement.
+                </li>
+                <li>
+                  <span className="text-sky-300 mr-1">3.</span>
+                  Fill in customer + material, then{" "}
+                  <span className="font-semibold text-sky-200">Apply to quote</span>.
+                </li>
+              </ul>
+            </div>
 
-          Replace:
-            "border-slate-600 bg-slate-9...200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+            {/* Compressed top metrics + controls row */}
+            <div className="px-5 pt-3 pb-2 bg-slate-950/95 border-b border-slate-900/80">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                {/* LEFT: Layers summary + quick metrics + block dims */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 text-[11px] text-slate-200">
+                  <div className="flex items-start justify-between gap-3 mb-1.5">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+                        Layers
+                      </span>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-200">
+                        <span>
+                          {layers && layers.length > 0 ? (
+                            <>
+                              {layers.length} layer{layers.length > 1 ? "s" : ""} · Active:{" "}
+                              <span className="font-semibold text-slate-50">
+                                {activeLayerLabel ?? layers[0].label}
+                              </span>
+                            </>
+                          ) : (
+                            "Single foam block"
+                          )}
+                        </span>
+                        <span className="text-slate-400">
+                          · Footprint{" "}
+                          <span className="font-mono text-slate-100">{footprintLabel}</span>
+                        </span>
+                        <span className="text-slate-400">
+                          · Stack depth{" "}
+                          <span className="font-mono text-slate-100">{stackDepthLabel}</span>
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addLayer}
+                      className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                    >
+                      + Layer
+                    </button>
+                  </div>
 
-          With:
-            "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10"
+                  <div className="grid grid-cols-3 gap-2 text-xs mt-1">
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-slate-400">Length (in)</span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={block.lengthIn}
+                        onChange={(e) => {
+                          const snapped = snapInches(Number(e.target.value));
+                          updateBlockDims({ lengthIn: snapped });
+                        }}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-slate-400">Width (in)</span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={block.widthIn}
+                        onChange={(e) => {
+                          const snapped = snapInches(Number(e.target.value));
+                          updateBlockDims({ widthIn: snapped });
+                        }}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-slate-400">Active layer thick (in)</span>
+                      <input
+                        type="number"
+                        step={0.125}
+                        value={activeLayer ? getLayerThickness(activeLayer.id) : blockThicknessIn}
+                        onChange={(e) => handleActiveLayerThicknessChange(e.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+                  </div>
+                </div>
 
-          Do that in BOTH places (RSC and MAILER).
+                {/* CENTER: Layout controls (Zoom + Qty + CTA buttons) */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80" />
+                      Layout controls
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Quoted qty:{" "}
+                      <span className="font-mono text-slate-50">{qtyLabel}</span>
+                    </div>
+                  </div>
 
-          Everything else in the file above is the seeding fix and the URL layer parsing.
-      */}
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-2 text-[11px] text-slate-400 flex-1">
+                      <span>Zoom</span>
+                      <input
+                        type="range"
+                        min={0.7}
+                        max={1.4}
+                        step={0.05}
+                        value={zoom}
+                        onChange={(e) => setZoom(Number(e.target.value))}
+                        className="w-32 accent-sky-400"
+                      />
+                      <span className="ml-1 text-sky-200 font-mono">{Math.round(zoom * 100)}%</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                      <span>Qty</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={qty}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (!v) {
+                            setQty("");
+                            return;
+                          }
+                          const num = Number(v);
+                          if (!Number.isFinite(num) || num <= 0) return;
+                          setQty(num);
+                        }}
+                        disabled={!hasRealQuoteNo}
+                        className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleGoToFoamAdvisor}
+                      disabled={missingCustomerInfo}
+                      className="inline-flex flex-1 items-center justify-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Recommend my foam
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleApplyToQuote}
+                      disabled={!canApplyButton}
+                      className="inline-flex flex-1 items-center justify-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
+                    >
+                      {!hasRealQuoteNo
+                        ? "Link to a quote first"
+                        : missingCustomerInfo
+                        ? "Add name + email"
+                        : applyStatus === "saving"
+                        ? "Applying…"
+                        : applyStatus === "done"
+                        ? "Applied!"
+                        : applyStatus === "error"
+                        ? "Error – retry"
+                        : "Apply to quote"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* RIGHT: Layer details (stack + per-layer list + per-layer crop) */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 text-[11px] text-slate-200">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+                        Layer details
+                      </span>
+                      <span className="text-xs text-slate-200">
+                        Stack depth:{" "}
+                        <span className="font-mono text-slate-50">{stackDepthLabel}</span>
+                      </span>
+                    </div>
+                    <label className="inline-flex items-center gap-1 text-[11px] text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={croppedCorners}
+                        onChange={(e) => setCroppedCorners(e.target.checked)}
+                        className="h-3 w-3 rounded border-slate-600 bg-slate-950"
+                      />
+                      <span>Crop corners 1&quot;</span>
+                    </label>
+                  </div>
+
+                  {layers && layers.length > 0 ? (
+                    <div className="max-h-32 overflow-auto space-y-1 mt-0.5">
+                      {layers.map((layer) => {
+                        const isActive = activeLayer?.id === layer.id;
+                        const layerThick = getLayerThickness(layer.id);
+
+                        return (
+                          <div
+                            key={layer.id}
+                            className={
+                              "rounded-lg border px-2.5 py-1 flex items-center justify-between gap-2 " +
+                              (isActive
+                                ? "border-sky-500/80 bg-sky-500/10"
+                                : "border-slate-700 bg-slate-900/80 hover:border-sky-400/70")
+                            }
+                          >
+                            <div className="flex flex-col gap-0.5 flex-1">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveLayerId(layer.id)}
+                                  className={"text-xs font-medium " + (isActive ? "text-sky-100" : "text-slate-100")}
+                                >
+                                  {layer.label}
+                                </button>
+                                <span className="text-[10px] text-slate-400">· Thickness (in)</span>
+                                <input
+                                  type="number"
+                                  step={0.125}
+                                  value={layerThick}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    const num = Number(v);
+                                    if (!Number.isFinite(num) || num <= 0) return;
+                                    setLayerThicknessIn(layer.id, num);
+                                  }}
+                                  className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-500">ID: {layer.id}</span>
+                              {stack && stack.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => deleteLayer(layer.id)}
+                                  className="text-[11px] text-slate-400 hover:text-red-400"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[11px] text-slate-400">
+                      Single-layer foam block. Add layers from the panel on the left if this layout needs multiple pads.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Body: three-column layout */}
+            <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
+              {/* LEFT: Cavity palette + material + cartons + notes */}
+              <aside className="w-52 shrink-0 flex flex-col gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-slate-100 mb-1">Cavity palette</div>
+                  <p className="text-[11px] text-slate-400 mb-2">
+                    Click a style to add a new pocket, then drag and resize it in the block.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleAddPreset("rect")}
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                >
+                  <div className="font-semibold text-slate-50 flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-slate-400/70 bg-slate-900/80" />
+                    Rectangle
+                  </div>
+                  <div className="text-[11px] text-slate-400">Rectangular pocket (4&quot; × 2&quot;)</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAddPreset("circle")}
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                >
+                  <div className="font-semibold text-slate-50 flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 bg-slate-900/80" />
+                    Circle
+                  </div>
+                  <div className="text-[11px] text-slate-400">Round pocket (3&quot; Ø)</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAddPreset("roundedRect")}
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                >
+                  <div className="font-semibold text-slate-50 flex items-center gap-2">
+                    <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
+                    Rounded rectangle
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Rounded corners (4&quot; × 3&quot;, 0.5&quot; R)
+                  </div>
+                </button>
+
+                {/* Foam material (in left bar) */}
+                <div className="mt-2">
+                  <div className="text-xs font-semibold text-slate-100 mb-1">Foam material</div>
+                  <div className="text-[11px] text-slate-400 mb-2">
+                    Choose the foam family and grade used for this layout.
+                  </div>
+                  <select
+                    value={selectedMaterialId ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) {
+                        setSelectedMaterialId(null);
+                      } else {
+                        const parsed = Number(v);
+                        if (Number.isFinite(parsed)) setSelectedMaterialId(parsed);
+                      }
+                    }}
+                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                  >
+                    <option value="">
+                      {materialsLoading ? "Loading materials…" : "Select material (optional)"}
+                    </option>
+                    {materialsByFamily.map(([family, list]) => (
+                      <optgroup key={family} label={family}>
+                        {list.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                            {m.density_lb_ft3 != null ? ` · ${m.density_lb_ft3.toFixed(1)} lb/ft³` : ""}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  {materialsError && <div className="mt-1 text-[11px] text-amber-300">{materialsError}</div>}
+                </div>
+
+                {/* Closest matching cartons (live suggester, always visible) */}
+                <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-slate-100">Closest matching cartons</div>
+                    <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                      Box suggester · BETA
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 mb-2">
+                    Uses the foam footprint{" "}
+                    <span className="font-mono text-sky-200">{footprintLabel}</span>, stack depth{" "}
+                    <span className="font-mono text-sky-200">{stackDepthLabel}</span> and quoted qty{" "}
+                    <span className="font-mono text-sky-200">{qtyLabel}</span> to suggest a best-fit{" "}
+                    <span className="text-sky-300 font-medium">RSC</span> and{" "}
+                    <span className="text-sky-300 font-medium">mailer</span>.
+                  </p>
+
+                  {selectedCartonKind && (
+                    <div className="mb-2 text-[11px] text-sky-200">
+                      Selected carton:{" "}
+                      <span className="font-mono">
+                        {selectedCartonKind === "RSC" ? boxSuggest.bestRsc?.sku : boxSuggest.bestMailer?.sku}
+                      </span>
+                    </div>
+                  )}
+
+                  {!suggesterReady ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+                      <div className="font-semibold text-slate-100 mb-1">Waiting for layout &amp; customer info…</div>
+                      <ul className="list-disc list-inside space-y-0.5">
+                        <li>Set block length, width and stack depth.</li>
+                        <li>Enter customer name + email.</li>
+                        {hasRealQuoteNo ? null : <li>Link this layout to a real quote.</li>}
+                      </ul>
+                    </div>
+                  ) : boxSuggest.loading ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-200">
+                      Calculating best-fit cartons…
+                    </div>
+                  ) : boxSuggest.error ? (
+                    <div className="rounded-xl border border-amber-500/70 bg-amber-900/40 px-3 py-2 text-[11px] text-amber-50">
+                      {boxSuggest.error}
+                    </div>
+                  ) : !boxSuggest.bestRsc && !boxSuggest.bestMailer ? (
+                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+                      No good carton matches found in the current stub catalog.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 text-[11px]">
+                      {boxSuggest.bestRsc && (
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <div className="font-semibold text-slate-100">Best RSC match</div>
+                            <span className="font-mono text-sky-300 text-[10px]">{boxSuggest.bestRsc.sku}</span>
+                          </div>
+                          <div className="text-slate-300">{boxSuggest.bestRsc.description}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                            <span>
+                              Inside{" "}
+                              <span className="font-mono text-slate-50">
+                                {boxSuggest.bestRsc.inside_length_in}" × {boxSuggest.bestRsc.inside_width_in}" ×{" "}
+                                {boxSuggest.bestRsc.inside_height_in}"
+                              </span>
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                              Fit score: {boxSuggest.bestRsc.fit_score}
+                            </span>
+                          </div>
+
+                          {boxSuggest.bestRsc.notes && (
+                            <div className="mt-0.5 text-slate-400">{boxSuggest.bestRsc.notes}</div>
+                          )}
+
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => handlePickCarton("RSC")}
+                              className={
+                                "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium " +
+                                (selectedCartonKind === "RSC"
+                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
+                                  : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10")
+                              }
+                            >
+                              {selectedCartonKind === "RSC" ? "Selected carton" : "Pick this box"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {boxSuggest.bestMailer && (
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <div className="font-semibold text-slate-100">Best mailer match</div>
+                            <span className="font-mono text-sky-300 text-[10px]">{boxSuggest.bestMailer.sku}</span>
+                          </div>
+                          <div className="text-slate-300">{boxSuggest.bestMailer.description}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                            <span>
+                              Inside{" "}
+                              <span className="font-mono text-slate-50">
+                                {boxSuggest.bestMailer.inside_length_in}" × {boxSuggest.bestMailer.inside_width_in}" ×{" "}
+                                {boxSuggest.bestMailer.inside_height_in}"
+                              </span>
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                              Fit score: {boxSuggest.bestMailer.fit_score}
+                            </span>
+                          </div>
+
+                          {boxSuggest.bestMailer.notes && (
+                            <div className="mt-0.5 text-slate-400">{boxSuggest.bestMailer.notes}</div>
+                          )}
+
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => handlePickCarton("MAILER")}
+                              className={
+                                "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium " +
+                                (selectedCartonKind === "MAILER"
+                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
+                                  : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10")
+                              }
+                            >
+                              {selectedCartonKind === "MAILER" ? "Selected carton" : "Pick this box"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Notes / special instructions */}
+                <div className="mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
+                  <div className="text-xs font-semibold text-slate-100 mb-1">Notes / special instructions</div>
+                  <div className="text-[11px] text-slate-400 mb-2">
+                    Optional text for anything the foam layout needs to call out (loose parts, labels, extra protection,
+                    etc.). This will be saved with the quote when you apply.
+                  </div>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    rows={4}
+                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 resize-vertical"
+                  />
+                </div>
+
+                <div className="mt-1 border-t border-slate-800 pt-2 text-[11px] text-slate-500">
+                  Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block edges and between pockets.
+                </div>
+
+                {!hasRealQuoteNo && (
+                  <div className="mt-3 rounded-xl border border-amber-500/70 bg-amber-900/50 px-3 py-2 text-[11px] text-amber-50">
+                    No quote is linked yet. Open this page from an emailed quote or the /quote print view to save layouts
+                    back to a real quote.
+                  </div>
+                )}
+              </aside>
+
+              {/* CENTER: Big visualizer */}
+              <section className="flex-1 flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm text-slate-50">
+                      <span className="font-semibold">Foam layout preview</span>
+                      <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium">
+                        Interactive layout
+                      </span>
+                    </div>
+                    {!hasRealQuoteNo && (
+                      <div className="text-[11px] text-amber-300 mt-1">
+                        Demo only – link from a real quote email to apply layouts.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Drag cavities to adjust placement. Use the square handle at the bottom-right of each cavity to resize.
+                  Cavities are placed inside a 0.5&quot; wall on all sides. When a cavity is selected, the nearest
+                  horizontal and vertical gaps to other cavities and to the block edges are dimensioned.
+                </p>
+
+                {/* canvas wrapper */}
+                <div className="relative flex-1 rounded-2xl border border-slate-800/90 bg-slate-950 overflow-hidden shadow-[0_22px_55px_rgba(15,23,42,0.95)]">
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,rgba(30,64,175,0.3)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.3)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
+                  />
+                  <div className="relative p-4 overflow-auto">
+                    <InteractiveCanvas
+                      layout={layout}
+                      selectedId={selectedId}
+                      selectAction={selectCavity}
+                      moveAction={(id, xNorm, yNorm) => {
+                        // Keep the cavity selected while dragging so
+                        // dimension lines stay visible during movement.
+                        selectCavity(id);
+                        updateCavityPosition(id, xNorm, yNorm);
+                      }}
+                      resizeAction={(id, lengthIn, widthIn) => updateCavityDims(id, { lengthIn, widthIn })}
+                      zoom={zoom}
+                      croppedCorners={croppedCorners}
+                    />
+                  </div>
+                </div>
+
+                {/* Box suggester preview + bottom cartons row (hidden for now, JSX preserved) */}
+                {false && (
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-xs font-semibold text-slate-100">Box suggester inputs</div>
+                        <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                          Preview only
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        These are the dimensions and quantity the box suggester will use. Next step is wiring this into
+                        the real Box Partners lookup.
+                      </p>
+                      <div className="space-y-1.5 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Foam footprint (L × W)</span>
+                          <span className="font-mono text-slate-50">
+                            {Number(block.lengthIn).toFixed(2)}" × {Number(block.widthIn).toFixed(2)}"
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Stack depth</span>
+                          <span className="font-mono text-slate-50">{totalStackThicknessIn.toFixed(2)}"</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Quoted quantity</span>
+                          <span className="font-mono text-slate-50">{qtyLabel}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+                      <div className="text-xs font-semibold text-slate-100 mb-1">Closest matching cartons (coming soon)</div>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        This panel will show the best fit <span className="text-sky-300 font-medium">RSC</span> and{" "}
+                        <span className="text-sky-300 font-medium">mailer</span> for the foam stack above, based on the
+                        Box Partners catalog. The selection will be saved back to the quote when you apply.
+                      </p>
+                      <div className="grid grid-cols-1 gap-2">
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-slate-100">Best RSC match</div>
+                          <div className="text-[11px] text-slate-500">
+                            Will show: part number, inside dims, and fit score.
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-slate-100">Best Mailer match</div>
+                          <div className="text-[11px] text-slate-500">
+                            Will show: part number, inside dims, and fit score.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* RIGHT: Customer info + cavities list */}
+              <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
+                {/* Customer info card */}
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-slate-100">Customer info</div>
+                    <span
+                      className={
+                        "inline-flex h-1.5 w-1.5 rounded-full " +
+                        (missingCustomerInfo && hasRealQuoteNo
+                          ? "bg-rose-400 shadow-[0_0_8px_rgba(248,113,113,0.9)]"
+                          : "bg-emerald-400/70 shadow-[0_0_7px_rgba(52,211,153,0.85)]")
+                      }
+                    />
+                  </div>
+                  <div className="text-[11px] text-slate-400 mb-2">
+                    Add who this foam layout is for.{" "}
+                    <span className="text-sky-300">
+                      Name + email are required before recommending foam or applying to the quote.
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-300">
+                        Customer name <span className="text-rose-300">*</span>
+                      </span>
+                      <input
+                        type="text"
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-300">Company (optional)</span>
+                      <input
+                        type="text"
+                        value={customerCompany}
+                        onChange={(e) => setCustomerCompany(e.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-300">
+                        Email <span className="text-rose-300">*</span>
+                      </span>
+                      <input
+                        type="email"
+                        value={customerEmail}
+                        onChange={(e) => setCustomerEmail(e.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[11px] text-slate-300">Phone (optional)</span>
+                      <input
+                        type="tel"
+                        value={customerPhone}
+                        onChange={(e) => setCustomerPhone(e.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      />
+                    </label>
+                  </div>
+
+                  {missingCustomerInfo && hasRealQuoteNo && (
+                    <div className="mt-2 text-[11px] text-amber-300">
+                      Enter a name and email to enable <span className="font-semibold">Recommend my foam</span> and{" "}
+                      <span className="font-semibold">Apply to quote</span>.
+                    </div>
+                  )}
+                </div>
+
+                {/* Cavities list + editor */}
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
+                  <div className="text-xs font-semibold text-slate-100">
+                    Cavities
+                    {activeLayerLabel && (
+                      <span className="ml-1 text-[11px] font-normal text-slate-400">— {activeLayerLabel}</span>
+                    )}
+                  </div>
+
+                  {cavities.length === 0 ? (
+                    <div className="mt-2 text-xs text-slate-400">
+                      No cavities yet. Use the palette on the left to add a pocket.
+                    </div>
+                  ) : (
+                    <ul className="mt-2 space-y-1.5 mb-3 max-h-40 overflow-auto">
+                      {cavities.map((cav, cavIndex) => {
+                        const isActive = cav.id === selectedId;
+
+                        const color = CAVITY_COLORS[cavIndex % CAVITY_COLORS.length];
+                        const inactiveBg = `${color}33`;
+                        const chipStyle = {
+                          backgroundColor: isActive ? color : inactiveBg,
+                          color: isActive ? "#020617" : "#e5e7eb",
+                        } as React.CSSProperties;
+
+                        return (
+                          <li
+                            key={cav.id}
+                            className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
+                              isActive ? "bg-slate-800/80" : "bg-slate-900/40 hover:bg-slate-800/50"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => (isActive ? selectCavity(null) : selectCavity(cav.id))}
+                              className="flex-1 flex items-center gap-2 text-xs text-left"
+                            >
+                              <span
+                                style={chipStyle}
+                                className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
+                              >
+                                {cav.id.replace("cav-", "C")}
+                              </span>
+                              <span className={isActive ? "text-slate-50 font-medium" : "text-slate-200"}>
+                                {cav.label}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteCavity(cav.id)}
+                              className="text-[11px] text-slate-500 hover:text-red-400"
+                              title="Delete cavity"
+                            >
+                              ✕
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+
+                  <div className="mt-2 border-t border-slate-800 pt-2 text-[11px] text-slate-400">
+                    {selectedCavity ? (
+                      <span>
+                        Editing <strong className="text-slate-100">{selectedCavity.label}</strong>
+                      </span>
+                    ) : (
+                      <span>Select a cavity above to edit its size and depth.</span>
+                    )}
+                  </div>
+
+                  {selectedCavity && (
+                    <>
+                      {selectedCavity.shape === "circle" ? (
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Diameter (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.length}
+                              onChange={(e) => setCavityInputs((prev) => ({ ...prev, length: e.target.value }))}
+                              onBlur={() => commitCavityField("length")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("length");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Depth (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.depth}
+                              onChange={(e) => setCavityInputs((prev) => ({ ...prev, depth: e.target.value }))}
+                              onBlur={() => commitCavityField("depth")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("depth");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Length (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.length}
+                              onChange={(e) => setCavityInputs((prev) => ({ ...prev, length: e.target.value }))}
+                              onBlur={() => commitCavityField("length")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("length");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Width (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.width}
+                              onChange={(e) => setCavityInputs((prev) => ({ ...prev, width: e.target.value }))}
+                              onBlur={() => commitCavityField("width")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("width");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Depth (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.depth}
+                              onChange={(e) => setCavityInputs((prev) => ({ ...prev, depth: e.target.value }))}
+                              onBlur={() => commitCavityField("depth")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("depth");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-slate-400">Corner radius (in)</span>
+                            <input
+                              type="number"
+                              step={0.125}
+                              value={cavityInputs.cornerRadius}
+                              onChange={(e) => setCavityInputs((prev) => ({ ...prev, cornerRadius: e.target.value }))}
+                              onBlur={() => commitCavityField("cornerRadius")}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitCavityField("cornerRadius");
+                                }
+                              }}
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                            />
+                          </label>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleCenterSelectedCavity}
+                        className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-100 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                      >
+                        Center this cavity in block
+                      </button>
+                    </>
+                  )}
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
   );
 }
@@ -1525,14 +2599,14 @@ function buildSvgFromLayout(
   const cavects: string[] = [];
 
   for (const c of cavities) {
-    const cavW = c.lengthIn * scale;
-    const cavH = c.widthIn * scale;
-    const x = blockX + c.x * blockW;
-    const y = blockY + c.y * blockH;
+    const cavW = Number(c.lengthIn) * scale;
+    const cavH = Number(c.widthIn) * scale;
+    const x = blockX + Number(c.x) * blockW;
+    const y = blockY + Number(c.y) * blockH;
 
-    const label = c.label ?? `${c.lengthIn}×${c.widthIn}×${c.depthIn}"`;
+    const label = (c as any).label ?? `${c.lengthIn}×${c.widthIn}×${(c as any).depthIn}"`;
 
-    if (c.shape === "circle") {
+    if ((c as any).shape === "circle") {
       const r = Math.min(cavW, cavH) / 2;
       const cx = x + cavW / 2;
       const cy = y + cavH / 2;
@@ -1542,9 +2616,7 @@ function buildSvgFromLayout(
           `  <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
             2,
           )}" fill="none" stroke="#111827" stroke-width="1" />`,
-          `  <text x="${cx.toFixed(
-            2,
-          )}" y="${cy.toFixed(
+          `  <text x="${cx.toFixed(2)}" y="${cy.toFixed(
             2,
           )}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#111827">${escapeText(
             label,
@@ -1553,17 +2625,13 @@ function buildSvgFromLayout(
         ].join("\n"),
       );
     } else {
-      cavects.push(
+       cavects.push(
         [
           `<g>`,
           `  <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${cavW.toFixed(
             2,
-          )}" height="${cavH.toFixed(
-            2,
-          )}" rx="0" ry="0" fill="none" stroke="#111827" stroke-width="1" />`,
-          `  <text x="${(x + cavW / 2).toFixed(
-            2,
-          )}" y="${(y + cavH / 2).toFixed(
+          )}" height="${cavH.toFixed(2)}" rx="0" ry="0" fill="none" stroke="#111827" stroke-width="1" />`,
+          `  <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
             2,
           )}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#111827">${escapeText(
             label,
@@ -1571,6 +2639,7 @@ function buildSvgFromLayout(
           `</g>`,
         ].join("\n"),
       );
+
     }
   }
 
@@ -1583,7 +2652,6 @@ function buildSvgFromLayout(
   } else {
     headerLines.push(`BLOCK: ${L}" × ${W}" (thickness see quote)`);
   }
-
   if (meta?.materialLabel) {
     headerLines.push(`MATERIAL: ${meta.materialLabel}`);
   }
@@ -1592,11 +2660,9 @@ function buildSvgFromLayout(
     .map((line, idx) => {
       const y = PADDING + idx * 14;
       const fontSize = idx === 0 ? 11 : 10;
-      return `<text x="${PADDING.toFixed(
+      return `<text x="${PADDING.toFixed(2)}" y="${y.toFixed(
         2,
-      )}" y="${y.toFixed(2)}" font-size="${fontSize}" fill="#111827">${escapeText(
-        line,
-      )}</text>`;
+      )}" font-size="${fontSize}" fill="#111827">${escapeText(line)}</text>`;
     })
     .join("\n    ");
 
@@ -1605,10 +2671,8 @@ function buildSvgFromLayout(
   </g>`;
 
   const metaLines: string[] = [];
-
   if (meta?.notes && meta.notes.trim().length > 0) {
     const rawNotes = meta.notes.trim();
-
     const cleaned = rawNotes
       .split(/\r?\n/)
       .map((line) => line.trim())
@@ -1632,11 +2696,9 @@ function buildSvgFromLayout(
     const notesTexts = metaLines
       .map((line, idx) => {
         const y = VIEW_H - PADDING + idx * 14;
-        return `<text x="${PADDING.toFixed(
+        return `<text x="${PADDING.toFixed(2)}" y="${y.toFixed(
           2,
-        )}" y="${y.toFixed(2)}" font-size="10" fill="#111827">${escapeText(
-          line,
-        )}</text>`;
+        )}" font-size="10" fill="#111827">${escapeText(line)}</text>`;
       })
       .join("\n    ");
 
