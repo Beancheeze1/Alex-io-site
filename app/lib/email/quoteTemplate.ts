@@ -135,6 +135,77 @@ function computeMinThicknessUnder(specs: TemplateSpecs): number | null {
   return minUnder;
 }
 
+/**
+ * Parse inches loosely from common email-ish inputs.
+ * Supports:
+ *  - numbers: 0.5, .5
+ *  - with units/quotes: 0.5", 0.5 in
+ *  - fractions: 1/2, 3/8
+ *  - mixed: 1 1/2
+ *  - unicode: ½ ¼ ¾ ⅛ ⅜ ⅝ ⅞
+ */
+function parseInchesLoose(v: any): number | null {
+  if (v == null) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+
+  const s0 = String(v).trim();
+  if (!s0) return null;
+
+  // normalize unicode fractions to ascii
+  const fracMap: Record<string, string> = {
+    "¼": "1/4",
+    "½": "1/2",
+    "¾": "3/4",
+    "⅛": "1/8",
+    "⅜": "3/8",
+    "⅝": "5/8",
+    "⅞": "7/8",
+  };
+
+  let s = s0.replace(/[¼½¾⅛⅜⅝⅞]/g, (m) => fracMap[m] || m);
+
+  // strip units/quotes and junk but KEEP digits, dot, slash, space, minus
+  s = s
+    .toLowerCase()
+    .replace(/inches|inch|in\b/g, "")
+    .replace(/["”]/g, "")
+    .trim();
+
+  // Mixed number: "1 1/2"
+  const mixed = s.match(/^(-?\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) {
+    const whole = Number(mixed[1]);
+    const num = Number(mixed[2]);
+    const den = Number(mixed[3]);
+    if (Number.isFinite(whole) && Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+      return whole + num / den;
+    }
+  }
+
+  // Simple fraction: "1/2"
+  const frac = s.match(/^(-?\d+)\s*\/\s*(\d+)$/);
+  if (frac) {
+    const num = Number(frac[1]);
+    const den = Number(frac[2]);
+    if (Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+      return num / den;
+    }
+  }
+
+  // Plain number (also handles ".5")
+  const n = Number(s);
+  if (Number.isFinite(n)) return n;
+
+  // Last resort: extract first numeric token
+  const tok = s.match(/-?\d+(?:\.\d+)?/);
+  if (tok) {
+    const nn = Number(tok[0]);
+    if (Number.isFinite(nn)) return nn;
+  }
+
+  return null;
+}
+
 // Build a layout-editor URL if we have enough info to make it useful.
 function buildLayoutUrl(input: TemplateInput): string | null {
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
@@ -157,11 +228,14 @@ function buildLayoutUrl(input: TemplateInput): string | null {
 
   const layerCountRaw = Number(facts.layer_count);
   const layersArr = Array.isArray(facts.layers) ? (facts.layers as any[]) : [];
-  const thArrRaw = Array.isArray(facts.layer_thicknesses) ? (facts.layer_thicknesses as any[]) : [];
+  const thArrRaw = Array.isArray(facts.layer_thicknesses)
+    ? (facts.layer_thicknesses as any[])
+    : [];
 
+  // NOTE: Use loose inch parsing (supports "1/2", "0.5\"", "½", etc.)
   const thFromFacts = thArrRaw
-    .map((x: any) => Number(x))
-    .filter((n: number) => Number.isFinite(n) && n > 0);
+    .map((x: any) => parseInchesLoose(x))
+    .filter((n: any) => typeof n === "number" && Number.isFinite(n) && n > 0) as number[];
 
   const hasLayerIntent =
     (Number.isFinite(layerCountRaw) && layerCountRaw > 1) ||
@@ -185,8 +259,8 @@ function buildLayoutUrl(input: TemplateInput): string | null {
       thFromFacts.length > 0
         ? thFromFacts
         : layersArr
-            .map((l) => Number((l as any)?.thickness_in))
-            .filter((n) => Number.isFinite(n) && n > 0);
+            .map((l) => parseInchesLoose((l as any)?.thickness_in))
+            .filter((n: any) => typeof n === "number" && Number.isFinite(n) && n > 0) as number[];
 
     for (const t of th) {
       params.append("layer_thicknesses", String(t));
@@ -312,7 +386,9 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
   const pieceCi = fmtNumber(pricing.piece_ci ?? pricing.raw?.piece_ci);
   const orderCi = fmtNumber(pricing.order_ci ?? pricing.raw?.order_ci);
-  const orderCiWithWaste = fmtNumber(pricing.order_ci_with_waste ?? pricing.raw?.order_ci_with_waste);
+  const orderCiWithWaste = fmtNumber(
+    pricing.order_ci_with_waste ?? pricing.raw?.order_ci_with_waste,
+  );
 
   const computedOrderTotal = fmtMoney(
     pricing.total ??
