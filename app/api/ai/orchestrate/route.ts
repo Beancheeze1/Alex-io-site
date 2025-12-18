@@ -850,12 +850,17 @@ function grabLayerThicknessNumeric(raw: string): {
   }
 
   // 2) Top/Middle/Bottom hints (only meaningful when count=3, but we store as indices)
-  const rePos = new RegExp(
-    `\\b(top|middle|bottom)\\s+layer\\b[^.\\n\\r]{0,140}?\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
-    "gi",
-  );
+  const re = new RegExp(
+  `\\b(top|middle|bottom)\\s+(?:layer|pad|piece|sheet)\\b` +
+    `[^\\n\\r]{0,200}?` +
+    `(?:\\b(?:will\\s+be|is|=|:)\\b\\s*)?` +
+    `\\b(${NUM})\\s*(?:"|inches?|inch)?\\b` +
+    `[^\\n\\r]{0,80}?\\bthick\\b`,
+  "gi",
+);
 
-  while ((m = rePos.exec(s))) {
+
+  while ((m = re.exec(s))) {
     const pos = String(m[1]).toLowerCase();
     const th = canonNum(m[2]);
     if (!th) continue;
