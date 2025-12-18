@@ -309,7 +309,10 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
       id: l.id,
       label: l.label,
       thicknessIn: l.thicknessIn ?? 1,
-      cavities: dedupeCavities([...(l.cavities ?? [])]),
+      cavities: dedupeCavities(
+  (l.cavities ?? []).map((c: Cavity) => ({ ...c }))
+),
+
     })) as LayoutLayer[];
 
     const active = stack[0];
