@@ -86,10 +86,17 @@ function parseLayersParam(
 ): { thicknesses: number[]; labels: string[] } | null {
   if (!raw) return null;
 
-  const first = Array.isArray(raw) ? raw.find((s) => s && s.trim()) : raw;
-  if (!first) return null;
+  // IMPORTANT:
+  // If raw is a string[], it may represent repeated query params like:
+  //   layer_thicknesses=1&layer_thicknesses=3&layer_thicknesses=0.5
+  // We must combine ALL values, not just the first one.
+  const s = Array.isArray(raw)
+    ? raw
+        .map((v) => (v ?? "").toString().trim())
+        .filter(Boolean)
+        .join(",")
+    : raw.toString().trim();
 
-  const s = first.trim();
   if (!s) return null;
 
   // JSON forms
@@ -141,9 +148,11 @@ function parseLayersParam(
 
   if (thicknesses.length === 0) return null;
 
+  // Numeric layers only (no top/middle/bottom labels)
   const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
   return { thicknesses, labels };
 }
+
 
 /**
  * Read per-layer cavities from search params:
