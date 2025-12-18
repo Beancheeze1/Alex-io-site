@@ -135,40 +135,6 @@ function computeMinThicknessUnder(specs: TemplateSpecs): number | null {
   return minUnder;
 }
 
-/* ============================================================
-   PATH-A FIX: canonical layout-editor URL params
-   - Prefer repeated params over comma strings
-   - layer_thicknesses=1&layer_thicknesses=3&layer_thicknesses=0.5
-   - cavity=2x1x0.5&cavity=5x4x1&cavity=3x3x1
-   ============================================================ */
-
-function canonNumStr(raw: string): string {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return raw;
-  return n.toString();
-}
-
-function canonCavityDim(raw: string): string {
-  if (!raw) return "";
-  // normalize unicode × and strip quotes/spaces
-  const s = String(raw)
-    .replace(/×/g, "x")
-    .replace(/"/g, "")
-    .trim();
-
-  const parts = s
-    .split("x")
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  if (parts.length < 3) return s;
-
-  const L = canonNumStr(parts[0]);
-  const W = canonNumStr(parts[1]);
-  const H = canonNumStr(parts[2]); // ".5" -> "0.5"
-  return `${L}x${W}x${H}`;
-}
-
 // Build a layout-editor URL if we have enough info to make it useful.
 function buildLayoutUrl(input: TemplateInput): string | null {
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
@@ -180,58 +146,53 @@ function buildLayoutUrl(input: TemplateInput): string | null {
   if (!qno) return null;
 
   const params = new URLSearchParams();
-  const { L_in, W_in, H_in, cavityDims } = input.specs;
+  const { L_in, W_in, H_in } = input.specs;
 
   params.set("quote_no", qno);
 
   // If the original email described layers, we need the editor to boot in
   // multi-layer mode immediately (before "Apply to quote").
   // Orchestrate stores this intent in facts (layer_count / layers / layer_thicknesses).
-  const layerCountRaw = Number(input.facts?.layer_count);
+  const facts: any = input.facts || {};
 
-  const layersArr = Array.isArray(input.facts?.layers) ? (input.facts?.layers as any[]) : [];
+  const layerCountRaw = Number(facts.layer_count);
+  const layersArr = Array.isArray(facts.layers) ? (facts.layers as any[]) : [];
+  const thArrRaw = Array.isArray(facts.layer_thicknesses) ? (facts.layer_thicknesses as any[]) : [];
 
-  const thicknessArrRaw = Array.isArray(input.facts?.layer_thicknesses)
-    ? (input.facts?.layer_thicknesses as any[])
-    : [];
-
-  const thicknessesFromFacts = thicknessArrRaw
-    .map((x) => Number(x))
-    .map((n) => (Number.isFinite(n) && n > 0 ? n : null))
-    .filter((n) => n != null) as number[];
-
-  const thicknessesFromLayers = layersArr
-    .map((l) => Number((l as any)?.thickness_in))
-    .filter((n) => Number.isFinite(n) && n > 0);
+  const thFromFacts = thArrRaw
+    .map((x: any) => Number(x))
+    .filter((n: number) => Number.isFinite(n) && n > 0);
 
   const hasLayerIntent =
     (Number.isFinite(layerCountRaw) && layerCountRaw > 1) ||
     layersArr.length > 0 ||
-    thicknessesFromFacts.length > 0;
+    thFromFacts.length > 0;
 
   if (hasLayerIntent) {
     const count =
       Number.isFinite(layerCountRaw) && layerCountRaw > 1
         ? layerCountRaw
-        : layersArr.length > 1
-        ? layersArr.length
-        : thicknessesFromFacts.length > 1
-        ? thicknessesFromFacts.length
-        : undefined;
+        : thFromFacts.length > 0
+          ? thFromFacts.length
+          : layersArr.length;
 
     if (count && count > 1) params.set("layer_count", String(count));
 
-    // CANONICAL: repeated layer_thicknesses params, bottom->top order as provided by facts
-    // Prefer facts.layer_thicknesses (already canonicalized upstream), else fall back to layers[].thickness_in.
-    const th = thicknessesFromFacts.length ? thicknessesFromFacts : thicknessesFromLayers;
+    // Canonical thickness params: REPEATED values (NOT comma strings).
+    // Example:
+    //   layer_thicknesses=1&layer_thicknesses=3&layer_thicknesses=0.5
+    const th =
+      thFromFacts.length > 0
+        ? thFromFacts
+        : layersArr
+            .map((l) => Number((l as any)?.thickness_in))
+            .filter((n) => Number.isFinite(n) && n > 0);
 
-    if (th.length) {
-      for (const n of th) {
-        params.append("layer_thicknesses", canonNumStr(String(n)));
-      }
+    for (const t of th) {
+      params.append("layer_thicknesses", String(t));
     }
 
-    const cavLayerIndex = Number(input.facts?.layer_cavity_layer_index);
+    const cavLayerIndex = Number(facts.layer_cavity_layer_index);
     if (Number.isFinite(cavLayerIndex) && cavLayerIndex >= 1) {
       params.set("layer_cavity_layer_index", String(cavLayerIndex));
     }
@@ -241,13 +202,18 @@ function buildLayoutUrl(input: TemplateInput): string | null {
     params.set("dims", `${L_in}x${W_in}x${H_in}`);
   }
 
-  // CANONICAL: repeated cavity params, include ALL cavities, no comma string, no single-only.
-  const cavs = Array.isArray(cavityDims) ? cavityDims : [];
-  if (cavs.length > 0) {
-    for (const c of cavs) {
-      const cc = canonCavityDim(String(c));
-      if (cc) params.append("cavity", cc);
-    }
+  // Canonical cavity params: REPEATED cavity= (NOT cavities=comma and NOT only first cavity)
+  const cavityDimsFromFacts = Array.isArray(facts.cavityDims) ? (facts.cavityDims as any[]) : [];
+  const cavityDimsFromSpecs = Array.isArray(input.specs.cavityDims)
+    ? (input.specs.cavityDims as any[])
+    : [];
+
+  const cavityList = (cavityDimsFromFacts.length ? cavityDimsFromFacts : cavityDimsFromSpecs)
+    .map((x: any) => String(x || "").trim())
+    .filter(Boolean);
+
+  for (const c of cavityList) {
+    params.append("cavity", c);
   }
 
   return `${base}/quote/layout?${params.toString()}`;
@@ -309,8 +275,8 @@ export function renderQuoteEmail(input: TemplateInput): string {
     material.density_lbft3 != null
       ? `${fmtNumber(material.density_lbft3, 1)} lb/ft³`
       : densityLabel !== "—"
-      ? densityLabel
-      : "—";
+        ? densityLabel
+        : "—";
 
   const matKerf = fmtPercent(material.kerf_pct ?? pricing.raw?.kerf_pct);
 
@@ -362,10 +328,10 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const minCharge = pricingPending
     ? "—"
     : material.min_charge != null
-    ? fmtMoney(material.min_charge)
-    : pricing.raw?.min_charge
-    ? fmtMoney(pricing.raw.min_charge)
-    : "$0.00";
+      ? fmtMoney(material.min_charge)
+      : pricing.raw?.min_charge
+        ? fmtMoney(pricing.raw.min_charge)
+        : "$0.00";
 
   const orderTotal = pricingPending ? "Pending" : computedOrderTotal;
 
@@ -374,8 +340,8 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const appliedLabel = pricingPending
     ? "Pending (need dimensions)"
     : usedMinCharge
-    ? "Minimum charge applied"
-    : "Calculated from volume";
+      ? "Minimum charge applied"
+      : "Calculated from volume";
 
   // Hide the “How this price is built” row entirely when pending (so we don’t imply it was computed).
   const showHowBuilt = !pricingPending;
@@ -528,8 +494,8 @@ export function renderQuoteEmail(input: TemplateInput): string {
                             pricingPending
                               ? ""
                               : usedMinCharge
-                              ? " (applied)"
-                              : " (not applied on this run)"
+                                ? " (applied)"
+                                : " (not applied on this run)"
                           }</td>
                         </tr>
                         <tr>
