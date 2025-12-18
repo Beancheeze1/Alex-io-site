@@ -133,7 +133,8 @@ function parseLayersParam(
   }
 
   // Delimited numeric list
-  const parts = s.split(/[;,|]/).map((x) => x.trim()).filter(Boolean);
+  const parts = s.split(/[,;|]/).map((x) => x.trim()).filter(Boolean);
+
   const thicknesses = parts
     .map((x) => Number(x))
     .filter((n) => Number.isFinite(n) && n > 0);
@@ -512,19 +513,57 @@ export default function LayoutPage({
           }
 
           // layers + per-layer cavities (canonical) — ONLY ONCE
-          const layersRaw =
-            url.searchParams.get("layers") ??
-            (url.searchParams.getAll("layer").length > 0
-              ? url.searchParams.getAll("layer").join(",")
-              : null);
+          // --- Layer seeding (canonical / “conical”): prefer modern params, fall back to legacy ---
+const layersRaw =
+  url.searchParams.get("layers") ??
+  (url.searchParams.getAll("layer").length > 0
+    ? url.searchParams.getAll("layer").join(",")
+    : null);
 
-          layersInfo = layersRaw ? parseLayersParam(layersRaw) : null;
+// Legacy params currently produced by some links:
+//  - layer_thicknesses=1,4,1
+//  - layer_count=3
+//  - layer_cavity_layer_index=2   (1-based)
+const legacyThicknessesRaw =
+  url.searchParams.get("layer_thicknesses") ??
+  url.searchParams.get("layer_thickness") ??
+  null;
 
-          if (layersInfo && layersInfo.thicknesses.length > 0) {
-            perLayerCavityStrs = layersInfo.thicknesses.map((_, i) =>
-              readLayerCavitiesFromUrl(url, i + 1),
-            );
-          }
+// 1) Parse layers from modern params first, then legacy thickness list
+layersInfo = layersRaw
+  ? parseLayersParam(layersRaw)
+  : legacyThicknessesRaw
+  ? parseLayersParam(legacyThicknessesRaw)
+  : null;
+
+// 2) Build per-layer cavity strings
+if (layersInfo && layersInfo.thicknesses.length > 0) {
+  const n = layersInfo.thicknesses.length;
+
+  // Prefer explicit per-layer cavities in URL (cavities_l1 / cavity_l1, etc.)
+  perLayerCavityStrs = layersInfo.thicknesses.map((_, i) =>
+    readLayerCavitiesFromUrl(url, i + 1),
+  );
+
+  // If none were provided, fall back to assigning the generic cavities string
+  // to the requested layer index (legacy behavior), else to middle layer.
+  const anyLayerHasCavs = perLayerCavityStrs.some((s) => (s || "").trim().length > 0);
+
+  if (!anyLayerHasCavs) {
+    const legacyIdxRaw = url.searchParams.get("layer_cavity_layer_index");
+    const legacyIdx = legacyIdxRaw ? Number(legacyIdxRaw) : NaN;
+
+    const fallbackTarget =
+      Number.isFinite(legacyIdx) && legacyIdx >= 1 && legacyIdx <= n
+        ? legacyIdx - 1
+        : Math.max(0, Math.min(n - 1, Math.floor((n - 1) / 2)));
+
+    if ((effectiveCavityStr || "").trim().length > 0) {
+      perLayerCavityStrs[fallbackTarget] = effectiveCavityStr;
+    }
+  }
+}
+
         }
       } catch {
         // if anything goes wrong, we fall back to serverBlockStr/serverCavityStr
