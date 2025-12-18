@@ -150,38 +150,67 @@ function buildLayoutUrl(input: TemplateInput): string | null {
 
   params.set("quote_no", qno);
 
-// If the original email described layers, we need the editor to boot in
-// multi-layer mode immediately (before "Apply to quote").
-// Orchestrate stores this intent in facts (layer_count / layers).
-const layerCountRaw = Number(input.facts?.layer_count);
-const layersArr = Array.isArray(input.facts?.layers) ? (input.facts?.layers as any[]) : [];
-const hasLayerIntent = (Number.isFinite(layerCountRaw) && layerCountRaw > 1) || layersArr.length > 0;
+  // If the original email described layers, we need the editor to boot in
+  // multi-layer mode immediately (before "Apply to quote").
+  // Orchestrate stores this intent in facts (layer_count / layer_thicknesses / layers).
+  const layerCountRaw = Number(input.facts?.layer_count);
+  const layersArr = Array.isArray(input.facts?.layers) ? (input.facts?.layers as any[]) : [];
+  const hasLayerIntent =
+    (Number.isFinite(layerCountRaw) && layerCountRaw > 1) || layersArr.length > 0;
 
-if (hasLayerIntent) {
-  const count = Number.isFinite(layerCountRaw) && layerCountRaw > 1 ? layerCountRaw : layersArr.length;
-  if (count && count > 1) params.set("layer_count", String(count));
+  if (hasLayerIntent) {
+    const count =
+      Number.isFinite(layerCountRaw) && layerCountRaw > 1 ? layerCountRaw : layersArr.length;
 
-  // Pass per-layer thicknesses when known (comma-separated inches).
-  // Example: "1,4,1" (top,middle,bottom order) — editor treats this as an intent hint.
-  const th = layersArr
-    .map((l) => Number((l as any)?.thickness_in))
-    .filter((n) => Number.isFinite(n) && n > 0);
-  if (th.length) params.set("layer_thicknesses", th.join(","));
+    if (count && count > 1) params.set("layer_count", String(count));
 
-  const cavLayerIndex = Number(input.facts?.layer_cavity_layer_index);
-  if (Number.isFinite(cavLayerIndex) && cavLayerIndex >= 0) {
-    params.set("layer_cavity_layer_index", String(cavLayerIndex));
+    // IMPORTANT (Path A fix):
+    // Emit repeated params so the editor always parses thicknesses correctly:
+    // layer_thicknesses=1&layer_thicknesses=3&layer_thicknesses=0.5
+    //
+    // Prefer orchestrate's canonical facts.layer_thicknesses array (length = layer_count).
+    // Fallback to facts.layers thicknesses if needed.
+    const thFromFacts = Array.isArray(input.facts?.layer_thicknesses)
+      ? (input.facts?.layer_thicknesses as any[])
+      : null;
+
+    let thList: number[] = [];
+
+    if (thFromFacts && thFromFacts.length) {
+      thList = thFromFacts
+        .map((x) => Number(x))
+        .filter((n) => Number.isFinite(n) && n > 0);
+    } else {
+      thList = layersArr
+        .map((l) => Number((l as any)?.thickness_in))
+        .filter((n) => Number.isFinite(n) && n > 0);
+    }
+
+    for (const n of thList) {
+      params.append("layer_thicknesses", String(n));
+    }
+
+    // 1-based (Layer 1 = bottom) per orchestrate hardening.
+    const cavLayerIndex = Number(input.facts?.layer_cavity_layer_index);
+    if (Number.isFinite(cavLayerIndex) && cavLayerIndex >= 1) {
+      params.set("layer_cavity_layer_index", String(cavLayerIndex));
+    }
   }
-}
-
-
 
   if (L_in && W_in && H_in) {
     params.set("dims", `${L_in}x${W_in}x${H_in}`);
   }
+
+  // IMPORTANT (Path A fix):
+  // Emit repeated cavity params so sizes are not lost / mis-parsed:
+  // cavity=2x1x0.5&cavity=5x4x1&cavity=3x3x1
   if (Array.isArray(cavityDims) && cavityDims.length > 0) {
-    params.set("cavities", cavityDims.join(","));
-    params.set("cavity", cavityDims[0]);
+    for (const c of cavityDims) {
+      if (!c || typeof c !== "string") continue;
+      const s = c.trim();
+      if (!s) continue;
+      params.append("cavity", s);
+    }
   }
 
   return `${base}/quote/layout?${params.toString()}`;
@@ -280,7 +309,9 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
   const pieceCi = fmtNumber(pricing.piece_ci ?? pricing.raw?.piece_ci);
   const orderCi = fmtNumber(pricing.order_ci ?? pricing.raw?.order_ci);
-  const orderCiWithWaste = fmtNumber(pricing.order_ci_with_waste ?? pricing.raw?.order_ci_with_waste);
+  const orderCiWithWaste = fmtNumber(
+    pricing.order_ci_with_waste ?? pricing.raw?.order_ci_with_waste,
+  );
 
   const computedOrderTotal = fmtMoney(
     pricing.total ??
