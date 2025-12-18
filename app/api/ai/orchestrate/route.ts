@@ -1032,7 +1032,7 @@ function recoverCavityDimsFromText(rawText: string, mainDims?: string | null): s
 function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const rawBody = body || "";
   const facts: Mem = {};
-  const text = `${subject}\n\n${rawBody}`.replace(/[”“]/g, '"');
+  const text = `${subject}\n\n${rawBody}`.replace(/[”“″]/g, '"');
 
   let outsideDimsWasExplicit = false;
 
