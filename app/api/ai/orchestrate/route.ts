@@ -149,6 +149,76 @@ function inferRepSlugFromThreadMsgs(threadMsgs: any[]): string | null {
   return null;
 }
 
+/**
+ * Build a canonical layout editor URL that NEVER relies on JS array-to-string
+ * (comma-join) behavior. We emit repeated params for thicknesses & cavities:
+ *   layer_thicknesses=1&layer_thicknesses=3&layer_thicknesses=0.5
+ *   cavity=2x1x0.5&cavity=5x4x1&cavity=3x3x1
+ *
+ * Path-A: we only add this URL into facts; the template can use it directly.
+ */
+function buildLayoutEditorUrlFromFacts(f: Mem): string | null {
+  try {
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const url = new URL("/quote/layout", base);
+
+    const quoteNo = String(f.quoteNumber || f.quote_no || "").trim();
+    if (quoteNo) url.searchParams.set("quote_no", quoteNo);
+
+    // dims (outside block dims) if present
+    if (f.dims) url.searchParams.set("dims", String(f.dims));
+
+    // layer_count authoritative if present
+    const n = Number(f.layer_count);
+    if (Number.isFinite(n) && n > 0) {
+      url.searchParams.set("layer_count", String(n));
+    }
+
+    // Repeated thickness params (critical)
+    const thRaw = f.layer_thicknesses;
+    const thArr: any[] = Array.isArray(thRaw) ? thRaw : [];
+
+    for (const v of thArr) {
+      const num = Number(v);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      // Keep 0.5 canonical as "0.5" (not ".5")
+      url.searchParams.append("layer_thicknesses", num.toString());
+    }
+
+    // Repeated cavities params (critical)
+    const cavArr: any[] = Array.isArray(f.cavityDims) ? f.cavityDims : [];
+    for (const c of cavArr) {
+      const s = String(c || "").trim();
+      if (!s) continue;
+      url.searchParams.append("cavity", s);
+    }
+
+    // If we know which layer has cavities (1-based), include it
+    if (f.layer_cavity_layer_index != null) {
+      const idx = Number(f.layer_cavity_layer_index);
+      if (Number.isFinite(idx) && idx >= 1) {
+        url.searchParams.set("layer_cavity_layer_index", String(idx));
+      }
+    }
+
+    // Optional: numeric layer labels (repeated), if the editor supports it.
+    // We only emit if layers exist and labels are numeric.
+    if (Array.isArray(f.layers) && f.layers.length) {
+      for (const L of f.layers) {
+        const lab = String(L?.label || "").trim();
+        if (!lab) continue;
+        if (/^layer\s+\d+$/i.test(lab)) {
+          url.searchParams.append("layer_label", lab);
+        }
+      }
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 /* ============================================================
    Cavity normalization
    ============================================================ */
@@ -1054,9 +1124,14 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
         }
       }
 
-      // 3) Build facts.layers for UI/email/debug, but DO NOT drop missing slots.
-      // Keep a numeric label convention for any N:
-      // - Layer 1 = bottom ... Layer N = top
+      // PATH-A HARDENING: ensure the emitted thickness array is FULL numeric length N.
+      // If any slots are still null, fill them with 1" (safe default) so the editor seeds N layers.
+      // (Better than collapsing to a comma-string that breaks parsing.)
+      for (let i = 0; i < thicknesses1.length; i++) {
+        if (thicknesses1[i] == null) thicknesses1[i] = 1;
+      }
+
+      // 3) Build facts.layers for UI/email/debug, numeric labels only
       const layers: any[] = [];
       for (let i = 0; i < n; i++) {
         const thv = thicknesses1[i];
@@ -1070,13 +1145,10 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
       facts.layers = layers;
 
       // 4) Emit canonical thickness array for the editor link generation.
-      // IMPORTANT: we only set this if we have >=1 known thickness,
-      // but we keep the full length and do NOT shrink it.
       const numericThicknesses = thicknesses1.map((v) =>
-        v == null ? null : Number(canonNumStr(String(v))),
+        v == null ? 1 : Number(canonNumStr(String(v))),
       );
 
-      // Keep as array (template/link builder can join with commas).
       (facts as any).layer_thicknesses = numericThicknesses;
 
       // 5) cavity layer index: 1-based to match layout/page legacy handling
@@ -1085,7 +1157,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
       }
 
       // 6) If outside dims were NOT explicit, and we have footprint + thicknesses,
-      // infer overall dims using sum(thicknesses) (only when we have a full numeric sum).
+      // infer overall dims using sum(thicknesses)
       if (!outsideDimsWasExplicit) {
         const fp = String(facts.layer_footprint || "").trim();
         const [fpLRaw, fpWRaw] = fp.split("x");
@@ -1399,6 +1471,27 @@ export async function POST(req: NextRequest) {
       lockDims: hadNewDims,
     });
 
+    // Ensure layer_thicknesses remains a FULL numeric array (length = layer_count) after hydration/merge.
+    // (Hydration can add dims/cavities; this keeps seeding stable.)
+    if (merged.layer_count && Array.isArray(merged.layer_thicknesses)) {
+      const n = Number(merged.layer_count);
+      if (Number.isFinite(n) && n > 0) {
+        const arr = (merged.layer_thicknesses as any[])
+          .slice(0, n)
+          .map((x) => {
+            const v = Number(x);
+            return Number.isFinite(v) && v > 0 ? v : null;
+          });
+
+        while (arr.length < n) arr.push(null);
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i] == null) arr[i] = 1;
+        }
+
+        merged.layer_thicknesses = arr;
+      }
+    }
+
     if (threadKey) await saveFacts(threadKey, merged);
     if (merged.quote_no) await saveFacts(merged.quote_no, merged);
 
@@ -1529,6 +1622,17 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         console.error("quote item store error:", err);
       }
+    }
+
+    /* ------------------- Build canonical layout editor link (Path-A) ------------------- */
+
+    const layoutEditorUrl = buildLayoutEditorUrlFromFacts(merged);
+    if (layoutEditorUrl) {
+      // Store under multiple common keys so the template can use it without edits.
+      merged.layout_editor_url = layoutEditorUrl;
+      merged.layoutEditorUrl = layoutEditorUrl;
+      merged.layout_editor_link = layoutEditorUrl;
+      merged.layoutEditorLink = layoutEditorUrl;
     }
 
     /* ------------------- Build email template ------------------- */
