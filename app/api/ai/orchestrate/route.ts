@@ -886,10 +886,11 @@ function grabLayerThicknessesCanonical(
 
   // 1) Positional wording: top/middle/bottom layer/pad
   // NOTE: allow ".5" numbers, allow quotes, allow "pad" synonym
-  const rePos = new RegExp(
-    `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
+    const rePos = new RegExp(
+    `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
     "gi",
   );
+
 
   let m: RegExpExecArray | null;
   while ((m = rePos.exec(s))) {
@@ -920,10 +921,11 @@ function grabLayerThicknessesCanonical(
 
   // 2) Numeric wording: "layer 1 will be 1\" thick" / "layer 3 is .5 thick" / "pad 2 ..."
   // Accept "layer" or "pad", and optional "will be/is/=".
-  const reNum = new RegExp(
+    const reNum = new RegExp(
     `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
     "gi",
   );
+
 
   while ((m = reNum.exec(s))) {
     const idx = Number(m[1]);
