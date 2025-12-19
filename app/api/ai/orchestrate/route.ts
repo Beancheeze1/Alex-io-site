@@ -1447,24 +1447,19 @@ if (needsLLM) {
 
     let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
 
-// PATH-A: If this turn explicitly specified layer thicknesses, they must override saved memory.
-if (
-  Array.isArray(newly.layer_thicknesses) &&
-  newly.layer_thicknesses.length &&
-  newly.layer_thicknesses.every((v: any) => Number.isFinite(Number(v)) && Number(v) > 0)
-) {
-  merged.layer_thicknesses = [...newly.layer_thicknesses];
+// PATH-A: If the inbound email mentions layers at all,
+// we MUST discard any saved layer_thicknesses from memory.
+const inboundMentionsLayers =
+  /\b(top|middle|bottom)\s+(?:layer|pad)\b/i.test(`${subject}\n${lastText}`) ||
+  /\blayer\s*\d+\b/i.test(`${subject}\n${lastText}`) ||
+  /\b\d+\s*(?:layers?|layer)\b/i.test(`${subject}\n${lastText}`);
+
+if (inboundMentionsLayers) {
+  delete merged.layer_thicknesses;
+  delete merged.layers;
+  delete merged.layer_cavity_layer_index;
 }
 
-// Keep layers[] consistent if present
-if (Array.isArray(newly.layers) && newly.layers.length) {
-  merged.layers = [...newly.layers];
-}
-
-// Keep cavity layer index authoritative for this turn
-if (newly.layer_cavity_layer_index != null) {
-  merged.layer_cavity_layer_index = newly.layer_cavity_layer_index;
-}
 
 
 
