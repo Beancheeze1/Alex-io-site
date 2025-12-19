@@ -372,10 +372,8 @@ if (cavsRaw.length) {
 }
 
 function cavitySig(c: Cavity) {
-  // Signature used for de-dupe (fallback only): shape + dims + corner radius (rounded to 1/8")
-  // NOTE: We intentionally do NOT include x/y here because:
-  // - We primarily dedupe by stable id (preferred).
-  // - Fallback sig is only used when an id is missing (legacy/seeded cases).
+  // Signature used ONLY as a fallback when id is missing.
+  // (We intentionally do NOT include x/y here; position changes should never cause dedupe.)
   const r8 = (n: number) => Math.round((Number(n) || 0) * 8) / 8;
   return [
     c.shape,
@@ -387,24 +385,34 @@ function cavitySig(c: Cavity) {
 }
 
 function dedupeCavities(list: Cavity[]) {
-  // Path-A SAFETY:
-  // Prefer de-dupe by stable cavity id. This prevents "teleporting" when multiple
-  // cavities share identical dims but have different x/y (common during seeding/mirroring).
-  // Only fall back to geometric signature if an id is missing.
-  const seen = new Set<string>();
+  // IMPORTANT:
+  // Cavities must be unique by *id*.
+  // Using a shape/dims signature causes "jumping" when multiple cavities share the same dims
+  // (common for circles). Position (x/y) is not part of identity.
+  const seenIds = new Set<string>();
+  const seenFallback = new Set<string>();
   const out: Cavity[] = [];
 
   for (const c of list || []) {
-    const id = String((c as any)?.id ?? "").trim();
-    const key = id ? `id:${id}` : `sig:${cavitySig(c)}`;
+    const id = String((c as any).id ?? "").trim();
 
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (id) {
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+      out.push(c);
+      continue;
+    }
+
+    // Fallback only for legacy cavities that have no id
+    const k = cavitySig(c);
+    if (seenFallback.has(k)) continue;
+    seenFallback.add(k);
     out.push(c);
   }
 
   return out;
 }
+
 
 
 
