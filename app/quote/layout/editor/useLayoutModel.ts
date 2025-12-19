@@ -308,7 +308,8 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     const stack = (initial as any).stack.map((l: any) => ({
       id: l.id,
       label: l.label,
-      thicknessIn: l.thicknessIn ?? 1,
+      thicknessIn: l.thicknessIn,
+
       cavities: dedupeCavities(
   (l.cavities ?? []).map((c: Cavity) => ({ ...c }))
 ),
