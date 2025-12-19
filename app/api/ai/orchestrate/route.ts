@@ -27,6 +27,10 @@
 // FIX 12/19 (ALIAS PATCH - TOP/MIDDLE/BOTTOM):
 // Normalize "top/middle/bottom layer|pad" into numeric "layer N" text *before* regex runs,
 // so "top layer" always binds to layer 3 (or layer_count) and never falls back to 1".
+//
+// FIX 12/19 (DRYRUN INPUT SHAPE):
+// Accept "body" as an alias for "text" so PowerShell dryRun payloads work.
+// (No behavior change for real inbound calls; this only broadens accepted input.)
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -44,7 +48,13 @@ type In = {
   mode?: string;
   toEmail?: string;
   subject?: string;
+
+  // Primary inbound email text field:
   text?: string;
+
+  // Alias used by many dryRun payloads / older callers:
+  body?: string;
+
   threadId?: string | number;
   threadMsgs?: any[];
   dryRun?: boolean;
@@ -1278,7 +1288,9 @@ export async function POST(req: NextRequest) {
 
     if (mode !== "ai") return err("unsupported_mode", { mode });
 
-    const lastText = String(p.text || "");
+    // FIX: accept "body" as alias for "text" (dryRun + older callers)
+    const lastText = String(p.text || p.body || "");
+
     const subject = String(p.subject || "");
     const providedThreadId = String(p.threadId || "").trim();
 

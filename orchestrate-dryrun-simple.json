@@ -1,0 +1,6 @@
+﻿{
+  "dryRun": true,
+  "from": "chuck@test.com",
+  "subject": "DryRun SIMPLE sanity",
+  "body": "Quote 123 pieces of 12x12x2 foam."
+}
