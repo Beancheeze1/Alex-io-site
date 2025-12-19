@@ -31,6 +31,10 @@
 // FIX 12/19 (DRYRUN INPUT SHAPE):
 // Accept "body" as an alias for "text" so PowerShell dryRun payloads work.
 // (No behavior change for real inbound calls; this only broadens accepted input.)
+//
+// FIX 12/19 (CIRCLE CAVITIES - THIS PATCH):
+// - Extract Ø/DIA/diameter circle cavities (ØD x depth)
+// - Preserve them through cavity normalization (was dropping anything not LxWxH)
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -268,8 +272,8 @@ function canonNumStr(raw: string): string {
 
 /**
  * Step 1 fix:
- * - Parse ALL valid cavity dims first (3-number LxWxH)
- * - De-dupe conservatively (exact same L/W/H only), preserve order
+ * - Parse ALL valid cavity dims first (3-number LxWxH) AND circle dims (ØDxDepth)
+ * - De-dupe conservatively (exact same dims only), preserve order
  * - Only duplicate if still fewer than cavityCount
  * - Canonicalize decimals so ".5" => "0.5"
  *
@@ -284,46 +288,57 @@ function applyCavityNormalization(facts: Mem): Mem {
       ? facts.cavityCount
       : undefined;
 
-  const parsed: { key: string; dims: string }[] = [];
+  const seen = new Set<string>();
+  const distinct: string[] = [];
 
   for (const raw of facts.cavityDims as string[]) {
     if (!raw) continue;
 
     const norm = normalizeCavity(String(raw));
 
-    const m = norm
+    // Circle: ØD x depth  (e.g., Ø3x1, Ø2.5x0.5)
+    const mc = norm.match(new RegExp(`^Ø\\s*(${NUM})\\s*[x×]\\s*(${NUM})$`, "i"));
+    if (mc) {
+      const D = canonNumStr(mc[1]);
+      const Z = canonNumStr(mc[2]);
+      const key = `Ø${D}|${Z}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        distinct.push(`Ø${D}x${Z}`);
+      }
+      continue;
+    }
+
+    // Rectangle: L x W x H
+    const mr = norm
       .toLowerCase()
       .replace(/"/g, "")
-      .match(new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`, "i"));
+      .match(new RegExp(`^(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})$`, "i"));
 
-    if (!m) continue;
+    if (mr) {
+      const L = canonNumStr(mr[1]);
+      const W = canonNumStr(mr[2]);
+      const H = canonNumStr(mr[3]);
 
-    const L = canonNumStr(m[1]);
-    const W = canonNumStr(m[2]);
-    const H = canonNumStr(m[3]);
-
-    const key = `${L}|${W}|${H}`;
-    parsed.push({ key, dims: `${L}x${W}x${H}` });
+      const key = `${L}|${W}|${H}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        distinct.push(`${L}x${W}x${H}`);
+      }
+      continue;
+    }
   }
 
-  if (!parsed.length) {
+  if (!distinct.length) {
     delete (facts as any).cavityDims;
     delete (facts as any).cavityCount;
     return facts;
   }
 
-  const seen = new Set<string>();
-  const distinct: string[] = [];
-
-  for (const p of parsed) {
-    if (seen.has(p.key)) continue;
-    seen.add(p.key);
-    distinct.push(p.dims);
-  }
-
   let targetCount = distinct.length;
 
   if (originalCount && originalCount > targetCount) {
+    // Preserve prior behavior: only duplicate when there is exactly one distinct cavity size.
     if (distinct.length === 1) {
       targetCount = originalCount;
     } else {
@@ -332,7 +347,6 @@ function applyCavityNormalization(facts: Mem): Mem {
   }
 
   const finalDims: string[] = [...distinct];
-
   while (finalDims.length < targetCount) {
     finalDims.push(distinct[finalDims.length % distinct.length]);
   }
@@ -951,10 +965,19 @@ function extractCavities(raw: string): { cavityCount?: number; cavityDims?: stri
     if (!/\b(cavity|cavities|cutout|pocket)\b/.test(lower)) continue;
 
     const lineNoQuotes = (line || "").replace(/"/g, " ");
+
+    // Rectangular cavities: L x W x D
     const reTriple = new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`, "gi");
     let m: RegExpExecArray | null;
     while ((m = reTriple.exec(lineNoQuotes))) {
       cavityDims.push(`${m[1]}x${m[2]}x${m[3]}`);
+    }
+
+    // Circle cavities: ØD x depth  (supports "Ø3 x 1", "3 dia x 1", "3 diameter x 1")
+    const norm = normalizeCavity(lineNoQuotes);
+    const reCircle = new RegExp(`Ø\\s*(${NUM})\\s*[x×]\\s*(${NUM})`, "gi");
+    while ((m = reCircle.exec(norm))) {
+      cavityDims.push(`Ø${m[1]}x${m[2]}`);
     }
   }
 
@@ -969,6 +992,7 @@ function recoverCavityDimsFromText(rawText: string, mainDims?: string | null): s
   const text = rawText.toLowerCase().replace(/"/g, " ").replace(/\s+/g, " ");
   const mainNorm = (mainDims || "").toLowerCase().trim();
 
+  // Rects: L x W x D
   const re = new RegExp(`\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`, "gi");
 
   const seen = new Set<string>();
@@ -979,6 +1003,18 @@ function recoverCavityDimsFromText(rawText: string, mainDims?: string | null): s
     const dims = `${m[1]}x${m[2]}x${m[3]}`;
     const norm = dims.toLowerCase().trim();
     if (mainNorm && norm === mainNorm) continue;
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      out.push(dims);
+    }
+  }
+
+  // Circles: ØD x depth
+  const normAll = normalizeCavity(rawText);
+  const reCircle = new RegExp(`Ø\\s*(${NUM})\\s*[x×]\\s*(${NUM})`, "gi");
+  while ((m = reCircle.exec(normAll))) {
+    const dims = `Ø${m[1]}x${m[2]}`;
+    const norm = dims.toLowerCase().trim();
     if (!seen.has(norm)) {
       seen.add(norm);
       out.push(dims);
