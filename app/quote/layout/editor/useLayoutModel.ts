@@ -44,7 +44,12 @@ export type UseLayoutModelResult = {
   ) => void;
   addCavity: (
     shape: CavityShape,
-    size?: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
+    size?: {
+      lengthIn: number;
+      widthIn: number;
+      depthIn: number;
+      cornerRadiusIn?: number;
+    },
   ) => void;
 
   deleteCavity: (id: string) => void;
@@ -412,7 +417,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 }
 
 function cavitySig(c: Cavity) {
-  // Signature used for de-dupe: shape + dims + corner radius (rounded to 1/8")
+  // Signature used for de-dupe fallback: shape + dims + corner radius (rounded to 1/8")
   const r8 = (n: number) => Math.round((Number(n) || 0) * 8) / 8;
   return [
     c.shape,
@@ -424,14 +429,21 @@ function cavitySig(c: Cavity) {
 }
 
 function dedupeCavities(list: Cavity[]) {
+  // IMPORTANT:
+  // We must allow multiple cavities with identical dimensions (common in packaging).
+  // So we de-dupe by stable `id` first. Only fall back to a dims signature when `id` is missing.
   const seen = new Set<string>();
   const out: Cavity[] = [];
+
   for (const c of list || []) {
-    const k = cavitySig(c);
-    if (seen.has(k)) continue;
-    seen.add(k);
+    const id = String((c as any)?.id ?? "").trim();
+    const key = id ? `id:${id}` : `sig:${cavitySig(c)}`;
+
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(c);
   }
+
   return out;
 }
 
@@ -447,15 +459,8 @@ function nextCavityNumber(stack: LayoutLayer[]) {
 }
 
 function clamp01(v: number) {
-  // IMPORTANT:
-  // x/y are already normalized (0–1).
-  // Never coerce valid values to 0 or 1 during layer mirroring.
-  if (!Number.isFinite(v)) return 0;
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
+  return Math.max(0, Math.min(1, v || 0));
 }
-
 
 function safeInch(v: number | undefined, min: number) {
   const n = Number(v);
