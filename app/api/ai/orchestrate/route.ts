@@ -1472,6 +1472,53 @@ if (needsLLM) {
       }
     }
 
+    // PATH-A: FINAL thickness authority pass (run AFTER merges so nothing overwrites it later).
+// If the email explicitly states top/middle/bottom thicknesses, force them into merged.layer_thicknesses.
+if (merged.layer_count) {
+  const n = Number(merged.layer_count);
+  if (Number.isFinite(n) && n > 1) {
+    const emailText = `${subject}\n\n${lastText}`.replace(/[”“″]/g, '"');
+
+    const thFinal = grabLayerThicknessesCanonical(emailText, n);
+    const thArr = thFinal.thicknessesByLayer1Based.slice(0, n);
+
+    // Only apply if we found at least one explicit thickness in the email (avoid changing unrelated quotes).
+    const foundAny = thArr.some((v) => v != null && Number(v) > 0);
+
+    if (foundAny) {
+      // Fill missing slots from existing merged.layer_thicknesses (if present), else default 1.
+      const existing = Array.isArray(merged.layer_thicknesses) ? (merged.layer_thicknesses as any[]) : [];
+
+      for (let i = 0; i < n; i++) {
+        if (thArr[i] == null) {
+          const ev = Number(existing[i]);
+          thArr[i] = Number.isFinite(ev) && ev > 0 ? ev : 1;
+        }
+      }
+
+      // Commit final canonical thicknesses
+      merged.layer_thicknesses = thArr.map((v) => Number(canonNumStr(String(v))));
+
+      // Keep layers[] in sync (editor/debug)
+      const layers: any[] = [];
+      for (let i = 0; i < n; i++) {
+        layers.push({
+          index: i,
+          label: `Layer ${i + 1}`,
+          thickness_in: Number(merged.layer_thicknesses[i]),
+        });
+      }
+      merged.layers = layers;
+
+      // Keep cavity layer index in sync too (1-based)
+      if (thFinal.cavityLayerIndex1Based != null) {
+        merged.layer_cavity_layer_index = thFinal.cavityLayerIndex1Based;
+      }
+    }
+  }
+}
+
+
     merged.__turnCount = (merged.__turnCount || 0) + 1;
 
     if (merged.fromSketch && !merged.from) {
