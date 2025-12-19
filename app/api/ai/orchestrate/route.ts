@@ -1447,6 +1447,27 @@ if (needsLLM) {
 
     let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
 
+// PATH-A: If this turn explicitly specified layer thicknesses, they must override saved memory.
+if (
+  Array.isArray(newly.layer_thicknesses) &&
+  newly.layer_thicknesses.length &&
+  newly.layer_thicknesses.every((v: any) => Number.isFinite(Number(v)) && Number(v) > 0)
+) {
+  merged.layer_thicknesses = [...newly.layer_thicknesses];
+}
+
+// Keep layers[] consistent if present
+if (Array.isArray(newly.layers) && newly.layers.length) {
+  merged.layers = [...newly.layers];
+}
+
+// Keep cavity layer index authoritative for this turn
+if (newly.layer_cavity_layer_index != null) {
+  merged.layer_cavity_layer_index = newly.layer_cavity_layer_index;
+}
+
+
+
     if (salesRepSlugResolved && !merged.sales_rep_slug) {
       merged.sales_rep_slug = salesRepSlugResolved;
     }
