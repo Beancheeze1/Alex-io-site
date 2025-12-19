@@ -86,6 +86,21 @@ function parseLayersParam(
 ): { thicknesses: number[]; labels: string[] } | null {
   if (!raw) return null;
 
+  // Parse a "loose" numeric value out of a token that may contain quotes/units/punctuation
+  // Examples handled: 1.5", 2in, 0.5., .5, "1.5\"",  3 inch
+  const toNumberLoose = (val: any): number => {
+    if (val == null) return NaN;
+    const s = String(val).trim().toLowerCase();
+    if (!s) return NaN;
+
+    // Grab the first numeric chunk (supports leading dot)
+    const m = s.match(/-?(?:\d+(?:\.\d+)?|\.\d+)/);
+    if (!m) return NaN;
+
+    const n = Number(m[0]);
+    return Number.isFinite(n) ? n : NaN;
+  };
+
   // IMPORTANT:
   // If raw is a string[], it may represent repeated query params like:
   //   layer_thicknesses=1&layer_thicknesses=3&layer_thicknesses=0.5
@@ -110,7 +125,7 @@ function parseLayersParam(
         const labels: string[] = [];
 
         for (const item of parsed) {
-          const t = Number(item?.thicknessIn ?? item?.thickness ?? item?.t);
+          const t = toNumberLoose(item?.thicknessIn ?? item?.thickness ?? item?.t);
           if (Number.isFinite(t) && t > 0) {
             thicknesses.push(t);
             const lbl = (item?.label ?? item?.name ?? "").toString().trim();
@@ -126,8 +141,9 @@ function parseLayersParam(
         const arr = (parsed as any).thicknesses ?? (parsed as any).layers ?? null;
         if (Array.isArray(arr)) {
           const thicknesses = arr
-            .map((x: any) => Number(x))
+            .map((x: any) => toNumberLoose(x))
             .filter((n: number) => Number.isFinite(n) && n > 0);
+
           if (thicknesses.length === 0) return null;
 
           const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
@@ -143,7 +159,7 @@ function parseLayersParam(
   const parts = s.split(/[,;|]/).map((x) => x.trim()).filter(Boolean);
 
   const thicknesses = parts
-    .map((x) => Number(x))
+    .map((x) => toNumberLoose(x))
     .filter((n) => Number.isFinite(n) && n > 0);
 
   if (thicknesses.length === 0) return null;
@@ -152,6 +168,7 @@ function parseLayersParam(
   const labels = thicknesses.map((_, i) => `Layer ${i + 1}`);
   return { thicknesses, labels };
 }
+
 
 
 /**
