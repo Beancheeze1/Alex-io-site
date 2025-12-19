@@ -23,6 +23,10 @@
 // 2) If inbound mentions layers, wipe layer fields ONLY from loaded memory (thread/quote)
 //    BEFORE merging newly, so we never delete the inbound-parsed thicknesses.
 // 3) Keep regex-derived layer intent authoritative whenever LLM is invoked.
+//
+// FIX 12/19 (ALIAS PATCH - TOP/MIDDLE/BOTTOM):
+// Normalize "top/middle/bottom layer|pad" into numeric "layer N" text *before* regex runs,
+// so "top layer" always binds to layer 3 (or layer_count) and never falls back to 1".
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -807,6 +811,24 @@ function grabLayerFootprintOnly(raw: string): { footprint?: string } {
 }
 
 /**
+ * Normalize "top/middle/bottom layer|pad" into numeric "layer N" text before parsing.
+ * This makes "top layer" always bind to layer_count (e.g., Layer 3) consistently.
+ */
+function normalizeLayerAliases(raw: string, n: number): string {
+  if (!raw) return raw;
+  if (!Number.isFinite(n) || n <= 0) return raw;
+
+  const mid = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
+
+  // Replace whole-word phrases only; preserve original punctuation around it.
+  // We normalize both "layer" and "pad" phrasing.
+  return raw
+    .replace(/\b(bottom)\s+(layer|pad)\b/gi, `layer 1`)
+    .replace(/\b(middle)\s+(layer|pad)\b/gi, `layer ${mid}`)
+    .replace(/\b(top)\s+(layer|pad)\b/gi, `layer ${n}`);
+}
+
+/**
  * Extract per-layer thicknesses.
  * Layer 1 = bottom ... Layer N = top
  */
@@ -814,8 +836,11 @@ function grabLayerThicknessesCanonical(
   raw: string,
   layerCount: number | undefined,
 ): { thicknessesByLayer1Based: (number | null)[]; cavityLayerIndex1Based: number | null } {
-  const s = raw || "";
   const n = Number.isFinite(layerCount as any) && (layerCount as number) > 0 ? (layerCount as number) : 0;
+
+  // IMPORTANT: normalize aliases first so "top layer" becomes "layer N"
+  const s0 = raw || "";
+  const s = n ? normalizeLayerAliases(s0, n) : s0;
 
   const thicknesses: (number | null)[] = n ? Array.from({ length: n }, () => null) : [];
   let cavityIdx1: number | null = null;
@@ -827,6 +852,8 @@ function grabLayerThicknessesCanonical(
     thicknesses[layer1 - 1] = th;
   };
 
+  // Keep this for backwards compatibility (still works if someone literally writes "top layer"),
+  // but in practice the alias normalization above makes the numbered regex catch everything.
   const rePos = new RegExp(
     `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*(?:[^.\\n\\r]{0,60}?\\bthick\\b)?`,
     "gi",
@@ -878,6 +905,8 @@ function grabLayerThicknessesCanonical(
     const cavIdx = t.search(/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/);
     if (cavIdx >= 0) {
       const windowText = t.slice(Math.max(0, cavIdx - 160), Math.min(t.length, cavIdx + 160));
+      // Note: even here, the alias normalization means these phrases might be gone,
+      // but we keep this fallback as-is.
       if (windowText.includes("middle layer") || windowText.includes("middle pad")) {
         cavityIdx1 = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
       } else if (windowText.includes("top layer") || windowText.includes("top pad")) {
