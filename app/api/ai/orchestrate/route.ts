@@ -13,22 +13,16 @@
 //   data (dims/qty/cavities/material) is available on follow-up emails.
 // - Dynamic price-break generation for multiple quantities (and stored into facts).
 // - NEW 11/24: hydrateFromDBByQuoteNo()
-//     * Pulls latest qty + dims from quote_items for this quote_no
-//     * Pulls latest cavity sizes from quote_layout_packages.layout_json
-//     * Only fills in fields that were NOT explicitly updated in this turn,
-//       so “change qty to 250” in the email still wins over DB.
-// - NEW 11/27: Pricing calc now ignores cavity volume so that the
-//   first-response email, quote page, and layout snapshot all match.
-// - HARDENING 12/13: If material_grade is present (e.g. "1560"),
-//   DB enrichment must prefer grade matching within the correct foam family
-//   BEFORE density fallback, and avoid wrong subtypes (e.g. Ester) unless asked.
-// - HARDENING 12/14 (THIS FIX): Move NUM above any helpers that reference it,
-//   and add layer-intent facts so the layout editor can show multiple layers
-//   when the email describes them.
-// - HARDENING 12/17 (THIS FIX): Make layer_count authoritative and ALWAYS emit
-//   a full layer_thicknesses array of length layer_count (numeric), including .5",
-//   so the editor seeds the correct number of layers consistently.
-//   Also switch cavity layer index to 1-based to match layout/page legacy behavior.
+// - NEW 11/27: Pricing calc now ignores cavity volume
+// - HARDENING 12/13: grade-first matching
+// - HARDENING 12/14: layer intent facts
+// - HARDENING 12/17: layer_count authoritative, full layer_thicknesses numeric array
+//
+// FIX 12/19 (THIS PATCH):
+// 1) Remove duplicated needsLLM block (was merging LLM twice and overwriting layers).
+// 2) If inbound mentions layers, wipe layer fields ONLY from loaded memory (thread/quote)
+//    BEFORE merging newly, so we never delete the inbound-parsed thicknesses.
+// 3) Keep regex-derived layer intent authoritative whenever LLM is invoked.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -599,11 +593,7 @@ function densityToPcf(density: string | null | undefined) {
   return m ? Number(m[1]) : null;
 }
 
-function specsCompleteForQuote(s: {
-  dims: string | null;
-  qty: number | string | null;
-  material_id: number | null;
-}) {
+function specsCompleteForQuote(s: { dims: string | null; qty: number | string | null; material_id: number | null }) {
   return !!(s.dims && s.qty && s.material_id);
 }
 
@@ -611,12 +601,7 @@ function specsCompleteForQuote(s: {
    Quote calc via internal API
    ============================================================ */
 
-async function fetchCalcQuote(opts: {
-  dims: string;
-  qty: number;
-  material_id: number;
-  round_to_bf: boolean;
-}) {
+async function fetchCalcQuote(opts: { dims: string; qty: number; material_id: number; round_to_bf: boolean }) {
   const { L, W, H } = parseDimsNums(opts.dims);
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
@@ -695,9 +680,7 @@ async function buildPriceBreaks(
 function grabDims(raw: string): string | undefined {
   const text = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
   const m =
-    text.match(
-      new RegExp(`\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`, "i"),
-    ) ||
+    text.match(new RegExp(`\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`, "i")) ||
     text.match(
       new RegExp(
         `\\b(?:size|dimensions?|dims?)\\s*[:\\-]?\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\b`,
@@ -777,38 +760,14 @@ function grabMaterialGrade(raw: string): string | undefined {
 function grabMaterial(raw: string): string | undefined {
   const t = raw.toLowerCase();
 
-  if (/\bepe\b/.test(t) || /\bepe\s+foam\b/.test(t) || t.includes("expanded polyethylene")) {
-    return "epe";
-  }
-
-  if (
-    /\bxlpe\b/.test(t) ||
-    t.includes("cross-linked polyethylene") ||
-    t.includes("cross linked polyethylene") ||
-    t.includes("crosslinked polyethylene")
-  ) {
+  if (/\bepe\b/.test(t) || /\bepe\s+foam\b/.test(t) || t.includes("expanded polyethylene")) return "epe";
+  if (/\bxlpe\b/.test(t) || t.includes("cross-linked polyethylene") || t.includes("cross linked polyethylene") || t.includes("crosslinked polyethylene"))
     return "xlpe";
-  }
-
-  if (t.includes("polyurethane") || /\bpu\b/.test(t) || /\burethane\b/.test(t) || t.includes("urethane foam")) {
-    return "polyurethane";
-  }
-
-  if (/\bkaizen\b/.test(t)) {
-    return "kaizen";
-  }
-
-  if (t.includes("polystyrene") || /\beps\b/.test(t)) {
-    return "eps";
-  }
-
-  if (/\bpp\b/.test(t)) {
-    return "pp";
-  }
-
-  if (t.includes("polyethylene") || t.includes("pe foam") || /\bpe\b/.test(t)) {
-    return "pe";
-  }
+  if (t.includes("polyurethane") || /\bpu\b/.test(t) || /\burethane\b/.test(t) || t.includes("urethane foam")) return "polyurethane";
+  if (/\bkaizen\b/.test(t)) return "kaizen";
+  if (t.includes("polystyrene") || /\beps\b/.test(t)) return "eps";
+  if (/\bpp\b/.test(t)) return "pp";
+  if (t.includes("polyethylene") || t.includes("pe foam") || /\bpe\b/.test(t)) return "pe";
 
   return undefined;
 }
@@ -839,10 +798,7 @@ function grabLayerSummary(raw: string): { layer_count?: number; footprint?: stri
 
 function grabLayerFootprintOnly(raw: string): { footprint?: string } {
   const t = (raw || "").toLowerCase();
-  const re = new RegExp(
-    `\\b(${NUM})\\s*["']?\\s*[x×]\\s*(${NUM})\\s*["']?\\s*(?:layers?|layer)\\b`,
-    "i",
-  );
+  const re = new RegExp(`\\b(${NUM})\\s*["']?\\s*[x×]\\s*(${NUM})\\s*["']?\\s*(?:layers?|layer)\\b`, "i");
   const m = t.match(re);
   if (!m) return {};
   const L = canonNumStr(m[1]);
@@ -852,31 +808,18 @@ function grabLayerFootprintOnly(raw: string): { footprint?: string } {
 
 /**
  * Extract per-layer thicknesses.
- *
- * Convention we emit for the editor / URL:
- * - Layer 1 = bottom
- * - Layer 2 = next up
- * - ...
- * - Layer N = top
- *
- * Return:
- * - thicknessesByLayer1Based: number[] length N (may have nulls before final fill)
- * - cavityLayerIndex1Based: number | null (1-based to match layout/page legacy behavior)
+ * Layer 1 = bottom ... Layer N = top
  */
 function grabLayerThicknessesCanonical(
   raw: string,
   layerCount: number | undefined,
-): {
-  thicknessesByLayer1Based: (number | null)[];
-  cavityLayerIndex1Based: number | null;
-} {
+): { thicknessesByLayer1Based: (number | null)[]; cavityLayerIndex1Based: number | null } {
   const s = raw || "";
   const n = Number.isFinite(layerCount as any) && (layerCount as number) > 0 ? (layerCount as number) : 0;
 
   const thicknesses: (number | null)[] = n ? Array.from({ length: n }, () => null) : [];
   let cavityIdx1: number | null = null;
 
-  // Helper to set thickness safely
   const setTh = (layer1: number, th: number) => {
     if (!n) return;
     if (layer1 < 1 || layer1 > n) return;
@@ -884,8 +827,6 @@ function grabLayerThicknessesCanonical(
     thicknesses[layer1 - 1] = th;
   };
 
-  // 1) Positional wording: top/middle/bottom layer/pad
-  // NOTE: allow ".5" numbers, allow quotes, allow "pad" synonym
   const rePos = new RegExp(
     `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*(?:[^.\\n\\r]{0,60}?\\bthick\\b)?`,
     "gi",
@@ -897,20 +838,16 @@ function grabLayerThicknessesCanonical(
     const th = Number(m[2]);
     if (!Number.isFinite(th) || th <= 0) continue;
 
-    // Only meaningful mapping when we know count
     if (n) {
       if (pos === "bottom") setTh(1, th);
       else if (pos === "top") setTh(n, th);
       else if (pos === "middle") {
-        // Middle = closest to center; for 3 => layer 2
         const mid = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
         setTh(mid, th);
       }
     }
 
-    const windowText = s
-      .slice(Math.max(0, m.index), Math.min(s.length, m.index + 220))
-      .toLowerCase();
+    const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)).toLowerCase();
     if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
       if (pos === "bottom") cavityIdx1 = 1;
       else if (pos === "top") cavityIdx1 = n;
@@ -918,8 +855,6 @@ function grabLayerThicknessesCanonical(
     }
   }
 
-  // 2) Numeric wording: "layer 1 will be 1\" thick" / "layer 3 is .5 thick" / "pad 2 ..."
-  // Accept "layer" or "pad", and optional "will be/is/=".
   const reNum = new RegExp(
     `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
     "gi",
@@ -932,15 +867,12 @@ function grabLayerThicknessesCanonical(
     if (!Number.isFinite(th) || th <= 0) continue;
     if (n) setTh(idx, th);
 
-    const windowText = s
-      .slice(Math.max(0, m.index), Math.min(s.length, m.index + 220))
-      .toLowerCase();
+    const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)).toLowerCase();
     if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
       if (idx >= 1 && idx <= n) cavityIdx1 = idx;
     }
   }
 
-  // 3) If cavities mentioned but no explicit positional hit, try nearby "middle/top/bottom"
   if (!cavityIdx1 && n) {
     const t = s.toLowerCase();
     const cavIdx = t.search(/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/);
@@ -987,9 +919,7 @@ function extractCavities(raw: string): { cavityCount?: number; cavityDims?: stri
     }
   }
 
-  if (cavityDims.length) {
-    cavityCount = cavityDims.length;
-  }
+  if (cavityDims.length) cavityCount = cavityDims.length;
 
   return { cavityCount, cavityDims: cavityDims.length ? cavityDims : undefined };
 }
@@ -1000,10 +930,7 @@ function recoverCavityDimsFromText(rawText: string, mainDims?: string | null): s
   const text = rawText.toLowerCase().replace(/"/g, " ").replace(/\s+/g, " ");
   const mainNorm = (mainDims || "").toLowerCase().trim();
 
-  const re = new RegExp(
-    `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
-    "gi",
-  );
+  const re = new RegExp(`\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`, "gi");
 
   const seen = new Set<string>();
   const out: string[] = [];
@@ -1033,33 +960,28 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   let outsideDimsWasExplicit = false;
 
-  // 1) OUTSIDE / MAIN DIMS
   const outsideDims = grabOutsideDims(text);
   if (outsideDims) {
     facts.dims = normDims(outsideDims) || outsideDims;
     outsideDimsWasExplicit = true;
   } else {
     const bodyNoCavity = rawBody
-      .split(/\r?\n/)
-      .filter((ln) => !/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(ln))
+      .split(/\r?\n/).filter((ln) => !/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(ln))
       .join("\n");
 
     const dimsSource = `${subject}\n\n${bodyNoCavity}`;
     const dims = grabDims(dimsSource);
-    if (dims && !facts.dims) {
-      facts.dims = normDims(dims) || dims;
-    }
+    if (dims && !facts.dims) facts.dims = normDims(dims) || dims;
   }
 
-  // 2) BASIC SPECS
   const qtyVal = grabQty(text);
   if (qtyVal) facts.qty = qtyVal;
 
   const density = grabDensity(text);
   if (density) facts.density = density;
 
-  const material = grabMaterial(text);
-  if (material) facts.material = material;
+  const needsMaterial = grabMaterial(text);
+  if (needsMaterial) facts.material = needsMaterial;
 
   const color = grabColor(text);
   if (color) facts.color = color;
@@ -1067,7 +989,6 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const grade = grabMaterialGrade(text);
   if (grade) (facts as any).material_grade = grade;
 
-  // 3) CAVITIES
   const { cavityCount, cavityDims } = extractCavities(text);
   if (cavityCount != null) facts.cavityCount = cavityCount;
   if (cavityDims?.length) facts.cavityDims = cavityDims;
@@ -1080,17 +1001,12 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
     }
   }
 
-  // 4) Preserve explicit material phrases
-  const mMaterialPhrase = text.match(
-    /\b(\d{3,5})\s+(black|white|gray|grey|blue|red|green|yellow|orange|tan|natural)\s+(polyurethane|urethane)\b/i,
-  );
+  const mMaterialPhrase = text.match(/\b(\d{3,5})\s+(black|white|gray|grey|blue|red|green|yellow|orange|tan|natural)\s+(polyurethane|urethane)\b/i);
   if (mMaterialPhrase) {
     facts.material = `${mMaterialPhrase[1]} ${mMaterialPhrase[2]} polyurethane`.toLowerCase();
     (facts as any).material_grade = mMaterialPhrase[1];
     facts.color = String(mMaterialPhrase[2]).toLowerCase();
   }
-
-  /* ------------------- STEP 2: LAYER INTENT EXTRACTION ------------------- */
 
   const layerSummary = grabLayerSummary(text);
   const layerFootOnly = !layerSummary.footprint ? grabLayerFootprintOnly(text) : {};
@@ -1098,23 +1014,16 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const layerCount = layerSummary.layer_count;
   const footprint = layerSummary.footprint || layerFootOnly.footprint;
 
-  // PATH-A FIX: do NOT require footprint to keep layer_count / thickness parsing alive.
   if (layerCount) facts.layer_count = layerCount;
   if (footprint) facts.layer_footprint = footprint;
 
-  // HARDENING: layer_count authoritative (when present)
   if (facts.layer_count) {
     const n = Number(facts.layer_count);
     if (Number.isFinite(n) && n > 0) {
-      // 1) build N-slot thickness list (Layer 1 = bottom ... Layer N = top)
       const th = grabLayerThicknessesCanonical(text, n);
       let thicknesses1 = th.thicknessesByLayer1Based.slice();
 
-      // 2) If exactly one thickness is missing and we have explicit overall H, infer it.
-      // This covers cases where the parser misses ".5" once, but overall dims were specified.
-      const missingIdxs = thicknesses1
-        .map((v, idx) => (v == null ? idx : -1))
-        .filter((idx) => idx >= 0);
+      const missingIdxs = thicknesses1.map((v, idx) => (v == null ? idx : -1)).filter((idx) => idx >= 0);
 
       const dimsNow = facts.dims ? String(facts.dims) : null;
       if (missingIdxs.length === 1 && dimsNow) {
@@ -1130,14 +1039,10 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
         }
       }
 
-      // PATH-A HARDENING: ensure the emitted thickness array is FULL numeric length N.
-      // If any slots are still null, fill them with 1" (safe default) so the editor seeds N layers.
-      // (Better than collapsing to a comma-string that breaks parsing.)
       for (let i = 0; i < thicknesses1.length; i++) {
         if (thicknesses1[i] == null) thicknesses1[i] = 1;
       }
 
-      // 3) Build facts.layers for UI/email/debug, numeric labels only
       const layers: any[] = [];
       for (let i = 0; i < n; i++) {
         const thv = thicknesses1[i];
@@ -1150,20 +1055,11 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
       facts.layers = layers;
 
-      // 4) Emit canonical thickness array for the editor link generation.
-      const numericThicknesses = thicknesses1.map((v) =>
-        v == null ? 1 : Number(canonNumStr(String(v))),
-      );
-
+      const numericThicknesses = thicknesses1.map((v) => (v == null ? 1 : Number(canonNumStr(String(v)))));
       (facts as any).layer_thicknesses = numericThicknesses;
 
-      // 5) cavity layer index: 1-based to match layout/page legacy handling
-      if (th.cavityLayerIndex1Based != null) {
-        facts.layer_cavity_layer_index = th.cavityLayerIndex1Based;
-      }
+      if (th.cavityLayerIndex1Based != null) facts.layer_cavity_layer_index = th.cavityLayerIndex1Based;
 
-      // 6) If outside dims were NOT explicit, and we have footprint + thicknesses,
-      // infer overall dims using sum(thicknesses)
       if (!outsideDimsWasExplicit && facts.layer_footprint) {
         const fp = String(facts.layer_footprint || "").trim();
         const [fpLRaw, fpWRaw] = fp.split("x");
@@ -1176,9 +1072,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
           .reduce((a, b) => a + b, 0);
 
         if (Number.isFinite(fpL) && fpL > 0 && Number.isFinite(fpW) && fpW > 0 && sumTh > 0) {
-          facts.dims = `${canonNumStr(String(fpL))}x${canonNumStr(String(fpW))}x${canonNumStr(
-            String(sumTh),
-          )}`;
+          facts.dims = `${canonNumStr(String(fpL))}x${canonNumStr(String(fpW))}x${canonNumStr(String(sumTh))}`;
         }
       }
     }
@@ -1253,9 +1147,7 @@ ${body}
     if (parsed.material_grade != null) (out as any).material_grade = String(parsed.material_grade);
 
     if (parsed.cavityCount != null) out.cavityCount = parsed.cavityCount;
-    if (Array.isArray(parsed.cavityDims)) {
-      out.cavityDims = parsed.cavityDims.map((x: string) => normalizeCavity(normDims(x) || x));
-    }
+    if (Array.isArray(parsed.cavityDims)) out.cavityDims = parsed.cavityDims.map((x: string) => normalizeCavity(normDims(x) || x));
 
     if (parsed.layer_count != null) {
       const n = Number(parsed.layer_count);
@@ -1355,9 +1247,7 @@ export async function POST(req: NextRequest) {
     const p = (await req.json().catch(() => ({}))) as In;
     const mode = String(p.mode || "ai");
 
-    if (mode !== "ai") {
-      return err("unsupported_mode", { mode });
-    }
+    if (mode !== "ai") return err("unsupported_mode", { mode });
 
     const lastText = String(p.text || "");
     const subject = String(p.subject || "");
@@ -1383,41 +1273,16 @@ export async function POST(req: NextRequest) {
 
     let newly = extractAllFromTextAndSubject(lastText, subject);
 
-// Preserve regex-derived fields that must stay authoritative even if we call the LLM.
-const regexDims = newly.dims || null;
+    // Preserve regex-derived fields that must stay authoritative even if we call the LLM.
+    const regexDims = newly.dims || null;
 
-const regexLayerCount = newly.layer_count ?? null;
-const regexLayerFootprint = newly.layer_footprint ?? null;
-const regexLayerThicknesses = Array.isArray(newly.layer_thicknesses)
-  ? [...(newly.layer_thicknesses as any[])]
-  : null;
-const regexLayerCavityIdx = newly.layer_cavity_layer_index ?? null;
-const regexLayers = Array.isArray(newly.layers) ? [...(newly.layers as any[])] : null;
+    const regexLayerCount = newly.layer_count ?? null;
+    const regexLayerFootprint = newly.layer_footprint ?? null;
+    const regexLayerThicknesses = Array.isArray(newly.layer_thicknesses) ? [...(newly.layer_thicknesses as any[])] : null;
+    const regexLayerCavityIdx = newly.layer_cavity_layer_index ?? null;
+    const regexLayers = Array.isArray(newly.layers) ? [...(newly.layers as any[])] : null;
 
-const needsLLM =
-  !newly.dims ||
-  !newly.qty ||
-  !newly.material ||
-  !newly.density ||
-  (newly.cavityCount && (!newly.cavityDims || newly.cavityDims.length === 0));
-
-if (needsLLM) {
-  const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
-  newly = mergeFacts(newly, llmFacts);
-
-  // Keep regex dims authoritative (existing behavior)
-  if (regexDims) {
-    newly.dims = regexDims;
-  }
-
-  // Keep regex layer intent authoritative (NEW: prevents LLM overwriting top/bottom thicknesses)
-  if (regexLayerCount != null) newly.layer_count = regexLayerCount;
-  if (regexLayerFootprint != null) newly.layer_footprint = regexLayerFootprint;
-  if (regexLayerThicknesses != null) (newly as any).layer_thicknesses = regexLayerThicknesses;
-  if (regexLayerCavityIdx != null) newly.layer_cavity_layer_index = regexLayerCavityIdx;
-  if (regexLayers != null) newly.layers = regexLayers;
-}
-
+    const needsLLM =
       !newly.dims ||
       !newly.qty ||
       !newly.material ||
@@ -1428,9 +1293,15 @@ if (needsLLM) {
       const llmFacts = await aiParseFacts("gpt-4.1-mini", lastText, subject);
       newly = mergeFacts(newly, llmFacts);
 
-      if (regexDims) {
-        newly.dims = regexDims;
-      }
+      // Keep regex dims authoritative
+      if (regexDims) newly.dims = regexDims;
+
+      // Keep regex layer intent authoritative
+      if (regexLayerCount != null) newly.layer_count = regexLayerCount;
+      if (regexLayerFootprint != null) newly.layer_footprint = regexLayerFootprint;
+      if (regexLayerThicknesses != null) (newly as any).layer_thicknesses = regexLayerThicknesses;
+      if (regexLayerCavityIdx != null) newly.layer_cavity_layer_index = regexLayerCavityIdx;
+      if (regexLayers != null) newly.layers = regexLayers;
     }
 
     const hadNewQty = newly.qty != null;
@@ -1445,33 +1316,30 @@ if (needsLLM) {
     if (threadKey) loadedThread = await loadFacts(threadKey);
     if (subjectQuoteNo) loadedQuote = await loadFacts(subjectQuoteNo);
 
+    // PATH-A: If inbound email mentions layers, discard ONLY saved layer fields from memory
+    // BEFORE merging newly, so we never delete the inbound-parsed thicknesses.
+    const inboundMentionsLayers =
+      /\b(top|middle|bottom)\s+(?:layer|pad)\b/i.test(`${subject}\n${lastText}`) ||
+      /\blayer\s*\d+\b/i.test(`${subject}\n${lastText}`) ||
+      /\b\d+\s*(?:layers?|layer)\b/i.test(`${subject}\n${lastText}`);
+
+    if (inboundMentionsLayers) {
+      delete loadedThread.layer_thicknesses;
+      delete loadedThread.layers;
+      delete loadedThread.layer_cavity_layer_index;
+
+      delete loadedQuote.layer_thicknesses;
+      delete loadedQuote.layers;
+      delete loadedQuote.layer_cavity_layer_index;
+    }
+
     let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
 
-// PATH-A: If the inbound email mentions layers at all,
-// we MUST discard any saved layer_thicknesses from memory.
-const inboundMentionsLayers =
-  /\b(top|middle|bottom)\s+(?:layer|pad)\b/i.test(`${subject}\n${lastText}`) ||
-  /\blayer\s*\d+\b/i.test(`${subject}\n${lastText}`) ||
-  /\b\d+\s*(?:layers?|layer)\b/i.test(`${subject}\n${lastText}`);
-
-if (inboundMentionsLayers) {
-  delete merged.layer_thicknesses;
-  delete merged.layers;
-  delete merged.layer_cavity_layer_index;
-}
-
-
-
-
-    if (salesRepSlugResolved && !merged.sales_rep_slug) {
-      merged.sales_rep_slug = salesRepSlugResolved;
-    }
+    if (salesRepSlugResolved && !merged.sales_rep_slug) merged.sales_rep_slug = salesRepSlugResolved;
 
     if (merged.cavityCount && (!Array.isArray(merged.cavityDims) || merged.cavityDims.length === 0)) {
       const recovered = recoverCavityDimsFromText(`${subject}\n\n${lastText}`, merged.dims);
-      if (recovered.length > 0) {
-        merged.cavityDims = recovered;
-      }
+      if (recovered.length > 0) merged.cavityDims = recovered;
     }
 
     merged = applyCavityNormalization(merged);
@@ -1488,58 +1356,41 @@ if (inboundMentionsLayers) {
       }
     }
 
-    // PATH-A: FINAL thickness authority pass (run AFTER merges so nothing overwrites it later).
-// If the email explicitly states top/middle/bottom thicknesses, force them into merged.layer_thicknesses.
-if (merged.layer_count) {
-  const n = Number(merged.layer_count);
-  if (Number.isFinite(n) && n > 1) {
-    const emailText = `${subject}\n\n${lastText}`.replace(/[”“″]/g, '"');
+    // FINAL thickness authority pass (after merges so nothing overwrites it later)
+    if (merged.layer_count) {
+      const n = Number(merged.layer_count);
+      if (Number.isFinite(n) && n > 1) {
+        const emailText = `${subject}\n\n${lastText}`.replace(/[”“″]/g, '"');
 
-    const thFinal = grabLayerThicknessesCanonical(emailText, n);
-    const thArr = thFinal.thicknessesByLayer1Based.slice(0, n);
+        const thFinal = grabLayerThicknessesCanonical(emailText, n);
+        const thArr = thFinal.thicknessesByLayer1Based.slice(0, n);
 
-    // Only apply if we found at least one explicit thickness in the email (avoid changing unrelated quotes).
-    const foundAny = thArr.some((v) => v != null && Number(v) > 0);
+        const foundAny = thArr.some((v) => v != null && Number(v) > 0);
 
-    if (foundAny) {
-      // Fill missing slots from existing merged.layer_thicknesses (if present), else default 1.
-      const existing = Array.isArray(merged.layer_thicknesses) ? (merged.layer_thicknesses as any[]) : [];
+        if (foundAny) {
+          const existing = Array.isArray(merged.layer_thicknesses) ? (merged.layer_thicknesses as any[]) : [];
 
-      for (let i = 0; i < n; i++) {
-        if (thArr[i] == null) {
-          const ev = Number(existing[i]);
-          thArr[i] = Number.isFinite(ev) && ev > 0 ? ev : 1;
+          for (let i = 0; i < n; i++) {
+            if (thArr[i] == null) {
+              const ev = Number(existing[i]);
+              thArr[i] = Number.isFinite(ev) && ev > 0 ? ev : 1;
+            }
+          }
+
+          merged.layer_thicknesses = thArr.map((v) => Number(canonNumStr(String(v))));
+
+          const layers: any[] = [];
+          for (let i = 0; i < n; i++) {
+            layers.push({ index: i, label: `Layer ${i + 1}`, thickness_in: Number(merged.layer_thicknesses[i]) });
+          }
+          merged.layers = layers;
+
+          if (thFinal.cavityLayerIndex1Based != null) merged.layer_cavity_layer_index = thFinal.cavityLayerIndex1Based;
         }
       }
-
-      // Commit final canonical thicknesses
-      merged.layer_thicknesses = thArr.map((v) => Number(canonNumStr(String(v))));
-
-      // Keep layers[] in sync (editor/debug)
-      const layers: any[] = [];
-      for (let i = 0; i < n; i++) {
-        layers.push({
-          index: i,
-          label: `Layer ${i + 1}`,
-          thickness_in: Number(merged.layer_thicknesses[i]),
-        });
-      }
-      merged.layers = layers;
-
-      // Keep cavity layer index in sync too (1-based)
-      if (thFinal.cavityLayerIndex1Based != null) {
-        merged.layer_cavity_layer_index = thFinal.cavityLayerIndex1Based;
-      }
     }
-  }
-}
-
 
     merged.__turnCount = (merged.__turnCount || 0) + 1;
-
-    if (merged.fromSketch && !merged.from) {
-      merged.from = "sketch-auto-quote";
-    }
 
     // Stable quote number per thread
     if (!merged.quoteNumber && !merged.quote_no) {
@@ -1572,8 +1423,7 @@ if (merged.layer_count) {
       lockDims: hadNewDims,
     });
 
-    // Ensure layer_thicknesses remains a FULL numeric array (length = layer_count) after hydration/merge.
-    // (Hydration can add dims/cavities; this keeps seeding stable.)
+    // Ensure layer_thicknesses remains a FULL numeric array (length = layer_count)
     if (merged.layer_count && Array.isArray(merged.layer_thicknesses)) {
       const n = Number(merged.layer_count);
       if (Number.isFinite(n) && n > 0) {
@@ -1585,9 +1435,7 @@ if (merged.layer_count) {
           });
 
         while (arr.length < n) arr.push(null);
-        for (let i = 0; i < arr.length; i++) {
-          if (arr[i] == null) arr[i] = 1;
-        }
+        for (let i = 0; i < arr.length; i++) if (arr[i] == null) arr[i] = 1;
 
         merged.layer_thicknesses = arr;
       }
@@ -1649,11 +1497,10 @@ if (merged.layer_count) {
       }
     }
 
-    if (priceBreaks && priceBreaks.length) {
-      merged.price_breaks = priceBreaks;
-    }
+    if (priceBreaks && priceBreaks.length) merged.price_breaks = priceBreaks;
 
-    // Header: store whenever we have a quoteNumber.
+    /* ------------------- Store quote header + item (unchanged) ------------------- */
+
     let quoteId = merged.quote_id;
 
     const salesRepSlugForHeader: string | undefined =
@@ -1686,9 +1533,7 @@ if (merged.layer_count) {
           merged.quote_id = quoteId;
           merged.status = headerJson.quote.status || merged.status;
 
-          if (headerJson.quote.sales_rep_id != null) {
-            merged.sales_rep_id = headerJson.quote.sales_rep_id;
-          }
+          if (headerJson.quote.sales_rep_id != null) merged.sales_rep_id = headerJson.quote.sales_rep_id;
 
           if (threadKey) await saveFacts(threadKey, merged);
           if (merged.quote_no) await saveFacts(merged.quote_no, merged);
@@ -1698,7 +1543,6 @@ if (merged.layer_count) {
       }
     }
 
-    // Primary item: only when we have material_id, and only once
     if (!dryRun && quoteId && canCalc && specs.material_id && !merged.__primary_item_created) {
       try {
         const { L, W, H } = parseDimsNums(specs.dims);
@@ -1729,7 +1573,6 @@ if (merged.layer_count) {
 
     const layoutEditorUrl = buildLayoutEditorUrlFromFacts(merged);
     if (layoutEditorUrl) {
-      // Store under multiple common keys so the template can use it without edits.
       merged.layout_editor_url = layoutEditorUrl;
       merged.layoutEditorUrl = layoutEditorUrl;
       merged.layout_editor_link = layoutEditorUrl;
@@ -1754,12 +1597,9 @@ if (merged.layer_count) {
         foam_family: foamFamily,
         thickness_under_in: merged.thickness_under_in,
         color: merged.color,
-        cavityCount:
-          merged.cavityCount ??
-          (Array.isArray(merged.cavityDims) ? merged.cavityDims.length : null),
+        cavityCount: merged.cavityCount ?? (Array.isArray(merged.cavityDims) ? merged.cavityDims.length : null),
         cavityDims: Array.isArray(merged.cavityDims) ? (merged.cavityDims as string[]) : [],
       },
-
       material: {
         name: merged.material_name,
         family: merged.material_family,
@@ -1782,9 +1622,7 @@ if (merged.layer_count) {
         if (!merged.qty) miss.push("Quantity");
         if (!foamFamily) miss.push("Material");
         if (!merged.density) miss.push("Density");
-        if (merged.cavityCount > 0 && (!merged.cavityDims || merged.cavityDims.length === 0)) {
-          miss.push("Cavity sizes");
-        }
+        if (merged.cavityCount > 0 && (!merged.cavityDims || merged.cavityDims.length === 0)) miss.push("Cavity sizes");
         return miss;
       })(),
       facts: merged,
