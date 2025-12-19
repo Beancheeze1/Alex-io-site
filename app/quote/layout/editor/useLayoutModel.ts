@@ -447,8 +447,15 @@ function nextCavityNumber(stack: LayoutLayer[]) {
 }
 
 function clamp01(v: number) {
-  return Math.max(0, Math.min(1, v || 0));
+  // IMPORTANT:
+  // x/y are already normalized (0–1).
+  // Never coerce valid values to 0 or 1 during layer mirroring.
+  if (!Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
 }
+
 
 function safeInch(v: number | undefined, min: number) {
   const n = Number(v);
