@@ -42,10 +42,10 @@ export type UseLayoutModelResult = {
       Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
     >
   ) => void;
- addCavity: (
-  shape: CavityShape,
-  size?: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
-) => void;
+  addCavity: (
+    shape: CavityShape,
+    size?: { lengthIn: number; widthIn: number; depthIn: number; cornerRadiusIn?: number }
+  ) => void;
 
   deleteCavity: (id: string) => void;
 
@@ -165,8 +165,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   }, []);
 
   const addCavity = useCallback((shape: CavityShape, size: any) => {
-const s = size ?? { lengthIn: 2, widthIn: 2, depthIn: 1, cornerRadiusIn: 0 };
-
+    const s = size ?? { lengthIn: 2, widthIn: 2, depthIn: 1, cornerRadiusIn: 0 };
 
     setState((prev) => {
       const nextN = nextCavityNumber(prev.layout.stack);
@@ -305,23 +304,58 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 
   // Trust pre-existing stack fully
   if (Array.isArray((initial as any).stack) && (initial as any).stack.length) {
-    const stack = (initial as any).stack.map((l: any) => ({
-      id: l.id,
-      label: l.label,
-      thicknessIn: l.thicknessIn,
+    // IMPORTANT:
+    // Cavity ids must be globally unique across the entire stack.
+    // If two layers both contain "cav-1", React key reuse can cause visual "teleporting"
+    // when switching layers (you see the other layer's last position).
+    const seenIds = new Set<string>();
 
-      cavities: dedupeCavities(
-  (l.cavities ?? []).map((c: Cavity) => ({ ...c }))
-),
+    // Find current max numeric id so we can generate new ids only when needed.
+    let maxNum = 0;
+    for (const l of (initial as any).stack) {
+      for (const c of (l?.cavities ?? []) as Cavity[]) {
+        const m = String((c as any)?.id ?? "").match(/(?:seed-cav-|cav-)(\d+)/);
+        if (m) maxNum = Math.max(maxNum, Number(m[1]) || 0);
+      }
+    }
 
-    })) as LayoutLayer[];
+    const stack = (initial as any).stack.map((l: any) => {
+      const cavsIn = (l.cavities ?? []) as Cavity[];
+
+      const cavs = dedupeCavities(
+        cavsIn.map((c: Cavity) => {
+          const next = { ...c } as Cavity;
+
+          let id = String((next as any).id ?? "").trim();
+          if (!id || seenIds.has(id)) {
+            // Assign a new globally-unique cav-N id (only when duplicate/missing)
+            maxNum += 1;
+            id = `cav-${maxNum}`;
+            (next as any).id = id;
+          }
+
+          seenIds.add(id);
+          return next;
+        }),
+      );
+
+      return {
+        id: l.id,
+        label: l.label,
+        thicknessIn: l.thicknessIn,
+        cavities: cavs,
+      };
+    }) as LayoutLayer[];
 
     const active = stack[0];
     const mirrored = dedupeCavities(active.cavities);
 
     return {
       layout: {
-        block: { ...block, thicknessIn: safeInch(active.thicknessIn ?? block.thicknessIn ?? 1, 0.5) },
+        block: {
+          ...block,
+          thicknessIn: safeInch(active.thicknessIn ?? block.thicknessIn ?? 1, 0.5),
+        },
         stack,
         cavities: [...mirrored],
       },
@@ -331,40 +365,46 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 
   const cavsRaw = Array.isArray(initial.cavities) ? [...initial.cavities] : [];
 
-// Legacy single-layer fallback:
-// If the incoming model does NOT include a stack, we treat it as a single-piece
-// layout (even if it has cavities). Multi-layer layouts must provide `stack`.
-if (cavsRaw.length) {
-  // Seed stable IDs to prevent phantom duplicates on mount
-  const seeded = cavsRaw.map((c, i) => ({ ...c, id: `seed-cav-${i + 1}` }));
-  const cavs = dedupeCavities(seeded);
+  // Legacy single-layer fallback:
+  // If the incoming model does NOT include a stack, we treat it as a single-piece
+  // layout (even if it has cavities). Multi-layer layouts must provide `stack`.
+  if (cavsRaw.length) {
+    // Seed stable IDs to prevent phantom duplicates on mount
+    const seeded = cavsRaw.map((c, i) => ({ ...c, id: `seed-cav-${i + 1}` }));
+    const cavs = dedupeCavities(seeded);
 
-  const thickness = safeInch(block.thicknessIn ?? 1, 0.5);
-  const stack: LayoutLayer[] = [
-    {
-      id: "layer-1",
-      label: "Layer 1",
-      thicknessIn: thickness,
-      cavities: cavs,
-    },
-  ];
+    const thickness = safeInch(block.thicknessIn ?? 1, 0.5);
+    const stack: LayoutLayer[] = [
+      {
+        id: "layer-1",
+        label: "Layer 1",
+        thicknessIn: thickness,
+        cavities: cavs,
+      },
+    ];
 
-  return {
-    layout: {
-      block: { ...block, thicknessIn: thickness },
-      stack,
-      cavities: [...cavs],
-    },
-    activeLayerId: "layer-1",
-  };
-}
-
+    return {
+      layout: {
+        block: { ...block, thicknessIn: thickness },
+        stack,
+        cavities: [...cavs],
+      },
+      activeLayerId: "layer-1",
+    };
+  }
 
   // Legacy single-layer fallback
   return {
     layout: {
       block: { ...block, thicknessIn: safeInch(block.thicknessIn ?? 1, 0.5) },
-      stack: [{ id: "layer-1", label: "Layer 1", thicknessIn: safeInch(block.thicknessIn ?? 1, 0.5), cavities: [] }],
+      stack: [
+        {
+          id: "layer-1",
+          label: "Layer 1",
+          thicknessIn: safeInch(block.thicknessIn ?? 1, 0.5),
+          cavities: [],
+        },
+      ],
       cavities: [],
     },
     activeLayerId: "layer-1",
@@ -372,8 +412,7 @@ if (cavsRaw.length) {
 }
 
 function cavitySig(c: Cavity) {
-  // Signature used ONLY as a fallback when id is missing.
-  // (We intentionally do NOT include x/y here; position changes should never cause dedupe.)
+  // Signature used for de-dupe: shape + dims + corner radius (rounded to 1/8")
   const r8 = (n: number) => Math.round((Number(n) || 0) * 8) / 8;
   return [
     c.shape,
@@ -385,37 +424,16 @@ function cavitySig(c: Cavity) {
 }
 
 function dedupeCavities(list: Cavity[]) {
-  // IMPORTANT:
-  // Cavities must be unique by *id*.
-  // Using a shape/dims signature causes "jumping" when multiple cavities share the same dims
-  // (common for circles). Position (x/y) is not part of identity.
-  const seenIds = new Set<string>();
-  const seenFallback = new Set<string>();
+  const seen = new Set<string>();
   const out: Cavity[] = [];
-
   for (const c of list || []) {
-    const id = String((c as any).id ?? "").trim();
-
-    if (id) {
-      if (seenIds.has(id)) continue;
-      seenIds.add(id);
-      out.push(c);
-      continue;
-    }
-
-    // Fallback only for legacy cavities that have no id
     const k = cavitySig(c);
-    if (seenFallback.has(k)) continue;
-    seenFallback.add(k);
+    if (seen.has(k)) continue;
+    seen.add(k);
     out.push(c);
   }
-
   return out;
 }
-
-
-
-
 
 function nextCavityNumber(stack: LayoutLayer[]) {
   let max = 0;
@@ -456,7 +474,9 @@ function normalizeCavityPatch(p: Partial<Cavity>) {
   return o;
 }
 
-function formatCavityLabel(c: Pick<Cavity, "shape" | "lengthIn" | "widthIn" | "depthIn">) {
+function formatCavityLabel(
+  c: Pick<Cavity, "shape" | "lengthIn" | "widthIn" | "depthIn">,
+) {
   const L = Math.round(c.lengthIn * 8) / 8;
   const W = Math.round(c.widthIn * 8) / 8;
   const D = Math.round(c.depthIn * 8) / 8;
