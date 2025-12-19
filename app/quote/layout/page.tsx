@@ -2376,19 +2376,21 @@ function LayoutEditorHost(props: {
                   />
                   <div className="relative p-4 overflow-auto">
                     <InteractiveCanvas
-                      layout={layout}
-                      selectedId={selectedId}
-                      selectAction={selectCavity}
-                      moveAction={(id, xNorm, yNorm) => {
-                        // Keep the cavity selected while dragging so
-                        // dimension lines stay visible during movement.
-                        selectCavity(id);
-                        updateCavityPosition(id, xNorm, yNorm);
-                      }}
-                      resizeAction={(id, lengthIn, widthIn) => updateCavityDims(id, { lengthIn, widthIn })}
-                      zoom={zoom}
-                      croppedCorners={croppedCorners}
-                    />
+  layout={layout}
+  
+  selectedId={selectedId}
+  selectAction={selectCavity}
+  moveAction={(id, xNorm, yNorm) => {
+    // Keep the cavity selected while dragging so
+    // dimension lines stay visible during movement.
+    selectCavity(id);
+    updateCavityPosition(id, xNorm, yNorm);
+  }}
+  resizeAction={(id, lengthIn, widthIn) => updateCavityDims(id, { lengthIn, widthIn })}
+  zoom={zoom}
+  croppedCorners={croppedCorners}
+/>
+
                   </div>
                 </div>
 
