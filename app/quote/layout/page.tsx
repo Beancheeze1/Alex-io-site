@@ -686,8 +686,52 @@ if (layersInfo && layersInfo.thicknesses.length > 0) {
         if (json && json.ok && dbLayout && dbHasStack) {
           const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
 
+          // IMPORTANT:
+          // If the URL explicitly provides layer thicknesses (email deep-link),
+          // prefer those values over any DB-saved stack thicknesses.
+          // This prevents a subtle clobber where a DB layout stack may carry
+          // missing/legacy thickness values (often defaulting to 1") even though
+          // the backend-generated URL/facts are correct.
+          let mergedLayout: LayoutModel = dbLayout;
+          if (layersInfo && Array.isArray(layersInfo.thicknesses) && layersInfo.thicknesses.length > 0) {
+            const stack = (dbLayout as any).stack as any[];
+            if (Array.isArray(stack) && stack.length > 0) {
+              const urlTs = layersInfo.thicknesses;
+              const sameLen = urlTs.length === stack.length;
+              const anyMismatch = stack.some((l, i) => {
+                const dbT = Number((l as any)?.thicknessIn);
+                const urlT = Number(urlTs[i]);
+                if (!Number.isFinite(urlT) || urlT <= 0) return false;
+                // Treat missing/invalid DB thickness, or an obvious mismatch, as needing override.
+                return !Number.isFinite(dbT) || dbT <= 0 || Math.abs(dbT - urlT) > 1e-6;
+              });
+
+              if (sameLen && anyMismatch) {
+                const nextStack = stack.map((l, i) => ({
+                  ...l,
+                  thicknessIn: snapInches(Number(urlTs[i]) || 0),
+                }));
+
+                // Keep block length/width from DB, but ensure total thickness matches URL sum.
+                const sum = urlTs.reduce((acc, n) => acc + (Number(n) || 0), 0);
+                const nextBlock = {
+                  ...(dbLayout as any).block,
+                  thicknessIn: Number.isFinite(sum) && sum > 0 ? snapInches(sum) : (dbLayout as any).block?.thicknessIn,
+                };
+
+                mergedLayout = {
+                  ...(dbLayout as any),
+                  block: nextBlock,
+                  stack: nextStack,
+                  // Ensure cavities reflect the active layer (layer 1) on first open.
+                  cavities: Array.isArray(nextStack[0]?.cavities) ? nextStack[0].cavities : (dbLayout as any).cavities,
+                } as any;
+              }
+            }
+          }
+
           if (!cancelled) {
-            setInitialLayout(dbLayout);
+            setInitialLayout(mergedLayout);
             setInitialNotes(notesFromDb);
             setInitialQty(qtyFromItems);
             setInitialMaterialId(materialIdOverride ?? materialIdFromItems);
