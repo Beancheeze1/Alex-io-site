@@ -10,6 +10,7 @@
 //  - Mirrors active layer thickness into layout.block.thicknessIn for UI controls
 //  - Legacy layouts normalized exactly once
 //  - Path A safe
+//  - HARDENING: ensure cavity x/y are always finite so drag can never teleport to (0,0)
 
 "use client";
 
@@ -331,6 +332,11 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         cavsIn.map((c: Cavity) => {
           const next = { ...c } as Cavity;
 
+          // HARDENING: x/y must always be finite; otherwise drag math can produce NaN
+          // which clamp01() turns into 0 => teleport to the corner.
+          (next as any).x = clamp01Or((next as any).x, 0.2);
+          (next as any).y = clamp01Or((next as any).y, 0.2);
+
           let id = String((next as any).id ?? "").trim();
           if (!id || seenIds.has(id)) {
             // Assign a new globally-unique cav-N id (only when duplicate/missing)
@@ -375,7 +381,13 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   // layout (even if it has cavities). Multi-layer layouts must provide `stack`.
   if (cavsRaw.length) {
     // Seed stable IDs to prevent phantom duplicates on mount
-    const seeded = cavsRaw.map((c, i) => ({ ...c, id: `seed-cav-${i + 1}` }));
+    const seeded = cavsRaw.map((c, i) => ({
+      ...c,
+      id: `seed-cav-${i + 1}`,
+      // HARDENING: ensure x/y exist on legacy cavities too
+      x: clamp01Or((c as any).x, 0.2),
+      y: clamp01Or((c as any).y, 0.2),
+    }));
     const cavs = dedupeCavities(seeded);
 
     const thickness = safeInch(block.thicknessIn ?? 1, 0.5);
@@ -441,6 +453,11 @@ function dedupeCavities(list: Cavity[]) {
 
     if (seen.has(key)) continue;
     seen.add(key);
+
+    // HARDENING: final safety — x/y should never be missing in state
+    (c as any).x = clamp01Or((c as any).x, 0.2);
+    (c as any).y = clamp01Or((c as any).y, 0.2);
+
     out.push(c);
   }
 
@@ -459,7 +476,14 @@ function nextCavityNumber(stack: LayoutLayer[]) {
 }
 
 function clamp01(v: number) {
+  // keep existing behavior for normal numeric inputs
   return Math.max(0, Math.min(1, v || 0));
+}
+
+function clamp01Or(v: any, fallback: number) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return clamp01(fallback);
+  return clamp01(n);
 }
 
 function safeInch(v: number | undefined, min: number) {
@@ -483,6 +507,7 @@ function normalizeCavityPatch(p: Partial<Cavity>) {
   if (p.depthIn != null) o.depthIn = safeInch(p.depthIn, 0.25);
   if (p.cornerRadiusIn != null) o.cornerRadiusIn = safeInch(p.cornerRadiusIn, 0);
   if (p.label != null) o.label = p.label;
+  // NOTE: we do NOT allow editing x/y here — movement goes through updateCavityPosition()
   return o;
 }
 
