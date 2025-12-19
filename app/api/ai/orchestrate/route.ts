@@ -971,6 +971,15 @@ function extractCavities(raw: string): { cavityCount?: number; cavityDims?: stri
     let m: RegExpExecArray | null;
     while ((m = reTriple.exec(lineNoQuotes))) {
       cavityDims.push(`${m[1]}x${m[2]}x${m[3]}`);
+
+// BACKUP BEHAVIOR: allow 2-number cavity patterns and coerce to square proxy (DxDxDepth=1)
+// This is how circle cavities worked previously.
+const rePair = new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`, "gi");
+while ((m = rePair.exec(lineNoQuotes))) {
+  cavityDims.push(`${m[1]}x${m[2]}x1`);
+}
+
+
     }
 
     // Circle cavities: ØD x depth  (supports "Ø3 x 1", "3 dia x 1", "3 diameter x 1")
