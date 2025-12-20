@@ -71,22 +71,33 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   }, []);
 
   const setActiveLayerId = useCallback((id: string) => {
-    setState((prev) => {
-      const layer = prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
-      const mirrored = dedupeCavities(layer.cavities);
+  setState((prev) => {
+    const layer =
+      prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
 
-      return {
-        layout: {
-          ...prev.layout,
-          // Mirror active layer thickness into block.thicknessIn for UI that binds to block dims
-          block: { ...prev.layout.block, thicknessIn: safeInch(layer.thicknessIn, 0.5) },
-          cavities: [...mirrored],
+    // CRITICAL:
+    // When switching layers, we must fully reset any cavity-derived UI state.
+    // Otherwise spacing / selection / drag math may reference cavities
+    // that belong to the previous layer and cause position snaps.
+    const mirrored = dedupeCavities(layer.cavities);
+
+    return {
+      layout: {
+        ...prev.layout,
+        block: {
+          ...prev.layout.block,
+          thicknessIn: safeInch(layer.thicknessIn, 0.5),
         },
-        activeLayerId: layer.id,
-      };
-    });
-    setSelectedId(null);
-  }, []);
+        cavities: [...mirrored],
+      },
+      activeLayerId: layer.id,
+    };
+  });
+
+  // HARD RESET selection on layer switch
+  setSelectedId(null);
+}, []);
+
 
   const updateCavityPosition = useCallback((id: string, x: number, y: number) => {
     setState((prev) => {
