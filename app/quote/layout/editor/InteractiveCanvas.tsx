@@ -12,7 +12,7 @@
 
 "use client";
 
-import { useRef, useState, useEffect, MouseEvent } from "react";
+import { useRef, useState, useEffect, useMemo, MouseEvent } from "react";
 
 import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
 
@@ -77,6 +77,30 @@ export default function InteractiveCanvas({
   const [drag, setDrag] = useState<DragState>(null);
 
   const { block, cavities } = layout;
+
+  // ===== Path-A hardening: always clear any in-flight drag across layer switches =====
+  // (Layer switches change mirrored thickness and/or cavity set; if the user releases
+  // the mouse outside the SVG, SVG won't see mouseup, leaving drag "armed".)
+  const cavityIdKey = useMemo(
+    () => cavities.map((c) => c.id).join("|"),
+    [cavities],
+  );
+
+  useEffect(() => {
+    setDrag(null);
+  }, [block.thicknessIn, cavityIdKey]);
+
+  useEffect(() => {
+    const onUp = () => setDrag(null);
+    const onBlur = () => setDrag(null);
+
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
 
   // ==== Block scaling / centering (with zoom) ====
   const innerW = CANVAS_WIDTH - PADDING * 2;
@@ -187,7 +211,6 @@ export default function InteractiveCanvas({
   const handlePointerDownPan = () => {};
   const handlePointerMovePan = () => {};
   const handlePointerUpPan = () => {};
-
 
   // ==== Mouse handlers ====
 
@@ -436,8 +459,7 @@ export default function InteractiveCanvas({
             const cavityFill = "#d4d4d8"; // slightly darker than block
 
             return (
-  <g key={`${layout.block.thicknessIn}-${cavity.id}`}>
-
+              <g key={cavity.id}>
                 {isCircle ? (
                   <circle
                     cx={cavX + cavWidthPx / 2}
