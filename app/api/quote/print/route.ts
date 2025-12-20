@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
 import { computePricingBreakdown } from "@/app/lib/pricing/compute";
+import { buildLayoutExports } from "@/app/lib/layout/exports";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -219,145 +220,67 @@ function computeLayoutThicknessMetrics(layoutJson: any) {
     return 0;
   });
 
-  const stack_total_thickness_in = stackHasAny ? stackTotal : null;
+  // Active layer cavity depth max (if we can find it)
+  let activeCavityMaxDepth: number | null = null;
 
-  // Choose cavity layer:
-  // 1) Prefer active layer (by id) if it has any cavities
-  // 2) Else first layer with cavities
-  // 3) Else null
-  let cavityLayerIndex: number | null = null;
-
-  if (layers.length > 0) {
-    if (activeLayerId) {
-      const idx = layers.findIndex((ly) => String(ly?.id ?? "") === activeLayerId);
-      if (idx >= 0) {
-        const cavs = Array.isArray(layers[idx]?.cavities) ? layers[idx]!.cavities! : [];
-        if (cavs.length > 0) cavityLayerIndex = idx;
-      }
-    }
-
-    if (cavityLayerIndex == null) {
-      const idx = layers.findIndex(
-        (ly) => Array.isArray(ly?.cavities) && (ly.cavities?.length ?? 0) > 0,
-      );
-      if (idx >= 0) cavityLayerIndex = idx;
-    }
-  }
-
-  const cavityLayer = cavityLayerIndex != null ? layers[cavityLayerIndex] : null;
-  const cavity_layer_thickness_in =
-    cavityLayerIndex != null
-      ? pickThicknessIn(cavityLayer) ?? perLayerThickness[cavityLayerIndex] ?? null
+  const activeLayer =
+    activeLayerId && layers.length > 0
+      ? layers.find((l: any) => String(l?.id ?? "") === activeLayerId) ?? null
       : null;
 
-  // Max cavity depth in that layer
-  let maxCavityDepth = 0;
-  let hasDepth = false;
+  const activeCavities = Array.isArray(activeLayer?.cavities)
+    ? (activeLayer as any).cavities
+    : Array.isArray(layoutJson?.cavities)
+      ? layoutJson.cavities
+      : [];
 
-  if (cavityLayer && Array.isArray(cavityLayer.cavities)) {
-    for (const cav of cavityLayer.cavities) {
+  if (Array.isArray(activeCavities) && activeCavities.length > 0) {
+    for (const cav of activeCavities) {
       const d = pickCavityDepthIn(cav);
       if (d != null) {
-        hasDepth = true;
-        if (d > maxCavityDepth) maxCavityDepth = d;
+        if (activeCavityMaxDepth == null || d > activeCavityMaxDepth) activeCavityMaxDepth = d;
       }
     }
-  }
-
-  const max_cavity_depth_in_layer_in = hasDepth ? maxCavityDepth : null;
-
-  // Min thickness under cavities = layer thickness - deepest cavity (clamp at 0)
-  let min_thickness_under_cavities_in: number | null = null;
-  if (cavity_layer_thickness_in != null && max_cavity_depth_in_layer_in != null) {
-    const raw = cavity_layer_thickness_in - max_cavity_depth_in_layer_in;
-    min_thickness_under_cavities_in = raw >= 0 ? raw : 0;
   }
 
   return {
-    stack_total_thickness_in,
-    cavity_layer_index: cavityLayerIndex,
-    cavity_layer_thickness_in,
-    max_cavity_depth_in_layer_in,
-    min_thickness_under_cavities_in,
+    layer_count: layers.length,
+    stack_total_thickness_in: stackHasAny ? stackTotal : null,
+    per_layer_thickness_in: perLayerThickness,
+    active_layer_id: activeLayerId,
+    active_layer_cavity_max_depth_in: activeCavityMaxDepth,
   };
 }
 
-function isLayoutLayerItem(it: ItemRow): boolean {
-  const n = typeof it.notes === "string" ? it.notes : "";
-  return n.startsWith("[LAYOUT-LAYER]");
+function isLayoutLayerItem(it: ItemRow) {
+  const notes = String(it.notes ?? "");
+  return notes.startsWith("[LAYOUT-LAYER]");
 }
 
 async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
-  try {
-    const { L, W, H } = parseDimsNums(item);
-    const qty = Number(item.qty);
-    const materialId = Number(item.material_id);
+  const { L, W, H } = parseDimsNums(item);
 
-    if (![L, W, H, qty, materialId].every((n) => Number.isFinite(n) && n > 0)) {
-      // Keep original item if we can't safely calc.
-      return item;
-    }
+  if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return item;
+  if (!Number.isFinite(Number(item.qty)) || Number(item.qty) <= 0) return item;
+  if (!Number.isFinite(Number(item.material_id)) || Number(item.material_id) <= 0) return item;
 
-    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const result = await computePricingBreakdown({
+    length_in: L,
+    width_in: W,
+    height_in: H,
+    density_lbft3: item.density_lb_ft3 ?? null,
+    cost_per_lb: null,
+    qty: item.qty,
+  } as any);
 
-    const resp = await fetch(`${base}/api/quotes/calc`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        length_in: L,
-        width_in: W,
-        height_in: H,
-        material_id: materialId,
-        qty,
-        cavities: [], // IMPORTANT: we do not change cavity logic here (Path A)
-        round_to_bf: false,
-      }),
-    });
+  const unit = (result as any)?.unitPrice ?? null;
+  const total = (result as any)?.extendedPrice ?? null;
 
-    const json = (await resp.json().catch(() => null as any)) as any;
-    if (!resp.ok || !json || !json.ok || !json.result) {
-      // If calc fails for any reason, just return the bare item.
-      return item;
-    }
-
-    const result = json.result || {};
-    const rawTotal = Number(result.total ?? result.price_total ?? 0);
-    const total = Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : 0;
-    const piece = qty > 0 && Number.isFinite(total) ? total / qty : null;
-
-    // NEW: compact pricing_meta blob we can use on the UI
-    const pricing_meta: ItemRow["pricing_meta"] = {
-      variant_used: json.variant_used ?? null,
-      piece_ci: result.piece_ci ?? null,
-      order_ci: result.order_ci ?? null,
-      order_ci_with_waste: result.order_ci_with_waste ?? null,
-      price_per_ci: result.price_per_ci ?? null,
-      price_per_bf: result.price_per_bf ?? null,
-      min_charge: result.min_charge ?? null,
-      total: result.total ?? null,
-      used_min_charge: !!result.used_min_charge,
-      kerf_pct: result.kerf_pct ?? null,
-      is_skived: !!result.is_skived,
-      skive_pct: result.skive_pct ?? null,
-      setup_fee: result.setup_fee ?? null,
-      cavities_ci: result.cavities_ci ?? null,
-      piece_ci_raw: result.piece_ci_raw ?? null,
-      material_name: result.material_name ?? null,
-    };
-
-    let pricing_breakdown: any = undefined;
-
-    return {
-      ...item,
-      price_total_usd: Number.isFinite(total) ? total : null,
-      price_unit_usd: piece != null && Number.isFinite(piece) ? piece : null,
-      pricing_meta,
-      ...(pricing_breakdown ? { pricing_breakdown } : {}),
-    };
-  } catch (err) {
-    console.error("attachPricingToItem error:", err);
-    return item;
-  }
+  return {
+    ...item,
+    price_unit_usd: unit != null && Number.isFinite(Number(unit)) ? Number(unit) : item.price_unit_usd ?? null,
+    price_total_usd: total != null && Number.isFinite(Number(total)) ? Number(total) : item.price_total_usd ?? null,
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -378,17 +301,18 @@ export async function GET(req: NextRequest) {
   try {
     const quote = await one<QuoteRow>(
       `
-        select
-          id,
-          quote_no,
-          customer_name,
-          email,
-          phone,
-          company,
-          status,
-          created_at
-        from quotes
-        where quote_no = $1
+      select
+        id,
+        quote_no,
+        customer_name,
+        email,
+        phone,
+        company,
+        status,
+        created_at,
+        color
+      from quotes
+      where quote_no = $1
       `,
       [quoteNo],
     );
@@ -404,49 +328,52 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // hydrate facts (color, etc.)
-    let facts: any = null;
-    try {
-      facts = await loadFacts(quote.quote_no);
-    } catch {
-      facts = null;
-    }
-
-    const hydratedColor: string | null =
-      facts?.color != null && String(facts.color).trim() !== ""
-        ? String(facts.color).trim()
-        : null;
-
-    (quote as any).color = hydratedColor;
-
-    const itemsRaw = await q<ItemRow>(
+    // Load items (including layer rows if present)
+    let itemsRaw = await q<ItemRow>(
       `
-        select
-          qi.id,
-          qi.quote_id,
-          qi.length_in::text,
-          qi.width_in::text,
-          qi.height_in::text,
-          qi.qty,
-          qi.material_id,
-          qi.notes,
-          m.name as material_name,
-          m.material_family,
-          m.density_lb_ft3
-        from quote_items qi
-        left join materials m on m.id = qi.material_id
-        where qi.quote_id = $1
-        order by qi.id asc
-      `,
+      select
+        qi.id,
+        qi.quote_id,
+        qi.length_in,
+        qi.width_in,
+        qi.height_in,
+        qi.qty,
+        qi.material_id,
+        m.name as material_name,
+        m.material_family as material_family,
+        m.density_lb_ft3 as density_lb_ft3,
+        qi.notes,
+        qi.color
+      from quote_items qi
+      left join materials m on m.id = qi.material_id
+      where qi.quote_id = $1
+      order by qi.id asc
+    `,
       [quote.id],
     );
 
-    let items: ItemRow[] = [];
+    // Hydrate color fallback from quote
+    const hydratedColor = quote.color ?? null;
+    if (hydratedColor) {
+      itemsRaw = itemsRaw.map((it) => ({ ...it, color: it.color ?? hydratedColor }));
+    }
 
-    if (itemsRaw.length > 0) {
-      items = await Promise.all(itemsRaw.map((it) => attachPricingToItem(it)));
-    } else {
-      // fallback from memory if no DB items exist
+    // Attach pricing (best-effort) to each item row
+    let items: ItemRow[] = [];
+    for (const item of itemsRaw) {
+      try {
+        const withPricing = await attachPricingToItem(item);
+        items.push(withPricing);
+      } catch (err) {
+        console.error("quote/print: attachPricingToItem failed:", err);
+        items.push(item);
+      }
+    }
+
+    // If items missing, try memory fallback to keep quote usable
+    if (!items || items.length === 0) {
+      const facts = await loadFacts(quoteNo);
+
       try {
         const dims = String(facts?.dims || "");
         const [Lraw, Wraw, Hraw] = dims.split("x");
@@ -454,9 +381,8 @@ export async function GET(req: NextRequest) {
         const W = Number(Wraw);
         const H = Number(Hraw);
         const qtyFact = Number(facts?.qty ?? 0);
-        const matId = Number(facts?.material_id ?? 0);
 
-        if ([L, W, H, qtyFact, matId].every((n) => Number.isFinite(n) && n > 0)) {
+        if ([L, W, H, qtyFact].every((n) => Number.isFinite(n) && n > 0)) {
           const synthetic: ItemRow = {
             id: 0,
             quote_id: quote.id,
@@ -464,7 +390,7 @@ export async function GET(req: NextRequest) {
             width_in: W.toString(),
             height_in: H.toString(),
             qty: qtyFact,
-            material_id: matId,
+            material_id: 0,
             material_name: facts?.material_name || null,
             material_family: facts?.material_family || null,
             density_lb_ft3: Number.isFinite(Number(facts?.material_density_lb_ft3))
@@ -488,7 +414,7 @@ export async function GET(req: NextRequest) {
       items = items.map((it) => ({ ...it, color: it.color ?? hydratedColor }));
     }
 
-    const layoutPkg = await one<LayoutPkgRow>(
+    let layoutPkg = await one<LayoutPkgRow>(
       `
         select
           id,
@@ -507,85 +433,28 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
+    // ------------------------------------------------------------
+    // PATH A FIX: Admin exports should honor rounded corners.
+    // Regenerate SVG from layout_json (source of truth) so admin preview
+    // matches the quote preview renderer (roundedRect + cornerRadiusIn).
+    // DXF/STEP remain as stored for now.
+    // ------------------------------------------------------------
+    if (layoutPkg && layoutPkg.layout_json) {
+      try {
+        const bundle = buildLayoutExports(layoutPkg.layout_json as any);
+        if (bundle?.svg && typeof bundle.svg === "string" && bundle.svg.length > 0) {
+          layoutPkg = { ...layoutPkg, svg_text: bundle.svg };
+        }
+      } catch (err) {
+        // Never break quote loading for older quotes or unexpected layout shapes.
+        console.warn("quote/print: layout export regen failed (svg only):", err);
+      }
+    }
+
     const layoutMetrics =
       layoutPkg && layoutPkg.layout_json
         ? computeLayoutThicknessMetrics(layoutPkg.layout_json)
         : null;
-
-    // ------------------------------------------------------------
-    // FIX (Path A): If this quote's DB items are [LAYOUT-LAYER] rows,
-    // build a single "Foam set" priced as the SUM of the priced layers,
-    // and mark the layer rows as Included (no price fields).
-    // ------------------------------------------------------------
-    const layerItems = items.filter(isLayoutLayerItem);
-    if (layerItems.length > 0) {
-      const layerTotal = layerItems.reduce((sum, it) => {
-        const n = typeof it.price_total_usd === "number" ? it.price_total_usd : Number(it.price_total_usd ?? 0);
-        return Number.isFinite(n) ? sum + n : sum;
-      }, 0);
-
-      const baseQty =
-        layerItems.length > 0 && Number.isFinite(Number(layerItems[0].qty)) && Number(layerItems[0].qty) > 0
-          ? Number(layerItems[0].qty)
-          : 1;
-
-      // Prefer layout block dims for display (L/W) and stack total thickness (H)
-      let setL = Number(layerItems[0].length_in);
-      let setW = Number(layerItems[0].width_in);
-      let setH = Number(layerItems[0].height_in);
-
-      try {
-        const block = layoutPkg?.layout_json?.block || {};
-        const rawLength = block.lengthIn ?? block.length ?? block.L ?? block.l;
-        const rawWidth = block.widthIn ?? block.width ?? block.W ?? block.w;
-        const stackH = layoutMetrics?.stack_total_thickness_in ?? null;
-
-        const Lb = Number(rawLength);
-        const Wb = Number(rawWidth);
-
-        if (Number.isFinite(Lb) && Lb > 0) setL = Lb;
-        if (Number.isFinite(Wb) && Wb > 0) setW = Wb;
-        if (stackH != null && Number.isFinite(Number(stackH)) && Number(stackH) > 0) {
-          setH = Number(stackH);
-        }
-      } catch {
-        // keep defaults
-      }
-
-      const foamSet: ItemRow = {
-        id: -1,
-        quote_id: quote.id,
-        length_in: setL.toString(),
-        width_in: setW.toString(),
-        height_in: setH.toString(),
-        qty: baseQty,
-        material_id: layerItems[0].material_id,
-        material_name: layerItems[0].material_name ?? null,
-        material_family: layerItems[0].material_family,
-        density_lb_ft3: layerItems[0].density_lb_ft3,
-        notes: "[FOAM-SET] Foam set — layered construction",
-        color: layerItems[0].color ?? hydratedColor ?? null,
-        price_total_usd: Math.round(layerTotal * 100) / 100,
-        price_unit_usd: baseQty > 0 ? Math.round((layerTotal / baseQty) * 100) / 100 : null,
-        pricing_meta: {
-          variant_used: "layer_sum",
-          total: Math.round(layerTotal * 100) / 100,
-          used_min_charge: false,
-        },
-      };
-
-      // Mark layers as included for UI + subtotal (do not double count)
-      const includedLayers = layerItems.map((it) => ({
-        ...it,
-        price_total_usd: null,
-        price_unit_usd: null,
-      }));
-
-      // Keep any non-layer items (packaging etc.) after
-      const nonLayer = items.filter((it) => !isLayoutLayerItem(it));
-
-      items = [foamSet, ...includedLayers, ...nonLayer];
-    }
 
     // ---------- packaging lines: quote_box_selections + boxes ----------
     const packagingSelectionsRaw = await q<any>(
@@ -621,34 +490,28 @@ export async function GET(req: NextRequest) {
           ? Number(unitRaw)
           : null;
 
-      const extendedRaw = row.extended_price_usd;
-      let extended: number | null = null;
-
-      if (extendedRaw != null && extendedRaw !== "" && Number.isFinite(Number(extendedRaw))) {
-        extended = Number(extendedRaw);
-      } else if (unit != null && Number.isFinite(unit) && qty > 0) {
-        extended = unit * qty;
-      }
-
-      const L =
-        row.inside_length_in != null &&
-        row.inside_length_in !== "" &&
-        Number.isFinite(Number(row.inside_length_in))
-          ? Number(row.inside_length_in)
+      const extRaw = row.extended_price_usd;
+      const ext =
+        extRaw != null && extRaw !== "" && Number.isFinite(Number(extRaw))
+          ? Number(extRaw)
           : null;
 
-      const W =
-        row.inside_width_in != null &&
-        row.inside_width_in !== "" &&
-        Number.isFinite(Number(row.inside_width_in))
-          ? Number(row.inside_width_in)
+      const ilRaw = row.inside_length_in;
+      const il =
+        ilRaw != null && ilRaw !== "" && Number.isFinite(Number(ilRaw))
+          ? Number(ilRaw)
           : null;
 
-      const H =
-        row.inside_height_in != null &&
-        row.inside_height_in !== "" &&
-        Number.isFinite(Number(row.inside_height_in))
-          ? Number(row.inside_height_in)
+      const iwRaw = row.inside_width_in;
+      const iw =
+        iwRaw != null && iwRaw !== "" && Number.isFinite(Number(iwRaw))
+          ? Number(iwRaw)
+          : null;
+
+      const ihRaw = row.inside_height_in;
+      const ih =
+        ihRaw != null && ihRaw !== "" && Number.isFinite(Number(ihRaw))
+          ? Number(ihRaw)
           : null;
 
       return {
@@ -658,20 +521,17 @@ export async function GET(req: NextRequest) {
         sku: row.sku,
         qty,
         unit_price_usd: unit,
-        extended_price_usd: extended,
-        vendor: row.vendor,
-        style: row.style,
-        description: row.description,
-        inside_length_in: L,
-        inside_width_in: W,
-        inside_height_in: H,
+        extended_price_usd: ext,
+        vendor: row.vendor ?? null,
+        style: row.style ?? null,
+        description: row.description ?? null,
+        inside_length_in: il,
+        inside_width_in: iw,
+        inside_height_in: ih,
       };
     });
 
-    // ---------- subtotals: foam + packaging ----------
-
-    // Foam subtotal: sum only items that actually have a numeric price_total_usd.
-    // (Layer rows are now Included → null, so they won't double count.)
+    // Subtotals
     const foamSubtotal = items.reduce((sum, it) => {
       const raw = (it as any).price_total_usd;
       const n = typeof raw === "number" ? raw : raw != null ? Number(raw) : 0;
@@ -685,20 +545,20 @@ export async function GET(req: NextRequest) {
 
     const grandSubtotal = foamSubtotal + packagingSubtotal;
 
-    return ok(
-      {
-        ok: true,
-        quote,
-        items,
-        layoutPkg,
-        layoutMetrics,
-        packagingLines,
-        foamSubtotal,
-        packagingSubtotal,
-        grandSubtotal,
-      },
-      200,
-    );
+    const facts = await loadFacts(quoteNo);
+
+    return ok({
+      ok: true,
+      quote,
+      items,
+      layoutPkg,
+      layoutMetrics,
+      packagingLines,
+      foamSubtotal,
+      packagingSubtotal,
+      grandSubtotal,
+      facts,
+    });
   } catch (err) {
     console.error("Error in /api/quote/print:", err);
     return bad(
