@@ -750,7 +750,26 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
         return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
       }
 
-      return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+      // ---- roundedRect support (Path A, admin preview only) ----
+// FlatCavity typing in admin may be narrower than runtime layout cavities.
+// Use safe runtime reads (no global type changes).
+const shape = String((c as any)?.shape ?? "rect");
+const cornerRadiusInRaw = Number((c as any)?.cornerRadiusIn ?? 0);
+
+// Clamp radius so SVG is valid
+const r = Number.isFinite(cornerRadiusInRaw) && cornerRadiusInRaw > 0
+  ? Math.max(0, Math.min(cornerRadiusInRaw, w2 / 2, h2 / 2))
+  : 0;
+
+if (shape === "roundedRect" || r > 0) {
+  // Only emit rx/ry when > 0
+  if (r > 0) {
+    return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" rx="${r}" ry="${r}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+  }
+}
+
+// default rect (includes legacy "rect")
+return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
     })
     .filter(Boolean)
     .join("");
