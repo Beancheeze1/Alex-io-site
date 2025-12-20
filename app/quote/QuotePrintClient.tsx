@@ -218,8 +218,9 @@ type FlatCavity = {
   x: number; // normalized 0..1
   y: number; // normalized 0..1
   depthIn?: number | null;
-  shape?: "rect" | "circle" | null;
+  shape?: "rect" | "roundedRect" | "circle" | null;
   diameterIn?: number | null;
+  cornerRadiusIn?: number | null;
 };
 
 /** Extract the layers array from layout_json (supports stack/layers/foamLayers). */
@@ -300,12 +301,28 @@ function getLayerThicknessInFromLayout(layout: any, layerIndex: number): number 
   return null;
 }
 
-/** Normalize shape field values to rect/circle. Matches admin logic 1:1. */
-function normalizeShape(raw: any): "rect" | "circle" | null {
+/** Normalize shape field values to rect/roundedRect/circle (display-only preview). */
+function normalizeShape(raw: any): "rect" | "roundedRect" | "circle" | null {
   const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   if (!s) return null;
 
+  // Circle aliases
   if (s === "circle" || s === "round" || s === "circular") return "circle";
+
+  // Rounded-rect aliases (keep distinct from plain rect)
+  if (
+    s === "roundedrect" ||
+    s === "rounded_rect" ||
+    s === "rounded-rect" ||
+    s === "rounded rectangle" ||
+    s === "roundrect" ||
+    s === "round_rect" ||
+    s === "round-rect"
+  ) {
+    return "roundedRect";
+  }
+
+  // Plain rect aliases
   if (s === "rect" || s === "rectangle" || s === "square") return "rect";
 
   return null;
@@ -358,6 +375,16 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
           : Math.min(lengthIn, w)
         : null;
 
+    const radiusRaw =
+      (cav as any).cornerRadiusIn ??
+      (cav as any).corner_radius_in ??
+      (cav as any).cornerRadius ??
+      (cav as any).corner_radius ??
+      null;
+    const radiusNum = radiusRaw == null ? NaN : Number(radiusRaw);
+    const cornerRadiusIn =
+      shape === "roundedRect" && Number.isFinite(radiusNum) && radiusNum > 0 ? radiusNum : null;
+
     out.push({
       lengthIn,
       widthIn: w,
@@ -366,6 +393,7 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
       depthIn,
       shape: shape ?? null,
       diameterIn: diameterIn ?? null,
+      cornerRadiusIn,
     });
   }
 
@@ -468,7 +496,11 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
       const h2 = Math.max(0, Math.min(W - y2, h));
       if (w2 <= 0 || h2 <= 0) return "";
 
-      return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+      const rRaw = c.cornerRadiusIn;
+      const r = typeof rRaw === "number" && Number.isFinite(rRaw) && rRaw > 0 ? rRaw : 0;
+      const rx = c.shape === "roundedRect" ? Math.max(0, Math.min(r, w2 / 2, h2 / 2)) : 0;
+
+      return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" rx="${rx}" ry="${rx}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
     })
     .filter(Boolean)
     .join("");
