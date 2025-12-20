@@ -1071,85 +1071,75 @@ function LayoutEditorHost(props: {
     selectCavity(null);
   }, [effectiveActiveLayerId, layerCount, selectCavity, layers]);
 
-  // When a new cavity is added, try to drop it into "dead space"
-  const prevCavityCountRef = React.useRef<number>(cavities.length);
-  React.useEffect(() => {
-    const prevCount = prevCavityCountRef.current;
+ // When a new cavity is added, try to drop it into "dead space"
+const prevCavityCountRef = React.useRef<number>(cavities.length);
 
-    if (
-      cavities.length > prevCount &&
-      block.lengthIn &&
-      block.widthIn &&
-      Number.isFinite(block.lengthIn) &&
-      Number.isFinite(block.widthIn)
-    ) {
-      const newCavity = cavities[cavities.length - 1];
-      if (newCavity) {
-        const existing = cavities.slice(0, -1);
+// NEW: layer-switch guard.
+// Switching layers can change cavities.length (e.g., 0 -> 3) which looks like
+// "a cavity was added" and this effect will reposition the last cavity.
+// We bail out on layer change and only sync the baseline count.
+const prevLayerIdRef = React.useRef<string>(effectiveActiveLayerId); // <-- if your file uses activeLayerId, swap it here
 
-        const cavLen = Number(newCavity.lengthIn) || 1;
-        const cavWid = Number(newCavity.widthIn) || 1;
+React.useEffect(() => {
+  // If we changed layers, do NOT run auto-placement.
+  // Just sync our baseline and exit.
+  if (prevLayerIdRef.current !== effectiveActiveLayerId) { // <-- if your file uses activeLayerId, swap it here too
+    prevLayerIdRef.current = effectiveActiveLayerId;
+    prevCavityCountRef.current = cavities.length;
+    return;
+  }
 
-        const usableLen = Math.max(block.lengthIn - 2 * WALL_IN, cavLen);
-        const usableWid = Math.max(block.widthIn - 2 * WALL_IN, cavWid);
+  const prevCount = prevCavityCountRef.current;
 
-        const isOverlapping = (xIn: number, yIn: number) => {
-          return existing.some((c) => {
-            const cxIn = (Number(c.x) || 0) * block.lengthIn;
-            const cyIn = (Number(c.y) || 0) * block.widthIn;
-            const cLen = Number(c.lengthIn) || 0;
-            const cWid = Number(c.widthIn) || 0;
+  if (
+    cavities.length > prevCount &&
+    block.lengthIn &&
+    block.widthIn &&
+    Number.isFinite(block.lengthIn) &&
+    Number.isFinite(block.widthIn)
+  ) {
+    const newCavity = cavities[cavities.length - 1];
+    if (newCavity) {
+      const existing = cavities.slice(0, -1);
 
-            // Simple AABB overlap check
-            return !(
-              xIn + cavLen <= cxIn ||
-              cxIn + cLen <= xIn ||
-              yIn + cavWid <= cyIn ||
-              cyIn + cWid <= yIn
-            );
-          });
-        };
+      const cavLen = Number(newCavity.lengthIn) || 1;
+      const cavWid = Number(newCavity.widthIn) || 1;
 
-        let chosenXIn: number | null = null;
-        let chosenYIn: number | null = null;
+      const usableLen = Math.max(block.lengthIn - 2 * WALL_IN, cavLen);
+      const usableWid = Math.max(block.widthIn - 2 * WALL_IN, cavWid);
 
-        const cols = 3;
-        const rows = 3;
-        const cellW = usableLen / cols;
-        const cellH = usableWid / rows;
+      const isOverlapping = (xIn: number, yIn: number) => {
+        return existing.some((c) => {
+          const cxIn = (Number(c.x) || 0) * block.lengthIn;
+          const cyIn = (Number(c.y) || 0) * block.widthIn;
+          const cLen = Number(c.lengthIn) || 0;
+          const cWid = Number(c.widthIn) || 0;
 
-        for (let row = 0; row < rows; row++) {
-          for (let col = 0; col < cols; col++) {
-            const centerXIn = WALL_IN + cellW * (col + 0.5);
-            const centerYIn = WALL_IN + cellH * (row + 0.5);
+          // Simple AABB overlap check
+          return !(
+            xIn + cavLen <= cxIn ||
+            cxIn + cLen <= xIn ||
+            yIn + cavWid <= cyIn ||
+            cyIn + cWid <= yIn
+          );
+        });
+      };
 
-            let xIn = centerXIn - cavLen / 2;
-            let yIn = centerYIn - cavWid / 2;
+      let chosenXIn: number | null = null;
+      let chosenYIn: number | null = null;
 
-            const minXIn = WALL_IN;
-            const maxXIn = block.lengthIn - WALL_IN - cavLen;
-            const minYIn = WALL_IN;
-            const maxYIn = block.widthIn - WALL_IN - cavWid;
+      const cols = 3;
+      const rows = 3;
+      const cellW = usableLen / cols;
+      const cellH = usableWid / rows;
 
-            const clamp = (v: number, min: number, max: number) =>
-              v < min ? min : v > max ? max : v;
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const centerXIn = WALL_IN + cellW * (col + 0.5);
+          const centerYIn = WALL_IN + cellH * (row + 0.5);
 
-            xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
-            yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
-
-            if (!isOverlapping(xIn, yIn)) {
-              chosenXIn = xIn;
-              chosenYIn = yIn;
-              break;
-            }
-          }
-          if (chosenXIn != null) break;
-        }
-
-        // Fallback: center placement inside walls
-        if (chosenXIn == null || chosenYIn == null) {
-          let xIn = (block.lengthIn - cavLen) / 2;
-          let yIn = (block.widthIn - cavWid) / 2;
+          let xIn = centerXIn - cavLen / 2;
+          let yIn = centerYIn - cavWid / 2;
 
           const minXIn = WALL_IN;
           const maxXIn = block.lengthIn - WALL_IN - cavLen;
@@ -1162,25 +1152,57 @@ function LayoutEditorHost(props: {
           xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
           yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
 
-          chosenXIn = xIn;
-          chosenYIn = yIn;
+          if (!isOverlapping(xIn, yIn)) {
+            chosenXIn = xIn;
+            chosenYIn = yIn;
+            break;
+          }
         }
+        if (chosenXIn != null) break;
+      }
 
-        if (
-          chosenXIn != null &&
-          chosenYIn != null &&
-          block.lengthIn > 0 &&
-          block.widthIn > 0
-        ) {
-          const xNorm = chosenXIn / block.lengthIn;
-          const yNorm = chosenYIn / block.widthIn;
-          updateCavityPosition(newCavity.id, xNorm, yNorm);
-        }
+      // Fallback: center placement inside walls
+      if (chosenXIn == null || chosenYIn == null) {
+        let xIn = (block.lengthIn - cavLen) / 2;
+        let yIn = (block.widthIn - cavWid) / 2;
+
+        const minXIn = WALL_IN;
+        const maxXIn = block.lengthIn - WALL_IN - cavLen;
+        const minYIn = WALL_IN;
+        const maxYIn = block.widthIn - WALL_IN - cavWid;
+
+        const clamp = (v: number, min: number, max: number) =>
+          v < min ? min : v > max ? max : v;
+
+        xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+        yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+        chosenXIn = xIn;
+        chosenYIn = yIn;
+      }
+
+      if (
+        chosenXIn != null &&
+        chosenYIn != null &&
+        block.lengthIn > 0 &&
+        block.widthIn > 0
+      ) {
+        const xNorm = chosenXIn / block.lengthIn;
+        const yNorm = chosenYIn / block.widthIn;
+        updateCavityPosition(newCavity.id, xNorm, yNorm);
       }
     }
+  }
 
-    prevCavityCountRef.current = cavities.length;
-  }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
+  // Always update baseline at end
+  prevCavityCountRef.current = cavities.length;
+}, [
+  cavities,
+  block.lengthIn,
+  block.widthIn,
+  effectiveActiveLayerId, // <-- swap to activeLayerId if needed
+  updateCavityPosition,
+]);
 
   // Handle edits to the active layer's thickness
   const handleActiveLayerThicknessChange = (value: string) => {
