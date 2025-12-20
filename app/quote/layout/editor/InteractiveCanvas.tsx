@@ -12,7 +12,7 @@
 
 "use client";
 
-import { useRef, useState, useEffect, useMemo, MouseEvent } from "react";
+import { useRef, useState, MouseEvent } from "react";
 
 import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
 
@@ -77,30 +77,6 @@ export default function InteractiveCanvas({
   const [drag, setDrag] = useState<DragState>(null);
 
   const { block, cavities } = layout;
-
-  // ===== Path-A hardening: always clear any in-flight drag across layer switches =====
-  // (Layer switches change mirrored thickness and/or cavity set; if the user releases
-  // the mouse outside the SVG, SVG won't see mouseup, leaving drag "armed".)
-  const cavityIdKey = useMemo(
-    () => cavities.map((c) => c.id).join("|"),
-    [cavities],
-  );
-
-  useEffect(() => {
-    setDrag(null);
-  }, [block.thicknessIn, cavityIdKey]);
-
-  useEffect(() => {
-    const onUp = () => setDrag(null);
-    const onBlur = () => setDrag(null);
-
-    window.addEventListener("mouseup", onUp);
-    window.addEventListener("blur", onBlur);
-    return () => {
-      window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("blur", onBlur);
-    };
-  }, []);
 
   // ==== Block scaling / centering (with zoom) ====
   const innerW = CANVAS_WIDTH - PADDING * 2;
@@ -204,6 +180,7 @@ export default function InteractiveCanvas({
       ].join(" ");
 
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
+
   // === Pan state disabled (we keep the API but do nothing) ===
   const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
   const panMode = false;
@@ -363,15 +340,15 @@ export default function InteractiveCanvas({
     setDrag(null);
   };
 
-  const innerWall = {
-    leftIn: WALL_IN,
-    rightIn: block.lengthIn - WALL_IN,
-    topIn: WALL_IN,
-    bottomIn: block.widthIn - WALL_IN,
-  };
+  // Keep spacing visible during drag:
+  // If selection disappears mid-drag (due to upstream click/selection clearing),
+  // we still compute spacing off the dragged cavity.
+  const spacingCavity =
+    selectedCavity ||
+    (drag ? cavities.find((c) => c.id === drag.id) || null : null);
 
-  const spacing = selectedCavity
-    ? computeSpacing(selectedCavity, block, cavities, blockPx, blockOffset)
+  const spacing = spacingCavity
+    ? computeSpacing(spacingCavity, block, cavities, blockPx, blockOffset)
     : null;
 
   return (
@@ -918,7 +895,6 @@ function drawSpacing(info: SpacingInfo) {
       {/* left edge of foam block */}
       {edgeDims.leftIn > 0 && (
         <g>
-          {/* vertical dimension line on the foam edge */}
           <line
             x1={edgeDims.leftPx}
             y1={edgeDims.cavTopPx}
@@ -928,7 +904,6 @@ function drawSpacing(info: SpacingInfo) {
             strokeDasharray="4 3"
             strokeWidth={1}
           />
-          {/* horizontal reference line from foam edge to cavity */}
           <line
             x1={edgeDims.leftPx}
             y1={(edgeDims.cavTopPx + edgeDims.cavBottomPx) / 2}
@@ -952,7 +927,6 @@ function drawSpacing(info: SpacingInfo) {
       {/* right edge of foam block */}
       {edgeDims.rightIn > 0 && (
         <g>
-          {/* vertical dimension line on the foam edge */}
           <line
             x1={edgeDims.rightPx}
             y1={edgeDims.cavTopPx}
@@ -962,7 +936,6 @@ function drawSpacing(info: SpacingInfo) {
             strokeDasharray="4 3"
             strokeWidth={1}
           />
-          {/* horizontal reference line from cavity to foam edge */}
           <line
             x1={edgeDims.cavRightPx}
             y1={(edgeDims.cavTopPx + edgeDims.cavBottomPx) / 2}
@@ -986,7 +959,6 @@ function drawSpacing(info: SpacingInfo) {
       {/* top edge of foam block */}
       {edgeDims.topIn > 0 && (
         <g>
-          {/* horizontal dimension line along the foam edge */}
           <line
             x1={edgeDims.cavLeftPx}
             y1={edgeDims.topPx}
@@ -996,7 +968,6 @@ function drawSpacing(info: SpacingInfo) {
             strokeDasharray="4 3"
             strokeWidth={1}
           />
-          {/* vertical reference line from foam edge down to cavity */}
           <line
             x1={(edgeDims.cavLeftPx + edgeDims.cavRightPx) / 2}
             y1={edgeDims.topPx}
@@ -1020,7 +991,6 @@ function drawSpacing(info: SpacingInfo) {
       {/* bottom edge of foam block */}
       {edgeDims.bottomIn > 0 && (
         <g>
-          {/* horizontal dimension line along the foam edge */}
           <line
             x1={edgeDims.cavLeftPx}
             y1={edgeDims.bottomPx}
@@ -1030,7 +1000,6 @@ function drawSpacing(info: SpacingInfo) {
             strokeDasharray="4 3"
             strokeWidth={1}
           />
-          {/* vertical reference line from cavity down to foam edge */}
           <line
             x1={(edgeDims.cavLeftPx + edgeDims.cavRightPx) / 2}
             y1={edgeDims.cavBottomPx}
