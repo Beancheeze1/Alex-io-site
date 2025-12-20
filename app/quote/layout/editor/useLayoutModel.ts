@@ -11,6 +11,8 @@
 //  - Legacy layouts normalized exactly once
 //  - Path A safe
 //  - HARDENING: ensure cavity x/y are always finite so drag can never teleport to (0,0)
+//  - NEW HARDENING (12/19): NEVER turn invalid x/y into 0 (upper-left teleport).
+//    If an invalid coordinate reaches updateCavityPosition(), we keep the prior value.
 
 "use client";
 
@@ -41,7 +43,7 @@ export type UseLayoutModelResult = {
     id: string,
     patch: Partial<
       Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
-    >,
+    >
   ) => void;
   addCavity: (
     shape: CavityShape,
@@ -71,33 +73,22 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   }, []);
 
   const setActiveLayerId = useCallback((id: string) => {
-  setState((prev) => {
-    const layer =
-      prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
+    setState((prev) => {
+      const layer = prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
+      const mirrored = dedupeCavities(layer.cavities);
 
-    // CRITICAL:
-    // When switching layers, we must fully reset any cavity-derived UI state.
-    // Otherwise spacing / selection / drag math may reference cavities
-    // that belong to the previous layer and cause position snaps.
-    const mirrored = dedupeCavities(layer.cavities);
-
-    return {
-      layout: {
-        ...prev.layout,
-        block: {
-          ...prev.layout.block,
-          thicknessIn: safeInch(layer.thicknessIn, 0.5),
+      return {
+        layout: {
+          ...prev.layout,
+          // Mirror active layer thickness into block.thicknessIn for UI that binds to block dims
+          block: { ...prev.layout.block, thicknessIn: safeInch(layer.thicknessIn, 0.5) },
+          cavities: [...mirrored],
         },
-        cavities: [...mirrored],
-      },
-      activeLayerId: layer.id,
-    };
-  });
-
-  // HARD RESET selection on layer switch
-  setSelectedId(null);
-}, []);
-
+        activeLayerId: layer.id,
+      };
+    });
+    setSelectedId(null);
+  }, []);
 
   const updateCavityPosition = useCallback((id: string, x: number, y: number) => {
     setState((prev) => {
@@ -106,9 +97,17 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           ? layer
           : {
               ...layer,
-              cavities: layer.cavities.map((c) =>
-                c.id === id ? { ...c, x: clamp01(x), y: clamp01(y) } : c,
-              ),
+              cavities: layer.cavities.map((c) => {
+                if (c.id !== id) return c;
+
+                // CRITICAL HARDENING:
+                // If x/y are invalid (NaN/Infinity/undefined), DO NOT turn them into 0.
+                // Keep the prior value to prevent "teleport to upper-left".
+                const nextX = clamp01OrKeep(x, (c as any).x);
+                const nextY = clamp01OrKeep(y, (c as any).y);
+
+                return { ...c, x: nextX, y: nextY };
+              }),
             },
       );
 
@@ -466,12 +465,10 @@ function dedupeCavities(list: Cavity[]) {
     seen.add(key);
 
     // HARDENING: final safety — x/y should never be missing in state
-    // CRITICAL FIX: clone before clamping so we NEVER mutate layer-owned cavity objects.
-    const next = { ...(c as any) } as Cavity;
-    (next as any).x = clamp01Or((next as any).x, 0.2);
-    (next as any).y = clamp01Or((next as any).y, 0.2);
+    (c as any).x = clamp01Or((c as any).x, 0.2);
+    (c as any).y = clamp01Or((c as any).y, 0.2);
 
-    out.push(next);
+    out.push(c);
   }
 
   return out;
@@ -496,6 +493,17 @@ function clamp01(v: number) {
 function clamp01Or(v: any, fallback: number) {
   const n = Number(v);
   if (!Number.isFinite(n)) return clamp01(fallback);
+  return clamp01(n);
+}
+
+// NEW: keep prior value when incoming coordinate is invalid
+function clamp01OrKeep(v: any, prior: any) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) {
+    const p = Number(prior);
+    if (Number.isFinite(p)) return clamp01(p);
+    return clamp01(0.2);
+  }
   return clamp01(n);
 }
 
