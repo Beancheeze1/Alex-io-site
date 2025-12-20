@@ -436,7 +436,8 @@ export default function InteractiveCanvas({
             const cavityFill = "#d4d4d8"; // slightly darker than block
 
             return (
-              <g key={cavity.id}>
+  <g key={`${layout.block.thicknessIn}-${cavity.id}`}>
+
                 {isCircle ? (
                   <circle
                     cx={cavX + cavWidthPx / 2}
