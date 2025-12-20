@@ -1073,7 +1073,18 @@ function LayoutEditorHost(props: {
 
   // When a new cavity is added, try to drop it into "dead space"
   const prevCavityCountRef = React.useRef<number>(cavities.length);
+  // Guard: switching layers can change cavities.length and would incorrectly
+  // trigger "new cavity" placement (which repositions the last cavity).
+  const prevLayerIdRef = React.useRef<string | null>(effectiveActiveLayerId);
   React.useEffect(() => {
+    // If we changed layers, do NOT run the "dead space" auto-placement.
+    // Just sync baselines for this layer and exit.
+    if (prevLayerIdRef.current !== effectiveActiveLayerId) {
+      prevLayerIdRef.current = effectiveActiveLayerId;
+      prevCavityCountRef.current = cavities.length;
+      return;
+    }
+
     const prevCount = prevCavityCountRef.current;
 
     if (
@@ -1180,7 +1191,7 @@ function LayoutEditorHost(props: {
     }
 
     prevCavityCountRef.current = cavities.length;
-  }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
+  }, [cavities, block.lengthIn, block.widthIn, effectiveActiveLayerId, updateCavityPosition]);
 
   // Handle edits to the active layer's thickness
   const handleActiveLayerThicknessChange = (value: string) => {
