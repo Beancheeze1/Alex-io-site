@@ -41,7 +41,7 @@ export type UseLayoutModelResult = {
     id: string,
     patch: Partial<
       Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
-    >
+    >,
   ) => void;
   addCavity: (
     shape: CavityShape,
@@ -442,33 +442,29 @@ function cavitySig(c: Cavity) {
 
 function dedupeCavities(list: Cavity[]) {
   // IMPORTANT:
-  // We must allow multiple cavities with identical dimensions.
-  // De-dupe by stable `id` first; fall back to dims signature only if id is missing.
+  // We must allow multiple cavities with identical dimensions (common in packaging).
+  // So we de-dupe by stable `id` first. Only fall back to a dims signature when `id` is missing.
   const seen = new Set<string>();
   const out: Cavity[] = [];
 
-  for (const src of list || []) {
-    const id = String((src as any)?.id ?? "").trim();
-    const key = id ? `id:${id}` : `sig:${cavitySig(src)}`;
+  for (const c of list || []) {
+    const id = String((c as any)?.id ?? "").trim();
+    const key = id ? `id:${id}` : `sig:${cavitySig(c)}`;
 
     if (seen.has(key)) continue;
     seen.add(key);
 
-    // CRITICAL FIX:
-    // Clone cavity before normalization so we never mutate
-    // layer-owned cavity objects during mirroring.
-    const c: Cavity = {
-      ...src,
-      x: clamp01Or((src as any).x, 0.2),
-      y: clamp01Or((src as any).y, 0.2),
-    };
+    // HARDENING: final safety — x/y should never be missing in state
+    // CRITICAL FIX: clone before clamping so we NEVER mutate layer-owned cavity objects.
+    const next = { ...(c as any) } as Cavity;
+    (next as any).x = clamp01Or((next as any).x, 0.2);
+    (next as any).y = clamp01Or((next as any).y, 0.2);
 
-    out.push(c);
+    out.push(next);
   }
 
   return out;
 }
-
 
 function nextCavityNumber(stack: LayoutLayer[]) {
   let max = 0;
