@@ -1073,18 +1073,7 @@ function LayoutEditorHost(props: {
 
   // When a new cavity is added, try to drop it into "dead space"
   const prevCavityCountRef = React.useRef<number>(cavities.length);
-  // Guard: switching layers can change cavities.length and would incorrectly
-  // trigger "new cavity" placement (which repositions the last cavity).
-  const prevLayerIdRef = React.useRef<string | null>(effectiveActiveLayerId);
   React.useEffect(() => {
-    // If we changed layers, do NOT run the "dead space" auto-placement.
-    // Just sync baselines for this layer and exit.
-    if (prevLayerIdRef.current !== effectiveActiveLayerId) {
-      prevLayerIdRef.current = effectiveActiveLayerId;
-      prevCavityCountRef.current = cavities.length;
-      return;
-    }
-
     const prevCount = prevCavityCountRef.current;
 
     if (
@@ -1191,7 +1180,7 @@ function LayoutEditorHost(props: {
     }
 
     prevCavityCountRef.current = cavities.length;
-  }, [cavities, block.lengthIn, block.widthIn, effectiveActiveLayerId, updateCavityPosition]);
+  }, [cavities, block.lengthIn, block.widthIn, updateCavityPosition]);
 
   // Handle edits to the active layer's thickness
   const handleActiveLayerThicknessChange = (value: string) => {
@@ -2802,12 +2791,18 @@ function buildSvgFromLayout(
         ].join("\n"),
       );
     } else {
-       cavects.push(
+      const isRounded = (c as any).shape === "roundedRect";
+      const rIn = Number((c as any).cornerRadiusIn) || 0;
+      const rPx = isRounded ? Math.max(0, rIn) * scale : 0;
+      const rx = Math.min(rPx, cavW / 2, cavH / 2);
+      const ry = rx;
+
+      cavects.push(
         [
           `<g>`,
           `  <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${cavW.toFixed(
             2,
-          )}" height="${cavH.toFixed(2)}" rx="0" ry="0" fill="none" stroke="#111827" stroke-width="1" />`,
+          )}" height="${cavH.toFixed(2)}" rx="${rx.toFixed(2)}" ry="${ry.toFixed(2)}" fill="none" stroke="#111827" stroke-width="1" />`,
           `  <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
             2,
           )}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#111827">${escapeText(
