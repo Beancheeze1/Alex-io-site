@@ -351,10 +351,11 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
   const svg = svgRaw;
 
   // Extract viewBox: "minX minY width height"
-  const vbMatch = svg.match(/viewBox\\s*=\\s*"([^"]+)"/i);
+  // FIX: use real regex escapes (not double-escaped)
+  const vbMatch = svg.match(/viewBox\s*=\s*"([^"]+)"/i);
   if (!vbMatch) return null;
 
-  const vbParts = vbMatch[1].trim().split(/\\s+/).map((s) => Number(s));
+  const vbParts = vbMatch[1].trim().split(/\s+/).map((s) => Number(s));
   if (vbParts.length !== 4) return null;
 
   const vbW = vbParts[2];
@@ -413,22 +414,23 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
   const entities: string[] = [];
 
   // --- rects ---
-  const rectRe = /<rect\\b([^>]*)\\/?>/gi;
+  // FIX: correct regex so we actually match <rect .../>
+  const rectRe = /<rect\b([^>]*)\/?>/gi;
   let rectM: RegExpExecArray | null = null;
   while ((rectM = rectRe.exec(svg))) {
     const attrs = rectM[1] || "";
 
-    const x = Number((attrs.match(/\\bx\\s*=\\s*"([^"]+)"/i)?.[1] ?? "0"));
-    const y = Number((attrs.match(/\\by\\s*=\\s*"([^"]+)"/i)?.[1] ?? "0"));
-    const w = Number((attrs.match(/\\bwidth\\s*=\\s*"([^"]+)"/i)?.[1] ?? "0"));
-    const h = Number((attrs.match(/\\bheight\\s*=\\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const x = Number((attrs.match(/\bx\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const y = Number((attrs.match(/\by\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const w = Number((attrs.match(/\bwidth\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
+    const h = Number((attrs.match(/\bheight\s*=\s*"([^"]+)"/i)?.[1] ?? "0"));
 
     if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) continue;
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
 
     // rx/ry (optional)
-    const rxRaw = attrs.match(/\\brx\\s*=\\s*"([^"]+)"/i)?.[1] ?? null;
-    const ryRaw = attrs.match(/\\bry\\s*=\\s*"([^"]+)"/i)?.[1] ?? null;
+    const rxRaw = attrs.match(/\brx\s*=\s*"([^"]+)"/i)?.[1] ?? null;
+    const ryRaw = attrs.match(/\bry\s*=\s*"([^"]+)"/i)?.[1] ?? null;
 
     const rxNum = rxRaw == null ? NaN : Number(rxRaw);
     const ryNum = ryRaw == null ? NaN : Number(ryRaw);
@@ -466,14 +468,14 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
   }
 
   // --- circles ---
-  const circleRe = /<circle\\b([^>]*)\\/?>/gi;
+  const circleRe = /<circle\b([^>]*)\/?>/gi;
   let circM: RegExpExecArray | null = null;
   while ((circM = circleRe.exec(svg))) {
     const attrs = circM[1] || "";
 
-    const cx = Number((attrs.match(/\\bcx\\s*=\\s*"([^"]+)"/i)?.[1] ?? "NaN"));
-    const cySvg = Number((attrs.match(/\\bcy\\s*=\\s*"([^"]+)"/i)?.[1] ?? "NaN"));
-    const r = Number((attrs.match(/\\br\\s*=\\s*"([^"]+)"/i)?.[1] ?? "NaN"));
+    const cx = Number((attrs.match(/\bcx\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN"));
+    const cySvg = Number((attrs.match(/\bcy\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN"));
+    const r = Number((attrs.match(/\br\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN"));
 
     if (!Number.isFinite(cx) || !Number.isFinite(cySvg) || !Number.isFinite(r) || r <= 0) continue;
 
@@ -535,12 +537,14 @@ function buildSvgWithAnnotations(
   let svg = svgRaw as string;
 
   // 1) Remove any previous <g id="alex-io-notes">...</g> groups.
-  svg = svg.replace(/<g[^>]*id=["']alex-io-notes["'][^>]*>[\\s\\S]*?<\\/g>/gi, "");
+  // FIX: correct closing tag regex so it actually removes the group
+  svg = svg.replace(/<g\b[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g\s*>/gi, "");
 
   // 2) Remove individual <text> nodes that look like old legends.
   const legendLabelPattern = /(NOT TO SCALE|FOAM BLOCK:|FOAM:|BLOCK:|MATERIAL:)/i;
 
-  svg = svg.replace(/<text\\b[^>]*>[\\s\\S]*?<\\/text>/gi, (match) => (legendLabelPattern.test(match) ? "" : match));
+  // FIX: correct regex escapes
+  svg = svg.replace(/<text\b[^>]*>[\s\S]*?<\/text>/gi, (match) => (legendLabelPattern.test(match) ? "" : match));
 
   if (!layout || !layout.block) {
     return svg;
@@ -568,7 +572,7 @@ function buildSvgWithAnnotations(
   const svgClose = svg.slice(closeIdx);
 
   function bumpLengthAttr(tag: string, attrName: string, delta: number): string {
-    const re = new RegExp(`${attrName}\\\\s*=\\\\s*"([^"]+)"`);
+    const re = new RegExp(`${attrName}\\s*=\\s*"([^"]+)"`);
     const m = tag.match(re);
     if (!m) return tag;
     const original = m[1];
@@ -581,10 +585,11 @@ function buildSvgWithAnnotations(
     return tag.replace(re, `${attrName}="${updated}"`);
   }
 
-  const vbRe = /viewBox\\s*=\\s*"([^"]+)"/;
+  // FIX: correct regex escapes
+  const vbRe = /viewBox\s*=\s*"([^"]+)"/;
   const vbMatch = svgOpen.match(vbRe);
   if (vbMatch) {
-    const parts = vbMatch[1].trim().split(/\\s+/);
+    const parts = vbMatch[1].trim().split(/\s+/);
     if (parts.length === 4) {
       const h = parseFloat(parts[3]);
       if (Number.isFinite(h)) {
