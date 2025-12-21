@@ -1,15 +1,20 @@
 // app/api/quote/print/route.ts
 //
 // Returns full quote data (header + items + latest layout package)
-// by quote_no, and attaches a pricing snapshot to each item using
-// the volumetric calc route.
+// by quote_no.
+//
+// NOTE (Path A):
+// We intentionally DO NOT "auto price" items here anymore.
+// The previous attachPricingToItem() was calling computePricingBreakdown()
+// with cost_per_lb = null, which turns into 0 and produces misleading low totals.
+// Until a real cost model is wired into this endpoint, pricing should display as
+// "pending" instead of fake numbers.
 //
 // GET /api/quote/print?quote_no=Q-AI-20251116-115613
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
-import { computePricingBreakdown } from "@/app/lib/pricing/compute";
 import { buildLayoutExports } from "@/app/lib/layout/exports";
 
 export const dynamic = "force-dynamic";
@@ -78,35 +83,9 @@ function bad(body: any, status = 400) {
   return NextResponse.json(body, { status });
 }
 
-function parseDimsNums(item: ItemRow) {
-  return {
-    L: Number(item.length_in),
-    W: Number(item.width_in),
-    H: Number(item.height_in),
-  };
-}
-
+// Path A: pricing is NOT computed here. Keep this function in case we re-enable later.
 async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
-  const { L, W, H } = parseDimsNums(item);
-
-  if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return item;
-  if (!Number.isFinite(Number(item.qty)) || item.qty <= 0) return item;
-  if (!Number.isFinite(Number(item.material_id)) || item.material_id <= 0) return item;
-
-  const result = await computePricingBreakdown({
-    length_in: L,
-    width_in: W,
-    height_in: H,
-    density_lbft3: item.density_lb_ft3 ?? null,
-    cost_per_lb: null,
-    qty: item.qty,
-  } as any);
-
-  return {
-    ...item,
-    price_unit_usd: Number((result as any)?.unitPrice ?? item.price_unit_usd ?? null),
-    price_total_usd: Number((result as any)?.extendedPrice ?? item.price_total_usd ?? null),
-  };
+  return item;
 }
 
 export async function GET(req: NextRequest) {
@@ -138,7 +117,7 @@ export async function GET(req: NextRequest) {
       return bad({ ok: false, error: "NOT_FOUND" }, 404);
     }
 
-    let itemsRaw = await q<ItemRow>(
+    const itemsRaw = await q<ItemRow>(
       `
       select
         qi.id,
@@ -221,6 +200,7 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
+    // Path A: if we are not computing pricing here, these should remain 0 unless the DB stores priced totals.
     const foamSubtotal = items.reduce((s, i) => s + (Number(i.price_total_usd) || 0), 0);
     const packagingSubtotal = packagingLines.reduce((s, l) => s + (Number(l.extended_price_usd) || 0), 0);
 
