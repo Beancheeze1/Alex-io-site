@@ -408,14 +408,24 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const computedUsedMinCharge =
     pricing.used_min_charge ?? pricing.raw?.min_charge_applied ?? false;
 
-  // When pending, replace numeric-ish pricing fields with — / Pending (keep the same rows & layout).
-  const minCharge = pricingPending
-    ? "—"
-    : material.min_charge != null
-      ? fmtMoney(material.min_charge)
-      : pricing.raw?.min_charge
-        ? fmtMoney(pricing.raw.min_charge)
-        : "$0.00";
+  // ============================================================
+  // STEP 2B (DISPLAY-ONLY):
+  // Don’t show "$0.00" as a “min charge” when it’s really unknown / not configured.
+  // We show:
+  //   - "—" if no min charge is provided
+  //   - and only show "(applied)/(not applied...)" when a real min charge exists
+  // ============================================================
+  const minChargeNum: number | null = pricingPending
+    ? null
+    : material.min_charge != null && Number.isFinite(Number(material.min_charge))
+      ? Number(material.min_charge)
+      : pricing.raw?.min_charge != null && Number.isFinite(Number(pricing.raw.min_charge))
+        ? Number(pricing.raw.min_charge)
+        : null;
+
+  const hasMinCharge = minChargeNum != null && minChargeNum > 0;
+
+  const minCharge = pricingPending ? "—" : hasMinCharge ? fmtMoney(minChargeNum) : "—";
 
   const orderTotal = pricingPending ? "Pending" : computedOrderTotal;
 
@@ -577,9 +587,11 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${minCharge}${
                             pricingPending
                               ? ""
-                              : usedMinCharge
-                                ? " (applied)"
-                                : " (not applied on this run)"
+                              : hasMinCharge
+                                ? usedMinCharge
+                                  ? " (applied)"
+                                  : " (not applied on this run)"
+                                : ""
                           }</td>
                         </tr>
                         <tr>
