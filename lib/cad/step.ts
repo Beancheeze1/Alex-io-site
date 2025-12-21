@@ -15,20 +15,23 @@ export type CavityDef = {
   lengthIn: number;
   widthIn: number;
   depthIn: number;
-  x: number; // normalized 0..1 across block length
-  y: number; // normalized 0..1 across block width
+  x: number;
+  y: number;
 
-  // preferred (our canonical)
-  shape?: string | null; // "rect" | "circle"
+  shape?: string | null;
   diameterIn?: number | null;
 
-  // aliases (for microservice compatibility)
+  // NEW: explicit rounded-rect support
+  cornerRadiusIn?: number | null;
+
+  // aliases for microservice
   cavityShape?: string | null;
   type?: string | null;
   radiusIn?: number | null;
   diameter?: number | null;
   r?: number | null;
 };
+
 
 export type FoamLayer = {
   thicknessIn: number;
@@ -69,66 +72,39 @@ function normalizeShape(raw: any): string | null {
   return s;
 }
 
-function normalizeCavities(raw: any): CavityDef[] {
+function normalizeCavities(raw: any[]): CavityDef[] {
   if (!Array.isArray(raw)) return [];
-  const out: CavityDef[] = [];
 
-  for (const c of raw) {
-    if (!c) continue;
+  return raw.map((c) => {
+    const lengthIn = Number(c.lengthIn);
+    const widthIn = Number(c.widthIn);
+    const depthIn = Number(c.depthIn);
+    const x = Number(c.x);
+    const y = Number(c.y);
 
-    const lengthIn = safePosNumber(c.lengthIn ?? c.length_in ?? c.length);
-    const widthIn = safePosNumber(c.widthIn ?? c.width_in ?? c.width);
-    const depthIn = safePosNumber(
-      c.depthIn ??
-        c.depth_in ??
-        c.depth ??
-        c.heightIn ??
-        c.height_in ??
-        c.height,
-    );
-    const x = safeNorm01(c.x);
-    const y = safeNorm01(c.y);
+    const shape = typeof c.shape === "string" ? c.shape : null;
+    const cornerRadiusIn =
+      Number.isFinite(c.cornerRadiusIn) && c.cornerRadiusIn > 0
+        ? c.cornerRadiusIn
+        : null;
 
-    if (!(lengthIn && widthIn && depthIn && x != null && y != null)) continue;
-
-    const shape = normalizeShape(c.shape ?? c.cavityShape ?? c.type ?? c.cavity_shape ?? null);
-
-    // “diameter” may exist under many names
-    const diameterIn =
-      safePosNumber(c.diameterIn ?? c.diameter_in ?? c.diameter ?? c.diaIn ?? c.dia_in ?? c.dia) ??
-      null;
-
-    // If it’s a circle and we still don’t have a diameter, fall back to min(L,W)
-    const inferredDiameter =
-      shape === "circle" ? Math.min(lengthIn, widthIn) : null;
-
-    const d = diameterIn ?? inferredDiameter ?? null;
-    const r = d != null ? d / 2 : null;
-
-    // Build a cavity object that includes both our canonical keys and aliases
-    const cav: CavityDef = {
+    return {
       lengthIn,
       widthIn,
       depthIn,
       x,
       y,
+      shape,
+      diameterIn: c.diameterIn ?? null,
+      cornerRadiusIn,
 
-      // canonical
-      shape: shape ?? null,
-      diameterIn: d,
-
-      // aliases (so the microservice matches *something*)
-      cavityShape: shape ?? null,
-      type: shape ?? null,
-      radiusIn: r,
-      diameter: d,
-      r: r,
+      cavityShape: shape,
+      type: shape,
+      radiusIn: cornerRadiusIn,
+      r: cornerRadiusIn,
+      diameter: c.diameterIn ?? null,
     };
-
-    out.push(cav);
-  }
-
-  return out;
+  });
 }
 
 function normalizeLayoutForStep(layout: any): LayoutForStep | null {

@@ -130,6 +130,44 @@ function formatUsd(value: number | null | undefined): string {
   }
 }
 
+
+/* ============================================================
+   🔒 NEW: canonical SVG rounded-rect path generator
+   ============================================================ */
+
+function svgRoundedRectPath(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): string {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  if (rr <= 0) {
+    return `M ${x} ${y} H ${x + w} V ${y + h} H ${x} Z`;
+  }
+
+  const x2 = x + w;
+  const y2 = y + h;
+
+  return [
+    `M ${x + rr} ${y}`,
+    `H ${x2 - rr}`,
+    `A ${rr} ${rr} 0 0 1 ${x2} ${y + rr}`,
+    `V ${y2 - rr}`,
+    `A ${rr} ${rr} 0 0 1 ${x2 - rr} ${y2}`,
+    `H ${x + rr}`,
+    `A ${rr} ${rr} 0 0 1 ${x} ${y2 - rr}`,
+    `V ${y + rr}`,
+    `A ${rr} ${rr} 0 0 1 ${x + rr} ${y}`,
+    `Z`,
+  ].join(" ");
+}
+
+
+
+
+
 /* ---------------- Filename helpers (manufacturer-friendly) ---------------- */
 
 function sanitizeFilenamePart(input: string): string {
@@ -209,6 +247,64 @@ type FlatCavity = {
   // NEW: carry rounded corner radius through so admin previews can render it
   cornerRadiusIn?: number | null;
 };
+
+
+function arcEntity(
+  cx: number,
+  cy: number,
+  r: number,
+  startDeg: number,
+  endDeg: number,
+): string {
+  return [
+    "0", "ARC",
+    "8", "0",
+    "10", cx.toFixed(4),
+    "20", cy.toFixed(4),
+    "30", "0.0",
+    "40", r.toFixed(4),
+    "50", startDeg.toFixed(4),
+    "51", endDeg.toFixed(4),
+  ].join("\n");
+}
+
+function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
+  return [
+    "0", "LINE",
+    "8", "0",
+    "10", x1.toFixed(4),
+    "20", y1.toFixed(4),
+    "30", "0.0",
+    "11", x2.toFixed(4),
+    "21", y2.toFixed(4),
+    "31", "0.0",
+  ].join("\n");
+}
+
+function emitRoundedRectDXF(
+  entities: string[],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  const x2 = x + w;
+  const y2 = y + h;
+
+  // Lines
+  entities.push(lineEntity(x + rr, y, x2 - rr, y));
+  entities.push(lineEntity(x2, y + rr, x2, y2 - rr));
+  entities.push(lineEntity(x2 - rr, y2, x + rr, y2));
+  entities.push(lineEntity(x, y2 - rr, x, y + rr));
+
+  // Arcs (DXF angles are CCW, degrees)
+  entities.push(arcEntity(x2 - rr, y + rr, rr, 270, 360)); // bottom-right
+  entities.push(arcEntity(x2 - rr, y2 - rr, rr,   0,  90)); // top-right
+  entities.push(arcEntity(x + rr, y2 - rr, rr,  90, 180)); // top-left
+  entities.push(arcEntity(x + rr, y + rr, rr, 180, 270)); // bottom-left
+}
 
 type TargetDimsIn = { L: number; W: number };
 
@@ -413,7 +509,6 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
   if (!Number.isFinite(rawL) || rawL <= 0) return null;
   const fallbackW = Number.isFinite(rawW) && rawW > 0 ? rawW : rawL;
 
-  // Uniform scale: prefer using target L when available; keeps circles circular.
   let scale = 1;
   if (
     targetDimsIn &&
@@ -435,83 +530,50 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
 
   function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
     return [
-      "0",
-      "LINE",
-      "8",
-      "0",
-      "10",
-      fmt(x1),
-      "20",
-      fmt(y1),
-      "30",
-      "0.0",
-      "11",
-      fmt(x2),
-      "21",
-      fmt(y2),
-      "31",
-      "0.0",
+      "0","LINE","8","0",
+      "10",fmt(x1),"20",fmt(y1),"30","0.0",
+      "11",fmt(x2),"21",fmt(y2),"31","0.0",
     ].join("\n");
   }
 
   const entities: string[] = [];
 
-  // 1) Block rectangle
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
   entities.push(lineEntity(0, W, 0, 0));
 
-  // 2) Layer-specific cavities (normalized x/y → inches)
   const cavs = getCavitiesForLayer(layout, layerIndex);
 
   for (const cav of cavs) {
     const cL = cav.lengthIn;
     const cW = cav.widthIn;
 
-    // X is consistent (0 = left). Y must be flipped to match SVG/editor:
-    // SVG: y grows downward from top
-    // DXF: y grows upward from bottom
     const x0 = L * cav.x;
-
     const ySvgTop = W * cav.y;
-    const y0 = W - ySvgTop - cW; // flip + keep cavity height in-bounds
+    const y0 = W - ySvgTop - cW;
 
-    // Defensive clamp (keep inside block)
     const left = Math.max(0, Math.min(L - cL, x0));
     const bottom = Math.max(0, Math.min(W - cW, y0));
 
-    // If circle, output a CIRCLE entity. Otherwise, rectangle lines.
     if (cav.shape === "circle") {
       const dia =
-        cav.diameterIn != null && Number.isFinite(cav.diameterIn) && cav.diameterIn > 0
-          ? cav.diameterIn
-          : Math.min(cL, cW);
-
-      const r = Math.max(0, dia / 2);
+        cav.diameterIn && cav.diameterIn > 0 ? cav.diameterIn : Math.min(cL, cW);
+      const r = dia / 2;
       const cx = left + cL / 2;
       const cy = bottom + cW / 2;
 
       entities.push(
-        [
-          "0",
-          "CIRCLE",
-          "8",
-          "0",
-          "10",
-          fmt(cx),
-          "20",
-          fmt(cy),
-          "30",
-          "0.0",
-          "40",
-          fmt(r),
-        ].join("\n"),
+        ["0","CIRCLE","8","0","10",fmt(cx),"20",fmt(cy),"30","0.0","40",fmt(r)].join("\n"),
       );
       continue;
     }
 
-    // Rect (default)
+    if ((cav.shape === "roundedRect" || cav.cornerRadiusIn) && cav.cornerRadiusIn) {
+      emitRoundedRectDXF(entities, left, bottom, cL, cW, cav.cornerRadiusIn);
+      continue;
+    }
+
     entities.push(lineEntity(left, bottom, left + cL, bottom));
     entities.push(lineEntity(left + cL, bottom, left + cL, bottom + cW));
     entities.push(lineEntity(left + cL, bottom + cW, left, bottom + cW));
@@ -521,49 +583,18 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
   if (!entities.length) return null;
 
   const header = [
-    "0",
-    "SECTION",
-    "2",
-    "HEADER",
-    "9",
-    "$ACADVER",
-    "1",
-    "AC1009",
-    "9",
-    "$INSUNITS",
-    "70",
-    "1", // inches
-    "0",
-    "ENDSEC",
-    "0",
-    "SECTION",
-    "2",
-    "TABLES",
-    "0",
-    "ENDSEC",
-    "0",
-    "SECTION",
-    "2",
-    "BLOCKS",
-    "0",
-    "ENDSEC",
-    "0",
-    "SECTION",
-    "2",
-    "ENTITIES",
+    "0","SECTION","2","HEADER","9","$ACADVER","1","AC1009",
+    "9","$INSUNITS","70","1","0","ENDSEC",
+    "0","SECTION","2","TABLES","0","ENDSEC",
+    "0","SECTION","2","BLOCKS","0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
   ].join("\n");
 
-  const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
+  const footer = ["0","ENDSEC","0","EOF"].join("\n");
 
   return [header, entities.join("\n"), footer].join("\n");
 }
 
-/**
- * NEW: Build a "Full Package" DXF on-demand (client-side) using the SAME
- * scale/orientation logic as buildDxfForLayer, but combining cavities from ALL layers.
- *
- * This intentionally bypasses layoutPkg.dxf_text (which is currently mis-scaled).
- */
 function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): string | null {
   if (!layout || !layout.block) return null;
 
@@ -575,16 +606,7 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
   const fallbackW = Number.isFinite(rawW) && rawW > 0 ? rawW : rawL;
 
   let scale = 1;
-  if (
-    targetDimsIn &&
-    Number.isFinite(targetDimsIn.L) &&
-    targetDimsIn.L > 0 &&
-    Number.isFinite(rawL) &&
-    rawL > 0
-  ) {
-    scale = targetDimsIn.L / rawL;
-    if (!Number.isFinite(scale) || scale <= 0) scale = 1;
-  }
+  if (targetDimsIn?.L && rawL > 0) scale = targetDimsIn.L / rawL;
 
   const L = rawL * scale;
   const W = fallbackW * scale;
@@ -595,28 +617,14 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
 
   function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
     return [
-      "0",
-      "LINE",
-      "8",
-      "0",
-      "10",
-      fmt(x1),
-      "20",
-      fmt(y1),
-      "30",
-      "0.0",
-      "11",
-      fmt(x2),
-      "21",
-      fmt(y2),
-      "31",
-      "0.0",
+      "0","LINE","8","0",
+      "10",fmt(x1),"20",fmt(y1),"30","0.0",
+      "11",fmt(x2),"21",fmt(y2),"31","0.0",
     ].join("\n");
   }
 
   const entities: string[] = [];
 
-  // Block rectangle
   entities.push(lineEntity(0, 0, L, 0));
   entities.push(lineEntity(L, 0, L, W));
   entities.push(lineEntity(L, W, 0, W));
@@ -632,7 +640,6 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
       const cW = cav.widthIn;
 
       const x0 = L * cav.x;
-
       const ySvgTop = W * cav.y;
       const y0 = W - ySvgTop - cW;
 
@@ -640,31 +647,19 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
       const bottom = Math.max(0, Math.min(W - cW, y0));
 
       if (cav.shape === "circle") {
-        const dia =
-          cav.diameterIn != null && Number.isFinite(cav.diameterIn) && cav.diameterIn > 0
-            ? cav.diameterIn
-            : Math.min(cL, cW);
-
-        const r = Math.max(0, dia / 2);
+        const dia = cav.diameterIn ?? Math.min(cL, cW);
+        const r = dia / 2;
         const cx = left + cL / 2;
         const cy = bottom + cW / 2;
 
         entities.push(
-          [
-            "0",
-            "CIRCLE",
-            "8",
-            "0",
-            "10",
-            fmt(cx),
-            "20",
-            fmt(cy),
-            "30",
-            "0.0",
-            "40",
-            fmt(r),
-          ].join("\n"),
+          ["0","CIRCLE","8","0","10",fmt(cx),"20",fmt(cy),"30","0.0","40",fmt(r)].join("\n"),
         );
+        continue;
+      }
+
+      if ((cav.shape === "roundedRect" || cav.cornerRadiusIn) && cav.cornerRadiusIn) {
+        emitRoundedRectDXF(entities, left, bottom, cL, cW, cav.cornerRadiusIn);
         continue;
       }
 
@@ -678,51 +673,24 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
   if (!entities.length) return null;
 
   const header = [
-    "0",
-    "SECTION",
-    "2",
-    "HEADER",
-    "9",
-    "$ACADVER",
-    "1",
-    "AC1009",
-    "9",
-    "$INSUNITS",
-    "70",
-    "1", // inches
-    "0",
-    "ENDSEC",
-    "0",
-    "SECTION",
-    "2",
-    "TABLES",
-    "0",
-    "ENDSEC",
-    "0",
-    "SECTION",
-    "2",
-    "BLOCKS",
-    "0",
-    "ENDSEC",
-    "0",
-    "SECTION",
-    "2",
-    "ENTITIES",
+    "0","SECTION","2","HEADER","9","$ACADVER","1","AC1009",
+    "9","$INSUNITS","70","1","0","ENDSEC",
+    "0","SECTION","2","TABLES","0","ENDSEC",
+    "0","SECTION","2","BLOCKS","0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
   ].join("\n");
 
-  const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
+  const footer = ["0","ENDSEC","0","EOF"].join("\n");
 
   return [header, entities.join("\n"), footer].join("\n");
 }
 
 /* ---------------- Lightweight SVG preview (per-layer, client-side) ---------------- */
 function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null {
-  if (!layout || !layout.block) return null;
+  if (!layout?.block) return null;
 
-  const block = layout.block || {};
-  let L = Number(block.lengthIn ?? block.length_in);
-  let W = Number(block.widthIn ?? block.width_in);
-
+  let L = Number(layout.block.lengthIn ?? layout.block.length_in);
+  let W = Number(layout.block.widthIn ?? layout.block.width_in);
   if (!Number.isFinite(L) || L <= 0) return null;
   if (!Number.isFinite(W) || W <= 0) W = L;
 
@@ -730,60 +698,42 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
 
   const stroke = "#111827";
   const cavStroke = "#ef4444";
-
   const strokeWidth = Math.max(0.04, Math.min(L, W) / 250);
   const cavStrokeWidth = Math.max(0.03, Math.min(L, W) / 300);
 
-  const shapes = cavs
-    .map((c) => {
-      const left = L * c.x;
-      const top = W * c.y;
+  const shapes = cavs.map((c) => {
+    const x = L * c.x;
+    const y = W * c.y;
+    const w = c.lengthIn;
+    const h = c.widthIn;
 
-      const w = c.lengthIn;
-      const h = c.widthIn;
+    const r =
+      c.cornerRadiusIn && Number.isFinite(c.cornerRadiusIn)
+        ? Math.max(0, Math.min(c.cornerRadiusIn, w / 2, h / 2))
+        : 0;
 
-      const x2 = Math.max(0, Math.min(L, left));
-      const y2 = Math.max(0, Math.min(W, top));
-      const w2 = Math.max(0, Math.min(L - x2, w));
-      const h2 = Math.max(0, Math.min(W - y2, h));
-      if (w2 <= 0 || h2 <= 0) return "";
+    if (c.shape === "circle") {
+      const d = c.diameterIn ?? Math.min(w, h);
+      const rr = d / 2;
+      return `<circle cx="${x + w / 2}" cy="${y + h / 2}" r="${rr}"
+        fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+    }
 
-      if (c.shape === "circle") {
-        const dia =
-          c.diameterIn != null && Number.isFinite(c.diameterIn) && c.diameterIn > 0
-            ? c.diameterIn
-            : Math.min(w2, h2);
-        const r = Math.max(0, Math.min(dia / 2, Math.min(w2, h2) / 2));
-        if (r <= 0) return "";
+    if (c.shape === "roundedRect" || r > 0) {
+      const d = svgRoundedRectPath(x, y, w, h, r);
+      return `<path d="${d}"
+        fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+    }
 
-        const cx = x2 + w2 / 2;
-        const cy = y2 + h2 / 2;
-
-        return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
-      }
-
-      // Rounded rect support (admin preview only)
-      const rawR = c.cornerRadiusIn;
-      const r =
-        rawR != null && Number.isFinite(rawR) && rawR > 0 ? Math.max(0, Math.min(rawR, w2 / 2, h2 / 2)) : 0;
-
-      if (c.shape === "roundedRect" || r > 0) {
-        if (r > 0) {
-          return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" rx="${r}" ry="${r}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
-        }
-        // if shape says roundedRect but radius is 0, fall through to normal rect
-      }
-
-      // default rect (includes legacy "rect")
-      return `<rect x="${x2}" y="${y2}" width="${w2}" height="${h2}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
-    })
-    .filter(Boolean)
-    .join("");
+    return `<rect x="${x}" y="${y}" width="${w}" height="${h}"
+      fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+  });
 
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`,
-    `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`,
-    shapes,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%">`,
+    `<rect x="0" y="0" width="${L}" height="${W}" fill="#fff"
+      stroke="${stroke}" stroke-width="${strokeWidth}" />`,
+    shapes.join(""),
     `</svg>`,
   ].join("");
 }
