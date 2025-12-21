@@ -82,15 +82,61 @@ function fmtQty(q: number | string | null | undefined): string {
   return String(q);
 }
 
+// Normalize a cavity dim string for comparison so we can de-dupe safely.
+// Examples that should be treated the same:
+//  - "5x4x1", "5 x 4 x 1", "5×4×1", "5 X 4 X 1"
+function cavityKey(raw: any): string {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  return s
+    .toLowerCase()
+    .replace(/×/g, "x")
+    .replace(/\s+/g, "")
+    .replace(/inches|inch|in\b/g, "")
+    .replace(/["”]/g, "");
+}
+
+function dedupeCavityList(list: any[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const x of list || []) {
+    const s = String(x || "").trim();
+    if (!s) continue;
+    const k = cavityKey(s);
+    if (!k) continue;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s.replace(/×/g, "x"));
+  }
+  return out;
+}
+
 // Build human-readable cavity label like:
 // "1 cavity — 1x1x1" or "3 cavities — 1x1x1, 2x2x1"
 function buildCavityLabel(specs: TemplateSpecs): string {
-  const count = specs.cavityCount ?? (specs.cavityDims?.length || 0);
-  const dims = (specs.cavityDims || []).filter((s) => !!s && typeof s === "string");
+  const rawDims = Array.isArray(specs.cavityDims) ? specs.cavityDims : [];
+  const dims = dedupeCavityList(rawDims);
+
+  // Prefer count if provided, but never show a count bigger than the unique dims we have.
+  const countFromSpec = specs.cavityCount != null ? Number(specs.cavityCount) : null;
+
+  // Path-A TS fix: ensure Math.min() second arg is always a number (never null).
+  // If we have dims, cap to dims.length; otherwise cap to countFromSpec if it's a real number, else 0.
+  const cap =
+    dims.length > 0
+      ? dims.length
+      : Number.isFinite(countFromSpec)
+        ? (countFromSpec as number)
+        : 0;
+
+  const count =
+    Number.isFinite(countFromSpec) && (countFromSpec as number) > 0
+      ? Math.max(1, Math.min(countFromSpec as number, cap))
+      : dims.length;
 
   if (!count && dims.length === 0) return "—";
 
-  const countLabel = count === 1 ? "1 cavity" : `${count || dims.length} cavities`;
+  const countLabel = count === 1 ? "1 cavity" : `${count} cavities`;
 
   if (!dims.length) return countLabel;
 
@@ -109,12 +155,16 @@ function computeMinThicknessUnder(specs: TemplateSpecs): number | null {
   if (!specs.H_in || !Array.isArray(specs.cavityDims) || specs.cavityDims.length === 0) {
     return null;
   }
+
   const overall = Number(specs.H_in);
   if (isNaN(overall)) return null;
 
+  // De-dupe to avoid weird effects from repeated dims
+  const cavityDims = dedupeCavityList(specs.cavityDims);
+
   let minUnder: number | null = null;
 
-  for (const raw of specs.cavityDims) {
+  for (const raw of cavityDims) {
     if (!raw || typeof raw !== "string") continue;
     const parts = raw
       .split(/x|×/i)
@@ -276,15 +326,15 @@ function buildLayoutUrl(input: TemplateInput): string | null {
     params.set("dims", `${L_in}x${W_in}x${H_in}`);
   }
 
-  // Canonical cavity params: REPEATED cavity= (NOT cavities=comma and NOT only first cavity)
+  // Canonical cavity params: REPEATED cavity=
+  // IMPORTANT: De-dupe before adding to URL so we don't double-seed.
   const cavityDimsFromFacts = Array.isArray(facts.cavityDims) ? (facts.cavityDims as any[]) : [];
   const cavityDimsFromSpecs = Array.isArray(input.specs.cavityDims)
     ? (input.specs.cavityDims as any[])
     : [];
 
-  const cavityList = (cavityDimsFromFacts.length ? cavityDimsFromFacts : cavityDimsFromSpecs)
-    .map((x: any) => String(x || "").trim())
-    .filter(Boolean);
+  const cavityRaw = cavityDimsFromFacts.length ? cavityDimsFromFacts : cavityDimsFromSpecs;
+  const cavityList = dedupeCavityList(cavityRaw);
 
   for (const c of cavityList) {
     params.append("cavity", c);
@@ -408,24 +458,14 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const computedUsedMinCharge =
     pricing.used_min_charge ?? pricing.raw?.min_charge_applied ?? false;
 
-  // ============================================================
-  // STEP 2B (DISPLAY-ONLY):
-  // Don’t show "$0.00" as a “min charge” when it’s really unknown / not configured.
-  // We show:
-  //   - "—" if no min charge is provided
-  //   - and only show "(applied)/(not applied...)" when a real min charge exists
-  // ============================================================
-  const minChargeNum: number | null = pricingPending
-    ? null
-    : material.min_charge != null && Number.isFinite(Number(material.min_charge))
-      ? Number(material.min_charge)
-      : pricing.raw?.min_charge != null && Number.isFinite(Number(pricing.raw.min_charge))
-        ? Number(pricing.raw.min_charge)
-        : null;
-
-  const hasMinCharge = minChargeNum != null && minChargeNum > 0;
-
-  const minCharge = pricingPending ? "—" : hasMinCharge ? fmtMoney(minChargeNum) : "—";
+  // When pending, replace numeric-ish pricing fields with — / Pending (keep the same rows & layout).
+  const minCharge = pricingPending
+    ? "—"
+    : material.min_charge != null
+      ? fmtMoney(material.min_charge)
+      : pricing.raw?.min_charge
+        ? fmtMoney(pricing.raw.min_charge)
+        : "$0.00";
 
   const orderTotal = pricingPending ? "Pending" : computedOrderTotal;
 
@@ -587,11 +627,9 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${minCharge}${
                             pricingPending
                               ? ""
-                              : hasMinCharge
-                                ? usedMinCharge
-                                  ? " (applied)"
-                                  : " (not applied on this run)"
-                                : ""
+                              : usedMinCharge
+                                ? " (applied)"
+                                : " (not applied on this run)"
                           }</td>
                         </tr>
                         <tr>
