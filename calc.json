@@ -1,1 +1,9 @@
-{"material_id":1,"width_in":12,"qty":250,"cavities":["?6x1"],"height_in":3,"length_in":12,"round_to_bf":false}
+{
+  "length_in": 12,
+  "width_in": 12,
+  "height_in": 3,
+  "material_id": 1,
+  "qty": 250,
+  "cavities": ["?6x1"],
+  "round_to_bf": false
+}
