@@ -378,11 +378,19 @@ export function renderQuoteEmail(input: TemplateInput): string {
   }
 
   // ============================================================
-  // PATH A FIX (NO LAYOUT CHANGES):
-  // If dimensions are missing, show pending values instead of $0.00 / misleading copy.
+  // PATH A FIX (NO PRICING LOGIC CHANGES):
+  // If required inputs are missing, show pending values instead of $0.00 / misleading copy.
+  // Required inputs for showing a real dollar amount (display-only):
+  //   - Dimensions
+  //   - Material
+  //   - Density
   // ============================================================
-  const dimsMissing = Array.isArray(missing) && missing.includes("Dimensions");
-  const pricingPending = !!dimsMissing;
+  const missingList = Array.isArray(missing) ? missing : [];
+  const dimsMissing = missingList.includes("Dimensions");
+  const materialMissing = missingList.includes("Material");
+  const densityMissing = missingList.includes("Density");
+
+  const pricingPending = dimsMissing || materialMissing || densityMissing;
 
   const pieceCi = fmtNumber(pricing.piece_ci ?? pricing.raw?.piece_ci);
   const orderCi = fmtNumber(pricing.order_ci ?? pricing.raw?.order_ci);
@@ -414,7 +422,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const usedMinCharge = pricingPending ? false : computedUsedMinCharge;
 
   const appliedLabel = pricingPending
-    ? "Pending (need dimensions)"
+    ? "Pending (need specs)"
     : usedMinCharge
       ? "Minimum charge applied"
       : "Calculated from volume";
