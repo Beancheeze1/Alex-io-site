@@ -21,7 +21,7 @@ export type CavityDef = {
   shape?: string | null;
   diameterIn?: number | null;
 
-  // NEW: explicit rounded-rect support
+  // explicit rounded-rect support
   cornerRadiusIn?: number | null;
 
   // aliases for microservice
@@ -31,7 +31,6 @@ export type CavityDef = {
   diameter?: number | null;
   r?: number | null;
 };
-
 
 export type FoamLayer = {
   thicknessIn: number;
@@ -63,48 +62,114 @@ function safeNorm01(v: unknown): number | null {
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
 }
 
-function normalizeShape(raw: any): string | null {
+function normalizeShape(raw: any): "circle" | "rect" | "roundedRect" | null {
   if (typeof raw !== "string") return null;
   const s = raw.trim().toLowerCase();
   if (!s) return null;
+
   if (s === "circle" || s === "round") return "circle";
+
+  // common rect synonyms
   if (s === "rect" || s === "rectangle" || s === "square") return "rect";
-  return s;
+
+  // rounded rect synonyms seen across UI/editor code
+  if (s === "roundedrect" || s === "rounded-rect" || s === "rounded_rect" || s === "roundrect") return "roundedRect";
+
+  // If something else comes in, keep it null (we only send the canonical set)
+  return null;
+}
+
+function coerceCornerRadiusIn(c: any): number | null {
+  // Accept multiple keys; pick the first valid positive number.
+  const candidates = [
+    c?.cornerRadiusIn,
+    c?.corner_radius_in,
+    c?.corner_radius,
+    c?.radiusIn, // some codepaths may use radiusIn for rounded rect
+    c?.radius_in,
+    c?.r,
+    c?.rx, // sometimes svg-ish naming leaks into objects
+    c?.ry,
+  ];
+
+  for (const v of candidates) {
+    const n = safePosNumber(v);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+function coerceDiameterIn(c: any): number | null {
+  const candidates = [
+    c?.diameterIn,
+    c?.diameter_in,
+    c?.diameter,
+    c?.dia,
+    c?.d,
+  ];
+
+  for (const v of candidates) {
+    const n = safePosNumber(v);
+    if (n != null) return n;
+  }
+  return null;
 }
 
 function normalizeCavities(raw: any[]): CavityDef[] {
   if (!Array.isArray(raw)) return [];
 
-  return raw.map((c) => {
-    const lengthIn = Number(c.lengthIn);
-    const widthIn = Number(c.widthIn);
-    const depthIn = Number(c.depthIn);
-    const x = Number(c.x);
-    const y = Number(c.y);
+  return raw
+    .map((c) => {
+      if (!c) return null;
 
-    const shape = typeof c.shape === "string" ? c.shape : null;
-    const cornerRadiusIn =
-      Number.isFinite(c.cornerRadiusIn) && c.cornerRadiusIn > 0
-        ? c.cornerRadiusIn
-        : null;
+      const lengthIn = safePosNumber(c.lengthIn ?? c.length_in ?? c.length);
+      const widthIn = safePosNumber(c.widthIn ?? c.width_in ?? c.width) ?? lengthIn;
+      const depthIn = safePosNumber(c.depthIn ?? c.depth_in ?? c.depth ?? c.heightIn ?? c.height_in ?? c.height);
+      const x = safeNorm01(c.x);
+      const y = safeNorm01(c.y);
 
-    return {
-      lengthIn,
-      widthIn,
-      depthIn,
-      x,
-      y,
-      shape,
-      diameterIn: c.diameterIn ?? null,
-      cornerRadiusIn,
+      if (!lengthIn || !widthIn || !depthIn || x == null || y == null) return null;
 
-      cavityShape: shape,
-      type: shape,
-      radiusIn: cornerRadiusIn,
-      r: cornerRadiusIn,
-      diameter: c.diameterIn ?? null,
-    };
-  });
+      // Shape can come from multiple keys
+      const rawShape = c.shape ?? c.cavityShape ?? c.type ?? null;
+      let shape = normalizeShape(rawShape);
+
+      const cornerRadiusIn = coerceCornerRadiusIn(c);
+      const diameterIn = coerceDiameterIn(c);
+
+      // If we have a positive radius, treat as roundedRect unless it's explicitly a circle.
+      if (cornerRadiusIn != null && cornerRadiusIn > 0) {
+        if (shape !== "circle") shape = "roundedRect";
+      }
+
+      // If we have a diameter and not explicitly a rounded rect, treat as circle (service usually uses dia)
+      if (diameterIn != null && diameterIn > 0) {
+        if (shape == null || shape === "circle") shape = "circle";
+      }
+
+      // Default shape to rect if still unknown (service currently supports rect/circle only)
+      if (shape == null) shape = "rect";
+
+      return {
+        lengthIn,
+        widthIn,
+        depthIn,
+        x,
+        y,
+
+        shape,
+        diameterIn: diameterIn ?? null,
+        cornerRadiusIn: cornerRadiusIn ?? null,
+
+        // aliases for microservice
+        cavityShape: shape,
+        type: shape,
+        radiusIn: cornerRadiusIn ?? null,
+        r: cornerRadiusIn ?? null,
+        diameter: diameterIn ?? null,
+      } as CavityDef;
+    })
+    .filter((v): v is CavityDef => !!v);
 }
 
 function normalizeLayoutForStep(layout: any): LayoutForStep | null {
