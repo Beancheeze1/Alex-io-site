@@ -1,8 +1,8 @@
 // app/api/quote/print/route.ts
 //
 // Returns full quote data (header + items + latest layout package)
-// by quote_no, and attaches a pricing snapshot to each item using
-// the deterministic volumetric calc route.
+// by quote_no, and attaches pricing snapshot to the PRIMARY item
+// by calling the real volumetric calc route.
 //
 // GET /api/quote/print?quote_no=Q-AI-20251116-115613
 
@@ -40,6 +40,14 @@ type ItemRow = {
 
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
+
+  // Optional metadata used by some UIs/templates (safe to attach if present)
+  pricing_meta?: {
+    min_charge?: number | null;
+    used_min_charge?: boolean;
+    setup_fee?: number | null;
+    kerf_waste_pct?: number | null;
+  } | null;
 };
 
 type LayoutPkgRow = {
@@ -85,62 +93,145 @@ function parseDimsNums(item: ItemRow) {
   };
 }
 
+function cleanStringArray(x: any): string[] {
+  if (!Array.isArray(x)) return [];
+  const out: string[] = [];
+  for (const v of x) {
+    const s = typeof v === "string" ? v.trim() : String(v ?? "").trim();
+    if (s) out.push(s);
+  }
+  return out;
+}
+
 /**
- * Attach real pricing by calling the deterministic calc route:
- *   POST /api/quotes/calc
- *
- * This is the same logic you validated via PowerShell.
- * We write the totals back into:
- *   - price_total_usd
- *   - price_unit_usd
+ * Best-effort extraction of cavity strings from facts.
+ * We intentionally keep this conservative + non-destructive.
  */
-async function attachPricingToItem(req: NextRequest, item: ItemRow): Promise<ItemRow> {
+function extractCavityStrings(facts: any): string[] {
+  if (!facts || typeof facts !== "object") return [];
+
+  // Most common: facts.cavities = ["5x4x1","3x3x1"] or ["Ø6x1"]
+  const direct = cleanStringArray((facts as any).cavities);
+  if (direct.length) return direct;
+
+  // Alternate common keys
+  const alt1 = cleanStringArray((facts as any).cavityDims);
+  if (alt1.length) return alt1;
+
+  const alt2 = cleanStringArray((facts as any).cavity_dims);
+  if (alt2.length) return alt2;
+
+  const alt3 = cleanStringArray((facts as any).cavity_list);
+  if (alt3.length) return alt3;
+
+  // Nested shapes some versions used
+  const nested = (facts as any).parsed || (facts as any).specs || null;
+  if (nested && typeof nested === "object") {
+    const n1 = cleanStringArray((nested as any).cavities);
+    if (n1.length) return n1;
+    const n2 = cleanStringArray((nested as any).cavityDims);
+    if (n2.length) return n2;
+  }
+
+  return [];
+}
+
+/**
+ * Call the real volumetric pricing route.
+ * Returns { unitPrice, total, kerf_pct, used_min_charge, min_charge, setup_fee }
+ */
+async function callVolumetricCalc(args: {
+  origin: string;
+  length_in: number;
+  width_in: number;
+  height_in: number;
+  material_id: number;
+  qty: number;
+  cavities: string[];
+}): Promise<{
+  unitPrice: number | null;
+  total: number | null;
+  kerf_pct?: number | null;
+  used_min_charge?: boolean;
+  min_charge?: number | null;
+  setup_fee?: number | null;
+}> {
+  const url = `${args.origin}/api/quotes/calc`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // IMPORTANT: keep payload simple + deterministic
+    body: JSON.stringify({
+      length_in: args.length_in,
+      width_in: args.width_in,
+      height_in: args.height_in,
+      material_id: args.material_id,
+      qty: args.qty,
+      cavities: args.cavities || [],
+      round_to_bf: false,
+    }),
+    cache: "no-store",
+  });
+
+  const json = (await res.json().catch(() => null)) as any;
+
+  if (!res.ok || !json?.ok) {
+    // Fail soft: no throw here; caller will fallback gracefully.
+    return { unitPrice: null, total: null };
+  }
+
+  const total = Number(json?.result?.total);
+  const qty = Number(args.qty);
+
+  const totalOk = Number.isFinite(total) && total >= 0;
+  const qtyOk = Number.isFinite(qty) && qty > 0;
+
+  const unitPrice = totalOk && qtyOk ? Math.round((total / qty) * 100) / 100 : null;
+
+  return {
+    unitPrice,
+    total: totalOk ? Math.round(total * 100) / 100 : null,
+    kerf_pct: typeof json?.result?.kerf_pct === "number" ? json.result.kerf_pct : null,
+    used_min_charge: !!json?.result?.used_min_charge,
+    min_charge: typeof json?.result?.min_charge === "number" ? json.result.min_charge : null,
+    setup_fee: typeof json?.result?.setup_fee === "number" ? json.result.setup_fee : null,
+  };
+}
+
+async function attachPricingToPrimaryItem(args: {
+  origin: string;
+  item: ItemRow;
+  cavities: string[];
+}): Promise<ItemRow> {
+  const { item } = args;
   const { L, W, H } = parseDimsNums(item);
 
   if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return item;
   if (!Number.isFinite(Number(item.qty)) || item.qty <= 0) return item;
   if (!Number.isFinite(Number(item.material_id)) || item.material_id <= 0) return item;
 
-  try {
-    const origin = req.nextUrl?.origin || "";
-    const url = `${origin}/api/quotes/calc?t=${Math.floor(Math.random() * 1_000_000_000)}`;
+  const priced = await callVolumetricCalc({
+    origin: args.origin,
+    length_in: L,
+    width_in: W,
+    height_in: H,
+    material_id: item.material_id,
+    qty: item.qty,
+    cavities: args.cavities || [],
+  });
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // Cavities are ignored here for now (Path A) because quote_items do not store
-      // cavity strings deterministically. The layout pricing model can be upgraded later.
-      body: JSON.stringify({
-        length_in: L,
-        width_in: W,
-        height_in: H,
-        material_id: item.material_id,
-        qty: item.qty,
-        cavities: [],
-        round_to_bf: false,
-      }),
-      cache: "no-store",
-    });
-
-    const json: any = await res.json().catch(() => null);
-
-    if (!res.ok || !json?.ok || !json?.result) return item;
-
-    const total = Number(json.result.total);
-    if (!Number.isFinite(total) || total < 0) return item;
-
-    const unit = total / item.qty;
-    const unitSafe = Number.isFinite(unit) ? Math.round(unit * 100) / 100 : null;
-    const totalSafe = Math.round(total * 100) / 100;
-
-    return {
-      ...item,
-      price_unit_usd: unitSafe,
-      price_total_usd: totalSafe,
-    };
-  } catch {
-    return item;
-  }
+  return {
+    ...item,
+    price_unit_usd: priced.unitPrice ?? null,
+    price_total_usd: priced.total ?? null,
+    pricing_meta: {
+      min_charge: priced.min_charge ?? null,
+      used_min_charge: !!priced.used_min_charge,
+      setup_fee: priced.setup_fee ?? null,
+      kerf_waste_pct: priced.kerf_pct ?? null,
+    },
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -172,7 +263,11 @@ export async function GET(req: NextRequest) {
       return bad({ ok: false, error: "NOT_FOUND" }, 404);
     }
 
-    let itemsRaw = await q<ItemRow>(
+    // Load facts once (needed for cavity strings and to return to caller)
+    const facts = await loadFacts(quoteNo);
+    const cavitiesFromFacts = extractCavityStrings(facts);
+
+    const itemsRaw = await q<ItemRow>(
       `
       select
         qi.id,
@@ -194,12 +289,32 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    let items: ItemRow[] = [];
-    for (const it of itemsRaw) {
+    // IMPORTANT: Only the PRIMARY row gets priced (the UI treats others as Included layers)
+    const origin = req.nextUrl.origin;
+
+    const items: ItemRow[] = [];
+    if (itemsRaw.length > 0) {
+      const primary = itemsRaw[0];
+      let pricedPrimary: ItemRow = primary;
+
       try {
-        items.push(await attachPricingToItem(req, it));
+        pricedPrimary = await attachPricingToPrimaryItem({
+          origin,
+          item: primary,
+          cavities: cavitiesFromFacts,
+        });
       } catch {
-        items.push(it);
+        pricedPrimary = primary;
+      }
+
+      items.push(pricedPrimary);
+
+      for (let i = 1; i < itemsRaw.length; i++) {
+        items.push({
+          ...itemsRaw[i],
+          price_unit_usd: null,
+          price_total_usd: null,
+        });
       }
     }
 
@@ -222,7 +337,7 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // ✅ SVG regen (roundedRect fix) — already correct
+    // ✅ SVG regen (roundedRect fix)
     if (layoutPkg?.layout_json) {
       try {
         const bundle = buildLayoutExports(layoutPkg.layout_json);
@@ -255,7 +370,8 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    const foamSubtotal = items.reduce((s, i) => s + (Number(i.price_total_usd) || 0), 0);
+    // Foam subtotal should come ONLY from the primary priced row.
+    const foamSubtotal = items.length > 0 ? Number(items[0].price_total_usd) || 0 : 0;
     const packagingSubtotal = packagingLines.reduce((s, l) => s + (Number(l.extended_price_usd) || 0), 0);
 
     return ok({
@@ -267,7 +383,7 @@ export async function GET(req: NextRequest) {
       foamSubtotal,
       packagingSubtotal,
       grandSubtotal: foamSubtotal + packagingSubtotal,
-      facts: await loadFacts(quoteNo),
+      facts,
     });
   } catch (err) {
     console.error(err);
