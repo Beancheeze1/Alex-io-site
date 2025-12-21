@@ -1,14 +1,10 @@
 // app/api/quote/print/route.ts
 //
 // Returns full quote data (header + items + latest layout package)
-// by quote_no, and attaches a pricing snapshot to each item.
+// by quote_no, and attaches a pricing snapshot to each item using
+// the deterministic volumetric calc route.
 //
 // GET /api/quote/print?quote_no=Q-AI-20251116-115613
-//
-// PATH A FIX (real pricing):
-// - Only price AFTER Apply-to-Quote created quote_items.
-// - Use the real deterministic endpoint /api/quotes/calc (material-based).
-// - If no quote_items exist yet, pricing stays blank (UI shows "—") which is correct.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
@@ -42,33 +38,8 @@ type ItemRow = {
   density_lb_ft3?: number | null;
   notes?: string | null;
 
-  // priced outputs (stored/attached)
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
-
-  // optional meta (client uses this for copy)
-  pricing_meta?: {
-    min_charge?: number | null;
-    used_min_charge?: boolean;
-    setup_fee?: number | null;
-    kerf_waste_pct?: number | null;
-  } | null;
-
-  // optional breakdown (client reads unitPrice/extendedPrice/breaks)
-  pricing_breakdown?: {
-    volumeIn3: number;
-    materialWeightLb: number;
-    materialCost: number;
-    machineMinutes: number;
-    machineCost: number;
-    rawCost: number;
-    markupFactor: number;
-    sellPrice: number;
-    unitPrice: number;
-    extendedPrice: number;
-    qty: number;
-    breaks: { qty: number; unit: number; total: number }[];
-  } | null;
 };
 
 type LayoutPkgRow = {
@@ -114,112 +85,62 @@ function parseDimsNums(item: ItemRow) {
   };
 }
 
-function safeNum(v: any): number | null {
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
 /**
- * Call the real deterministic pricing endpoint.
- * NOTE: This only runs once quote_items exist (Apply-to-Quote has happened).
+ * Attach real pricing by calling the deterministic calc route:
+ *   POST /api/quotes/calc
+ *
+ * This is the same logic you validated via PowerShell.
+ * We write the totals back into:
+ *   - price_total_usd
+ *   - price_unit_usd
  */
-async function callQuotesCalc(origin: string, payload: any) {
-  const url = `${origin}/api/quotes/calc`;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    cache: "no-store",
-  });
-
-  // If calc errors, keep the item unpriced (do not break the whole print endpoint)
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`quotes_calc_failed_${res.status}:${txt}`);
-  }
-
-  const json = (await res.json().catch(() => null)) as any;
-  if (!json || json.ok !== true || !json.result) {
-    throw new Error(`quotes_calc_bad_response`);
-  }
-
-  return json;
-}
-
-/**
- * Attach real pricing to a quote item using /api/quotes/calc.
- * Path A:
- * - We do NOT guess material.
- * - We do NOT price if dims/material/qty are invalid.
- * - We do NOT explode the whole request if pricing fails.
- */
-async function attachPricingToItem(item: ItemRow, origin: string): Promise<ItemRow> {
+async function attachPricingToItem(req: NextRequest, item: ItemRow): Promise<ItemRow> {
   const { L, W, H } = parseDimsNums(item);
 
   if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return item;
   if (!Number.isFinite(Number(item.qty)) || item.qty <= 0) return item;
   if (!Number.isFinite(Number(item.material_id)) || item.material_id <= 0) return item;
 
-  // Cavities are intentionally NOT used for pricing in v1 unless you decide otherwise.
-  // (If you want them included later, we can wire them from facts/layout.)
-  const payload = {
-    length_in: L,
-    width_in: W,
-    height_in: H,
-    material_id: item.material_id,
-    qty: item.qty,
-    cavities: [],
-    round_to_bf: false,
-  };
+  try {
+    const origin = req.nextUrl?.origin || "";
+    const url = `${origin}/api/quotes/calc?t=${Math.floor(Math.random() * 1_000_000_000)}`;
 
-  const calc = await callQuotesCalc(origin, payload);
-  const r = calc.result || {};
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Cavities are ignored here for now (Path A) because quote_items do not store
+      // cavity strings deterministically. The layout pricing model can be upgraded later.
+      body: JSON.stringify({
+        length_in: L,
+        width_in: W,
+        height_in: H,
+        material_id: item.material_id,
+        qty: item.qty,
+        cavities: [],
+        round_to_bf: false,
+      }),
+      cache: "no-store",
+    });
 
-  const total = safeNum(r.total);
-  const qty = Number(item.qty);
-  const unit = total != null && qty > 0 ? Math.round((total / qty) * 100) / 100 : null;
+    const json: any = await res.json().catch(() => null);
 
-  // Build a minimal breakdown object that your UI already understands.
-  // We keep the "extra fields" zeroed because /api/quotes/calc returns
-  // total/min_charge/kerf/setup, not material+machine cost components.
-  const volumeIn3 = Math.max(0, L * W * H);
+    if (!res.ok || !json?.ok || !json?.result) return item;
 
-  const breakQtys = [1, 10, 25, 50, 100, 150, 250];
-  const breaks = breakQtys.map((bq) => {
-    const bTotal = unit != null ? unit * bq : 0;
-    return { qty: bq, unit: unit ?? 0, total: bTotal };
-  });
+    const total = Number(json.result.total);
+    if (!Number.isFinite(total) || total < 0) return item;
 
-  return {
-    ...item,
-    price_unit_usd: unit ?? item.price_unit_usd ?? null,
-    price_total_usd: total ?? item.price_total_usd ?? null,
+    const unit = total / item.qty;
+    const unitSafe = Number.isFinite(unit) ? Math.round(unit * 100) / 100 : null;
+    const totalSafe = Math.round(total * 100) / 100;
 
-    pricing_meta: {
-      min_charge: safeNum(r.min_charge),
-      used_min_charge: !!r.used_min_charge,
-      setup_fee: safeNum(r.setup_fee),
-      kerf_waste_pct: safeNum(r.kerf_pct),
-    },
-
-    pricing_breakdown: unit != null && total != null
-      ? {
-          volumeIn3,
-          materialWeightLb: 0,
-          materialCost: 0,
-          machineMinutes: 0,
-          machineCost: 0,
-          rawCost: 0,
-          markupFactor: safeNum(r.markup_factor) ?? 1,
-          sellPrice: total,
-          unitPrice: unit,
-          extendedPrice: total,
-          qty,
-          breaks,
-        }
-      : null,
-  };
+    return {
+      ...item,
+      price_unit_usd: unitSafe,
+      price_total_usd: totalSafe,
+    };
+  } catch {
+    return item;
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -228,9 +149,6 @@ export async function GET(req: NextRequest) {
   if (!quoteNo) {
     return bad({ ok: false, error: "MISSING_QUOTE_NO" }, 400);
   }
-
-  // Origin for calling /api/quotes/calc on the same deployment
-  const origin = req.nextUrl.origin;
 
   try {
     const quote = await one<QuoteRow>(
@@ -254,7 +172,7 @@ export async function GET(req: NextRequest) {
       return bad({ ok: false, error: "NOT_FOUND" }, 404);
     }
 
-    const itemsRaw = await q<ItemRow>(
+    let itemsRaw = await q<ItemRow>(
       `
       select
         qi.id,
@@ -276,16 +194,12 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // PATH A: If there are no quote_items, that means Apply-to-Quote has not happened yet.
-    // We return empty items and subtotals 0. Client will correctly show "—".
     let items: ItemRow[] = [];
-    if (itemsRaw && itemsRaw.length > 0) {
-      for (const it of itemsRaw) {
-        try {
-          items.push(await attachPricingToItem(it, origin));
-        } catch {
-          items.push(it);
-        }
+    for (const it of itemsRaw) {
+      try {
+        items.push(await attachPricingToItem(req, it));
+      } catch {
+        items.push(it);
       }
     }
 
@@ -308,7 +222,7 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // ✅ SVG regen (roundedRect fix) — keep as-is
+    // ✅ SVG regen (roundedRect fix) — already correct
     if (layoutPkg?.layout_json) {
       try {
         const bundle = buildLayoutExports(layoutPkg.layout_json);
