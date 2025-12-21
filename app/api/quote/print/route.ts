@@ -1,10 +1,14 @@
 // app/api/quote/print/route.ts
 //
 // Returns full quote data (header + items + latest layout package)
-// by quote_no, and attaches a pricing snapshot to the PRIMARY foam item
-// using /api/quotes/calc (authoritative pricing route).
+// by quote_no, and attaches a pricing snapshot to each item.
 //
 // GET /api/quote/print?quote_no=Q-AI-20251116-115613
+//
+// PATH A FIX (real pricing):
+// - Only price AFTER Apply-to-Quote created quote_items.
+// - Use the real deterministic endpoint /api/quotes/calc (material-based).
+// - If no quote_items exist yet, pricing stays blank (UI shows "—") which is correct.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
@@ -38,11 +42,11 @@ type ItemRow = {
   density_lb_ft3?: number | null;
   notes?: string | null;
 
-  // persisted/display fields (used by QuotePrintClient fallbacks)
+  // priced outputs (stored/attached)
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
 
-  // NEW: metadata payload used by QuotePrintClient (already supported there)
+  // optional meta (client uses this for copy)
   pricing_meta?: {
     min_charge?: number | null;
     used_min_charge?: boolean;
@@ -50,9 +54,21 @@ type ItemRow = {
     kerf_waste_pct?: number | null;
   } | null;
 
-  // NOTE: We intentionally do NOT force pricing_breakdown here yet.
-  // The UI already falls back correctly to price_* fields.
-  pricing_breakdown?: any | null;
+  // optional breakdown (client reads unitPrice/extendedPrice/breaks)
+  pricing_breakdown?: {
+    volumeIn3: number;
+    materialWeightLb: number;
+    materialCost: number;
+    machineMinutes: number;
+    machineCost: number;
+    rawCost: number;
+    markupFactor: number;
+    sellPrice: number;
+    unitPrice: number;
+    extendedPrice: number;
+    qty: number;
+    breaks: { qty: number; unit: number; total: number }[];
+  } | null;
 };
 
 type LayoutPkgRow = {
@@ -98,154 +114,111 @@ function parseDimsNums(item: ItemRow) {
   };
 }
 
-/**
- * Try to extract cavities for pricing from facts.
- * We keep this permissive and safe:
- * - If facts contain cavity strings (e.g. ["2x3x0.5","Ø6x1"]), use them.
- * - Otherwise send none (pricing still works).
- */
-function extractCavityStringsFromFacts(facts: any): string[] {
-  const out: string[] = [];
-
-  if (!facts || typeof facts !== "object") return out;
-
-  // Common shapes we’ve used in the project over time.
-  const candidates = [
-    (facts as any).cavities,
-    (facts as any).cavitySpecs,
-    (facts as any).cavity_strings,
-    (facts as any).cavityStrings,
-    (facts as any).parsed?.cavities,
-    (facts as any).layout?.cavities,
-  ];
-
-  for (const cand of candidates) {
-    if (!cand) continue;
-
-    // If it’s already string[]
-    if (Array.isArray(cand) && cand.every((x) => typeof x === "string")) {
-      for (const s of cand) {
-        const t = String(s).trim();
-        if (t) out.push(t);
-      }
-      break;
-    }
-
-    // If it’s object cavities, try to create "LxWxD" strings when possible
-    if (Array.isArray(cand) && cand.length > 0 && typeof cand[0] === "object") {
-      for (const c of cand) {
-        const L = Number((c as any).lengthIn ?? (c as any).length_in ?? (c as any).length);
-        const W = Number((c as any).widthIn ?? (c as any).width_in ?? (c as any).width);
-        const D = Number((c as any).depthIn ?? (c as any).depth_in ?? (c as any).depth);
-        const dia = Number((c as any).diameterIn ?? (c as any).diameter_in ?? (c as any).diameter);
-
-        const shape = typeof (c as any).shape === "string" ? (c as any).shape.toLowerCase() : "";
-
-        // Circle → "Ø{dia}x{depth}"
-        if ((shape === "circle" || shape === "round") && Number.isFinite(dia) && dia > 0 && Number.isFinite(D) && D > 0) {
-          out.push(`Ø${dia}x${D}`);
-          continue;
-        }
-
-        // Rect → "LxWxD"
-        if (Number.isFinite(L) && L > 0 && Number.isFinite(W) && W > 0 && Number.isFinite(D) && D > 0) {
-          out.push(`${L}x${W}x${D}`);
-        }
-      }
-      if (out.length) break;
-    }
-  }
-
-  // De-dupe
-  const uniq: string[] = [];
-  const seen = new Set<string>();
-  for (const s of out) {
-    const k = s.trim();
-    if (!k) continue;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    uniq.push(k);
-  }
-
-  return uniq;
+function safeNum(v: any): number | null {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
-async function callQuoteCalc(origin: string, payload: any) {
+/**
+ * Call the real deterministic pricing endpoint.
+ * NOTE: This only runs once quote_items exist (Apply-to-Quote has happened).
+ */
+async function callQuotesCalc(origin: string, payload: any) {
   const url = `${origin}/api/quotes/calc`;
 
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // Server-to-server: no caching
-    cache: "no-store",
     body: JSON.stringify(payload),
+    cache: "no-store",
   });
 
-  const text = await res.text().catch(() => "");
-  let json: any = null;
-
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
+  // If calc errors, keep the item unpriced (do not break the whole print endpoint)
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`quotes_calc_failed_${res.status}:${txt}`);
   }
 
-  if (!res.ok || !json || json.ok !== true) {
-    const err = (json && (json.error || json.message)) || `HTTP_${res.status}`;
-    throw new Error(`quotes_calc_failed:${err}`);
+  const json = (await res.json().catch(() => null)) as any;
+  if (!json || json.ok !== true || !json.result) {
+    throw new Error(`quotes_calc_bad_response`);
   }
 
   return json;
 }
 
 /**
- * Attach authoritative pricing from /api/quotes/calc.
- * IMPORTANT: This is intended for the PRIMARY item only.
+ * Attach real pricing to a quote item using /api/quotes/calc.
+ * Path A:
+ * - We do NOT guess material.
+ * - We do NOT price if dims/material/qty are invalid.
+ * - We do NOT explode the whole request if pricing fails.
  */
-async function attachPricingToPrimaryItem(item: ItemRow, origin: string, facts: any): Promise<ItemRow> {
+async function attachPricingToItem(item: ItemRow, origin: string): Promise<ItemRow> {
   const { L, W, H } = parseDimsNums(item);
 
   if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return item;
   if (!Number.isFinite(Number(item.qty)) || item.qty <= 0) return item;
   if (!Number.isFinite(Number(item.material_id)) || item.material_id <= 0) return item;
 
-  const cavities = extractCavityStringsFromFacts(facts);
-
+  // Cavities are intentionally NOT used for pricing in v1 unless you decide otherwise.
+  // (If you want them included later, we can wire them from facts/layout.)
   const payload = {
     length_in: L,
     width_in: W,
     height_in: H,
     material_id: item.material_id,
     qty: item.qty,
-    cavities: cavities.length ? cavities : null,
+    cavities: [],
     round_to_bf: false,
   };
 
-  const calc = await callQuoteCalc(origin, payload);
+  const calc = await callQuotesCalc(origin, payload);
+  const r = calc.result || {};
 
-  const result = calc?.result || {};
-  const total = Number(result.total);
-  const usedMin = !!result.used_min_charge;
+  const total = safeNum(r.total);
+  const qty = Number(item.qty);
+  const unit = total != null && qty > 0 ? Math.round((total / qty) * 100) / 100 : null;
 
-  const unit = Number.isFinite(total) && item.qty > 0 ? total / item.qty : NaN;
-  const unitRounded = Number.isFinite(unit) ? Math.round(unit * 100) / 100 : null;
+  // Build a minimal breakdown object that your UI already understands.
+  // We keep the "extra fields" zeroed because /api/quotes/calc returns
+  // total/min_charge/kerf/setup, not material+machine cost components.
+  const volumeIn3 = Math.max(0, L * W * H);
 
-  const totalRounded = Number.isFinite(total) ? Math.round(total * 100) / 100 : null;
-
-  const pricing_meta = {
-    min_charge: result.min_charge != null ? Number(result.min_charge) : null,
-    used_min_charge: usedMin,
-    setup_fee: result.setup_fee != null ? Number(result.setup_fee) : null,
-    kerf_waste_pct: result.kerf_pct != null ? Number(result.kerf_pct) : null,
-  };
+  const breakQtys = [1, 10, 25, 50, 100, 150, 250];
+  const breaks = breakQtys.map((bq) => {
+    const bTotal = unit != null ? unit * bq : 0;
+    return { qty: bq, unit: unit ?? 0, total: bTotal };
+  });
 
   return {
     ...item,
-    price_unit_usd: unitRounded,
-    price_total_usd: totalRounded,
-    pricing_meta,
-    // Leave pricing_breakdown alone for now (UI falls back safely to price fields)
-    pricing_breakdown: item.pricing_breakdown ?? null,
+    price_unit_usd: unit ?? item.price_unit_usd ?? null,
+    price_total_usd: total ?? item.price_total_usd ?? null,
+
+    pricing_meta: {
+      min_charge: safeNum(r.min_charge),
+      used_min_charge: !!r.used_min_charge,
+      setup_fee: safeNum(r.setup_fee),
+      kerf_waste_pct: safeNum(r.kerf_pct),
+    },
+
+    pricing_breakdown: unit != null && total != null
+      ? {
+          volumeIn3,
+          materialWeightLb: 0,
+          materialCost: 0,
+          machineMinutes: 0,
+          machineCost: 0,
+          rawCost: 0,
+          markupFactor: safeNum(r.markup_factor) ?? 1,
+          sellPrice: total,
+          unitPrice: unit,
+          extendedPrice: total,
+          qty,
+          breaks,
+        }
+      : null,
   };
 }
 
@@ -255,6 +228,9 @@ export async function GET(req: NextRequest) {
   if (!quoteNo) {
     return bad({ ok: false, error: "MISSING_QUOTE_NO" }, 400);
   }
+
+  // Origin for calling /api/quotes/calc on the same deployment
+  const origin = req.nextUrl.origin;
 
   try {
     const quote = await one<QuoteRow>(
@@ -278,10 +254,7 @@ export async function GET(req: NextRequest) {
       return bad({ ok: false, error: "NOT_FOUND" }, 404);
     }
 
-    // Load facts once (used for pricing cavities + returned to client)
-    const facts = await loadFacts(quoteNo);
-
-    let itemsRaw = await q<ItemRow>(
+    const itemsRaw = await q<ItemRow>(
       `
       select
         qi.id,
@@ -303,24 +276,16 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // Use request origin so we call /api/quotes/calc on the same host
-    const origin = req.nextUrl.origin;
-
-    // Pricing policy (Path A):
-    // - Price ONLY the primary item (index 0). All other foam rows are "included layers" for display.
+    // PATH A: If there are no quote_items, that means Apply-to-Quote has not happened yet.
+    // We return empty items and subtotals 0. Client will correctly show "—".
     let items: ItemRow[] = [];
-    for (let i = 0; i < itemsRaw.length; i++) {
-      const it = itemsRaw[i];
-      if (i === 0) {
+    if (itemsRaw && itemsRaw.length > 0) {
+      for (const it of itemsRaw) {
         try {
-          items.push(await attachPricingToPrimaryItem(it, origin, facts));
-        } catch (err) {
-          // If pricing fails, keep item unmodified (UI will show —)
-          console.error("attachPricingToPrimaryItem error:", err);
+          items.push(await attachPricingToItem(it, origin));
+        } catch {
           items.push(it);
         }
-      } else {
-        items.push(it);
       }
     }
 
@@ -343,7 +308,7 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // ✅ SVG regen (roundedRect fix) — already correct
+    // ✅ SVG regen (roundedRect fix) — keep as-is
     if (layoutPkg?.layout_json) {
       try {
         const bundle = buildLayoutExports(layoutPkg.layout_json);
@@ -376,12 +341,7 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    const foamSubtotal = items.reduce((s, i, idx) => {
-      // Path A: subtotal should reflect primary item only
-      if (idx !== 0) return s;
-      return s + (Number(i.price_total_usd) || 0);
-    }, 0);
-
+    const foamSubtotal = items.reduce((s, i) => s + (Number(i.price_total_usd) || 0), 0);
     const packagingSubtotal = packagingLines.reduce((s, l) => s + (Number(l.extended_price_usd) || 0), 0);
 
     return ok({
@@ -393,7 +353,7 @@ export async function GET(req: NextRequest) {
       foamSubtotal,
       packagingSubtotal,
       grandSubtotal: foamSubtotal + packagingSubtotal,
-      facts,
+      facts: await loadFacts(quoteNo),
     });
   } catch (err) {
     console.error(err);
