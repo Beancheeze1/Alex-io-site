@@ -1765,13 +1765,22 @@ if (inboundMentionsLayers && inboundHasStructuredLayerUpdate) {
 
     /* ------------------- Build canonical layout editor link (Path-A) ------------------- */
 
-    const layoutEditorUrl = buildLayoutEditorUrlFromFacts(merged);
-    if (layoutEditorUrl) {
-      merged.layout_editor_url = layoutEditorUrl;
-      merged.layoutEditorUrl = layoutEditorUrl;
-      merged.layout_editor_link = layoutEditorUrl;
-      merged.layoutEditorLink = layoutEditorUrl;
-    }
+    // Build layout editor URL ONLY when layer data is authoritative
+if (
+  Number.isFinite(Number(merged.layer_count)) &&
+  Array.isArray(merged.layer_thicknesses) &&
+  merged.layer_thicknesses.every((v: any) => Number.isFinite(Number(v))) &&
+  merged.dims
+) {
+  const layoutEditorUrl = buildLayoutEditorUrlFromFacts(merged);
+  if (layoutEditorUrl) {
+    merged.layout_editor_url = layoutEditorUrl;
+    merged.layoutEditorUrl = layoutEditorUrl;
+    merged.layout_editor_link = layoutEditorUrl;
+    merged.layoutEditorLink = layoutEditorUrl;
+  }
+}
+
 
     /* ------------------- Build email template ------------------- */
 
