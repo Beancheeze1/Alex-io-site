@@ -113,6 +113,43 @@ function pickThreadContext(threadMsgs: any[] = []) {
 // NOTE: Use [0-9] instead of \d to avoid Unicode backslash paste issues breaking regex matching at runtime.
 const NUM = "(?:[0-9]{1,4}(?:[.][0-9]+)?|[.][0-9]+)";
 
+function normalizeInboundTextForRegex(raw: string): string {
+  let s = String(raw || "");
+
+  // If it looks like HTML, strip tags.
+  if (/<[a-z][\s\S]*>/i.test(s)) {
+    s = s.replace(/<style[\s\S]*?<\/style>/gi, " ");
+    s = s.replace(/<script[\s\S]*?<\/script>/gi, " ");
+    s = s.replace(/<br\s*\/?>/gi, "\n");
+    s = s.replace(/<\/p>/gi, "\n");
+    s = s.replace(/<\/div>/gi, "\n");
+    s = s.replace(/<[^>]+>/g, " ");
+  }
+
+  // Decode common entities we actually see in emails.
+  s = s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    // diameter / Ø sometimes comes through as entities
+    .replace(/&oslash;|&Oslash;|&#248;|&#216;/g, "Ø");
+
+  // Normalize whitespace similar to your other helpers.
+  s = s.replace(/[”“″]/g, '"');
+  s = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  s = s.replace(/[ \t]+/g, " ");
+  s = s.replace(/\n{3,}/g, "\n\n");
+
+  return s.trim();
+}
+
+
+
 function safeRegExp(pattern: string, flags: string) {
   try {
     return new RegExp(pattern, flags);
@@ -1485,6 +1522,9 @@ const dryRun = !!p.dryRun;
 // and if empty, fall back to the latest threadMsgs text (and normalize HTML-ish input).
 const lastText = getLastInboundText(p, threadMsgs);
 
+const lastTextForRegex = normalizeInboundTextForRegex(lastText);
+
+
 
     const salesRepSlugFromSubject = extractRepSlugFromSubject(subject, lastText);
     const salesRepSlugFromThread = inferRepSlugFromThreadMsgs(threadMsgs);
@@ -1501,7 +1541,8 @@ const lastText = getLastInboundText(p, threadMsgs);
 
     /* ------------------- Parse new turn ------------------- */
 
-    let newly = extractAllFromTextAndSubject(lastText, subject);
+    let newly = extractAllFromTextAndSubject(lastTextForRegex, subject);
+
 
     // Preserve regex-derived fields that must stay authoritative even if we call the LLM.
     const regexDims = newly.dims || null;
@@ -1611,7 +1652,8 @@ if (inboundMentionsLayers && inboundHasStructuredLayerUpdate) {
     if (merged.layer_count) {
       const n = Number(merged.layer_count);
       if (Number.isFinite(n) && n > 1) {
-        const emailText = `${subject}\n\n${lastText}`.replace(/[”“″]/g, '"');
+        const emailText = normalizeInboundTextForRegex(`${subject}\n\n${lastText}`);
+
 
         const thFinal = grabLayerThicknessesCanonical(emailText, n);
         const thArr = thFinal.thicknessesByLayer1Based.slice(0, n);
