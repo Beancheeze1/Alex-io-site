@@ -138,18 +138,6 @@ function getAllCavitiesFromLayout(layout: any): FlatCavity[] {
 
 /* ===================== NEW: Normalize/persist layer thickness into layout_json ===================== */
 
-/**
- * Your current stored layout_json.stack[] layers are missing thickness.
- * The editor clearly has thickness (admin/quote_items sync sees it), but it is
- * not being persisted into the layout package JSON.
- *
- * Path A fix:
- * - Make a defensive copy of the layout before saving.
- * - Ensure each layer has thicknessIn when we can resolve it.
- * - Prefer values already on the layer, otherwise pull from body.foamLayers by index.
- *
- * This does NOT touch cavities; it only fills in a missing thickness field.
- */
 function coercePositiveNumber(raw: any): number | null {
   if (raw == null) return null;
   const n = typeof raw === "number" ? raw : Number(raw);
@@ -194,7 +182,7 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
       // 1) If thickness is already on the layer, normalize to thicknessIn
       let thickness = resolveThicknessFromAny(copy);
 
-      // 2) If missing, try body.foamLayers[idx] (this is the key fix for your current payload)
+      // 2) If missing, try body.foamLayers[idx]
       if (thickness == null && Array.isArray(foamLayers) && foamLayers[idx]) {
         thickness = resolveThicknessFromAny(foamLayers[idx]);
       }
@@ -219,11 +207,105 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
   return next;
 }
 
+/* ===================== NEW: ensure primary quote_items exists ===================== */
+
+function sumLayerThickness(layout: any): number | null {
+  const layers = Array.isArray(layout?.stack)
+    ? layout.stack
+    : Array.isArray(layout?.layers)
+      ? layout.layers
+      : null;
+
+  if (!Array.isArray(layers) || layers.length === 0) return null;
+
+  let sum = 0;
+  let any = false;
+
+  for (const layer of layers) {
+    const t = resolveThicknessFromAny(layer);
+    if (t != null && t > 0) {
+      sum += t;
+      any = true;
+    }
+  }
+
+  return any && sum > 0 ? sum : null;
+}
+
+async function ensurePrimaryQuoteItem(args: {
+  quoteId: number;
+  layoutForSave: any;
+  qtyMaybe: number | null;
+  materialIdMaybe: number | null;
+}) {
+  const existingCount = await one<{ c: number }>(
+    `select count(*)::int as c from quote_items where quote_id = $1`,
+    [args.quoteId],
+  );
+
+  if ((existingCount?.c ?? 0) > 0) return;
+
+  const block = args.layoutForSave?.block ?? null;
+
+  const L = Number(block?.lengthIn ?? block?.length_in);
+  const W = Number(block?.widthIn ?? block?.width_in);
+  let T = Number(block?.thicknessIn ?? block?.thickness_in ?? block?.heightIn ?? block?.height_in);
+
+  if (!Number.isFinite(L) || L <= 0 || !Number.isFinite(W) || W <= 0) {
+    console.warn("[layout/apply] Cannot create primary quote_item (missing block dims)", { quoteId: args.quoteId });
+    return;
+  }
+
+  if (!Number.isFinite(T) || T <= 0) {
+    const sumT = sumLayerThickness(args.layoutForSave);
+    if (sumT != null) T = sumT;
+  }
+
+  if (!Number.isFinite(T) || T <= 0) {
+    console.warn("[layout/apply] Cannot create primary quote_item (missing thickness)", { quoteId: args.quoteId });
+    return;
+  }
+
+  const qty = args.qtyMaybe != null && Number.isFinite(args.qtyMaybe) && args.qtyMaybe > 0 ? args.qtyMaybe : 1;
+  const materialId =
+    args.materialIdMaybe != null && Number.isFinite(args.materialIdMaybe) && args.materialIdMaybe > 0
+      ? args.materialIdMaybe
+      : null;
+
+  if (!materialId) {
+    console.warn("[layout/apply] Cannot create primary quote_item (missing materialId)", { quoteId: args.quoteId });
+    return;
+  }
+
+  await q(
+    `
+    insert into quote_items (
+      quote_id,
+      product_id,
+      length_in,
+      width_in,
+      height_in,
+      material_id,
+      qty,
+      notes
+    )
+    values ($1, null, $2, $3, $4, $5, $6, $7)
+    `,
+    [args.quoteId, L, W, T, materialId, qty, "[PRIMARY] Auto-created by layout/apply"],
+  );
+
+  console.warn("[layout/apply] Created missing PRIMARY quote_item", {
+    quoteId: args.quoteId,
+    L,
+    W,
+    T,
+    materialId,
+    qty,
+  });
+}
+
 /* ===================== DXF builder from layout (fallback) ===================== */
-/**
- * Layout-based DXF fallback (rectangles only).
- * We keep this as a fallback if SVG is missing.
- */
+
 function buildDxfFromLayout(layout: any): string | null {
   if (!layout || !layout.block) return null;
 
@@ -333,25 +415,12 @@ function buildDxfFromLayout(layout: any): string | null {
 }
 
 /* ===================== DXF builder from SVG (preferred) ===================== */
-/**
- * Canonical DXF generation from SVG (editor truth).
- * Supports:
- *  - <rect> (as 4 LINEs)
- *  - <rect rx/ry> (as LINEs + ARC fillets)
- *  - <circle> (as DXF CIRCLE)
- *
- * IMPORTANT:
- *  - SVG is top-left origin (y down)
- *  - DXF is bottom-left origin (y up)
- * We flip Y using the SVG viewBox height.
- */
+
 function buildDxfFromSvg(svgRaw: string | null): string | null {
   if (!svgRaw || typeof svgRaw !== "string") return null;
 
   const svg = svgRaw;
 
-  // Extract viewBox: "minX minY width height"
-  // FIX: use real regex escapes (not double-escaped)
   const vbMatch = svg.match(/viewBox\s*=\s*"([^"]+)"/i);
   if (!vbMatch) return null;
 
@@ -392,7 +461,6 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
   }
 
   function arcEntity(cx: number, cy: number, r: number, startDeg: number, endDeg: number): string {
-    // DXF ARC angles are degrees, counter-clockwise from +X axis.
     return [
       "0",
       "ARC",
@@ -413,8 +481,6 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
 
   const entities: string[] = [];
 
-  // --- rects ---
-  // FIX: correct regex so we actually match <rect .../>
   const rectRe = /<rect\b([^>]*)\/?>/gi;
   let rectM: RegExpExecArray | null = null;
   while ((rectM = rectRe.exec(svg))) {
@@ -428,14 +494,12 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
     if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) continue;
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
 
-    // rx/ry (optional)
     const rxRaw = attrs.match(/\brx\s*=\s*"([^"]+)"/i)?.[1] ?? null;
     const ryRaw = attrs.match(/\bry\s*=\s*"([^"]+)"/i)?.[1] ?? null;
 
     const rxNum = rxRaw == null ? NaN : Number(rxRaw);
     const ryNum = ryRaw == null ? NaN : Number(ryRaw);
 
-    // If only one is set in SVG, spec treats the other as the same.
     let r = 0;
     if (Number.isFinite(rxNum) || Number.isFinite(ryNum)) {
       const rr = Number.isFinite(rxNum) ? rxNum : Number.isFinite(ryNum) ? ryNum : 0;
@@ -443,11 +507,9 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
       r = Math.max(0, Math.min(rr, rr2, w / 2, h / 2));
     }
 
-    // Flip Y to DXF space
     const yCad = vbH - y - h;
 
     if (!(r > 0)) {
-      // Plain rectangle
       entities.push(lineEntity(x, yCad, x + w, yCad));
       entities.push(lineEntity(x + w, yCad, x + w, yCad + h));
       entities.push(lineEntity(x + w, yCad + h, x, yCad + h));
@@ -455,19 +517,17 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
       continue;
     }
 
-    // Rounded rectangle: 4 lines shortened + 4 corner arcs.
-    entities.push(lineEntity(x + r, yCad, x + w - r, yCad)); // bottom
-    entities.push(lineEntity(x + r, yCad + h, x + w - r, yCad + h)); // top
-    entities.push(lineEntity(x, yCad + r, x, yCad + h - r)); // left
-    entities.push(lineEntity(x + w, yCad + r, x + w, yCad + h - r)); // right
+    entities.push(lineEntity(x + r, yCad, x + w - r, yCad));
+    entities.push(lineEntity(x + r, yCad + h, x + w - r, yCad + h));
+    entities.push(lineEntity(x, yCad + r, x, yCad + h - r));
+    entities.push(lineEntity(x + w, yCad + r, x + w, yCad + h - r));
 
-    entities.push(arcEntity(x + r, yCad + r, r, 180, 270)); // BL
-    entities.push(arcEntity(x + w - r, yCad + r, r, 270, 0)); // BR
-    entities.push(arcEntity(x + w - r, yCad + h - r, r, 0, 90)); // TR
-    entities.push(arcEntity(x + r, yCad + h - r, r, 90, 180)); // TL
+    entities.push(arcEntity(x + r, yCad + r, r, 180, 270));
+    entities.push(arcEntity(x + w - r, yCad + r, r, 270, 0));
+    entities.push(arcEntity(x + w - r, yCad + h - r, r, 0, 90));
+    entities.push(arcEntity(x + r, yCad + h - r, r, 90, 180));
   }
 
-  // --- circles ---
   const circleRe = /<circle\b([^>]*)\/?>/gi;
   let circM: RegExpExecArray | null = null;
   while ((circM = circleRe.exec(svg))) {
@@ -479,9 +539,7 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
 
     if (!Number.isFinite(cx) || !Number.isFinite(cySvg) || !Number.isFinite(r) || r <= 0) continue;
 
-    // Flip center Y
     const cy = vbH - cySvg;
-
     entities.push(circleEntity(cx, cy, r));
   }
 
@@ -536,14 +594,9 @@ function buildSvgWithAnnotations(
 
   let svg = svgRaw as string;
 
-  // 1) Remove any previous <g id="alex-io-notes">...</g> groups.
-  // FIX: correct closing tag regex so it actually removes the group
   svg = svg.replace(/<g\b[^>]*id=["']alex-io-notes["'][^>]*>[\s\S]*?<\/g\s*>/gi, "");
 
-  // 2) Remove individual <text> nodes that look like old legends.
   const legendLabelPattern = /(NOT TO SCALE|FOAM BLOCK:|FOAM:|BLOCK:|MATERIAL:)/i;
-
-  // FIX: correct regex escapes
   svg = svg.replace(/<text\b[^>]*>[\s\S]*?<\/text>/gi, (match) => (legendLabelPattern.test(match) ? "" : match));
 
   if (!layout || !layout.block) {
@@ -585,7 +638,6 @@ function buildSvgWithAnnotations(
     return tag.replace(re, `${attrName}="${updated}"`);
   }
 
-  // FIX: correct regex escapes
   const vbRe = /viewBox\s*=\s*"([^"]+)"/;
   const vbMatch = svgOpen.match(vbRe);
   if (vbMatch) {
@@ -659,7 +711,6 @@ export async function POST(req: NextRequest) {
   const quoteNo = String(body.quoteNo).trim();
   const layout = body.layout;
 
-  // NEW: normalize layout before saving so layer thickness persists into layout_json.stack[]
   const layoutForSave = normalizeLayoutForStorage(layout, body);
 
   const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
@@ -733,6 +784,27 @@ export async function POST(req: NextRequest) {
         404,
       );
     }
+
+    // NEW: If quote_items is missing, create the PRIMARY row now (safe self-heal).
+    let qtyMaybe: number | null = null;
+    if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
+      const qn = Number(body.qty);
+      if (Number.isFinite(qn) && qn > 0) qtyMaybe = qn;
+    }
+
+    const materialIdMaybe =
+      materialId != null
+        ? materialId
+        : layoutForSave && (layoutForSave.materialId != null || layoutForSave.material_id != null)
+          ? Number(layoutForSave.materialId ?? layoutForSave.material_id) || null
+          : null;
+
+    await ensurePrimaryQuoteItem({
+      quoteId: quote.id,
+      layoutForSave,
+      qtyMaybe,
+      materialIdMaybe: materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0 ? materialIdMaybe : null,
+    });
 
     if (customerName || customerEmail || customerPhone || customerCompany) {
       await q(
@@ -810,16 +882,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // DXF (preferred): build from raw SVG so circles/rounded shapes match the editor.
-    // Fallback: layout-based DXF if SVG is missing.
     const dxfFromSvg = buildDxfFromSvg(svgRaw);
     const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
 
-    // STEP via external geometry service (microservice-backed).
-    // NOTE: Rounded corners in STEP must be handled inside buildStepFromLayout (lib/cad/step).
     const step = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
 
-    // Annotate SVG (for stored preview)
     const svgAnnotated = buildSvgWithAnnotations(layoutForSave, svgRaw, materialLegend ?? null, quoteNo);
 
     const pkg = await one<LayoutPkgRow>(
@@ -890,9 +957,6 @@ export async function POST(req: NextRequest) {
 
       const foamLayers = Array.isArray((body as any)?.foamLayers) ? (body as any).foamLayers : null;
 
-      // ---- PATH A FIX:
-      // Only trust body.foamLayers if it matches the saved stack length.
-      // Otherwise use layoutForSave.stack (source of truth).
       const stackLayers = Array.isArray(layoutForSave?.stack) ? layoutForSave.stack : null;
 
       const useFoamLayers =
@@ -903,7 +967,7 @@ export async function POST(req: NextRequest) {
         foamLayers.length === stackLayers.length;
 
       const layers = useFoamLayers
-        ? stackLayers // still iterate stack so labels/ordering match; foamLayers used only as thickness fallback
+        ? stackLayers
         : Array.isArray(stackLayers) && stackLayers.length > 0
           ? stackLayers
           : Array.isArray(layoutForSave?.layers)
@@ -962,10 +1026,8 @@ export async function POST(req: NextRequest) {
           const rawLayer = layers[i];
           if (!rawLayer) continue;
 
-          // thickness resolution:
-          // 1) use thickness already on the saved stack layer
-          // 2) if missing AND foamLayers matches stack length, fallback to foamLayers[i]
-          const thicknessFromLayer = (rawLayer as any).thicknessIn ?? (rawLayer as any).thickness_in ?? (rawLayer as any).thickness;
+          const thicknessFromLayer =
+            (rawLayer as any).thicknessIn ?? (rawLayer as any).thickness_in ?? (rawLayer as any).thickness;
 
           let thickness = Number(thicknessFromLayer) || 0;
 
@@ -1076,6 +1138,7 @@ export async function POST(req: NextRequest) {
 
       if (customerName) nextFacts.customer_name = customerName;
       if (customerEmail) nextFacts.customer_email = customerEmail;
+
       if (customerPhone) nextFacts.customer_phone = customerPhone;
       if (customerCompany) nextFacts.customer_company = customerCompany;
 
