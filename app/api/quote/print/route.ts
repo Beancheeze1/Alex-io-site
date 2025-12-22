@@ -7,11 +7,16 @@
 // - Supports PRE-APPLY interactive quotes using facts only
 // - Automatically switches to DB-backed items after Apply
 // - Single authoritative response for the interactive quote page
+//
+// PRICING (FIX):
+// - Interactive quote pricing MUST match the email pricing engine.
+// - Therefore, DO NOT use computePricingBreakdown() here.
+// - Always price via POST /api/quotes/calc (authoritative volumetric route).
+// - We pass cavities: [] and round_to_bf: false to match email behavior.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
-import { computePricingBreakdown } from "@/app/lib/pricing/compute";
 import { buildLayoutExports } from "@/app/lib/layout/exports";
 
 export const dynamic = "force-dynamic";
@@ -89,30 +94,66 @@ function bad(body: any, status = 400) {
 
 function parseDimsString(dims: string | null | undefined) {
   if (!dims) return null;
-  const [L, W, H] = dims.split("x").map(Number);
+  const [L, W, H] = String(dims)
+    .split("x")
+    .map((s) => Number(String(s).trim()));
   if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return null;
   return { L, W, H };
 }
 
-async function priceItem(params: {
+function safeNum(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Authoritative pricing call: POST /api/quotes/calc
+ * - MUST match initial email pricing.
+ * - We intentionally pass cavities: [] and round_to_bf: false to match your email flow.
+ */
+async function priceViaCalcRoute(params: {
   L: number;
   W: number;
   H: number;
   qty: number;
-  density_lbft3: number | null;
-}) {
-  const result = await computePricingBreakdown({
+  material_id: number;
+}): Promise<{ unit: number; total: number; raw: any | null }> {
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const url = `${base}/api/quotes/calc?t=${Date.now()}`;
+
+  const payload = {
     length_in: params.L,
     width_in: params.W,
     height_in: params.H,
-    density_lbft3: params.density_lbft3,
-    cost_per_lb: null,
+    material_id: params.material_id,
     qty: params.qty,
-  } as any);
+    cavities: [], // match email (no cavity subtraction)
+    round_to_bf: false,
+  };
+
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const j = await r.json().catch(() => ({} as any));
+
+  // Route returns { ok:true, result:{ total, ... } }
+  const total =
+    safeNum(j?.result?.total) ??
+    safeNum(j?.result?.price_total) ??
+    safeNum(j?.result?.order_total) ??
+    safeNum(j?.total) ??
+    0;
+
+  const qty = Number(params.qty) > 0 ? Number(params.qty) : 0;
+  const unit = qty > 0 ? total / qty : 0;
 
   return {
-    unit: Number((result as any)?.unitPrice ?? 0),
-    total: Number((result as any)?.extendedPrice ?? 0),
+    unit: Number.isFinite(unit) ? unit : 0,
+    total: Number.isFinite(total) ? total : 0,
+    raw: j || null,
   };
 }
 
@@ -186,14 +227,17 @@ export async function GET(req: NextRequest) {
 
     if (itemsRaw.length === 0) {
       const dimsParsed = parseDimsString(facts.dims);
-      if (dimsParsed && facts.qty && facts.material_id) {
-        const priced = await priceItem({
-          ...dimsParsed,
-          qty: Number(facts.qty),
-          density_lbft3:
-            typeof facts.density === "string"
-              ? Number(facts.density.match(/(\d+(\.\d+)?)/)?.[1] || null)
-              : null,
+
+      const qty = safeNum(facts.qty);
+      const materialId = safeNum(facts.material_id);
+
+      if (dimsParsed && qty && qty > 0 && materialId && materialId > 0) {
+        const priced = await priceViaCalcRoute({
+          L: dimsParsed.L,
+          W: dimsParsed.W,
+          H: dimsParsed.H,
+          qty,
+          material_id: materialId,
         });
 
         items.push({
@@ -202,8 +246,8 @@ export async function GET(req: NextRequest) {
           length_in: String(dimsParsed.L),
           width_in: String(dimsParsed.W),
           height_in: String(dimsParsed.H),
-          qty: Number(facts.qty),
-          material_id: Number(facts.material_id),
+          qty: Number(qty),
+          material_id: Number(materialId),
           material_name: facts.material_name || null,
           material_family: facts.material_family || null,
           density_lb_ft3: null,
@@ -221,15 +265,29 @@ export async function GET(req: NextRequest) {
     if (itemsRaw.length > 0) {
       for (const it of itemsRaw) {
         try {
-          const dims = {
-            L: Number(it.length_in),
-            W: Number(it.width_in),
-            H: Number(it.height_in),
-          };
-          const priced = await priceItem({
-            ...dims,
-            qty: it.qty,
-            density_lbft3: it.density_lb_ft3 ?? null,
+          const L = Number(it.length_in);
+          const W = Number(it.width_in);
+          const H = Number(it.height_in);
+
+          if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) {
+            items.push(it);
+            continue;
+          }
+
+          const qty = Number(it.qty);
+          const materialId = Number(it.material_id);
+
+          if (!(qty > 0) || !(materialId > 0)) {
+            items.push(it);
+            continue;
+          }
+
+          const priced = await priceViaCalcRoute({
+            L,
+            W,
+            H,
+            qty,
+            material_id: materialId,
           });
 
           items.push({
@@ -299,7 +357,10 @@ export async function GET(req: NextRequest) {
     );
 
     const foamSubtotal = items.reduce((s, i) => s + (Number(i.price_total_usd) || 0), 0);
-    const packagingSubtotal = packagingLines.reduce((s, l) => s + (Number(l.extended_price_usd) || 0), 0);
+    const packagingSubtotal = packagingLines.reduce(
+      (s, l) => s + (Number(l.extended_price_usd) || 0),
+      0,
+    );
 
     return ok({
       ok: true,
