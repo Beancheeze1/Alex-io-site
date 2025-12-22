@@ -13,6 +13,8 @@
 // - Therefore, DO NOT use computePricingBreakdown() here.
 // - Always price via POST /api/quotes/calc (authoritative volumetric route).
 // - We pass cavities: [] and round_to_bf: false to match email behavior.
+// - POST-APPLY: do NOT price "included" layer rows (reference-only).
+//   Only the primary/billable foam set should be priced.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
@@ -104,6 +106,15 @@ function parseDimsString(dims: string | null | undefined) {
 function safeNum(v: any): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Identify "included/reference-only" layer rows.
+ * We keep this conservative: only skip pricing if notes explicitly says "included".
+ */
+function isIncludedReferenceRow(it: ItemRow): boolean {
+  const notes = String(it?.notes || "").toLowerCase();
+  return notes.includes("included");
 }
 
 /**
@@ -282,6 +293,18 @@ export async function GET(req: NextRequest) {
             continue;
           }
 
+          // FIX: Do not price "included/reference-only" rows.
+          // These should remain visible in the interactive quote,
+          // but MUST NOT contribute to the billable foam subtotal.
+          if (isIncludedReferenceRow(it)) {
+            items.push({
+              ...it,
+              price_unit_usd: null,
+              price_total_usd: null,
+            });
+            continue;
+          }
+
           const priced = await priceViaCalcRoute({
             L,
             W,
@@ -356,7 +379,12 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    const foamSubtotal = items.reduce((s, i) => s + (Number(i.price_total_usd) || 0), 0);
+    // Only count billable priced items toward foam subtotal.
+    const foamSubtotal = items.reduce(
+      (s, i) => s + (Number(i.price_total_usd) || 0),
+      0,
+    );
+
     const packagingSubtotal = packagingLines.reduce(
       (s, l) => s + (Number(l.extended_price_usd) || 0),
       0,
