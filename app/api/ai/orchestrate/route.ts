@@ -1402,20 +1402,41 @@ export async function POST(req: NextRequest) {
 
     // PATH-A: If inbound email mentions layers, discard ONLY saved layer fields from memory
     // BEFORE merging newly, so we never delete the inbound-parsed thicknesses.
-    const inboundMentionsLayers =
-      /\b(top|middle|bottom)\s+(?:layer|pad)\b/i.test(`${subject}\n${lastText}`) ||
-      /\blayer\s*\d+\b/i.test(`${subject}\n${lastText}`) ||
-      /\b\d+\s*(?:layers?|layer)\b/i.test(`${subject}\n${lastText}`);
+const inboundMentionsLayers =
+  /\b(top|middle|bottom)\s+(?:layer|pad)\b/i.test(`${subject}\n${lastText}`) ||
+  /\blayer\s*\d+\b/i.test(`${subject}\n${lastText}`) ||
+  /\b\d+\s*(?:layers?|layer)\b/i.test(`${subject}\n${lastText}`);
 
-    if (inboundMentionsLayers) {
-      delete loadedThread.layer_thicknesses;
-      delete loadedThread.layers;
-      delete loadedThread.layer_cavity_layer_index;
+// IMPORTANT (Path-A hardening):
+// Only wipe saved layer fields if the inbound turn actually provides a structured layer update.
+// Many real replies *mention* layers but do not restate all thicknesses; those should not erase memory.
+//
+// "Structured" = has a declared layer_count AND at least one thickness value OR a layers array.
+const inboundHasStructuredLayerUpdate = (() => {
+  const n = Number(newly.layer_count);
+  const hasCount = Number.isFinite(n) && n > 0;
 
-      delete loadedQuote.layer_thicknesses;
-      delete loadedQuote.layers;
-      delete loadedQuote.layer_cavity_layer_index;
-    }
+  const th = Array.isArray((newly as any).layer_thicknesses) ? ((newly as any).layer_thicknesses as any[]) : [];
+  const hasAnyThickness = th.some((x) => {
+    const v = Number(x);
+    return Number.isFinite(v) && v > 0;
+  });
+
+  const hasLayersArray = Array.isArray(newly.layers) && newly.layers.length > 0;
+
+  return hasCount && (hasAnyThickness || hasLayersArray);
+})();
+
+if (inboundMentionsLayers && inboundHasStructuredLayerUpdate) {
+  delete loadedThread.layer_thicknesses;
+  delete loadedThread.layers;
+  delete loadedThread.layer_cavity_layer_index;
+
+  delete loadedQuote.layer_thicknesses;
+  delete loadedQuote.layers;
+  delete loadedQuote.layer_cavity_layer_index;
+}
+
 
     let merged = mergeFacts(mergeFacts(loadedThread, loadedQuote), newly);
 
