@@ -1612,10 +1612,14 @@ if (inboundMentionsLayers && inboundHasStructuredLayerUpdate) {
     merged = await enrichFromDB(merged);
 
     merged = await hydrateFromDBByQuoteNo(merged, {
-      lockQty: hadNewQty,
-      lockCavities: hadNewCavities,
-      lockDims: hadNewDims,
-    });
+  lockQty: hadNewQty,
+  lockCavities: hadNewCavities,
+
+  // Path-A: if this is a layered quote, dims is derived from footprint + thicknesses
+  // and must NOT be overridden by any stale DB item height_in.
+  lockDims: hadNewDims || Number(merged.layer_count) > 1,
+});
+
 
     // Ensure layer_thicknesses remains a FULL numeric array (length = layer_count)
     if (merged.layer_count && Array.isArray(merged.layer_thicknesses)) {
