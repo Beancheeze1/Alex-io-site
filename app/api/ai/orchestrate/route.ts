@@ -122,6 +122,58 @@ function safeRegExp(pattern: string, flags: string) {
   }
 }
 
+function normalizeInboundText(raw: string): string {
+  let s = String(raw || "");
+
+  // If it looks like HTML, do a light conversion to readable plain text.
+  const looksHtml = /<\s*(br|p|div|span|li|ul|ol|table|tr|td)\b/i.test(s) || /<\/\s*[a-z]+\s*>/i.test(s);
+  if (looksHtml) {
+    s = s
+      .replace(/\r\n/g, "\n")
+      .replace(/<\s*br\s*\/?\s*>/gi, "\n")
+      .replace(/<\/\s*p\s*>/gi, "\n")
+      .replace(/<\/\s*div\s*>/gi, "\n")
+      .replace(/<\/\s*li\s*>/gi, "\n")
+      .replace(/<\s*li\b[^>]*>/gi, "• ")
+      .replace(/<[^>]+>/g, " ");
+  }
+
+  // Decode a few common entities we see in email bodies.
+  s = s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+
+  // Normalize quotes + whitespace
+  s = s
+    .replace(/[”“″]/g, '"')
+    .replace(/\u00A0/g, " ") // NBSP
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return s;
+}
+
+function getLastInboundText(p: In, threadMsgs: any[]): string {
+  const direct = normalizeInboundText(String(p.text || p.body || ""));
+  if (direct) return direct;
+
+  // Fall back to most recent non-empty thread message text
+  if (Array.isArray(threadMsgs) && threadMsgs.length) {
+    for (let i = threadMsgs.length - 1; i >= 0; i--) {
+      const t = normalizeInboundText(String(threadMsgs[i]?.text || ""));
+      if (t) return t;
+    }
+  }
+
+  return "";
+}
+
+
 
 
 // Detect Q-AI-* style quote numbers in subject/body so we can
@@ -1421,13 +1473,18 @@ export async function POST(req: NextRequest) {
     if (mode !== "ai") return err("unsupported_mode", { mode });
 
     // FIX: accept "body" as alias for "text" (dryRun + older callers)
-    const lastText = String(p.text || p.body || "");
+    
 
     const subject = String(p.subject || "");
-    const providedThreadId = String(p.threadId || "").trim();
+const providedThreadId = String(p.threadId || "").trim();
 
-    const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
-    const dryRun = !!p.dryRun;
+const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
+const dryRun = !!p.dryRun;
+
+// FIX: accept "body" as alias for "text" (dryRun + older callers),
+// and if empty, fall back to the latest threadMsgs text (and normalize HTML-ish input).
+const lastText = getLastInboundText(p, threadMsgs);
+
 
     const salesRepSlugFromSubject = extractRepSlugFromSubject(subject, lastText);
     const salesRepSlugFromThread = inferRepSlugFromThreadMsgs(threadMsgs);
