@@ -713,19 +713,38 @@ async function buildPriceBreaks(
    ============================================================ */
 
 function grabDims(raw: string): string | undefined {
-  const text = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
-  const m =
-    text.match(new RegExp(`\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`, "i")) ||
-    text.match(
-      new RegExp(
-        `\\b(?:size|dimensions?|dims?)\\s*[:\\-]?\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\b`,
-        "i",
-      ),
-    );
+  const text = (raw || "").toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
 
-  if (!m) return undefined;
-  return `${m[1]}x${m[2]}x${m[3]}`;
+  const reMain = new RegExp(
+    `\\b(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})(?:\\s*(?:in|inch|inches))?\\b`,
+    "gi",
+  );
+
+  let m: RegExpExecArray | null;
+  while ((m = reMain.exec(text))) {
+    const start = m.index || 0;
+    const before = text.slice(Math.max(0, start - 25), start);
+
+    // Ignore layer-by-layer dimension statements like:
+    // "layer 1 is 12x10x1" / "layer2 12x10x2.5"
+    if (/\blayer\s*\d{1,2}\b/.test(before) || /\bpad\s*\d{1,2}\b/.test(before)) {
+      continue;
+    }
+
+    return `${m[1]}x${m[2]}x${m[3]}`;
+  }
+
+  const m2 = text.match(
+    new RegExp(
+      `\\b(?:size|dimensions?|dims?)\\s*[:\\-]?\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})\\b`,
+      "i",
+    ),
+  );
+
+  if (!m2) return undefined;
+  return `${m2[1]}x${m2[2]}x${m2[3]}`;
 }
+
 
 function grabOutsideDims(raw: string): string | undefined {
   const text = raw.toLowerCase().replace(/"/g, "").replace(/\s+/g, " ");
@@ -815,21 +834,41 @@ function grabMaterial(raw: string): string | undefined {
 function grabLayerSummary(raw: string): { layer_count?: number; footprint?: string } {
   const t = (raw || "").toLowerCase();
 
-  const re = new RegExp(
+  // Pattern A: "(3) 12x10 layers" (existing style)
+  const reA = new RegExp(
     `\\b(?:made\\s+up\\s+of\\s+)?\\(?\\s*(\\d{1,2})\\s*\\)?\\s*` +
       `(${NUM})\\s*["']?\\s*[x×]\\s*(${NUM})\\s*["']?\\s*` +
       `(?:layers?|layer)\\b`,
     "i",
   );
 
-  const m = t.match(re);
-  if (!m) return {};
-  const count = Number(m[1]);
-  const L = canonNumStr(m[2]);
-  const W = canonNumStr(m[3]);
-  if (!Number.isFinite(count) || count <= 0) return {};
-  return { layer_count: count, footprint: `${L}x${W}` };
+  let m = t.match(reA);
+  if (m) {
+    const count = Number(m[1]);
+    const L = canonNumStr(m[2]);
+    const W = canonNumStr(m[3]);
+    if (Number.isFinite(count) && count > 0) return { layer_count: count, footprint: `${L}x${W}` };
+  }
+
+  // Pattern B: "(3) layers, each 12x10"  (YOUR TEST EMAIL STYLE)
+  const reB = new RegExp(
+    `\\b(?:made\\s+up\\s+of\\s+)?\\(?\\s*(\\d{1,2})\\s*\\)?\\s*layers?\\b[^\\n\\r]{0,120}?` +
+      `\\b(?:each|size|sized)\\b[^\\n\\r]{0,40}?` +
+      `(${NUM})\\s*["']?\\s*[x×]\\s*(${NUM})\\s*["']?\\b`,
+    "i",
+  );
+
+  m = t.match(reB);
+  if (m) {
+    const count = Number(m[1]);
+    const L = canonNumStr(m[2]);
+    const W = canonNumStr(m[3]);
+    if (Number.isFinite(count) && count > 0) return { layer_count: count, footprint: `${L}x${W}` };
+  }
+
+  return {};
 }
+
 
 function grabLayerFootprintOnly(raw: string): { footprint?: string } {
   const t = (raw || "").toLowerCase();
@@ -913,10 +952,14 @@ function grabLayerThicknessesCanonical(
     }
   }
 
-  const reNum = new RegExp(
-    `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
+    const reNum = new RegExp(
+    `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,160}?` +
+      `\\b(?:thickness\\b[^.\\n\\r]{0,40}?|(?:will\\s+be|is|=|at)?\\s*)` +
+      `(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,80}?` +
+      `\\b(?:thick|thickness)\\b?`,
     "gi",
   );
+
 
   while ((m = reNum.exec(s))) {
     const idx = Number(m[1]);
@@ -930,6 +973,28 @@ function grabLayerThicknessesCanonical(
       if (idx >= 1 && idx <= n) cavityIdx1 = idx;
     }
   }
+
+  // ALSO support the common formatted-email pattern:
+  // "Layer 1 (bottom):" newline "Thickness 1.00""
+  const reLayerHeaderThickness = new RegExp(
+    `\\blayer\\s*(\\d{1,2})\\b[^\\n\\r]{0,80}[:\\)]?\\s*[\\s\\S]{0,120}?\\bthickness\\b\\s*[:\\-]?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\b`,
+    "gi",
+  );
+
+  while ((m = reLayerHeaderThickness.exec(s))) {
+    const idx = Number(m[1]);
+    const th = Number(m[2]);
+    if (!Number.isFinite(idx) || idx <= 0) continue;
+    if (!Number.isFinite(th) || th <= 0) continue;
+    if (n) setTh(idx, th);
+
+    const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 240)).toLowerCase();
+    if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts|through-?hole|hole)\b/.test(windowText) && n) {
+      if (idx >= 1 && idx <= n) cavityIdx1 = idx;
+    }
+  }
+
+
 
   if (!cavityIdx1 && n) {
     const t = s.toLowerCase();
@@ -1075,13 +1140,23 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   if (cavityCount != null) facts.cavityCount = cavityCount;
   if (cavityDims?.length) facts.cavityDims = cavityDims;
 
-  if (facts.dims && (!facts.cavityDims || facts.cavityDims.length === 0)) {
-    const recovered = recoverCavityDimsFromText(text, facts.dims);
-    if (recovered.length > 0) {
-      facts.cavityDims = recovered;
-      facts.cavityCount = recovered.length;
+   if (facts.dims && (!facts.cavityDims || facts.cavityDims.length === 0)) {
+    // Only "recover" cavity dims if the message actually mentions cavities/cutouts
+    // (prevents layer-dim replies like "layer 1 is 12x10x1" from becoming fake cavities).
+    const mentionsCavity =
+      /\b(cavity|cavities|pocket|pockets|cutout|cutouts|through-?hole|hole)\b/i.test(text) ||
+      /[Ø]/.test(text) ||
+      /\b(dia|diameter)\b/i.test(text);
+
+    if (mentionsCavity) {
+      const recovered = recoverCavityDimsFromText(text, facts.dims);
+      if (recovered.length > 0) {
+        facts.cavityDims = recovered;
+        facts.cavityCount = recovered.length;
+      }
     }
   }
+
 
   const mMaterialPhrase = text.match(/\b(\d{3,5})\s+(black|white|gray|grey|blue|red|green|yellow|orange|tan|natural)\s+(polyurethane|urethane)\b/i);
   if (mMaterialPhrase) {
