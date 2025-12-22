@@ -27,9 +27,6 @@ type QuoteRow = {
   phone: string | null;
   status: string;
   created_at: string;
-
-  // NEW: revision label (RevAS/RevA/etc) returned by /api/quote/print
-  revision?: string | null;
 };
 
 type ItemRow = {
@@ -74,6 +71,9 @@ type ApiOk = {
   quote: QuoteRow;
   items: ItemRow[];
   layoutPkg: LayoutPkgRow | null;
+
+  // NEW: /api/quote/print returns facts; we only use facts.revision here.
+  facts?: any;
 };
 
 type ApiErr = {
@@ -419,7 +419,11 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
     }
 
     const shape = normalizeShape(
-      (cav as any).shape ?? (cav as any).cavityShape ?? (cav as any).cavity_shape ?? (cav as any).type ?? (cav as any).kind,
+      (cav as any).shape ??
+        (cav as any).cavityShape ??
+        (cav as any).cavity_shape ??
+        (cav as any).type ??
+        (cav as any).kind,
     );
 
     const rawDia = (cav as any).diameterIn ?? (cav as any).diameter_in ?? (cav as any).diameter ?? null;
@@ -516,16 +520,18 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
   }
 
-  function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
-    return ["0", "LINE", "8", "0", "10", fmt(x1), "20", fmt(y1), "30", "0.0", "11", fmt(x2), "21", fmt(y2), "31", "0.0"].join("\n");
+  function lineEntityLocal(x1: number, y1: number, x2: number, y2: number): string {
+    return ["0", "LINE", "8", "0", "10", fmt(x1), "20", fmt(y1), "30", "0.0", "11", fmt(x2), "21", fmt(y2), "31", "0.0"].join(
+      "\n",
+    );
   }
 
   const entities: string[] = [];
 
-  entities.push(lineEntity(0, 0, L, 0));
-  entities.push(lineEntity(L, 0, L, W));
-  entities.push(lineEntity(L, W, 0, W));
-  entities.push(lineEntity(0, W, 0, 0));
+  entities.push(lineEntityLocal(0, 0, L, 0));
+  entities.push(lineEntityLocal(L, 0, L, W));
+  entities.push(lineEntityLocal(L, W, 0, W));
+  entities.push(lineEntityLocal(0, W, 0, 0));
 
   const cavs = getCavitiesForLayer(layout, layerIndex);
 
@@ -555,15 +561,47 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
       continue;
     }
 
-    entities.push(lineEntity(left, bottom, left + cL, bottom));
-    entities.push(lineEntity(left + cL, bottom, left + cL, bottom + cW));
-    entities.push(lineEntity(left + cL, bottom + cW, left, bottom + cW));
-    entities.push(lineEntity(left, bottom + cW, left, bottom));
+    entities.push(lineEntityLocal(left, bottom, left + cL, bottom));
+    entities.push(lineEntityLocal(left + cL, bottom, left + cL, bottom + cW));
+    entities.push(lineEntityLocal(left + cL, bottom + cW, left, bottom + cW));
+    entities.push(lineEntityLocal(left, bottom + cW, left, bottom));
   }
 
   if (!entities.length) return null;
 
-  const header = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1009", "9", "$INSUNITS", "70", "1", "0", "ENDSEC", "0", "SECTION", "2", "TABLES", "0", "ENDSEC", "0", "SECTION", "2", "BLOCKS", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"].join("\n");
+  const header = [
+    "0",
+    "SECTION",
+    "2",
+    "HEADER",
+    "9",
+    "$ACADVER",
+    "1",
+    "AC1009",
+    "9",
+    "$INSUNITS",
+    "70",
+    "1",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "TABLES",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "BLOCKS",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "ENTITIES",
+  ].join("\n");
+
   const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
 
   return [header, entities.join("\n"), footer].join("\n");
@@ -589,16 +627,18 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
     return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
   }
 
-  function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
-    return ["0", "LINE", "8", "0", "10", fmt(x1), "20", fmt(y1), "30", "0.0", "11", fmt(x2), "21", fmt(y2), "31", "0.0"].join("\n");
+  function lineEntityLocal(x1: number, y1: number, x2: number, y2: number): string {
+    return ["0", "LINE", "8", "0", "10", fmt(x1), "20", fmt(y1), "30", "0.0", "11", fmt(x2), "21", fmt(y2), "31", "0.0"].join(
+      "\n",
+    );
   }
 
   const entities: string[] = [];
 
-  entities.push(lineEntity(0, 0, L, 0));
-  entities.push(lineEntity(L, 0, L, W));
-  entities.push(lineEntity(L, W, 0, W));
-  entities.push(lineEntity(0, W, 0, 0));
+  entities.push(lineEntityLocal(0, 0, L, 0));
+  entities.push(lineEntityLocal(L, 0, L, W));
+  entities.push(lineEntityLocal(L, W, 0, W));
+  entities.push(lineEntityLocal(0, W, 0, 0));
 
   const layers = getLayersFromLayout(layout);
 
@@ -631,16 +671,48 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
         continue;
       }
 
-      entities.push(lineEntity(left, bottom, left + cL, bottom));
-      entities.push(lineEntity(left + cL, bottom, left + cL, bottom + cW));
-      entities.push(lineEntity(left + cL, bottom + cW, left, bottom + cW));
-      entities.push(lineEntity(left, bottom + cW, left, bottom));
+      entities.push(lineEntityLocal(left, bottom, left + cL, bottom));
+      entities.push(lineEntityLocal(left + cL, bottom, left + cL, bottom + cW));
+      entities.push(lineEntityLocal(left + cL, bottom + cW, left, bottom + cW));
+      entities.push(lineEntityLocal(left, bottom + cW, left, bottom));
     }
   }
 
   if (!entities.length) return null;
 
-  const header = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1009", "9", "$INSUNITS", "70", "1", "0", "ENDSEC", "0", "SECTION", "2", "TABLES", "0", "ENDSEC", "0", "SECTION", "2", "BLOCKS", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"].join("\n");
+  const header = [
+    "0",
+    "SECTION",
+    "2",
+    "HEADER",
+    "9",
+    "$ACADVER",
+    "1",
+    "AC1009",
+    "9",
+    "$INSUNITS",
+    "70",
+    "1",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "TABLES",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "BLOCKS",
+    "0",
+    "ENDSEC",
+    "0",
+    "SECTION",
+    "2",
+    "ENTITIES",
+  ].join("\n");
+
   const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
 
   return [header, entities.join("\n"), footer].join("\n");
@@ -709,9 +781,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 
-  // NEW: local revision editor (display + local edit; persistence comes next step)
-  const [revisionDraft, setRevisionDraft] = React.useState<string>("RevAS");
-
   const [refreshTick, setRefreshTick] = React.useState<number>(0);
 
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -730,6 +799,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [zipOkAt, setZipOkAt] = React.useState<string | null>(null);
 
   const [selectedLayerIdx, setSelectedLayerIdx] = React.useState<number>(0);
+
+  /* ============================================================
+     NEW: Revision editor (facts-backed via /api/admin/mem)
+     ============================================================ */
+
+  const [revisionValue, setRevisionValue] = React.useState<string>("RevAS");
+  const [revisionBusy, setRevisionBusy] = React.useState<boolean>(false);
+  const [revisionError, setRevisionError] = React.useState<string | null>(null);
+  const [revisionOkAt, setRevisionOkAt] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (quoteNoValue) return;
@@ -769,6 +847,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       setItems([]);
       setLayoutPkg(null);
 
+      // Keep revision UI stable across refresh; reset only errors/saved markers.
+      setRevisionError(null);
+      setRevisionOkAt(null);
+
       try {
         const res = await fetch("/api/quote/print?quote_no=" + encodeURIComponent(quoteNoValue), {
           cache: "no-store",
@@ -795,12 +877,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             setItems(json.items || []);
             setLayoutPkg(json.layoutPkg || null);
 
-            // NEW: revision from API (fallback RevAS)
-            const rev =
-              typeof json.quote?.revision === "string" && json.quote.revision.trim().length > 0
-                ? json.quote.revision.trim()
-                : "RevAS";
-            setRevisionDraft(rev);
+            // NEW: Pull revision from facts if present; default RevAS.
+            const revRaw = (json as any)?.facts?.revision;
+            const rev = typeof revRaw === "string" && revRaw.trim().length > 0 ? revRaw.trim() : "RevAS";
+            setRevisionValue(rev);
           } else {
             setError("Unexpected response from quote API.");
           }
@@ -843,8 +923,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
         if (!res.ok || !json.ok) {
           if (!cancelled) {
-            const msg =
-              (!json.ok && (json as BoxesForQuoteErr).error) || "Unable to load requested cartons for this quote.";
+            const msg = (!json.ok && (json as BoxesForQuoteErr).error) || "Unable to load requested cartons for this quote.";
             setBoxSelectionsError(msg);
           }
           return;
@@ -949,10 +1028,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     quoteState?.quote_no && typeof window === "undefined"
       ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
       : quoteState?.quote_no
-        ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
-        : null;
+      ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
+      : null;
 
-  const layersForDxf = React.useMemo(() => (layoutPkg && layoutPkg.layout_json ? getLayersFromLayout(layoutPkg.layout_json) : []), [layoutPkg]);
+  const layersForDxf = React.useMemo(() => (layoutPkg && layoutPkg.layout_json ? getLayersFromLayout(layoutPkg.layout_json) : []), [
+    layoutPkg,
+  ]);
 
   React.useEffect(() => {
     const n = layersForDxf?.length || 0;
@@ -1257,6 +1338,55 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [quoteNoValue, rebuildBusy]);
 
+  // NEW: Save revision to facts store via /api/admin/mem
+  const handleSaveRevision = React.useCallback(async () => {
+    if (!quoteNoValue) return;
+    if (revisionBusy) return;
+
+    const rev = (revisionValue || "").trim();
+    if (!rev) {
+      setRevisionError("Revision cannot be blank.");
+      return;
+    }
+
+    setRevisionBusy(true);
+    setRevisionError(null);
+    setRevisionOkAt(null);
+
+    try {
+      const res = await fetch("/api/admin/mem?t=" + String(Date.now()), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ key: quoteNoValue, revision: rev }),
+      });
+
+      const ct = res.headers.get("content-type") || "";
+      let json: any = null;
+
+      if (ct.includes("application/json")) {
+        json = await res.json();
+      } else {
+        const text = await res.text();
+        json = { ok: res.ok, message: text };
+      }
+
+      if (!res.ok || !json?.ok) {
+        setRevisionError(json?.error || json?.message || "Save failed.");
+        return;
+      }
+
+      setRevisionOkAt(new Date().toLocaleString());
+      // Keep UI in sync; also refresh print data so it shows up in facts if needed later.
+      setRefreshTick((x) => x + 1);
+    } catch (e: any) {
+      console.error("Admin: revision save failed:", e);
+      setRevisionError(String(e?.message ?? e));
+    } finally {
+      setRevisionBusy(false);
+    }
+  }, [quoteNoValue, revisionBusy, revisionValue]);
+
   return (
     <div
       style={{
@@ -1334,8 +1464,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               }}
             >
               Quote {quoteNoValue || "—"}
-              {" · "}
-              <span style={{ fontWeight: 700 }}>{revisionDraft || "RevAS"}</span>
             </div>
           </div>
 
@@ -1344,26 +1472,16 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               textAlign: "right",
               fontSize: 12,
               color: "#e5e7eb",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-end",
+              gap: 8,
+              minWidth: 320,
             }}
           >
             {quoteState && (
               <>
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                  <div
-                    style={{
-                      display: "inline-block",
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      background: "rgba(15,23,42,0.2)",
-                      border: "1px solid rgba(15,23,42,0.25)",
-                      color: "#f9fafb",
-                      fontWeight: 700,
-                    }}
-                    title="Revision label (draft revisions: RevAS/RevBS/...; released: RevA/RevB/...)"
-                  >
-                    {revisionDraft || "RevAS"}
-                  </div>
-
+                <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
                   <div
                     style={{
                       display: "inline-block",
@@ -1377,17 +1495,78 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   >
                     {quoteState.status.toUpperCase()}
                   </div>
+
+                  {/* NEW: Revision editor */}
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "rgba(15,23,42,0.18)",
+                      border: "1px solid rgba(15,23,42,0.20)",
+                      color: "#f9fafb",
+                    }}
+                    title="Internal revision label stored in facts (e.g., RevAS / RevBS … RevA / RevB …)"
+                  >
+                    <span style={{ fontSize: 11, opacity: 0.95, fontWeight: 700 }}>REV</span>
+                    <input
+                      value={revisionValue}
+                      onChange={(e) => setRevisionValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleSaveRevision();
+                        }
+                      }}
+                      style={{
+                        width: 90,
+                        border: "1px solid rgba(255,255,255,0.35)",
+                        background: "rgba(255,255,255,0.10)",
+                        color: "#ffffff",
+                        borderRadius: 8,
+                        padding: "2px 6px",
+                        fontSize: 11,
+                        outline: "none",
+                      }}
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveRevision}
+                      disabled={revisionBusy}
+                      style={{
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        border: "1px solid rgba(255,255,255,0.40)",
+                        background: revisionBusy ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.12)",
+                        color: "#ffffff",
+                        fontSize: 11,
+                        fontWeight: 800,
+                        cursor: revisionBusy ? "not-allowed" : "pointer",
+                      }}
+                      title="Save revision to facts store"
+                    >
+                      {revisionBusy ? "Saving..." : "Save"}
+                    </button>
+                  </div>
                 </div>
 
-                <p
-                  style={{
-                    margin: "4px 0 0 0",
-                    fontSize: 11,
-                    opacity: 0.9,
-                  }}
-                >
-                  Created: {new Date(quoteState.created_at).toLocaleString()}
-                </p>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 11,
+                      opacity: 0.9,
+                    }}
+                  >
+                    Created: {new Date(quoteState.created_at).toLocaleString()}
+                  </p>
+
+                  {revisionOkAt && <span style={{ fontSize: 11, color: "#dcfce7", fontWeight: 700 }}>✅ Saved</span>}
+                  {revisionError && <span style={{ fontSize: 11, color: "#fee2e2", fontWeight: 700 }}>❌ {revisionError}</span>}
+                </div>
               </>
             )}
           </div>
@@ -1433,38 +1612,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   style={{
                     display: "flex",
                     flexDirection: "column",
-                    gap: 10,
+                    gap: 6,
                     fontSize: 13,
                     color: "#111827",
                   }}
                 >
-                  {/* NEW: Revision block */}
-                  <div>
-                    <div style={labelStyle}>Revision</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <input
-                        value={revisionDraft}
-                        onChange={(e) => setRevisionDraft(e.target.value)}
-                        style={{
-                          width: 120,
-                          padding: "6px 10px",
-                          borderRadius: 10,
-                          border: "1px solid #e5e7eb",
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: "#111827",
-                          background: "#ffffff",
-                        }}
-                        spellCheck={false}
-                        aria-label="Revision"
-                        title="Edit revision label (local only for now; persistence is next step)."
-                      />
-                      <span style={{ fontSize: 11, color: "#6b7280" }}>
-                        Draft = RevAS/RevBS/… • Released = RevA/RevB/… (save wiring is next step)
-                      </span>
-                    </div>
-                  </div>
-
                   <div>
                     <div style={labelStyle}>Customer</div>
                     <div>
@@ -1473,7 +1625,6 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       {quoteState.phone ? <> • {quoteState.phone}</> : null}
                     </div>
                   </div>
-
                   {primaryItem && (
                     <>
                       <div>
@@ -1538,9 +1689,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               {typeof kerfPct === "number" ? `~${kerfPct}% kerf/waste` : "standard kerf/waste"}.{" "}
                               {setupFee && setupFee > 0 ? ` Includes a setup fee of ${formatUsd(setupFee)}.` : ""}
                               {minChargeApplied
-                                ? ` Pricing is currently governed by the minimum charge (${formatUsd(
-                                    minChargeValue ?? subtotal,
-                                  )}), not the raw volume math.`
+                                ? ` Pricing is currently governed by the minimum charge (${formatUsd(minChargeValue ?? subtotal)}), not the raw volume math.`
                                 : " Minimum charge is not the limiting factor for this configuration."}
                             </span>
                           </div>
@@ -1586,11 +1735,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     </div>
                     <div>
                       <div style={labelStyle}>Family</div>
-                      <div>
-                        {primaryMaterialFamily || (
-                          <span style={{ color: "#9ca3af" }}>Unassigned (set in materials admin)</span>
-                        )}
-                      </div>
+                      <div>{primaryMaterialFamily || <span style={{ color: "#9ca3af" }}>Unassigned (set in materials admin)</span>}</div>
                     </div>
                     <div>
                       <div style={labelStyle}>Density</div>
@@ -1641,10 +1786,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                         to confirm family / density.
                       </li>
                       <li>
-                        <a
-                          href={`/admin/cushion-curves/${primaryItem.material_id}`}
-                          style={{ color: "#0369a1", textDecoration: "none" }}
-                        >
+                        <a href={`/admin/cushion-curves/${primaryItem.material_id}`} style={{ color: "#0369a1", textDecoration: "none" }}>
                           View cushion curves for this material
                         </a>{" "}
                         (foam advisor data).
@@ -1690,20 +1832,16 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   Looking up any cartons the customer marked as <strong>Requested</strong> from the quote viewer…
                 </p>
               )}
-              {!boxSelectionsLoading && boxSelectionsError && (
-                <p style={{ fontSize: 12, color: "#b91c1c" }}>{boxSelectionsError}</p>
-              )}
+              {!boxSelectionsLoading && boxSelectionsError && <p style={{ fontSize: 12, color: "#b91c1c" }}>{boxSelectionsError}</p>}
               {!boxSelectionsLoading && !boxSelectionsError && (!boxSelections || boxSelections.length === 0) && (
-                <p style={{ fontSize: 12, color: "#6b7280" }}>
-                  No cartons have been requested on this quote yet from the customer-facing /quote page.
-                </p>
+                <p style={{ fontSize: 12, color: "#6b7280" }}>No cartons have been requested on this quote yet from the customer-facing /quote page.</p>
               )}
               {!boxSelectionsLoading && !boxSelectionsError && boxSelections && boxSelections.length > 0 && (
                 <>
                   <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 6 }}>
                     These selections come from the public quote viewer when the customer clicks{" "}
-                    <strong>&ldquo;Add this carton to my quote&rdquo;</strong>. Use this list as a heads-up when
-                    finalizing packaging and placing box orders.
+                    <strong>&ldquo;Add this carton to my quote&rdquo;</strong>. Use this list as a heads-up when finalizing packaging and placing box
+                    orders.
                   </p>
                   <ul style={{ listStyle: "disc", paddingLeft: 18, margin: 0, fontSize: 12, color: "#111827" }}>
                     {boxSelections.map((sel) => {
@@ -1724,8 +1862,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   </ul>
                   <p style={{ marginTop: 6, fontSize: 11, color: "#9ca3af" }}>
                     Read-only mirror of{" "}
-                    <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>quote_box_selections</span>.
-                    Changing cartons or quantities still happens via your normal quoting workflow.
+                    <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>quote_box_selections</span>. Changing cartons or quantities
+                    still happens via your normal quoting workflow.
                   </p>
                 </>
               )}
@@ -1733,34 +1871,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
             {/* layout + CAD downloads */}
             <div style={{ marginTop: 4, marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
-                Foam layout & CAD exports
-              </div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Foam layout & CAD exports</div>
 
               <div style={{ ...cardBase, background: "#ffffff" }}>
                 {!layoutPkg ? (
                   <p style={{ color: "#6b7280", fontSize: 13 }}>
-                    No foam layout package has been stored for this quote yet. Have the client use the layout editor
-                    from their emailed quote and click <strong>Apply to quote</strong>.
+                    No foam layout package has been stored for this quote yet. Have the client use the layout editor from their emailed quote and click{" "}
+                    <strong>Apply to quote</strong>.
                   </p>
                 ) : (
                   <>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        marginBottom: 8,
-                        gap: 12,
-                        flexWrap: "wrap",
-                      }}
-                    >
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 12, flexWrap: "wrap" }}>
                       <div>
-                        <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>
-                          Layout package #{layoutPkg.id}
-                        </div>
-                        <div style={{ color: "#6b7280", fontSize: 12 }}>
-                          Saved: {new Date(layoutPkg.created_at).toLocaleString()}
-                        </div>
+                        <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>Layout package #{layoutPkg.id}</div>
+                        <div style={{ color: "#6b7280", fontSize: 12 }}>Saved: {new Date(layoutPkg.created_at).toLocaleString()}</div>
                         {notesPreview && (
                           <div
                             style={{
@@ -1780,15 +1904,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
                         {/* Admin-only: rebuild STEP */}
                         <div style={{ marginTop: 10 }}>
-                          <div
-                            style={{
-                              fontSize: 11,
-                              textTransform: "uppercase",
-                              letterSpacing: "0.08em",
-                              color: "#6b7280",
-                              marginBottom: 4,
-                            }}
-                          >
+                          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280", marginBottom: 4 }}>
                             STEP maintenance
                           </div>
 
@@ -1812,38 +1928,16 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                               {rebuildBusy ? "Rebuilding STEP..." : "Rebuild STEP now"}
                             </button>
 
-                            {rebuildOkAt && (
-                              <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>
-                            )}
-                            {rebuildError && (
-                              <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>
-                            )}
+                            {rebuildOkAt && <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>}
+                            {rebuildError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>}
                           </div>
                         </div>
                       </div>
 
                       <div style={{ textAlign: "right", fontSize: 12, minWidth: 320 }}>
-                        <div
-                          style={{
-                            marginBottom: 4,
-                            fontSize: 11,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.08em",
-                            color: "#6b7280",
-                          }}
-                        >
-                          Full Package
-                        </div>
+                        <div style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280" }}>Full Package</div>
 
-                        <div
-                          style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: 8,
-                            justifyContent: "flex-end",
-                            alignItems: "center",
-                          }}
-                        >
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
                           {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
                             <button
                               type="button"
@@ -1929,17 +2023,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     {/* Per-layer previews + buttons */}
                     {layersForDxf && layersForDxf.length > 0 && layoutPkg.layout_json && (
                       <div style={{ marginTop: 12 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
-                          Layers (preview + downloads)
-                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Layers (preview + downloads)</div>
 
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                            gap: 12,
-                          }}
-                        >
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
                           {layersForDxf.map((layer, idx) => {
                             const label = getLayerLabel(layer, idx);
 
@@ -1969,9 +2055,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                   borderRadius: 14,
                                   padding: 10,
                                   background: "#ffffff",
-                                  boxShadow: isSelected
-                                    ? "0 10px 22px rgba(14,165,233,0.20)"
-                                    : "0 6px 16px rgba(15,23,42,0.06)",
+                                  boxShadow: isSelected ? "0 10px 22px rgba(14,165,233,0.20)" : "0 6px 16px rgba(15,23,42,0.06)",
                                   cursor: "pointer",
                                   outline: "none",
                                 }}
@@ -1980,12 +2064,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                   <div>
                                     <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{label}</div>
-                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                                      {t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}
-                                    </div>
-                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                                      Pocket depth: {pocket.text}
-                                    </div>
+                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}</div>
+                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>Pocket depth: {pocket.text}</div>
                                   </div>
                                   <div style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>
                                     Layer {idx + 1}/{layersForDxf.length}
@@ -2003,21 +2083,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                   }}
                                 >
                                   {svg ? (
-                                    <div
-                                      style={{ width: "100%", height: "100%", display: "flex" }}
-                                      dangerouslySetInnerHTML={{ __html: svg }}
-                                    />
+                                    <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
                                   ) : (
-                                    <div
-                                      style={{
-                                        height: "100%",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        fontSize: 12,
-                                        color: "#6b7280",
-                                      }}
-                                    >
+                                    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#6b7280" }}>
                                       No preview
                                     </div>
                                   )}
@@ -2065,9 +2133,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                                   </button>
                                 </div>
 
-                                <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
-                                  Preview shows foam outline + cavity geometry (layer-specific).
-                                </div>
+                                <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>Preview shows foam outline + cavity geometry (layer-specific).</div>
                               </div>
                             );
                           })}
@@ -2088,30 +2154,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             const selLabel = getLayerLabel(selLayer, selectedLayerIdx);
 
                             // Resolve thickness from full layout payload (NOT just the derived layer object)
-                            const selT =
-                              layoutPkg?.layout_json
-                                ? getLayerThicknessInFromLayout(layoutPkg.layout_json, selectedLayerIdx)
-                                : null;
+                            const selT = layoutPkg?.layout_json ? getLayerThicknessInFromLayout(layoutPkg.layout_json, selectedLayerIdx) : null;
 
-                            const pocket = layoutPkg?.layout_json
-                              ? getLayerPocketDepthSummary(layoutPkg.layout_json, selectedLayerIdx)
-                              : { text: "—", hasMultiple: false };
+                            const pocket = layoutPkg?.layout_json ? getLayerPocketDepthSummary(layoutPkg.layout_json, selectedLayerIdx) : { text: "—", hasMultiple: false };
 
                             return (
                               <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
                                 Selected layer preview:{" "}
                                 <span style={{ fontWeight: 700 }}>
-                                  {selLabel} (Layer {Math.min(selectedLayerIdx + 1, layersForDxf.length)}/
-                                  {layersForDxf.length})
+                                  {selLabel} (Layer {Math.min(selectedLayerIdx + 1, layersForDxf.length)}/{layersForDxf.length})
                                 </span>
                                 {" · "}
-                                <span style={{ fontWeight: 600, color: "#111827" }}>
-                                  Thickness: {selT ? `${selT.toFixed(3)} in` : "—"}
-                                </span>
+                                <span style={{ fontWeight: 600, color: "#111827" }}>Thickness: {selT ? `${selT.toFixed(3)} in` : "—"}</span>
                                 {" · "}
-                                <span style={{ fontWeight: 600, color: "#111827" }}>
-                                  Pocket depth: {pocket.text}
-                                </span>
+                                <span style={{ fontWeight: 600, color: "#111827" }}>Pocket depth: {pocket.text}</span>
                               </div>
                             );
                           })()}
@@ -2132,12 +2188,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                             {(() => {
                               const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, selectedLayerIdx);
                               if (!svg) return <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>;
-                              return (
-                                <div
-                                  style={{ width: "100%", height: "100%", display: "flex" }}
-                                  dangerouslySetInnerHTML={{ __html: svg }}
-                                />
-                              );
+                              return <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />;
                             })()}
                           </div>
                         </div>
@@ -2154,12 +2205,10 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 <div style={{ ...cardBase, background: "#ffffff", marginTop: 12 }}>
                   <div style={cardTitleStyle}>Layout activity</div>
                   <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 4 }}>
-                    Latest layout package is <strong>#{layoutPkg.id}</strong>, saved on{" "}
-                    {new Date(layoutPkg.created_at).toLocaleString()}.
+                    Latest layout package is <strong>#{layoutPkg.id}</strong>, saved on {new Date(layoutPkg.created_at).toLocaleString()}.
                   </p>
                   <p style={{ fontSize: 11, color: "#9ca3af" }}>
-                    Future upgrade: once a history API is wired, this panel will list multiple layout revisions with
-                    timestamps.
+                    Future upgrade: once a history API is wired, this panel will list multiple layout revisions with timestamps.
                   </p>
                 </div>
               )}
@@ -2167,9 +2216,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
             {/* optional: quick line items table (admin view) */}
             <div style={{ ...cardBase, background: "#ffffff" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>
-                Line items (admin view)
-              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>Line items (admin view)</div>
               {items.length === 0 ? (
                 <p style={{ color: "#6b7280", fontSize: 13 }}>No line items stored for this quote.</p>
               ) : (
@@ -2187,9 +2234,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     <tr style={{ background: "#eef2ff" }}>
                       <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Line</th>
                       <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Material</th>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>
-                        Dims (L × W × H)
-                      </th>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Dims (L × W × H)</th>
                       <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Qty</th>
                       <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Unit</th>
                       <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Total</th>
@@ -2206,15 +2251,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{idx + 1}</td>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{label}</td>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                            {item.qty}
-                          </td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                            {formatUsd(unit)}
-                          </td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                            {formatUsd(total)}
-                          </td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{item.qty}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(unit)}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(total)}</td>
                         </tr>
                       );
                     })}
@@ -2224,8 +2263,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             </div>
 
             <p style={{ marginTop: 24, fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
-              Internal-only view. Use this page for engineering review and CAD exports. Clients should continue to use
-              the public /quote link in their email.
+              Internal-only view. Use this page for engineering review and CAD exports. Clients should continue to use the public /quote link in their email.
             </p>
           </>
         )}
