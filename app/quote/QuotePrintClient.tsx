@@ -99,6 +99,14 @@ type LayoutMetrics = {
   min_thickness_under_cavities_in: number | null;
 };
 
+// NEW (Path A): facts payload (revision pill only)
+type QuoteFacts = {
+  revision?: string | null;
+  revision_updated_at?: string | null;
+};
+
+
+
 type ApiOk = {
   ok: true;
   quote: QuoteRow;
@@ -107,6 +115,11 @@ type ApiOk = {
 
   // NEW (Path A): thickness + cavity-under thickness metrics
   layoutMetrics?: LayoutMetrics | null;
+
+  // NEW (Path A): revision pill facts (read-only)
+  facts?: QuoteFacts | null;
+
+
 
   foamSubtotal: number;
   packagingSubtotal: number;
@@ -525,6 +538,10 @@ export default function QuotePrintClient() {
   const [quote, setQuote] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
+const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
+
+
+
 
   // NEW (Path A): layout thickness metrics from server
   const [layoutMetrics, setLayoutMetrics] = React.useState<LayoutMetrics | null>(null);
@@ -661,6 +678,8 @@ export default function QuotePrintClient() {
         setQuote(json.quote);
         setItems(json.items || []);
         setLayoutPkg(json.layoutPkg || null);
+        setFacts((json as ApiOk).facts ?? null);
+
 
         // NEW (Path A): layoutMetrics payload (may be null)
         const asOk = json as ApiOk;
@@ -745,6 +764,8 @@ export default function QuotePrintClient() {
       setItems([]);
       setLayoutPkg(null);
       setLayoutMetrics(null);
+      setFacts(null);
+
 
       try {
         await reloadQuoteData(quoteNo);
@@ -1130,7 +1151,25 @@ export default function QuotePrintClient() {
                     opacity: 0.94,
                   }}
                 >
-                  Quote {quote.quote_no}
+                    Quote {quote.quote_no}
+  {facts?.revision ? (
+    <span
+      title={facts.revision_updated_at ? new Date(facts.revision_updated_at).toLocaleString() : undefined}
+      style={{
+        marginLeft: 8,
+        padding: "2px 8px",
+        borderRadius: 999,
+        background: "rgba(15,23,42,0.25)",
+        border: "1px solid rgba(15,23,42,0.35)",
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: "0.06em",
+      }}
+    >
+      {facts.revision}
+    </span>
+  ) : null}
+
                 </div>
                 <p
                   style={{
