@@ -109,13 +109,14 @@ function safeNum(v: any): number | null {
 }
 
 /**
- * Identify "included/reference-only" layer rows.
- * We keep this conservative: only skip pricing if notes explicitly says "included".
+ * Identify layout-generated reference-only rows.
+ * [LAYOUT-LAYER] rows must NEVER be priced.
  */
-function isIncludedReferenceRow(it: ItemRow): boolean {
-  const notes = String(it?.notes || "").toLowerCase();
-  return notes.includes("included");
+function isLayoutLayerRow(it: ItemRow): boolean {
+  const notes = String(it?.notes || "").toUpperCase();
+  return notes.includes("[LAYOUT-LAYER]");
 }
+
 
 /**
  * Authoritative pricing call: POST /api/quotes/calc
@@ -293,17 +294,17 @@ export async function GET(req: NextRequest) {
             continue;
           }
 
-          // FIX: Do not price "included/reference-only" rows.
-          // These should remain visible in the interactive quote,
-          // but MUST NOT contribute to the billable foam subtotal.
-          if (isIncludedReferenceRow(it)) {
-            items.push({
-              ...it,
-              price_unit_usd: null,
-              price_total_usd: null,
-            });
-            continue;
-          }
+        // FIX: Do not price layout-generated layer rows.
+// These are reference-only and already included in the PRIMARY foam set.
+if (isLayoutLayerRow(it)) {
+  items.push({
+    ...it,
+    price_unit_usd: null,
+    price_total_usd: null,
+  });
+  continue;
+}
+
 
           const priced = await priceViaCalcRoute({
             L,
