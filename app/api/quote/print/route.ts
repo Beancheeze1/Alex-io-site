@@ -41,7 +41,6 @@ type ItemRow = {
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
 
-  // Optional metadata used by some UIs/templates (safe to attach if present)
   pricing_meta?: {
     min_charge?: number | null;
     used_min_charge?: boolean;
@@ -110,11 +109,9 @@ function cleanStringArray(x: any): string[] {
 function extractCavityStrings(facts: any): string[] {
   if (!facts || typeof facts !== "object") return [];
 
-  // Most common: facts.cavities = ["5x4x1","3x3x1"] or ["Ø6x1"]
   const direct = cleanStringArray((facts as any).cavities);
   if (direct.length) return direct;
 
-  // Alternate common keys
   const alt1 = cleanStringArray((facts as any).cavityDims);
   if (alt1.length) return alt1;
 
@@ -124,7 +121,6 @@ function extractCavityStrings(facts: any): string[] {
   const alt3 = cleanStringArray((facts as any).cavity_list);
   if (alt3.length) return alt3;
 
-  // Nested shapes some versions used
   const nested = (facts as any).parsed || (facts as any).specs || null;
   if (nested && typeof nested === "object") {
     const n1 = cleanStringArray((nested as any).cavities);
@@ -134,6 +130,39 @@ function extractCavityStrings(facts: any): string[] {
   }
 
   return [];
+}
+
+/**
+ * Path-A: Prefer qty/material from facts when present.
+ * This restores carryover for interactive quote even if quote_items are stale.
+ */
+function coercePosInt(raw: any): number | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.round(n);
+  if (i <= 0) return null;
+  return i;
+}
+
+function getPreferredQtyMaterial(item: ItemRow, facts: any): { qty: number; material_id: number } {
+  const itemQty = coercePosInt(item.qty);
+  const itemMat = coercePosInt(item.material_id);
+
+  const factsQty =
+    facts && typeof facts === "object"
+      ? coercePosInt((facts as any).qty ?? (facts as any).quantity ?? (facts as any).Qty)
+      : null;
+
+  const factsMat =
+    facts && typeof facts === "object"
+      ? coercePosInt((facts as any).material_id ?? (facts as any).materialId ?? (facts as any).material)
+      : null;
+
+  // Prefer facts if valid; fall back to item values.
+  const qty = factsQty ?? itemQty ?? 0;
+  const material_id = factsMat ?? itemMat ?? 0;
+
+  return { qty, material_id };
 }
 
 /**
@@ -161,7 +190,6 @@ async function callVolumetricCalc(args: {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // IMPORTANT: keep payload simple + deterministic
     body: JSON.stringify({
       length_in: args.length_in,
       width_in: args.width_in,
@@ -177,7 +205,6 @@ async function callVolumetricCalc(args: {
   const json = (await res.json().catch(() => null)) as any;
 
   if (!res.ok || !json?.ok) {
-    // Fail soft: no throw here; caller will fallback gracefully.
     return { unitPrice: null, total: null };
   }
 
@@ -203,26 +230,34 @@ async function attachPricingToPrimaryItem(args: {
   origin: string;
   item: ItemRow;
   cavities: string[];
+  facts: any;
 }): Promise<ItemRow> {
   const { item } = args;
   const { L, W, H } = parseDimsNums(item);
 
   if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return item;
-  if (!Number.isFinite(Number(item.qty)) || item.qty <= 0) return item;
-  if (!Number.isFinite(Number(item.material_id)) || item.material_id <= 0) return item;
+
+  const preferred = getPreferredQtyMaterial(item, args.facts);
+
+  if (!Number.isFinite(Number(preferred.qty)) || preferred.qty <= 0) return item;
+  if (!Number.isFinite(Number(preferred.material_id)) || preferred.material_id <= 0) return item;
 
   const priced = await callVolumetricCalc({
     origin: args.origin,
     length_in: L,
     width_in: W,
     height_in: H,
-    material_id: item.material_id,
-    qty: item.qty,
+    material_id: preferred.material_id,
+    qty: preferred.qty,
     cavities: args.cavities || [],
   });
 
+  // IMPORTANT: also return the preferred qty/material so the interactive quote UI
+  // shows the carryover even if DB row is stale.
   return {
     ...item,
+    qty: preferred.qty,
+    material_id: preferred.material_id,
     price_unit_usd: priced.unitPrice ?? null,
     price_total_usd: priced.total ?? null,
     pricing_meta: {
@@ -263,7 +298,7 @@ export async function GET(req: NextRequest) {
       return bad({ ok: false, error: "NOT_FOUND" }, 404);
     }
 
-    // Load facts once (needed for cavity strings and to return to caller)
+    // Load facts once (needed for cavity strings and qty/material carryover)
     const facts = await loadFacts(quoteNo);
     const cavitiesFromFacts = extractCavityStrings(facts);
 
@@ -302,6 +337,7 @@ export async function GET(req: NextRequest) {
           origin,
           item: primary,
           cavities: cavitiesFromFacts,
+          facts,
         });
       } catch {
         pricedPrimary = primary;
