@@ -1,0 +1,7 @@
+﻿{
+  "mode": "ai",
+  "dryRun": true,
+  "toEmail": "chuck@alex-io.com",
+  "subject": "quote layer parse test",
+  "text": "Please quote 75 sets of 1.7# white Polyethylene foam.\n\nThe foam is made up of (3) layers, each 12\" x 10\".\n\nLayer 1 (bottom):\nThickness 1.00\"\nNo cavities.\n\nLayer 2 (middle):\nThickness 2.50\"\nIncludes 3 cavities:\n- One rectangular cavity: 4.0\" x 3.0\" x 1.25\" deep\n- One rounded-corner cavity: 3.5\" x 2.5\" x 1.00\" deep, 0.50\" corner radius\n- One circular cavity: Ø2.25\" x 1.50\" deep\n\nLayer 3 (top):\nThickness 0.75\"\nIncludes 1 circular through-hole: Ø1.50\"\n\nPlease include pricing for the full foam set. Thank you."
+}

@@ -111,7 +111,18 @@ function pickThreadContext(threadMsgs: any[] = []) {
 // Allow "1", "1.5" and also ".5" style numbers
 // IMPORTANT: used by multiple helpers (dims, cavities, layers) so define it early.
 // NOTE: Use [0-9] instead of \d to avoid Unicode backslash paste issues breaking regex matching at runtime.
-const NUM = "(?:[0-9]{1,4}(?:\\.[0-9]+)?|\\.[0-9]+)";
+const NUM = "(?:[0-9]{1,4}(?:[.][0-9]+)?|[.][0-9]+)";
+
+function safeRegExp(pattern: string, flags: string) {
+  try {
+    return new RegExp(pattern, flags);
+  } catch (e: any) {
+    console.error("BAD_REGEX", { pattern, flags, msg: String(e?.message || e) });
+    return null;
+  }
+}
+
+
 
 // Detect Q-AI-* style quote numbers in subject/body so we can
 // pull sketch facts that were stored under quote_no.
@@ -924,10 +935,14 @@ function grabLayerThicknessesCanonical(
 
   // Keep this for backwards compatibility (still works if someone literally writes "top layer"),
   // but in practice the alias normalization above makes the numbered regex catch everything.
-  const rePos = new RegExp(
-    `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*(?:[^.\\n\\r]{0,60}?\\bthick\\b)?`,
-    "gi",
-  );
+  const rePos = safeRegExp(
+  `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*(?:[^.\\n\\r]{0,60}?\\bthick\\b)?`,
+  "gi",
+);
+
+if (!rePos) return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
+
+
 
   let m: RegExpExecArray | null;
   while ((m = rePos.exec(s))) {
@@ -952,13 +967,12 @@ function grabLayerThicknessesCanonical(
     }
   }
 
-    const reNum = new RegExp(
-    `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,160}?` +
-      `\\b(?:thickness\\b[^.\\n\\r]{0,40}?|(?:will\\s+be|is|=|at)?\\s*)` +
-      `(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,80}?` +
-      `\\b(?:thick|thickness)\\b?`,
-    "gi",
-  );
+ const reNum = safeRegExp(
+  `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
+  "gi",
+);
+
+if (!reNum) return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
 
 
   while ((m = reNum.exec(s))) {
