@@ -1524,6 +1524,12 @@ const lastText = getLastInboundText(p, threadMsgs);
 
 const lastTextForRegex = normalizeInboundTextForRegex(lastText);
 
+console.log("ORCH_INBOUND_SAMPLE", {
+  len: (lastText || "").length,
+  head: String(lastText || "").slice(0, 400),
+});
+
+
 
 
     const salesRepSlugFromSubject = extractRepSlugFromSubject(subject, lastText);
