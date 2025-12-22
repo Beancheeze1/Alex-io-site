@@ -37,9 +37,8 @@
 //     use the latest layout, not stale test data.
 //   - NEW: syncs each foam layer in layout.stack into quote_items as separate
 //     rows marked with notes starting "[LAYOUT-LAYER] ...".
-//
-// GET (debug helper):
-//   - /api/quote/layout/apply?quote_no=Q-...   -> latest package for that quote
+//   - FIX (Path A): After Apply, PRIMARY quote_item height_in must be FULL STACK DEPTH,
+//     not the active layer thickness. We set PRIMARY.height_in = sum(stack[].thicknessIn).
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -806,6 +805,30 @@ export async function POST(req: NextRequest) {
       materialIdMaybe: materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0 ? materialIdMaybe : null,
     });
 
+    // FIX (Path A): After Apply, PRIMARY must reflect FULL STACK DEPTH so /api/quotes/calc prices the full set.
+    // This does NOT affect per-layer CAD exports; it only corrects PRIMARY quote_items dims for pricing + display.
+    try {
+      const stackDepthIn = sumLayerThickness(layoutForSave);
+      if (stackDepthIn != null && Number.isFinite(stackDepthIn) && stackDepthIn > 0) {
+        await q(
+          `
+          update quote_items
+          set height_in = $1
+          where id = (
+            select id
+            from quote_items
+            where quote_id = $2
+            order by id asc
+            limit 1
+          )
+          `,
+          [stackDepthIn, quote.id],
+        );
+      }
+    } catch (e) {
+      console.error("[layout/apply] Failed to set PRIMARY height_in to stack depth for", quoteNo, e);
+    }
+
     if (customerName || customerEmail || customerPhone || customerCompany) {
       await q(
         `
@@ -1089,7 +1112,14 @@ export async function POST(req: NextRequest) {
       if (layoutForSave && layoutForSave.block) {
         const Lb = Number(layoutForSave.block.lengthIn) || 0;
         const Wb = Number(layoutForSave.block.widthIn) || 0;
-        const Tb = Number(layoutForSave.block.thicknessIn) || 0;
+
+        // FIX (Path A): Facts dims should reflect FULL STACK DEPTH when available.
+        const stackDepthIn = sumLayerThickness(layoutForSave);
+        const Tb =
+          stackDepthIn != null && Number.isFinite(stackDepthIn) && stackDepthIn > 0
+            ? stackDepthIn
+            : Number(layoutForSave.block.thicknessIn) || 0;
+
         if (Lb > 0 && Wb > 0 && Tb > 0) {
           nextFacts.dims = `${Lb}x${Wb}x${Tb}`;
         }
