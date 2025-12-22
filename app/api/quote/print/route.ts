@@ -102,25 +102,16 @@ function cleanStringArray(x: any): string[] {
   return out;
 }
 
-/**
- * Best-effort extraction of cavity strings from facts.
- * We intentionally keep this conservative + non-destructive.
- */
 function extractCavityStrings(facts: any): string[] {
   if (!facts || typeof facts !== "object") return [];
-
   const direct = cleanStringArray((facts as any).cavities);
   if (direct.length) return direct;
-
   const alt1 = cleanStringArray((facts as any).cavityDims);
   if (alt1.length) return alt1;
-
   const alt2 = cleanStringArray((facts as any).cavity_dims);
   if (alt2.length) return alt2;
-
   const alt3 = cleanStringArray((facts as any).cavity_list);
   if (alt3.length) return alt3;
-
   const nested = (facts as any).parsed || (facts as any).specs || null;
   if (nested && typeof nested === "object") {
     const n1 = cleanStringArray((nested as any).cavities);
@@ -128,14 +119,9 @@ function extractCavityStrings(facts: any): string[] {
     const n2 = cleanStringArray((nested as any).cavityDims);
     if (n2.length) return n2;
   }
-
   return [];
 }
 
-/**
- * Path-A: Prefer qty/material from facts when present.
- * This restores carryover for interactive quote even if quote_items are stale.
- */
 function coercePosInt(raw: any): number | null {
   const n = Number(raw);
   if (!Number.isFinite(n)) return null;
@@ -158,17 +144,12 @@ function getPreferredQtyMaterial(item: ItemRow, facts: any): { qty: number; mate
       ? coercePosInt((facts as any).material_id ?? (facts as any).materialId ?? (facts as any).material)
       : null;
 
-  // Prefer facts if valid; fall back to item values.
   const qty = factsQty ?? itemQty ?? 0;
   const material_id = factsMat ?? itemMat ?? 0;
 
   return { qty, material_id };
 }
 
-/**
- * Call the real volumetric pricing route.
- * Returns { unitPrice, total, kerf_pct, used_min_charge, min_charge, setup_fee }
- */
 async function callVolumetricCalc(args: {
   origin: string;
   length_in: number;
@@ -226,6 +207,22 @@ async function callVolumetricCalc(args: {
   };
 }
 
+async function hydrateMaterial(material_id: number) {
+  if (!Number.isFinite(material_id) || material_id <= 0) return null;
+  return await one<{
+    name: string | null;
+    material_family: string | null;
+    density_lb_ft3: number | null;
+  }>(
+    `
+    select name, material_family, density_lb_ft3
+    from materials
+    where id = $1
+    `,
+    [material_id],
+  );
+}
+
 async function attachPricingToPrimaryItem(args: {
   origin: string;
   item: ItemRow;
@@ -239,8 +236,8 @@ async function attachPricingToPrimaryItem(args: {
 
   const preferred = getPreferredQtyMaterial(item, args.facts);
 
-  if (!Number.isFinite(Number(preferred.qty)) || preferred.qty <= 0) return item;
-  if (!Number.isFinite(Number(preferred.material_id)) || preferred.material_id <= 0) return item;
+  if (!Number.isFinite(preferred.qty) || preferred.qty <= 0) return item;
+  if (!Number.isFinite(preferred.material_id) || preferred.material_id <= 0) return item;
 
   const priced = await callVolumetricCalc({
     origin: args.origin,
@@ -252,12 +249,15 @@ async function attachPricingToPrimaryItem(args: {
     cavities: args.cavities || [],
   });
 
-  // IMPORTANT: also return the preferred qty/material so the interactive quote UI
-  // shows the carryover even if DB row is stale.
+  const mat = await hydrateMaterial(preferred.material_id);
+
   return {
     ...item,
     qty: preferred.qty,
     material_id: preferred.material_id,
+    material_name: mat?.name ?? item.material_name ?? null,
+    material_family: mat?.material_family ?? item.material_family ?? null,
+    density_lb_ft3: mat?.density_lb_ft3 ?? item.density_lb_ft3 ?? null,
     price_unit_usd: priced.unitPrice ?? null,
     price_total_usd: priced.total ?? null,
     pricing_meta: {
@@ -279,15 +279,7 @@ export async function GET(req: NextRequest) {
   try {
     const quote = await one<QuoteRow>(
       `
-      select
-        id,
-        quote_no,
-        customer_name,
-        email,
-        phone,
-        company,
-        status,
-        created_at
+      select id, quote_no, customer_name, email, phone, company, status, created_at
       from quotes
       where quote_no = $1
       `,
@@ -298,7 +290,6 @@ export async function GET(req: NextRequest) {
       return bad({ ok: false, error: "NOT_FOUND" }, 404);
     }
 
-    // Load facts once (needed for cavity strings and qty/material carryover)
     const facts = await loadFacts(quoteNo);
     const cavitiesFromFacts = extractCavityStrings(facts);
 
@@ -324,14 +315,12 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // IMPORTANT: Only the PRIMARY row gets priced (the UI treats others as Included layers)
     const origin = req.nextUrl.origin;
 
     const items: ItemRow[] = [];
     if (itemsRaw.length > 0) {
       const primary = itemsRaw[0];
-      let pricedPrimary: ItemRow = primary;
-
+      let pricedPrimary = primary;
       try {
         pricedPrimary = await attachPricingToPrimaryItem({
           origin,
@@ -339,32 +328,16 @@ export async function GET(req: NextRequest) {
           cavities: cavitiesFromFacts,
           facts,
         });
-      } catch {
-        pricedPrimary = primary;
-      }
-
+      } catch {}
       items.push(pricedPrimary);
-
       for (let i = 1; i < itemsRaw.length; i++) {
-        items.push({
-          ...itemsRaw[i],
-          price_unit_usd: null,
-          price_total_usd: null,
-        });
+        items.push({ ...itemsRaw[i], price_unit_usd: null, price_total_usd: null });
       }
     }
 
     let layoutPkg = await one<LayoutPkgRow>(
       `
-      select
-        id,
-        quote_id,
-        layout_json,
-        notes,
-        svg_text,
-        dxf_text,
-        step_text,
-        created_at
+      select id, quote_id, layout_json, notes, svg_text, dxf_text, step_text, created_at
       from quote_layout_packages
       where quote_id = $1
       order by created_at desc
@@ -373,13 +346,10 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // ✅ SVG regen (roundedRect fix)
     if (layoutPkg?.layout_json) {
       try {
         const bundle = buildLayoutExports(layoutPkg.layout_json);
-        if (bundle?.svg) {
-          layoutPkg = { ...layoutPkg, svg_text: bundle.svg };
-        }
+        if (bundle?.svg) layoutPkg = { ...layoutPkg, svg_text: bundle.svg };
       } catch {}
     }
 
@@ -406,7 +376,6 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // Foam subtotal should come ONLY from the primary priced row.
     const foamSubtotal = items.length > 0 ? Number(items[0].price_total_usd) || 0 : 0;
     const packagingSubtotal = packagingLines.reduce((s, l) => s + (Number(l.extended_price_usd) || 0), 0);
 
