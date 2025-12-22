@@ -1,10 +1,12 @@
 // app/api/quote/print/route.ts
 //
 // Returns full quote data (header + items + latest layout package)
-// by quote_no, and attaches a pricing snapshot to each item using
-// the volumetric calc route.
+// by quote_no, and attaches pricing snapshot.
 //
-// GET /api/quote/print?quote_no=Q-AI-20251116-115613
+// IMPORTANT:
+// - Supports PRE-APPLY interactive quotes using facts only
+// - Automatically switches to DB-backed items after Apply
+// - Single authoritative response for the interactive quote page
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
@@ -14,6 +16,10 @@ import { buildLayoutExports } from "@/app/lib/layout/exports";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+/* ============================================================
+   Types
+   ============================================================ */
 
 type QuoteRow = {
   id: number;
@@ -38,7 +44,6 @@ type ItemRow = {
   material_family?: string | null;
   density_lb_ft3?: number | null;
   notes?: string | null;
-
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
 };
@@ -70,6 +75,10 @@ export type PackagingLine = {
   inside_height_in: number | null;
 };
 
+/* ============================================================
+   Helpers
+   ============================================================ */
+
 function ok(body: any, status = 200) {
   return NextResponse.json(body, { status });
 }
@@ -78,45 +87,48 @@ function bad(body: any, status = 400) {
   return NextResponse.json(body, { status });
 }
 
-function parseDimsNums(item: ItemRow) {
-  return {
-    L: Number(item.length_in),
-    W: Number(item.width_in),
-    H: Number(item.height_in),
-  };
+function parseDimsString(dims: string | null | undefined) {
+  if (!dims) return null;
+  const [L, W, H] = dims.split("x").map(Number);
+  if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return null;
+  return { L, W, H };
 }
 
-async function attachPricingToItem(item: ItemRow): Promise<ItemRow> {
-  const { L, W, H } = parseDimsNums(item);
-
-  if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return item;
-  if (!Number.isFinite(Number(item.qty)) || item.qty <= 0) return item;
-  if (!Number.isFinite(Number(item.material_id)) || item.material_id <= 0) return item;
-
+async function priceItem(params: {
+  L: number;
+  W: number;
+  H: number;
+  qty: number;
+  density_lbft3: number | null;
+}) {
   const result = await computePricingBreakdown({
-    length_in: L,
-    width_in: W,
-    height_in: H,
-    density_lbft3: item.density_lb_ft3 ?? null,
+    length_in: params.L,
+    width_in: params.W,
+    height_in: params.H,
+    density_lbft3: params.density_lbft3,
     cost_per_lb: null,
-    qty: item.qty,
+    qty: params.qty,
   } as any);
 
   return {
-    ...item,
-    price_unit_usd: Number((result as any)?.unitPrice ?? item.price_unit_usd ?? null),
-    price_total_usd: Number((result as any)?.extendedPrice ?? item.price_total_usd ?? null),
+    unit: Number((result as any)?.unitPrice ?? 0),
+    total: Number((result as any)?.extendedPrice ?? 0),
   };
 }
 
+/* ============================================================
+   Main handler
+   ============================================================ */
+
 export async function GET(req: NextRequest) {
   const quoteNo = req.nextUrl.searchParams.get("quote_no");
-
   if (!quoteNo) {
     return bad({ ok: false, error: "MISSING_QUOTE_NO" }, 400);
   }
 
   try {
+    /* ---------------- Quote header ---------------- */
+
     const quote = await one<QuoteRow>(
       `
       select
@@ -138,7 +150,13 @@ export async function GET(req: NextRequest) {
       return bad({ ok: false, error: "NOT_FOUND" }, 404);
     }
 
-    let itemsRaw = await q<ItemRow>(
+    /* ---------------- Load facts (authoritative pre-Apply) ---------------- */
+
+    const facts = (await loadFacts(quoteNo)) || {};
+
+    /* ---------------- DB items (post-Apply) ---------------- */
+
+    const itemsRaw = await q<ItemRow>(
       `
       select
         qi.id,
@@ -161,13 +179,71 @@ export async function GET(req: NextRequest) {
     );
 
     let items: ItemRow[] = [];
-    for (const it of itemsRaw) {
-      try {
-        items.push(await attachPricingToItem(it));
-      } catch {
-        items.push(it);
+
+    /* ============================================================
+       PRE-APPLY PATH (facts only, no DB items)
+       ============================================================ */
+
+    if (itemsRaw.length === 0) {
+      const dimsParsed = parseDimsString(facts.dims);
+      if (dimsParsed && facts.qty && facts.material_id) {
+        const priced = await priceItem({
+          ...dimsParsed,
+          qty: Number(facts.qty),
+          density_lbft3:
+            typeof facts.density === "string"
+              ? Number(facts.density.match(/(\d+(\.\d+)?)/)?.[1] || null)
+              : null,
+        });
+
+        items.push({
+          id: -1,
+          quote_id: quote.id,
+          length_in: String(dimsParsed.L),
+          width_in: String(dimsParsed.W),
+          height_in: String(dimsParsed.H),
+          qty: Number(facts.qty),
+          material_id: Number(facts.material_id),
+          material_name: facts.material_name || null,
+          material_family: facts.material_family || null,
+          density_lb_ft3: null,
+          notes: null,
+          price_unit_usd: priced.unit,
+          price_total_usd: priced.total,
+        });
       }
     }
+
+    /* ============================================================
+       POST-APPLY PATH (DB authoritative)
+       ============================================================ */
+
+    if (itemsRaw.length > 0) {
+      for (const it of itemsRaw) {
+        try {
+          const dims = {
+            L: Number(it.length_in),
+            W: Number(it.width_in),
+            H: Number(it.height_in),
+          };
+          const priced = await priceItem({
+            ...dims,
+            qty: it.qty,
+            density_lbft3: it.density_lb_ft3 ?? null,
+          });
+
+          items.push({
+            ...it,
+            price_unit_usd: priced.unit,
+            price_total_usd: priced.total,
+          });
+        } catch {
+          items.push(it);
+        }
+      }
+    }
+
+    /* ---------------- Layout package ---------------- */
 
     let layoutPkg = await one<LayoutPkgRow>(
       `
@@ -188,7 +264,6 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // ✅ SVG regen (roundedRect fix) — already correct
     if (layoutPkg?.layout_json) {
       try {
         const bundle = buildLayoutExports(layoutPkg.layout_json);
@@ -197,6 +272,8 @@ export async function GET(req: NextRequest) {
         }
       } catch {}
     }
+
+    /* ---------------- Packaging lines ---------------- */
 
     const packagingLines: PackagingLine[] = await q(
       `
@@ -233,7 +310,7 @@ export async function GET(req: NextRequest) {
       foamSubtotal,
       packagingSubtotal,
       grandSubtotal: foamSubtotal + packagingSubtotal,
-      facts: await loadFacts(quoteNo),
+      facts,
     });
   } catch (err) {
     console.error(err);
