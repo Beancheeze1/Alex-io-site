@@ -27,6 +27,9 @@ type QuoteRow = {
   phone: string | null;
   status: string;
   created_at: string;
+
+  // NEW: revision label (RevAS/RevA/etc) returned by /api/quote/print
+  revision?: string | null;
 };
 
 type ItemRow = {
@@ -130,18 +133,11 @@ function formatUsd(value: number | null | undefined): string {
   }
 }
 
-
 /* ============================================================
    🔒 NEW: canonical SVG rounded-rect path generator
    ============================================================ */
 
-function svgRoundedRectPath(
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-): string {
+function svgRoundedRectPath(x: number, y: number, w: number, h: number, r: number): string {
   const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   if (rr <= 0) {
     return `M ${x} ${y} H ${x + w} V ${y + h} H ${x} Z`;
@@ -163,10 +159,6 @@ function svgRoundedRectPath(
     `Z`,
   ].join(" ");
 }
-
-
-
-
 
 /* ---------------- Filename helpers (manufacturer-friendly) ---------------- */
 
@@ -248,47 +240,49 @@ type FlatCavity = {
   cornerRadiusIn?: number | null;
 };
 
-
-function arcEntity(
-  cx: number,
-  cy: number,
-  r: number,
-  startDeg: number,
-  endDeg: number,
-): string {
+function arcEntity(cx: number, cy: number, r: number, startDeg: number, endDeg: number): string {
   return [
-    "0", "ARC",
-    "8", "0",
-    "10", cx.toFixed(4),
-    "20", cy.toFixed(4),
-    "30", "0.0",
-    "40", r.toFixed(4),
-    "50", startDeg.toFixed(4),
-    "51", endDeg.toFixed(4),
+    "0",
+    "ARC",
+    "8",
+    "0",
+    "10",
+    cx.toFixed(4),
+    "20",
+    cy.toFixed(4),
+    "30",
+    "0.0",
+    "40",
+    r.toFixed(4),
+    "50",
+    startDeg.toFixed(4),
+    "51",
+    endDeg.toFixed(4),
   ].join("\n");
 }
 
 function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
   return [
-    "0", "LINE",
-    "8", "0",
-    "10", x1.toFixed(4),
-    "20", y1.toFixed(4),
-    "30", "0.0",
-    "11", x2.toFixed(4),
-    "21", y2.toFixed(4),
-    "31", "0.0",
+    "0",
+    "LINE",
+    "8",
+    "0",
+    "10",
+    x1.toFixed(4),
+    "20",
+    y1.toFixed(4),
+    "30",
+    "0.0",
+    "11",
+    x2.toFixed(4),
+    "21",
+    y2.toFixed(4),
+    "31",
+    "0.0",
   ].join("\n");
 }
 
-function emitRoundedRectDXF(
-  entities: string[],
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-) {
+function emitRoundedRectDXF(entities: string[], x: number, y: number, w: number, h: number, r: number) {
   const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   const x2 = x + w;
   const y2 = y + h;
@@ -301,8 +295,8 @@ function emitRoundedRectDXF(
 
   // Arcs (DXF angles are CCW, degrees)
   entities.push(arcEntity(x2 - rr, y + rr, rr, 270, 360)); // bottom-right
-  entities.push(arcEntity(x2 - rr, y2 - rr, rr,   0,  90)); // top-right
-  entities.push(arcEntity(x + rr, y2 - rr, rr,  90, 180)); // top-left
+  entities.push(arcEntity(x2 - rr, y2 - rr, rr, 0, 90)); // top-right
+  entities.push(arcEntity(x + rr, y2 - rr, rr, 90, 180)); // top-left
   entities.push(arcEntity(x + rr, y + rr, rr, 180, 270)); // bottom-left
 }
 
@@ -425,11 +419,7 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
     }
 
     const shape = normalizeShape(
-      (cav as any).shape ??
-        (cav as any).cavityShape ??
-        (cav as any).cavity_shape ??
-        (cav as any).type ??
-        (cav as any).kind,
+      (cav as any).shape ?? (cav as any).cavityShape ?? (cav as any).cavity_shape ?? (cav as any).type ?? (cav as any).kind,
     );
 
     const rawDia = (cav as any).diameterIn ?? (cav as any).diameter_in ?? (cav as any).diameter ?? null;
@@ -443,7 +433,11 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
 
     // NEW: carry radius through (admin preview only; no logic elsewhere)
     const rawR =
-      (cav as any).cornerRadiusIn ?? (cav as any).corner_radius_in ?? (cav as any).cornerRadius ?? (cav as any).r ?? null;
+      (cav as any).cornerRadiusIn ??
+      (cav as any).corner_radius_in ??
+      (cav as any).cornerRadius ??
+      (cav as any).r ??
+      null;
     const rNum = rawR == null ? NaN : Number(rawR);
     const cornerRadiusIn = Number.isFinite(rNum) && rNum > 0 ? rNum : null;
 
@@ -510,13 +504,7 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
   const fallbackW = Number.isFinite(rawW) && rawW > 0 ? rawW : rawL;
 
   let scale = 1;
-  if (
-    targetDimsIn &&
-    Number.isFinite(targetDimsIn.L) &&
-    targetDimsIn.L > 0 &&
-    Number.isFinite(rawL) &&
-    rawL > 0
-  ) {
+  if (targetDimsIn && Number.isFinite(targetDimsIn.L) && targetDimsIn.L > 0 && Number.isFinite(rawL) && rawL > 0) {
     scale = targetDimsIn.L / rawL;
     if (!Number.isFinite(scale) || scale <= 0) scale = 1;
   }
@@ -529,11 +517,7 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
   }
 
   function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
-    return [
-      "0","LINE","8","0",
-      "10",fmt(x1),"20",fmt(y1),"30","0.0",
-      "11",fmt(x2),"21",fmt(y2),"31","0.0",
-    ].join("\n");
+    return ["0", "LINE", "8", "0", "10", fmt(x1), "20", fmt(y1), "30", "0.0", "11", fmt(x2), "21", fmt(y2), "31", "0.0"].join("\n");
   }
 
   const entities: string[] = [];
@@ -557,15 +541,12 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
     const bottom = Math.max(0, Math.min(W - cW, y0));
 
     if (cav.shape === "circle") {
-      const dia =
-        cav.diameterIn && cav.diameterIn > 0 ? cav.diameterIn : Math.min(cL, cW);
+      const dia = cav.diameterIn && cav.diameterIn > 0 ? cav.diameterIn : Math.min(cL, cW);
       const r = dia / 2;
       const cx = left + cL / 2;
       const cy = bottom + cW / 2;
 
-      entities.push(
-        ["0","CIRCLE","8","0","10",fmt(cx),"20",fmt(cy),"30","0.0","40",fmt(r)].join("\n"),
-      );
+      entities.push(["0", "CIRCLE", "8", "0", "10", fmt(cx), "20", fmt(cy), "30", "0.0", "40", fmt(r)].join("\n"));
       continue;
     }
 
@@ -582,15 +563,8 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
 
   if (!entities.length) return null;
 
-  const header = [
-    "0","SECTION","2","HEADER","9","$ACADVER","1","AC1009",
-    "9","$INSUNITS","70","1","0","ENDSEC",
-    "0","SECTION","2","TABLES","0","ENDSEC",
-    "0","SECTION","2","BLOCKS","0","ENDSEC",
-    "0","SECTION","2","ENTITIES",
-  ].join("\n");
-
-  const footer = ["0","ENDSEC","0","EOF"].join("\n");
+  const header = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1009", "9", "$INSUNITS", "70", "1", "0", "ENDSEC", "0", "SECTION", "2", "TABLES", "0", "ENDSEC", "0", "SECTION", "2", "BLOCKS", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"].join("\n");
+  const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
 
   return [header, entities.join("\n"), footer].join("\n");
 }
@@ -616,11 +590,7 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
   }
 
   function lineEntity(x1: number, y1: number, x2: number, y2: number): string {
-    return [
-      "0","LINE","8","0",
-      "10",fmt(x1),"20",fmt(y1),"30","0.0",
-      "11",fmt(x2),"21",fmt(y2),"31","0.0",
-    ].join("\n");
+    return ["0", "LINE", "8", "0", "10", fmt(x1), "20", fmt(y1), "30", "0.0", "11", fmt(x2), "21", fmt(y2), "31", "0.0"].join("\n");
   }
 
   const entities: string[] = [];
@@ -652,9 +622,7 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
         const cx = left + cL / 2;
         const cy = bottom + cW / 2;
 
-        entities.push(
-          ["0","CIRCLE","8","0","10",fmt(cx),"20",fmt(cy),"30","0.0","40",fmt(r)].join("\n"),
-        );
+        entities.push(["0", "CIRCLE", "8", "0", "10", fmt(cx), "20", fmt(cy), "30", "0.0", "40", fmt(r)].join("\n"));
         continue;
       }
 
@@ -672,15 +640,8 @@ function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): strin
 
   if (!entities.length) return null;
 
-  const header = [
-    "0","SECTION","2","HEADER","9","$ACADVER","1","AC1009",
-    "9","$INSUNITS","70","1","0","ENDSEC",
-    "0","SECTION","2","TABLES","0","ENDSEC",
-    "0","SECTION","2","BLOCKS","0","ENDSEC",
-    "0","SECTION","2","ENTITIES",
-  ].join("\n");
-
-  const footer = ["0","ENDSEC","0","EOF"].join("\n");
+  const header = ["0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1009", "9", "$INSUNITS", "70", "1", "0", "ENDSEC", "0", "SECTION", "2", "TABLES", "0", "ENDSEC", "0", "SECTION", "2", "BLOCKS", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"].join("\n");
+  const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
 
   return [header, entities.join("\n"), footer].join("\n");
 }
@@ -708,9 +669,7 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
     const h = c.widthIn;
 
     const r =
-      c.cornerRadiusIn && Number.isFinite(c.cornerRadiusIn)
-        ? Math.max(0, Math.min(c.cornerRadiusIn, w / 2, h / 2))
-        : 0;
+      c.cornerRadiusIn && Number.isFinite(c.cornerRadiusIn) ? Math.max(0, Math.min(c.cornerRadiusIn, w / 2, h / 2)) : 0;
 
     if (c.shape === "circle") {
       const d = c.diameterIn ?? Math.min(w, h);
@@ -749,6 +708,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [quoteState, setQuoteState] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
+
+  // NEW: local revision editor (display + local edit; persistence comes next step)
+  const [revisionDraft, setRevisionDraft] = React.useState<string>("RevAS");
 
   const [refreshTick, setRefreshTick] = React.useState<number>(0);
 
@@ -832,6 +794,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             setQuoteState(json.quote);
             setItems(json.items || []);
             setLayoutPkg(json.layoutPkg || null);
+
+            // NEW: revision from API (fallback RevAS)
+            const rev =
+              typeof json.quote?.revision === "string" && json.quote.revision.trim().length > 0
+                ? json.quote.revision.trim()
+                : "RevAS";
+            setRevisionDraft(rev);
           } else {
             setError("Unexpected response from quote API.");
           }
@@ -970,13 +939,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     marginBottom: 2,
   };
 
-  const primaryMaterialName =
-    primaryItem?.material_name || (primaryItem ? `Material #${primaryItem.material_id}` : null);
+  const primaryMaterialName = primaryItem?.material_name || (primaryItem ? `Material #${primaryItem.material_id}` : null);
   const primaryMaterialFamily = primaryItem?.material_family || null;
   const rawPrimaryDensity = primaryItem?.density_lb_ft3 ?? null;
   const primaryDensity = rawPrimaryDensity != null ? Number(rawPrimaryDensity) : null;
-  const primaryDensityDisplay =
-    primaryDensity != null && Number.isFinite(primaryDensity) ? primaryDensity.toFixed(2) : null;
+  const primaryDensityDisplay = primaryDensity != null && Number.isFinite(primaryDensity) ? primaryDensity.toFixed(2) : null;
 
   const customerQuoteUrl =
     quoteState?.quote_no && typeof window === "undefined"
@@ -985,10 +952,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         ? `/quote?quote_no=${encodeURIComponent(quoteState.quote_no)}`
         : null;
 
-  const layersForDxf = React.useMemo(
-    () => (layoutPkg && layoutPkg.layout_json ? getLayersFromLayout(layoutPkg.layout_json) : []),
-    [layoutPkg],
-  );
+  const layersForDxf = React.useMemo(() => (layoutPkg && layoutPkg.layout_json ? getLayersFromLayout(layoutPkg.layout_json) : []), [layoutPkg]);
 
   React.useEffect(() => {
     const n = layersForDxf?.length || 0;
@@ -1007,9 +971,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     const targetL = primaryItem ? Number(primaryItem.length_in) : NaN;
     const targetW = primaryItem ? Number(primaryItem.width_in) : NaN;
     const targetDims =
-      Number.isFinite(targetL) && targetL > 0 && Number.isFinite(targetW) && targetW > 0
-        ? ({ L: targetL, W: targetW } as TargetDimsIn)
-        : undefined;
+      Number.isFinite(targetL) && targetL > 0 && Number.isFinite(targetW) && targetW > 0 ? ({ L: targetL, W: targetW } as TargetDimsIn) : undefined;
     return targetDims;
   }
 
@@ -1088,9 +1050,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       if (typeof window === "undefined") return;
       if (!quoteNoValue) return;
 
-      const url = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(
-        quoteNoValue,
-      )}&layer_index=${encodeURIComponent(String(layerIndex))}`;
+      const url = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(quoteNoValue)}&layer_index=${encodeURIComponent(String(layerIndex))}`;
 
       try {
         const res = await fetch(url, { cache: "no-store" });
@@ -1202,9 +1162,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
         }
 
         // STEP (server-generated via microservice route)
-        const stepUrl = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(
-          quoteNoValue,
-        )}&layer_index=${encodeURIComponent(String(i))}`;
+        const stepUrl = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(quoteNoValue)}&layer_index=${encodeURIComponent(String(i))}`;
 
         try {
           const res = await fetch(stepUrl, { cache: "no-store" });
@@ -1376,6 +1334,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
               }}
             >
               Quote {quoteNoValue || "—"}
+              {" · "}
+              <span style={{ fontWeight: 700 }}>{revisionDraft || "RevAS"}</span>
             </div>
           </div>
 
@@ -1388,19 +1348,37 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
           >
             {quoteState && (
               <>
-                <div
-                  style={{
-                    display: "inline-block",
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    background: "rgba(15,23,42,0.2)",
-                    border: "1px solid rgba(15,23,42,0.25)",
-                    color: "#f9fafb",
-                    fontWeight: 600,
-                  }}
-                >
-                  {quoteState.status.toUpperCase()}
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      display: "inline-block",
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "rgba(15,23,42,0.2)",
+                      border: "1px solid rgba(15,23,42,0.25)",
+                      color: "#f9fafb",
+                      fontWeight: 700,
+                    }}
+                    title="Revision label (draft revisions: RevAS/RevBS/...; released: RevA/RevB/...)"
+                  >
+                    {revisionDraft || "RevAS"}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "inline-block",
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "rgba(15,23,42,0.2)",
+                      border: "1px solid rgba(15,23,42,0.25)",
+                      color: "#f9fafb",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {quoteState.status.toUpperCase()}
+                  </div>
                 </div>
+
                 <p
                   style={{
                     margin: "4px 0 0 0",
@@ -1455,11 +1433,38 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                   style={{
                     display: "flex",
                     flexDirection: "column",
-                    gap: 6,
+                    gap: 10,
                     fontSize: 13,
                     color: "#111827",
                   }}
                 >
+                  {/* NEW: Revision block */}
+                  <div>
+                    <div style={labelStyle}>Revision</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <input
+                        value={revisionDraft}
+                        onChange={(e) => setRevisionDraft(e.target.value)}
+                        style={{
+                          width: 120,
+                          padding: "6px 10px",
+                          borderRadius: 10,
+                          border: "1px solid #e5e7eb",
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "#111827",
+                          background: "#ffffff",
+                        }}
+                        spellCheck={false}
+                        aria-label="Revision"
+                        title="Edit revision label (local only for now; persistence is next step)."
+                      />
+                      <span style={{ fontSize: 11, color: "#6b7280" }}>
+                        Draft = RevAS/RevBS/… • Released = RevA/RevB/… (save wiring is next step)
+                      </span>
+                    </div>
+                  </div>
+
                   <div>
                     <div style={labelStyle}>Customer</div>
                     <div>
@@ -1468,6 +1473,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                       {quoteState.phone ? <> • {quoteState.phone}</> : null}
                     </div>
                   </div>
+
                   {primaryItem && (
                     <>
                       <div>

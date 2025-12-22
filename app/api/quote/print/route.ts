@@ -37,6 +37,10 @@ type QuoteRow = {
   company: string | null;
   status: string;
   created_at: string;
+
+  // NEW: revision label (customer workflow language)
+  // Source (Path A): facts.revision (default RevAS) until DB is wired.
+  revision?: string | null;
 };
 
 type ItemRow = {
@@ -116,7 +120,6 @@ function isLayoutLayerRow(it: ItemRow): boolean {
   const notes = String(it?.notes || "").toUpperCase();
   return notes.includes("[LAYOUT-LAYER]");
 }
-
 
 /**
  * Authoritative pricing call: POST /api/quotes/calc
@@ -207,6 +210,17 @@ export async function GET(req: NextRequest) {
 
     const facts = (await loadFacts(quoteNo)) || {};
 
+    // NEW (Path A): revision is carried via facts for now.
+    // Default new quotes to RevAS when missing.
+    const revision =
+      (typeof (facts as any)?.revision === "string" && (facts as any).revision.trim().length > 0
+        ? String((facts as any).revision).trim()
+        : null) || "RevAS";
+
+    // Attach revision to the quote header we return.
+    // This does NOT require DB schema changes and is safe for current consumers.
+    (quote as any).revision = revision;
+
     /* ---------------- DB items (post-Apply) ---------------- */
 
     const itemsRaw = await q<ItemRow>(
@@ -238,10 +252,10 @@ export async function GET(req: NextRequest) {
        ============================================================ */
 
     if (itemsRaw.length === 0) {
-      const dimsParsed = parseDimsString(facts.dims);
+      const dimsParsed = parseDimsString((facts as any).dims);
 
-      const qty = safeNum(facts.qty);
-      const materialId = safeNum(facts.material_id);
+      const qty = safeNum((facts as any).qty);
+      const materialId = safeNum((facts as any).material_id);
 
       if (dimsParsed && qty && qty > 0 && materialId && materialId > 0) {
         const priced = await priceViaCalcRoute({
@@ -260,8 +274,8 @@ export async function GET(req: NextRequest) {
           height_in: String(dimsParsed.H),
           qty: Number(qty),
           material_id: Number(materialId),
-          material_name: facts.material_name || null,
-          material_family: facts.material_family || null,
+          material_name: (facts as any).material_name || null,
+          material_family: (facts as any).material_family || null,
           density_lb_ft3: null,
           notes: null,
           price_unit_usd: priced.unit,
@@ -294,17 +308,16 @@ export async function GET(req: NextRequest) {
             continue;
           }
 
-        // FIX: Do not price layout-generated layer rows.
-// These are reference-only and already included in the PRIMARY foam set.
-if (isLayoutLayerRow(it)) {
-  items.push({
-    ...it,
-    price_unit_usd: null,
-    price_total_usd: null,
-  });
-  continue;
-}
-
+          // FIX: Do not price layout-generated layer rows.
+          // These are reference-only and already included in the PRIMARY foam set.
+          if (isLayoutLayerRow(it)) {
+            items.push({
+              ...it,
+              price_unit_usd: null,
+              price_total_usd: null,
+            });
+            continue;
+          }
 
           const priced = await priceViaCalcRoute({
             L,
@@ -381,15 +394,9 @@ if (isLayoutLayerRow(it)) {
     );
 
     // Only count billable priced items toward foam subtotal.
-    const foamSubtotal = items.reduce(
-      (s, i) => s + (Number(i.price_total_usd) || 0),
-      0,
-    );
+    const foamSubtotal = items.reduce((s, i) => s + (Number(i.price_total_usd) || 0), 0);
 
-    const packagingSubtotal = packagingLines.reduce(
-      (s, l) => s + (Number(l.extended_price_usd) || 0),
-      0,
-    );
+    const packagingSubtotal = packagingLines.reduce((s, l) => s + (Number(l.extended_price_usd) || 0), 0);
 
     return ok({
       ok: true,
