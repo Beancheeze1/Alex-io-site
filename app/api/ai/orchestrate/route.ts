@@ -35,6 +35,13 @@
 // FIX 12/19 (CIRCLE CAVITIES - THIS PATCH):
 // - Extract Ø/DIA/diameter circle cavities (ØD x depth)
 // - Preserve them through cavity normalization (was dropping anything not LxWxH)
+//
+// FIX 12/21 (THIS PATCH):
+// - REMOVE the legacy "2-number cavity => DxDxDepth=1" coercion.
+//   That fallback was accidentally reintroduced and would create bogus cavities
+//   (e.g., it would split 3-number cavities into multiple 2-number matches),
+//   which then poisoned downstream layout seeding and pricing expectations.
+//   Circle cavities are handled explicitly as ØDxDepth.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
@@ -966,20 +973,11 @@ function extractCavities(raw: string): { cavityCount?: number; cavityDims?: stri
 
     const lineNoQuotes = (line || "").replace(/"/g, " ");
 
-    // Rectangular cavities: L x W x D
+    // Rectangular cavities: L x W x D (ONLY 3-number)
     const reTriple = new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})`, "gi");
     let m: RegExpExecArray | null;
     while ((m = reTriple.exec(lineNoQuotes))) {
       cavityDims.push(`${m[1]}x${m[2]}x${m[3]}`);
-
-// BACKUP BEHAVIOR: allow 2-number cavity patterns and coerce to square proxy (DxDxDepth=1)
-// This is how circle cavities worked previously.
-const rePair = new RegExp(`(${NUM})\\s*[x×]\\s*(${NUM})`, "gi");
-while ((m = rePair.exec(lineNoQuotes))) {
-  cavityDims.push(`${m[1]}x${m[2]}x1`);
-}
-
-
     }
 
     // Circle cavities: ØD x depth  (supports "Ø3 x 1", "3 dia x 1", "3 diameter x 1")
