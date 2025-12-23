@@ -628,8 +628,14 @@ async function enrichFromDB(f: Mem): Promise<Mem> {
 
 async function hydrateFromDBByQuoteNo(
   f: Mem,
-  opts: { lockQty?: boolean; lockCavities?: boolean; lockDims?: boolean } = {},
-): Promise<Mem> {
+  opts: {
+    lockQty?: boolean;
+    lockCavities?: boolean;
+    lockDims?: boolean;
+    lockLayers?: boolean;
+  } = {},
+)
+: Promise<Mem> {
   const out: Mem = { ...(f || {}) };
   const quoteNo: string | undefined = out.quote_no || out.quoteNumber;
   if (!quoteNo) return out;
@@ -651,6 +657,13 @@ async function hydrateFromDBByQuoteNo(
       if (!opts.lockQty && Number(primaryItem.qty) > 0) {
         out.qty = Number(primaryItem.qty);
       }
+
+      if (opts.lockLayers) {
+  // Explicit inbound layer thicknesses are authoritative.
+  // Do NOT infer or alter layers from DB in this case.
+  return out;
+}
+
 
       if (!opts.lockDims && !out.dims) {
         const L = Number(primaryItem.length_in) || 0;
@@ -1585,6 +1598,15 @@ console.log("ORCH_INBOUND_SAMPLE", {
     const hadNewCavities = Array.isArray(newly.cavityDims) && newly.cavityDims.length > 0;
     const hadNewDims = !!newly.dims;
 
+    const hadAuthoritativeLayerThicknesses =
+  Number.isFinite(Number(newly.layer_count)) &&
+  Array.isArray(newly.layer_thicknesses) &&
+  newly.layer_thicknesses.length === Number(newly.layer_count) &&
+  newly.layer_thicknesses.every(
+    (v: any) => Number.isFinite(Number(v)) && Number(v) > 0,
+  );
+
+
     /* ------------------- Merge with memory ------------------- */
 
     let loadedThread: Mem = {};
@@ -1716,14 +1738,14 @@ if (inboundMentionsLayers && inboundHasStructuredLayerUpdate) {
 
     merged = await enrichFromDB(merged);
 
-    merged = await hydrateFromDBByQuoteNo(merged, {
+merged = await hydrateFromDBByQuoteNo(merged, {
   lockQty: hadNewQty,
   lockCavities: hadNewCavities,
-
-  // Path-A: if this is a layered quote, dims is derived from footprint + thicknesses
-  // and must NOT be overridden by any stale DB item height_in.
-  lockDims: hadNewDims || Number(merged.layer_count) > 1,
+  lockDims: hadNewDims,
+  // CRITICAL: never let DB overwrite explicit inbound layer thicknesses
+  lockLayers: hadAuthoritativeLayerThicknesses,
 });
+
 
 
     // Ensure layer_thicknesses remains a FULL numeric array (length = layer_count)
