@@ -358,10 +358,6 @@ function priceBreakUnit(br: PriceBreak): string {
 export function renderQuoteEmail(input: TemplateInput): string {
   const { quoteNumber, status, specs, material, pricing, missing } = input;
 
-  const customerLine =
-    input.customerLine ||
-    "Thanks for your message—I'll get you a price after confirming a couple of specs.";
-
   const outsideSize = fmtInchesTriple(specs.L_in, specs.W_in, specs.H_in);
   const qty = fmtQty(specs.qty);
   const densityLabel =
@@ -524,15 +520,6 @@ export function renderQuoteEmail(input: TemplateInput): string {
                     </td>
                   </tr>
                 </table>
-              </td>
-            </tr>
-
-            <!-- Intro line -->
-            <tr>
-              <td style="padding:18px 26px 6px 26px;">
-                <p style="margin:0;font-size:14px;color:#e5e7eb;line-height:1.6;">
-                  ${customerLine}
-                </p>
               </td>
             </tr>
 
