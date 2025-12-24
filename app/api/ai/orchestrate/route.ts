@@ -1027,24 +1027,132 @@ function grabLayerThicknessesCanonical(
   const thicknesses: (number | null)[] = n ? Array.from({ length: n }, () => null) : [];
   let cavityIdx1: number | null = null;
 
-  const setTh = (layer1: number, th: number) => {
+  // Set only if empty (Path-A: first strong signal wins; later passes fill gaps only)
+  const setThIfEmpty = (layer1: number, th: number) => {
     if (!n) return;
     if (layer1 < 1 || layer1 > n) return;
     if (!Number.isFinite(th) || th <= 0) return;
-    thicknesses[layer1 - 1] = th;
+    if (thicknesses[layer1 - 1] == null) thicknesses[layer1 - 1] = th;
+  };
+
+  const noteCavityIfMentions = (layer1: number, text: string) => {
+    if (!n) return;
+    if (layer1 < 1 || layer1 > n) return;
+    if (
+      /\b(cavity|cavities|pocket|pockets|cutout|cutouts|through-?hole|hole)\b/i.test(text || "")
+    ) {
+      if (cavityIdx1 == null) cavityIdx1 = layer1;
+    }
+  };
+
+  // Helper: extract the first thickness-like number from a short string segment
+  const extractThicknessNum = (segment: string): number | null => {
+    const seg = String(segment || "");
+
+    // Prefer explicit units
+    let m = seg.match(
+      new RegExp(`(${NUM})\\s*(?:"|inches?|inch|in\\b)`, "i"),
+    );
+    if (m) {
+      const v = Number(m[1]);
+      return Number.isFinite(v) && v > 0 ? v : null;
+    }
+
+    // “2.5 thick” / “thickness 2.5”
+    m =
+      seg.match(new RegExp(`\\bthickness\\b\\s*[:=\\-—]?\\s*(${NUM})\\b`, "i")) ||
+      seg.match(new RegExp(`\\b(${NUM})\\b\\s*\\bthick\\b`, "i"));
+    if (m) {
+      const v = Number(m[1]);
+      return Number.isFinite(v) && v > 0 ? v : null;
+    }
+
+    // As a last fallback, allow a bare number in a very short segment (e.g., “Layer 3: .75”)
+    // This is intentionally conservative: only accept if the segment is short and layer-tagged passes found it.
+    m = seg.match(new RegExp(`\\b(${NUM})\\b`, "i"));
+    if (m) {
+      const v = Number(m[1]);
+      return Number.isFinite(v) && v > 0 ? v : null;
+    }
+
+    return null;
   };
 
   const lines = String(s).split(/\r?\n/);
 
-  // ---------
-  // PASS A: parse “Layer N …” sections and look for “Thickness X” lines.
-  // This matches your Gmail examples exactly.
-  // ---------
+  // ==========================================================
+  // PASS 0 (STRONGEST): Inline assignments / shorthand
+  // Supports:
+  //   "Layer 1 = 1, Layer 2 = 2.5, Layer 3 = .75"
+  //   "L2 = 2.5"
+  //   "Layer 3: 0.75 in" (handled here too)
+  // ==========================================================
+  const whole = String(s);
+
+  // Layer N = X (or :, -, —)
+  {
+    const re = new RegExp(`\\blayer\\s*(\\d{1,2})\\b\\s*(?:=|:|\\-|—)\\s*(${NUM})\\s*(?:"|inches?|inch|in\\b)?`, "gi");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(whole))) {
+      const idx = Number(m[1]);
+      const th = Number(m[2]);
+      if (Number.isFinite(idx) && idx >= 1 && idx <= n && Number.isFinite(th) && th > 0) {
+        setThIfEmpty(idx, th);
+        noteCavityIfMentions(idx, whole.slice(Math.max(0, m.index), Math.min(whole.length, m.index + 180)));
+      }
+    }
+  }
+
+  // L2 = X (or :, -, —)
+  {
+    const re = new RegExp(`\\bL\\s*(\\d{1,2})\\b\\s*(?:=|:|\\-|—)\\s*(${NUM})\\s*(?:"|inches?|inch|in\\b)?`, "gi");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(whole))) {
+      const idx = Number(m[1]);
+      const th = Number(m[2]);
+      if (Number.isFinite(idx) && idx >= 1 && idx <= n && Number.isFinite(th) && th > 0) {
+        setThIfEmpty(idx, th);
+        noteCavityIfMentions(idx, whole.slice(Math.max(0, m.index), Math.min(whole.length, m.index + 180)));
+      }
+    }
+  }
+
+  // ==========================================================
+  // PASS A: Same-line “Layer N ... thickness ...” OR “Layer N: 0.75”
+  // Supports:
+  //   "Layer 2 Thickness 2.50""
+  //   "Layer 3: 0.75 in"
+  //   "Layer 1 — 1""
+  // ==========================================================
+  {
+    const reSameLine = new RegExp(
+      `\\blayer\\s*(\\d{1,2})\\b[^\\n\\r]{0,80}?` +
+        `(?:\\bthickness\\b[^\\n\\r]{0,30}?)?` +
+        `(?:=|:|\\-|—)?\\s*(${NUM})\\s*(?:"|inches?|inch|in\\b)?`,
+      "gi",
+    );
+
+    let m: RegExpExecArray | null;
+    while ((m = reSameLine.exec(whole))) {
+      const idx = Number(m[1]);
+      const th = Number(m[2]);
+      if (Number.isFinite(idx) && idx >= 1 && idx <= n && Number.isFinite(th) && th > 0) {
+        setThIfEmpty(idx, th);
+        noteCavityIfMentions(idx, whole.slice(Math.max(0, m.index), Math.min(whole.length, m.index + 220)));
+      }
+    }
+  }
+
+  // ==========================================================
+  // PASS B: Multi-line layer blocks (your existing Gmail style)
+  // Looks for:
+  //   "Layer 1 (bottom):"
+  //   next line "Thickness 1.00""
+  // also catches "2.50 thick"
+  // ==========================================================
   let currentLayer: number | null = null;
 
   const layerHeaderRe = safeRegExp(`\\blayer\\s*(\\d{1,2})\\b`, "i");
-  const thicknessRe = safeRegExp(`\\bthickness\\b\\s*[:\\-]?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\b`, "i");
-  const thickWordRe = safeRegExp(`\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*\\bthick\\b`, "i");
 
   for (const lineRaw of lines) {
     const line = String(lineRaw || "").trim();
@@ -1059,36 +1167,25 @@ function grabLayerThicknessesCanonical(
       }
     }
 
-    // If this layer section mentions cavities, tag it as the cavity layer.
-    if (currentLayer && /\b(cavity|cavities|pocket|pockets|cutout|cutouts|through-?hole|hole)\b/i.test(line)) {
-      cavityIdx1 = currentLayer;
-    }
-
-    // Parse thickness in this line (either “Thickness 2.50"” OR “2.50" thick”)
     if (currentLayer) {
-      let mt: RegExpMatchArray | null = null;
+      noteCavityIfMentions(currentLayer, line);
 
-      if (thicknessRe) mt = line.match(thicknessRe);
-      if (!mt && thickWordRe) mt = line.match(thickWordRe);
-
-      // Also handle: “Layer 2 Thickness 2.50"” on the same line
-      if (!mt && thicknessRe && layerHeaderRe && line.match(layerHeaderRe) && line.toLowerCase().includes("thickness")) {
-        mt = line.match(thicknessRe);
-      }
-
-      if (mt) {
-        const th = Number(mt[1]);
-        if (Number.isFinite(th) && th > 0) setTh(currentLayer, th);
-      }
+      // Parse thickness in this line
+      const th = extractThicknessNum(line);
+      if (th != null) setThIfEmpty(currentLayer, th);
     }
   }
 
-  // ---------
-  // PASS B: fallback for “top/middle/bottom layer … 2.5 thick” style
-  // (keeps your prior behavior)
-  // ---------
+  // ==========================================================
+  // PASS C: Position-based language (bottom/top/middle)
+  // Supports:
+  //   "bottom layer is 1.5\" thick"
+  //   "top pad = 0.75\""
+  // ==========================================================
   const rePos = safeRegExp(
-    `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*(?:[^.\\n\\r]{0,60}?\\bthick\\b)?`,
+    `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,180}?` +
+      `(?:=|:|\\-|—)?\\s*(${NUM})\\s*(?:"|inches?|inch|in\\b)?` +
+      `(?:[^.\\n\\r]{0,60}?\\bthick\\b)?`,
     "gi",
   );
 
@@ -1100,25 +1197,62 @@ function grabLayerThicknessesCanonical(
       if (!Number.isFinite(th) || th <= 0) continue;
 
       if (n) {
-        if (pos === "bottom") setTh(1, th);
-        else if (pos === "top") setTh(n, th);
-        else if (pos === "middle") {
+        if (pos === "bottom") {
+          setThIfEmpty(1, th);
+          noteCavityIfMentions(1, s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)));
+        } else if (pos === "top") {
+          setThIfEmpty(n, th);
+          noteCavityIfMentions(n, s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)));
+        } else if (pos === "middle") {
           const mid = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
-          setTh(mid, th);
+          setThIfEmpty(mid, th);
+          noteCavityIfMentions(mid, s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)));
         }
       }
+    }
+  }
 
-      const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)).toLowerCase();
-      if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
-        if (pos === "bottom") cavityIdx1 = 1;
-        else if (pos === "top") cavityIdx1 = n;
-        else if (pos === "middle") cavityIdx1 = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
+  // ==========================================================
+  // PASS D: Thickness lists (only when layer_count is known)
+  // Supports:
+  //   "Thicknesses: 1, 2.5, .75"
+  //   "3 layers – 1\", 2.5\", .75\""
+  //   "layers: 1 2.5 0.75"
+  // ==========================================================
+  if (n > 0) {
+    const listSources: string[] = [];
+
+    // “Thicknesses: ...”
+    {
+      const m = whole.match(new RegExp(`\\bthickness(?:es)?\\b\\s*[:=\\-—]\\s*([^\\n\\r]{1,200})`, "i"));
+      if (m && m[1]) listSources.push(m[1]);
+    }
+
+    // “3 layers – ...”
+    {
+      const m = whole.match(new RegExp(`\\b${n}\\s*(?:layers?|layer)\\b\\s*[:\\-—]\\s*([^\\n\\r]{1,220})`, "i"));
+      if (m && m[1]) listSources.push(m[1]);
+    }
+
+    for (const src of listSources) {
+      const nums = String(src)
+        .replace(/[()\[\]]/g, " ")
+        .replace(/and/gi, ",")
+        .split(/[,;]/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .map((chunk) => extractThicknessNum(chunk))
+        .filter((v): v is number => v != null && Number.isFinite(v) && v > 0);
+
+      if (nums.length === n) {
+        for (let i = 0; i < n; i++) setThIfEmpty(i + 1, nums[i]);
       }
     }
   }
 
   return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
 }
+
 
 
 /* ============================================================
