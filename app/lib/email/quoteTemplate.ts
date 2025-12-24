@@ -528,8 +528,9 @@ export function renderQuoteEmail(input: TemplateInput): string {
               <td style="padding:10px 26px 18px 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
                   <tr>
-                    <!-- Specs card -->
+                    <!-- Specs card + Next step card (left column) -->
                     <td style="vertical-align:top;width:52%;padding-right:8px;">
+                      <!-- Specs card -->
                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
                         <tr>
                           <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
@@ -569,9 +570,32 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${cavityLabel}</td>
                         </tr>
                       </table>
+
+                      ${
+                        layoutUrl
+                          ? `<!-- Next step card -->
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:12px;border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
+                        <tr>
+                          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
+                            Next step
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.6;">
+                            Open the layout editor and place the cavities (size, location, and orientation).
+                            <div style="margin-top:10px;text-align:center;">
+                              <a href="${layoutUrl}" style="display:inline-block;padding:8px 16px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">
+                                Open layout editor
+                              </a>
+                            </div>
+                          </td>
+                        </tr>
+                      </table>`
+                          : ""
+                      }
                     </td>
 
-                    <!-- Pricing card -->
+                    <!-- Pricing card (right column) -->
                     <td style="vertical-align:top;width:48%;padding-left:8px;">
                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
                         <tr>
@@ -702,19 +726,15 @@ export function renderQuoteEmail(input: TemplateInput): string {
                 : ""
             }
 
-            <!-- Explanation / next steps -->
-            <tr>
+            <!-- Next steps (kept when no layoutUrl) -->
+            ${
+              layoutUrl
+                ? ""
+                : `<tr>
               <td style="padding:0 26px 18px 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
                   <tr>
                     <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.7;">
-                      ${
-                        layoutUrl
-                          ? `<p style="margin:0 0 6px 0;">
-                        The next step is to open the foam layout editor and place the cavities where you want them in the block (size, location, and orientation).
-                      </p>`
-                          : ""
-                      }
                       <p style="margin:0;">
                         Once we finalize the details, I'll send over a formal quote and lead time.
                       </p>
@@ -722,18 +742,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                   </tr>
                 </table>
               </td>
-            </tr>
-
-            ${
-              layoutUrl
-                ? `<tr>
-              <td style="padding:0 26px 22px 26px;text-align:center;">
-                <a href="${layoutUrl}" style="display:inline-block;padding:8px 18px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">
-                  View foam layout editor
-                </a>
-              </td>
             </tr>`
-                : ""
             }
 
             <!-- Bug / feedback card -->
