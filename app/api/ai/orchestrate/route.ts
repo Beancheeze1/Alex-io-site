@@ -1021,7 +1021,6 @@ function grabLayerThicknessesCanonical(
 ): { thicknessesByLayer1Based: (number | null)[]; cavityLayerIndex1Based: number | null } {
   const n = Number.isFinite(layerCount as any) && (layerCount as number) > 0 ? (layerCount as number) : 0;
 
-  // IMPORTANT: normalize aliases first so "top layer" becomes "layer N"
   const s0 = raw || "";
   const s = n ? normalizeLayerAliases(s0, n) : s0;
 
@@ -1035,179 +1034,92 @@ function grabLayerThicknessesCanonical(
     thicknesses[layer1 - 1] = th;
   };
 
-  // Keep this for backwards compatibility (still works if someone literally writes "top layer"),
-  // but in practice the alias normalization above makes the numbered regex catch everything.
+  const lines = String(s).split(/\r?\n/);
+
+  // ---------
+  // PASS A: parse “Layer N …” sections and look for “Thickness X” lines.
+  // This matches your Gmail examples exactly.
+  // ---------
+  let currentLayer: number | null = null;
+
+  const layerHeaderRe = safeRegExp(`\\blayer\\s*(\\d{1,2})\\b`, "i");
+  const thicknessRe = safeRegExp(`\\bthickness\\b\\s*[:\\-]?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\b`, "i");
+  const thickWordRe = safeRegExp(`\\b(${NUM})\\s*(?:"|inches?|inch)?\\s*\\bthick\\b`, "i");
+
+  for (const lineRaw of lines) {
+    const line = String(lineRaw || "").trim();
+    if (!line) continue;
+
+    // Detect new layer section
+    if (layerHeaderRe) {
+      const mh = line.match(layerHeaderRe);
+      if (mh) {
+        const idx = Number(mh[1]);
+        if (Number.isFinite(idx) && idx >= 1 && (!n || idx <= n)) currentLayer = idx;
+      }
+    }
+
+    // If this layer section mentions cavities, tag it as the cavity layer.
+    if (currentLayer && /\b(cavity|cavities|pocket|pockets|cutout|cutouts|through-?hole|hole)\b/i.test(line)) {
+      cavityIdx1 = currentLayer;
+    }
+
+    // Parse thickness in this line (either “Thickness 2.50"” OR “2.50" thick”)
+    if (currentLayer) {
+      let mt: RegExpMatchArray | null = null;
+
+      if (thicknessRe) mt = line.match(thicknessRe);
+      if (!mt && thickWordRe) mt = line.match(thickWordRe);
+
+      // Also handle: “Layer 2 Thickness 2.50"” on the same line
+      if (!mt && thicknessRe && layerHeaderRe && line.match(layerHeaderRe) && line.toLowerCase().includes("thickness")) {
+        mt = line.match(thicknessRe);
+      }
+
+      if (mt) {
+        const th = Number(mt[1]);
+        if (Number.isFinite(th) && th > 0) setTh(currentLayer, th);
+      }
+    }
+  }
+
+  // ---------
+  // PASS B: fallback for “top/middle/bottom layer … 2.5 thick” style
+  // (keeps your prior behavior)
+  // ---------
   const rePos = safeRegExp(
-  `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*(?:[^.\\n\\r]{0,60}?\\bthick\\b)?`,
-  "gi",
-);
-
-if (!rePos) return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
-
-
-
-  let m: RegExpExecArray | null;
-  while ((m = rePos.exec(s))) {
-    const pos = String(m[1] || "").toLowerCase();
-    const th = Number(m[2]);
-    if (!Number.isFinite(th) || th <= 0) continue;
-
-    if (n) {
-      if (pos === "bottom") setTh(1, th);
-      else if (pos === "top") setTh(n, th);
-      else if (pos === "middle") {
-        const mid = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
-        setTh(mid, th);
-      }
-    }
-
-    const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)).toLowerCase();
-    if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
-      if (pos === "bottom") cavityIdx1 = 1;
-      else if (pos === "top") cavityIdx1 = n;
-      else if (pos === "middle") cavityIdx1 = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
-    }
-  }
-
-// --- Numbered layers: "Layer 2 ... 3\" thick" ---
-let matchedAnyThickness = false;
-
-const reNum = safeRegExp(
-  `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
-  "gi",
-);
-
-if (!reNum) return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
-
-while ((m = reNum.exec(s))) {
-  const idx = Number(m[1]);
-  const th = Number(m[2]);
-  if (!Number.isFinite(idx) || idx <= 0) continue;
-  if (!Number.isFinite(th) || th <= 0) continue;
-  if (n) setTh(idx, th);
-  matchedAnyThickness = true;
-
-  const windowText = s
-    .slice(Math.max(0, m.index), Math.min(s.length, m.index + 220))
-    .toLowerCase();
-
-  if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
-    if (idx >= 1 && idx <= n) cavityIdx1 = idx;
-  }
-}
-
-// --- Fallback: allow "Layer 2 ... 3\"" even if the word "thick" is missing ---
-// SAFE because it still requires inch marker (quote or inch/inches).
-if (!matchedAnyThickness) {
-  const reNumUnitOnly = safeRegExp(
-    `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)\\b`,
+    `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,160}?(${NUM})\\s*(?:"|inches?|inch)?\\s*(?:[^.\\n\\r]{0,60}?\\bthick\\b)?`,
     "gi",
   );
 
-  if (reNumUnitOnly) {
-    while ((m = reNumUnitOnly.exec(s))) {
-      const idx = Number(m[1]);
+  if (rePos) {
+    let m: RegExpExecArray | null;
+    while ((m = rePos.exec(s))) {
+      const pos = String(m[1] || "").toLowerCase();
       const th = Number(m[2]);
-      if (!Number.isFinite(idx) || idx <= 0) continue;
       if (!Number.isFinite(th) || th <= 0) continue;
-      if (n) setTh(idx, th);
-      matchedAnyThickness = true;
 
-      const windowText = s
-        .slice(Math.max(0, m.index), Math.min(s.length, m.index + 220))
-        .toLowerCase();
-
-      if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
-        if (idx >= 1 && idx <= n) cavityIdx1 = idx;
+      if (n) {
+        if (pos === "bottom") setTh(1, th);
+        else if (pos === "top") setTh(n, th);
+        else if (pos === "middle") {
+          const mid = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
+          setTh(mid, th);
+        }
       }
-    }
-  }
-}
-
-
-// Fallback: allow "Layer 1 ... 1.5\"" / "1.5 inch" even if "thick" isn't written.
-// This is SAFE because it still requires an inch marker (quote or inch/inches).
-if (!matchedAnyThickness) {
-  const reNumUnitOnly = safeRegExp(
-    `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)\\b`,
-    "gi",
-  );
-
-  if (reNumUnitOnly) {
-    while ((m = reNumUnitOnly.exec(s))) {
-      const idx = Number(m[1]);
-      const th = Number(m[2]);
-      if (!Number.isFinite(idx) || idx <= 0) continue;
-      if (!Number.isFinite(th) || th <= 0) continue;
-      if (n) setTh(idx, th);
-      matchedAnyThickness = true;
 
       const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)).toLowerCase();
       if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
-        if (idx >= 1 && idx <= n) cavityIdx1 = idx;
-      }
-    }
-  }
-}
-;
-
-if (!reNum) return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
-
-
-  while ((m = reNum.exec(s))) {
-    const idx = Number(m[1]);
-    const th = Number(m[2]);
-    if (!Number.isFinite(idx) || idx <= 0) continue;
-    if (!Number.isFinite(th) || th <= 0) continue;
-    if (n) setTh(idx, th);
-
-    const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)).toLowerCase();
-    if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
-      if (idx >= 1 && idx <= n) cavityIdx1 = idx;
-    }
-  }
-
-  // ALSO support the common formatted-email pattern:
-  // "Layer 1 (bottom):" newline "Thickness 1.00""
-  const reLayerHeaderThickness = new RegExp(
-    `\\blayer\\s*(\\d{1,2})\\b[^\\n\\r]{0,80}[:\\)]?\\s*[\\s\\S]{0,120}?\\bthickness\\b\\s*[:\\-]?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\b`,
-    "gi",
-  );
-
-  while ((m = reLayerHeaderThickness.exec(s))) {
-    const idx = Number(m[1]);
-    const th = Number(m[2]);
-    if (!Number.isFinite(idx) || idx <= 0) continue;
-    if (!Number.isFinite(th) || th <= 0) continue;
-    if (n) setTh(idx, th);
-
-    const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 240)).toLowerCase();
-    if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts|through-?hole|hole)\b/.test(windowText) && n) {
-      if (idx >= 1 && idx <= n) cavityIdx1 = idx;
-    }
-  }
-
-
-
-  if (!cavityIdx1 && n) {
-    const t = s.toLowerCase();
-    const cavIdx = t.search(/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/);
-    if (cavIdx >= 0) {
-      const windowText = t.slice(Math.max(0, cavIdx - 160), Math.min(t.length, cavIdx + 160));
-      // Note: even here, the alias normalization means these phrases might be gone,
-      // but we keep this fallback as-is.
-      if (windowText.includes("middle layer") || windowText.includes("middle pad")) {
-        cavityIdx1 = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
-      } else if (windowText.includes("top layer") || windowText.includes("top pad")) {
-        cavityIdx1 = n;
-      } else if (windowText.includes("bottom layer") || windowText.includes("bottom pad")) {
-        cavityIdx1 = 1;
+        if (pos === "bottom") cavityIdx1 = 1;
+        else if (pos === "top") cavityIdx1 = n;
+        else if (pos === "middle") cavityIdx1 = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
       }
     }
   }
 
   return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
 }
+
 
 /* ============================================================
    Cavity extraction + normalization
