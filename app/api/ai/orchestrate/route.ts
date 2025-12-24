@@ -1069,10 +1069,87 @@ if (!rePos) return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Bas
     }
   }
 
- const reNum = safeRegExp(
+// --- Numbered layers: "Layer 2 ... 3\" thick" ---
+let matchedAnyThickness = false;
+
+const reNum = safeRegExp(
   `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)?\\s*[^.\\n\\r]{0,60}?\\bthick\\b`,
   "gi",
 );
+
+if (!reNum) return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
+
+while ((m = reNum.exec(s))) {
+  const idx = Number(m[1]);
+  const th = Number(m[2]);
+  if (!Number.isFinite(idx) || idx <= 0) continue;
+  if (!Number.isFinite(th) || th <= 0) continue;
+  if (n) setTh(idx, th);
+  matchedAnyThickness = true;
+
+  const windowText = s
+    .slice(Math.max(0, m.index), Math.min(s.length, m.index + 220))
+    .toLowerCase();
+
+  if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
+    if (idx >= 1 && idx <= n) cavityIdx1 = idx;
+  }
+}
+
+// --- Fallback: allow "Layer 2 ... 3\"" even if the word "thick" is missing ---
+// SAFE because it still requires inch marker (quote or inch/inches).
+if (!matchedAnyThickness) {
+  const reNumUnitOnly = safeRegExp(
+    `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)\\b`,
+    "gi",
+  );
+
+  if (reNumUnitOnly) {
+    while ((m = reNumUnitOnly.exec(s))) {
+      const idx = Number(m[1]);
+      const th = Number(m[2]);
+      if (!Number.isFinite(idx) || idx <= 0) continue;
+      if (!Number.isFinite(th) || th <= 0) continue;
+      if (n) setTh(idx, th);
+      matchedAnyThickness = true;
+
+      const windowText = s
+        .slice(Math.max(0, m.index), Math.min(s.length, m.index + 220))
+        .toLowerCase();
+
+      if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
+        if (idx >= 1 && idx <= n) cavityIdx1 = idx;
+      }
+    }
+  }
+}
+
+
+// Fallback: allow "Layer 1 ... 1.5\"" / "1.5 inch" even if "thick" isn't written.
+// This is SAFE because it still requires an inch marker (quote or inch/inches).
+if (!matchedAnyThickness) {
+  const reNumUnitOnly = safeRegExp(
+    `\\b(?:layer|pad)\\s*(\\d{1,2})\\b[^.\\n\\r]{0,140}?\\b(?:will\\s+be|is|=|at)?\\s*(${NUM})\\s*(?:"|inches?|inch)\\b`,
+    "gi",
+  );
+
+  if (reNumUnitOnly) {
+    while ((m = reNumUnitOnly.exec(s))) {
+      const idx = Number(m[1]);
+      const th = Number(m[2]);
+      if (!Number.isFinite(idx) || idx <= 0) continue;
+      if (!Number.isFinite(th) || th <= 0) continue;
+      if (n) setTh(idx, th);
+      matchedAnyThickness = true;
+
+      const windowText = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)).toLowerCase();
+      if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/.test(windowText) && n) {
+        if (idx >= 1 && idx <= n) cavityIdx1 = idx;
+      }
+    }
+  }
+}
+;
 
 if (!reNum) return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
 
@@ -2028,3 +2105,4 @@ if (
     return err("orchestrate_exception", String(e?.message || e));
   }
 }
+
