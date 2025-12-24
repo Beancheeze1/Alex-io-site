@@ -1018,7 +1018,16 @@ function normalizeLayerAliases(raw: string, n: number): string {
 function grabLayerThicknessesCanonical(
   raw: string,
   layerCount: number | undefined,
-): { thicknessesByLayer1Based: (number | null)[]; cavityLayerIndex1Based: number | null } {
+): {
+  thicknessesByLayer1Based: (number | null)[];
+  cavityLayerIndex1Based: number | null;
+  meta?: {
+    thickness: { layer: number; value: number; confidence: number; evidence: string[] }[];
+    cavity_layer_index?: { value: number; confidence: number; evidence: string[] } | null;
+    warnings: string[];
+    overall_confidence: number | null;
+  };
+} {
   const n = Number.isFinite(layerCount as any) && (layerCount as number) > 0 ? (layerCount as number) : 0;
 
   const s0 = raw || "";
@@ -1027,38 +1036,64 @@ function grabLayerThicknessesCanonical(
   const thicknesses: (number | null)[] = n ? Array.from({ length: n }, () => null) : [];
   let cavityIdx1: number | null = null;
 
-  // Set only if empty (Path-A: first strong signal wins; later passes fill gaps only)
-  const setThIfEmpty = (layer1: number, th: number) => {
+  // Evidence + confidence (1-based layers)
+  const evidenceByLayer: string[][] = n ? Array.from({ length: n }, () => []) : [];
+  const confByLayer: (number | null)[] = n ? Array.from({ length: n }, () => null) : [];
+  const warnings: string[] = [];
+
+  const pushEvidence = (layer1: number, ev: string) => {
+    if (!n) return;
+    if (layer1 < 1 || layer1 > n) return;
+    const sEv = String(ev || "").replace(/\s+/g, " ").trim();
+    if (!sEv) return;
+    // Keep evidence short + limited
+    if (sEv.length > 90) {
+      evidenceByLayer[layer1 - 1].push(sEv.slice(0, 87) + "...");
+    } else {
+      evidenceByLayer[layer1 - 1].push(sEv);
+    }
+    // cap evidence count
+    if (evidenceByLayer[layer1 - 1].length > 2) evidenceByLayer[layer1 - 1].length = 2;
+  };
+
+  // Set only if empty (first strong signal wins); store evidence/confidence
+  const setThIfEmpty = (layer1: number, th: number, conf: number, ev: string) => {
     if (!n) return;
     if (layer1 < 1 || layer1 > n) return;
     if (!Number.isFinite(th) || th <= 0) return;
-    if (thicknesses[layer1 - 1] == null) thicknesses[layer1 - 1] = th;
-  };
 
-  const noteCavityIfMentions = (layer1: number, text: string) => {
-    if (!n) return;
-    if (layer1 < 1 || layer1 > n) return;
-    if (
-      /\b(cavity|cavities|pocket|pockets|cutout|cutouts|through-?hole|hole)\b/i.test(text || "")
-    ) {
-      if (cavityIdx1 == null) cavityIdx1 = layer1;
+    if (thicknesses[layer1 - 1] == null) {
+      thicknesses[layer1 - 1] = th;
+      confByLayer[layer1 - 1] = Number.isFinite(conf) ? conf : 0.6;
+      pushEvidence(layer1, ev);
     }
   };
 
-  // Helper: extract the first thickness-like number from a short string segment
+  const noteCavityIfMentions = (layer1: number, text: string, conf: number, ev: string) => {
+    if (!n) return;
+    if (layer1 < 1 || layer1 > n) return;
+    if (cavityIdx1 != null) return;
+
+    if (/\b(cavity|cavities|pocket|pockets|cutout|cutouts|through-?hole|hole)\b/i.test(text || "")) {
+      cavityIdx1 = layer1;
+      // Store a tiny bit of evidence for cavity-layer assignment
+      // (we attach it later in meta)
+      pushEvidence(layer1, ev || text);
+      // We don’t store per-layer cavity confidence here; we attach a single cavity_layer_index meta later.
+    }
+  };
+
   const extractThicknessNum = (segment: string): number | null => {
     const seg = String(segment || "");
 
     // Prefer explicit units
-    let m = seg.match(
-      new RegExp(`(${NUM})\\s*(?:"|inches?|inch|in\\b)`, "i"),
-    );
+    let m = seg.match(new RegExp(`(${NUM})\\s*(?:"|inches?|inch|in\\b)`, "i"));
     if (m) {
       const v = Number(m[1]);
       return Number.isFinite(v) && v > 0 ? v : null;
     }
 
-    // “2.5 thick” / “thickness 2.5”
+    // “thickness 2.5” or “2.5 thick”
     m =
       seg.match(new RegExp(`\\bthickness\\b\\s*[:=\\-—]?\\s*(${NUM})\\b`, "i")) ||
       seg.match(new RegExp(`\\b(${NUM})\\b\\s*\\bthick\\b`, "i"));
@@ -1067,8 +1102,7 @@ function grabLayerThicknessesCanonical(
       return Number.isFinite(v) && v > 0 ? v : null;
     }
 
-    // As a last fallback, allow a bare number in a very short segment (e.g., “Layer 3: .75”)
-    // This is intentionally conservative: only accept if the segment is short and layer-tagged passes found it.
+    // Bare number fallback (conservative; used only in layer-tagged contexts)
     m = seg.match(new RegExp(`\\b(${NUM})\\b`, "i"));
     if (m) {
       const v = Number(m[1]);
@@ -1079,50 +1113,47 @@ function grabLayerThicknessesCanonical(
   };
 
   const lines = String(s).split(/\r?\n/);
-
-  // ==========================================================
-  // PASS 0 (STRONGEST): Inline assignments / shorthand
-  // Supports:
-  //   "Layer 1 = 1, Layer 2 = 2.5, Layer 3 = .75"
-  //   "L2 = 2.5"
-  //   "Layer 3: 0.75 in" (handled here too)
-  // ==========================================================
   const whole = String(s);
 
-  // Layer N = X (or :, -, —)
+  // ==========================================================
+  // PASS 0 (VERY HIGH): inline assignments / shorthand
+  //   "Layer 1 = 1, Layer 2 = 2.5, Layer 3 = .75"
+  //   "L2 = 2.5"
+  // ==========================================================
   {
-    const re = new RegExp(`\\blayer\\s*(\\d{1,2})\\b\\s*(?:=|:|\\-|—)\\s*(${NUM})\\s*(?:"|inches?|inch|in\\b)?`, "gi");
+    const re = new RegExp(
+      `\\blayer\\s*(\\d{1,2})\\b\\s*(?:=|:|\\-|—)\\s*(${NUM})\\s*(?:"|inches?|inch|in\\b)?`,
+      "gi",
+    );
     let m: RegExpExecArray | null;
     while ((m = re.exec(whole))) {
       const idx = Number(m[1]);
       const th = Number(m[2]);
       if (Number.isFinite(idx) && idx >= 1 && idx <= n && Number.isFinite(th) && th > 0) {
-        setThIfEmpty(idx, th);
-        noteCavityIfMentions(idx, whole.slice(Math.max(0, m.index), Math.min(whole.length, m.index + 180)));
+        setThIfEmpty(idx, th, 0.98, whole.slice(m.index, Math.min(whole.length, m.index + 90)));
+        noteCavityIfMentions(idx, whole, 0.75, whole.slice(m.index, Math.min(whole.length, m.index + 120)));
       }
     }
   }
 
-  // L2 = X (or :, -, —)
   {
-    const re = new RegExp(`\\bL\\s*(\\d{1,2})\\b\\s*(?:=|:|\\-|—)\\s*(${NUM})\\s*(?:"|inches?|inch|in\\b)?`, "gi");
+    const re = new RegExp(
+      `\\bL\\s*(\\d{1,2})\\b\\s*(?:=|:|\\-|—)\\s*(${NUM})\\s*(?:"|inches?|inch|in\\b)?`,
+      "gi",
+    );
     let m: RegExpExecArray | null;
     while ((m = re.exec(whole))) {
       const idx = Number(m[1]);
       const th = Number(m[2]);
       if (Number.isFinite(idx) && idx >= 1 && idx <= n && Number.isFinite(th) && th > 0) {
-        setThIfEmpty(idx, th);
-        noteCavityIfMentions(idx, whole.slice(Math.max(0, m.index), Math.min(whole.length, m.index + 180)));
+        setThIfEmpty(idx, th, 0.98, whole.slice(m.index, Math.min(whole.length, m.index + 90)));
+        noteCavityIfMentions(idx, whole, 0.75, whole.slice(m.index, Math.min(whole.length, m.index + 120)));
       }
     }
   }
 
   // ==========================================================
-  // PASS A: Same-line “Layer N ... thickness ...” OR “Layer N: 0.75”
-  // Supports:
-  //   "Layer 2 Thickness 2.50""
-  //   "Layer 3: 0.75 in"
-  //   "Layer 1 — 1""
+  // PASS A (VERY HIGH): same-line “Layer N ... thickness ...” OR “Layer N: 0.75 in”
   // ==========================================================
   {
     const reSameLine = new RegExp(
@@ -1137,28 +1168,22 @@ function grabLayerThicknessesCanonical(
       const idx = Number(m[1]);
       const th = Number(m[2]);
       if (Number.isFinite(idx) && idx >= 1 && idx <= n && Number.isFinite(th) && th > 0) {
-        setThIfEmpty(idx, th);
-        noteCavityIfMentions(idx, whole.slice(Math.max(0, m.index), Math.min(whole.length, m.index + 220)));
+        setThIfEmpty(idx, th, 0.98, whole.slice(m.index, Math.min(whole.length, m.index + 90)));
+        noteCavityIfMentions(idx, whole.slice(m.index, Math.min(whole.length, m.index + 220)), 0.75, whole.slice(m.index, Math.min(whole.length, m.index + 120)));
       }
     }
   }
 
   // ==========================================================
-  // PASS B: Multi-line layer blocks (your existing Gmail style)
-  // Looks for:
-  //   "Layer 1 (bottom):"
-  //   next line "Thickness 1.00""
-  // also catches "2.50 thick"
+  // PASS B (HIGH): multi-line layer blocks (Layer header then Thickness line)
   // ==========================================================
   let currentLayer: number | null = null;
-
   const layerHeaderRe = safeRegExp(`\\blayer\\s*(\\d{1,2})\\b`, "i");
 
   for (const lineRaw of lines) {
     const line = String(lineRaw || "").trim();
     if (!line) continue;
 
-    // Detect new layer section
     if (layerHeaderRe) {
       const mh = line.match(layerHeaderRe);
       if (mh) {
@@ -1168,19 +1193,20 @@ function grabLayerThicknessesCanonical(
     }
 
     if (currentLayer) {
-      noteCavityIfMentions(currentLayer, line);
+      noteCavityIfMentions(currentLayer, line, 0.75, line);
 
-      // Parse thickness in this line
       const th = extractThicknessNum(line);
-      if (th != null) setThIfEmpty(currentLayer, th);
+      if (th != null) {
+        // If line contains the word “thickness” or explicit units, treat as very high
+        const conf =
+          /\bthickness\b/i.test(line) || /("|inches?\b|inch\b|in\b)/i.test(line) ? 0.98 : 0.85;
+        setThIfEmpty(currentLayer, th, conf, line);
+      }
     }
   }
 
   // ==========================================================
-  // PASS C: Position-based language (bottom/top/middle)
-  // Supports:
-  //   "bottom layer is 1.5\" thick"
-  //   "top pad = 0.75\""
+  // PASS C (HIGH): positional language (top/middle/bottom)
   // ==========================================================
   const rePos = safeRegExp(
     `\\b(top|middle|bottom)\\s+(?:layer|pad)\\b[^.\\n\\r]{0,180}?` +
@@ -1196,45 +1222,39 @@ function grabLayerThicknessesCanonical(
       const th = Number(m[2]);
       if (!Number.isFinite(th) || th <= 0) continue;
 
+      const snippet = s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 120)).replace(/\s+/g, " ").trim();
+
       if (n) {
         if (pos === "bottom") {
-          setThIfEmpty(1, th);
-          noteCavityIfMentions(1, s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)));
+          setThIfEmpty(1, th, 0.85, snippet);
+          noteCavityIfMentions(1, snippet, 0.65, snippet);
         } else if (pos === "top") {
-          setThIfEmpty(n, th);
-          noteCavityIfMentions(n, s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)));
+          setThIfEmpty(n, th, 0.85, snippet);
+          noteCavityIfMentions(n, snippet, 0.65, snippet);
         } else if (pos === "middle") {
           const mid = Math.max(1, Math.min(n, Math.round((n + 1) / 2)));
-          setThIfEmpty(mid, th);
-          noteCavityIfMentions(mid, s.slice(Math.max(0, m.index), Math.min(s.length, m.index + 220)));
+          setThIfEmpty(mid, th, 0.85, snippet);
+          noteCavityIfMentions(mid, snippet, 0.65, snippet);
         }
       }
     }
   }
 
   // ==========================================================
-  // PASS D: Thickness lists (only when layer_count is known)
-  // Supports:
+  // PASS D (MEDIUM): thickness lists
   //   "Thicknesses: 1, 2.5, .75"
   //   "3 layers – 1\", 2.5\", .75\""
-  //   "layers: 1 2.5 0.75"
   // ==========================================================
   if (n > 0) {
-    const listSources: string[] = [];
+    const listSources: { src: string; label: string }[] = [];
 
-    // “Thicknesses: ...”
-    {
-      const m = whole.match(new RegExp(`\\bthickness(?:es)?\\b\\s*[:=\\-—]\\s*([^\\n\\r]{1,200})`, "i"));
-      if (m && m[1]) listSources.push(m[1]);
-    }
+    const mA = whole.match(new RegExp(`\\bthickness(?:es)?\\b\\s*[:=\\-—]\\s*([^\\n\\r]{1,220})`, "i"));
+    if (mA && mA[1]) listSources.push({ src: mA[1], label: `Thicknesses: ${mA[1]}` });
 
-    // “3 layers – ...”
-    {
-      const m = whole.match(new RegExp(`\\b${n}\\s*(?:layers?|layer)\\b\\s*[:\\-—]\\s*([^\\n\\r]{1,220})`, "i"));
-      if (m && m[1]) listSources.push(m[1]);
-    }
+    const mB = whole.match(new RegExp(`\\b${n}\\s*(?:layers?|layer)\\b\\s*[:\\-—]\\s*([^\\n\\r]{1,240})`, "i"));
+    if (mB && mB[1]) listSources.push({ src: mB[1], label: `${n} layers: ${mB[1]}` });
 
-    for (const src of listSources) {
+    for (const { src, label } of listSources) {
       const nums = String(src)
         .replace(/[()\[\]]/g, " ")
         .replace(/and/gi, ",")
@@ -1245,12 +1265,52 @@ function grabLayerThicknessesCanonical(
         .filter((v): v is number => v != null && Number.isFinite(v) && v > 0);
 
       if (nums.length === n) {
-        for (let i = 0; i < n; i++) setThIfEmpty(i + 1, nums[i]);
+        for (let i = 0; i < n; i++) {
+          setThIfEmpty(i + 1, nums[i], 0.65, label);
+        }
       }
     }
   }
 
-  return { thicknessesByLayer1Based: thicknesses, cavityLayerIndex1Based: cavityIdx1 };
+  // Build meta summary (overall = min of set thickness confidences)
+  let overall: number | null = null;
+  if (n > 0) {
+    const confs = confByLayer.filter((x): x is number => x != null && Number.isFinite(x));
+    if (confs.length) overall = Math.min(...confs);
+  }
+
+  const thicknessMeta =
+    n > 0
+      ? Array.from({ length: n }, (_, i) => {
+          const layer1 = i + 1;
+          const v = Number(thicknesses[i]);
+          const value = Number.isFinite(v) && v > 0 ? v : 0;
+          const confidence =
+            confByLayer[i] != null && Number.isFinite(confByLayer[i] as any) ? (confByLayer[i] as number) : 0;
+          const evidence = evidenceByLayer[i] || [];
+          return { layer: layer1, value, confidence, evidence };
+        })
+      : [];
+
+  let cavityMeta: { value: number; confidence: number; evidence: string[] } | null = null;
+  if (cavityIdx1 != null && n > 0) {
+    cavityMeta = {
+      value: cavityIdx1,
+      confidence: 0.75,
+      evidence: evidenceByLayer[cavityIdx1 - 1] || [],
+    };
+  }
+
+  return {
+    thicknessesByLayer1Based: thicknesses,
+    cavityLayerIndex1Based: cavityIdx1,
+    meta: {
+      thickness: thicknessMeta,
+      cavity_layer_index: cavityMeta,
+      warnings,
+      overall_confidence: overall,
+    },
+  };
 }
 
 
@@ -1418,6 +1478,34 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
     if (Number.isFinite(n) && n > 0) {
       const th = grabLayerThicknessesCanonical(text, n);
       let thicknesses1 = th.thicknessesByLayer1Based.slice();
+            // --- Confidence/evidence model (Path-A additive) ---
+      // Start from parser meta if available, otherwise build a blank structure.
+      const layerExtract = {
+        layer_count: {
+          value: n,
+          confidence: 0.95, // because layer_count here came from explicit summary patterns
+          evidence: (() => {
+            const ev: string[] = [];
+            const src = String(text || "");
+            const m = src.match(new RegExp(`\\b${n}\\s*(?:layers?|layer)\\b`, "i"));
+            if (m) ev.push(m[0]);
+            // Keep it short; evidence is optional
+            return ev.slice(0, 2);
+          })(),
+        },
+        thicknesses: (th as any)?.meta?.thickness && Array.isArray((th as any).meta.thickness)
+          ? ((th as any).meta.thickness as any[])
+          : Array.from({ length: n }, (_: any, i: number) => ({
+              layer: i + 1,
+              value: 0,
+              confidence: 0,
+              evidence: [],
+            })),
+        cavity_layer_index: (th as any)?.meta?.cavity_layer_index ?? null,
+        warnings: [] as string[],
+        overall_confidence: (th as any)?.meta?.overall_confidence ?? null,
+      };
+
 
       const missingIdxs = thicknesses1.map((v, idx) => (v == null ? idx : -1)).filter((idx) => idx >= 0);
 
@@ -1432,11 +1520,34 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
         const inferred = H - knownSum;
         if (Number.isFinite(inferred) && inferred > 0) {
           thicknesses1[missingIdxs[0]] = Number(canonNumStr(String(inferred)));
-        }
+        }          const missing0 = missingIdxs[0]; // 0-based
+          const inferredVal = Number(canonNumStr(String(inferred)));
+          if (layerExtract.thicknesses?.[missing0]) {
+            layerExtract.thicknesses[missing0].value = inferredVal;
+            layerExtract.thicknesses[missing0].confidence = 0.40;
+            layerExtract.thicknesses[missing0].evidence = [`Inferred from total H=${H} minus known sum=${knownSum}`];
+          }
+          layerExtract.warnings.push(`Layer ${missing0 + 1} thickness inferred from overall height`);
+
       }
 
       for (let i = 0; i < thicknesses1.length; i++) {
-        if (thicknesses1[i] == null) thicknesses1[i] = 1;
+        if (thicknesses1[i] == null) {
+          thicknesses1[i] = 1;
+          if (layerExtract.thicknesses?.[i]) {
+            layerExtract.thicknesses[i].value = 1;
+            layerExtract.thicknesses[i].confidence = 0.15;
+            layerExtract.thicknesses[i].evidence = ["Defaulted to 1\" (missing in email)"];
+          }
+          layerExtract.warnings.push(`Layer ${i + 1} thickness defaulted to 1" (missing)`);
+        } else {
+          const v = Number(thicknesses1[i]);
+          if (layerExtract.thicknesses?.[i]) {
+            // Keep any existing confidence/evidence from parser; ensure value is set.
+            layerExtract.thicknesses[i].value = Number.isFinite(v) ? v : layerExtract.thicknesses[i].value;
+            if (!Number.isFinite(layerExtract.thicknesses[i].confidence)) layerExtract.thicknesses[i].confidence = 0.6;
+          }
+        }
       }
 
       const layers: any[] = [];
@@ -1453,6 +1564,17 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
       const numericThicknesses = thicknesses1.map((v) => (v == null ? 1 : Number(canonNumStr(String(v)))));
       (facts as any).layer_thicknesses = numericThicknesses;
+
+            // Compute overall confidence (min across layers)
+      const confs = (layerExtract.thicknesses || [])
+        .map((x: any) => Number(x?.confidence))
+        .filter((x: any) => Number.isFinite(x));
+      layerExtract.overall_confidence = confs.length ? Math.min(...confs) : null;
+
+      // Attach to facts (Path-A additive)
+      (facts as any).__extract = (facts as any).__extract || {};
+      (facts as any).__extract.layers = layerExtract;
+
 
       if (th.cavityLayerIndex1Based != null) facts.layer_cavity_layer_index = th.cavityLayerIndex1Based;
 
@@ -2020,7 +2142,15 @@ merged = await hydrateFromDBByQuoteNo(merged, {
     /* ------------------- Build canonical layout editor link (Path-A) ------------------- */
 
     // Build layout editor URL ONLY when layer data is authoritative
+// Build layout editor URL when layer data is authoritative AND confidence is not low.
+// Policy: generate link for medium/high; hold link for low (< 0.60).
+const layerOverallConf = Number((merged as any)?.__extract?.layers?.overall_confidence);
+
+const isLowConfidence =
+  Number.isFinite(layerOverallConf) ? layerOverallConf < 0.6 : false; // if unknown, don’t block
+
 if (
+  !isLowConfidence &&
   Number.isFinite(Number(merged.layer_count)) &&
   Array.isArray(merged.layer_thicknesses) &&
   merged.layer_thicknesses.every((v: any) => Number.isFinite(Number(v))) &&
@@ -2032,8 +2162,20 @@ if (
     merged.layoutEditorUrl = layoutEditorUrl;
     merged.layout_editor_link = layoutEditorUrl;
     merged.layoutEditorLink = layoutEditorUrl;
+
+    // Optional: store confidence label (additive, safe)
+    if (Number.isFinite(layerOverallConf)) {
+      (merged as any).layout_confidence =
+        layerOverallConf >= 0.8 ? "high" : layerOverallConf >= 0.6 ? "medium" : "low";
+    }
+  }
+} else {
+  // Optional: mark that we intentionally held the link (additive, safe)
+  if (isLowConfidence) {
+    (merged as any).layout_link_held_reason = "low_layer_confidence";
   }
 }
+
 
 
     /* ------------------- Build email template ------------------- */
