@@ -693,53 +693,28 @@ export function renderQuoteEmail(input: TemplateInput): string {
             }
 
             ${
-  showMissing
-    ? `<tr>
-<td style="padding:0 26px 18px 26px;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
-    style="border-radius:14px;border:1px solid #7f1d1d;background:#450a0a;">
-    <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #7f1d1d;
-        font-size:12px;font-weight:600;color:#fee2e2;
-        background:linear-gradient(90deg,#b91c1c,#450a0a);
-        border-radius:14px 14px 0 0;">
-        Just one more step to finalize your quote
-      </td>
-    </tr>
-    <tr>
-      <td style="padding:8px 12px;font-size:12px;color:#fee2e2;line-height:1.6;">
-        <ul style="margin:0;padding-left:18px;">
-          <li style="margin-bottom:2px;">
-            Let us know if this foam needs any cavities or cutouts
-          </li>
-          <li style="margin-bottom:2px;">
-            If it’s a solid block with no cavities, just confirm that instead
-          </li>
-        </ul>
-      </td>
-    </tr>
-  </table>
-</td>
-</tr>`
-    : ""
-}
+              showMissing
+                ? `<tr>
+              <td style="padding:0 26px 18px 26px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #7f1d1d;background:#450a0a;">
+                  <tr>
+                    <td style="padding:8px 12px;border-bottom:1px solid #7f1d1d;font-size:12px;font-weight:600;color:#fee2e2;background:linear-gradient(90deg,#b91c1c,#450a0a);border-radius:14px 14px 0 0;">
+                      Items we still need to finalize
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 12px;font-size:12px;color:#fee2e2;line-height:1.6;">
+                      <ul style="margin:0;padding-left:18px;">
+                        ${missing.map((m) => `<li style="margin-bottom:2px;">${m}</li>`).join("")}
+                      </ul>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>`
+                : ""
+            }
 
-/* ===================== CTA BUTTON ===================== */
-
-${
-  layoutUrl
-    ? `<tr>
-<td style="padding:0 26px 22px 26px;text-align:center;">
-  <a href="${layoutUrl}"
-     style="display:inline-block;padding:8px 18px;border-radius:999px;
-     border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;
-     font-size:12px;font-weight:600;text-decoration:none;">
-    Confirm cavities or solid block
-  </a>
-</td>
-</tr>`
-    : ""
-}
             <!-- Explanation / next steps -->
             <tr>
               <td style="padding:0 26px 18px 26px;">
