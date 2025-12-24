@@ -1785,12 +1785,22 @@ ${body}
       const idx = Number(parsed.layer_cavity_layer_index);
       if (Number.isFinite(idx) && idx >= 1) out.layer_cavity_layer_index = idx;
     }
-    if (Array.isArray(parsed.layer_thicknesses)) {
-      const arr = parsed.layer_thicknesses
-        .map((x: any) => Number(x))
-        .map((x: number) => (Number.isFinite(x) && x > 0 ? x : null));
-      if (arr.length) (out as any).layer_thicknesses = arr;
-    }
+    if (parsed.layer_thicknesses) {
+  const arr = parsed.layer_thicknesses
+    .map((x: any) => Number(x))
+    .map((x: number) => (Number.isFinite(x) && x > 0 ? x : null));
+
+  const hasAuthoritativeThicknesses =
+    Array.isArray((out as any).layer_thicknesses) &&
+    Array.isArray((out as any).__extract?.layers?.per_layer) &&
+    (out as any).__extract?.layers?.overall_confidence === "high";
+
+  // Only allow overwrite if we do NOT already have authoritative parsed thicknesses
+  if (arr.length && !hasAuthoritativeThicknesses) {
+    (out as any).layer_thicknesses = arr;
+  }
+}
+
 
     return compact(out);
   } catch {
