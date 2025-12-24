@@ -930,6 +930,24 @@ export async function POST(req: NextRequest) {
       [quote.id, layoutForSave, notes, svgAnnotated, dxf, step, currentUserId],
     );
 
+    // NEW (Path A): Clicking "Apply to quote" should advance the quote status.
+// Keep it conservative: only promote draft → applied; never overwrite later statuses.
+try {
+  await q(
+    `
+    update quotes
+    set
+      status = case when status = 'draft' then 'applied' else status end,
+      updated_by_user_id = coalesce($2, updated_by_user_id)
+    where id = $1
+    `,
+    [quote.id, currentUserId],
+  );
+} catch (e) {
+  console.error("[layout/apply] Failed to promote quote status to applied for", quoteNo, e);
+}
+
+
     let updatedQty: number | null = null;
 
     if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
@@ -1180,14 +1198,17 @@ export async function POST(req: NextRequest) {
     }
 
     return ok(
-      {
-        ok: true,
-        quoteNo,
-        packageId: pkg ? pkg.id : null,
-        updatedQty,
-      },
-      200,
-    );
+  {
+    ok: true,
+    quoteNo,
+    packageId: pkg ? pkg.id : null,
+    updatedQty,
+    // helpful debug signal (UI can ignore)
+    statusHint: "applied",
+  },
+  200,
+);
+
   } catch (err) {
     console.error("Error in /api/quote/layout/apply POST:", err);
     return bad(
