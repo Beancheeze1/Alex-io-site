@@ -930,6 +930,29 @@ export async function POST(req: NextRequest) {
       [quote.id, layoutForSave, notes, svgAnnotated, dxf, step, currentUserId],
     );
 
+    // ===================== NEW: status progression =====================
+    // Draft -> Applied
+    // Applied/Revised -> Revised (re-apply means we revised the quote)
+    try {
+      await q(
+        `
+        update quotes
+        set
+          status = case
+            when status in ('applied', 'revised') then 'revised'
+            else 'applied'
+          end,
+          updated_by_user_id = coalesce($2, updated_by_user_id)
+        where id = $1
+        `,
+        [quote.id, currentUserId],
+      );
+    } catch (e) {
+      console.error("[layout/apply] Failed to update quote status for", quoteNo, e);
+    }
+    // =================== END status progression ===================
+
+
     // NEW (Path A): Clicking "Apply to quote" should advance the quote status.
 // Keep it conservative: only promote draft → applied; never overwrite later statuses.
 try {
