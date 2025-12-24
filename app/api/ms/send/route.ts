@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { q } from "@/lib/db";
+
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,27 @@ function json(data: any, init?: number | ResponseInit) {
     typeof init === "number" ? { status: init } : init;
   return NextResponse.json(data, opts);
 }
+
+async function markQuoteSent(quoteNoRaw: any) {
+  const quoteNo = typeof quoteNoRaw === "string" ? quoteNoRaw.trim() : "";
+  if (!quoteNo) return;
+
+  try {
+    // Keep it conservative: only progress forward to 'sent'
+    await q(
+      `
+      update quotes
+      set status = 'sent'
+      where quote_no = $1
+        and status in ('draft', 'applied', 'revised')
+      `,
+      [quoteNo],
+    );
+  } catch (e) {
+    console.log(`[ms/send] markQuoteSent failed quoteNo=${quoteNo}: ${String(e)}`);
+  }
+}
+
 
 async function getAppToken() {
   const url = `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`;
@@ -41,7 +64,11 @@ type SendInput = {
   text?: string;
   html?: string;
   replyTo?: string[];
+
+  // OPTIONAL: if provided, we will flip quotes.status -> 'sent' after a successful Graph send
+  quoteNo?: string;
 };
+
 
 export async function POST(req: Request) {
   let body: SendInput;
@@ -103,7 +130,10 @@ export async function POST(req: Request) {
       `[ms/send] to=${to} status=${res.status} sentItems=true subject="${message.subject}"`
     );
 
-    if (res.status === 202 || res.ok) {
+        if (res.status === 202 || res.ok) {
+      // NEW: flip quote status -> sent (only if caller provided quoteNo)
+      await markQuoteSent((body as any).quoteNo);
+
       return json({
         ok: true,
         sent: {
@@ -115,6 +145,7 @@ export async function POST(req: Request) {
         },
       });
     }
+
 
     // Non-2xx — return Graph error
     return json(
