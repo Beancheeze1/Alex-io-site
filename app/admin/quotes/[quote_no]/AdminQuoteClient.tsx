@@ -1434,19 +1434,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
           boxShadow: "0 16px 40px rgba(15,23,42,0.45)",
         }}
       >
-        {/* Back link to quotes list */}
-        <div style={{ marginBottom: 8 }}>
-          <a
-            href="/admin/quotes"
-            style={{
-              fontSize: 11,
-              color: "#0284c7",
-              textDecoration: "none",
-            }}
-          >
-            ← Back to quotes list
-          </a>
-        </div>
+       
 
         {/* Header */}
         <div
@@ -1463,6 +1451,19 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
           }}
         >
           <div>
+                        <a
+              href="/admin/quotes"
+              style={{
+                display: "inline-block",
+                fontSize: 11,
+                color: "rgba(255,255,255,0.92)",
+                textDecoration: "none",
+                marginBottom: 6,
+              }}
+            >
+              ← Back to quotes list
+            </a>
+
             <div
               style={{
                 fontSize: 11,

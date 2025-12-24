@@ -2591,7 +2591,7 @@ React.useEffect(() => {
                                 style={chipStyle}
                                 className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
                               >
-                                {cav.id.replace("cav-", "C")}
+                                {formatCavityChip(cav.id)}
                               </span>
                               <span className={isActive ? "text-slate-50 font-medium" : "text-slate-200"}>
                                 {cav.label}
@@ -2751,6 +2751,28 @@ React.useEffect(() => {
     </main>
   );
 }
+const formatCavityChip = (id: string): string => {
+  if (!id) return "C";
+
+  // Seeded cavities: seed-cav-1 → C1
+  if (id.startsWith("seed-cav-")) {
+    const n = id.slice("seed-cav-".length).trim();
+    return n ? `C${n}` : "C";
+  }
+
+  // Normal cavities: cav-1 → C1
+  if (id.startsWith("cav-")) {
+    const n = id.slice("cav-".length).trim();
+    return n ? `C${n}` : "C";
+  }
+
+  // Fallback: grab first number anywhere
+  const m = id.match(/(\d+)/);
+  if (m?.[1]) return `C${m[1]}`;
+
+  return "C";
+};
+
 
 /* ---------- SVG export helper ---------- */
 
