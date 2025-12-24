@@ -1527,6 +1527,7 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
 
   const needsMaterial = grabMaterial(text);
   if (needsMaterial) facts.material = needsMaterial;
+  
 
   const color = grabColor(text);
   if (color) facts.color = color;
