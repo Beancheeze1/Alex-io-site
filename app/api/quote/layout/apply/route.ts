@@ -52,7 +52,9 @@ export const runtime = "nodejs";
 type QuoteRow = {
   id: number;
   quote_no: string;
+  status: string | null;
 };
+
 
 type LayoutPkgRow = {
   id: number;
@@ -765,13 +767,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const quote = await one<QuoteRow>(
-      `
-      select id, quote_no
+  `
+      select id, quote_no, status
       from quotes
       where quote_no = $1
       `,
-      [quoteNo],
-    );
+  [quoteNo],
+);
+
 
     if (!quote) {
       return bad(
@@ -929,6 +932,8 @@ export async function POST(req: NextRequest) {
       `,
       [quote.id, layoutForSave, notes, svgAnnotated, dxf, step, currentUserId],
     );
+
+
 
     // ===================== NEW: status progression =====================
     // Draft -> Applied
@@ -1219,6 +1224,42 @@ try {
     } catch (e) {
       console.error("Error syncing layout facts for quote", quoteNo, e);
     }
+
+        // ===================== NEW (Path A): status transitions =====================
+    // Rule:
+    //  - If already SENT and we Apply again => REVISED
+    //  - If DRAFT and we Apply the first time => APPLIED
+    try {
+      const prevStatus = (quote?.status ?? "").toLowerCase();
+
+      if (prevStatus === "sent") {
+        await q(
+          `
+          update quotes
+          set
+            status = 'revised',
+            updated_by_user_id = coalesce($2, updated_by_user_id)
+          where id = $1
+          `,
+          [quote.id, currentUserId],
+        );
+      } else if (prevStatus === "draft") {
+        await q(
+          `
+          update quotes
+          set
+            status = 'applied',
+            updated_by_user_id = coalesce($2, updated_by_user_id)
+          where id = $1
+          `,
+          [quote.id, currentUserId],
+        );
+      }
+    } catch (e) {
+      console.error("[layout/apply] status transition failed for", quoteNo, e);
+    }
+    // =================== END NEW status transitions ===================
+
 
     return ok(
   {

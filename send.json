@@ -1,6 +1,6 @@
 ﻿{
-    "subject":  "Alex-IO Graph test — corrected",
-    "toEmail":  "25thhourdesign@gmail.com",
-    "html":  "\u003cdiv style=\u0027font-family:Segoe UI,Arial;line-height:1.5\u0027\u003e\n               \u003cp\u003eHello from \u003cb\u003eAlex-IO\u003c/b\u003e via Microsoft Graph.\u003c/p\u003e\n             \u003c/div\u003e",
-    "dryRun":  false
+  "to": "you@example.com",
+  "subject": "Alex-IO test — Sent status flip",
+  "text": "If you got this, Graph send worked.",
+  "quoteNo": "Q-AI-20251224-214314"
 }
