@@ -929,6 +929,68 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   // Planning total adds rough shipping to the effective grandSubtotal
   const planningTotal = (effectiveGrandSubtotal ?? 0) + (shippingEstimate || 0);
 
+  // ===== Status pill mapping (Path A) =====
+  function getStatusPill(statusRaw: any): { label: string; style: React.CSSProperties } {
+    const s = typeof statusRaw === "string" ? statusRaw.trim().toLowerCase() : "";
+
+    // Base pill style (matches your current look)
+    const base: React.CSSProperties = {
+      display: "inline-block",
+      padding: "4px 10px",
+      borderRadius: 999,
+      background: "rgba(15,23,42,0.2)",
+      border: "1px solid rgba(15,23,42,0.25)",
+      color: "#f9fafb",
+      fontWeight: 700,
+      letterSpacing: "0.08em",
+      textTransform: "uppercase",
+    };
+
+    // Label + subtle per-status tweaks (kept minimal)
+    if (s === "draft") {
+      return { label: "Draft", style: base };
+    }
+
+    if (s === "applied") {
+      return {
+        label: "Applied",
+        style: {
+          ...base,
+          background: "rgba(15,23,42,0.25)",
+          border: "1px solid rgba(15,23,42,0.35)",
+        },
+      };
+    }
+
+    if (s === "sent") {
+      return {
+        label: "Sent",
+        style: {
+          ...base,
+          background: "rgba(2,132,199,0.30)", // subtle blue tint
+          border: "1px solid rgba(2,132,199,0.40)",
+        },
+      };
+    }
+
+    if (s === "revised") {
+      return {
+        label: "Revised",
+        style: {
+          ...base,
+          background: "rgba(99,102,241,0.30)", // subtle indigo tint
+          border: "1px solid rgba(99,102,241,0.45)",
+        },
+      };
+    }
+
+    // Unknown status: show safely
+    const fallbackLabel = s ? s : "Draft";
+    return { label: fallbackLabel.charAt(0).toUpperCase() + fallbackLabel.slice(1), style: base };
+  }
+
+
+
   // Shared card styles
   const cardBase: React.CSSProperties = {
     borderRadius: 16,
@@ -1192,19 +1254,11 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
                   color: "#e5e7eb",
                 }}
               >
-                <div
-                  style={{
-                    display: "inline-block",
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    background: "rgba(15,23,42,0.2)",
-                    border: "1px solid rgba(15,23,42,0.25)",
-                    color: "#f9fafb",
-                    fontWeight: 600,
-                  }}
-                >
-                  {quote.status.toUpperCase()}
-                </div>
+                {(() => {
+  const pill = getStatusPill(quote.status);
+  return <div style={pill.style}>{pill.label}</div>;
+})()}
+
                 <p
                   style={{
                     margin: "4px 0 0 0",
