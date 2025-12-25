@@ -52,6 +52,12 @@ export type LayoutLayer = {
   label: string;
   thicknessIn: number;
   cavities: Cavity[];
+
+  // NEW (Path A, additive):
+  // Per-layer toggle for cropped/chamfered outside corners in exports/preview.
+  // - If omitted or false, layer renders with square corners (current behavior).
+  // - UI will manage this flag; we do NOT parse it from email.
+  cropCorners?: boolean;
 };
 
 export type LayoutModel = {

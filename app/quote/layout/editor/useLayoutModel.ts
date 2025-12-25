@@ -13,6 +13,11 @@
 //  - HARDENING: ensure cavity x/y are always finite so drag can never teleport to (0,0)
 //  - NEW HARDENING (12/19): NEVER turn invalid x/y into 0 (upper-left teleport).
 //    If an invalid coordinate reaches updateCavityPosition(), we keep the prior value.
+//
+// NEW (Path A, additive):
+//  - Per-layer crop-corners toggle persisted on LayoutLayer.cropCorners
+//  - Hook exposes setLayerCropCorners(id, value)
+//  - Normalization preserves cropCorners if already present
 
 "use client";
 
@@ -36,6 +41,9 @@ export type UseLayoutModelResult = {
   activeLayerId: string;
   selectCavity: (id: string | null) => void;
   setActiveLayerId: (id: string) => void;
+
+  // NEW (Path A): per-layer cropped-corner toggle
+  setLayerCropCorners: (layerId: string, cropCorners: boolean) => void;
 
   updateCavityPosition: (id: string, x: number, y: number) => void;
   updateBlockDims: (patch: Partial<BlockDims>) => void;
@@ -63,7 +71,9 @@ export type UseLayoutModelResult = {
 };
 
 export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
-  const [state, setState] = useState<LayoutState>(() => normalizeInitialLayout(initial));
+  const [state, setState] = useState<LayoutState>(() =>
+    normalizeInitialLayout(initial),
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { layout, activeLayerId } = state;
@@ -74,7 +84,8 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
   const setActiveLayerId = useCallback((id: string) => {
     setState((prev) => {
-      const layer = prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
+      const layer =
+        prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
       const mirrored = dedupeCavities(layer.cavities);
 
       return {
@@ -89,6 +100,26 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
     });
     setSelectedId(null);
   }, []);
+
+  // NEW (Path A): set per-layer crop-corners flag
+  const setLayerCropCorners = useCallback(
+    (layerId: string, cropCorners: boolean) => {
+      setState((prev) => {
+        const nextStack = prev.layout.stack.map((l) =>
+          l.id === layerId ? { ...l, cropCorners: !!cropCorners } : l,
+        );
+
+        return {
+          ...prev,
+          layout: {
+            ...prev.layout,
+            stack: nextStack,
+          },
+        };
+      });
+    },
+    [],
+  );
 
   const updateCavityPosition = useCallback((id: string, x: number, y: number) => {
     setState((prev) => {
@@ -247,7 +278,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       const id = `layer-${idx}`;
       const nextStack = [
         ...prev.layout.stack,
-        { id, label: `Layer ${idx}`, thicknessIn: 1, cavities: [] },
+        { id, label: `Layer ${idx}`, thicknessIn: 1, cavities: [], cropCorners: false },
       ];
 
       return {
@@ -302,6 +333,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
     activeLayerId,
     selectCavity,
     setActiveLayerId,
+    setLayerCropCorners,
     updateCavityPosition,
     updateBlockDims,
     updateCavityDims,
@@ -365,6 +397,9 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         label: l.label,
         thicknessIn: l.thicknessIn,
         cavities: cavs,
+
+        // NEW (Path A): preserve per-layer crop-corners flag if present
+        cropCorners: !!l.cropCorners,
       };
     }) as LayoutLayer[];
 
@@ -407,6 +442,9 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         label: "Layer 1",
         thicknessIn: thickness,
         cavities: cavs,
+
+        // NEW (Path A): legacy defaults to square corners
+        cropCorners: false,
       },
     ];
 
@@ -430,6 +468,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
           label: "Layer 1",
           thicknessIn: safeInch(block.thicknessIn ?? 1, 0.5),
           cavities: [],
+          cropCorners: false,
         },
       ],
       cavities: [],
