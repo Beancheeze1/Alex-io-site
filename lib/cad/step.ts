@@ -43,7 +43,12 @@ export type LayoutForStep = {
     lengthIn: number;
     widthIn: number;
     thicknessIn: number; // total stack height
+
+    // Optional: outer-block chamfer intent
+    croppedCorners?: boolean | null;
+    chamferIn?: number | null;
   };
+
   stack: FoamLayer[];
   cavities?: CavityDef[] | null; // legacy top-level cavities
 };
@@ -192,6 +197,15 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
   if (!lengthIn || !widthIn || !thicknessIn) return null;
 
   const rawStack = Array.isArray((layout as any).stack) ? (layout as any).stack : [];
+    // Optional export intent flags from editor
+  const croppedCornersRaw = (blockRaw as any).croppedCorners ?? (blockRaw as any).cropped_corners ?? null;
+  const chamferInRaw = (blockRaw as any).chamferIn ?? (blockRaw as any).chamfer_in ?? null;
+
+  const croppedCorners =
+    typeof croppedCornersRaw === "boolean" ? croppedCornersRaw : null;
+
+  const chamferIn = safePosNumber(chamferInRaw); // null if missing/invalid
+
   const normalizedStack: FoamLayer[] = [];
 
   if (rawStack.length > 0) {
@@ -231,18 +245,20 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
       label: "Foam layer",
       cavities: legacyCavs.length ? legacyCavs : null,
     });
-    return {
-      block: { lengthIn, widthIn, thicknessIn },
+        return {
+      block: { lengthIn, widthIn, thicknessIn, croppedCorners, chamferIn },
       stack: normalizedStack,
       cavities: null,
     };
+
   }
 
-  return {
-    block: { lengthIn, widthIn, thicknessIn },
+    return {
+    block: { lengthIn, widthIn, thicknessIn, croppedCorners, chamferIn },
     stack: normalizedStack,
     cavities: legacyCavs.length ? legacyCavs : null,
   };
+
 }
 
 function getStepServiceUrl(): string | null {

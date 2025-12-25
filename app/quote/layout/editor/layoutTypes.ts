@@ -8,7 +8,12 @@ export type BlockDims = {
   lengthIn: number;
   widthIn: number;
   thicknessIn: number;
+
+  // Optional: editor "Crop corners" intent (for exports)
+  croppedCorners?: boolean;
+  chamferIn?: number; // default 1" if omitted
 };
+
 
 export type CavityShape = "rect" | "circle" | "roundedRect";
 

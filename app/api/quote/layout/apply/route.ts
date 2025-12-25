@@ -344,11 +344,39 @@ function buildDxfFromLayout(layout: any): string | null {
 
   const entities: string[] = [];
 
-  // outer block
-  entities.push(lineEntity(0, 0, L, 0));
-  entities.push(lineEntity(L, 0, L, W));
-  entities.push(lineEntity(L, W, 0, W));
-  entities.push(lineEntity(0, W, 0, 0));
+  // outer block (optionally chamfered)
+  const cropped = !!(layout?.block?.croppedCorners ?? layout?.block?.cropped_corners);
+  const chamferIn =
+    Number(layout?.block?.chamferIn ?? layout?.block?.chamfer_in) || 1;
+
+  const canChamfer =
+    cropped &&
+    Number.isFinite(chamferIn) &&
+    chamferIn > 0 &&
+    L > chamferIn * 2 &&
+    W > chamferIn * 2;
+
+  if (!canChamfer) {
+    entities.push(lineEntity(0, 0, L, 0));
+    entities.push(lineEntity(L, 0, L, W));
+    entities.push(lineEntity(L, W, 0, W));
+    entities.push(lineEntity(0, W, 0, 0));
+  } else {
+    const c = chamferIn;
+
+    // Match editor intent: chamfer upper-left and lower-right (45°)
+    // Using DXF coords with origin bottom-left:
+    // UL corner is (0, W), LR corner is (L, 0)
+
+    // Start at top edge after UL chamfer
+    entities.push(lineEntity(c, W, L, W));          // top edge
+    entities.push(lineEntity(L, W, L, c));          // right edge down to before LR chamfer
+    entities.push(lineEntity(L, c, L - c, 0));      // LR chamfer
+    entities.push(lineEntity(L - c, 0, 0, 0));      // bottom edge
+    entities.push(lineEntity(0, 0, 0, W - c));      // left edge up to before UL chamfer
+    entities.push(lineEntity(0, W - c, c, W));      // UL chamfer
+  }
+
 
   // cavities (flattened) as rectangles
   const allCavities = getAllCavitiesFromLayout(layout);
