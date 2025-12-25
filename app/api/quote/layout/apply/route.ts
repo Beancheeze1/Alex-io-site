@@ -214,12 +214,12 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     const cornerStyle = b.cornerStyle ?? b.corner_style ?? null;
     const croppedLegacy = b.croppedCorners ?? b.cropped_corners ?? null;
 
-    // Canonicalize chamferIn to b.chamferIn when present under any key
     const rawChamfer = b.chamferIn ?? b.chamfer_in ?? null;
-    const chamferNum = rawChamfer == null ? null : Number(rawChamfer);
-    if (Number.isFinite(chamferNum) && chamferNum >= 0) {
-      b.chamferIn = chamferNum;
-    }
+const chamferNum = Number(rawChamfer);
+if (rawChamfer != null && Number.isFinite(chamferNum) && chamferNum >= 0) {
+  b.chamferIn = chamferNum;
+}
+
 
     // If NEW cornerStyle says chamfer, ensure legacy boolean exists too
     if (cornerStyle === "chamfer" && croppedLegacy == null) {
