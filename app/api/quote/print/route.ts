@@ -360,13 +360,20 @@ export async function GET(req: NextRequest) {
     );
 
     if (layoutPkg?.layout_json) {
-      try {
-        const bundle = buildLayoutExports(layoutPkg.layout_json);
-        if (bundle?.svg) {
-          layoutPkg = { ...layoutPkg, svg_text: bundle.svg };
-        }
-      } catch {}
-    }
+  try {
+    const bundle = buildLayoutExports(layoutPkg.layout_json);
+
+    layoutPkg = {
+      ...layoutPkg,
+      svg_text: bundle.svg ?? layoutPkg.svg_text,
+      dxf_text: bundle.dxf ?? layoutPkg.dxf_text,
+      step_text: bundle.step ?? layoutPkg.step_text,
+    };
+  } catch (e) {
+    console.error("[quote/print] export regeneration failed", e);
+  }
+}
+
 
     /* ---------------- Packaging lines ---------------- */
 
