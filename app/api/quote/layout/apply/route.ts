@@ -353,11 +353,12 @@ function buildDxfFromLayout(layout: any): string | null {
     cornerStyleRaw === "chamfer" ||
     !!(layout?.block?.croppedCorners ?? layout?.block?.cropped_corners);
 
-  const chamferIn =
-    Number(layout?.block?.chamferIn ?? layout?.block?.chamfer_in) || 1;
+  const cropped =
+  String(layout?.block?.cornerStyle ?? "").toLowerCase() === "chamfer" ||
+  !!(layout?.block?.croppedCorners ?? layout?.block?.cropped_corners);
 
-  const cropped = chamferEnabled;
-
+const chamferIn =
+  Number(layout?.block?.chamferIn ?? layout?.block?.chamfer_in) || 1;
 
   const canChamfer =
     cropped &&
@@ -953,8 +954,15 @@ export async function POST(req: NextRequest) {
 
     // If chamfer is enabled, the SVG coming from the editor may still be square.
     // In that case, prefer the layout-based DXF builder so corners are actually cropped.
-    const dxfFromSvg = chamferEnabled ? null : buildDxfFromSvg(svgRaw);
-    const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
+    // If block is chamfered, DXF-from-SVG is unsafe because it only supports <rect>/<circle>
+// and will produce a square outer block. Force layout-based DXF for chamfer blocks.
+const wantsChamfer =
+  String(layoutForSave?.block?.cornerStyle ?? "").toLowerCase() === "chamfer" ||
+  !!(layoutForSave?.block?.croppedCorners ?? layoutForSave?.block?.cropped_corners);
+
+const dxfFromSvg = wantsChamfer ? null : buildDxfFromSvg(svgRaw);
+const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
+
 
 
     const step = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
