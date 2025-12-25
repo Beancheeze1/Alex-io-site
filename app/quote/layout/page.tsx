@@ -2955,11 +2955,52 @@ function buildSvgFromLayout(
 
   svgParts.push(`  ${headerSection}`);
 
-  svgParts.push(
-    `  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}" width="${blockW.toFixed(
-      2,
-    )}" height="${blockH.toFixed(2)}" rx="0" ry="0" fill="#e5e7eb" stroke="#111827" stroke-width="2" />`,
+    // --- Block outline (square OR chamfer) ---
+  const cornerStyle = String((block as any)?.cornerStyle ?? "").toLowerCase();
+  const chamferInRaw = (block as any)?.chamferIn;
+  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
+
+  const chamferPx =
+    cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
+      ? chamferIn * scale
+      : 0;
+
+  // Clamp chamfer so it can't exceed half the side
+  const c = Math.max(
+    0,
+    Math.min(chamferPx, blockW / 2 - 0.01, blockH / 2 - 0.01),
   );
+
+  if (c > 0.001) {
+    const x0 = blockX;
+    const y0 = blockY;
+    const x1 = blockX + blockW;
+    const y1 = blockY + blockH;
+
+    // Chamfered rectangle path (45° chamfers)
+    const d = [
+      `M ${(x0 + c).toFixed(2)} ${y0.toFixed(2)}`,
+      `L ${(x1 - c).toFixed(2)} ${y0.toFixed(2)}`,
+      `L ${x1.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+      `L ${x1.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+      `L ${(x1 - c).toFixed(2)} ${y1.toFixed(2)}`,
+      `L ${(x0 + c).toFixed(2)} ${y1.toFixed(2)}`,
+      `L ${x0.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+      `L ${x0.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+      `Z`,
+    ].join(" ");
+
+    svgParts.push(
+      `  <path d="${d}" fill="#e5e7eb" stroke="#111827" stroke-width="2" />`,
+    );
+  } else {
+    svgParts.push(
+      `  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}" width="${blockW.toFixed(
+        2,
+      )}" height="${blockH.toFixed(2)}" rx="0" ry="0" fill="#e5e7eb" stroke="#111827" stroke-width="2" />`,
+    );
+  }
+
 
   if (cavRects) {
     svgParts.push(cavRects);
