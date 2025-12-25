@@ -19,9 +19,9 @@ type BlockLike = {
   widthIn: number;
   thicknessIn?: number | null;
 
-  // NEW: block corner metadata (durable)
-  cornerStyle?: "square" | "chamfer" | string | null;
-  chamferIn?: number | null;
+  // NEW: optional corner metadata (persisted by layout editor)
+  cornerStyle?: string | null; // "square" | "chamfer"
+  chamferIn?: number | null;   // inches
 };
 
 type CavityLike = {
@@ -54,67 +54,34 @@ export function buildLayoutExports(layout: LayoutLike): LayoutExportBundle {
 
 /* ================= SVG ================= */
 
+function escapeText(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function buildSvg(layout: LayoutLike): string {
   const { block, cavities } = layout;
 
-  const scaleX = (VIEW_W - 2 * PADDING) / block.lengthIn;
-  const scaleY = (VIEW_H - 2 * PADDING) / block.widthIn;
+  const L = Number(block.lengthIn) || 0;
+  const W = Number(block.widthIn) || 0;
+
+  if (L <= 0 || W <= 0) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg"></svg>`;
+  }
+
+  const scaleX = (VIEW_W - 2 * PADDING) / L;
+  const scaleY = (VIEW_H - 2 * PADDING) / W;
   const scale = Math.min(scaleX, scaleY);
 
-  const blockW = block.lengthIn * scale;
-  const blockH = block.widthIn * scale;
+  const blockW = L * scale;
+  const blockH = W * scale;
   const blockX = (VIEW_W - blockW) / 2;
   const blockY = (VIEW_H - blockH) / 2;
 
-  const cavRects = cavities
-    .map((c) => {
-      const cavW = c.lengthIn * scale;
-      const cavH = c.widthIn * scale;
-      const x = blockX + c.x * blockW;
-      const y = blockY + c.y * blockH;
-
-      const label =
-        c.label ??
-        (c.shape === "circle"
-          ? `Ø${c.lengthIn}×${c.depthIn ?? ""}"`.trim()
-          : `${c.lengthIn}×${c.widthIn}×${c.depthIn ?? ""}"`.trim());
-
-      if (c.shape === "circle") {
-        const r = Math.min(cavW, cavH) / 2;
-        const cx = x + cavW / 2;
-        const cy = y + cavH / 2;
-        return `
-  <g>
-    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
-          2,
-        )}" fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-          2,
-        )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${label}</text>
-  </g>`;
-      }
-
-      const rPx = c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0;
-
-      return `
-  <g>
-    <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
-          width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
-          rx="${rPx.toFixed(2)}"
-          ry="${rPx.toFixed(2)}"
-          fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
-        2,
-      )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${label}</text>
-  </g>`;
-    })
-    .join("\n");
-
   // --- Block outline (square OR chamfer) ---
   const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
-  const chamferIn = Number(block.chamferIn ?? 0);
+  const chamferInRaw = block.chamferIn;
+  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
 
   const chamferPx =
     cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
@@ -147,15 +114,62 @@ function buildSvg(layout: LayoutLike): string {
             `Z`,
           ].join(" ");
 
-          return `  <path d="${d}" fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
+          return `<path d="${d}" fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
         })()
-      : `  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
+      : `<rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
         width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
         fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
 
+  const cavRects = cavities
+    .map((cav) => {
+      const cavW = cav.lengthIn * scale;
+      const cavH = cav.widthIn * scale;
+      const x = blockX + cav.x * blockW;
+      const y = blockY + cav.y * blockH;
+
+      const label =
+        cav.label ??
+        (cav.shape === "circle"
+          ? `Ø${cav.lengthIn}×${cav.depthIn ?? ""}"`.trim()
+          : `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn ?? ""}"`.trim());
+
+      if (cav.shape === "circle") {
+        const r = Math.min(cavW, cavH) / 2;
+        const cx = x + cavW / 2;
+        const cy = y + cavH / 2;
+        return `
+  <g>
+    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
+          2,
+        )}" fill="none" stroke="#111827" stroke-width="1" />
+    <text x="${cx.toFixed(2)}" y="${cy.toFixed(
+          2,
+        )}" text-anchor="middle" dominant-baseline="middle"
+          font-size="10" fill="#111827">${escapeText(label)}</text>
+  </g>`;
+      }
+
+      const rx = (cav.cornerRadiusIn ? cav.cornerRadiusIn * scale : 0);
+      const rxy = Number.isFinite(rx) ? rx : 0;
+
+      return `
+  <g>
+    <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
+          width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
+          rx="${rxy.toFixed(2)}"
+          ry="${rxy.toFixed(2)}"
+          fill="none" stroke="#111827" stroke-width="1" />
+    <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
+        2,
+      )}" text-anchor="middle" dominant-baseline="middle"
+          font-size="10" fill="#111827">${escapeText(label)}</text>
+  </g>`;
+    })
+    .join("\n");
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg">
-${blockOutline}
+  ${blockOutline}
 ${cavRects}
 </svg>`;
 }
@@ -186,19 +200,21 @@ function buildDxf(layout: LayoutLike): string {
   const blkLen = Number(block.lengthIn) || 0;
   const blkWid = Number(block.widthIn) || 0;
 
-  // Block outline (square OR chamfered)
+  // Determine chamfer behavior
   const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
-  const chamferIn = Number(block.chamferIn ?? 0);
-
+  const chamferInRaw = block.chamferIn;
+  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
   const c =
     cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
-      ? Math.max(0, Math.min(chamferIn, blkLen / 2 - 0.0001, blkWid / 2 - 0.0001))
+      ? Math.max(0, Math.min(chamferIn, blkLen / 2 - 1e-6, blkWid / 2 - 1e-6))
       : 0;
 
+  // Block outline as LWPOLYLINE.
+  // - Square: 4 vertices
+  // - Chamfer: 8 vertices
   const blockPts: [number, number][] =
     c > 0.0001
       ? [
-          // 8-vertex chamfered perimeter (45° chamfers)
           [c, 0],
           [blkLen - c, 0],
           [blkLen, c],
@@ -209,7 +225,6 @@ function buildDxf(layout: LayoutLike): string {
           [0, c],
         ]
       : [
-          // 4-vertex rectangle
           [0, 0],
           [blkLen, 0],
           [blkLen, blkWid],
@@ -217,8 +232,8 @@ function buildDxf(layout: LayoutLike): string {
         ];
 
   push(0, "LWPOLYLINE");
-  push(8, "BLOCK"); // layer name
-  push(90, blockPts.length); // number of vertices
+  push(8, "BLOCK");
+  push(90, blockPts.length);
   push(70, 1); // closed polyline flag
   for (const [x, y] of blockPts) {
     push(10, x);
@@ -233,7 +248,6 @@ function buildDxf(layout: LayoutLike): string {
     const wid = cav.widthIn;
 
     if (cav.shape === "circle") {
-      // center at cavity center
       const cx = xIn + len / 2;
       const cy = yIn + wid / 2;
       const r = Math.min(len, wid) / 2;
@@ -244,7 +258,6 @@ function buildDxf(layout: LayoutLike): string {
       push(30, 0);
       push(40, r);
     } else {
-      // rect / roundedRect -> polyline rectangle (rounded is not represented in this minimal DXF)
       const pts: [number, number][] = [
         [xIn, yIn],
         [xIn + len, yIn],
@@ -254,7 +267,7 @@ function buildDxf(layout: LayoutLike): string {
       push(0, "LWPOLYLINE");
       push(8, "CAVITY");
       push(90, 4);
-      push(70, 1); // closed
+      push(70, 1);
       for (const [px, py] of pts) {
         push(10, px);
         push(20, py);
@@ -262,7 +275,6 @@ function buildDxf(layout: LayoutLike): string {
     }
   }
 
-  // End ENTITIES and file
   push(0, "ENDSEC");
   push(0, "EOF");
 
@@ -270,10 +282,6 @@ function buildDxf(layout: LayoutLike): string {
 }
 
 /* ================= STEP (stub) ================= */
-
-// Proper 3D STEP modeling requires a CAD kernel. For now we emit a small,
-// well-formed text "stub" that still carries all the layout metadata and can
-// be regenerated into real geometry later if needed.
 
 function buildStepStub(layout: LayoutLike): string {
   const { block, cavities } = layout;
@@ -289,14 +297,11 @@ DATA;
 
   const bodyLines: string[] = [];
 
-  const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
-  const chamferIn = block.chamferIn ?? null;
-
   bodyLines.push(
     `/* BLOCK: ${block.lengthIn} x ${block.widthIn} x ${block.thicknessIn ?? ""} in */`,
   );
   bodyLines.push(
-    `/* BLOCK_CORNERS: style=${cornerStyle || "square"}, chamferIn=${chamferIn ?? ""} */`,
+    `/* BLOCK CORNERS: style=${String(block.cornerStyle ?? "square")}, chamferIn=${block.chamferIn ?? ""} */`,
   );
 
   cavities.forEach((cav, idx) => {
