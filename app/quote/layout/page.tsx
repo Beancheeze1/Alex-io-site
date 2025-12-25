@@ -395,10 +395,12 @@ export default function LayoutPage({
         H: 2,
       };
 
-      const block = {
+      const block: any = {
         lengthIn: parsedBlock.L,
         widthIn: parsedBlock.W,
         thicknessIn: parsedBlock.H,
+        // NEW: defaults (square) — we intentionally do NOT auto-chamfer on fallback
+        // cornerStyle/chamferIn are left undefined unless user toggles.
       };
 
       // If layers are provided, block thickness becomes total stack thickness.
@@ -487,7 +489,7 @@ export default function LayoutPage({
         !layersInfo.thicknesses ||
         layersInfo.thicknesses.length === 0
       ) {
-        return { block, cavities };
+        return { block, cavities } as any;
       }
 
       // Multi-layer: build stack and assign cavities.
@@ -539,11 +541,6 @@ export default function LayoutPage({
     [],
   );
 
-  // ---- rest of your file is unchanged ----
-  // (I’m leaving it out here ONLY because your paste is already massive and the UI can truncate;
-  // but per your rule, if you want the *entire* file re-posted in one block, tell me and I’ll paste it.)
-
-
   React.useEffect(() => {
     let cancelled = false;
 
@@ -589,62 +586,61 @@ export default function LayoutPage({
 
           // layers + per-layer cavities (canonical) — ONLY ONCE
           // --- Layer seeding (canonical / “conical”): prefer modern params, fall back to legacy ---
-const layersRaw =
-  url.searchParams.get("layers") ??
-  (url.searchParams.getAll("layer").length > 0
-    ? url.searchParams.getAll("layer").join(",")
-    : null);
+          const layersRaw =
+            url.searchParams.get("layers") ??
+            (url.searchParams.getAll("layer").length > 0
+              ? url.searchParams.getAll("layer").join(",")
+              : null);
 
-// Legacy params currently produced by some links:
-//  - layer_thicknesses=1,4,1
-//  - layer_count=3
-//  - layer_cavity_layer_index=2   (1-based)
-const legacyThicknessesAll = url.searchParams
-  .getAll("layer_thicknesses")
-  .map((s) => (s ?? "").trim())
-  .filter(Boolean);
+          // Legacy params currently produced by some links:
+          //  - layer_thicknesses=1,4,1
+          //  - layer_count=3
+          //  - layer_cavity_layer_index=2   (1-based)
+          const legacyThicknessesAll = url.searchParams
+            .getAll("layer_thicknesses")
+            .map((s) => (s ?? "").trim())
+            .filter(Boolean);
 
-// Legacy single value fallback (older links)
-const legacyThicknessesRaw =
-  legacyThicknessesAll.length > 0
-    ? legacyThicknessesAll
-    : url.searchParams.get("layer_thickness") ?? null;
+          // Legacy single value fallback (older links)
+          const legacyThicknessesRaw =
+            legacyThicknessesAll.length > 0
+              ? legacyThicknessesAll
+              : url.searchParams.get("layer_thickness") ?? null;
 
-// 1) Parse layers from modern params first, then legacy thickness list
-layersInfo = layersRaw
-  ? parseLayersParam(layersRaw)
-  : legacyThicknessesRaw
-  ? parseLayersParam(legacyThicknessesRaw)
-  : null;
+          // 1) Parse layers from modern params first, then legacy thickness list
+          layersInfo = layersRaw
+            ? parseLayersParam(layersRaw)
+            : legacyThicknessesRaw
+            ? parseLayersParam(legacyThicknessesRaw)
+            : null;
 
-// 2) Build per-layer cavity strings
-if (layersInfo && layersInfo.thicknesses.length > 0) {
-  const n = layersInfo.thicknesses.length;
+          // 2) Build per-layer cavity strings
+          if (layersInfo && layersInfo.thicknesses.length > 0) {
+            const n = layersInfo.thicknesses.length;
 
-  // Prefer explicit per-layer cavities in URL (cavities_l1 / cavity_l1, etc.)
-  perLayerCavityStrs = layersInfo.thicknesses.map((_, i) =>
-    readLayerCavitiesFromUrl(url, i + 1),
-  );
+            // Prefer explicit per-layer cavities in URL (cavities_l1 / cavity_l1, etc.)
+            perLayerCavityStrs = layersInfo.thicknesses.map((_, i) =>
+              readLayerCavitiesFromUrl(url, i + 1),
+            );
 
-  // If none were provided, fall back to assigning the generic cavities string
-  // to the requested layer index (legacy behavior), else to middle layer.
-  const anyLayerHasCavs = perLayerCavityStrs.some((s) => (s || "").trim().length > 0);
+            // If none were provided, fall back to assigning the generic cavities string
+            // to the requested layer index (legacy behavior), else to middle layer.
+            const anyLayerHasCavs = perLayerCavityStrs.some((s) => (s || "").trim().length > 0);
 
-  if (!anyLayerHasCavs) {
-    const legacyIdxRaw = url.searchParams.get("layer_cavity_layer_index");
-    const legacyIdx = legacyIdxRaw ? Number(legacyIdxRaw) : NaN;
+            if (!anyLayerHasCavs) {
+              const legacyIdxRaw = url.searchParams.get("layer_cavity_layer_index");
+              const legacyIdx = legacyIdxRaw ? Number(legacyIdxRaw) : NaN;
 
-    const fallbackTarget =
-      Number.isFinite(legacyIdx) && legacyIdx >= 1 && legacyIdx <= n
-        ? legacyIdx - 1
-        : Math.max(0, Math.min(n - 1, Math.floor((n - 1) / 2)));
+              const fallbackTarget =
+                Number.isFinite(legacyIdx) && legacyIdx >= 1 && legacyIdx <= n
+                  ? legacyIdx - 1
+                  : Math.max(0, Math.min(n - 1, Math.floor((n - 1) / 2)));
 
-    if ((effectiveCavityStr || "").trim().length > 0) {
-      perLayerCavityStrs[fallbackTarget] = effectiveCavityStr;
-    }
-  }
-}
-
+              if ((effectiveCavityStr || "").trim().length > 0) {
+                perLayerCavityStrs[fallbackTarget] = effectiveCavityStr;
+              }
+            }
+          }
         }
       } catch {
         // if anything goes wrong, we fall back to serverBlockStr/serverCavityStr
@@ -954,6 +950,7 @@ function LayoutEditorHost(props: {
     renameLayer,
     deleteLayer,
   } = useLayoutModel(initialLayout);
+  
 
   const { block, cavities, stack } = layout as LayoutModel & {
     stack?: {
@@ -1071,75 +1068,101 @@ function LayoutEditorHost(props: {
     selectCavity(null);
   }, [effectiveActiveLayerId, layerCount, selectCavity, layers]);
 
- // When a new cavity is added, try to drop it into "dead space"
-const prevCavityCountRef = React.useRef<number>(cavities.length);
+  // When a new cavity is added, try to drop it into "dead space"
+  const prevCavityCountRef = React.useRef<number>(cavities.length);
 
-// NEW: layer-switch guard.
-// Switching layers can change cavities.length (e.g., 0 -> 3) which looks like
-// "a cavity was added" and this effect will reposition the last cavity.
-// We bail out on layer change and only sync the baseline count.
-const prevLayerIdRef = React.useRef<string>(effectiveActiveLayerId); // <-- if your file uses activeLayerId, swap it here
+  // NEW: layer-switch guard.
+  // Switching layers can change cavities.length (e.g., 0 -> 3) which looks like
+  // "a cavity was added" and this effect will reposition the last cavity.
+  // We bail out on layer change and only sync the baseline count.
+  const prevLayerIdRef = React.useRef<string>(effectiveActiveLayerId);
 
-React.useEffect(() => {
-  // If we changed layers, do NOT run auto-placement.
-  // Just sync our baseline and exit.
-  if (prevLayerIdRef.current !== effectiveActiveLayerId) { // <-- if your file uses activeLayerId, swap it here too
-    prevLayerIdRef.current = effectiveActiveLayerId;
-    prevCavityCountRef.current = cavities.length;
-    return;
-  }
+  React.useEffect(() => {
+    // If we changed layers, do NOT run auto-placement.
+    // Just sync our baseline and exit.
+    if (prevLayerIdRef.current !== effectiveActiveLayerId) {
+      prevLayerIdRef.current = effectiveActiveLayerId;
+      prevCavityCountRef.current = cavities.length;
+      return;
+    }
 
-  const prevCount = prevCavityCountRef.current;
+    const prevCount = prevCavityCountRef.current;
 
-  if (
-    cavities.length > prevCount &&
-    block.lengthIn &&
-    block.widthIn &&
-    Number.isFinite(block.lengthIn) &&
-    Number.isFinite(block.widthIn)
-  ) {
-    const newCavity = cavities[cavities.length - 1];
-    if (newCavity) {
-      const existing = cavities.slice(0, -1);
+    if (
+      cavities.length > prevCount &&
+      block.lengthIn &&
+      block.widthIn &&
+      Number.isFinite(block.lengthIn) &&
+      Number.isFinite(block.widthIn)
+    ) {
+      const newCavity = cavities[cavities.length - 1];
+      if (newCavity) {
+        const existing = cavities.slice(0, -1);
 
-      const cavLen = Number(newCavity.lengthIn) || 1;
-      const cavWid = Number(newCavity.widthIn) || 1;
+        const cavLen = Number(newCavity.lengthIn) || 1;
+        const cavWid = Number(newCavity.widthIn) || 1;
 
-      const usableLen = Math.max(block.lengthIn - 2 * WALL_IN, cavLen);
-      const usableWid = Math.max(block.widthIn - 2 * WALL_IN, cavWid);
+        const usableLen = Math.max(block.lengthIn - 2 * WALL_IN, cavLen);
+        const usableWid = Math.max(block.widthIn - 2 * WALL_IN, cavWid);
 
-      const isOverlapping = (xIn: number, yIn: number) => {
-        return existing.some((c) => {
-          const cxIn = (Number(c.x) || 0) * block.lengthIn;
-          const cyIn = (Number(c.y) || 0) * block.widthIn;
-          const cLen = Number(c.lengthIn) || 0;
-          const cWid = Number(c.widthIn) || 0;
+        const isOverlapping = (xIn: number, yIn: number) => {
+          return existing.some((c) => {
+            const cxIn = (Number(c.x) || 0) * block.lengthIn;
+            const cyIn = (Number(c.y) || 0) * block.widthIn;
+            const cLen = Number(c.lengthIn) || 0;
+            const cWid = Number(c.widthIn) || 0;
 
-          // Simple AABB overlap check
-          return !(
-            xIn + cavLen <= cxIn ||
-            cxIn + cLen <= xIn ||
-            yIn + cavWid <= cyIn ||
-            cyIn + cWid <= yIn
-          );
-        });
-      };
+            // Simple AABB overlap check
+            return !(
+              xIn + cavLen <= cxIn ||
+              cxIn + cLen <= xIn ||
+              yIn + cavWid <= cyIn ||
+              cyIn + cWid <= yIn
+            );
+          });
+        };
 
-      let chosenXIn: number | null = null;
-      let chosenYIn: number | null = null;
+        let chosenXIn: number | null = null;
+        let chosenYIn: number | null = null;
 
-      const cols = 3;
-      const rows = 3;
-      const cellW = usableLen / cols;
-      const cellH = usableWid / rows;
+        const cols = 3;
+        const rows = 3;
+        const cellW = usableLen / cols;
+        const cellH = usableWid / rows;
 
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          const centerXIn = WALL_IN + cellW * (col + 0.5);
-          const centerYIn = WALL_IN + cellH * (row + 0.5);
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            const centerXIn = WALL_IN + cellW * (col + 0.5);
+            const centerYIn = WALL_IN + cellH * (row + 0.5);
 
-          let xIn = centerXIn - cavLen / 2;
-          let yIn = centerYIn - cavWid / 2;
+            let xIn
+              = centerXIn - cavLen / 2;
+            let yIn = centerYIn - cavWid / 2;
+
+            const minXIn = WALL_IN;
+            const maxXIn = block.lengthIn - WALL_IN - cavLen;
+            const minYIn = WALL_IN;
+            const maxYIn = block.widthIn - WALL_IN - cavWid;
+
+            const clamp = (v: number, min: number, max: number) =>
+              v < min ? min : v > max ? max : v;
+
+            xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+            yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+            if (!isOverlapping(xIn, yIn)) {
+              chosenXIn = xIn;
+              chosenYIn = yIn;
+              break;
+            }
+          }
+          if (chosenXIn != null) break;
+        }
+
+        // Fallback: center placement inside walls
+        if (chosenXIn == null || chosenYIn == null) {
+          let xIn = (block.lengthIn - cavLen) / 2;
+          let yIn = (block.widthIn - cavWid) / 2;
 
           const minXIn = WALL_IN;
           const maxXIn = block.lengthIn - WALL_IN - cavLen;
@@ -1152,57 +1175,32 @@ React.useEffect(() => {
           xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
           yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
 
-          if (!isOverlapping(xIn, yIn)) {
-            chosenXIn = xIn;
-            chosenYIn = yIn;
-            break;
-          }
+          chosenXIn = xIn;
+          chosenYIn = yIn;
         }
-        if (chosenXIn != null) break;
-      }
 
-      // Fallback: center placement inside walls
-      if (chosenXIn == null || chosenYIn == null) {
-        let xIn = (block.lengthIn - cavLen) / 2;
-        let yIn = (block.widthIn - cavWid) / 2;
-
-        const minXIn = WALL_IN;
-        const maxXIn = block.lengthIn - WALL_IN - cavLen;
-        const minYIn = WALL_IN;
-        const maxYIn = block.widthIn - WALL_IN - cavWid;
-
-        const clamp = (v: number, min: number, max: number) =>
-          v < min ? min : v > max ? max : v;
-
-        xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
-        yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
-
-        chosenXIn = xIn;
-        chosenYIn = yIn;
-      }
-
-      if (
-        chosenXIn != null &&
-        chosenYIn != null &&
-        block.lengthIn > 0 &&
-        block.widthIn > 0
-      ) {
-        const xNorm = chosenXIn / block.lengthIn;
-        const yNorm = chosenYIn / block.widthIn;
-        updateCavityPosition(newCavity.id, xNorm, yNorm);
+        if (
+          chosenXIn != null &&
+          chosenYIn != null &&
+          block.lengthIn > 0 &&
+          block.widthIn > 0
+        ) {
+          const xNorm = chosenXIn / block.lengthIn;
+          const yNorm = chosenYIn / block.widthIn;
+          updateCavityPosition(newCavity.id, xNorm, yNorm);
+        }
       }
     }
-  }
 
-  // Always update baseline at end
-  prevCavityCountRef.current = cavities.length;
-}, [
-  cavities,
-  block.lengthIn,
-  block.widthIn,
-  effectiveActiveLayerId, // <-- swap to activeLayerId if needed
-  updateCavityPosition,
-]);
+    // Always update baseline at end
+    prevCavityCountRef.current = cavities.length;
+  }, [
+    cavities,
+    block.lengthIn,
+    block.widthIn,
+    effectiveActiveLayerId,
+    updateCavityPosition,
+  ]);
 
   // Handle edits to the active layer's thickness
   const handleActiveLayerThicknessChange = (value: string) => {
@@ -1213,7 +1211,12 @@ React.useEffect(() => {
   };
 
   const [zoom, setZoom] = React.useState(1);
-  const [croppedCorners, setCroppedCorners] = React.useState(false);
+
+  // NEW (Path A): Crop corners is derived from durable block metadata.
+  // - Default false if unset.
+  // - If a saved layout has cornerStyle="chamfer", checkbox will rehydrate checked.
+  const croppedCorners = (layout as any)?.block?.cornerStyle === "chamfer";
+
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
@@ -1401,6 +1404,7 @@ React.useEffect(() => {
     },
     [cavityInputs, selectedCavity, updateCavityDims],
   );
+
   React.useEffect(() => {
     let cancelled = false;
 
@@ -1595,9 +1599,21 @@ React.useEffect(() => {
         materialLabel: materialLabel || undefined,
       });
 
+      // NEW (Path A): ensure block-corner metadata is present on the outbound layout
+      // so /api/quote/layout/apply persists it even if the user never toggled again after reload.
+      const layoutToSave: any = layout;
+      if (!layoutToSave.block) layoutToSave.block = {};
+      if (croppedCorners) {
+        layoutToSave.block.cornerStyle = "chamfer";
+        layoutToSave.block.chamferIn = 1;
+      } else {
+        layoutToSave.block.cornerStyle = "square";
+        layoutToSave.block.chamferIn = null;
+      }
+
       const payload: any = {
         quoteNo,
-        layout,
+        layout: layoutToSave,
         notes,
         svg,
         customer: {
@@ -1677,6 +1693,7 @@ React.useEffect(() => {
       setTimeout(() => setApplyStatus("idle"), 3000);
     }
   };
+
   /* ---------- Layout ---------- */
 
   const canApplyButton = hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
@@ -2045,11 +2062,18 @@ React.useEffect(() => {
                     </div>
                     <label className="inline-flex items-center gap-1 text-[11px] text-slate-300">
                       <input
-                        type="checkbox"
-                        checked={croppedCorners}
-                        onChange={(e) => setCroppedCorners(e.target.checked)}
-                        className="h-3 w-3 rounded border-slate-600 bg-slate-950"
-                      />
+  type="checkbox"
+  checked={croppedCorners}
+  onChange={(e) => {
+    const next = !!e.target.checked;
+
+    // Persist on layout.block (durable)
+    updateBlockDims({
+      cornerStyle: next ? "chamfer" : "square",
+      chamferIn: next ? 1 : null,
+    } as any);
+  }}
+/>
                       <span>Crop corners 1&quot;</span>
                     </label>
                   </div>

@@ -4,22 +4,28 @@
 // SAFE module — no React imports. Path A only.
 //
 
+export type BlockCornerStyle = "square" | "chamfer";
+
 export type BlockDims = {
   lengthIn: number;
   widthIn: number;
   thicknessIn: number;
 
-  // Optional: editor "Crop corners" intent (for exports)
-  croppedCorners?: boolean;
-  chamferIn?: number; // default 1" if omitted
-};
+  // NEW (Path A, additive):
+  // Persist block-corner intent so exports can match the editor.
+  // - If omitted, behavior is identical to today (square block).
+  cornerStyle?: BlockCornerStyle;
 
+  // When cornerStyle === "chamfer", the chamfer run (inches) for the 45° cut.
+  // Example: 1 means a 1" run on both X and Y.
+  chamferIn?: number;
+};
 
 export type CavityShape = "rect" | "circle" | "roundedRect";
 
 export type Cavity = {
   id: string;
-  label: string;        // "3×2×1 in"
+  label: string; // "3×2×1 in"
   shape: CavityShape;
   cornerRadiusIn: number;
   lengthIn: number;
@@ -47,6 +53,7 @@ export type LayoutLayer = {
   thicknessIn: number;
   cavities: Cavity[];
 };
+
 export type LayoutModel = {
   block: BlockDims;
 
@@ -107,7 +114,6 @@ export function formatCavityLabel(
   return `${L} × ${W} × ${D} in`;
 }
 
-
 /** Extract numbers from a string */
 function extractNums(input: string | null | undefined): number[] {
   if (!input) return [];
@@ -129,6 +135,7 @@ export function parseBlockDims(dims: string): BlockDims | null {
     lengthIn: l,
     widthIn: w,
     thicknessIn: t,
+    // cornerStyle/chamferIn intentionally NOT set here (defaults to square behavior)
   };
 }
 
@@ -183,7 +190,7 @@ export function parseCavity(spec: string, index: number): Cavity | null {
  */
 export function buildLayoutFromStrings(
   blockDims: string,
-  cavitySpecs: string | null | undefined
+  cavitySpecs: string | null | undefined,
 ): LayoutModel | null {
   const block = parseBlockDims(blockDims);
   if (!block) return null;

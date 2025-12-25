@@ -8,6 +8,9 @@
 // - Preserve cavity shape metadata and ALSO provide alias keys so the STEP
 //   microservice can recognize circles even if it expects different field names.
 //
+// NEW (Path A):
+// - Thread block-level corner metadata through unchanged (cornerStyle/chamferIn).
+//
 // ENV:
 //   STEP_SERVICE_URL = https://alex-io-step-service.onrender.com
 
@@ -44,11 +47,10 @@ export type LayoutForStep = {
     widthIn: number;
     thicknessIn: number; // total stack height
 
-    // Optional: outer-block chamfer intent
-    croppedCorners?: boolean | null;
-    chamferIn?: number | null;
+    // NEW (Path A, additive): pass-through only (microservice may ignore for now)
+    cornerStyle?: string | null; // expected: "square" | "chamfer"
+    chamferIn?: number | null; // inches
   };
-
   stack: FoamLayer[];
   cavities?: CavityDef[] | null; // legacy top-level cavities
 };
@@ -78,7 +80,13 @@ function normalizeShape(raw: any): "circle" | "rect" | "roundedRect" | null {
   if (s === "rect" || s === "rectangle" || s === "square") return "rect";
 
   // rounded rect synonyms seen across UI/editor code
-  if (s === "roundedrect" || s === "rounded-rect" || s === "rounded_rect" || s === "roundrect") return "roundedRect";
+  if (
+    s === "roundedrect" ||
+    s === "rounded-rect" ||
+    s === "rounded_rect" ||
+    s === "roundrect"
+  )
+    return "roundedRect";
 
   // If something else comes in, keep it null (we only send the canonical set)
   return null;
@@ -105,13 +113,7 @@ function coerceCornerRadiusIn(c: any): number | null {
 }
 
 function coerceDiameterIn(c: any): number | null {
-  const candidates = [
-    c?.diameterIn,
-    c?.diameter_in,
-    c?.diameter,
-    c?.dia,
-    c?.d,
-  ];
+  const candidates = [c?.diameterIn, c?.diameter_in, c?.diameter, c?.dia, c?.d];
 
   for (const v of candidates) {
     const n = safePosNumber(v);
@@ -128,12 +130,21 @@ function normalizeCavities(raw: any[]): CavityDef[] {
       if (!c) return null;
 
       const lengthIn = safePosNumber(c.lengthIn ?? c.length_in ?? c.length);
-      const widthIn = safePosNumber(c.widthIn ?? c.width_in ?? c.width) ?? lengthIn;
-      const depthIn = safePosNumber(c.depthIn ?? c.depth_in ?? c.depth ?? c.heightIn ?? c.height_in ?? c.height);
+      const widthIn =
+        safePosNumber(c.widthIn ?? c.width_in ?? c.width) ?? lengthIn;
+      const depthIn = safePosNumber(
+        c.depthIn ??
+          c.depth_in ??
+          c.depth ??
+          c.heightIn ??
+          c.height_in ??
+          c.height,
+      );
       const x = safeNorm01(c.x);
       const y = safeNorm01(c.y);
 
-      if (!lengthIn || !widthIn || !depthIn || x == null || y == null) return null;
+      if (!lengthIn || !widthIn || !depthIn || x == null || y == null)
+        return null;
 
       // Shape can come from multiple keys
       const rawShape = c.shape ?? c.cavityShape ?? c.type ?? null;
@@ -152,7 +163,7 @@ function normalizeCavities(raw: any[]): CavityDef[] {
         if (shape == null || shape === "circle") shape = "circle";
       }
 
-      // Default shape to rect if still unknown (service currently supports rect/circle only)
+      // Default shape to rect if still unknown
       if (shape == null) shape = "rect";
 
       return {
@@ -196,16 +207,16 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
 
   if (!lengthIn || !widthIn || !thicknessIn) return null;
 
+  // NEW (Path A): pass-through only (do not infer)
+  const cornerStyleRaw = typeof blockRaw.cornerStyle === "string" ? blockRaw.cornerStyle.trim() : "";
+  const cornerStyle = cornerStyleRaw ? cornerStyleRaw : null;
+
+  const chamferInNum =
+    blockRaw.chamferIn != null || blockRaw.chamfer_in != null
+      ? safePosNumber(blockRaw.chamferIn ?? blockRaw.chamfer_in)
+      : null;
+
   const rawStack = Array.isArray((layout as any).stack) ? (layout as any).stack : [];
-    // Optional export intent flags from editor
-  const croppedCornersRaw = (blockRaw as any).croppedCorners ?? (blockRaw as any).cropped_corners ?? null;
-  const chamferInRaw = (blockRaw as any).chamferIn ?? (blockRaw as any).chamfer_in ?? null;
-
-  const croppedCorners =
-    typeof croppedCornersRaw === "boolean" ? croppedCornersRaw : null;
-
-  const chamferIn = safePosNumber(chamferInRaw); // null if missing/invalid
-
   const normalizedStack: FoamLayer[] = [];
 
   if (rawStack.length > 0) {
@@ -239,32 +250,40 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
 
   const legacyCavs = normalizeCavities((layout as any).cavities);
 
+  const blockOut: LayoutForStep["block"] = {
+    lengthIn,
+    widthIn,
+    thicknessIn,
+    cornerStyle,
+    chamferIn: chamferInNum,
+  };
+
   if (normalizedStack.length === 0) {
     normalizedStack.push({
       thicknessIn,
       label: "Foam layer",
       cavities: legacyCavs.length ? legacyCavs : null,
     });
-        return {
-      block: { lengthIn, widthIn, thicknessIn, croppedCorners, chamferIn },
+    return {
+      block: blockOut,
       stack: normalizedStack,
       cavities: null,
     };
-
   }
 
-    return {
-    block: { lengthIn, widthIn, thicknessIn, croppedCorners, chamferIn },
+  return {
+    block: blockOut,
     stack: normalizedStack,
     cavities: legacyCavs.length ? legacyCavs : null,
   };
-
 }
 
 function getStepServiceUrl(): string | null {
   const raw = process.env.STEP_SERVICE_URL;
   if (!raw || !raw.trim()) {
-    console.error("[STEP] Missing STEP_SERVICE_URL env var; cannot contact STEP microservice.");
+    console.error(
+      "[STEP] Missing STEP_SERVICE_URL env var; cannot contact STEP microservice.",
+    );
     return null;
   }
   return raw.replace(/\/+$/, "");
