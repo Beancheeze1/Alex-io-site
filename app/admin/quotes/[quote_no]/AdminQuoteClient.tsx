@@ -18,6 +18,8 @@
 "use client";
 
 import * as React from "react";
+import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
+
 
 type QuoteRow = {
   id: number;
@@ -809,6 +811,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [zipBusy, setZipBusy] = React.useState<boolean>(false);
   const [zipError, setZipError] = React.useState<string | null>(null);
   const [zipOkAt, setZipOkAt] = React.useState<string | null>(null);
+    // NEW: Send-to-customer (Graph) state
+  const [sendBusy, setSendBusy] = React.useState<boolean>(false);
+  const [sendError, setSendError] = React.useState<string | null>(null);
+  const [sendOkAt, setSendOkAt] = React.useState<string | null>(null);
+
 
   const [selectedLayerIdx, setSelectedLayerIdx] = React.useState<number>(0);
 
@@ -1415,6 +1422,153 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
   }, [quoteNoValue, revisionBusy, revisionValue]);
 
+    // NEW: Admin-only send to customer (Graph -> /api/ms/send)
+  const handleSendToCustomer = React.useCallback(async () => {
+    if (!quoteNoValue) return;
+    if (sendBusy) return;
+
+    const to = (quoteState?.email || "").trim();
+    if (!to) {
+      setSendError("No customer email on this quote.");
+      return;
+    }
+
+    if (!primaryItem) {
+      setSendError("No primary line item found for this quote.");
+      return;
+    }
+
+    // Build a clean subject line (include revision)
+    const rev = (revisionValue || "").trim();
+    const subj = `Quote ${quoteNoValue}${rev ? " " + rev : ""}`;
+
+    setSendBusy(true);
+    setSendError(null);
+    setSendOkAt(null);
+
+    try {
+      // 1) Get authoritative pricing snapshot from /api/quotes/calc (same shape used by orchestrate)
+      const L = Number(primaryItem.length_in);
+      const W = Number(primaryItem.width_in);
+      const H = Number(primaryItem.height_in);
+      const qty = Number(primaryItem.qty);
+      const material_id = Number(primaryItem.material_id);
+
+      let calcResult: any = null;
+
+      if (Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H) && Number.isFinite(qty) && Number.isFinite(material_id)) {
+        const r = await fetch(`/api/quotes/calc?t=${Date.now()}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            length_in: L,
+            width_in: W,
+            height_in: H,
+            material_id,
+            qty,
+            cavities: [],
+            round_to_bf: false,
+          }),
+        });
+
+        const j = await r.json().catch(() => ({} as any));
+        if (r.ok && j?.ok && j?.result) {
+          calcResult = j.result;
+        }
+      }
+
+      // 2) Build email HTML (template expects TemplateInput)
+      const density = primaryItem.density_lb_ft3 != null ? Number(primaryItem.density_lb_ft3) : null;
+      const density_pcf = density != null && Number.isFinite(density) ? density : null;
+
+      const totalFromStored = (() => {
+        // fallback to stored subtotal for safety
+        const n = Number(subtotal);
+        return Number.isFinite(n) ? n : 0;
+      })();
+
+      const total =
+        calcResult && typeof calcResult.total === "number" && Number.isFinite(calcResult.total) ? calcResult.total : totalFromStored;
+
+      const used_min_charge =
+        calcResult && typeof calcResult.used_min_charge === "boolean" ? calcResult.used_min_charge : null;
+
+      const html = renderQuoteEmail({
+        customerLine: `${quoteState?.customer_name || "Customer"}${quoteState?.email ? " • " + quoteState.email : ""}`,
+        quoteNumber: quoteNoValue,
+        status: quoteState?.status || "Draft",
+        specs: {
+          L_in: Number(primaryItem.length_in),
+          W_in: Number(primaryItem.width_in),
+          H_in: Number(primaryItem.height_in),
+          qty: primaryItem.qty ?? null,
+          density_pcf,
+          foam_family: primaryItem.material_family ?? null,
+          thickness_under_in: null,
+          color: null,
+          cavityCount: null,
+          cavityDims: [],
+        },
+        material: {
+          name: primaryItem.material_name || `Material #${primaryItem.material_id}`,
+          density_lbft3: density_pcf,
+          kerf_pct: calcResult?.kerf_pct ?? primaryItem?.pricing_meta?.kerf_pct ?? null,
+          min_charge: calcResult?.min_charge ?? primaryItem?.pricing_meta?.min_charge ?? null,
+        },
+        pricing: {
+          total,
+          piece_ci: calcResult?.piece_ci ?? null,
+          order_ci: calcResult?.order_ci ?? null,
+          order_ci_with_waste: calcResult?.order_ci_with_waste ?? null,
+          used_min_charge,
+          raw: calcResult ?? null,
+          price_breaks: null,
+        },
+        missing: [],
+        facts: {
+          revision: rev || null,
+        },
+      });
+
+      // 3) Send via Graph wrapper route (already flips quotes.status='sent' server-side when quoteNo is provided)
+      const res = await fetch(`/api/ms/send?t=${Date.now()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          to,
+          subject: subj,
+          html,
+          quoteNo: quoteNoValue,
+        }),
+      });
+
+      const ct = res.headers.get("content-type") || "";
+      const j = ct.includes("application/json") ? await res.json().catch(() => ({} as any)) : await res.text();
+
+      if (!res.ok || !j || (typeof j === "object" && j.ok === false)) {
+        const msg =
+          typeof j === "string"
+            ? j
+            : j?.message || j?.error || `Send failed (HTTP ${res.status})`;
+        setSendError(msg);
+        return;
+      }
+
+      setSendOkAt(new Date().toLocaleString());
+
+      // Refresh quote status pill
+      setRefreshTick((x) => x + 1);
+    } catch (e: any) {
+      console.error("Admin: send-to-customer failed:", e);
+      setSendError(String(e?.message ?? e));
+    } finally {
+      setSendBusy(false);
+    }
+  }, [quoteNoValue, sendBusy, quoteState, primaryItem, subtotal, revisionValue]);
+
+
   return (
     <div
       style={{
@@ -1525,6 +1679,27 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     {quoteState.status.toUpperCase()}
                   </div>
 
+                                    {/* NEW: Admin-only send */}
+                  <button
+                    type="button"
+                    onClick={handleSendToCustomer}
+                    disabled={sendBusy || !quoteState?.email}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      border: "1px solid rgba(255,255,255,0.55)",
+                      background: sendBusy ? "rgba(255,255,255,0.20)" : "rgba(15,23,42,0.22)",
+                      color: "#ffffff",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      cursor: sendBusy || !quoteState?.email ? "not-allowed" : "pointer",
+                    }}
+                    title={quoteState?.email ? "Send quote email to customer (Graph; saves to Sent Items)" : "No customer email on this quote"}
+                  >
+                    {sendBusy ? "Sending..." : "Send to customer"}
+                  </button>
+
+
                   {/* NEW: Revision editor */}
                   <div
                     style={{
@@ -1595,6 +1770,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
                   {revisionOkAt && <span style={{ fontSize: 11, color: "#dcfce7", fontWeight: 700 }}>✅ Saved</span>}
                   {revisionError && <span style={{ fontSize: 11, color: "#fee2e2", fontWeight: 700 }}>❌ {revisionError}</span>}
+                                    {sendOkAt && <span style={{ fontSize: 11, color: "#dcfce7", fontWeight: 700 }}>✅ Sent</span>}
+                  {sendError && <span style={{ fontSize: 11, color: "#fee2e2", fontWeight: 700 }}>❌ {sendError}</span>}
+
                 </div>
               </>
             )}
