@@ -102,17 +102,31 @@ function buildSvg(layout: LayoutLike): string {
           const x1 = blockX + blockW;
           const y1 = blockY + blockH;
 
+                    // Two-corner chamfer (SVG coords: y grows downward):
+          // - Top-left chamfer at (x0,y0)
+          // - Bottom-right chamfer at (x1,y1)
           const d = [
-            `M ${(x0 + c).toFixed(2)} ${y0.toFixed(2)}`,
-            `L ${(x1 - c).toFixed(2)} ${y0.toFixed(2)}`,
-            `L ${x1.toFixed(2)} ${(y0 + c).toFixed(2)}`,
-            `L ${x1.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+            // start just below top-left chamfer on left edge
+            `M ${x0.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+
+            // left edge down to bottom-left (square)
+            `L ${x0.toFixed(2)} ${y1.toFixed(2)}`,
+
+            // bottom edge to just before bottom-right chamfer
             `L ${(x1 - c).toFixed(2)} ${y1.toFixed(2)}`,
-            `L ${(x0 + c).toFixed(2)} ${y1.toFixed(2)}`,
-            `L ${x0.toFixed(2)} ${(y1 - c).toFixed(2)}`,
-            `L ${x0.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+
+            // bottom-right chamfer
+            `L ${x1.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+
+            // right edge up to top-right (square)
+            `L ${x1.toFixed(2)} ${y0.toFixed(2)}`,
+
+            // top edge to just after top-left chamfer
+            `L ${(x0 + c).toFixed(2)} ${y0.toFixed(2)}`,
+
             `Z`,
           ].join(" ");
+
 
           return `<path d="${d}" fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
         })()
@@ -212,17 +226,30 @@ function buildDxf(layout: LayoutLike): string {
   // Block outline as LWPOLYLINE.
   // - Square: 4 vertices
   // - Chamfer: 8 vertices
-  const blockPts: [number, number][] =
+    const blockPts: [number, number][] =
     c > 0.0001
       ? [
-          [c, 0],
+          // Two-corner chamfer (DXF coords assumed: (0,0)=bottom-left, y up):
+          // - Bottom-right chamfer at (blkLen,0)
+          // - Top-left chamfer at (0,blkWid)
+
+          // start at bottom-left (square)
+          [0, 0],
+
+          // bottom edge to just before bottom-right chamfer
           [blkLen - c, 0],
+
+          // bottom-right chamfer
           [blkLen, c],
-          [blkLen, blkWid - c],
-          [blkLen - c, blkWid],
+
+          // right edge to top-right (square)
+          [blkLen, blkWid],
+
+          // top edge to just after top-left chamfer
           [c, blkWid],
+
+          // top-left chamfer
           [0, blkWid - c],
-          [0, c],
         ]
       : [
           [0, 0],
@@ -230,6 +257,7 @@ function buildDxf(layout: LayoutLike): string {
           [blkLen, blkWid],
           [0, blkWid],
         ];
+
 
   push(0, "LWPOLYLINE");
   push(8, "BLOCK");
@@ -283,41 +311,15 @@ function buildDxf(layout: LayoutLike): string {
 
 /* ================= STEP (stub) ================= */
 
-function buildStepStub(layout: LayoutLike): string {
-  const { block, cavities } = layout;
-
-  const header = `ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('Alex-IO foam layout export'),'2;1');
-FILE_NAME('foam_layout.stp','${new Date().toISOString()}',('Alex-IO'),('Alex-IO'), 'Alex-IO','Alex-IO','');
-FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
-ENDSEC;
-DATA;
-`;
-
-  const bodyLines: string[] = [];
-
-  bodyLines.push(
-    `/* BLOCK: ${block.lengthIn} x ${block.widthIn} x ${block.thicknessIn ?? ""} in */`,
-  );
-  bodyLines.push(
-    `/* BLOCK CORNERS: style=${String(block.cornerStyle ?? "square")}, chamferIn=${block.chamferIn ?? ""} */`,
-  );
-
-  cavities.forEach((cav, idx) => {
-    bodyLines.push(
-      `/* CAVITY ${idx + 1}: shape=${cav.shape}, x=${cav.x.toFixed(
-        4,
-      )}, y=${cav.y.toFixed(4)}, L=${cav.lengthIn}, W=${cav.widthIn}, D=${
-        cav.depthIn ?? ""
-      } */`,
-    );
-  });
-
-  const footer = `
-ENDSEC;
-END-ISO-10303-21;
-`;
-
-  return header + bodyLines.join("\n") + footer;
+function buildStepStub(_layout: LayoutLike): string {
+  // IMPORTANT (Path A):
+  // /api/quote/print regenerates exports via buildLayoutExports() and then does:
+  //   step_text: bundle.step ?? layoutPkg.step_text
+  //
+  // If we return any non-empty string here, we overwrite the real STEP produced
+  // by the STEP microservice / DB with a stub, causing “blank”/incorrect STEP output.
+  //
+  // Returning "" makes the ?? fallback keep the real stored STEP.
+  return "";
 }
+

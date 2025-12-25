@@ -556,15 +556,30 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
   if (chamferScaled > 0.0001) {
     const c = chamferScaled;
 
-    // 8-point chamfered outline (top view), drawn as line segments
-    entities.push(lineEntityLocal(c, 0, L - c, 0));
+        // Two-corner chamfer: TOP-LEFT + BOTTOM-RIGHT only.
+    // Coordinate system here: (0,0)=bottom-left, (L,W)=top-right.
+    //
+    // Top-left chamfer cuts corner near (0,W)
+    // Bottom-right chamfer cuts corner near (L,0)
+
+    // Bottom edge: start at bottom-left (square), end before bottom-right chamfer
+    entities.push(lineEntityLocal(0, 0, L - c, 0));
+
+    // Bottom-right chamfer edge
     entities.push(lineEntityLocal(L - c, 0, L, c));
-    entities.push(lineEntityLocal(L, c, L, W - c));
-    entities.push(lineEntityLocal(L, W - c, L - c, W));
-    entities.push(lineEntityLocal(L - c, W, c, W));
+
+    // Right edge (square at top-right)
+    entities.push(lineEntityLocal(L, c, L, W));
+
+    // Top edge: go to just right of top-left chamfer
+    entities.push(lineEntityLocal(L, W, c, W));
+
+    // Top-left chamfer edge
     entities.push(lineEntityLocal(c, W, 0, W - c));
-    entities.push(lineEntityLocal(0, W - c, 0, c));
-    entities.push(lineEntityLocal(0, c, c, 0));
+
+    // Left edge down to bottom-left (square)
+    entities.push(lineEntityLocal(0, W - c, 0, 0));
+
   } else {
     // default square block
     entities.push(lineEntityLocal(0, 0, L, 0));
