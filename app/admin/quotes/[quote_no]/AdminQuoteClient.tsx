@@ -757,25 +757,29 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
       ? Math.max(0, Math.min(chamferIn, L / 2 - 1e-6, W / 2 - 1e-6))
       : 0;
 
-  const blockOutline =
-    chamfer > 0.0001
-      ? (() => {
-          // 8-point chamfered polygon (top view)
-          const c = chamfer;
-          const d = [
-            `M ${c} 0`,
-            `L ${L - c} 0`,
-            `L ${L} ${c}`,
-            `L ${L} ${W - c}`,
-            `L ${L - c} ${W}`,
-            `L ${c} ${W}`,
-            `L 0 ${W - c}`,
-            `L 0 ${c}`,
-            `Z`,
-          ].join(" ");
-          return `<path d="${d}" fill="#fff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
-        })()
-      : `<rect x="0" y="0" width="${L}" height="${W}" fill="#fff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+const blockOutline =
+  chamfer > 0.0001
+    ? (() => {
+        // Diagonal chamfer only: TOP-LEFT + BOTTOM-RIGHT
+        const c = chamfer;
+
+        const d = [
+          // Start after TL chamfer on top edge
+          `M ${c} 0`,
+          `L ${L} 0`,          // top-right square
+          `L ${L} ${W - c}`,   // approach BR chamfer
+          `L ${L - c} ${W}`,   // bottom-right chamfer
+          `L 0 ${W}`,          // bottom-left square
+          `L 0 ${c}`,          // up left edge
+          `L ${c} 0`,          // top-left chamfer
+          `Z`,
+        ].join(" ");
+
+        return `<path d="${d}" fill="#fff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+      })()
+    : `<rect x="0" y="0" width="${L}" height="${W}" fill="#fff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+
+
 
   const shapes = cavs.map((c) => {
     const x = L * c.x;

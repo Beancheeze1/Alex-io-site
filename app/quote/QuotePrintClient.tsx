@@ -484,24 +484,25 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
       ? Math.max(0, Math.min(chamferIn, L / 2 - 1e-6, W / 2 - 1e-6))
       : 0;
 
-  const blockOutline =
-    chamfer > 0.0001
-      ? (() => {
-          const c = chamfer;
-          const d = [
-            `M ${c} 0`,
-            `L ${L - c} 0`,
-            `L ${L} ${c}`,
-            `L ${L} ${W - c}`,
-            `L ${L - c} ${W}`,
-            `L ${c} ${W}`,
-            `L 0 ${W - c}`,
-            `L 0 ${c}`,
-            `Z`,
-          ].join(" ");
-          return `<path d="${d}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
-        })()
-      : `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+ const blockOutline =
+  chamfer > 0.0001
+    ? (() => {
+        const c = chamfer;
+        const d = [
+          // start top edge after TL chamfer
+          `M ${c} 0`,
+          `L ${L} 0`,        // top-right is square
+          `L ${L} ${W - c}`, // approach BR chamfer
+          `L ${L - c} ${W}`, // BR chamfer
+          `L 0 ${W}`,        // bottom-left square
+          `L 0 ${c}`,        // up left edge
+          `L ${c} 0`,        // TL chamfer
+          `Z`,
+        ].join(" ");
+        return `<path d="${d}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+      })()
+    : `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+
 
   const shapes = cavs
     .map((c) => {
