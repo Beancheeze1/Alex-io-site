@@ -13,11 +13,6 @@
 //  - HARDENING: ensure cavity x/y are always finite so drag can never teleport to (0,0)
 //  - NEW HARDENING (12/19): NEVER turn invalid x/y into 0 (upper-left teleport).
 //    If an invalid coordinate reaches updateCavityPosition(), we keep the prior value.
-//
-// FIX (Path A):
-//  - Allow block.cornerStyle + block.chamferIn to be updated via updateBlockDims()
-//    (previously normalizeBlockPatch() dropped them, making the checkbox "dead").
-//
 
 "use client";
 
@@ -28,7 +23,6 @@ import type {
   Cavity,
   CavityShape,
   LayoutLayer,
-  BlockCornerStyle,
 } from "./layoutTypes";
 
 type LayoutState = {
@@ -326,8 +320,13 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 
   // Trust pre-existing stack fully
   if (Array.isArray((initial as any).stack) && (initial as any).stack.length) {
+    // IMPORTANT:
+    // Cavity ids must be globally unique across the entire stack.
+    // If two layers both contain "cav-1", React key reuse can cause visual "teleporting"
+    // when switching layers (you see the other layer's last position).
     const seenIds = new Set<string>();
 
+    // Find current max numeric id so we can generate new ids only when needed.
     let maxNum = 0;
     for (const l of (initial as any).stack) {
       for (const c of (l?.cavities ?? []) as Cavity[]) {
@@ -343,11 +342,14 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         cavsIn.map((c: Cavity) => {
           const next = { ...c } as Cavity;
 
+          // HARDENING: x/y must always be finite; otherwise drag math can produce NaN
+          // which clamp01() turns into 0 => teleport to the corner.
           (next as any).x = clamp01Or((next as any).x, 0.2);
           (next as any).y = clamp01Or((next as any).y, 0.2);
 
           let id = String((next as any).id ?? "").trim();
           if (!id || seenIds.has(id)) {
+            // Assign a new globally-unique cav-N id (only when duplicate/missing)
             maxNum += 1;
             id = `cav-${maxNum}`;
             (next as any).id = id;
@@ -384,10 +386,15 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 
   const cavsRaw = Array.isArray(initial.cavities) ? [...initial.cavities] : [];
 
+  // Legacy single-layer fallback:
+  // If the incoming model does NOT include a stack, we treat it as a single-piece
+  // layout (even if it has cavities). Multi-layer layouts must provide `stack`.
   if (cavsRaw.length) {
+    // Seed stable IDs to prevent phantom duplicates on mount
     const seeded = cavsRaw.map((c, i) => ({
       ...c,
       id: `seed-cav-${i + 1}`,
+      // HARDENING: ensure x/y exist on legacy cavities too
       x: clamp01Or((c as any).x, 0.2),
       y: clamp01Or((c as any).y, 0.2),
     }));
@@ -413,6 +420,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     };
   }
 
+  // Legacy single-layer fallback
   return {
     layout: {
       block: { ...block, thicknessIn: safeInch(block.thicknessIn ?? 1, 0.5) },
@@ -431,6 +439,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 }
 
 function cavitySig(c: Cavity) {
+  // Signature used for de-dupe fallback: shape + dims + corner radius (rounded to 1/8")
   const r8 = (n: number) => Math.round((Number(n) || 0) * 8) / 8;
   return [
     c.shape,
@@ -442,6 +451,9 @@ function cavitySig(c: Cavity) {
 }
 
 function dedupeCavities(list: Cavity[]) {
+  // IMPORTANT:
+  // We must allow multiple cavities with identical dimensions (common in packaging).
+  // So we de-dupe by stable `id` first. Only fall back to a dims signature when `id` is missing.
   const seen = new Set<string>();
   const out: Cavity[] = [];
 
@@ -452,6 +464,7 @@ function dedupeCavities(list: Cavity[]) {
     if (seen.has(key)) continue;
     seen.add(key);
 
+    // HARDENING: final safety — x/y should never be missing in state
     (c as any).x = clamp01Or((c as any).x, 0.2);
     (c as any).y = clamp01Or((c as any).y, 0.2);
 
@@ -473,6 +486,7 @@ function nextCavityNumber(stack: LayoutLayer[]) {
 }
 
 function clamp01(v: number) {
+  // keep existing behavior for normal numeric inputs
   return Math.max(0, Math.min(1, v || 0));
 }
 
@@ -482,6 +496,7 @@ function clamp01Or(v: any, fallback: number) {
   return clamp01(n);
 }
 
+// NEW: keep prior value when incoming coordinate is invalid
 function clamp01OrKeep(v: any, prior: any) {
   const n = Number(v);
   if (!Number.isFinite(n)) {
@@ -498,21 +513,25 @@ function safeInch(v: number | undefined, min: number) {
   return Math.max(min, Math.round(n * 8) / 8);
 }
 
-// ✅ FIX: allow cornerStyle + chamferIn through
 function normalizeBlockPatch(p: Partial<BlockDims>) {
   const o: Partial<BlockDims> = {};
   if (p.lengthIn != null) o.lengthIn = safeInch(p.lengthIn, 1);
   if (p.widthIn != null) o.widthIn = safeInch(p.widthIn, 1);
   if (p.thicknessIn != null) o.thicknessIn = safeInch(p.thicknessIn, 0.5);
 
+  // ✅ NEW (Path A): allow UI to persist corner intent
+  // (kept permissive + additive; if undefined, no change)
   if (p.cornerStyle != null) {
-    const v = String(p.cornerStyle) as BlockCornerStyle;
-    o.cornerStyle = v === "chamfer" ? "chamfer" : "square";
+    const cs = String(p.cornerStyle);
+    if (cs === "square" || cs === "chamfer") {
+      (o as any).cornerStyle = cs;
+    }
   }
-
-  if (p.chamferIn != null) {
-    const n = Number(p.chamferIn);
-    if (Number.isFinite(n) && n > 0) o.chamferIn = safeInch(n, 0.125);
+  if ((p as any).chamferIn != null) {
+    const n = Number((p as any).chamferIn);
+    if (Number.isFinite(n) && n >= 0) {
+      (o as any).chamferIn = safeInch(n, 0);
+    }
   }
 
   return o;
@@ -525,6 +544,7 @@ function normalizeCavityPatch(p: Partial<Cavity>) {
   if (p.depthIn != null) o.depthIn = safeInch(p.depthIn, 0.25);
   if (p.cornerRadiusIn != null) o.cornerRadiusIn = safeInch(p.cornerRadiusIn, 0);
   if (p.label != null) o.label = p.label;
+  // NOTE: we do NOT allow editing x/y here — movement goes through updateCavityPosition()
   return o;
 }
 

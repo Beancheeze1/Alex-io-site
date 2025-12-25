@@ -55,7 +55,6 @@ type QuoteRow = {
   status: string | null;
 };
 
-
 type LayoutPkgRow = {
   id: number;
   quote_id: number;
@@ -205,6 +204,34 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     next.layers = normalizeLayerArray((layout as any).layers);
   }
 
+  // ✅ NEW (Path A): normalize corner intent for exports (backward compatible)
+  // - New editor stores: block.cornerStyle + block.chamferIn
+  // - Older export code may still read: block.croppedCorners + block.chamferIn
+  // We mirror both directions so nothing downstream stays "square" by accident.
+  if (next && typeof next === "object" && next.block && typeof next.block === "object") {
+    const b: any = next.block;
+
+    const cornerStyle = b.cornerStyle ?? b.corner_style ?? null;
+    const croppedLegacy = b.croppedCorners ?? b.cropped_corners ?? null;
+
+    // Canonicalize chamferIn to b.chamferIn when present under any key
+    const rawChamfer = b.chamferIn ?? b.chamfer_in ?? null;
+    const chamferNum = rawChamfer == null ? null : Number(rawChamfer);
+    if (Number.isFinite(chamferNum) && chamferNum >= 0) {
+      b.chamferIn = chamferNum;
+    }
+
+    // If NEW cornerStyle says chamfer, ensure legacy boolean exists too
+    if (cornerStyle === "chamfer" && croppedLegacy == null) {
+      b.croppedCorners = true;
+    }
+
+    // If legacy says cropped, ensure new cornerStyle exists too
+    if ((cornerStyle == null || cornerStyle === "") && croppedLegacy === true) {
+      b.cornerStyle = "chamfer";
+    }
+  }
+
   return next;
 }
 
@@ -345,20 +372,17 @@ function buildDxfFromLayout(layout: any): string | null {
   const entities: string[] = [];
 
   // outer block (optionally chamfered)
-    // Chamfer intent (Path A):
-  // - New canonical: block.cornerStyle === "chamfer" + block.chamferIn
-  // - Legacy: block.croppedCorners / block.cropped_corners
-  const cornerStyleRaw = String(layout?.block?.cornerStyle ?? layout?.block?.corner_style ?? "").toLowerCase();
-  const chamferEnabled =
-    cornerStyleRaw === "chamfer" ||
-    !!(layout?.block?.croppedCorners ?? layout?.block?.cropped_corners);
+  const cornerStyle =
+    layout?.block?.cornerStyle ??
+    layout?.block?.corner_style ??
+    null;
 
-  const cropped =
-  String(layout?.block?.cornerStyle ?? "").toLowerCase() === "chamfer" ||
-  !!(layout?.block?.croppedCorners ?? layout?.block?.cropped_corners);
+  const croppedLegacy = !!(layout?.block?.croppedCorners ?? layout?.block?.cropped_corners);
 
-const chamferIn =
-  Number(layout?.block?.chamferIn ?? layout?.block?.chamfer_in) || 1;
+  const cropped = cornerStyle === "chamfer" || croppedLegacy;
+
+  const chamferIn =
+    Number(layout?.block?.chamferIn ?? layout?.block?.chamfer_in) || 1;
 
   const canChamfer =
     cropped &&
@@ -387,7 +411,6 @@ const chamferIn =
     entities.push(lineEntity(0, 0, 0, W - c));      // left edge up to before UL chamfer
     entities.push(lineEntity(0, W - c, c, W));      // UL chamfer
   }
-
 
   // cavities (flattened) as rectangles
   const allCavities = getAllCavitiesFromLayout(layout);
@@ -806,14 +829,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const quote = await one<QuoteRow>(
-  `
+      `
       select id, quote_no, status
       from quotes
       where quote_no = $1
       `,
-  [quoteNo],
-);
-
+      [quoteNo],
+    );
 
     if (!quote) {
       return bad(
@@ -947,23 +969,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-        const cornerStyleRaw = String(layoutForSave?.block?.cornerStyle ?? "").toLowerCase();
-    const chamferEnabled =
-      cornerStyleRaw === "chamfer" ||
-      !!(layoutForSave?.block?.croppedCorners ?? layoutForSave?.block?.cropped_corners);
-
-    // If chamfer is enabled, the SVG coming from the editor may still be square.
-    // In that case, prefer the layout-based DXF builder so corners are actually cropped.
-    // If block is chamfered, DXF-from-SVG is unsafe because it only supports <rect>/<circle>
-// and will produce a square outer block. Force layout-based DXF for chamfer blocks.
-const wantsChamfer =
-  String(layoutForSave?.block?.cornerStyle ?? "").toLowerCase() === "chamfer" ||
-  !!(layoutForSave?.block?.croppedCorners ?? layoutForSave?.block?.cropped_corners);
-
-const dxfFromSvg = wantsChamfer ? null : buildDxfFromSvg(svgRaw);
-const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
-
-
+    const dxfFromSvg = buildDxfFromSvg(svgRaw);
+    const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
 
     const step = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
 
@@ -987,8 +994,6 @@ const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
       [quote.id, layoutForSave, notes, svgAnnotated, dxf, step, currentUserId],
     );
 
-
-
     // ===================== NEW: status progression =====================
     // Draft -> Applied
     // Applied/Revised -> Revised (re-apply means we revised the quote)
@@ -1011,24 +1016,22 @@ const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
     }
     // =================== END status progression ===================
 
-
     // NEW (Path A): Clicking "Apply to quote" should advance the quote status.
-// Keep it conservative: only promote draft → applied; never overwrite later statuses.
-try {
-  await q(
-    `
-    update quotes
-    set
-      status = case when status = 'draft' then 'applied' else status end,
-      updated_by_user_id = coalesce($2, updated_by_user_id)
-    where id = $1
-    `,
-    [quote.id, currentUserId],
-  );
-} catch (e) {
-  console.error("[layout/apply] Failed to promote quote status to applied for", quoteNo, e);
-}
-
+    // Keep it conservative: only promote draft → applied; never overwrite later statuses.
+    try {
+      await q(
+        `
+        update quotes
+        set
+          status = case when status = 'draft' then 'applied' else status end,
+          updated_by_user_id = coalesce($2, updated_by_user_id)
+        where id = $1
+        `,
+        [quote.id, currentUserId],
+      );
+    } catch (e) {
+      console.error("[layout/apply] Failed to promote quote status to applied for", quoteNo, e);
+    }
 
     let updatedQty: number | null = null;
 
@@ -1279,7 +1282,7 @@ try {
       console.error("Error syncing layout facts for quote", quoteNo, e);
     }
 
-        // ===================== NEW (Path A): status transitions =====================
+    // ===================== NEW (Path A): status transitions =====================
     // Rule:
     //  - If already SENT and we Apply again => REVISED
     //  - If DRAFT and we Apply the first time => APPLIED
@@ -1314,19 +1317,17 @@ try {
     }
     // =================== END NEW status transitions ===================
 
-
     return ok(
-  {
-    ok: true,
-    quoteNo,
-    packageId: pkg ? pkg.id : null,
-    updatedQty,
-    // helpful debug signal (UI can ignore)
-    statusHint: "applied",
-  },
-  200,
-);
-
+      {
+        ok: true,
+        quoteNo,
+        packageId: pkg ? pkg.id : null,
+        updatedQty,
+        // helpful debug signal (UI can ignore)
+        statusHint: "applied",
+      },
+      200,
+    );
   } catch (err) {
     console.error("Error in /api/quote/layout/apply POST:", err);
     return bad(
