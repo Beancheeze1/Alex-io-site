@@ -748,6 +748,35 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
   const strokeWidth = Math.max(0.04, Math.min(L, W) / 250);
   const cavStrokeWidth = Math.max(0.03, Math.min(L, W) / 300);
 
+  // Block outline: honor persisted corner metadata when present.
+  const cornerStyle = String(layout.block.cornerStyle ?? "").toLowerCase();
+  const chamferInRaw = layout.block.chamferIn;
+  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
+  const chamfer =
+    cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
+      ? Math.max(0, Math.min(chamferIn, L / 2 - 1e-6, W / 2 - 1e-6))
+      : 0;
+
+  const blockOutline =
+    chamfer > 0.0001
+      ? (() => {
+          // 8-point chamfered polygon (top view)
+          const c = chamfer;
+          const d = [
+            `M ${c} 0`,
+            `L ${L - c} 0`,
+            `L ${L} ${c}`,
+            `L ${L} ${W - c}`,
+            `L ${L - c} ${W}`,
+            `L ${c} ${W}`,
+            `L 0 ${W - c}`,
+            `L 0 ${c}`,
+            `Z`,
+          ].join(" ");
+          return `<path d="${d}" fill="#fff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+        })()
+      : `<rect x="0" y="0" width="${L}" height="${W}" fill="#fff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+
   const shapes = cavs.map((c) => {
     const x = L * c.x;
     const y = W * c.y;
@@ -776,8 +805,7 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%">`,
-    `<rect x="0" y="0" width="${L}" height="${W}" fill="#fff"
-      stroke="${stroke}" stroke-width="${strokeWidth}" />`,
+    blockOutline,
     shapes.join(""),
     `</svg>`,
   ].join("");
@@ -1104,10 +1132,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
   const handleDownloadFullPackageDxf = React.useCallback(() => {
     if (typeof window === "undefined") return;
-    if (!layoutPkg || !layoutPkg.layout_json) return;
+    if (!layoutPkg) return;
 
+    // IMPORTANT:
+    // Use the same server-regenerated export strings returned by /api/quote/print
+    // (layoutPkg.dxf_text), so Admin downloads match the interactive quote pipeline.
+    // Fallback to legacy client-side DXF builder only if dxf_text is missing.
     const targetDims = getTargetDims();
-    const dxf = buildDxfForFullPackage(layoutPkg.layout_json, targetDims);
+    const dxf =
+      (typeof layoutPkg.dxf_text === "string" && layoutPkg.dxf_text.trim().length > 0
+        ? layoutPkg.dxf_text
+        : layoutPkg.layout_json
+          ? buildDxfForFullPackage(layoutPkg.layout_json, targetDims)
+          : null);
+
     if (!dxf) return;
 
     try {
@@ -1124,31 +1162,21 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
 
   const handleDownloadStep = React.useCallback(async () => {
     if (typeof window === "undefined") return;
-    if (!quoteNoValue) return;
+    if (!layoutPkg?.step_text) return;
 
-    const url = `/api/quote/layout/step?quote_no=${encodeURIComponent(quoteNoValue)}`;
-
+    // IMPORTANT:
+    // Use the server-regenerated STEP stub returned by /api/quote/print (layoutPkg.step_text)
+    // so STEP downloads match the same geometry pipeline used for SVG/DXF.
+    // (The /api/quote/layout/step route serves DB-stored STEP which may be stale.)
     try {
-      const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok) {
-        console.error("Admin: STEP fetch failed:", res.status, res.statusText);
-        window.open(url, "_blank", "noopener,noreferrer");
-        return;
-      }
-
-      const buf = await res.arrayBuffer();
-      const blob = new Blob([buf], { type: "application/octet-stream" });
-
-            const baseName = quoteState?.quote_no || quoteNoValue || "quote";
+      const blob = new Blob([layoutPkg.step_text], { type: "application/step" });
+      const baseName = quoteState?.quote_no || quoteNoValue || "quote";
       const filename = buildFullPackageFilename({ quoteNo: baseName, ext: "step", revision: revisionValue });
-
-
       triggerBlobDownload(blob, filename);
     } catch (err) {
       console.error("Admin: STEP download failed:", err);
-      window.open(url, "_blank", "noopener,noreferrer");
     }
-    }, [quoteNoValue, quoteState, revisionValue]);
+    }, [layoutPkg, quoteNoValue, quoteState, revisionValue]);
 
 
   const handleDownloadLayerStep = React.useCallback(

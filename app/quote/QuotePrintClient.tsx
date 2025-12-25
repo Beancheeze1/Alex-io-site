@@ -475,6 +475,34 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
   const strokeWidth = Math.max(0.04, Math.min(L, W) / 250);
   const cavStrokeWidth = Math.max(0.03, Math.min(L, W) / 300);
 
+  // Block outline: honor persisted corner metadata when present.
+  const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
+  const chamferInRaw = block.chamferIn;
+  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
+  const chamfer =
+    cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
+      ? Math.max(0, Math.min(chamferIn, L / 2 - 1e-6, W / 2 - 1e-6))
+      : 0;
+
+  const blockOutline =
+    chamfer > 0.0001
+      ? (() => {
+          const c = chamfer;
+          const d = [
+            `M ${c} 0`,
+            `L ${L - c} 0`,
+            `L ${L} ${c}`,
+            `L ${L} ${W - c}`,
+            `L ${L - c} ${W}`,
+            `L ${c} ${W}`,
+            `L 0 ${W - c}`,
+            `L 0 ${c}`,
+            `Z`,
+          ].join(" ");
+          return `<path d="${d}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+        })()
+      : `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+
   const shapes = cavs
     .map((c) => {
       const left = L * c.x;
@@ -520,7 +548,7 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`,
-    `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`,
+    blockOutline,
     shapes,
     `</svg>`,
   ].join("");
