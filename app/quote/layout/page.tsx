@@ -1212,10 +1212,10 @@ function LayoutEditorHost(props: {
 
   const [zoom, setZoom] = React.useState(1);
 
-  // NEW (Path A): Crop corners is derived from durable block metadata.
-  // - Default false if unset.
-  // - If a saved layout has cornerStyle="chamfer", checkbox will rehydrate checked.
-  const croppedCorners = (layout as any)?.block?.cornerStyle === "chamfer";
+   // Crop corners is PER-LAYER (active layer).
+  // Each layer can independently enable the 1" crop on export.
+  const croppedCorners = !!(activeLayer as any)?.cropCorners;
+
 
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
@@ -1602,14 +1602,23 @@ const layoutToSave: any = {
   block: { ...((layout as any).block ?? {}) },
 };
 
-// Persist crop metadata onto the layout that we are about to save/export.
-if (croppedCorners) {
-  layoutToSave.block.cornerStyle = "chamfer";
-  layoutToSave.block.chamferIn = 1;
-} else {
-  layoutToSave.block.cornerStyle = "square";
-  layoutToSave.block.chamferIn = null;
+// Per-layer crop corners: stored on each layer.
+// Do NOT write block.cornerStyle here anymore.
+if (layoutToSave.stack && Array.isArray(layoutToSave.stack)) {
+  layoutToSave.stack = layoutToSave.stack.map((l: any) => ({
+    ...l,
+    cropCorners: !!l.cropCorners,
+  }));
 }
+
+const activeLayerForSave =
+  Array.isArray(layoutToSave.stack) && layoutToSave.stack.length > 0
+    ? layoutToSave.stack.find((l: any) => l.id === activeLayerId) ?? layoutToSave.stack[0]
+    : null;
+
+layoutToSave.block.cornerStyle = activeLayerForSave?.cropCorners ? "chamfer" : "square";
+layoutToSave.block.chamferIn = activeLayerForSave?.cropCorners ? 1 : null;
+
 
 // IMPORTANT: Build SVG from the SAME layout object we are saving.
 const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
@@ -2072,14 +2081,18 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
   type="checkbox"
   checked={croppedCorners}
   onChange={(e) => {
-    const next = !!e.target.checked;
+  const next = !!e.target.checked;
 
-    // Persist on layout.block (durable)
-    updateBlockDims({
-      cornerStyle: next ? "chamfer" : "square",
-      chamferIn: next ? 1 : null,
-    } as any);
-  }}
+  if (!activeLayer) return;
+
+  // Persist on the ACTIVE layer (durable in layout.stack)
+  (activeLayer as any).cropCorners = next;
+
+  // Force rerender so checkbox + canvas update immediately.
+  // Reuse thicknessTick as a simple render bump (Path A, no new state).
+  setThicknessTick((t) => t + 1);
+}}
+
 />
                       <span>Crop corners 1&quot;</span>
                     </label>
@@ -2985,17 +2998,34 @@ function buildSvgFromLayout(
     const y1 = blockY + blockH;
 
     // Chamfered rectangle path (45° chamfers)
+        // 2-corner chamfer ONLY:
+    // - Top-left corner chamfered
+    // - Bottom-right corner chamfered
     const d = [
+      // start just right of top-left chamfer
       `M ${(x0 + c).toFixed(2)} ${y0.toFixed(2)}`,
-      `L ${(x1 - c).toFixed(2)} ${y0.toFixed(2)}`,
-      `L ${x1.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+
+      // top edge to top-right (square)
+      `L ${x1.toFixed(2)} ${y0.toFixed(2)}`,
+
+      // right edge down to just above bottom-right chamfer
       `L ${x1.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+
+      // bottom-right chamfer
       `L ${(x1 - c).toFixed(2)} ${y1.toFixed(2)}`,
-      `L ${(x0 + c).toFixed(2)} ${y1.toFixed(2)}`,
-      `L ${x0.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+
+      // bottom edge to bottom-left (square)
+      `L ${x0.toFixed(2)} ${y1.toFixed(2)}`,
+
+      // left edge up to just below top-left chamfer
       `L ${x0.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+
+      // top-left chamfer back to start
+      `L ${(x0 + c).toFixed(2)} ${y0.toFixed(2)}`,
+
       `Z`,
     ].join(" ");
+
 
     svgParts.push(
       `  <path d="${d}" fill="#e5e7eb" stroke="#111827" stroke-width="2" />`,
