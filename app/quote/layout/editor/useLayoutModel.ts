@@ -13,6 +13,11 @@
 //  - HARDENING: ensure cavity x/y are always finite so drag can never teleport to (0,0)
 //  - NEW HARDENING (12/19): NEVER turn invalid x/y into 0 (upper-left teleport).
 //    If an invalid coordinate reaches updateCavityPosition(), we keep the prior value.
+//
+// PATH-A FIX (12/25):
+//  - Persist block corner intent into layout.block by allowing cornerStyle/chamferIn
+//    through normalizeBlockPatch(). This makes the "Crop corner" checkbox actually
+//    toggle and persist into layout_json.
 
 "use client";
 
@@ -518,6 +523,26 @@ function normalizeBlockPatch(p: Partial<BlockDims>) {
   if (p.lengthIn != null) o.lengthIn = safeInch(p.lengthIn, 1);
   if (p.widthIn != null) o.widthIn = safeInch(p.widthIn, 1);
   if (p.thicknessIn != null) o.thicknessIn = safeInch(p.thicknessIn, 0.5);
+
+  // PATH-A FIX:
+  // Allow cornerStyle/chamferIn through, otherwise UI toggles do nothing.
+  if (p.cornerStyle != null) {
+    const v = String(p.cornerStyle);
+    o.cornerStyle = v === "chamfer" ? "chamfer" : "square";
+
+    // If switching back to square, clear chamferIn so layout_json stays clean.
+    if (o.cornerStyle === "square") {
+      (o as any).chamferIn = undefined;
+    }
+  }
+
+  if (p.chamferIn != null) {
+    const n = Number(p.chamferIn);
+    if (Number.isFinite(n) && n >= 0) {
+      o.chamferIn = safeInch(n, 0);
+    }
+  }
+
   return o;
 }
 
