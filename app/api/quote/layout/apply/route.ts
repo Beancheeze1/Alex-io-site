@@ -204,10 +204,7 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     next.layers = normalizeLayerArray((layout as any).layers);
   }
 
-  // ✅ NEW (Path A): normalize corner intent for exports (backward compatible)
-  // - New editor stores: block.cornerStyle + block.chamferIn
-  // - Older export code may still read: block.croppedCorners + block.chamferIn
-  // We mirror both directions so nothing downstream stays "square" by accident.
+  // ✅ normalize corner intent for exports (backward compatible)
   if (next && typeof next === "object" && next.block && typeof next.block === "object") {
     const b: any = next.block;
 
@@ -215,11 +212,10 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     const croppedLegacy = b.croppedCorners ?? b.cropped_corners ?? null;
 
     const rawChamfer = b.chamferIn ?? b.chamfer_in ?? null;
-const chamferNum = Number(rawChamfer);
-if (rawChamfer != null && Number.isFinite(chamferNum) && chamferNum >= 0) {
-  b.chamferIn = chamferNum;
-}
-
+    const chamferNum = Number(rawChamfer);
+    if (rawChamfer != null && Number.isFinite(chamferNum) && chamferNum >= 0) {
+      b.chamferIn = chamferNum;
+    }
 
     // If NEW cornerStyle says chamfer, ensure legacy boolean exists too
     if (cornerStyle === "chamfer" && croppedLegacy == null) {
@@ -399,17 +395,15 @@ function buildDxfFromLayout(layout: any): string | null {
   } else {
     const c = chamferIn;
 
-    // Match editor intent: chamfer upper-left and lower-right (45°)
-    // Using DXF coords with origin bottom-left:
-    // UL corner is (0, W), LR corner is (L, 0)
-
-    // Start at top edge after UL chamfer
-    entities.push(lineEntity(c, W, L, W));          // top edge
-    entities.push(lineEntity(L, W, L, c));          // right edge down to before LR chamfer
-    entities.push(lineEntity(L, c, L - c, 0));      // LR chamfer
-    entities.push(lineEntity(L - c, 0, 0, 0));      // bottom edge
-    entities.push(lineEntity(0, 0, 0, W - c));      // left edge up to before UL chamfer
-    entities.push(lineEntity(0, W - c, c, W));      // UL chamfer
+    // Full 4-corner chamfer in CAD space
+    entities.push(lineEntity(c, 0, L - c, 0));
+    entities.push(lineEntity(L - c, 0, L, c));
+    entities.push(lineEntity(L, c, L, W - c));
+    entities.push(lineEntity(L, W - c, L - c, W));
+    entities.push(lineEntity(L - c, W, c, W));
+    entities.push(lineEntity(c, W, 0, W - c));
+    entities.push(lineEntity(0, W - c, 0, c));
+    entities.push(lineEntity(0, c, c, 0));
   }
 
   // cavities (flattened) as rectangles
@@ -544,6 +538,7 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
 
   const entities: string[] = [];
 
+  // --- RECTs ---
   const rectRe = /<rect\b([^>]*)\/?>/gi;
   let rectM: RegExpExecArray | null = null;
   while ((rectM = rectRe.exec(svg))) {
@@ -591,6 +586,72 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
     entities.push(arcEntity(x + r, yCad + h - r, r, 90, 180));
   }
 
+  // --- PATHs (supports chamfered outline: M ... L ... Z) ---
+  const pathRe = /<path\b([^>]*)\/?>/gi;
+  let pathM: RegExpExecArray | null = null;
+  while ((pathM = pathRe.exec(svg))) {
+    const attrs = pathM[1] || "";
+    const d = attrs.match(/\bd\s*=\s*"([^"]+)"/i)?.[1] ?? null;
+    if (!d) continue;
+
+    // Only handle simple absolute M/L/Z paths
+    // Example: M x y L x y L x y ... Z
+    const cmdRe = /([MLZ])([^MLZ]*)/gi;
+    const pts: Array<{ x: number; y: number }> = [];
+    let start: { x: number; y: number } | null = null;
+    let last: { x: number; y: number } | null = null;
+
+    let cm: RegExpExecArray | null = null;
+    while ((cm = cmdRe.exec(d))) {
+      const cmd = (cm[1] || "").toUpperCase();
+      const rest = (cm[2] || "").trim();
+
+      if (cmd === "Z") {
+        // close
+        if (start && last) {
+          pts.push({ x: start.x, y: start.y });
+        }
+        continue;
+      }
+
+      const nums = rest
+        .split(/[\s,]+/)
+        .map((s) => Number(s))
+        .filter((n) => Number.isFinite(n));
+
+      // M and L expect pairs
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        const x = nums[i];
+        const y = nums[i + 1];
+        const p = { x, y };
+
+        if (cmd === "M" && !start) {
+          start = p;
+        }
+        last = p;
+        pts.push(p);
+      }
+    }
+
+    // Need at least 2 points
+    if (pts.length < 2) continue;
+
+    // Draw consecutive lines
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      if (!a || !b) continue;
+
+      const ax = a.x;
+      const ayCad = vbH - a.y;
+      const bx = b.x;
+      const byCad = vbH - b.y;
+
+      entities.push(lineEntity(ax, ayCad, bx, byCad));
+    }
+  }
+
+  // --- CIRCLEs ---
   const circleRe = /<circle\b([^>]*)\/?>/gi;
   let circM: RegExpExecArray | null = null;
   while ((circM = circleRe.exec(svg))) {
@@ -643,6 +704,87 @@ function buildDxfFromSvg(svgRaw: string | null): string | null {
 
   const footer = ["0", "ENDSEC", "0", "EOF"].join("\\n");
   return [header, entities.join("\\n"), footer].join("\\n");
+}
+
+/* ===================== SERVER FIX: force chamfered block outline in saved SVG ===================== */
+
+function enforceChamferedBlockInSvg(svgRaw: string | null, layout: any): string | null {
+  if (!svgRaw || typeof svgRaw !== "string") return svgRaw;
+
+  const cornerStyle = layout?.block?.cornerStyle ?? layout?.block?.corner_style ?? null;
+  const croppedLegacy = !!(layout?.block?.croppedCorners ?? layout?.block?.cropped_corners);
+  const wantsChamfer = cornerStyle === "chamfer" || croppedLegacy;
+  if (!wantsChamfer) return svgRaw;
+
+  const L_in = Number(layout?.block?.lengthIn ?? layout?.block?.length_in);
+  const W_in = Number(layout?.block?.widthIn ?? layout?.block?.width_in);
+  if (!Number.isFinite(L_in) || L_in <= 0 || !Number.isFinite(W_in) || W_in <= 0) return svgRaw;
+
+  const chamferIn = Number(layout?.block?.chamferIn ?? layout?.block?.chamfer_in);
+  if (!Number.isFinite(chamferIn) || chamferIn <= 0) return svgRaw;
+
+  // Find the "main block" rect (first rect that is not fill="none" and has stroke-width="2")
+  // This matches what your saved svg_text looks like.
+  const rectRe = /<rect\b([^>]*)\/?>/i;
+  const m = svgRaw.match(rectRe);
+  if (!m) return svgRaw;
+
+  const attrs = m[1] || "";
+
+  // Skip if this rect is clearly a cavity outline (fill="none")
+  const fill = attrs.match(/\bfill\s*=\s*"([^"]+)"/i)?.[1] ?? null;
+  if (!fill || fill.toLowerCase() === "none") {
+    return svgRaw;
+  }
+
+  const strokeWidthStr = attrs.match(/\bstroke-width\s*=\s*"([^"]+)"/i)?.[1] ?? null;
+  const strokeWidthNum = strokeWidthStr != null ? Number(strokeWidthStr) : NaN;
+  if (!(Number.isFinite(strokeWidthNum) && strokeWidthNum >= 2)) {
+    // Still allow, but your block usually uses 2
+  }
+
+  const x0 = Number(attrs.match(/\bx\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN");
+  const y0 = Number(attrs.match(/\by\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN");
+  const w = Number(attrs.match(/\bwidth\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN");
+  const h = Number(attrs.match(/\bheight\s*=\s*"([^"]+)"/i)?.[1] ?? "NaN");
+
+  if (![x0, y0, w, h].every((n) => Number.isFinite(n))) return svgRaw;
+  if (!(w > 0 && h > 0)) return svgRaw;
+
+  // Convert chamfer inches into SVG units based on the block rect scale
+  const scaleX = w / L_in;
+  const scaleY = h / W_in;
+  const scale = Math.min(scaleX, scaleY);
+  if (!Number.isFinite(scale) || scale <= 0) return svgRaw;
+
+  const c = chamferIn * scale;
+
+  // Must be valid chamfer vs rect size
+  if (!(c > 0 && w > c * 2 && h > c * 2)) return svgRaw;
+
+  const x1 = x0 + w;
+  const y1 = y0 + h;
+
+  const stroke = attrs.match(/\bstroke\s*=\s*"([^"]+)"/i)?.[1] ?? "#111827";
+  const strokeWidth = strokeWidthStr ?? "2";
+
+  // Build 4-corner chamfer path (same as your screenshot logic)
+  const d = [
+    `M ${(x0 + c).toFixed(2)} ${y0.toFixed(2)}`,
+    `L ${(x1 - c).toFixed(2)} ${y0.toFixed(2)}`,
+    `L ${x1.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+    `L ${x1.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+    `L ${(x1 - c).toFixed(2)} ${y1.toFixed(2)}`,
+    `L ${(x0 + c).toFixed(2)} ${y1.toFixed(2)}`,
+    `L ${x0.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+    `L ${x0.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+    `Z`,
+  ].join(" ");
+
+  const pathTag = `<path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+
+  // Replace ONLY the first rect tag we matched
+  return svgRaw.replace(rectRe, pathTag);
 }
 
 /* ===================== SVG annotator from layout ===================== */
@@ -779,6 +921,9 @@ export async function POST(req: NextRequest) {
   const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
   const svgRaw = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
 
+  // ✅ Server-enforced chamfer (fixes broken client checkbox)
+  const svgFixed = enforceChamferedBlockInSvg(svgRaw, layoutForSave);
+
   if (!quoteNo) {
     return bad(
       {
@@ -870,7 +1015,6 @@ export async function POST(req: NextRequest) {
     });
 
     // FIX (Path A): After Apply, PRIMARY must reflect FULL STACK DEPTH so /api/quotes/calc prices the full set.
-    // This does NOT affect per-layer CAD exports; it only corrects PRIMARY quote_items dims for pricing + display.
     try {
       const stackDepthIn = sumLayerThickness(layoutForSave);
       if (stackDepthIn != null && Number.isFinite(stackDepthIn) && stackDepthIn > 0) {
@@ -969,12 +1113,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const dxfFromSvg = buildDxfFromSvg(svgRaw);
+    // ✅ Use server-fixed SVG for DXF+SVG storage
+    const dxfFromSvg = buildDxfFromSvg(svgFixed);
     const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
 
     const step = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
 
-    const svgAnnotated = buildSvgWithAnnotations(layoutForSave, svgRaw, materialLegend ?? null, quoteNo);
+    const svgAnnotated = buildSvgWithAnnotations(layoutForSave, svgFixed, materialLegend ?? null, quoteNo);
 
     const pkg = await one<LayoutPkgRow>(
       `

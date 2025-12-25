@@ -18,6 +18,10 @@ type BlockLike = {
   lengthIn: number;
   widthIn: number;
   thicknessIn?: number | null;
+
+  // NEW: block corner metadata (durable)
+  cornerStyle?: "square" | "chamfer" | string | null;
+  chamferIn?: number | null;
 };
 
 type CavityLike = {
@@ -82,35 +86,76 @@ function buildSvg(layout: LayoutLike): string {
         return `
   <g>
     <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
-          2
+          2,
         )}" fill="none" stroke="#111827" stroke-width="1" />
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-          2
+          2,
         )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
       }
 
+      const rPx = c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0;
+
       return `
   <g>
     <rect x="${x.toFixed(2)}" y="${y.toFixed(2)}"
           width="${cavW.toFixed(2)}" height="${cavH.toFixed(2)}"
-          rx="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
-          ry="${(c.cornerRadiusIn ? c.cornerRadiusIn * scale : 0).toFixed(2)}"
+          rx="${rPx.toFixed(2)}"
+          ry="${rPx.toFixed(2)}"
           fill="none" stroke="#111827" stroke-width="1" />
     <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
-        2
+        2,
       )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${label}</text>
   </g>`;
     })
     .join("\n");
 
+  // --- Block outline (square OR chamfer) ---
+  const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
+  const chamferIn = Number(block.chamferIn ?? 0);
+
+  const chamferPx =
+    cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
+      ? chamferIn * scale
+      : 0;
+
+  // Clamp chamfer so it can't exceed half the side
+  const c = Math.max(
+    0,
+    Math.min(chamferPx, blockW / 2 - 0.01, blockH / 2 - 0.01),
+  );
+
+  const blockOutline =
+    c > 0.001
+      ? (() => {
+          const x0 = blockX;
+          const y0 = blockY;
+          const x1 = blockX + blockW;
+          const y1 = blockY + blockH;
+
+          const d = [
+            `M ${(x0 + c).toFixed(2)} ${y0.toFixed(2)}`,
+            `L ${(x1 - c).toFixed(2)} ${y0.toFixed(2)}`,
+            `L ${x1.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+            `L ${x1.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+            `L ${(x1 - c).toFixed(2)} ${y1.toFixed(2)}`,
+            `L ${(x0 + c).toFixed(2)} ${y1.toFixed(2)}`,
+            `L ${x0.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+            `L ${x0.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+            `Z`,
+          ].join(" ");
+
+          return `  <path d="${d}" fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
+        })()
+      : `  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
+        width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
+        fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
-        width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
-        fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />
+${blockOutline}
 ${cavRects}
 </svg>`;
 }
@@ -138,22 +183,43 @@ function buildDxf(layout: LayoutLike): string {
   push(0, "SECTION");
   push(2, "ENTITIES");
 
-  // Block outline (rectangle)
-  const blkLen = block.lengthIn;
-  const blkWid = block.widthIn;
+  const blkLen = Number(block.lengthIn) || 0;
+  const blkWid = Number(block.widthIn) || 0;
 
-  // Use a lightweight polyline (LWPOLYLINE) for the block border
+  // Block outline (square OR chamfered)
+  const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
+  const chamferIn = Number(block.chamferIn ?? 0);
+
+  const c =
+    cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
+      ? Math.max(0, Math.min(chamferIn, blkLen / 2 - 0.0001, blkWid / 2 - 0.0001))
+      : 0;
+
+  const blockPts: [number, number][] =
+    c > 0.0001
+      ? [
+          // 8-vertex chamfered perimeter (45° chamfers)
+          [c, 0],
+          [blkLen - c, 0],
+          [blkLen, c],
+          [blkLen, blkWid - c],
+          [blkLen - c, blkWid],
+          [c, blkWid],
+          [0, blkWid - c],
+          [0, c],
+        ]
+      : [
+          // 4-vertex rectangle
+          [0, 0],
+          [blkLen, 0],
+          [blkLen, blkWid],
+          [0, blkWid],
+        ];
+
   push(0, "LWPOLYLINE");
   push(8, "BLOCK"); // layer name
-  push(90, 4); // number of vertices
+  push(90, blockPts.length); // number of vertices
   push(70, 1); // closed polyline flag
-  // points (x,y):
-  const blockPts: [number, number][] = [
-    [0, 0],
-    [blkLen, 0],
-    [blkLen, blkWid],
-    [0, blkWid],
-  ];
   for (const [x, y] of blockPts) {
     push(10, x);
     push(20, y);
@@ -178,7 +244,7 @@ function buildDxf(layout: LayoutLike): string {
       push(30, 0);
       push(40, r);
     } else {
-      // rect / roundedRect -> polyline rectangle
+      // rect / roundedRect -> polyline rectangle (rounded is not represented in this minimal DXF)
       const pts: [number, number][] = [
         [xIn, yIn],
         [xIn + len, yIn],
@@ -223,18 +289,23 @@ DATA;
 
   const bodyLines: string[] = [];
 
+  const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
+  const chamferIn = block.chamferIn ?? null;
+
   bodyLines.push(
-    `/* BLOCK: ${block.lengthIn} x ${block.widthIn} x ${
-      block.thicknessIn ?? ""
-    } in */`
+    `/* BLOCK: ${block.lengthIn} x ${block.widthIn} x ${block.thicknessIn ?? ""} in */`,
   );
+  bodyLines.push(
+    `/* BLOCK_CORNERS: style=${cornerStyle || "square"}, chamferIn=${chamferIn ?? ""} */`,
+  );
+
   cavities.forEach((cav, idx) => {
     bodyLines.push(
       `/* CAVITY ${idx + 1}: shape=${cav.shape}, x=${cav.x.toFixed(
-        4
+        4,
       )}, y=${cav.y.toFixed(4)}, L=${cav.lengthIn}, W=${cav.widthIn}, D=${
         cav.depthIn ?? ""
-     } */`
+      } */`,
     );
   });
 
