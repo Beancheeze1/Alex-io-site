@@ -1685,15 +1685,20 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                     onClick={handleSendToCustomer}
                     disabled={sendBusy || !quoteState?.email}
                     style={{
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      border: "1px solid rgba(255,255,255,0.55)",
-                      background: sendBusy ? "rgba(255,255,255,0.20)" : "rgba(15,23,42,0.22)",
-                      color: "#ffffff",
-                      fontSize: 11,
-                      fontWeight: 800,
-                      cursor: sendBusy || !quoteState?.email ? "not-allowed" : "pointer",
-                    }}
+  display: "inline-block",
+  padding: "4px 10px",
+  borderRadius: 999,
+  background: sendBusy
+    ? "rgba(15,23,42,0.12)"
+    : "rgba(15,23,42,0.2)",
+  border: "1px solid rgba(15,23,42,0.25)",
+  color: "#f9fafb",
+  fontSize: 11,
+  fontWeight: 600,
+  cursor: sendBusy || !quoteState?.email ? "not-allowed" : "pointer",
+  opacity: sendBusy || !quoteState?.email ? 0.7 : 1,
+}}
+
                     title={quoteState?.email ? "Send quote email to customer (Graph; saves to Sent Items)" : "No customer email on this quote"}
                   >
                     {sendBusy ? "Sending..." : "Send to customer"}
