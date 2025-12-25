@@ -1594,22 +1594,29 @@ function LayoutEditorHost(props: {
         materialLabel = densityLabel ? `${familyLabel}, ${densityLabel}` : familyLabel || null;
       }
 
-      const svg = buildSvgFromLayout(layout, {
-        notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
-        materialLabel: materialLabel || undefined,
-      });
+      // NEW (must-fix): build a durable layout object FIRST, then generate SVG from it.
+// Reason: previously we generated SVG from `layout` BEFORE writing cornerStyle/chamferIn,
+// so exports were always square even when the checkbox was checked.
+const layoutToSave: any = {
+  ...(layout as any),
+  block: { ...((layout as any).block ?? {}) },
+};
 
-      // NEW (Path A): ensure block-corner metadata is present on the outbound layout
-      // so /api/quote/layout/apply persists it even if the user never toggled again after reload.
-      const layoutToSave: any = layout;
-      if (!layoutToSave.block) layoutToSave.block = {};
-      if (croppedCorners) {
-        layoutToSave.block.cornerStyle = "chamfer";
-        layoutToSave.block.chamferIn = 1;
-      } else {
-        layoutToSave.block.cornerStyle = "square";
-        layoutToSave.block.chamferIn = null;
-      }
+// Persist crop metadata onto the layout that we are about to save/export.
+if (croppedCorners) {
+  layoutToSave.block.cornerStyle = "chamfer";
+  layoutToSave.block.chamferIn = 1;
+} else {
+  layoutToSave.block.cornerStyle = "square";
+  layoutToSave.block.chamferIn = null;
+}
+
+// IMPORTANT: Build SVG from the SAME layout object we are saving.
+const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
+  notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
+  materialLabel: materialLabel || undefined,
+});
+
 
       const payload: any = {
         quoteNo,
