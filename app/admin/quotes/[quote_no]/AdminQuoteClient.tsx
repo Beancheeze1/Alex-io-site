@@ -542,10 +542,37 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
 
   const entities: string[] = [];
 
-  entities.push(lineEntityLocal(0, 0, L, 0));
-  entities.push(lineEntityLocal(L, 0, L, W));
-  entities.push(lineEntityLocal(L, W, 0, W));
-  entities.push(lineEntityLocal(0, W, 0, 0));
+  // Block outline: honor persisted corner metadata (chamfer) when present.
+  const cornerStyle = String((layout as any)?.block?.cornerStyle ?? "").toLowerCase();
+  const chamferInRaw = (layout as any)?.block?.chamferIn;
+  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
+
+  // chamfer is in inches, so scale it to match our scaled L/W
+  const chamferScaled =
+    cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
+      ? Math.max(0, Math.min(chamferIn * scale, L / 2 - 1e-6, W / 2 - 1e-6))
+      : 0;
+
+  if (chamferScaled > 0.0001) {
+    const c = chamferScaled;
+
+    // 8-point chamfered outline (top view), drawn as line segments
+    entities.push(lineEntityLocal(c, 0, L - c, 0));
+    entities.push(lineEntityLocal(L - c, 0, L, c));
+    entities.push(lineEntityLocal(L, c, L, W - c));
+    entities.push(lineEntityLocal(L, W - c, L - c, W));
+    entities.push(lineEntityLocal(L - c, W, c, W));
+    entities.push(lineEntityLocal(c, W, 0, W - c));
+    entities.push(lineEntityLocal(0, W - c, 0, c));
+    entities.push(lineEntityLocal(0, c, c, 0));
+  } else {
+    // default square block
+    entities.push(lineEntityLocal(0, 0, L, 0));
+    entities.push(lineEntityLocal(L, 0, L, W));
+    entities.push(lineEntityLocal(L, W, 0, W));
+    entities.push(lineEntityLocal(0, W, 0, 0));
+  }
+
 
   const cavs = getCavitiesForLayer(layout, layerIndex);
 
@@ -1164,23 +1191,43 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }, [layoutPkg, quoteState, primaryItem, revisionValue]);
 
 
-  const handleDownloadStep = React.useCallback(async () => {
+   const handleDownloadStep = React.useCallback(async () => {
     if (typeof window === "undefined") return;
-    if (!layoutPkg?.step_text) return;
+    if (!layoutPkg) return;
 
-    // IMPORTANT:
-    // Use the server-regenerated STEP stub returned by /api/quote/print (layoutPkg.step_text)
-    // so STEP downloads match the same geometry pipeline used for SVG/DXF.
-    // (The /api/quote/layout/step route serves DB-stored STEP which may be stale.)
+    // Prefer server-regenerated STEP returned by /api/quote/print,
+    // but fall back to /api/quote/layout/step if step_text is missing/bad.
+    const stepText = typeof layoutPkg.step_text === "string" ? layoutPkg.step_text.trim() : "";
+
     try {
-      const blob = new Blob([layoutPkg.step_text], { type: "application/step" });
       const baseName = quoteState?.quote_no || quoteNoValue || "quote";
       const filename = buildFullPackageFilename({ quoteNo: baseName, ext: "step", revision: revisionValue });
+
+      if (stepText.length > 200) {
+        // Looks like real STEP content
+        const blob = new Blob([layoutPkg.step_text as string], { type: "application/octet-stream" });
+        triggerBlobDownload(blob, filename);
+        return;
+      }
+
+      // Fallback: fetch the STEP via route (may be DB-stored but better than blank)
+      const url = `/api/quote/layout/step?quote_no=${encodeURIComponent(quoteNoValue)}&t=${encodeURIComponent(String(Date.now()))}`;
+      const res = await fetch(url, { cache: "no-store" });
+
+      if (!res.ok) {
+        console.error("Admin: fallback STEP fetch failed:", res.status, res.statusText);
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      const buf = await res.arrayBuffer();
+      const blob = new Blob([buf], { type: "application/octet-stream" });
       triggerBlobDownload(blob, filename);
     } catch (err) {
       console.error("Admin: STEP download failed:", err);
     }
-    }, [layoutPkg, quoteNoValue, quoteState, revisionValue]);
+  }, [layoutPkg, quoteNoValue, quoteState, revisionValue]);
+
 
 
   const handleDownloadLayerStep = React.useCallback(
