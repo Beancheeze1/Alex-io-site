@@ -941,6 +941,7 @@ function LayoutEditorHost(props: {
     activeLayerId,
     selectCavity,
     setActiveLayerId,
+    setLayerCropCorners,
     updateCavityPosition,
     updateBlockDims,
     updateCavityDims,
@@ -2121,7 +2122,7 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                                   <input
                                     type="checkbox"
                                     checked={!!layer.cropCorners}
-                                    onChange={(e) => setLayerCropcorners(layer.id, e.currentTarget.checked)}
+                                    onChange={(e) => setLayerCropCorners(layer.id, e.currentTarget.checked)}
                                   />
                                   Crop
                                 </label>
