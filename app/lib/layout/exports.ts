@@ -237,6 +237,9 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
     const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
     const crop = !!layer.cropCorners;
 
+    console.log("[EXPORTS] layer", i, "cropCorners:", crop, "layout.block.cornerStyle:", layout?.block?.cornerStyle);
+
+
     // Build a derived "single-layer" block style for this layer.
     // If cropCorners is true, force chamfer for THIS layer only.
     const block: BlockLike = {

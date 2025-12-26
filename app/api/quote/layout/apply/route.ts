@@ -204,8 +204,20 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     next.layers = normalizeLayerArray((layout as any).layers);
   }
 
+  const hasLayers =
+  (Array.isArray((next as any).stack) && (next as any).stack.length > 0) ||
+  (Array.isArray((next as any).layers) && (next as any).layers.length > 0);
+
+
   // ✅ normalize corner intent for exports (backward compatible)
-  if (next && typeof next === "object" && next.block && typeof next.block === "object") {
+  if (
+  !hasLayers &&
+  next &&
+  typeof next === "object" &&
+  next.block &&
+  typeof next.block === "object"
+) {
+
     const b: any = next.block;
 
     const cornerStyle = b.cornerStyle ?? b.corner_style ?? null;
@@ -216,6 +228,7 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     if (rawChamfer != null && Number.isFinite(chamferNum) && chamferNum >= 0) {
       b.chamferIn = chamferNum;
     }
+    
 
     // If NEW cornerStyle says chamfer, ensure legacy boolean exists too
     if (cornerStyle === "chamfer" && croppedLegacy == null) {
@@ -228,7 +241,23 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     }
   }
 
+   // HARD CLAMP: block-level crop is invalid once layers exist (layer crop is authoritative)
+  const hasLayersForClamp =
+
+    (Array.isArray((next as any).stack) && (next as any).stack.length > 0) ||
+    (Array.isArray((next as any).layers) && (next as any).layers.length > 0);
+
+ if (hasLayersForClamp && next?.block && typeof (next as any).block === "object") {
+
+    (next as any).block.cornerStyle = "square";
+    (next as any).block.croppedCorners = false;
+    delete (next as any).block.cropped_corners;
+    delete (next as any).block.corner_style;
+    delete (next as any).block.croppedCorners;
+  }
+
   return next;
+
 }
 
 /* ===================== NEW: ensure primary quote_items exists ===================== */
@@ -920,6 +949,14 @@ export async function POST(req: NextRequest) {
 
   const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
   const svgRaw = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
+
+  console.log("[APPLY] active-layer SVG provided?", !!svgRaw);
+console.log("[APPLY] block.cornerStyle:", layout?.block?.cornerStyle, "block.croppedCorners:", layout?.block?.croppedCorners);
+console.log(
+  "[APPLY] stack cropCorners:",
+  Array.isArray(layout?.stack) ? layout.stack.map((l: any, i: number) => ({ i, cropCorners: !!l?.cropCorners, label: l?.label })) : null
+);
+
 
   // ✅ Server-enforced chamfer (fixes broken client checkbox)
   const svgFixed = enforceChamferedBlockInSvg(svgRaw, layoutForSave);
