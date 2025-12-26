@@ -941,6 +941,7 @@ function LayoutEditorHost(props: {
     activeLayerId,
     selectCavity,
     setActiveLayerId,
+    setLayerCropCorners,
     updateCavityPosition,
     updateBlockDims,
     updateCavityDims,
@@ -958,6 +959,7 @@ function LayoutEditorHost(props: {
       label: string;
       cavities: any[];
       thicknessIn?: number;
+      cropCorners?: boolean;
     }[];
   };
 
@@ -2081,17 +2083,9 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
   type="checkbox"
   checked={croppedCorners}
   onChange={(e) => {
-  const next = !!e.target.checked;
-
-  if (!activeLayer) return;
-
-  // Persist on the ACTIVE layer (durable in layout.stack)
-  (activeLayer as any).cropCorners = next;
-
-  // Force rerender so checkbox + canvas update immediately.
-  // Reuse thicknessTick as a simple render bump (Path A, no new state).
-  setThicknessTick((t) => t + 1);
-}}
+                  if (!activeLayerId) return;
+                  setLayerCropCorners(activeLayerId, e.target.checked);
+                }}
 
 />
                       <span>Crop corners 1&quot;</span>
@@ -2136,6 +2130,14 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                                   }}
                                   className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100"
                                 />
+                                <label className="flex items-center gap-1 text-[10px] text-slate-300">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!layer.cropCorners}
+                                    onChange={(e) => setLayerCropCorners(layer.id, e.target.checked)}
+                                  />
+                                  Crop
+                                </label>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
