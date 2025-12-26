@@ -116,9 +116,10 @@ function buildSvg(layout: LayoutLike): string {
   const blockX = (VIEW_W - blockW) / 2;
   const blockY = (VIEW_H - blockH) / 2;
 
-  const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
-  const chamferInRaw = block.chamferIn;
-  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
+  const crop = !!(layer as any).cropCorners;
+    const cornerStyle = crop ? "chamfer" : "square";
+    const chamferInRaw = crop ? (block.chamferIn ?? 1) : 0;
+    const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
 
   const chamferPx =
     cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
@@ -241,8 +242,8 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
     // If cropCorners is true, force chamfer for THIS layer only.
     const block: BlockLike = {
       ...layout.block,
-      cornerStyle: crop ? "chamfer" : (layout.block.cornerStyle ?? "square"),
-      chamferIn: layout.block.chamferIn ?? 1,
+      cornerStyle: crop ? "chamfer" : "square",
+      chamferIn: crop ? (layout.block.chamferIn ?? 1) : 0,
     };
 
     const scaleX = (VIEW_W - 2 * PADDING) / L;
