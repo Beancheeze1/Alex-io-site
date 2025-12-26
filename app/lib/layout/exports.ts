@@ -116,10 +116,11 @@ function buildSvg(layout: LayoutLike): string {
   const blockX = (VIEW_W - blockW) / 2;
   const blockY = (VIEW_H - blockH) / 2;
 
-  const crop = !!(layer as any).cropCorners;
-    const cornerStyle = crop ? "chamfer" : "square";
-    const chamferInRaw = crop ? (block.chamferIn ?? 1) : 0;
-    const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
+  // SVG preview uses the layout-level corner style (legacy).
+  // Per-layer corner cropping is applied in DXF/STEP generation.
+  const cornerStyle = block.cornerStyle === "chamfer" ? "chamfer" : "square";
+  const chamferInRaw = block.chamferIn ?? 1;
+  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
 
   const chamferPx =
     cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
