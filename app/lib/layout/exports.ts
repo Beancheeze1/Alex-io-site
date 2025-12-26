@@ -241,7 +241,7 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
     // If cropCorners is true, force chamfer for THIS layer only.
     const block: BlockLike = {
       ...layout.block,
-      cornerStyle: crop ? "chamfer" : (layout.block.cornerStyle ?? "square"),
+      cornerStyle: crop ? "chamfer" : "square",
       chamferIn: layout.block.chamferIn ?? 1,
     };
 
@@ -502,7 +502,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     const crop = !!layer.cropCorners;
 
-    const cornerStyle = crop ? "chamfer" : String(block.cornerStyle ?? "").toLowerCase();
+    const cornerStyle = crop ? "chamfer" : "square";
     const chamferIn =
       cornerStyle === "chamfer"
         ? chamferInDefault
