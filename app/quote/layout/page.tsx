@@ -2121,7 +2121,7 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                                   <input
                                     type="checkbox"
                                     checked={!!layer.cropCorners}
-                                    onChange={(e) => setLayerCropCorners(layer.id, e.currentTarget.checked)}
+                                    onChange={(e) => setLayerCropcorners(layer.id, e.currentTarget.checked)}
                                   />
                                   Crop
                                 </label>

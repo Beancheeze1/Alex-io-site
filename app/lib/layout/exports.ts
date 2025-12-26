@@ -238,11 +238,11 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
     const crop = !!layer.cropCorners;
 
     // Build a derived "single-layer" block style for this layer.
-    // Per-layer crop is authoritative; do not inherit from layout.block.cornerStyle.
+    // If cropCorners is true, force chamfer for THIS layer only.
     const block: BlockLike = {
       ...layout.block,
-      cornerStyle: crop ? "chamfer" : "square",
-      chamferIn: crop ? (layout.block.chamferIn ?? 1) : 0,
+      cornerStyle: crop ? "chamfer" : (layout.block.cornerStyle ?? "square"),
+      chamferIn: layout.block.chamferIn ?? 1,
     };
 
     const scaleX = (VIEW_W - 2 * PADDING) / L;
@@ -502,9 +502,11 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     const crop = !!layer.cropCorners;
 
-    // Per-layer crop is authoritative; do not inherit from global block.cornerStyle.
-    const cornerStyle = crop ? "chamfer" : "square";
-    const chamferIn = crop ? chamferInDefault : 0;
+    const cornerStyle = crop ? "chamfer" : String(block.cornerStyle ?? "").toLowerCase();
+    const chamferIn =
+      cornerStyle === "chamfer"
+        ? chamferInDefault
+        : 0;
 
     const c =
       cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
