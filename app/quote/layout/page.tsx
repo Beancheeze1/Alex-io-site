@@ -1616,20 +1616,12 @@ const activeLayerForSave =
     ? layoutToSave.stack.find((l: any) => l.id === activeLayerId) ?? layoutToSave.stack[0]
     : null;
 
-// IMPORTANT:
-// - Do NOT write the active layer's crop-corner choice onto the *global* block.
-//   That would make downstream exporters think *all* layers share the same corner style.
-// - Instead, keep cropCorners on each layer, and only apply a cornerStyle override
-//   on a throwaway copy used to render the single SVG preview (active layer).
-const layoutForSvg: LayoutModel = JSON.parse(JSON.stringify(layoutToSave));
-if (layoutForSvg?.block) {
-  (layoutForSvg.block as any).cornerStyle = activeLayerForSave?.cropCorners ? "chamfer" : "square";
-  (layoutForSvg.block as any).chamferIn = activeLayerForSave?.cropCorners ? 1 : null;
-}
+layoutToSave.block.cornerStyle = activeLayerForSave?.cropCorners ? "chamfer" : "square";
+layoutToSave.block.chamferIn = activeLayerForSave?.cropCorners ? 1 : null;
 
-// Build SVG from the preview copy (active layer corner style), while saving the real per-layer flags.
-const svg = buildSvgFromLayout(layoutForSvg as LayoutModel, {
 
+// IMPORTANT: Build SVG from the SAME layout object we are saving.
+const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
   notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
   materialLabel: materialLabel || undefined,
 });
@@ -2084,26 +2076,7 @@ const svg = buildSvgFromLayout(layoutForSvg as LayoutModel, {
                         <span className="font-mono text-slate-50">{stackDepthLabel}</span>
                       </span>
                     </div>
-                    <label className="inline-flex items-center gap-1 text-[11px] text-slate-300">
-                      <input
-  type="checkbox"
-  checked={croppedCorners}
-  onChange={(e) => {
-  const next = !!e.target.checked;
-
-  if (!activeLayer) return;
-
-  // Persist on the ACTIVE layer (durable in layout.stack)
-  (activeLayer as any).cropCorners = next;
-
-  // Force rerender so checkbox + canvas update immediately.
-  // Reuse thicknessTick as a simple render bump (Path A, no new state).
-  setThicknessTick((t) => t + 1);
-}}
-
-/>
-                      <span>Crop corners 1&quot;</span>
-                    </label>
+                    
                   </div>
 
                   {layers && layers.length > 0 ? (
@@ -2144,6 +2117,14 @@ const svg = buildSvgFromLayout(layoutForSvg as LayoutModel, {
                                   }}
                                   className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100"
                                 />
+                                <label className="ml-2 flex items-center gap-1 text-xs text-slate-400">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!layer.cropCorners}
+                                    onChange={(e) => setLayerCropCorners(layer.id, e.currentTarget.checked)}
+                                  />
+                                  Crop
+                                </label>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">

@@ -116,10 +116,8 @@ function buildSvg(layout: LayoutLike): string {
   const blockX = (VIEW_W - blockW) / 2;
   const blockY = (VIEW_H - blockH) / 2;
 
-  // SVG preview uses the layout-level corner style (legacy).
-  // Per-layer corner cropping is applied in DXF/STEP generation.
-  const cornerStyle = block.cornerStyle === "chamfer" ? "chamfer" : "square";
-  const chamferInRaw = block.chamferIn ?? 1;
+  const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
+  const chamferInRaw = block.chamferIn;
   const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
 
   const chamferPx =
@@ -240,7 +238,7 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
     const crop = !!layer.cropCorners;
 
     // Build a derived "single-layer" block style for this layer.
-    // If cropCorners is true, force chamfer for THIS layer only.
+    // Per-layer crop is authoritative; do not inherit from layout.block.cornerStyle.
     const block: BlockLike = {
       ...layout.block,
       cornerStyle: crop ? "chamfer" : "square",
@@ -504,11 +502,9 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     const crop = !!layer.cropCorners;
 
-    const cornerStyle = crop ? "chamfer" : String(block.cornerStyle ?? "").toLowerCase();
-    const chamferIn =
-      cornerStyle === "chamfer"
-        ? chamferInDefault
-        : 0;
+    // Per-layer crop is authoritative; do not inherit from global block.cornerStyle.
+    const cornerStyle = crop ? "chamfer" : "square";
+    const chamferIn = crop ? chamferInDefault : 0;
 
     const c =
       cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
