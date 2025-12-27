@@ -266,6 +266,8 @@ const setActiveLayerId = useCallback((id: string) => {
   const addCavity = useCallback((shape: CavityShape, size: any) => {
     const s = size ?? { lengthIn: 2, widthIn: 2, depthIn: 1, cornerRadiusIn: 0 };
 
+    let newId: string | null = null;
+
     setState((prev) => {
       const nextN = nextCavityNumber(prev.layout.stack);
 
@@ -283,6 +285,7 @@ const setActiveLayerId = useCallback((id: string) => {
       };
 
       const cavity = { ...base, label: formatCavityLabel(base) };
+      newId = cavity.id;
 
       const nextStack = prev.layout.stack.map((l) =>
         l.id !== prev.activeLayerId ? l : { ...l, cavities: [...l.cavities, cavity] },
@@ -300,6 +303,11 @@ const setActiveLayerId = useCallback((id: string) => {
         activeLayerId: active.id,
       };
     });
+
+    // ✅ STICKY SELECTION: select newly created cavity
+    if (newId) {
+      setSelectedIds([newId]);
+    }
   }, []);
 
   const deleteCavity = useCallback((id: string) => {
@@ -309,7 +317,8 @@ const setActiveLayerId = useCallback((id: string) => {
         cavities: l.cavities.filter((c) => c.id !== id),
       }));
 
-      const active = nextStack.find((l) => l.id === prev.activeLayerId) ?? nextStack[0];
+      const active =
+        nextStack.find((l) => l.id === prev.activeLayerId) ?? nextStack[0];
       const mirrored = dedupeCavities(active.cavities);
 
       return {
@@ -321,8 +330,11 @@ const setActiveLayerId = useCallback((id: string) => {
         activeLayerId: active.id,
       };
     });
-    setSelectedIds([]);
+
+    // ✅ Only clear selection if the deleted cavity was selected
+    setSelectedIds((prev) => (prev.includes(id) ? [] : prev));
   }, []);
+
 
   const addLayer = useCallback(() => {
     setState((prev) => {
