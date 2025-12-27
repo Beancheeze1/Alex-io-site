@@ -438,9 +438,9 @@ export default function LayoutPage({
           const rows = Math.ceil(count / cols);
 
           const availW =
-            Math.max(block.lengthIn - 2 * WALL_IN, 1) || block.lengthIn;
+            Math.max(block.lengthIn - 2 * wallIn, 1) || block.lengthIn;
           const availH =
-            Math.max(block.widthIn - 2 * WALL_IN, 1) || block.widthIn;
+            Math.max(block.widthIn - 2 * wallIn, 1) || block.widthIn;
 
           const cellW = availW / cols;
           const cellH = availH / rows;
@@ -939,6 +939,7 @@ function LayoutEditorHost(props: {
     layout,
     editorMode,
     setEditorMode,
+    selectedIds,
     selectedId,
     activeLayerId,
     selectCavity,
@@ -1035,6 +1036,11 @@ function LayoutEditorHost(props: {
   const activeLayerLabel = activeLayer?.label ?? null;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
 
+  // Advanced mode removes spacing restrictions (no wall offset, no min gap enforcement)
+  const wallIn = editorMode === "advanced" ? 0 : WALL_IN;
+  const secondSelectedCavity =
+    selectedIds.length >= 2 ? cavities.find((c) => c.id === selectedIds[1]) || null : null;
+
   // Multi-layer: derive layers view if stack exists
   const layers = layout.stack && layout.stack.length > 0 ? layout.stack : null;
 
@@ -1105,8 +1111,8 @@ function LayoutEditorHost(props: {
         const cavLen = Number(newCavity.lengthIn) || 1;
         const cavWid = Number(newCavity.widthIn) || 1;
 
-        const usableLen = Math.max(block.lengthIn - 2 * WALL_IN, cavLen);
-        const usableWid = Math.max(block.widthIn - 2 * WALL_IN, cavWid);
+        const usableLen = Math.max(block.lengthIn - 2 * wallIn, cavLen);
+        const usableWid = Math.max(block.widthIn - 2 * wallIn, cavWid);
 
         const isOverlapping = (xIn: number, yIn: number) => {
           return existing.some((c) => {
@@ -1135,17 +1141,17 @@ function LayoutEditorHost(props: {
 
         for (let row = 0; row < rows; row++) {
           for (let col = 0; col < cols; col++) {
-            const centerXIn = WALL_IN + cellW * (col + 0.5);
-            const centerYIn = WALL_IN + cellH * (row + 0.5);
+            const centerXIn = wallIn + cellW * (col + 0.5);
+            const centerYIn = wallIn + cellH * (row + 0.5);
 
             let xIn
               = centerXIn - cavLen / 2;
             let yIn = centerYIn - cavWid / 2;
 
-            const minXIn = WALL_IN;
-            const maxXIn = block.lengthIn - WALL_IN - cavLen;
-            const minYIn = WALL_IN;
-            const maxYIn = block.widthIn - WALL_IN - cavWid;
+            const minXIn = wallIn;
+            const maxXIn = block.lengthIn - wallIn - cavLen;
+            const minYIn = wallIn;
+            const maxYIn = block.widthIn - wallIn - cavWid;
 
             const clamp = (v: number, min: number, max: number) =>
               v < min ? min : v > max ? max : v;
@@ -1167,10 +1173,10 @@ function LayoutEditorHost(props: {
           let xIn = (block.lengthIn - cavLen) / 2;
           let yIn = (block.widthIn - cavWid) / 2;
 
-          const minXIn = WALL_IN;
-          const maxXIn = block.lengthIn - WALL_IN - cavLen;
-          const minYIn = WALL_IN;
-          const maxYIn = block.widthIn - WALL_IN - cavWid;
+          const minXIn = wallIn;
+          const maxXIn = block.lengthIn - wallIn - cavLen;
+          const minYIn = wallIn;
+          const maxYIn = block.widthIn - wallIn - cavWid;
 
           const clamp = (v: number, min: number, max: number) =>
             v < min ? min : v > max ? max : v;
@@ -1520,10 +1526,10 @@ function LayoutEditorHost(props: {
     xIn = snapInches(xIn);
     yIn = snapInches(yIn);
 
-    const minXIn = WALL_IN;
-    const maxXIn = block.lengthIn - WALL_IN - len;
-    const minYIn = WALL_IN;
-    const maxYIn = block.widthIn - WALL_IN - wid;
+    const minXIn = wallIn;
+    const maxXIn = block.lengthIn - wallIn - len;
+    const minYIn = wallIn;
+    const maxYIn = block.widthIn - wallIn - wid;
 
     const clamp = (v: number, min: number, max: number) =>
       v < min ? min : v > max ? max : v;
@@ -1555,10 +1561,10 @@ function LayoutEditorHost(props: {
       let nextXIn = snapInches(curXIn + dxIn);
       let nextYIn = snapInches(curYIn + dyIn);
 
-      const minXIn = WALL_IN;
-      const maxXIn = block.lengthIn - WALL_IN - len;
-      const minYIn = WALL_IN;
-      const maxYIn = block.widthIn - WALL_IN - wid;
+      const minXIn = wallIn;
+      const maxXIn = block.lengthIn - wallIn - len;
+      const minYIn = wallIn;
+      const maxYIn = block.widthIn - wallIn - wid;
 
       nextXIn = clamp(nextXIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
       nextYIn = clamp(nextYIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
@@ -1569,17 +1575,64 @@ function LayoutEditorHost(props: {
         nextYIn / block.widthIn,
       );
     },
-    [selectedCavity, block.lengthIn, block.widthIn, updateCavityPosition],
+    [selectedCavity, block.lengthIn, block.widthIn, wallIn, updateCavityPosition],
   );
 
   const alignSelected = React.useCallback(
     (mode: "left" | "right" | "top" | "bottom" | "centerX" | "centerY") => {
+      if (!block.lengthIn || !block.widthIn) return;
+
+      // Advanced-only: align TWO selected cavities relative to the first-selected cavity.
+      // - No block reference (except clamping to stay inside the block)
+      // - No spacing enforcement
+      if (editorMode === "advanced" && selectedIds.length === 2) {
+        const a = selectedCavity;
+        const b = secondSelectedCavity;
+        if (!a || !b) return;
+
+        const aX = (Number(a.x) || 0) * block.lengthIn;
+        const aY = (Number(a.y) || 0) * block.widthIn;
+
+        const aLen = Number(a.lengthIn) || 0;
+        const aWid = Number(a.widthIn) || 0;
+
+        const bLen = Number(b.lengthIn) || 0;
+        const bWid = Number(b.widthIn) || 0;
+
+        if (!aLen || !aWid || !bLen || !bWid) return;
+
+        let nextXIn = (Number(b.x) || 0) * block.lengthIn;
+        let nextYIn = (Number(b.y) || 0) * block.widthIn;
+
+        if (mode === "left") nextXIn = aX;
+        if (mode === "right") nextXIn = aX + aLen - bLen;
+        if (mode === "top") nextYIn = aY;
+        if (mode === "bottom") nextYIn = aY + aWid - bWid;
+        if (mode === "centerX") nextXIn = aX + (aLen - bLen) / 2;
+        if (mode === "centerY") nextYIn = aY + (aWid - bWid) / 2;
+
+        nextXIn = snapInches(nextXIn);
+        nextYIn = snapInches(nextYIn);
+
+        const minXIn = 0;
+        const maxXIn = block.lengthIn - bLen;
+        const minYIn = 0;
+        const maxYIn = block.widthIn - bWid;
+
+        nextXIn = clamp(nextXIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+        nextYIn = clamp(nextYIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+        updateCavityPosition(b.id, nextXIn / block.lengthIn, nextYIn / block.widthIn);
+        return;
+      }
+
+      // Single-cavity alignment (Basic + Advanced) — respects wall clamp in Basic.
       if (!selectedCavity) return;
 
       const len = Number(selectedCavity.lengthIn) || 0;
       const wid = Number(selectedCavity.widthIn) || 0;
 
-      if (!block.lengthIn || !block.widthIn || !len || !wid) return;
+      if (!len || !wid) return;
 
       const curXIn = (Number(selectedCavity.x) || 0) * block.lengthIn;
       const curYIn = (Number(selectedCavity.y) || 0) * block.widthIn;
@@ -1587,20 +1640,20 @@ function LayoutEditorHost(props: {
       let nextXIn = curXIn;
       let nextYIn = curYIn;
 
-      if (mode === "left") nextXIn = WALL_IN;
-      if (mode === "right") nextXIn = block.lengthIn - WALL_IN - len;
-      if (mode === "top") nextYIn = WALL_IN;
-      if (mode === "bottom") nextYIn = block.widthIn - WALL_IN - wid;
+      if (mode === "left") nextXIn = wallIn;
+      if (mode === "right") nextXIn = block.lengthIn - wallIn - len;
+      if (mode === "top") nextYIn = wallIn;
+      if (mode === "bottom") nextYIn = block.widthIn - wallIn - wid;
       if (mode === "centerX") nextXIn = (block.lengthIn - len) / 2;
       if (mode === "centerY") nextYIn = (block.widthIn - wid) / 2;
 
       nextXIn = snapInches(nextXIn);
       nextYIn = snapInches(nextYIn);
 
-      const minXIn = WALL_IN;
-      const maxXIn = block.lengthIn - WALL_IN - len;
-      const minYIn = WALL_IN;
-      const maxYIn = block.widthIn - WALL_IN - wid;
+      const minXIn = wallIn;
+      const maxXIn = block.lengthIn - wallIn - len;
+      const minYIn = wallIn;
+      const maxYIn = block.widthIn - wallIn - wid;
 
       nextXIn = clamp(nextXIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
       nextYIn = clamp(nextYIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
@@ -1611,7 +1664,16 @@ function LayoutEditorHost(props: {
         nextYIn / block.widthIn,
       );
     },
-    [selectedCavity, block.lengthIn, block.widthIn, updateCavityPosition],
+    [
+      editorMode,
+      selectedIds,
+      selectedCavity,
+      secondSelectedCavity,
+      block.lengthIn,
+      block.widthIn,
+      wallIn,
+      updateCavityPosition,
+    ],
   );
 
   const duplicateSelected = React.useCallback(() => {
@@ -2704,12 +2766,15 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                     <InteractiveCanvas
   layout={layout}
   
-  selectedId={selectedId}
+  selectedIds={selectedIds}
   selectAction={selectCavity}
   moveAction={(id, xNorm, yNorm) => {
-    // Keep the cavity selected while dragging so
-    // dimension lines stay visible during movement.
-    selectCavity(id);
+    // Sticky selection:
+    // If this cavity is already part of the current selection (incl. 2-select),
+    // don't collapse selection while dragging.
+    if (!selectedIds.includes(id)) {
+      selectCavity(id);
+    }
     updateCavityPosition(id, xNorm, yNorm);
   }}
   resizeAction={(id, lengthIn, widthIn) => updateCavityDims(id, { lengthIn, widthIn })}
@@ -2870,7 +2935,7 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                   ) : (
                     <ul className="mt-2 space-y-1.5 mb-3 max-h-40 overflow-auto">
                       {cavities.map((cav, cavIndex) => {
-                        const isActive = cav.id === selectedId;
+                        const isActive = selectedIds.includes(cav.id);
 
                         const color = CAVITY_COLORS[cavIndex % CAVITY_COLORS.length];
                         const inactiveBg = `${color}33`;

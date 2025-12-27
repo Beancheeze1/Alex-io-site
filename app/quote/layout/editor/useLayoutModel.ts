@@ -45,10 +45,14 @@ export type UseLayoutModelResult = {
 
   // NEW (Path A): current editor mode (derived from layout.editorMode; defaults to "basic")
   editorMode: "basic" | "advanced";
-
+  // Selection model:
+  // - selectedIds[0] is the primary (anchor) selection
+  // - selectedIds[1] is the secondary (Advanced-only multi-select)
+  selectedIds: string[];
+  // Back-compat alias for existing single-select UIs (primary selection)
   selectedId: string | null;
   activeLayerId: string;
-  selectCavity: (id: string | null) => void;
+  selectCavity: (id: string | null, opts?: { additive?: boolean }) => void;
   setActiveLayerId: (id: string) => void;
 
   // NEW (Path A): editor mode (persisted in layout JSON)
@@ -86,15 +90,40 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   const [state, setState] = useState<LayoutState>(() =>
     normalizeInitialLayout(initial),
   );
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const { layout, activeLayerId } = state;
+  const selectedId = selectedIds[0] ?? null;
 
-  const selectCavity = useCallback((id: string | null) => {
-    setSelectedId(id);
-  }, []);
+  const selectCavity = useCallback(
+    (id: string | null, opts?: { additive?: boolean }) => {
+      if (!id) {
+        setSelectedIds([]);
+        return;
+      }
 
-  const setActiveLayerId = useCallback((id: string) => {
+      const additive = !!opts?.additive;
+
+      setSelectedIds((prev) => {
+        if (!additive) return [id];
+
+        // Toggle behavior with a max of 2 selected ids.
+        // - If already selected, remove it.
+        // - If 0 selected, add as primary.
+        // - If 1 selected, add as secondary.
+        // - If 2 selected, keep primary and replace secondary.
+        if (prev.includes(id)) return prev.filter((x) => x !== id);
+
+        if (prev.length === 0) return [id];
+        if (prev.length === 1) return [prev[0], id];
+
+        return [prev[0], id];
+      });
+    },
+    [],
+  );
+
+const setActiveLayerId = useCallback((id: string) => {
     setState((prev) => {
       const layer =
         prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
@@ -110,7 +139,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         activeLayerId: layer.id,
       };
     });
-    setSelectedId(null);
+    setSelectedIds([]);
   }, []);
 
   // NEW (Path A): editor mode persisted in layout JSON (defaults to "basic" when missing)
@@ -292,7 +321,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         activeLayerId: active.id,
       };
     });
-    setSelectedId(null);
+    setSelectedIds([]);
   }, []);
 
   const addLayer = useCallback(() => {
@@ -314,7 +343,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         activeLayerId: id,
       };
     });
-    setSelectedId(null);
+    setSelectedIds([]);
   }, []);
 
   const renameLayer = useCallback((id: string, label: string) => {
@@ -347,7 +376,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         activeLayerId: active.id,
       };
     });
-    setSelectedId(null);
+    setSelectedIds([]);
   }, []);
 
   return {
@@ -356,6 +385,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
     // NEW (Path A): expose current editor mode for the UI toggle
     editorMode: layout.editorMode ?? "basic",
 
+    selectedIds,
     selectedId,
     activeLayerId,
     selectCavity,

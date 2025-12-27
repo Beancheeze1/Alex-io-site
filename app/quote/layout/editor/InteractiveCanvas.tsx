@@ -2,13 +2,19 @@
 //
 // SVG-based canvas that can render the block + cavities
 // and supports:
-//   - drag-to-move inside a 0.5" wall
+//   - drag-to-move inside a 0.5" wall (Basic mode)
 //   - drag handle at bottom-right to resize
 //   - 0.0625" snap for movement + size
 //   - 0.5" grid inside the block
 //   - dimensions from selected cavity to walls + nearest neighbor
-//   - minimum ~0.5" gap between cavities
+//   - minimum ~0.5" gap between cavities (Basic mode)
 //   - zoom handled via scale prop
+//
+// PATH-A ADDITIVE (12/27):
+//  - Advanced mode removes spacing restrictions:
+//      - wall clamp becomes 0
+//      - min-gap becomes 0
+//  - Determined from layout.editorMode (no prop changes required)
 
 "use client";
 
@@ -18,8 +24,8 @@ import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
 
 type Props = {
   layout: LayoutModel;
-  selectedId: string | null;
-  selectAction: (id: string | null) => void;
+  selectedIds: string[];
+  selectAction: (id: string | null, opts?: { additive?: boolean }) => void;
   moveAction: (id: string, xNorm: number, yNorm: number) => void;
   resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
   zoom: number;
@@ -66,7 +72,7 @@ const CAVITY_COLORS = [
 
 export default function InteractiveCanvas({
   layout,
-  selectedId,
+  selectedIds,
   selectAction,
   moveAction,
   resizeAction,
@@ -77,6 +83,12 @@ export default function InteractiveCanvas({
   const [drag, setDrag] = useState<DragState>(null);
 
   const { block, cavities } = layout;
+
+  // NEW: gate spacing rules by editor mode (no prop needed)
+  const editorMode: "basic" | "advanced" =
+    (layout as any)?.editorMode === "advanced" ? "advanced" : "basic";
+  const wallIn = editorMode === "advanced" ? 0 : WALL_IN;
+  const minGapIn = editorMode === "advanced" ? 0 : MIN_GAP_IN;
 
   // ==== Block scaling / centering (with zoom) ====
   const innerW = CANVAS_WIDTH - PADDING * 2;
@@ -139,16 +151,16 @@ export default function InteractiveCanvas({
         "Z",
       ].join(" ");
 
-  // Inner 0.5" safety wall (also chamfered, but still used as a rectangular
-  // spacing reference for movement / gap checks)
+  // Inner safety wall path (dashed)
+  // NOTE: In Advanced mode, wallIn = 0 so the "inner wall" collapses to the outer wall.
   const L = block.lengthIn || 1;
   const W = block.widthIn || 1;
 
-  const usableLenIn = Math.max(L - 2 * WALL_IN, 0);
-  const usableWidIn = Math.max(W - 2 * WALL_IN, 0);
+  const usableLenIn = Math.max(L - 2 * wallIn, 0);
+  const usableWidIn = Math.max(W - 2 * wallIn, 0);
 
-  const innerX0 = x0 + (WALL_IN / L) * w;
-  const innerY0 = y0 + (WALL_IN / W) * h;
+  const innerX0 = x0 + (wallIn / L) * w;
+  const innerY0 = y0 + (wallIn / W) * h;
   const innerWallWidthPx = w * (usableLenIn / L);
   const innerWallHeightPx = h * (usableWidIn / W);
 
@@ -179,7 +191,7 @@ export default function InteractiveCanvas({
         "Z",
       ].join(" ");
 
-  const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
+  const selectedCavity = cavities.find((c) => c.id === (selectedIds[0] ?? "")) || null;
 
   // === Pan state disabled (we keep the API but do nothing) ===
   const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -213,7 +225,7 @@ export default function InteractiveCanvas({
       offsetY: ptY - cavY,
     });
 
-    selectAction(cavity.id);
+    selectAction(cavity.id, { additive: editorMode === "advanced" && (e.shiftKey || e.ctrlKey || (e as any).metaKey) });
   };
 
   const handleResizeMouseDown = (
@@ -226,7 +238,7 @@ export default function InteractiveCanvas({
       mode: "resize",
       id: cavity.id,
     });
-    selectAction(cavity.id);
+    selectAction(cavity.id, { additive: editorMode === "advanced" && (e.shiftKey || e.ctrlKey || (e as any).metaKey) });
   };
 
   const handleMouseMove = (e: MouseEvent<SVGSVGElement>) => {
@@ -241,9 +253,6 @@ export default function InteractiveCanvas({
 
     if (drag.mode === "move") {
       // move whole cavity, keep size fixed
-      const cavWidthPx = (cav.lengthIn / block.lengthIn) * blockPx.width;
-      const cavHeightPx = (cav.widthIn / block.widthIn) * blockPx.height;
-
       const cavX = ptX - drag.offsetX;
       const cavY = ptY - drag.offsetY;
 
@@ -253,10 +262,10 @@ export default function InteractiveCanvas({
       const len = cav.lengthIn;
       const wid = cav.widthIn;
 
-      const minXIn = WALL_IN;
-      const maxXIn = block.lengthIn - WALL_IN - len;
-      const minYIn = WALL_IN;
-      const maxYIn = block.widthIn - WALL_IN - wid;
+      const minXIn = wallIn;
+      const maxXIn = block.lengthIn - wallIn - len;
+      const minYIn = wallIn;
+      const maxYIn = block.widthIn - wallIn - wid;
 
       let xIn = snapInches(xNorm * block.lengthIn);
       let yIn = snapInches(yNorm * block.widthIn);
@@ -264,18 +273,10 @@ export default function InteractiveCanvas({
       xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
       yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
 
-      // enforce 0.5" min gap to other cavities
+      // enforce min gap to other cavities (Basic mode only)
       if (
-        violatesMinGap(
-          cav.id,
-          xIn,
-          yIn,
-          len,
-          wid,
-          block,
-          cavities,
-          MIN_GAP_IN,
-        )
+        minGapIn > 0 &&
+        violatesMinGap(cav.id, xIn, yIn, len, wid, block, cavities, minGapIn)
       ) {
         return;
       }
@@ -311,13 +312,14 @@ export default function InteractiveCanvas({
         newWidIn = d;
       }
 
-      const maxLenIn = block.lengthIn - WALL_IN - startXIn;
-      const maxWidIn = block.widthIn - WALL_IN - startYIn;
+      const maxLenIn = block.lengthIn - wallIn - startXIn;
+      const maxWidIn = block.widthIn - wallIn - startYIn;
 
       newLenIn = clamp(newLenIn, minSize, Math.max(minSize, maxLenIn));
       newWidIn = clamp(newWidIn, minSize, Math.max(minSize, maxWidIn));
 
       if (
+        minGapIn > 0 &&
         violatesMinGap(
           cav.id,
           startXIn,
@@ -326,7 +328,7 @@ export default function InteractiveCanvas({
           newWidIn,
           block,
           cavities,
-          MIN_GAP_IN,
+          minGapIn,
         )
       ) {
         return;
@@ -348,7 +350,7 @@ export default function InteractiveCanvas({
     (drag ? cavities.find((c) => c.id === drag.id) || null : null);
 
   const spacing = spacingCavity
-    ? computeSpacing(spacingCavity, block, cavities, blockPx, blockOffset)
+    ? computeSpacing(spacingCavity, block, cavities, blockPx, blockOffset, wallIn)
     : null;
 
   return (
@@ -370,6 +372,7 @@ export default function InteractiveCanvas({
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
+          onMouseDown={() => selectAction(null)}
         >
           {/* background – transparent so the page-level dark grid shows through */}
           <rect
@@ -394,7 +397,7 @@ export default function InteractiveCanvas({
           {/* 0.5" grid *inside* the block */}
           {drawInchGrid(block, blockPx, blockOffset)}
 
-          {/* 0.5" inner wall (dashed, matches chamfer shape where possible) */}
+          {/* inner wall (dashed) - in Advanced mode it collapses to the outer wall */}
           <path
             d={innerWallPathD}
             fill="none"
@@ -413,7 +416,7 @@ export default function InteractiveCanvas({
             const cavX = blockOffset.x + cavity.x * blockPx.width;
             const cavY = blockOffset.y + cavity.y * blockPx.height;
 
-            const isSelected = cavity.id === selectedId;
+            const isSelected = selectedIds.includes(cavity.id);
             const isCircle = cavity.shape === "circle";
             const isRounded = cavity.shape === "roundedRect";
 
@@ -498,6 +501,7 @@ export default function InteractiveCanvas({
     </div>
   );
 }
+
 // ===== helpers =====
 
 function snapInches(v: number): number {
@@ -512,7 +516,7 @@ function clamp(v: number, min: number, max: number): number {
   return v;
 }
 
-// simple “keep at least MIN_GAP_IN between cavities” check
+// simple “keep at least minGapIn between cavities” check
 function violatesMinGap(
   id: string,
   xIn: number,
@@ -523,6 +527,8 @@ function violatesMinGap(
   cavities: Cavity[],
   minGapIn: number,
 ): boolean {
+  if (!(minGapIn > 0)) return false;
+
   const x1 = xIn;
   const x2 = xIn + lenIn;
   const y1 = yIn;
@@ -715,6 +721,7 @@ function drawRulersWithLabel(
 
   return <g>{group}</g>;
 }
+
 // ===== spacing calcs (edges + nearest neighbor) =====
 
 type SpacingInfo = {
@@ -754,16 +761,17 @@ function computeSpacing(
   cavities: Cavity[],
   blockPx: { width: number; height: number },
   blockOffset: { x: number; y: number },
+  wallIn: number,
 ): SpacingInfo {
   const cavLeftIn = cav.x * block.lengthIn;
   const cavTopIn = cav.y * block.widthIn;
   const cavRightIn = cavLeftIn + cav.lengthIn;
   const cavBottomIn = cavTopIn + cav.widthIn;
 
-  const leftIn = cavLeftIn - WALL_IN;
-  const rightIn = block.lengthIn - WALL_IN - cavRightIn;
-  const topIn = cavTopIn - WALL_IN;
-  const bottomIn = block.widthIn - WALL_IN - cavBottomIn;
+  const leftIn = cavLeftIn - wallIn;
+  const rightIn = block.lengthIn - wallIn - cavRightIn;
+  const topIn = cavTopIn - wallIn;
+  const bottomIn = block.widthIn - wallIn - cavBottomIn;
 
   const cavLeftPx = blockOffset.x + (cavLeftIn / block.lengthIn) * blockPx.width;
   const cavRightPx =
@@ -772,14 +780,14 @@ function computeSpacing(
   const cavBottomPx =
     blockOffset.y + (cavBottomIn / block.widthIn) * blockPx.height;
 
-  const leftWallPx = blockOffset.x + (WALL_IN / block.lengthIn) * blockPx.width;
+  const leftWallPx = blockOffset.x + (wallIn / block.lengthIn) * blockPx.width;
   const rightWallPx =
-    blockOffset.x + blockPx.width - (WALL_IN / block.lengthIn) * blockPx.width;
-  const topWallPx = blockOffset.y + (WALL_IN / block.widthIn) * blockPx.height;
+    blockOffset.x + blockPx.width - (wallIn / block.lengthIn) * blockPx.width;
+  const topWallPx = blockOffset.y + (wallIn / block.widthIn) * blockPx.height;
   const bottomWallPx =
     blockOffset.y +
     blockPx.height -
-    (WALL_IN / block.widthIn) * blockPx.height;
+    (wallIn / block.widthIn) * blockPx.height;
 
   let bestHorizGapIn = Infinity;
   let bestHoriz: SpacingInfo["neighborDims"]["horiz"] | undefined;
@@ -892,7 +900,7 @@ function drawSpacing(info: SpacingInfo) {
 
   return (
     <g>
-      {/* left edge of foam block */}
+      {/* left edge */}
       {edgeDims.leftIn > 0 && (
         <g>
           <line
@@ -924,7 +932,7 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* right edge of foam block */}
+      {/* right edge */}
       {edgeDims.rightIn > 0 && (
         <g>
           <line
@@ -956,7 +964,7 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* top edge of foam block */}
+      {/* top edge */}
       {edgeDims.topIn > 0 && (
         <g>
           <line
@@ -988,7 +996,7 @@ function drawSpacing(info: SpacingInfo) {
         </g>
       )}
 
-      {/* bottom edge of foam block */}
+      {/* bottom edge */}
       {edgeDims.bottomIn > 0 && (
         <g>
           <line
