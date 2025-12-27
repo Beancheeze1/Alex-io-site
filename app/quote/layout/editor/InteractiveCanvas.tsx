@@ -15,6 +15,10 @@
 //      - wall clamp becomes 0
 //      - min-gap becomes 0
 //  - Determined from layout.editorMode (no prop changes required)
+//
+// FIX (Path A, 12/27):
+//  - Make selection "sticky" by NOT clearing selection on *any* svg mousedown.
+//  - Only clear selection when clicking the empty background rect.
 
 "use client";
 
@@ -191,7 +195,8 @@ export default function InteractiveCanvas({
         "Z",
       ].join(" ");
 
-  const selectedCavity = cavities.find((c) => c.id === (selectedIds[0] ?? "")) || null;
+  const selectedCavity =
+    cavities.find((c) => c.id === (selectedIds[0] ?? "")) || null;
 
   // === Pan state disabled (we keep the API but do nothing) ===
   const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
@@ -225,7 +230,11 @@ export default function InteractiveCanvas({
       offsetY: ptY - cavY,
     });
 
-    selectAction(cavity.id, { additive: editorMode === "advanced" && (e.shiftKey || e.ctrlKey || (e as any).metaKey) });
+    selectAction(cavity.id, {
+      additive:
+        editorMode === "advanced" &&
+        (e.shiftKey || e.ctrlKey || (e as any).metaKey),
+    });
   };
 
   const handleResizeMouseDown = (
@@ -238,7 +247,11 @@ export default function InteractiveCanvas({
       mode: "resize",
       id: cavity.id,
     });
-    selectAction(cavity.id, { additive: editorMode === "advanced" && (e.shiftKey || e.ctrlKey || (e as any).metaKey) });
+    selectAction(cavity.id, {
+      additive:
+        editorMode === "advanced" &&
+        (e.shiftKey || e.ctrlKey || (e as any).metaKey),
+    });
   };
 
   const handleMouseMove = (e: MouseEvent<SVGSVGElement>) => {
@@ -346,8 +359,7 @@ export default function InteractiveCanvas({
   // If selection disappears mid-drag (due to upstream click/selection clearing),
   // we still compute spacing off the dragged cavity.
   const spacingCavity =
-    selectedCavity ||
-    (drag ? cavities.find((c) => c.id === drag.id) || null : null);
+    selectedCavity || (drag ? cavities.find((c) => c.id === drag.id) || null : null);
 
   const spacing = spacingCavity
     ? computeSpacing(spacingCavity, block, cavities, blockPx, blockOffset, wallIn)
@@ -372,15 +384,21 @@ export default function InteractiveCanvas({
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          onMouseDown={() => selectAction(null)}
         >
-          {/* background – transparent so the page-level dark grid shows through */}
+          {/* background – transparent so the page-level dark grid shows through
+              FIX: clicking empty background clears selection (sticky selection elsewhere) */}
           <rect
             x={0}
             y={0}
             width={CANVAS_WIDTH}
             height={CANVAS_HEIGHT}
             fill="transparent"
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              // If we are actively dragging/resizing, do not clear selection.
+              if (drag) return;
+              selectAction(null);
+            }}
           />
 
           {/* rulers + block label ABOVE the top ruler */}
