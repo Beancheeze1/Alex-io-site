@@ -3,6 +3,11 @@
 // Core types + helpers for the quote layout editor.
 // SAFE module — no React imports. Path A only.
 //
+// STEP 4 SAFETY RAILS (12/27):
+// - LayoutModel may gain Advanced-only fields over time.
+// - Editor/runtime normalization MUST preserve unknown keys so advanced metadata
+//   can round-trip safely (even if the user is currently in Basic mode).
+// - Basic mode UIs must ignore Advanced-only fields unless explicitly enabled.
 
 export type BlockCornerStyle = "square" | "chamfer";
 
@@ -61,7 +66,6 @@ export type LayoutLayer = {
 };
 
 export type LayoutModel = {
-  
   /**
    * Editor mode for the layout editor UI.
    *
@@ -70,7 +74,8 @@ export type LayoutModel = {
    * - Persistence-only for now; MUST NOT change behavior yet.
    */
   editorMode?: "basic" | "advanced";
-block: BlockDims;
+
+  block: BlockDims;
 
   /**
    * Legacy single-layer cavities.

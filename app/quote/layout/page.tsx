@@ -935,25 +935,23 @@ function LayoutEditorHost(props: {
 
   const router = useRouter();
 
- const {
-  layout,
-  editorMode,
-  setEditorMode,
-  selectedId,
-  activeLayerId,
-  selectCavity,
-  setActiveLayerId,
-  setLayerCropCorners,
-  updateCavityPosition,
-  updateBlockDims,
-  updateCavityDims,
-  addCavity,
-  deleteCavity,
-  addLayer,
-  renameLayer,
-  deleteLayer,
-} = useLayoutModel(initialLayout);
-
+  const {
+    layout,
+    editorMode,
+    selectedId,
+    activeLayerId,
+    selectCavity,
+    setActiveLayerId,
+    setLayerCropCorners,
+    updateCavityPosition,
+    updateBlockDims,
+    updateCavityDims,
+    addCavity,
+    deleteCavity,
+    addLayer,
+    renameLayer,
+    deleteLayer,
+  } = useLayoutModel(initialLayout);
   
 
   const { block, cavities, stack } = layout as LayoutModel & {
@@ -2223,20 +2221,21 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                   </div>
                   <div className="text-[11px] text-slate-400">Round pocket (3&quot; Ø)</div>
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleAddPreset("roundedRect")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
-                >
-                  <div className="font-semibold text-slate-50 flex items-center gap-2">
-                    <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
-                    Rounded rectangle
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    Rounded corners (4&quot; × 3&quot;, 0.5&quot; R)
-                  </div>
-                </button>
+              {editorMode === "advanced" && (
+                              <button
+                                type="button"
+                                onClick={() => handleAddPreset("roundedRect")}
+                                className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                              >
+                                <div className="font-semibold text-slate-50 flex items-center gap-2">
+                                  <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
+                                  Rounded rectangle
+                                </div>
+                                <div className="text-[11px] text-slate-400">
+                                  Rounded corners (4&quot; × 3&quot;, 0.5&quot; R)
+                                </div>
+                              </button>
+              )}
 
                 {/* Foam material (in left bar) */}
                 <div className="mt-2">
@@ -2783,23 +2782,26 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                               className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                             />
                           </label>
-                          <label className="flex flex-col gap-1">
-                            <span className="text-[11px] text-slate-400">Corner radius (in)</span>
-                            <input
-                              type="number"
-                              step={0.125}
-                              value={cavityInputs.cornerRadius}
-                              onChange={(e) => setCavityInputs((prev) => ({ ...prev, cornerRadius: e.target.value }))}
-                              onBlur={() => commitCavityField("cornerRadius")}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  commitCavityField("cornerRadius");
-                                }
-                              }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                            />
-                          </label>
+                          {editorMode === "advanced" && selectedCavity.shape === "roundedRect" && (
+                                                      <label className="flex flex-col gap-1">
+                                                        <span className="text-[11px] text-slate-400">Corner radius (in)</span>
+                                                        <input
+                                                          type="number"
+                                                          step={0.125}
+                                                          value={cavityInputs.cornerRadius}
+                                                          onChange={(e) => setCavityInputs((prev) => ({ ...prev, cornerRadius: e.target.value }))}
+                                                          onBlur={() => commitCavityField("cornerRadius")}
+                                                          onKeyDown={(e) => {
+                                                            if (e.key === "Enter") {
+                                                              e.preventDefault();
+                                                              commitCavityField("cornerRadius");
+                                                            }
+                                                          }}
+                                                          className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                                                        />
+                                                      </label>
+                          )}
+
                         </div>
                       )}
 
