@@ -481,6 +481,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
   const blkLen = nnum(block?.lengthIn, 0);
   const blkWid = nnum(block?.widthIn, 0);
 
+  const GAP = blkWid * 0.25; // visual separation between layers
   const lines: string[] = [];
 
   function push(code: number | string, value?: string | number) {
@@ -503,37 +504,33 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
     const layer = stack[i] || {};
     const layerNo = i + 1;
 
+    const yOffset = i * (blkWid + GAP);
     const crop = !!layer.cropCorners;
 
-    const cornerStyle = crop ? "chamfer" : "square";
-    const chamferIn =
-      cornerStyle === "chamfer"
-        ? chamferInDefault
-        : 0;
-
+    const chamferIn = crop ? chamferInDefault : 0;
     const c =
-      cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
+      chamferIn > 0
         ? Math.max(0, Math.min(chamferIn, blkLen / 2 - 1e-6, blkWid / 2 - 1e-6))
         : 0;
 
     const blockPts: [number, number][] =
       c > 0.0001
         ? [
-            [0, 0],
-            [blkLen - c, 0],
-            [blkLen, c],
-            [blkLen, blkWid],
-            [c, blkWid],
-            [0, blkWid - c],
+            [0, yOffset],
+            [blkLen - c, yOffset],
+            [blkLen, yOffset + c],
+            [blkLen, yOffset + blkWid],
+            [c, yOffset + blkWid],
+            [0, yOffset + blkWid - c],
           ]
         : [
-            [0, 0],
-            [blkLen, 0],
-            [blkLen, blkWid],
-            [0, blkWid],
+            [0, yOffset],
+            [blkLen, yOffset],
+            [blkLen, yOffset + blkWid],
+            [0, yOffset + blkWid],
           ];
 
-    // BLOCK outline on BLOCK_Ln
+    // Block outline
     push(0, "LWPOLYLINE");
     push(8, `BLOCK_L${layerNo}`);
     push(90, blockPts.length);
@@ -543,11 +540,11 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
       push(20, y);
     }
 
-    const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
+    const cavs = Array.isArray(layer.cavities) ? layer.cavities : [];
 
     for (const cav of cavs) {
       const xIn = nnum(cav.x) * blkLen;
-      const yIn = nnum(cav.y) * blkWid;
+      const yIn = yOffset + nnum(cav.y) * blkWid;
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
 
@@ -584,6 +581,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
   push(0, "EOF");
   return lines.join("\n");
 }
+
 
 /* ================= STEP (stub) ================= */
 
