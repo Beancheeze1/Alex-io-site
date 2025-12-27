@@ -935,24 +935,25 @@ function LayoutEditorHost(props: {
 
   const router = useRouter();
 
-  const {
-    layout,
-    editorMode,
-    setEditorMode,
-    selectedId,
-    activeLayerId,
-    selectCavity,
-    setActiveLayerId,
-    setLayerCropCorners,
-    updateCavityPosition,
-    updateBlockDims,
-    updateCavityDims,
-    addCavity,
-    deleteCavity,
-    addLayer,
-    renameLayer,
-    deleteLayer,
-  } = useLayoutModel(initialLayout);
+ const {
+  layout,
+  editorMode,
+  setEditorMode,
+  selectedId,
+  activeLayerId,
+  selectCavity,
+  setActiveLayerId,
+  setLayerCropCorners,
+  updateCavityPosition,
+  updateBlockDims,
+  updateCavityDims,
+  addCavity,
+  deleteCavity,
+  addLayer,
+  renameLayer,
+  deleteLayer,
+} = useLayoutModel(initialLayout);
+
   
 
   const { block, cavities, stack } = layout as LayoutModel & {
@@ -1605,6 +1606,9 @@ const layoutToSave: any = {
   block: { ...((layout as any).block ?? {}) },
 };
 
+// Editor mode (persisted with layout; backward-compatible)
+layoutToSave.editorMode = editorMode === "advanced" ? "advanced" : "basic";
+
 // Per-layer crop corners: stored on each layer.
 // Do NOT write block.cornerStyle here anymore.
 if (layoutToSave.stack && Array.isArray(layoutToSave.stack)) {
@@ -1868,40 +1872,8 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                   </div>
                 </div>
 
-                {/* RIGHT: mode toggle + BETA pill */}
-                <div className="flex items-center justify-end gap-2">
-                  <div className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-900/35 p-0.5 text-[11px] font-medium text-sky-50 shadow-[0_0_10px_rgba(15,23,42,0.65)]">
-                    <span className="px-2 py-1 text-sky-100/80">Mode</span>
-                    <button
-                      type="button"
-                      onClick={() => setEditorMode("basic")}
-                      className={
-                        "rounded-full px-2.5 py-1 transition " +
-                        (editorMode === "basic"
-                          ? "bg-sky-500/25 text-sky-50 ring-1 ring-sky-300/50"
-                          : "text-sky-100/75 hover:text-sky-50 hover:bg-slate-800/40")
-                      }
-                      aria-pressed={editorMode === "basic"}
-                      title="Basic editor (default)"
-                    >
-                      Basic
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditorMode("advanced")}
-                      className={
-                        "rounded-full px-2.5 py-1 transition " +
-                        (editorMode === "advanced"
-                          ? "bg-amber-500/20 text-amber-50 ring-1 ring-amber-300/45"
-                          : "text-sky-100/75 hover:text-sky-50 hover:bg-slate-800/40")
-                      }
-                      aria-pressed={editorMode === "advanced"}
-                      title="Advanced editor (opt-in)"
-                    >
-                      Advanced
-                    </button>
-                  </div>
-
+                {/* RIGHT: BETA pill */}
+                <div className="flex items-center justify-end">
                   <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
                     Layout editor · BETA
@@ -2067,6 +2039,36 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                       />
                     </div>
                   </div>
+
+
+{editorMode === "advanced" && (
+  <div className="mb-2 rounded-xl border border-amber-400/40 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-50/90">
+    <div className="flex items-center justify-between gap-2">
+      <div className="font-semibold text-amber-50">Advanced tools (coming soon)</div>
+      <span className="rounded-full border border-amber-300/30 bg-slate-950/40 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-amber-100/80">
+        Preview
+      </span>
+    </div>
+    <div className="mt-1 text-amber-100/70">
+      Foundation for compound cavities, overlapping primitives, snapping &amp; alignment tools.
+    </div>
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {[
+        "Compound cavities",
+        "Overlaps / boolean ops",
+        "Snapping",
+        "Align tools",
+      ].map((label) => (
+        <span
+          key={label}
+          className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-0.5 text-[10px] text-slate-200 opacity-70"
+        >
+          {label}
+        </span>
+      ))}
+    </div>
+  </div>
+)}
 
                   <div className="flex flex-wrap items-center gap-2">
                     <button
