@@ -55,6 +55,13 @@ export type UseLayoutModelResult = {
   selectCavity: (id: string | null, opts?: { additive?: boolean }) => void;
   setActiveLayerId: (id: string) => void;
 
+  // NEW (Path A): hydrate/replace the entire layout model WITHOUT remounting.
+  // Used to load DB-backed layout after boot while preserving sticky selection state.
+  replaceLayout: (
+    next: LayoutModel,
+    opts?: { preserveSelection?: boolean }
+  ) => void;
+
   // NEW (Path A): editor mode (persisted in layout JSON)
   setEditorMode: (mode: "basic" | "advanced") => void;
 
@@ -172,6 +179,34 @@ const setActiveLayerId = useCallback((id: string) => {
     },
     [],
   );
+  // NEW (Path A): hydrate/replace the whole layout without remounting this hook.
+  const replaceLayout = useCallback(
+    (next: LayoutModel, opts?: { preserveSelection?: boolean }) => {
+      const preserveSelection = opts?.preserveSelection !== false;
+
+      const nextState = normalizeInitialLayout(next);
+
+      setState(() => nextState);
+
+      if (!preserveSelection) {
+        setSelectedIds([]);
+        return;
+      }
+
+      // Keep only selections that still exist in the incoming layout.
+      const idSet = new Set<string>();
+      for (const layer of nextState.layout.stack ?? []) {
+        for (const c of (layer as any).cavities ?? []) {
+          if (c && typeof c.id === "string") idSet.add(c.id);
+        }
+      }
+
+      setSelectedIds((prev) => prev.filter((id) => idSet.has(id)));
+    },
+    [],
+  );
+
+
 
   const updateCavityPosition = useCallback((id: string, x: number, y: number) => {
     setState((prev) => {
@@ -402,6 +437,7 @@ const setActiveLayerId = useCallback((id: string) => {
     activeLayerId,
     selectCavity,
     setActiveLayerId,
+  replaceLayout,
     setEditorMode,
     setLayerCropCorners,
 
