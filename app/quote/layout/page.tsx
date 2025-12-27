@@ -438,9 +438,9 @@ export default function LayoutPage({
           const rows = Math.ceil(count / cols);
 
           const availW =
-            Math.max(block.lengthIn - 2 * wallIn, 1) || block.lengthIn;
+            Math.max(block.lengthIn - 2 * WALL_IN, 1) || block.lengthIn;
           const availH =
-            Math.max(block.widthIn - 2 * wallIn, 1) || block.widthIn;
+            Math.max(block.widthIn - 2 * WALL_IN, 1) || block.widthIn;
 
           const cellW = availW / cols;
           const cellH = availH / rows;
