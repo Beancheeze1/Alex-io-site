@@ -18,6 +18,11 @@
 //  - Per-layer crop-corners toggle persisted on LayoutLayer.cropCorners
 //  - Hook exposes setLayerCropCorners(id, value)
 //  - Normalization preserves cropCorners if already present
+//
+// STEP 4 SAFETY RAILS (12/27):
+//  - Preserve unknown/future fields on LayoutModel during normalization.
+//    This ensures Advanced-only metadata can round-trip through the editor
+//    without being silently dropped, even when the user is in Basic mode.
 
 "use client";
 
@@ -48,7 +53,6 @@ export type UseLayoutModelResult = {
 
   // NEW (Path A): editor mode (persisted in layout JSON)
   setEditorMode: (mode: "basic" | "advanced") => void;
-
 
   // NEW (Path A): per-layer cropped-corner toggle
   setLayerCropCorners: (layerId: string, cropCorners: boolean) => void;
@@ -107,7 +111,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       };
     });
     setSelectedId(null);
-  }, [])
+  }, []);
 
   // NEW (Path A): editor mode persisted in layout JSON (defaults to "basic" when missing)
   const setEditorMode = useCallback((mode: "basic" | "advanced") => {
@@ -119,7 +123,6 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       },
     }));
   }, []);
-;
 
   // NEW (Path A): set per-layer crop-corners flag
   const setLayerCropCorners = useCallback(
@@ -348,17 +351,17 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   }, []);
 
   return {
-  layout,
+    layout,
 
-  // NEW (Path A): expose current editor mode for the UI toggle
-  editorMode: layout.editorMode ?? "basic",
+    // NEW (Path A): expose current editor mode for the UI toggle
+    editorMode: layout.editorMode ?? "basic",
 
-  selectedId,
-  activeLayerId,
-  selectCavity,
-  setActiveLayerId,
-  setEditorMode,
-  setLayerCropCorners,
+    selectedId,
+    activeLayerId,
+    selectCavity,
+    setActiveLayerId,
+    setEditorMode,
+    setLayerCropCorners,
 
     updateCavityPosition,
     updateBlockDims,
@@ -374,9 +377,16 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 /* ================= helpers ================= */
 
 function normalizeInitialLayout(initial: LayoutModel): LayoutState {
-  const block = { ...initial.block };
+  // STEP 4 SAFETY RAIL:
+  // Preserve unknown / future LayoutModel fields so Advanced-only metadata can round-trip.
+  // We normalize the fields we know, but we DO NOT drop additional keys.
+  const { block: _b, cavities: _c, stack: _s, editorMode: _m, ...rest } =
+    (initial as any) ?? {};
 
-  const editorMode: "basic" | "advanced" = (initial as any).editorMode === "advanced" ? "advanced" : "basic";
+  const block = { ...(initial as any).block };
+
+  const editorMode: "basic" | "advanced" =
+    (initial as any).editorMode === "advanced" ? "advanced" : "basic";
 
   // Trust pre-existing stack fully
   if (Array.isArray((initial as any).stack) && (initial as any).stack.length) {
@@ -436,6 +446,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 
     return {
       layout: {
+        ...rest,
         block: {
           ...block,
           thicknessIn: safeInch(active.thicknessIn ?? block.thicknessIn ?? 1, 0.5),
@@ -448,7 +459,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     };
   }
 
-  const cavsRaw = Array.isArray(initial.cavities) ? [...initial.cavities] : [];
+  const cavsRaw = Array.isArray((initial as any).cavities) ? [...(initial as any).cavities] : [];
 
   // Legacy single-layer fallback:
   // If the incoming model does NOT include a stack, we treat it as a single-piece
@@ -479,6 +490,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 
     return {
       layout: {
+        ...rest,
         block: { ...block, thicknessIn: thickness },
         stack,
         cavities: [...cavs],
@@ -491,6 +503,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   // Legacy single-layer fallback
   return {
     layout: {
+      ...rest,
       block: { ...block, thicknessIn: safeInch(block.thicknessIn ?? 1, 0.5) },
       stack: [
         {
