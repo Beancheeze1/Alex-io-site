@@ -125,7 +125,10 @@ function buildSvg(layout: LayoutLike): string {
       ? chamferIn * scale
       : 0;
 
-  const c = Math.max(0, Math.min(chamferPx, blockW / 2 - 0.01, blockH / 2 - 0.01));
+  const c = Math.max(
+    0,
+    Math.min(chamferPx, blockW / 2 - 0.01, blockH / 2 - 0.01),
+  );
 
   const blockOutline =
     c > 0.001
@@ -173,8 +176,12 @@ function buildSvg(layout: LayoutLike): string {
         const cy = y + cavH / 2;
         return `
   <g>
-    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(2)}" fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}" text-anchor="middle" dominant-baseline="middle"
+    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
+          2,
+        )}" fill="none" stroke="#111827" stroke-width="1" />
+    <text x="${cx.toFixed(2)}" y="${cy.toFixed(
+          2,
+        )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
       }
@@ -189,7 +196,9 @@ function buildSvg(layout: LayoutLike): string {
           rx="${rxy.toFixed(2)}"
           ry="${rxy.toFixed(2)}"
           fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(2)}" text-anchor="middle" dominant-baseline="middle"
+    <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
+        2,
+      )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
     })
@@ -228,6 +237,8 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
     const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
     const crop = !!layer.cropCorners;
 
+    console.log("[EXPORTS] layer", i, "cropCorners:", crop, "layout.block.cornerStyle:", layout?.block?.cornerStyle);
+
     // Build a derived "single-layer" block style for this layer.
     // If cropCorners is true, force chamfer for THIS layer only.
     const block: BlockLike = {
@@ -250,9 +261,14 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
     const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
 
     const chamferPx =
-      cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0 ? chamferIn * scale : 0;
+      cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
+        ? chamferIn * scale
+        : 0;
 
-    const c = Math.max(0, Math.min(chamferPx, blockW / 2 - 0.01, blockH / 2 - 0.01));
+    const c = Math.max(
+      0,
+      Math.min(chamferPx, blockW / 2 - 0.01, blockH / 2 - 0.01),
+    );
 
     const blockOutline =
       c > 0.001
@@ -279,7 +295,9 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
           fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
 
     const title =
-      (typeof layer.label === "string" && layer.label.trim().length > 0 ? layer.label.trim() : `Layer ${i + 1}`) +
+      (typeof layer.label === "string" && layer.label.trim().length > 0
+        ? layer.label.trim()
+        : `Layer ${i + 1}`) +
       (layer.thicknessIn != null && Number.isFinite(Number(layer.thicknessIn)) && Number(layer.thicknessIn) > 0
         ? `  (${Number(layer.thicknessIn)} in)`
         : "") +
@@ -304,8 +322,12 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
           const cy = y + cavH / 2;
           return `
   <g>
-    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(2)}" fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}" text-anchor="middle" dominant-baseline="middle"
+    <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
+            2,
+          )}" fill="none" stroke="#111827" stroke-width="1" />
+    <text x="${cx.toFixed(2)}" y="${cy.toFixed(
+            2,
+          )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
         }
@@ -320,7 +342,9 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
           rx="${rxy.toFixed(2)}"
           ry="${rxy.toFixed(2)}"
           fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(2)}" text-anchor="middle" dominant-baseline="middle"
+    <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
+          2,
+        )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
       })
@@ -328,7 +352,9 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     panels.push(`
   <g transform="translate(0, 0)">
-    <text x="${PADDING}" y="${(yOff + 18).toFixed(2)}" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
+    <text x="${PADDING}" y="${(yOff + 18).toFixed(
+      2,
+    )}" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
       font-size="14" fill="#111827">${escapeText(title)}</text>
     ${blockOutline}
     ${cavRects}
@@ -347,10 +373,6 @@ ${panels.join("\n")}
 // For per-layer exports, we separate entities onto different DXF layers:
 //   - BLOCK_L1, CAVITY_L1, BLOCK_L2, CAVITY_L2, ...
 // This is Option A.
-//
-// FIX (Path A):
-// - Add roundedRect cavity support using LINE + ARC entities.
-// - Keep existing behavior for rect + circle.
 
 function buildDxf(layout: LayoutLike): string {
   const stack = getStack(layout);
@@ -370,59 +392,6 @@ function buildDxf(layout: LayoutLike): string {
     }
     lines.push(String(code));
     lines.push(String(value));
-  }
-
-  function lineEntity(layerName: string, x1: number, y1: number, x2: number, y2: number) {
-    push(0, "LINE");
-    push(8, layerName);
-    push(10, x1);
-    push(20, y1);
-    push(30, 0);
-    push(11, x2);
-    push(21, y2);
-    push(31, 0);
-  }
-
-  function arcEntity(layerName: string, cx: number, cy: number, r: number, startDeg: number, endDeg: number) {
-    push(0, "ARC");
-    push(8, layerName);
-    push(10, cx);
-    push(20, cy);
-    push(30, 0);
-    push(40, r);
-    push(50, startDeg);
-    push(51, endDeg);
-  }
-
-  function emitRoundedRect(layerName: string, x: number, y: number, w: number, h: number, r: number) {
-    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
-    if (!(rr > 0)) {
-      // fallback: plain rect poly
-      push(0, "LWPOLYLINE");
-      push(8, layerName);
-      push(90, 4);
-      push(70, 1);
-      push(10, x); push(20, y);
-      push(10, x + w); push(20, y);
-      push(10, x + w); push(20, y + h);
-      push(10, x); push(20, y + h);
-      return;
-    }
-
-    const x2 = x + w;
-    const y2 = y + h;
-
-    // Lines
-    lineEntity(layerName, x + rr, y, x2 - rr, y);
-    lineEntity(layerName, x2, y + rr, x2, y2 - rr);
-    lineEntity(layerName, x2 - rr, y2, x + rr, y2);
-    lineEntity(layerName, x, y2 - rr, x, y + rr);
-
-    // Arcs (CCW degrees)
-    arcEntity(layerName, x2 - rr, y + rr, rr, 270, 360);
-    arcEntity(layerName, x2 - rr, y2 - rr, rr, 0, 90);
-    arcEntity(layerName, x + rr, y2 - rr, rr, 90, 180);
-    arcEntity(layerName, x + rr, y + rr, rr, 180, 270);
   }
 
   push(0, "SECTION");
@@ -466,46 +435,57 @@ function buildDxf(layout: LayoutLike): string {
   }
 
   for (const cav of cavities as CavityLike[]) {
-    const xIn = nnum(cav.x) * blkLen;
-    const yIn = nnum(cav.y) * blkWid;
     const len = nnum(cav.lengthIn);
     const wid = nnum(cav.widthIn);
 
+    // X stays the same
+    const xLeft = nnum(cav.x) * blkLen;
+
+    // Y-FLIP (match STEP): editor y is from TOP, CAD y is from BOTTOM.
+    // For rectangles: top-left at yTop = W*(1-y) - height
+    // For circles: top-left box at yTop = W*(1-y) - 2r
     if (cav.shape === "circle") {
-      const cx = xIn + len / 2;
-      const cy = yIn + wid / 2;
       const r = Math.min(len, wid) / 2;
+
+      let x = xLeft;
+      let yTop = blkWid * (1 - nnum(cav.y)) - (2 * r);
+
+      // clamp inside the block
+      x = Math.max(0, Math.min(blkLen - 2 * r, x));
+      yTop = Math.max(0, Math.min(blkWid - 2 * r, yTop));
+
+      const cx = x + r;
+      const cy = yTop + r;
+
       push(0, "CIRCLE");
       push(8, "CAVITY");
       push(10, cx);
       push(20, cy);
       push(30, 0);
       push(40, r);
-      continue;
-    }
+    } else {
+      let x = xLeft;
+      let yTop = blkWid * (1 - nnum(cav.y)) - wid;
 
-    const rRaw = cav.cornerRadiusIn;
-    const rNum = rRaw == null ? NaN : Number(rRaw);
-    const rr = Number.isFinite(rNum) && rNum > 0 ? rNum : 0;
+      // clamp inside the block
+      x = Math.max(0, Math.min(blkLen - len, x));
+      yTop = Math.max(0, Math.min(blkWid - wid, yTop));
 
-    if (cav.shape === "roundedRect" || rr > 0) {
-      emitRoundedRect("CAVITY", xIn, yIn, len, wid, rr);
-      continue;
-    }
+      const pts: [number, number][] = [
+        [x, yTop],
+        [x + len, yTop],
+        [x + len, yTop + wid],
+        [x, yTop + wid],
+      ];
 
-    const pts: [number, number][] = [
-      [xIn, yIn],
-      [xIn + len, yIn],
-      [xIn + len, yIn + wid],
-      [xIn, yIn + wid],
-    ];
-    push(0, "LWPOLYLINE");
-    push(8, "CAVITY");
-    push(90, 4);
-    push(70, 1);
-    for (const [px, py] of pts) {
-      push(10, px);
-      push(20, py);
+      push(0, "LWPOLYLINE");
+      push(8, "CAVITY");
+      push(90, 4);
+      push(70, 1);
+      for (const [px, py] of pts) {
+        push(10, px);
+        push(20, py);
+      }
     }
   }
 
@@ -532,70 +512,31 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
     lines.push(String(value));
   }
 
-  function lineEntity(layerName: string, x1: number, y1: number, x2: number, y2: number) {
-    push(0, "LINE");
-    push(8, layerName);
-    push(10, x1);
-    push(20, y1);
-    push(30, 0);
-    push(11, x2);
-    push(21, y2);
-    push(31, 0);
-  }
-
-  function arcEntity(layerName: string, cx: number, cy: number, r: number, startDeg: number, endDeg: number) {
-    push(0, "ARC");
-    push(8, layerName);
-    push(10, cx);
-    push(20, cy);
-    push(30, 0);
-    push(40, r);
-    push(50, startDeg);
-    push(51, endDeg);
-  }
-
-  function emitRoundedRect(layerName: string, x: number, y: number, w: number, h: number, r: number) {
-    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
-    if (!(rr > 0)) {
-      push(0, "LWPOLYLINE");
-      push(8, layerName);
-      push(90, 4);
-      push(70, 1);
-      push(10, x); push(20, y);
-      push(10, x + w); push(20, y);
-      push(10, x + w); push(20, y + h);
-      push(10, x); push(20, y + h);
-      return;
-    }
-
-    const x2 = x + w;
-    const y2 = y + h;
-
-    lineEntity(layerName, x + rr, y, x2 - rr, y);
-    lineEntity(layerName, x2, y + rr, x2, y2 - rr);
-    lineEntity(layerName, x2 - rr, y2, x + rr, y2);
-    lineEntity(layerName, x, y2 - rr, x, y + rr);
-
-    arcEntity(layerName, x2 - rr, y + rr, rr, 270, 360);
-    arcEntity(layerName, x2 - rr, y2 - rr, rr, 0, 90);
-    arcEntity(layerName, x + rr, y2 - rr, rr, 90, 180);
-    arcEntity(layerName, x + rr, y + rr, rr, 180, 270);
-  }
-
   push(0, "SECTION");
   push(2, "ENTITIES");
 
   const baseChamfer = Number(block?.chamferIn);
-  const chamferInDefault = Number.isFinite(baseChamfer) && baseChamfer > 0 ? baseChamfer : 1;
+  const chamferInDefault =
+    Number.isFinite(baseChamfer) && baseChamfer > 0 ? baseChamfer : 1;
+
+  // PATH A: visually stack full-package DXF layers vertically (like the SVG).
+  // DXF units are inches here (we emit raw inch dims), so use an inch gap.
+  const STACK_GAP_IN = 2; // spacing between layers in the full-package DXF
 
   for (let i = 0; i < stack.length; i++) {
     const layer = stack[i] || {};
     const layerNo = i + 1;
 
+    // Apply vertical offset per layer so they don't overlap.
+    const yOff = i * (blkWid + STACK_GAP_IN);
+
     const crop = !!layer.cropCorners;
 
     const cornerStyle = crop ? "chamfer" : "square";
-    const chamferIn = cornerStyle === "chamfer" ? chamferInDefault : 0;
+    const chamferIn =
+      cornerStyle === "chamfer"
+        ? chamferInDefault
+        : 0;
 
     const c =
       cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
@@ -605,18 +546,18 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
     const blockPts: [number, number][] =
       c > 0.0001
         ? [
-            [0, 0],
-            [blkLen - c, 0],
-            [blkLen, c],
-            [blkLen, blkWid],
-            [c, blkWid],
-            [0, blkWid - c],
+            [0, 0 + yOff],
+            [blkLen - c, 0 + yOff],
+            [blkLen, c + yOff],
+            [blkLen, blkWid + yOff],
+            [c, blkWid + yOff],
+            [0, blkWid - c + yOff],
           ]
         : [
-            [0, 0],
-            [blkLen, 0],
-            [blkLen, blkWid],
-            [0, blkWid],
+            [0, 0 + yOff],
+            [blkLen, 0 + yOff],
+            [blkLen, blkWid + yOff],
+            [0, blkWid + yOff],
           ];
 
     // BLOCK outline on BLOCK_Ln
@@ -633,7 +574,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     for (const cav of cavs) {
       const xIn = nnum(cav.x) * blkLen;
-      const yIn = nnum(cav.y) * blkWid;
+      const yIn = nnum(cav.y) * blkWid + yOff;
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
 
@@ -647,31 +588,21 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
         push(20, cy);
         push(30, 0);
         push(40, r);
-        continue;
-      }
-
-      const rRaw = cav.cornerRadiusIn;
-      const rNum = rRaw == null ? NaN : Number(rRaw);
-      const rr = Number.isFinite(rNum) && rNum > 0 ? rNum : 0;
-
-      if (cav.shape === "roundedRect" || rr > 0) {
-        emitRoundedRect(`CAVITY_L${layerNo}`, xIn, yIn, len, wid, rr);
-        continue;
-      }
-
-      const pts: [number, number][] = [
-        [xIn, yIn],
-        [xIn + len, yIn],
-        [xIn + len, yIn + wid],
-        [xIn, yIn + wid],
-      ];
-      push(0, "LWPOLYLINE");
-      push(8, `CAVITY_L${layerNo}`);
-      push(90, 4);
-      push(70, 1);
-      for (const [px, py] of pts) {
-        push(10, px);
-        push(20, py);
+      } else {
+        const pts: [number, number][] = [
+          [xIn, yIn],
+          [xIn + len, yIn],
+          [xIn + len, yIn + wid],
+          [xIn, yIn + wid],
+        ];
+        push(0, "LWPOLYLINE");
+        push(8, `CAVITY_L${layerNo}`);
+        push(90, 4);
+        push(70, 1);
+        for (const [px, py] of pts) {
+          push(10, px);
+          push(20, py);
+        }
       }
     }
   }
