@@ -5,6 +5,7 @@
 // Behavior:
 // - Loads latest layout package for the quote
 // - Slices layout_json to include ONLY the requested layer (and that layer's cavities)
+// - Forces block corner metadata based on *that layer's* crop flag (Path A fix)
 // - Calls STEP microservice via buildStepFromLayout (normalized)
 // - Returns attachment .step
 //
@@ -39,8 +40,8 @@ function sliceLayoutToSingleLayer(layout: any, layerIndex: number): any {
   const out: any = { ...(layout || {}) };
 
   // Prefer stack if present, else mirror the container that exists.
-  if (Array.isArray(layout.stack)) out.stack = [layer];
-  else out.stack = [layer];
+  // (Keep Path A: always ensure stack exists since step normalizer keys off stack.)
+  out.stack = [layer];
 
   // Keep other potential containers consistent (harmless if ignored)
   if (Array.isArray(layout.layers)) out.layers = [layer];
@@ -50,6 +51,62 @@ function sliceLayoutToSingleLayer(layout: any, layerIndex: number): any {
   out.__mode = "layer";
 
   return out;
+}
+
+/**
+ * PATH A:
+ * The STEP normalizer/microservice currently honors ONLY block.cornerStyle/chamferIn.
+ * The editor stores cropping per-layer (common), so per-layer STEP exports were
+ * defaulting to square.
+ *
+ * Fix:
+ * For a single-layer slice, force block corner metadata to match that layer’s crop flag.
+ */
+function coerceLayerCropToBlockCorners(slicedLayout: any) {
+  if (!slicedLayout || typeof slicedLayout !== "object") return;
+
+  const layers = getLayers(slicedLayout);
+  const layer = layers[0];
+  if (!layer) return;
+
+  // Layer crop may be stored under different keys across revisions.
+  const cropFlag =
+    layer.cropCorners ??
+    layer.croppedCorners ??
+    layer.crop_corners ??
+    layer.cropped_corners ??
+    null;
+
+  // Some codepaths may store an explicit style.
+  const layerCornerStyleRaw =
+    typeof layer.cornerStyle === "string" ? layer.cornerStyle.trim().toLowerCase() : "";
+  const layerCornerStyle =
+    layerCornerStyleRaw === "chamfer" || layerCornerStyleRaw === "square"
+      ? layerCornerStyleRaw
+      : null;
+
+  const wantsChamfer =
+    layerCornerStyle === "chamfer" ? true : layerCornerStyle === "square" ? false : !!cropFlag;
+
+  // Ensure block exists (it should in saved layouts, but keep defensive).
+  if (!slicedLayout.block || typeof slicedLayout.block !== "object") slicedLayout.block = {};
+
+  slicedLayout.block.cornerStyle = wantsChamfer ? "chamfer" : "square";
+
+  // If chamfer is desired and chamferIn is missing, default to 1 inch
+  // (matches our established “two-corner chamfer” behavior in exports).
+  const existingChamfer =
+    slicedLayout.block.chamferIn ?? slicedLayout.block.chamfer_in ?? null;
+
+  if (wantsChamfer) {
+    const n = Number(existingChamfer);
+    if (!Number.isFinite(n) || n <= 0) {
+      slicedLayout.block.chamferIn = 1;
+    } else {
+      // normalize to chamferIn key so the step normalizer can pass it through
+      slicedLayout.block.chamferIn = n;
+    }
+  }
 }
 
 export async function GET(req: Request) {
@@ -83,6 +140,9 @@ export async function GET(req: Request) {
 
     const sliced = sliceLayoutToSingleLayer(pkg.layout_json, layer_index);
     if (!sliced) return jsonErr(404, "NOT_FOUND", "Layer not found for this quote layout.");
+
+    // ✅ Path A fix: force block corner metadata from this layer’s crop flag
+    coerceLayerCropToBlockCorners(sliced);
 
     const stepText = await buildStepFromLayout(sliced, quote_no, null);
     if (!stepText || stepText.trim().length === 0) {
