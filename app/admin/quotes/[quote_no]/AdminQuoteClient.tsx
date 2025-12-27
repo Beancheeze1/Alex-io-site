@@ -2279,7 +2279,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                         </div>
                       </div>
 
-                      <div style={{ textAlign: "right", fontSize: 12, minWidth: 320 }}>
+                     {/*} <div style={{ textAlign: "right", fontSize: 12, minWidth: 320 }}>
                         <div style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280" }}>Full Package</div>
 
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
@@ -2363,6 +2363,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                           {zipError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {zipError}</span>}
                         </div>
                       </div>
+                      */}
                     </div>
 
                     {/* Per-layer previews + buttons */}
