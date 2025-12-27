@@ -937,6 +937,8 @@ function LayoutEditorHost(props: {
 
   const {
     layout,
+    editorMode,
+    setEditorMode,
     selectedId,
     activeLayerId,
     selectCavity,
@@ -1866,8 +1868,40 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                   </div>
                 </div>
 
-                {/* RIGHT: BETA pill */}
-                <div className="flex items-center justify-end">
+                {/* RIGHT: mode toggle + BETA pill */}
+                <div className="flex items-center justify-end gap-2">
+                  <div className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-900/35 p-0.5 text-[11px] font-medium text-sky-50 shadow-[0_0_10px_rgba(15,23,42,0.65)]">
+                    <span className="px-2 py-1 text-sky-100/80">Mode</span>
+                    <button
+                      type="button"
+                      onClick={() => setEditorMode("basic")}
+                      className={
+                        "rounded-full px-2.5 py-1 transition " +
+                        (editorMode === "basic"
+                          ? "bg-sky-500/25 text-sky-50 ring-1 ring-sky-300/50"
+                          : "text-sky-100/75 hover:text-sky-50 hover:bg-slate-800/40")
+                      }
+                      aria-pressed={editorMode === "basic"}
+                      title="Basic editor (default)"
+                    >
+                      Basic
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditorMode("advanced")}
+                      className={
+                        "rounded-full px-2.5 py-1 transition " +
+                        (editorMode === "advanced"
+                          ? "bg-amber-500/20 text-amber-50 ring-1 ring-amber-300/45"
+                          : "text-sky-100/75 hover:text-sky-50 hover:bg-slate-800/40")
+                      }
+                      aria-pressed={editorMode === "advanced"}
+                      title="Advanced editor (opt-in)"
+                    >
+                      Advanced
+                    </button>
+                  </div>
+
                   <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
                     Layout editor · BETA

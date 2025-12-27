@@ -37,10 +37,18 @@ type LayoutState = {
 
 export type UseLayoutModelResult = {
   layout: LayoutModel & { stack: LayoutLayer[] };
+
+  // NEW (Path A): current editor mode (derived from layout.editorMode; defaults to "basic")
+  editorMode: "basic" | "advanced";
+
   selectedId: string | null;
   activeLayerId: string;
   selectCavity: (id: string | null) => void;
   setActiveLayerId: (id: string) => void;
+
+  // NEW (Path A): editor mode (persisted in layout JSON)
+  setEditorMode: (mode: "basic" | "advanced") => void;
+
 
   // NEW (Path A): per-layer cropped-corner toggle
   setLayerCropCorners: (layerId: string, cropCorners: boolean) => void;
@@ -99,7 +107,19 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
       };
     });
     setSelectedId(null);
+  }, [])
+
+  // NEW (Path A): editor mode persisted in layout JSON (defaults to "basic" when missing)
+  const setEditorMode = useCallback((mode: "basic" | "advanced") => {
+    setState((prev) => ({
+      ...prev,
+      layout: {
+        ...prev.layout,
+        editorMode: mode,
+      },
+    }));
   }, []);
+;
 
   // NEW (Path A): set per-layer crop-corners flag
   const setLayerCropCorners = useCallback(
@@ -328,12 +348,18 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   }, []);
 
   return {
-    layout,
-    selectedId,
-    activeLayerId,
-    selectCavity,
-    setActiveLayerId,
-    setLayerCropCorners,
+  layout,
+
+  // NEW (Path A): expose current editor mode for the UI toggle
+  editorMode: layout.editorMode ?? "basic",
+
+  selectedId,
+  activeLayerId,
+  selectCavity,
+  setActiveLayerId,
+  setEditorMode,
+  setLayerCropCorners,
+
     updateCavityPosition,
     updateBlockDims,
     updateCavityDims,
@@ -349,6 +375,8 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
 function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   const block = { ...initial.block };
+
+  const editorMode: "basic" | "advanced" = (initial as any).editorMode === "advanced" ? "advanced" : "basic";
 
   // Trust pre-existing stack fully
   if (Array.isArray((initial as any).stack) && (initial as any).stack.length) {
@@ -414,6 +442,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         },
         stack,
         cavities: [...mirrored],
+        editorMode,
       },
       activeLayerId: active.id,
     };
@@ -453,6 +482,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         block: { ...block, thicknessIn: thickness },
         stack,
         cavities: [...cavs],
+        editorMode,
       },
       activeLayerId: "layer-1",
     };
@@ -472,6 +502,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         },
       ],
       cavities: [],
+      editorMode,
     },
     activeLayerId: "layer-1",
   };

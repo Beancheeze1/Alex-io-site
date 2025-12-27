@@ -61,7 +61,16 @@ export type LayoutLayer = {
 };
 
 export type LayoutModel = {
-  block: BlockDims;
+  
+  /**
+   * Editor mode for the layout editor UI.
+   *
+   * - Optional for backward compatibility with previously saved layouts.
+   * - When missing, treat as "basic".
+   * - Persistence-only for now; MUST NOT change behavior yet.
+   */
+  editorMode?: "basic" | "advanced";
+block: BlockDims;
 
   /**
    * Legacy single-layer cavities.
