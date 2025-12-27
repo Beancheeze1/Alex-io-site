@@ -519,6 +519,11 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
   const chamferInDefault =
     Number.isFinite(baseChamfer) && baseChamfer > 0 ? baseChamfer : 1;
 
+      // Vertical stacking (match stacked SVG)
+  const layerGap = 1; // inches
+  const layerPitch = blkWid + layerGap; // inches
+
+
   // PATH A: visually stack full-package DXF layers vertically (like the SVG).
   // DXF units are inches here (we emit raw inch dims), so use an inch gap.
   const STACK_GAP_IN = 2; // spacing between layers in the full-package DXF
@@ -526,9 +531,11 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
   for (let i = 0; i < stack.length; i++) {
     const layer = stack[i] || {};
     const layerNo = i + 1;
+        const yOff = i * layerPitch;
+
 
     // Apply vertical offset per layer so they don't overlap.
-    const yOff = i * (blkWid + STACK_GAP_IN);
+    
 
     const crop = !!layer.cropCorners;
 
@@ -565,36 +572,47 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
     push(8, `BLOCK_L${layerNo}`);
     push(90, blockPts.length);
     push(70, 1);
+    
     for (const [x, y] of blockPts) {
       push(10, x);
-      push(20, y);
+      push(20, y + yOff);
     }
 
     const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
 
     for (const cav of cavs) {
-      const xIn = nnum(cav.x) * blkLen;
-      const yIn = nnum(cav.y) * blkWid + yOff;
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
 
+      const xLeft = nnum(cav.x) * blkLen;
+
       if (cav.shape === "circle") {
-        const cx = xIn + len / 2;
-        const cy = yIn + wid / 2;
         const r = Math.min(len, wid) / 2;
-        push(0, "CIRCLE");
-        push(8, `CAVITY_L${layerNo}`);
-        push(10, cx);
-        push(20, cy);
-        push(30, 0);
-        push(40, r);
+
+        let x = xLeft;
+        let yTop = blkWid * (1 - nnum(cav.y)) - (2 * r);
+
+        x = Math.max(0, Math.min(blkLen - 2 * r, x));
+        yTop = Math.max(0, Math.min(blkWid - 2 * r, yTop));
+
+        const cx = x + r;
+        const cy = (yTop + r) + yOff;
+
+        // push circle...
       } else {
+        let x = xLeft;
+        let yTop = blkWid * (1 - nnum(cav.y)) - wid;
+
+        x = Math.max(0, Math.min(blkLen - len, x));
+        yTop = Math.max(0, Math.min(blkWid - wid, yTop));
+
         const pts: [number, number][] = [
-          [xIn, yIn],
-          [xIn + len, yIn],
-          [xIn + len, yIn + wid],
-          [xIn, yIn + wid],
+          [x, yTop + yOff],
+          [x + len, yTop + yOff],
+          [x + len, yTop + wid + yOff],
+          [x, yTop + wid + yOff],
         ];
+
         push(0, "LWPOLYLINE");
         push(8, `CAVITY_L${layerNo}`);
         push(90, 4);
@@ -604,6 +622,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
           push(20, py);
         }
       }
+
     }
   }
 
