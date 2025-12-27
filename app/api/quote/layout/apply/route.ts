@@ -45,6 +45,8 @@ import { one, q } from "@/lib/db";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { buildStepFromLayout } from "@/lib/cad/step";
+import { buildLayoutExports } from "@/app/lib/layout/exports";
+
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -204,20 +206,8 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     next.layers = normalizeLayerArray((layout as any).layers);
   }
 
-  const hasLayers =
-  (Array.isArray((next as any).stack) && (next as any).stack.length > 0) ||
-  (Array.isArray((next as any).layers) && (next as any).layers.length > 0);
-
-
   // ✅ normalize corner intent for exports (backward compatible)
-  if (
-  !hasLayers &&
-  next &&
-  typeof next === "object" &&
-  next.block &&
-  typeof next.block === "object"
-) {
-
+  if (next && typeof next === "object" && next.block && typeof next.block === "object") {
     const b: any = next.block;
 
     const cornerStyle = b.cornerStyle ?? b.corner_style ?? null;
@@ -228,7 +218,6 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     if (rawChamfer != null && Number.isFinite(chamferNum) && chamferNum >= 0) {
       b.chamferIn = chamferNum;
     }
-    
 
     // If NEW cornerStyle says chamfer, ensure legacy boolean exists too
     if (cornerStyle === "chamfer" && croppedLegacy == null) {
@@ -241,23 +230,7 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     }
   }
 
-   // HARD CLAMP: block-level crop is invalid once layers exist (layer crop is authoritative)
-  const hasLayersForClamp =
-
-    (Array.isArray((next as any).stack) && (next as any).stack.length > 0) ||
-    (Array.isArray((next as any).layers) && (next as any).layers.length > 0);
-
- if (hasLayersForClamp && next?.block && typeof (next as any).block === "object") {
-
-    (next as any).block.cornerStyle = "square";
-    (next as any).block.croppedCorners = false;
-    delete (next as any).block.cropped_corners;
-    delete (next as any).block.corner_style;
-    delete (next as any).block.croppedCorners;
-  }
-
   return next;
-
 }
 
 /* ===================== NEW: ensure primary quote_items exists ===================== */
@@ -946,17 +919,11 @@ export async function POST(req: NextRequest) {
   const layout = body.layout;
 
   const layoutForSave = normalizeLayoutForStorage(layout, body);
-
+  // Build canonical exports from the normalized layout.
+  // IMPORTANT: This must honor per-layer cropCorners regardless of active layer.
+  const bundle = buildLayoutExports(layoutForSave);
   const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
   const svgRaw = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
-
-  console.log("[APPLY] active-layer SVG provided?", !!svgRaw);
-console.log("[APPLY] block.cornerStyle:", layout?.block?.cornerStyle, "block.croppedCorners:", layout?.block?.croppedCorners);
-console.log(
-  "[APPLY] stack cropCorners:",
-  Array.isArray(layout?.stack) ? layout.stack.map((l: any, i: number) => ({ i, cropCorners: !!l?.cropCorners, label: l?.label })) : null
-);
-
 
   // ✅ Server-enforced chamfer (fixes broken client checkbox)
   const svgFixed = enforceChamferedBlockInSvg(svgRaw, layoutForSave);
@@ -1150,13 +1117,14 @@ console.log(
       }
     }
 
-    // ✅ Use server-fixed SVG for DXF+SVG storage
-    const dxfFromSvg = buildDxfFromSvg(svgFixed);
-    const dxf = dxfFromSvg ?? buildDxfFromLayout(layoutForSave);
+    // ✅ Canonical exports MUST come from buildLayoutExports(layoutForSave)
+    // so per-layer cropCorners is honored regardless of which layer was active.
+    const dxf = bundle?.dxf ?? buildDxfFromSvg(svgFixed) ?? buildDxfFromLayout(layoutForSave);
 
     const step = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
 
-    const svgAnnotated = buildSvgWithAnnotations(layoutForSave, svgFixed, materialLegend ?? null, quoteNo);
+    const svgBase = bundle?.svg ?? svgFixed;
+    const svgAnnotated = buildSvgWithAnnotations(layoutForSave, svgBase, materialLegend ?? null, quoteNo);
 
     const pkg = await one<LayoutPkgRow>(
       `

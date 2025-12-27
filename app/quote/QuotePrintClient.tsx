@@ -475,14 +475,31 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
   const strokeWidth = Math.max(0.04, Math.min(L, W) / 250);
   const cavStrokeWidth = Math.max(0.03, Math.min(L, W) / 300);
 
-  // Block outline: honor persisted corner metadata when present.
-  const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
-  const chamferInRaw = block.chamferIn;
-  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
-  const chamfer =
-    cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
-      ? Math.max(0, Math.min(chamferIn, L / 2 - 1e-6, W / 2 - 1e-6))
-      : 0;
+  // Block outline:
+  // - If we have multi-layer data, each layer owns its own cropCorners flag.
+  // - Otherwise, fall back to legacy block.cornerStyle/croppedCorners.
+  const layersArr: any[] | null = Array.isArray(layout?.stack)
+    ? layout.stack
+    : Array.isArray(layout?.layers)
+      ? layout.layers
+      : null;
+
+  const hasLayers = Array.isArray(layersArr) && layersArr.length > 0;
+  const layer = hasLayers ? layersArr![layerIndex] : null;
+  const layerCrop = !!(layer?.cropCorners ?? layer?.crop_corners ?? layer?.croppedCorners ?? layer?.cropped_corners);
+
+  const cornerStyle = String(block.cornerStyle ?? block.corner_style ?? "").toLowerCase();
+  const croppedLegacy = !!(block.croppedCorners ?? block.cropped_corners);
+
+  const wantsChamfer = hasLayers ? layerCrop : cornerStyle === "chamfer" || croppedLegacy;
+
+  const chamferInRaw = block.chamferIn ?? block.chamfer_in;
+  const chamferInNum = chamferInRaw == null ? 0 : Number(chamferInRaw);
+  const chamferBase = Number.isFinite(chamferInNum) && chamferInNum > 0 ? chamferInNum : 1;
+
+  const chamfer = wantsChamfer
+    ? Math.max(0, Math.min(chamferBase, L / 2 - 1e-6, W / 2 - 1e-6))
+    : 0;
 
  const blockOutline =
   chamfer > 0.0001
