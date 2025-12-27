@@ -1213,6 +1213,10 @@ function LayoutEditorHost(props: {
   };
 
   const [zoom, setZoom] = React.useState(1);
+  
+  
+
+
 
    // Crop corners is PER-LAYER (active layer).
   // Each layer can independently enable the 1" crop on export.
@@ -1531,6 +1535,147 @@ function LayoutEditorHost(props: {
 
     updateCavityPosition(selectedCavity.id, xNorm, yNorm);
   };
+
+    const clamp = (v: number, min: number, max: number) =>
+    v < min ? min : v > max ? max : v;
+
+  const nudgeSelected = React.useCallback(
+    (dxIn: number, dyIn: number) => {
+      if (!selectedCavity) return;
+
+      const len = Number(selectedCavity.lengthIn) || 0;
+      const wid = Number(selectedCavity.widthIn) || 0;
+
+      if (!block.lengthIn || !block.widthIn || !len || !wid) return;
+
+      const curXIn = (Number(selectedCavity.x) || 0) * block.lengthIn;
+      const curYIn = (Number(selectedCavity.y) || 0) * block.widthIn;
+
+      let nextXIn = snapInches(curXIn + dxIn);
+      let nextYIn = snapInches(curYIn + dyIn);
+
+      const minXIn = WALL_IN;
+      const maxXIn = block.lengthIn - WALL_IN - len;
+      const minYIn = WALL_IN;
+      const maxYIn = block.widthIn - WALL_IN - wid;
+
+      nextXIn = clamp(nextXIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+      nextYIn = clamp(nextYIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+      updateCavityPosition(
+        selectedCavity.id,
+        nextXIn / block.lengthIn,
+        nextYIn / block.widthIn,
+      );
+    },
+    [selectedCavity, block.lengthIn, block.widthIn, updateCavityPosition],
+  );
+
+  const alignSelected = React.useCallback(
+    (mode: "left" | "right" | "top" | "bottom" | "centerX" | "centerY") => {
+      if (!selectedCavity) return;
+
+      const len = Number(selectedCavity.lengthIn) || 0;
+      const wid = Number(selectedCavity.widthIn) || 0;
+
+      if (!block.lengthIn || !block.widthIn || !len || !wid) return;
+
+      const curXIn = (Number(selectedCavity.x) || 0) * block.lengthIn;
+      const curYIn = (Number(selectedCavity.y) || 0) * block.widthIn;
+
+      let nextXIn = curXIn;
+      let nextYIn = curYIn;
+
+      if (mode === "left") nextXIn = WALL_IN;
+      if (mode === "right") nextXIn = block.lengthIn - WALL_IN - len;
+      if (mode === "top") nextYIn = WALL_IN;
+      if (mode === "bottom") nextYIn = block.widthIn - WALL_IN - wid;
+      if (mode === "centerX") nextXIn = (block.lengthIn - len) / 2;
+      if (mode === "centerY") nextYIn = (block.widthIn - wid) / 2;
+
+      nextXIn = snapInches(nextXIn);
+      nextYIn = snapInches(nextYIn);
+
+      const minXIn = WALL_IN;
+      const maxXIn = block.lengthIn - WALL_IN - len;
+      const minYIn = WALL_IN;
+      const maxYIn = block.widthIn - WALL_IN - wid;
+
+      nextXIn = clamp(nextXIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+      nextYIn = clamp(nextYIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
+      updateCavityPosition(
+        selectedCavity.id,
+        nextXIn / block.lengthIn,
+        nextYIn / block.widthIn,
+      );
+    },
+    [selectedCavity, block.lengthIn, block.widthIn, updateCavityPosition],
+  );
+
+  const duplicateSelected = React.useCallback(() => {
+    if (!selectedCavity) return;
+
+    const shape = selectedCavity.shape as any;
+
+    if (shape === "circle") {
+      addCavity("circle", {
+        lengthIn: Number(selectedCavity.lengthIn) || 3,
+        widthIn: Number(selectedCavity.widthIn) || 3,
+        depthIn: Number(selectedCavity.depthIn) || 2,
+      });
+      return;
+    }
+
+    if (shape === "roundedRect") {
+      addCavity("roundedRect", {
+        lengthIn: Number(selectedCavity.lengthIn) || 4,
+        widthIn: Number(selectedCavity.widthIn) || 3,
+        depthIn: Number(selectedCavity.depthIn) || 2,
+        cornerRadiusIn: Number((selectedCavity as any).cornerRadiusIn) || 0.5,
+      });
+      return;
+    }
+
+    addCavity("rect", {
+      lengthIn: Number(selectedCavity.lengthIn) || 4,
+      widthIn: Number(selectedCavity.widthIn) || 2,
+      depthIn: Number(selectedCavity.depthIn) || 2,
+    });
+  }, [selectedCavity, addCavity]);
+
+
+  React.useEffect(() => {
+    if (editorMode !== "advanced") return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Don’t steal keys while typing in inputs/textareas
+      const tag = (e.target as any)?.tagName?.toLowerCase?.() || "";
+      if (tag === "input" || tag === "textarea" || (e.target as any)?.isContentEditable) return;
+
+      if (!selectedCavity) return;
+
+      const step = e.shiftKey ? 1.0 : SNAP_IN;
+
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        nudgeSelected(-step, 0);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        nudgeSelected(step, 0);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        nudgeSelected(0, -step);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        nudgeSelected(0, step);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editorMode, selectedCavity, nudgeSelected]);
+
 
   /* ---------- Foam Advisor navigation ---------- */
 
@@ -2042,31 +2187,91 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
 {editorMode === "advanced" && (
   <div className="mb-2 rounded-xl border border-amber-400/40 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-50/90">
     <div className="flex items-center justify-between gap-2">
-      <div className="font-semibold text-amber-50">Advanced tools (coming soon)</div>
+      <div className="font-semibold text-amber-50">Advanced tools</div>
       <span className="rounded-full border border-amber-300/30 bg-slate-950/40 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-amber-100/80">
-        Preview
+        Live
       </span>
     </div>
+
     <div className="mt-1 text-amber-100/70">
-      Foundation for compound cavities, overlapping primitives, snapping &amp; alignment tools.
+      Select a cavity, then use Align / Duplicate, or nudge with <span className="font-semibold">Arrow keys</span>
+      (Shift = 1&quot;).
     </div>
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {[
-        "Compound cavities",
-        "Overlaps / boolean ops",
-        "Snapping",
-        "Align tools",
-      ].map((label) => (
-        <span
-          key={label}
-          className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-0.5 text-[10px] text-slate-200 opacity-70"
-        >
-          {label}
-        </span>
-      ))}
+
+    <div className="mt-2 grid grid-cols-2 gap-2">
+      <button
+        type="button"
+        onClick={duplicateSelected}
+        disabled={!selectedCavity}
+        className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+      >
+        Duplicate selected
+      </button>
+
+      <button
+        type="button"
+        onClick={handleCenterSelectedCavity}
+        disabled={!selectedCavity}
+        className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+      >
+        Center in block
+      </button>
+    </div>
+
+    <div className="mt-2 grid grid-cols-3 gap-1.5">
+      <button
+        type="button"
+        onClick={() => alignSelected("left")}
+        disabled={!selectedCavity}
+        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+      >
+        Align Left
+      </button>
+      <button
+        type="button"
+        onClick={() => alignSelected("centerX")}
+        disabled={!selectedCavity}
+        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+      >
+        Center X
+      </button>
+      <button
+        type="button"
+        onClick={() => alignSelected("right")}
+        disabled={!selectedCavity}
+        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+      >
+        Align Right
+      </button>
+
+      <button
+        type="button"
+        onClick={() => alignSelected("top")}
+        disabled={!selectedCavity}
+        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+      >
+        Align Top
+      </button>
+      <button
+        type="button"
+        onClick={() => alignSelected("centerY")}
+        disabled={!selectedCavity}
+        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+      >
+        Center Y
+      </button>
+      <button
+        type="button"
+        onClick={() => alignSelected("bottom")}
+        disabled={!selectedCavity}
+        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+      >
+        Align Bottom
+      </button>
     </div>
   </div>
 )}
+
 
                   <div className="flex flex-wrap items-center gap-2">
                     <button
