@@ -542,16 +542,39 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
 
   const entities: string[] = [];
 
-  // Block outline: honor persisted corner metadata (chamfer) when present.
-  const cornerStyle = String((layout as any)?.block?.cornerStyle ?? "").toLowerCase();
-  const chamferInRaw = (layout as any)?.block?.chamferIn;
-  const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
+ // Block outline: per-layer crop flag wins when a stack exists.
+// Legacy single-layer falls back to block.cornerStyle / croppedCorners.
+const stackArr: any[] | null = Array.isArray((layout as any)?.stack)
+  ? ((layout as any).stack as any[])
+  : Array.isArray((layout as any)?.layers)
+    ? ((layout as any).layers as any[])
+    : null;
 
-  // chamfer is in inches, so scale it to match our scaled L/W
-  const chamferScaled =
-    cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
-      ? Math.max(0, Math.min(chamferIn * scale, L / 2 - 1e-6, W / 2 - 1e-6))
-      : 0;
+const hasLayers = Array.isArray(stackArr) && stackArr.length > 0;
+const layer = hasLayers ? stackArr![layerIndex] : null;
+
+const layerCrop = !!(
+  layer?.cropCorners ??
+  layer?.croppedCorners ??
+  layer?.cropped_corners ??
+  layer?.cornerStyle === "chamfer"
+);
+
+const cornerStyleLegacy = String((layout as any)?.block?.cornerStyle ?? (layout as any)?.block?.corner_style ?? "").toLowerCase();
+const croppedLegacy = !!((layout as any)?.block?.croppedCorners ?? (layout as any)?.block?.cropped_corners);
+
+const wantsChamfer = hasLayers ? layerCrop : cornerStyleLegacy === "chamfer" || croppedLegacy;
+
+const chamferInRaw = (layout as any)?.block?.chamferIn ?? (layout as any)?.block?.chamfer_in;
+const chamferInNum = chamferInRaw == null ? NaN : Number(chamferInRaw);
+const chamferIn = Number.isFinite(chamferInNum) && chamferInNum > 0 ? chamferInNum : 1;
+
+// chamfer is in inches, so scale it to match our scaled L/W
+const chamferScaled =
+  wantsChamfer
+    ? Math.max(0, Math.min(chamferIn * scale, L / 2 - 1e-6, W / 2 - 1e-6))
+    : 0;
+
 
   if (chamferScaled > 0.0001) {
     const c = chamferScaled;
