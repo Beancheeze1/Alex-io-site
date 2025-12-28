@@ -2534,6 +2534,21 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                               </button>
               )}
 
+              {editorMode === "basic" && (
+  <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-[11px] text-slate-400">
+    Need rounded pockets? Switch to{" "}
+    <button
+      type="button"
+      onClick={() => setEditorMode("advanced")}
+      className="font-semibold text-amber-200 hover:text-amber-100 underline underline-offset-2"
+    >
+      Advanced
+    </button>
+    .
+  </div>
+)}
+
+
                 {/* Foam material (in left bar) */}
                 <div className="mt-2">
                   <div className="text-xs font-semibold text-slate-100 mb-1">Foam material</div>
