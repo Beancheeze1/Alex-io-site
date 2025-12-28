@@ -1254,6 +1254,58 @@ function LayoutEditorHost(props: {
 
   const [zoom, setZoom] = React.useState(1);
 
+    // --- Block dimension inputs (type freely, commit on Enter/Blur; snap to 0.125) ---
+  const [blockInputs, setBlockInputs] = React.useState<{ length: string; width: string }>(() => ({
+    length: block.lengthIn != null ? String(block.lengthIn) : "",
+    width: block.widthIn != null ? String(block.widthIn) : "",
+  }));
+
+  // Keep the input boxes in sync when block dims change from elsewhere (buttons/arrows/apply)
+  React.useEffect(() => {
+    setBlockInputs({
+      length: block.lengthIn != null ? String(block.lengthIn) : "",
+      width: block.widthIn != null ? String(block.widthIn) : "",
+    });
+  }, [block.lengthIn, block.widthIn]);
+
+  const commitBlockDimField = React.useCallback(
+    (field: "length" | "width") => {
+      const raw = (blockInputs[field] ?? "").trim();
+
+      // If user leaves it blank (or invalid), revert to current model value
+      const revert = () => {
+        setBlockInputs({
+          length: block.lengthIn != null ? String(block.lengthIn) : "",
+          width: block.widthIn != null ? String(block.widthIn) : "",
+        });
+      };
+
+      if (!raw) {
+        revert();
+        return;
+      }
+
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        revert();
+        return;
+      }
+
+      const snapped = snapInches(parsed); // SNAP_IN = 0.125
+      if (!Number.isFinite(snapped) || snapped <= 0) {
+        revert();
+        return;
+      }
+
+      if (field === "length") updateBlockDims({ lengthIn: snapped });
+      else updateBlockDims({ widthIn: snapped });
+
+      setBlockInputs((prev) => ({ ...prev, [field]: String(snapped) }));
+    },
+    [blockInputs, block.lengthIn, block.widthIn, updateBlockDims],
+  );
+
+
   // Crop corners is PER-LAYER (active layer).
   // Each layer can independently enable the 1" crop on export.
   const croppedCorners = !!(activeLayer as any)?.cropCorners;
@@ -2187,28 +2239,40 @@ function LayoutEditorHost(props: {
                     <label className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-slate-400">Length (in)</span>
                       <input
-                        type="number"
-                        step={0.125}
-                        value={block.lengthIn}
-                        onChange={(e) => {
-                          const snapped = snapInches(Number(e.target.value));
-                          updateBlockDims({ lengthIn: snapped });
-                        }}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                      />
+  type="number"
+  step={0.125}
+  value={blockInputs.length}
+  onChange={(e) => setBlockInputs((prev) => ({ ...prev, length: e.target.value }))}
+  onBlur={() => commitBlockDimField("length")}
+  onKeyDown={(e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitBlockDimField("length");
+      (e.currentTarget as HTMLInputElement).blur();
+    }
+  }}
+  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+/>
+
                     </label>
                     <label className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-slate-400">Width (in)</span>
                       <input
-                        type="number"
-                        step={0.125}
-                        value={block.widthIn}
-                        onChange={(e) => {
-                          const snapped = snapInches(Number(e.target.value));
-                          updateBlockDims({ widthIn: snapped });
-                        }}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
-                      />
+  type="number"
+  step={0.125}
+  value={blockInputs.width}
+  onChange={(e) => setBlockInputs((prev) => ({ ...prev, width: e.target.value }))}
+  onBlur={() => commitBlockDimField("width")}
+  onKeyDown={(e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitBlockDimField("width");
+      (e.currentTarget as HTMLInputElement).blur();
+    }
+  }}
+  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+/>
+
                     </label>
                     <label className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-slate-400">Active layer thick (in)</span>
