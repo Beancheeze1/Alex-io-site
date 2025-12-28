@@ -878,45 +878,91 @@ export default function LayoutPage({
     materialIdFromUrl,
   ]);
 
-  // PATH-A FIX: Do NOT early-return while booting.
-  // Early return unmounts LayoutEditorHost, which resets useLayoutModel() state (selection not sticky).
-  const isBooting = loadingLayout || !initialLayout;
-
-  // Boot layout used ONLY for first mount; once DB layout arrives, LayoutEditorHost will hydrate via replaceLayout().
-  const bootLayout = React.useMemo(() => {
-    return initialLayout ?? buildFallbackLayout(serverBlockStr, serverCavityStr, layersInfo, perLayerCavityStrs);
-  }, [initialLayout, buildFallbackLayout, serverBlockStr, serverCavityStr, layersInfo, perLayerCavityStrs]);
+  if (loadingLayout || !initialLayout) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.12),transparent_60%)]">
+        <div className="rounded-xl border border-slate-800/80 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-[0_18px_45px_rgba(15,23,42,0.9)]">
+          Loading layout preview&hellip;
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <>
-      <div style={{ display: isBooting ? "none" : "block" }}>
-        <LayoutEditorHost
-          quoteNo={quoteNo}
-          hasRealQuoteNo={hasRealQuoteNo}
-          initialLayout={bootLayout}
-          hydratedLayout={initialLayout}
-          loadingLayout={loadingLayout}
-          initialNotes={initialNotes}
-          initialQty={initialQty}
-          initialMaterialId={initialMaterialId}
-          initialCustomerName={initialCustomerName}
-          initialCustomerEmail={initialCustomerEmail}
-          initialCustomerCompany={initialCustomerCompany}
-          initialCustomerPhone={initialCustomerPhone}
-        />
-      </div>
-
-      {isBooting && (
-        <main className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100 [background-image:radial-gradient(circle_at_bottom,_rgba(37,99,235,0.12),transparent_60%)]">
-          <div className="rounded-xl border border-slate-800/60 bg-slate-900/40 px-5 py-4 text-sm text-slate-200 shadow-[0_18px_45px_rgba(15,23,42,0.9)]">
-            Loading layout preview&hellip;
-          </div>
-        </main>
-      )}
-    </>
+    <LayoutEditorHost
+      quoteNo={quoteNo}
+      hasRealQuoteNo={hasRealQuoteNo}
+      initialLayout={initialLayout}
+      initialNotes={initialNotes}
+      initialQty={initialQty}
+      initialMaterialId={initialMaterialId}
+      initialCustomerName={initialCustomerName}
+      initialCustomerEmail={initialCustomerEmail}
+      initialCustomerCompany={initialCustomerCompany}
+      initialCustomerPhone={initialCustomerPhone}
+    />
   );
+}
 
-[];
+const CAVITY_COLORS = ["#38bdf8", "#a855f7", "#f97316", "#22c55e", "#eab308", "#ec4899"];
+
+/* ---------- Layout editor host (main body) ---------- */
+
+function LayoutEditorHost(props: {
+  quoteNo: string;
+  hasRealQuoteNo: boolean;
+  initialLayout: LayoutModel;
+  initialNotes: string;
+  initialQty: number | null;
+  initialMaterialId: number | null;
+  initialCustomerName: string;
+  initialCustomerEmail: string;
+  initialCustomerCompany: string;
+  initialCustomerPhone: string;
+}) {
+  const {
+    quoteNo,
+    hasRealQuoteNo,
+    initialLayout,
+    initialNotes,
+    initialQty,
+    initialMaterialId,
+    initialCustomerName,
+    initialCustomerEmail,
+    initialCustomerCompany,
+    initialCustomerPhone,
+  } = props;
+
+  const router = useRouter();
+
+  const {
+    layout,
+    editorMode,
+    setEditorMode,
+    selectedIds,
+    selectedId,
+    activeLayerId,
+    selectCavity,
+    setActiveLayerId,
+    setLayerCropCorners,
+    updateCavityPosition,
+    updateBlockDims,
+    updateCavityDims,
+    addCavity,
+    deleteCavity,
+    addLayer,
+    renameLayer,
+    deleteLayer,
+  } = useLayoutModel(initialLayout);
+  
+
+  const { block, cavities, stack } = layout as LayoutModel & {
+    stack?: {
+      id: string;
+      label: string;
+      cavities: any[];
+      thicknessIn?: number;
+    }[];
   };
 
   const blockThicknessIn = Number(block.thicknessIn) || 0;

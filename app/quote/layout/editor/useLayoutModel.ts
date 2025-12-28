@@ -35,6 +35,8 @@ import type {
   LayoutLayer,
 } from "./layoutTypes";
 
+/* ================= state ================= */
+
 type LayoutState = {
   layout: LayoutModel & { stack: LayoutLayer[] };
   activeLayerId: string;
@@ -43,49 +45,24 @@ type LayoutState = {
 export type UseLayoutModelResult = {
   layout: LayoutModel & { stack: LayoutLayer[] };
 
-  // NEW (Path A): current editor mode (derived from layout.editorMode; defaults to "basic")
   editorMode: "basic" | "advanced";
-  // Selection model:
-  // - selectedIds[0] is the primary (anchor) selection
-  // - selectedIds[1] is the secondary (Advanced-only multi-select)
+
   selectedIds: string[];
-  // Back-compat alias for existing single-select UIs (primary selection)
   selectedId: string | null;
+
   activeLayerId: string;
+
   selectCavity: (id: string | null, opts?: { additive?: boolean }) => void;
   setActiveLayerId: (id: string) => void;
 
-  // NEW (Path A): hydrate/replace the entire layout model WITHOUT remounting.
-  // Used to load DB-backed layout after boot while preserving sticky selection state.
-  replaceLayout: (
-    next: LayoutModel,
-    opts?: { preserveSelection?: boolean }
-  ) => void;
-
-  // NEW (Path A): editor mode (persisted in layout JSON)
   setEditorMode: (mode: "basic" | "advanced") => void;
-
-  // NEW (Path A): per-layer cropped-corner toggle
   setLayerCropCorners: (layerId: string, cropCorners: boolean) => void;
 
   updateCavityPosition: (id: string, x: number, y: number) => void;
   updateBlockDims: (patch: Partial<BlockDims>) => void;
-  updateCavityDims: (
-    id: string,
-    patch: Partial<
-      Pick<Cavity, "lengthIn" | "widthIn" | "depthIn" | "cornerRadiusIn" | "label">
-    >
-  ) => void;
-  addCavity: (
-    shape: CavityShape,
-    size?: {
-      lengthIn: number;
-      widthIn: number;
-      depthIn: number;
-      cornerRadiusIn?: number;
-    },
-  ) => void;
+  updateCavityDims: (id: string, patch: Partial<Cavity>) => void;
 
+  addCavity: (shape: CavityShape, size?: any) => void;
   deleteCavity: (id: string) => void;
 
   addLayer: () => void;
@@ -102,6 +79,8 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   const { layout, activeLayerId } = state;
   const selectedId = selectedIds[0] ?? null;
 
+  /* ================= selection ================= */
+
   const selectCavity = useCallback(
     (id: string | null, opts?: { additive?: boolean }) => {
       if (!id) {
@@ -113,24 +92,18 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
       setSelectedIds((prev) => {
         if (!additive) return [id];
-
-        // Toggle behavior with a max of 2 selected ids.
-        // - If already selected, remove it.
-        // - If 0 selected, add as primary.
-        // - If 1 selected, add as secondary.
-        // - If 2 selected, keep primary and replace secondary.
         if (prev.includes(id)) return prev.filter((x) => x !== id);
-
         if (prev.length === 0) return [id];
         if (prev.length === 1) return [prev[0], id];
-
         return [prev[0], id];
       });
     },
     [],
   );
 
-const setActiveLayerId = useCallback((id: string) => {
+  /* ================= ACTIVE LAYER (FIXED) ================= */
+
+  const setActiveLayerId = useCallback((id: string) => {
     setState((prev) => {
       const layer =
         prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
@@ -139,17 +112,32 @@ const setActiveLayerId = useCallback((id: string) => {
       return {
         layout: {
           ...prev.layout,
-          // Mirror active layer thickness into block.thicknessIn for UI that binds to block dims
-          block: { ...prev.layout.block, thicknessIn: safeInch(layer.thicknessIn, 0.5) },
+          block: {
+            ...prev.layout.block,
+            thicknessIn: safeInch(layer.thicknessIn, 0.5),
+          },
           cavities: [...mirrored],
         },
         activeLayerId: layer.id,
       };
     });
-    setSelectedIds([]);
-  }, []);
 
-  // NEW (Path A): editor mode persisted in layout JSON (defaults to "basic" when missing)
+    // ✅ FIX: DO NOT blindly clear selection
+    // Only keep selections that still exist in the active layer
+    setSelectedIds((prev) => {
+      if (!prev.length) return prev;
+
+      const active =
+        state.layout.stack.find((l) => l.id === id) ??
+        state.layout.stack[0];
+
+      const valid = new Set(active.cavities.map((c) => c.id));
+      return prev.filter((id) => valid.has(id));
+    });
+  }, [state.layout.stack]);
+
+  /* ================= editor mode ================= */
+
   const setEditorMode = useCallback((mode: "basic" | "advanced") => {
     setState((prev) => ({
       ...prev,
@@ -160,53 +148,22 @@ const setActiveLayerId = useCallback((id: string) => {
     }));
   }, []);
 
-  // NEW (Path A): set per-layer crop-corners flag
   const setLayerCropCorners = useCallback(
     (layerId: string, cropCorners: boolean) => {
-      setState((prev) => {
-        const nextStack = prev.layout.stack.map((l) =>
-          l.id === layerId ? { ...l, cropCorners: !!cropCorners } : l,
-        );
-
-        return {
-          ...prev,
-          layout: {
-            ...prev.layout,
-            stack: nextStack,
-          },
-        };
-      });
-    },
-    [],
-  );
-  // NEW (Path A): hydrate/replace the whole layout without remounting this hook.
-  const replaceLayout = useCallback(
-    (next: LayoutModel, opts?: { preserveSelection?: boolean }) => {
-      const preserveSelection = opts?.preserveSelection !== false;
-
-      const nextState = normalizeInitialLayout(next);
-
-      setState(() => nextState);
-
-      if (!preserveSelection) {
-        setSelectedIds([]);
-        return;
-      }
-
-      // Keep only selections that still exist in the incoming layout.
-      const idSet = new Set<string>();
-      for (const layer of nextState.layout.stack ?? []) {
-        for (const c of (layer as any).cavities ?? []) {
-          if (c && typeof c.id === "string") idSet.add(c.id);
-        }
-      }
-
-      setSelectedIds((prev) => prev.filter((id) => idSet.has(id)));
+      setState((prev) => ({
+        ...prev,
+        layout: {
+          ...prev.layout,
+          stack: prev.layout.stack.map((l) =>
+            l.id === layerId ? { ...l, cropCorners: !!cropCorners } : l,
+          ),
+        },
+      }));
     },
     [],
   );
 
-
+  /* ================= cavity + block updates ================= */
 
   const updateCavityPosition = useCallback((id: string, x: number, y: number) => {
     setState((prev) => {
@@ -215,28 +172,21 @@ const setActiveLayerId = useCallback((id: string) => {
           ? layer
           : {
               ...layer,
-              cavities: layer.cavities.map((c) => {
-                if (c.id !== id) return c;
-
-                // CRITICAL HARDENING:
-                // If x/y are invalid (NaN/Infinity/undefined), DO NOT turn them into 0.
-                // Keep the prior value to prevent "teleport to upper-left".
-                const nextX = clamp01OrKeep(x, (c as any).x);
-                const nextY = clamp01OrKeep(y, (c as any).y);
-
-                return { ...c, x: nextX, y: nextY };
-              }),
+              cavities: layer.cavities.map((c) =>
+                c.id !== id
+                  ? c
+                  : { ...c, x: clamp01OrKeep(x, c.x), y: clamp01OrKeep(y, c.y) },
+              ),
             },
       );
 
       const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
-      const mirrored = dedupeCavities(active.cavities);
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: [...mirrored],
+          cavities: dedupeCavities(active.cavities),
         },
         activeLayerId: active.id,
       };
@@ -244,31 +194,13 @@ const setActiveLayerId = useCallback((id: string) => {
   }, []);
 
   const updateBlockDims = useCallback((patch: Partial<BlockDims>) => {
-    setState((prev) => {
-      const nextBlock = {
-        ...prev.layout.block,
-        ...normalizeBlockPatch(patch),
-      };
-
-      // If thicknessIn was changed via UI, apply it to the active layer thickness too.
-      const nextStack =
-        patch.thicknessIn == null
-          ? prev.layout.stack
-          : prev.layout.stack.map((l) =>
-              l.id !== prev.activeLayerId
-                ? l
-                : { ...l, thicknessIn: safeInch(patch.thicknessIn, 0.5) },
-            );
-
-      return {
-        ...prev,
-        layout: {
-          ...prev.layout,
-          block: nextBlock,
-          stack: nextStack,
-        },
-      };
-    });
+    setState((prev) => ({
+      ...prev,
+      layout: {
+        ...prev.layout,
+        block: { ...prev.layout.block, ...normalizeBlockPatch(patch) },
+      },
+    }));
   }, []);
 
   const updateCavityDims = useCallback((id: string, patch: Partial<Cavity>) => {
@@ -285,64 +217,56 @@ const setActiveLayerId = useCallback((id: string) => {
       );
 
       const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
-      const mirrored = dedupeCavities(active.cavities);
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: [...mirrored],
+          cavities: dedupeCavities(active.cavities),
         },
         activeLayerId: active.id,
       };
     });
   }, []);
 
-  const addCavity = useCallback((shape: CavityShape, size: any) => {
-    const s = size ?? { lengthIn: 2, widthIn: 2, depthIn: 1, cornerRadiusIn: 0 };
+  /* ================= cavity + layer ops ================= */
 
+  const addCavity = useCallback((shape: CavityShape, size: any) => {
     let newId: string | null = null;
 
     setState((prev) => {
-      const nextN = nextCavityNumber(prev.layout.stack);
+      const id = `cav-${nextCavityNumber(prev.layout.stack)}`;
+      newId = id;
 
-      const base: Cavity = {
-        id: `cav-${nextN}`,
+      const cavity: Cavity = {
+        id,
         shape,
-        lengthIn: safeInch(s.lengthIn, 0.5),
-        widthIn: safeInch(s.widthIn, 0.5),
-        depthIn: safeInch(s.depthIn, 0.5),
-        cornerRadiusIn:
-          shape === "roundedRect" ? safeInch(s.cornerRadiusIn ?? 0.25, 0) : 0,
+        lengthIn: safeInch(size?.lengthIn ?? 2, 0.5),
+        widthIn: safeInch(size?.widthIn ?? 2, 0.5),
+        depthIn: safeInch(size?.depthIn ?? 1, 0.5),
+        cornerRadiusIn: safeInch(size?.cornerRadiusIn ?? 0, 0),
         x: 0.2,
         y: 0.2,
         label: "",
       };
 
-      const cavity = { ...base, label: formatCavityLabel(base) };
-      newId = cavity.id;
-
       const nextStack = prev.layout.stack.map((l) =>
-        l.id !== prev.activeLayerId ? l : { ...l, cavities: [...l.cavities, cavity] },
+        l.id !== prev.activeLayerId
+          ? l
+          : { ...l, cavities: [...l.cavities, cavity] },
       );
-
-      const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
-      const mirrored = dedupeCavities(active.cavities);
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: [...mirrored],
+          cavities: dedupeCavities(cavity ? [...nextStack.find(l => l.id === prev.activeLayerId)!.cavities] : []),
         },
-        activeLayerId: active.id,
+        activeLayerId: prev.activeLayerId,
       };
     });
 
-    // ✅ STICKY SELECTION: select newly created cavity
-    if (newId) {
-      setSelectedIds([newId]);
-    }
+    if (newId) setSelectedIds([newId]);
   }, []);
 
   const deleteCavity = useCallback((id: string) => {
@@ -354,42 +278,38 @@ const setActiveLayerId = useCallback((id: string) => {
 
       const active =
         nextStack.find((l) => l.id === prev.activeLayerId) ?? nextStack[0];
-      const mirrored = dedupeCavities(active.cavities);
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: [...mirrored],
+          cavities: dedupeCavities(active.cavities),
         },
         activeLayerId: active.id,
       };
     });
 
-    // ✅ Only clear selection if the deleted cavity was selected
     setSelectedIds((prev) => (prev.includes(id) ? [] : prev));
   }, []);
-
 
   const addLayer = useCallback(() => {
     setState((prev) => {
       const idx = prev.layout.stack.length + 1;
       const id = `layer-${idx}`;
-      const nextStack = [
-        ...prev.layout.stack,
-        { id, label: `Layer ${idx}`, thicknessIn: 1, cavities: [], cropCorners: false },
-      ];
 
       return {
         layout: {
           ...prev.layout,
-          stack: nextStack,
-          block: { ...prev.layout.block, thicknessIn: 1 }, // mirror new active thickness
+          stack: [
+            ...prev.layout.stack,
+            { id, label: `Layer ${idx}`, thicknessIn: 1, cavities: [], cropCorners: false },
+          ],
           cavities: [],
         },
         activeLayerId: id,
       };
     });
+
     setSelectedIds([]);
   }, []);
 
@@ -410,34 +330,31 @@ const setActiveLayerId = useCallback((id: string) => {
       if (prev.layout.stack.length <= 1) return prev;
 
       const nextStack = prev.layout.stack.filter((l) => l.id !== id);
-      const active = nextStack.find((l) => l.id === prev.activeLayerId) ?? nextStack[0];
-      const mirrored = dedupeCavities(active.cavities);
+      const active = nextStack[0];
 
       return {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          block: { ...prev.layout.block, thicknessIn: safeInch(active.thicknessIn, 0.5) },
-          cavities: [...mirrored],
+          cavities: dedupeCavities(active.cavities),
         },
         activeLayerId: active.id,
       };
     });
+
     setSelectedIds([]);
   }, []);
 
   return {
     layout,
-
-    // NEW (Path A): expose current editor mode for the UI toggle
     editorMode: layout.editorMode ?? "basic",
 
     selectedIds,
     selectedId,
     activeLayerId,
+
     selectCavity,
     setActiveLayerId,
-  replaceLayout,
     setEditorMode,
     setLayerCropCorners,
 
