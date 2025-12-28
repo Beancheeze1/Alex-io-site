@@ -1075,7 +1075,7 @@ function LayoutEditorHost(props: {
   React.useEffect(() => {
     if (!layers || layerCount === 0) return;
     selectCavity(null);
-  }, [effectiveActiveLayerId, layerCount, selectCavity, layers]);
+  }, [effectiveActiveLayerId, layerCount, selectCavity]);
 
   // When a new cavity is added, try to drop it into "dead space"
   const prevCavityCountRef = React.useRef<number>(cavities.length);
