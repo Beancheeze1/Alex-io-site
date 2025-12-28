@@ -1571,13 +1571,29 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       return;
     }
 
-    // Build a clean subject line (include revision)
+       // Build a clean subject line (include revision)
     const rev = (revisionValue || "").trim();
     const subj = `Quote ${quoteNoValue}${rev ? " " + rev : ""}`;
+
+    // NEW: Confirm before sending (prevents accidental double-send)
+    // If already sent, require an explicit re-send confirm.
+    const statusRaw = (quoteState?.status || "").toString().trim().toLowerCase();
+    const alreadySent = statusRaw === "sent" || statusRaw.includes("sent");
+
+    const confirmMsg = alreadySent
+      ? `This quote is already marked SENT.\n\nRe-send the quote email to:\n${to}\n\nPress OK to re-send, or Cancel to abort.`
+      : `Send this quote email to:\n${to}\n\nPress OK to send, or Cancel to abort.`;
+
+    const ok = typeof window !== "undefined" ? window.confirm(confirmMsg) : true;
+    if (!ok) {
+      // Do nothing (no send)
+      return;
+    }
 
     setSendBusy(true);
     setSendError(null);
     setSendOkAt(null);
+
 
     try {
       // 1) Get authoritative pricing snapshot from /api/quotes/calc (same shape used by orchestrate)
