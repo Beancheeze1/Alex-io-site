@@ -1402,8 +1402,8 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
                           return `${formatDims(primaryItem.length_in, primaryItem.width_in, h)} in`;
                         })()}
                       </div>
-
-{/* Foam sizing note (display-only) */}
+                    </div>
+                    {/* Foam sizing note (display-only) */}
 <div
   style={{
     marginTop: 6,
@@ -1418,10 +1418,6 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   versus the carton/mailer inside dimensions (unless you want a different fit).
 </div>
 
-
-                    </div>
-
-                    
 
                     {/* NEW (Path A): min thickness under cavities from server metric */}
                     {(() => {
