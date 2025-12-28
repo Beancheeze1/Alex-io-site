@@ -429,7 +429,12 @@ export default function LayoutPage({
       if (cavTokens.length > 0) {
         const parsedCavs = cavTokens
           .map((tok) => parseCavityDims(tok))
-          .filter(Boolean) as { L: number; W: number; D: number; shape?: "rect" | "circle" }[];
+          .filter(Boolean) as {
+          L: number;
+          W: number;
+          D: number;
+          shape?: "rect" | "circle";
+        }[];
 
         const count = parsedCavs.length;
 
@@ -625,7 +630,9 @@ export default function LayoutPage({
 
             // If none were provided, fall back to assigning the generic cavities string
             // to the requested layer index (legacy behavior), else to middle layer.
-            const anyLayerHasCavs = perLayerCavityStrs.some((s) => (s || "").trim().length > 0);
+            const anyLayerHasCavs = perLayerCavityStrs.some(
+              (s) => (s || "").trim().length > 0,
+            );
 
             if (!anyLayerHasCavs) {
               const legacyIdxRaw = url.searchParams.get("layer_cavity_layer_index");
@@ -755,7 +762,11 @@ export default function LayoutPage({
           // missing/legacy thickness values (often defaulting to 1") even though
           // the backend-generated URL/facts are correct.
           let mergedLayout: LayoutModel = dbLayout;
-          if (layersInfo && Array.isArray(layersInfo.thicknesses) && layersInfo.thicknesses.length > 0) {
+          if (
+            layersInfo &&
+            Array.isArray(layersInfo.thicknesses) &&
+            layersInfo.thicknesses.length > 0
+          ) {
             const stack = (dbLayout as any).stack as any[];
             if (Array.isArray(stack) && stack.length > 0) {
               const urlTs = layersInfo.thicknesses;
@@ -765,7 +776,11 @@ export default function LayoutPage({
                 const urlT = Number(urlTs[i]);
                 if (!Number.isFinite(urlT) || urlT <= 0) return false;
                 // Treat missing/invalid DB thickness, or an obvious mismatch, as needing override.
-                return !Number.isFinite(dbT) || dbT <= 0 || Math.abs(dbT - urlT) > 1e-6;
+                return (
+                  !Number.isFinite(dbT) ||
+                  dbT <= 0 ||
+                  Math.abs(dbT - urlT) > 1e-6
+                );
               });
 
               if (sameLen && anyMismatch) {
@@ -778,7 +793,10 @@ export default function LayoutPage({
                 const sum = urlTs.reduce((acc, n) => acc + (Number(n) || 0), 0);
                 const nextBlock = {
                   ...(dbLayout as any).block,
-                  thicknessIn: Number.isFinite(sum) && sum > 0 ? snapInches(sum) : (dbLayout as any).block?.thicknessIn,
+                  thicknessIn:
+                    Number.isFinite(sum) && sum > 0
+                      ? snapInches(sum)
+                      : (dbLayout as any).block?.thicknessIn,
                 };
 
                 mergedLayout = {
@@ -786,7 +804,9 @@ export default function LayoutPage({
                   block: nextBlock,
                   stack: nextStack,
                   // Ensure cavities reflect the active layer (layer 1) on first open.
-                  cavities: Array.isArray(nextStack[0]?.cavities) ? nextStack[0].cavities : (dbLayout as any).cavities,
+                  cavities: Array.isArray(nextStack[0]?.cavities)
+                    ? nextStack[0].cavities
+                    : (dbLayout as any).cavities,
                 } as any;
               }
             }
@@ -904,7 +924,14 @@ export default function LayoutPage({
   );
 }
 
-const CAVITY_COLORS = ["#38bdf8", "#a855f7", "#f97316", "#22c55e", "#eab308", "#ec4899"];
+const CAVITY_COLORS = [
+  "#38bdf8",
+  "#a855f7",
+  "#f97316",
+  "#22c55e",
+  "#eab308",
+  "#ec4899",
+];
 
 /* ---------- Layout editor host (main body) ---------- */
 
@@ -954,7 +981,6 @@ function LayoutEditorHost(props: {
     renameLayer,
     deleteLayer,
   } = useLayoutModel(initialLayout);
-  
 
   const { block, cavities, stack } = layout as LayoutModel & {
     stack?: {
@@ -975,7 +1001,9 @@ function LayoutEditorHost(props: {
   const getLayerThickness = React.useCallback(
     (layerId: string): number => {
       const layer =
-        stack && stack.length > 0 ? stack.find((l) => l.id === layerId) ?? null : null;
+        stack && stack.length > 0
+          ? stack.find((l) => l.id === layerId) ?? null
+          : null;
 
       const raw = layer ? Number(layer.thicknessIn) : NaN;
       if (Number.isFinite(raw) && raw > 0) return raw;
@@ -1039,7 +1067,9 @@ function LayoutEditorHost(props: {
   // Advanced mode removes spacing restrictions (no wall offset, no min gap enforcement)
   const wallIn = editorMode === "advanced" ? 0 : WALL_IN;
   const secondSelectedCavity =
-    selectedIds.length >= 2 ? cavities.find((c) => c.id === selectedIds[1]) || null : null;
+    selectedIds.length >= 2
+      ? cavities.find((c) => c.id === selectedIds[1]) || null
+      : null;
 
   // Multi-layer: derive layers view if stack exists
   const layers = layout.stack && layout.stack.length > 0 ? layout.stack : null;
@@ -1144,8 +1174,7 @@ function LayoutEditorHost(props: {
             const centerXIn = wallIn + cellW * (col + 0.5);
             const centerYIn = wallIn + cellH * (row + 0.5);
 
-            let xIn
-              = centerXIn - cavLen / 2;
+            let xIn = centerXIn - cavLen / 2;
             let yIn = centerYIn - cavWid / 2;
 
             const minXIn = wallIn;
@@ -1220,15 +1249,10 @@ function LayoutEditorHost(props: {
   };
 
   const [zoom, setZoom] = React.useState(1);
-  
-  
 
-
-
-   // Crop corners is PER-LAYER (active layer).
+  // Crop corners is PER-LAYER (active layer).
   // Each layer can independently enable the 1" crop on export.
   const croppedCorners = !!(activeLayer as any)?.cropCorners;
-
 
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
@@ -1274,7 +1298,8 @@ function LayoutEditorHost(props: {
       // Update the visual selection immediately
       setSelectedCartonKind(kind);
 
-      const sku = kind === "RSC" ? boxSuggest.bestRsc?.sku : boxSuggest.bestMailer?.sku;
+      const sku =
+        kind === "RSC" ? boxSuggest.bestRsc?.sku : boxSuggest.bestMailer?.sku;
 
       // We need a quote number and a SKU to do anything useful
       if (!quoteNo || !sku) {
@@ -1353,7 +1378,9 @@ function LayoutEditorHost(props: {
       width: selectedCavity.widthIn != null ? String(selectedCavity.widthIn) : "",
       depth: selectedCavity.depthIn != null ? String(selectedCavity.depthIn) : "",
       cornerRadius:
-        selectedCavity.cornerRadiusIn != null ? String(selectedCavity.cornerRadiusIn) : "",
+        selectedCavity.cornerRadiusIn != null
+          ? String(selectedCavity.cornerRadiusIn)
+          : "",
     });
   }, [selectedCavity]);
 
@@ -1543,7 +1570,7 @@ function LayoutEditorHost(props: {
     updateCavityPosition(selectedCavity.id, xNorm, yNorm);
   };
 
-    const clamp = (v: number, min: number, max: number) =>
+  const clamp = (v: number, min: number, max: number) =>
     v < min ? min : v > max ? max : v;
 
   const nudgeSelected = React.useCallback(
@@ -1707,7 +1734,6 @@ function LayoutEditorHost(props: {
     });
   }, [selectedCavity, addCavity]);
 
-
   React.useEffect(() => {
     if (editorMode !== "advanced") return;
 
@@ -1738,7 +1764,6 @@ function LayoutEditorHost(props: {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editorMode, selectedCavity, nudgeSelected]);
-
 
   /* ---------- Foam Advisor navigation ---------- */
 
@@ -1805,40 +1830,38 @@ function LayoutEditorHost(props: {
       }
 
       // NEW (must-fix): build a durable layout object FIRST, then generate SVG from it.
-// Reason: previously we generated SVG from `layout` BEFORE writing cornerStyle/chamferIn,
-// so exports were always square even when the checkbox was checked.
-const layoutToSave: any = {
-  ...(layout as any),
-  block: { ...((layout as any).block ?? {}) },
-};
+      // Reason: previously we generated SVG from `layout` BEFORE writing cornerStyle/chamferIn,
+      // so exports were always square even when the checkbox was checked.
+      const layoutToSave: any = {
+        ...(layout as any),
+        block: { ...((layout as any).block ?? {}) },
+      };
 
-// Editor mode (persisted with layout; backward-compatible)
-layoutToSave.editorMode = editorMode === "advanced" ? "advanced" : "basic";
+      // Editor mode (persisted with layout; backward-compatible)
+      layoutToSave.editorMode = editorMode === "advanced" ? "advanced" : "basic";
 
-// Per-layer crop corners: stored on each layer.
-// Do NOT write block.cornerStyle here anymore.
-if (layoutToSave.stack && Array.isArray(layoutToSave.stack)) {
-  layoutToSave.stack = layoutToSave.stack.map((l: any) => ({
-    ...l,
-    cropCorners: !!l.cropCorners,
-  }));
-}
+      // Per-layer crop corners: stored on each layer.
+      // Do NOT write block.cornerStyle here anymore.
+      if (layoutToSave.stack && Array.isArray(layoutToSave.stack)) {
+        layoutToSave.stack = layoutToSave.stack.map((l: any) => ({
+          ...l,
+          cropCorners: !!l.cropCorners,
+        }));
+      }
 
-const activeLayerForSave =
-  Array.isArray(layoutToSave.stack) && layoutToSave.stack.length > 0
-    ? layoutToSave.stack.find((l: any) => l.id === activeLayerId) ?? layoutToSave.stack[0]
-    : null;
+      const activeLayerForSave =
+        Array.isArray(layoutToSave.stack) && layoutToSave.stack.length > 0
+          ? layoutToSave.stack.find((l: any) => l.id === activeLayerId) ?? layoutToSave.stack[0]
+          : null;
 
-layoutToSave.block.cornerStyle = activeLayerForSave?.cropCorners ? "chamfer" : "square";
-layoutToSave.block.chamferIn = activeLayerForSave?.cropCorners ? 1 : null;
+      layoutToSave.block.cornerStyle = activeLayerForSave?.cropCorners ? "chamfer" : "square";
+      layoutToSave.block.chamferIn = activeLayerForSave?.cropCorners ? 1 : null;
 
-
-// IMPORTANT: Build SVG from the SAME layout object we are saving.
-const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
-  notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
-  materialLabel: materialLabel || undefined,
-});
-
+      // IMPORTANT: Build SVG from the SAME layout object we are saving.
+      const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
+        notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
+        materialLabel: materialLabel || undefined,
+      });
 
       const payload: any = {
         quoteNo,
@@ -2194,49 +2217,66 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                       />
                     </label>
                   </div>
+
+                  {/* NEW: thin layer summary strip (visual balance) */}
+                  <div className="mt-2 pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                    <span>
+                      Active{" "}
+                      <span className="text-slate-100 font-semibold">
+                        {activeLayerLabel ?? (layers && layers[0] ? layers[0].label : "—")}
+                      </span>
+                    </span>
+                    <span>
+                      · Stack{" "}
+                      <span className="font-mono text-slate-100">{stackDepthLabel}</span>
+                    </span>
+                    <span>
+                      · Footprint{" "}
+                      <span className="font-mono text-slate-100">{footprintLabel}</span>
+                    </span>
+                  </div>
                 </div>
 
                 {/* CENTER: Layout controls (Zoom + Qty + CTA buttons) */}
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 flex flex-col justify-between">
-         <div className="flex items-center justify-between mb-1.5">
-  <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-slate-400">
-    <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80" />
-    Layout controls
-  </div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80" />
+                      Layout controls
+                    </div>
 
-  {/* Editor mode toggle */}
-  <div className="flex items-center gap-1 rounded-full border border-slate-700 bg-slate-900 p-0.5 text-[10px]">
-    <button
-      type="button"
-      onClick={() => setEditorMode("basic")}
-      className={
-        "px-2.5 py-0.5 rounded-full transition " +
-        (editorMode === "basic"
-          ? "bg-sky-500 text-slate-950 font-semibold"
-          : "text-slate-300 hover:text-slate-100")
-      }
-    >
-      Basic
-    </button>
-    <button
-      type="button"
-      onClick={() => setEditorMode("advanced")}
-      className={
-        "px-2.5 py-0.5 rounded-full transition " +
-        (editorMode === "advanced"
-          ? "bg-amber-400 text-slate-950 font-semibold"
-          : "text-slate-300 hover:text-slate-100")
-      }
-    >
-      Advanced
-    </button>
-  </div>
-</div>
+                    {/* Editor mode toggle */}
+                    <div className="flex items-center gap-1 rounded-full border border-slate-700 bg-slate-900 p-0.5 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setEditorMode("basic")}
+                        className={
+                          "px-2.5 py-0.5 rounded-full transition " +
+                          (editorMode === "basic"
+                            ? "bg-sky-500 text-slate-950 font-semibold"
+                            : "text-slate-300 hover:text-slate-100")
+                        }
+                      >
+                        Basic
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditorMode("advanced")}
+                        className={
+                          "px-2.5 py-0.5 rounded-full transition " +
+                          (editorMode === "advanced"
+                            ? "bg-amber-400 text-slate-950 font-semibold"
+                            : "text-slate-300 hover:text-slate-100")
+                        }
+                      >
+                        Advanced
+                      </button>
+                    </div>
+                  </div>
 
-<div className="text-[11px] text-slate-400">
-  Quoted qty: <span className="font-mono text-slate-50">{qtyLabel}</span>
-</div>
-
+                  <div className="text-[11px] text-slate-400">
+                    Quoted qty: <span className="font-mono text-slate-50">{qtyLabel}</span>
+                  </div>
 
                   <div className="flex items-center justify-between gap-3 mb-2">
                     <div className="flex items-center gap-2 text-[11px] text-slate-400 flex-1">
@@ -2275,95 +2315,96 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                     </div>
                   </div>
 
+                  {editorMode === "advanced" && (
+                    <div className="mb-2 rounded-xl border border-slate-700/80 bg-slate-950/45 px-3 py-2 text-[11px] text-slate-200">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 font-semibold text-slate-50">
+                          <span className="h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_10px_rgba(252,211,77,0.8)]" />
+                          Advanced tools
+                        </div>
+                        <span className="rounded-full border border-amber-300/25 bg-slate-950/40 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-amber-100/80">
+                          Live
+                        </span>
+                      </div>
 
-{editorMode === "advanced" && (
-  <div className="mb-2 rounded-xl border border-amber-400/40 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-50/90">
-    <div className="flex items-center justify-between gap-2">
-      <div className="font-semibold text-amber-50">Advanced tools</div>
-      <span className="rounded-full border border-amber-300/30 bg-slate-950/40 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-amber-100/80">
-        Live
-      </span>
-    </div>
+                      <div className="mt-1 text-slate-300/80">
+                        Select a cavity, then use Align / Duplicate, or nudge with{" "}
+                        <span className="font-semibold text-slate-100">Arrow keys</span> (Shift = 1&quot;).
+                      </div>
 
-    <div className="mt-1 text-amber-100/70">
-      Select a cavity, then use Align / Duplicate, or nudge with <span className="font-semibold">Arrow keys</span>
-      (Shift = 1&quot;).
-    </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={duplicateSelected}
+                          disabled={!selectedCavity}
+                          className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                        >
+                          Duplicate selected
+                        </button>
 
-    <div className="mt-2 grid grid-cols-2 gap-2">
-      <button
-        type="button"
-        onClick={duplicateSelected}
-        disabled={!selectedCavity}
-        className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
-      >
-        Duplicate selected
-      </button>
+                        <button
+                          type="button"
+                          onClick={handleCenterSelectedCavity}
+                          disabled={!selectedCavity}
+                          className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                        >
+                          Center in block
+                        </button>
+                      </div>
 
-      <button
-        type="button"
-        onClick={handleCenterSelectedCavity}
-        disabled={!selectedCavity}
-        className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
-      >
-        Center in block
-      </button>
-    </div>
+                      <div className="mt-2 grid grid-cols-3 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => alignSelected("left")}
+                          disabled={!selectedCavity}
+                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                        >
+                          Align Left
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => alignSelected("centerX")}
+                          disabled={!selectedCavity}
+                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                        >
+                          Center X
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => alignSelected("right")}
+                          disabled={!selectedCavity}
+                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                        >
+                          Align Right
+                        </button>
 
-    <div className="mt-2 grid grid-cols-3 gap-1.5">
-      <button
-        type="button"
-        onClick={() => alignSelected("left")}
-        disabled={!selectedCavity}
-        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
-      >
-        Align Left
-      </button>
-      <button
-        type="button"
-        onClick={() => alignSelected("centerX")}
-        disabled={!selectedCavity}
-        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
-      >
-        Center X
-      </button>
-      <button
-        type="button"
-        onClick={() => alignSelected("right")}
-        disabled={!selectedCavity}
-        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
-      >
-        Align Right
-      </button>
-
-      <button
-        type="button"
-        onClick={() => alignSelected("top")}
-        disabled={!selectedCavity}
-        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
-      >
-        Align Top
-      </button>
-      <button
-        type="button"
-        onClick={() => alignSelected("centerY")}
-        disabled={!selectedCavity}
-        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
-      >
-        Center Y
-      </button>
-      <button
-        type="button"
-        onClick={() => alignSelected("bottom")}
-        disabled={!selectedCavity}
-        className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
-      >
-        Align Bottom
-      </button>
-    </div>
-  </div>
-)}
-
+                        <button
+                          type="button"
+                          onClick={() => alignSelected("top")}
+                          disabled={!selectedCavity}
+                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                        >
+                          Align Top
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => alignSelected("centerY")}
+                          disabled={!selectedCavity}
+                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                        >
+                          Center Y
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => alignSelected("bottom")}
+                          disabled={!selectedCavity}
+                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                        >
+                          Align Bottom
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap items-center gap-2">
                     <button
@@ -2407,8 +2448,12 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                         Stack depth:{" "}
                         <span className="font-mono text-slate-50">{stackDepthLabel}</span>
                       </span>
+
+                      {/* NEW: subtle helper line (visual density only) */}
+                      <span className="text-[10px] text-slate-500">
+                        Per-layer thickness &amp; edge treatment
+                      </span>
                     </div>
-                    
                   </div>
 
                   {layers && layers.length > 0 ? (
@@ -2432,7 +2477,10 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                                 <button
                                   type="button"
                                   onClick={() => setActiveLayerId(layer.id)}
-                                  className={"text-xs font-medium " + (isActive ? "text-sky-100" : "text-slate-100")}
+                                  className={
+                                    "text-xs font-medium " +
+                                    (isActive ? "text-sky-100" : "text-slate-100")
+                                  }
                                 >
                                   {layer.label}
                                 </button>
@@ -2453,7 +2501,9 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                                   <input
                                     type="checkbox"
                                     checked={!!layer.cropCorners}
-                                    onChange={(e) => setLayerCropCorners(layer.id, e.currentTarget.checked)}
+                                    onChange={(e) =>
+                                      setLayerCropCorners(layer.id, e.currentTarget.checked)
+                                    }
                                   />
                                   Crop
                                 </label>
@@ -2483,6 +2533,8 @@ const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
                 </div>
               </div>
             </div>
+
+   
 
             {/* Body: three-column layout */}
             <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
