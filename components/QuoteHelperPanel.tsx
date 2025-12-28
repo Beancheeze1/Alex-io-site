@@ -4,7 +4,7 @@
 
 import * as React from "react";
 
-export default function QuoteHelperPanel() {
+export default function QuoteHelperPanel({ className }: { className?: string }) {
   const checklist = [
     "Outside size (L×W×H, inches)",
     "Quantity to quote",
@@ -63,7 +63,7 @@ export default function QuoteHelperPanel() {
   }, []);
 
   return (
-    <section className="mx-auto max-w-3xl">
+    <section className={className ?? "mx-auto max-w-3xl"}>
       <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_20px_80px_rgba(0,0,0,0.55)]">
         {/* subtle top glow like the rest of the splash */}
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-sky-500/10 via-transparent to-transparent" />
