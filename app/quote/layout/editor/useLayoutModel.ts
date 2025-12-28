@@ -132,7 +132,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           state.layout.stack.find((l) => l.id === id) ?? state.layout.stack[0];
 
         const valid = new Set(active.cavities.map((c) => c.id));
-        return prev.filter((id) => valid.has(id));
+        return prev.filter((cid) => valid.has(cid));
       });
     },
     [state.layout.stack],
@@ -167,48 +167,41 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
   /* ================= cavity + block updates ================= */
 
-  const updateCavityPosition = useCallback(
-    (id: string, x: number, y: number) => {
-      setState((prev) => {
-        const nextStack = prev.layout.stack.map((layer) =>
-          layer.id !== prev.activeLayerId
-            ? layer
-            : {
-                ...layer,
-                cavities: layer.cavities.map((c) =>
-                  c.id !== id
-                    ? c
-                    : {
-                        ...c,
-                        x: clamp01OrKeep(x, c.x),
-                        y: clamp01OrKeep(y, c.y),
-                      },
-                ),
-              },
-        );
+  const updateCavityPosition = useCallback((id: string, x: number, y: number) => {
+    setState((prev) => {
+      const nextStack = prev.layout.stack.map((layer) =>
+        layer.id !== prev.activeLayerId
+          ? layer
+          : {
+              ...layer,
+              cavities: layer.cavities.map((c) =>
+                c.id !== id
+                  ? c
+                  : { ...c, x: clamp01OrKeep(x, c.x), y: clamp01OrKeep(y, c.y) },
+              ),
+            },
+      );
 
-        const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
+      const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
 
-        return {
-          layout: {
-            ...prev.layout,
-            stack: nextStack,
-            cavities: dedupeCavities(active.cavities),
-          },
-          activeLayerId: active.id,
-        };
-      });
+      return {
+        layout: {
+          ...prev.layout,
+          stack: nextStack,
+          cavities: dedupeCavities(active.cavities),
+        },
+        activeLayerId: active.id,
+      };
+    });
 
-      // ✅ STICKY SELECTION (Path A):
-      // Ensure the cavity being moved remains selected.
-      // Preserves 2-select if this id is already in the selection.
-      setSelectedIds((prev) => {
-        if (prev.includes(id)) return prev;
-        return [id];
-      });
-    },
-    [],
-  );
+    // ✅ STICKY SELECTION (Path A):
+    // Ensure the cavity being moved remains selected.
+    // Preserves 2-select if this id is already in the selection.
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) return prev;
+      return [id];
+    });
+  }, []);
 
   const updateBlockDims = useCallback((patch: Partial<BlockDims>) => {
     setState((prev) => ({
@@ -227,27 +220,27 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           ? layer
           : {
               ...layer,
-             cavities: layer.cavities.map((c) => {
-  if (c.id !== id) return c;
+              cavities: layer.cavities.map((c) => {
+                if (c.id !== id) return c;
 
-  const next = { ...c, ...normalizeCavityPatch(patch) } as Cavity;
+                const next = { ...c, ...normalizeCavityPatch(patch) } as Cavity;
 
-  // ✅ Path-A: keep sidebar labels in sync with live dims
-  // Only auto-generate when the user didn't explicitly set a label in this patch.
-  const patchTouchesGeometry =
-    patch.shape != null ||
-    patch.lengthIn != null ||
-    patch.widthIn != null ||
-    patch.depthIn != null ||
-    (patch as any).cornerRadiusIn != null;
+                // ✅ Path-A: keep sidebar labels in sync with live dims
+                // Only auto-generate when the user didn't explicitly set a label in this patch.
+                const patchTouchesGeometry =
+                  (patch as any).shape != null ||
+                  (patch as any).lengthIn != null ||
+                  (patch as any).widthIn != null ||
+                  (patch as any).depthIn != null ||
+                  (patch as any).cornerRadiusIn != null ||
+                  (patch as any).corner_radius_in != null;
 
-  if (patch.label == null && patchTouchesGeometry) {
-    (next as any).label = formatCavityLabel(next);
-  }
+                if ((patch as any).label == null && patchTouchesGeometry) {
+                  (next as any).label = formatCavityLabel(next);
+                }
 
-  return next;
-}),
-
+                return next;
+              }),
             },
       );
 
@@ -305,9 +298,7 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           stack: nextStack,
           cavities: dedupeCavities(
             cavity
-              ? [
-                  ...nextStack.find((l) => l.id === prev.activeLayerId)!.cavities,
-                ]
+              ? [...nextStack.find((l) => l.id === prev.activeLayerId)!.cavities]
               : [],
           ),
         },
@@ -499,7 +490,10 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         ...rest,
         block: {
           ...block,
-          thicknessIn: safeInch(active.thicknessIn ?? block.thicknessIn ?? 1, 0.5),
+          thicknessIn: safeInch(
+            active.thicknessIn ?? block.thicknessIn ?? 1,
+            0.5,
+          ),
         },
         stack,
         cavities: [...mirrored],
