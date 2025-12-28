@@ -77,7 +77,7 @@ export default function AdminQuotesPage() {
 
     async function loadQuotes() {
       try {
-        const res = await fetch("/api/quotes?limit=50", {
+        const res = await fetch("/api/quotes?limit=200", {
           cache: "no-store",
         });
         if (!res.ok) {
@@ -369,7 +369,7 @@ export default function AdminQuotesPage() {
             <p className="mt-3 text-[11px] text-slate-500">
               Live data source:{" "}
               <span className="font-mono text-[11px] text-sky-300">
-                /api/quotes?limit=50
+                /api/quotes?limit=200
               </span>
               . This view is read-only; status changes still flow through your
               existing pipelines.
