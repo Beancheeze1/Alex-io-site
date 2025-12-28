@@ -103,38 +103,40 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
   /* ================= ACTIVE LAYER (FIXED) ================= */
 
-  const setActiveLayerId = useCallback((id: string) => {
-    setState((prev) => {
-      const layer =
-        prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
-      const mirrored = dedupeCavities(layer.cavities);
+  const setActiveLayerId = useCallback(
+    (id: string) => {
+      setState((prev) => {
+        const layer =
+          prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
+        const mirrored = dedupeCavities(layer.cavities);
 
-      return {
-        layout: {
-          ...prev.layout,
-          block: {
-            ...prev.layout.block,
-            thicknessIn: safeInch(layer.thicknessIn, 0.5),
+        return {
+          layout: {
+            ...prev.layout,
+            block: {
+              ...prev.layout.block,
+              thicknessIn: safeInch(layer.thicknessIn, 0.5),
+            },
+            cavities: [...mirrored],
           },
-          cavities: [...mirrored],
-        },
-        activeLayerId: layer.id,
-      };
-    });
+          activeLayerId: layer.id,
+        };
+      });
 
-    // ✅ FIX: DO NOT blindly clear selection
-    // Only keep selections that still exist in the active layer
-    setSelectedIds((prev) => {
-      if (!prev.length) return prev;
+      // ✅ FIX: DO NOT blindly clear selection
+      // Only keep selections that still exist in the active layer
+      setSelectedIds((prev) => {
+        if (!prev.length) return prev;
 
-      const active =
-        state.layout.stack.find((l) => l.id === id) ??
-        state.layout.stack[0];
+        const active =
+          state.layout.stack.find((l) => l.id === id) ?? state.layout.stack[0];
 
-      const valid = new Set(active.cavities.map((c) => c.id));
-      return prev.filter((id) => valid.has(id));
-    });
-  }, [state.layout.stack]);
+        const valid = new Set(active.cavities.map((c) => c.id));
+        return prev.filter((id) => valid.has(id));
+      });
+    },
+    [state.layout.stack],
+  );
 
   /* ================= editor mode ================= */
 
@@ -165,33 +167,48 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
   /* ================= cavity + block updates ================= */
 
-  const updateCavityPosition = useCallback((id: string, x: number, y: number) => {
-    setState((prev) => {
-      const nextStack = prev.layout.stack.map((layer) =>
-        layer.id !== prev.activeLayerId
-          ? layer
-          : {
-              ...layer,
-              cavities: layer.cavities.map((c) =>
-                c.id !== id
-                  ? c
-                  : { ...c, x: clamp01OrKeep(x, c.x), y: clamp01OrKeep(y, c.y) },
-              ),
-            },
-      );
+  const updateCavityPosition = useCallback(
+    (id: string, x: number, y: number) => {
+      setState((prev) => {
+        const nextStack = prev.layout.stack.map((layer) =>
+          layer.id !== prev.activeLayerId
+            ? layer
+            : {
+                ...layer,
+                cavities: layer.cavities.map((c) =>
+                  c.id !== id
+                    ? c
+                    : {
+                        ...c,
+                        x: clamp01OrKeep(x, c.x),
+                        y: clamp01OrKeep(y, c.y),
+                      },
+                ),
+              },
+        );
 
-      const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
+        const active = nextStack.find((l) => l.id === prev.activeLayerId)!;
 
-      return {
-        layout: {
-          ...prev.layout,
-          stack: nextStack,
-          cavities: dedupeCavities(active.cavities),
-        },
-        activeLayerId: active.id,
-      };
-    });
-  }, []);
+        return {
+          layout: {
+            ...prev.layout,
+            stack: nextStack,
+            cavities: dedupeCavities(active.cavities),
+          },
+          activeLayerId: active.id,
+        };
+      });
+
+      // ✅ STICKY SELECTION (Path A):
+      // Ensure the cavity being moved remains selected.
+      // Preserves 2-select if this id is already in the selection.
+      setSelectedIds((prev) => {
+        if (prev.includes(id)) return prev;
+        return [id];
+      });
+    },
+    [],
+  );
 
   const updateBlockDims = useCallback((patch: Partial<BlockDims>) => {
     setState((prev) => ({
@@ -227,6 +244,14 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         activeLayerId: active.id,
       };
     });
+
+    // ✅ STICKY SELECTION (Path A):
+    // Ensure the cavity being resized/edited remains selected.
+    // Preserves 2-select if this id is already in the selection.
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) return prev;
+      return [id];
+    });
   }, []);
 
   /* ================= cavity + layer ops ================= */
@@ -260,7 +285,13 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         layout: {
           ...prev.layout,
           stack: nextStack,
-          cavities: dedupeCavities(cavity ? [...nextStack.find(l => l.id === prev.activeLayerId)!.cavities] : []),
+          cavities: dedupeCavities(
+            cavity
+              ? [
+                  ...nextStack.find((l) => l.id === prev.activeLayerId)!.cavities,
+                ]
+              : [],
+          ),
         },
         activeLayerId: prev.activeLayerId,
       };
@@ -302,7 +333,13 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           ...prev.layout,
           stack: [
             ...prev.layout.stack,
-            { id, label: `Layer ${idx}`, thicknessIn: 1, cavities: [], cropCorners: false },
+            {
+              id,
+              label: `Layer ${idx}`,
+              thicknessIn: 1,
+              cavities: [],
+              cropCorners: false,
+            },
           ],
           cavities: [],
         },
@@ -454,7 +491,9 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     };
   }
 
-  const cavsRaw = Array.isArray((initial as any).cavities) ? [...(initial as any).cavities] : [];
+  const cavsRaw = Array.isArray((initial as any).cavities)
+    ? [...(initial as any).cavities]
+    : [];
 
   // Legacy single-layer fallback:
   // If the incoming model does NOT include a stack, we treat it as a single-piece
