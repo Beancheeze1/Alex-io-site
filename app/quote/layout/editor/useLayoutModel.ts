@@ -227,9 +227,27 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           ? layer
           : {
               ...layer,
-              cavities: layer.cavities.map((c) =>
-                c.id !== id ? c : { ...c, ...normalizeCavityPatch(patch) },
-              ),
+             cavities: layer.cavities.map((c) => {
+  if (c.id !== id) return c;
+
+  const next = { ...c, ...normalizeCavityPatch(patch) } as Cavity;
+
+  // ✅ Path-A: keep sidebar labels in sync with live dims
+  // Only auto-generate when the user didn't explicitly set a label in this patch.
+  const patchTouchesGeometry =
+    patch.shape != null ||
+    patch.lengthIn != null ||
+    patch.widthIn != null ||
+    patch.depthIn != null ||
+    (patch as any).cornerRadiusIn != null;
+
+  if (patch.label == null && patchTouchesGeometry) {
+    (next as any).label = formatCavityLabel(next);
+  }
+
+  return next;
+}),
+
             },
       );
 
