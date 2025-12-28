@@ -2221,6 +2221,12 @@ function LayoutEditorHost(props: {
                       />
                     </label>
                   </div>
+                  <div className="mt-2 text-xs text-slate-400">
+  <span className="font-semibold text-slate-300">Fit note:</span>{" "}
+  Foam OD is typically undersized <span className="font-semibold">0.125"</span> to ensure it fits into a box/mailer
+  (unless you specify otherwise).
+</div>
+
 
                   {/* NEW: thin layer summary strip (visual balance) */}
                   <div className="mt-2 pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400">
@@ -2795,12 +2801,7 @@ function LayoutEditorHost(props: {
   <div>
     Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block edges and between pockets.
   </div>
-  <div className="text-slate-400">
-    <span className="font-semibold text-slate-200">Fit note:</span> Foam OD is typically undersized{" "}
-    <span className="font-mono text-slate-100">{FOAM_FIT_UNDERSIZE_IN.toFixed(3)}&quot;</span> to ensure it fits into a
-    box/mailer (unless you specify otherwise).
   </div>
-</div>
 
 
                 {!hasRealQuoteNo && (
