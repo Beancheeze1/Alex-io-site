@@ -74,36 +74,37 @@ export default function Page() {
 
       {/* System-style header band (matches app vibe) */}
       <header className="relative z-10">
-        <div className="border-b border-white/10 bg-gradient-to-b from-sky-600/30 via-sky-500/10 to-slate-950/40">
-          <Container>
-            <div className="flex items-center justify-between py-4">
-              <div className="flex items-baseline gap-3">
-                <div className="text-sm font-semibold tracking-tight text-white">
-                  Alex-IO
-                </div>
-                <div className="hidden text-xs text-slate-300/80 sm:block">
-                  quoting • layout • CAD
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <a
-                  href="#demo"
-                  className="rounded-full bg-white/5 px-4 py-2 text-xs font-semibold text-white ring-1 ring-white/10 hover:bg-white/10"
-                >
-                  Watch demo
-                </a>
-                <a
-                  href="/quote"
-                  className="rounded-full bg-sky-500/90 px-4 py-2 text-xs font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
-                >
-                  Open quote
-                </a>
-              </div>
-            </div>
-          </Container>
+  <div
+    className="border-b border-white/10"
+    style={{
+      background:
+        "linear-gradient(135deg, rgba(14,165,233,0.9) 0%, rgba(14,165,233,0.9) 45%, rgba(15,23,42,1) 100%)",
+    }}
+  >
+    <Container>
+      <div className="flex items-center justify-between py-4">
+        {/* Left: system identity */}
+        <div>
+          <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-sky-100/90">
+            Powered by
+          </div>
+          <div className="text-lg font-extrabold text-sky-50 drop-shadow-[0_0_8px_rgba(15,23,42,0.55)]">
+            Alex-IO
+          </div>
+          <div className="mt-0.5 text-xs text-sky-100/90">
+            Quoting · Layout · CAD
+          </div>
         </div>
-      </header>
+
+        {/* Right: status pill */}
+        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-medium text-sky-50">
+          Automated first response
+        </span>
+      </div>
+    </Container>
+  </div>
+</header>
+
 
       {/* HERO (tight) */}
       <section className="relative z-10">
