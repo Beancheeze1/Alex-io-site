@@ -189,6 +189,10 @@ function readLayerCavitiesFromUrl(url: URL, layerIndex1Based: number): string {
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
 
+// NOTE (shop convention): foam OD is typically undersized for box/mailer fit.
+// This is a *note only* (no geometry is changed here).
+const FOAM_FIT_UNDERSIZE_IN = 0.125;
+
 /* Simple "LxWxH" parser */
 function parseDimsTriple(
   raw: string | undefined | null,
@@ -2787,9 +2791,17 @@ function LayoutEditorHost(props: {
                   />
                 </div>
 
-                <div className="mt-1 border-t border-slate-800 pt-2 text-[11px] text-slate-500">
-                  Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block edges and between pockets.
-                </div>
+                <div className="mt-1 border-t border-slate-800 pt-2 text-[11px] text-slate-500 space-y-1">
+  <div>
+    Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block edges and between pockets.
+  </div>
+  <div className="text-slate-400">
+    <span className="font-semibold text-slate-200">Fit note:</span> Foam OD is typically undersized{" "}
+    <span className="font-mono text-slate-100">{FOAM_FIT_UNDERSIZE_IN.toFixed(3)}&quot;</span> to ensure it fits into a
+    box/mailer (unless you specify otherwise).
+  </div>
+</div>
+
 
                 {!hasRealQuoteNo && (
                   <div className="mt-3 rounded-xl border border-amber-500/70 bg-amber-900/50 px-3 py-2 text-[11px] text-amber-50">
@@ -3302,6 +3314,8 @@ function buildSvgFromLayout(
 
   const headerLines: string[] = [];
   headerLines.push("NOT TO SCALE");
+  headerLines.push(`FIT NOTE: FOAM OD UNDERSIZED ${FOAM_FIT_UNDERSIZE_IN.toFixed(3)}" FOR BOX/MAILER FIT (UNLESS SPECIFIED)`);
+
   if (T > 0) {
     headerLines.push(`BLOCK: ${L}" × ${W}" × ${T}"`);
   } else {

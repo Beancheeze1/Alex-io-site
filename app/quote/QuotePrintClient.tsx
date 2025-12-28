@@ -1402,7 +1402,26 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
                           return `${formatDims(primaryItem.length_in, primaryItem.width_in, h)} in`;
                         })()}
                       </div>
+
+{/* Foam sizing note (display-only) */}
+<div
+  style={{
+    marginTop: 6,
+    fontSize: 11,
+    color: "#6b7280",
+    lineHeight: 1.35,
+  }}
+>
+  <span style={{ fontWeight: 600, color: "#374151" }}>Foam sizing note:</span>{" "}
+  If you are requesting a carton/mailer, please specify foam length/width{" "}
+  <span style={{ fontWeight: 700, color: "#111827" }}>0.125&quot; (1/8&quot;) undersize</span>{" "}
+  versus the carton/mailer inside dimensions (unless you want a different fit).
+</div>
+
+
                     </div>
+
+                    
 
                     {/* NEW (Path A): min thickness under cavities from server metric */}
                     {(() => {
