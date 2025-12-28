@@ -429,6 +429,60 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   const editorMode: "basic" | "advanced" =
     (initial as any).editorMode === "advanced" ? "advanced" : "basic";
 
+  // ============================
+  // NEW (Path A): layer-intent hydration when stack is missing
+  // ============================
+  // If the incoming model does NOT include a stack, but DOES include
+  // a layer thickness intent array (from email parsing), we seed layers.
+  //
+  // Safety:
+  // - Only triggers when stack is missing/empty AND there are >1 layers
+  // - Only triggers when there are no legacy cavities to preserve
+  const hasStack =
+    Array.isArray((initial as any).stack) && (initial as any).stack.length > 0;
+
+  const cavCount = Array.isArray((initial as any).cavities)
+    ? (initial as any).cavities.length
+    : 0;
+
+  const layerThicknessesRaw: any =
+    (initial as any).layerThicknesses ??
+    (initial as any).layers ??
+    (initial as any).block?.layers;
+
+  const layerThicknesses: number[] | null = Array.isArray(layerThicknessesRaw)
+    ? layerThicknessesRaw.map((x: any) => Number(x)).filter((n: any) => Number.isFinite(n))
+    : null;
+
+  if (!hasStack && cavCount === 0 && layerThicknesses && layerThicknesses.length > 1) {
+    const stack: LayoutLayer[] = layerThicknesses.map((t, i) => ({
+      id: `layer-${i + 1}`,
+      label: `Layer ${i + 1}`,
+      thicknessIn: safeInch(t, 0.5),
+      cavities: [],
+      cropCorners: false,
+    }));
+
+    const active = stack[0];
+
+    return {
+      layout: {
+        ...rest,
+        block: {
+          ...block,
+          thicknessIn: safeInch(
+            active.thicknessIn ?? block.thicknessIn ?? 1,
+            0.5,
+          ),
+        },
+        stack,
+        cavities: [],
+        editorMode,
+      },
+      activeLayerId: active.id,
+    };
+  }
+
   // Trust pre-existing stack fully
   if (Array.isArray((initial as any).stack) && (initial as any).stack.length) {
     // IMPORTANT:
