@@ -3,18 +3,9 @@ import type { ReactNode } from "react";
 import Image from "next/image";
 import QuoteHelperPanel from "@/components/QuoteHelperPanel";
 
-function gmailComposeUrl(opts: { to: string; subject?: string; body?: string }) {
-  const params = new URLSearchParams({
-    view: "cm",
-    fs: "1",
-    to: opts.to,
-  });
+const DEMO_QUOTE_PATH = "/demo/quote";
+const START_QUOTE_PATH = "/start-quote";
 
-  if (opts.subject) params.set("su", opts.subject);
-  if (opts.body) params.set("body", opts.body);
-
-  return `https://mail.google.com/mail/?${params.toString()}`;
-}
 
 
 
@@ -160,25 +151,8 @@ function OverlapSnips() {
   );
 }
 
-const START_QUOTE_MAILTO =
-  "https://mail.google.com/mail/?view=cm&fs=1" +
-  "&to=" +
-  encodeURIComponent("sales@alex-io.com") +
-  "&su=" +
-  encodeURIComponent("Foam quote request") +
-  "&body=" +
-  encodeURIComponent(
-    [
-      "Outside size (LxWxH, inches):",
-      "Quantity to quote:",
-      "Foam family (PE, EPE, PU):",
-      "Density (e.g., 1.7 lb):",
-      "Cavities / pockets (if any):",
-      "Cavity sizes (LxWxDepth or ØxDepth):",
-      "",
-      "Notes:",
-    ].join("\n")
-  );
+// Splash CTAs (locked): demo + start-quote (no mailto)
+
 
 
 export default function Page() {
@@ -271,42 +245,22 @@ export default function Page() {
                   </div>
                 </div>
 
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                  <a
-                    href="/quote"
-                    className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
-                  >
-                    Try the interactive quote
-                  </a>
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+  <a
+    href={START_QUOTE_PATH}
+    className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
+  >
+    Start a Quote
+  </a>
 
-                  {/* KEEP: Start a quote -> sales@alex-io.com */}
-                  <a
-  href={START_QUOTE_MAILTO}
-  target="_blank"
-  rel="noreferrer"
-  className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
->
-  Start a quote
-</a>
+  <a
+    href={DEMO_QUOTE_PATH}
+    className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+  >
+    Try the Interactive Quote
+  </a>
+</div>
 
-
-                  {/* Contact sales -> Chuck */}
-                 <a
-  href={
-    "https://mail.google.com/mail/?view=cm&fs=1" +
-    "&to=" +
-    encodeURIComponent("chuck@alex-io.com") +
-    "&su=" +
-    encodeURIComponent("Alex-IO inquiry")
-  }
-  target="_blank"
-  rel="noreferrer"
-  className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
->
-  Contact sales
-</a>
-
-                </div>
 
                 {/* Email sample integrated into left story */}
                 <div className="mt-6">
@@ -414,29 +368,15 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <a
-                href="/quote"
-                className="rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
-              >
-                Try the interactive quote
-              </a>
+           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+  <a
+    href={START_QUOTE_PATH}
+    className="rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
+  >
+    Start a Quote
+  </a>
+</div>
 
-              {/* KEEP: Start a quote -> sales@alex-io.com */}
-              <a
-                href={START_QUOTE_MAILTO}
-                className="rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
-              >
-                Start a quote
-              </a>
-
-              <a
-                href="mailto:chuck@alex-io.com"
-                className="rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
-              >
-                Contact sales
-              </a>
-            </div>
 
             <div className="mt-10 text-center text-xs text-slate-500">
               © {new Date().getFullYear()} Alex-IO. All rights reserved.
