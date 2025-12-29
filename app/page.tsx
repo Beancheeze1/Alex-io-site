@@ -106,8 +106,10 @@ function EmailSampleInline() {
 function OverlapSnips() {
   return (
     <div className="relative mx-auto w-full max-w-xl">
+      {/* subtle glow behind the stack */}
       <div className="pointer-events-none absolute -inset-6 rounded-[28px] bg-sky-500/10 blur-2xl" />
 
+      {/* Base card */}
       <div className="relative">
         <Shot
           src="/splash/hero-quote.png"
@@ -117,6 +119,7 @@ function OverlapSnips() {
         />
       </div>
 
+      {/* Top snip (Admin health) */}
       <div className="absolute -right-3 top-7 w-[62%] rotate-[1.5deg] sm:-right-6 sm:top-8 sm:w-[58%]">
         <Shot
           src="/splash/admin-health.png"
@@ -126,6 +129,7 @@ function OverlapSnips() {
         />
       </div>
 
+      {/* Bottom snip (Layer previews) */}
       <div className="absolute -left-3 bottom-7 w-[58%] -rotate-[1.25deg] sm:-left-6 sm:bottom-8 sm:w-[55%]">
         <Shot
           src="/splash/layer-previews.png"
@@ -135,65 +139,32 @@ function OverlapSnips() {
         />
       </div>
 
-      <div className="pointer-events-none mt-5 h-20 sm:h-24" />
+      {/* Keep layout height reserved so overlaps don't collapse */}
+      <div className="pointer-events-none mt-6 h-24 sm:h-28" />
     </div>
   );
 }
 
-function SpecChip({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2">
-      <span className="h-1.5 w-1.5 rounded-full bg-sky-400/90" />
-      <div className="text-[12px] text-slate-200">{children}</div>
-    </div>
+const START_QUOTE_MAILTO =
+  "mailto:sales@alex-io.com?subject=" +
+  encodeURIComponent("Start a quote") +
+  "&body=" +
+  encodeURIComponent(
+    [
+      "Hi Alex-IO,",
+      "",
+      "Please start a quote for:",
+      "",
+      "- Outside size (L×W×H, inches):",
+      "- Quantity:",
+      "- Foam family (PE/EPE/PU):",
+      "- Density (lb/ft³):",
+      "- Cavities (count + sizes):",
+      "- Any fit/clearance notes (optional):",
+      "",
+      "Thanks!",
+    ].join("\n")
   );
-}
-
-function WhatToIncludeCard() {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-          WHAT TO INCLUDE
-        </div>
-        <span className="text-[11px] text-slate-400">minimal back-and-forth</span>
-      </div>
-
-      <div className="mt-3 text-sm leading-relaxed text-slate-300">
-        Send a normal RFQ email. If you include these items, Alex-IO can price
-        and build the layout cleanly on the first pass.
-      </div>
-
-      <div className="mt-4 grid gap-2 sm:grid-cols-2">
-        <SpecChip>Outside size (L×W×H, inches)</SpecChip>
-        <SpecChip>Quantity to quote</SpecChip>
-        <SpecChip>Foam family (PE / EPE / PU)</SpecChip>
-        <SpecChip>Density (e.g., 1.7 lb)</SpecChip>
-        <SpecChip>Number of cavities / pockets</SpecChip>
-        <SpecChip>Cavity sizes (L×W×Depth or Ø×Depth)</SpecChip>
-      </div>
-
-      <details className="mt-4 group">
-        <summary className="cursor-pointer list-none rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-[12px] font-semibold text-slate-100 hover:bg-white/[0.04]">
-          <div className="flex items-center justify-between">
-            <span>Show copy/paste example</span>
-            <span className="text-slate-400 group-open:hidden">+</span>
-            <span className="text-slate-400 hidden group-open:inline">−</span>
-          </div>
-        </summary>
-
-        <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-4">
-          <QuoteHelperPanel className="max-w-none mx-0" />
-        </div>
-
-        <div className="mt-2 text-[11px] text-slate-400">
-          Tip: if fit is tight, mention clearance requirements so the foam is
-          sized appropriately.
-        </div>
-      </details>
-    </div>
-  );
-}
 
 export default function Page() {
   return (
@@ -210,7 +181,7 @@ export default function Page() {
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950/10 via-slate-950/35 to-slate-950" />
       </div>
 
-      {/* System-style header band (KEEP SAME COLOR SCHEME) */}
+      {/* System-style header band (UNCHANGED) */}
       <header className="relative z-10">
         <div
           className="border-b border-white/10"
@@ -233,7 +204,6 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* UPDATED PILL LABEL */}
               <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-medium text-sky-50">
                 Automated Quoting Assistant
               </span>
@@ -242,70 +212,82 @@ export default function Page() {
         </div>
       </header>
 
-      {/* HERO */}
+      {/* HERO (left story + right overlap snips) */}
       <section className="relative z-10">
         <Container>
-          <div className="pb-10 pt-7 sm:pb-12 sm:pt-9">
-            <div className="grid items-start gap-7 lg:grid-cols-12">
+          <div className="pb-10 pt-8 sm:pb-12 sm:pt-10">
+            <div className="grid items-start gap-8 lg:grid-cols-12">
               {/* Left */}
               <div className="lg:col-span-6">
                 <Kicker>EMAIL → QUOTE → LAYOUT → CAD</Kicker>
 
-                <p className="mt-2.5 text-base leading-relaxed text-slate-300 sm:text-lg">
+                <p className="mt-3 text-base leading-relaxed text-slate-300 sm:text-lg">
                   Pricing, cavity layout, layered sets, and CAD-ready outputs—one
                   connected workflow that starts with just a single email.
                 </p>
 
-                <div className="mt-4 grid gap-2.5">
+                <div className="mt-5 grid gap-3">
                   <div className="flex items-start gap-3">
-                    <div className="mt-1.5 h-2 w-2 rounded-full bg-sky-400/90" />
+                    <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
                     <div className="text-sm leading-relaxed text-slate-300">
-                      Start with a normal RFQ email.
+                      Send a normal RFQ email (size, quantity, material, and any
+                      cavities).
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
-                    <div className="mt-1.5 h-2 w-2 rounded-full bg-sky-400/90" />
+                    <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
                     <div className="text-sm leading-relaxed text-slate-300">
-                      Get an automated response with specs, pricing, and a live
-                      quote link.
+                      Get an automated first response with specs + pricing and a
+                      link to the interactive quote.
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
-                    <div className="mt-1.5 h-2 w-2 rounded-full bg-sky-400/90" />
+                    <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
                     <div className="text-sm leading-relaxed text-slate-300">
-                      Design the layout: layers, cavities, previews — all tied to
+                      Build the layout: layers, cavities, previews — all tied to
                       the quote.
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
-                    <div className="mt-1.5 h-2 w-2 rounded-full bg-sky-400/90" />
+                    <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
                     <div className="text-sm leading-relaxed text-slate-300">
                       Export per-layer DXF/STEP for engineering and vendors.
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                   <a
                     href="/quote"
                     className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
                   >
                     Try the interactive quote
                   </a>
+
+                  {/* KEEP: Start a quote -> sales@alex-io.com */}
                   <a
-                    href="mailto:sales@alex-io.com"
+                    href={START_QUOTE_MAILTO}
+                    className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+                  >
+                    Start a quote
+                  </a>
+
+                  {/* Contact sales -> Chuck */}
+                  <a
+                    href="mailto:chuck@alex-io.com"
                     className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
                   >
                     Contact sales
                   </a>
                 </div>
 
-                <div className="mt-5">
+                {/* Email sample integrated into left story */}
+                <div className="mt-6">
                   <EmailSampleInline />
                 </div>
               </div>
 
-              {/* Right */}
+              {/* Right: overlapping snips */}
               <div className="lg:col-span-6">
                 <OverlapSnips />
                 <div className="mt-2 text-center text-xs text-slate-400">
@@ -314,10 +296,23 @@ export default function Page() {
               </div>
             </div>
 
-            {/* Option B: “What to include” replaces screenshot wall */}
-            <div className="mt-9 grid gap-5 lg:grid-cols-12">
+            {/* “Example Input” row */}
+            <div className="mt-10 grid gap-5 lg:grid-cols-12">
               <div className="lg:col-span-7">
-                <WhatToIncludeCard />
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+                      EXAMPLE INPUT
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      copy/paste into an email
+                    </span>
+                  </div>
+
+                  <div className="mt-3">
+                    <QuoteHelperPanel className="max-w-none mx-0" />
+                  </div>
+                </div>
               </div>
 
               <div className="lg:col-span-5">
@@ -356,7 +351,6 @@ export default function Page() {
               </p>
             </div>
 
-            {/* Your current layout (CAD/admin + wide editor) stays as-is below */}
             <div className="mt-7 grid gap-5 lg:grid-cols-2">
               <div>
                 <Shot
@@ -400,8 +394,17 @@ export default function Page() {
               >
                 Try the interactive quote
               </a>
+
+              {/* KEEP: Start a quote -> sales@alex-io.com */}
               <a
-                href="mailto:sales@alex-io.com"
+                href={START_QUOTE_MAILTO}
+                className="rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+              >
+                Start a quote
+              </a>
+
+              <a
+                href="mailto:chuck@alex-io.com"
                 className="rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
               >
                 Contact sales
