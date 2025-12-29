@@ -1,75 +1,167 @@
-// app/demo/quote/demoSeed.ts
+// app/demo/quote/demoSeeds.ts
 //
-// Static seed model for the Demo Quote.
-// No backend calls. No quote numbers. Always works.
+// Demo scenarios (100% local, never hits backend).
+// Used by /demo/quote to make the demo feel like a real product.
 //
-// Locked demo layout spec:
-// - Block: 18" × 12" × 2" (single layer)
-// - Cavities (3):
-//   - Rect: 6" × 4" × 1.5"
-//   - Circle: Ø3" × 1.5"
-//   - Rect: 2.5" × 2" × 1.0"
-//
-// NOTE: x/y are normalized 0..1 values used by the editor (top-left origin in UI).
+// IMPORTANT:
+// - Keep Polyethylene vs Expanded Polyethylene distinct in wording.
+// - These are display-only in the demo (no pricing engine here).
 //
 
 import type { LayoutModel } from "../../quote/layout/editor/layoutTypes";
 
-export function getDemoLayoutSeed(): LayoutModel {
-  return {
-    editorMode: "basic",
-    block: {
-      lengthIn: 18,
-      widthIn: 12,
-      thicknessIn: 2,
+export type DemoScenarioId = "mailer" | "twoLayer" | "tray6";
+
+export type DemoScenario = {
+  id: DemoScenarioId;
+  label: string;
+  subtitle: string;
+  materialLabel: string; // display-only
+  densityLabel: string; // display-only
+  seed: LayoutModel;
+};
+
+export const DEMO_SCENARIOS: DemoScenario[] = [
+  {
+    id: "mailer",
+    label: "Mailer insert (single layer)",
+    subtitle: '18"×12"×2" with mixed cavities',
+    materialLabel: "Expanded Polyethylene (EPE)",
+    densityLabel: "1.7 lb/ft³",
+    seed: {
+      editorMode: "basic",
+      block: { lengthIn: 18, widthIn: 12, thicknessIn: 2 } as any,
+      cavities: [],
+      stack: [
+        {
+          id: "layer-1",
+          label: "Layer 1",
+          thicknessIn: 2,
+          cropCorners: false,
+          cavities: [
+            {
+              id: "demo-cav-a",
+              shape: "rect",
+              lengthIn: 6,
+              widthIn: 4,
+              depthIn: 1.5,
+              cornerRadiusIn: 0,
+              x: 0.14,
+              y: 0.18,
+              label: "6×4×1.5 in",
+            },
+            {
+              id: "demo-cav-b",
+              shape: "circle",
+              lengthIn: 3,
+              widthIn: 3,
+              depthIn: 1.5,
+              cornerRadiusIn: 0,
+              x: 0.68,
+              y: 0.34,
+              label: "Ø3×1.5 in",
+            },
+            {
+              id: "demo-cav-c",
+              shape: "rect",
+              lengthIn: 2.5,
+              widthIn: 2,
+              depthIn: 1,
+              cornerRadiusIn: 0,
+              x: 0.20,
+              y: 0.62,
+              label: "2.5×2×1 in",
+            },
+          ],
+        } as any,
+      ],
     } as any,
+  },
 
-    // useLayoutModel() will mirror active layer cavities here automatically
-    cavities: [],
+  {
+    id: "twoLayer",
+    label: "Two-layer set (top pad + base)",
+    subtitle: 'Top pad 0.5" + Base 1.5" (layered workflow)',
+    materialLabel: "Expanded Polyethylene (EPE)",
+    densityLabel: "2.0 lb/ft³",
+    seed: {
+      editorMode: "basic",
+      block: { lengthIn: 18, widthIn: 12, thicknessIn: 2 } as any,
+      cavities: [],
+      stack: [
+        {
+          id: "layer-1",
+          label: "Top pad",
+          thicknessIn: 0.5,
+          cropCorners: true,
+          cavities: [],
+        } as any,
+        {
+          id: "layer-2",
+          label: "Base",
+          thicknessIn: 1.5,
+          cropCorners: false,
+          cavities: [
+            {
+              id: "demo2-cav-a",
+              shape: "rect",
+              lengthIn: 6.5,
+              widthIn: 4.25,
+              depthIn: 1.5,
+              cornerRadiusIn: 0,
+              x: 0.12,
+              y: 0.18,
+              label: "6.5×4.25×1.5 in",
+            },
+            {
+              id: "demo2-cav-b",
+              shape: "circle",
+              lengthIn: 2.5,
+              widthIn: 2.5,
+              depthIn: 1.5,
+              cornerRadiusIn: 0,
+              x: 0.70,
+              y: 0.40,
+              label: "Ø2.5×1.5 in",
+            },
+          ],
+        } as any,
+      ],
+    } as any,
+  },
 
-    stack: [
-      {
-        id: "layer-1",
-        label: "Layer 1",
-        thicknessIn: 2,
-        cropCorners: false,
-        cavities: [
-          {
-            id: "demo-cav-a",
-            shape: "rect",
-            lengthIn: 6,
-            widthIn: 4,
-            depthIn: 1.5,
-            cornerRadiusIn: 0,
-            x: 0.14,
-            y: 0.18,
-            label: "6×4×1.5 in",
-          },
-          {
-            id: "demo-cav-b",
-            shape: "circle",
-            // For circle, InteractiveCanvas uses lengthIn as diameter.
-            lengthIn: 3,
-            widthIn: 3,
-            depthIn: 1.5,
-            cornerRadiusIn: 0,
-            x: 0.68,
-            y: 0.34,
-            label: "Ø3×1.5 in",
-          },
-          {
-            id: "demo-cav-c",
-            shape: "rect",
-            lengthIn: 2.5,
-            widthIn: 2,
-            depthIn: 1,
-            cornerRadiusIn: 0,
-            x: 0.20,
-            y: 0.62,
-            label: "2.5×2×1 in",
-          },
-        ],
-      } as any,
-    ],
-  } as any;
+  {
+    id: "tray6",
+    label: "Tray with 6 pockets",
+    subtitle: '16"×12"×2" with repeated cavities (spacing rules)',
+    materialLabel: "Polyethylene (PE)",
+    densityLabel: "1.7 lb/ft³",
+    seed: {
+      editorMode: "basic",
+      block: { lengthIn: 16, widthIn: 12, thicknessIn: 2 } as any,
+      cavities: [],
+      stack: [
+        {
+          id: "layer-1",
+          label: "Layer 1",
+          thicknessIn: 2,
+          cropCorners: false,
+          cavities: [
+            // 2×3 grid of pockets
+            { id: "t1", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.10, y: 0.16, label: "3×3×1.25 in" },
+            { id: "t2", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.35, y: 0.16, label: "3×3×1.25 in" },
+            { id: "t3", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.60, y: 0.16, label: "3×3×1.25 in" },
+
+            { id: "t4", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.10, y: 0.56, label: "3×3×1.25 in" },
+            { id: "t5", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.35, y: 0.56, label: "3×3×1.25 in" },
+            { id: "t6", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.60, y: 0.56, label: "3×3×1.25 in" },
+          ],
+        } as any,
+      ],
+    } as any,
+  },
+];
+
+export function getScenario(id: DemoScenarioId): DemoScenario {
+  return DEMO_SCENARIOS.find((s) => s.id === id) ?? DEMO_SCENARIOS[0];
 }
