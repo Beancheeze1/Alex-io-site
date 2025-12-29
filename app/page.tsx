@@ -7,22 +7,46 @@ function Container({ children }: { children: ReactNode }) {
   return <div className="mx-auto w-full max-w-6xl px-4">{children}</div>;
 }
 
+function Kicker({ children }: { children: ReactNode }) {
+  return (
+    <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+      {children}
+    </div>
+  );
+}
+
+function MiniCard({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+      <div className="text-sm font-semibold text-white">{title}</div>
+      <div className="mt-2 text-sm leading-relaxed text-slate-300">{desc}</div>
+    </div>
+  );
+}
+
 function Shot({
   src,
   alt,
   priority,
   aspect = "aspect-[16/10]",
+  className = "",
 }: {
   src: string;
   alt: string;
   priority?: boolean;
   aspect?: string;
+  className?: string;
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
+    <div
+      className={[
+        "group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]",
+        "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]",
+        className,
+      ].join(" ")}
+    >
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-sky-500/10 via-transparent to-transparent" />
 
-      {/* Force consistent tile sizing + allow crop */}
       <div className={`${aspect} w-full overflow-hidden`}>
         <Image
           src={src}
@@ -41,87 +65,82 @@ function Shot({
   );
 }
 
-function Kicker({ children }: { children: ReactNode }) {
+function EmailSampleInline() {
   return (
-    <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-      {children}
-    </div>
-  );
-}
-
-function MiniCard({ title, desc }: { title: string; desc: string }) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
-      <div className="text-sm font-semibold text-white">{title}</div>
-      <div className="mt-2 text-sm leading-relaxed text-slate-300">{desc}</div>
-    </div>
-  );
-}
-
-function DividerBand() {
-  return (
-    <div className="relative my-10">
-      <div className="pointer-events-none absolute inset-0 -z-10 opacity-[0.55]">
-        <div className="absolute left-1/2 top-1/2 h-[260px] w-[780px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-500/10 blur-3xl" />
-      </div>
-      <div className="mx-auto h-px w-full max-w-5xl bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-    </div>
-  );
-}
-
-function WorkflowStrip() {
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] px-5 py-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-sky-500/10 via-transparent to-transparent" />
-      <div className="relative flex flex-col items-center justify-between gap-3 sm:flex-row">
-        <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-          WORKFLOW
-        </div>
-        <div className="text-sm font-semibold text-slate-100">
-          Email → Quote → Layout → CAD
-        </div>
-        <div className="text-xs text-slate-400">
-          One chain of custody from request → production files.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EmailSnippetCard() {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-          FIRST RESPONSE
+        <div className="text-[11px] font-semibold tracking-widest text-sky-300/80">
+          FIRST RESPONSE (SAMPLE)
         </div>
         <span className="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200">
           auto-reply
         </span>
       </div>
 
-      <div className="mt-3">
-        <div className="text-sm font-semibold text-white">
-          Subject: Foam quote {`{#}`}&nbsp;— specs + pricing + next steps
+      <div className="mt-3 text-sm">
+        <div className="font-semibold text-white">
+          Subject: Foam quote {`{#}`} — specs + pricing + next steps
         </div>
-        <div className="mt-2 text-sm leading-relaxed text-slate-300">
+        <div className="mt-2 leading-relaxed text-slate-300">
           We pulled the key specs from your email, priced the foam set, and
           generated an interactive quote. If anything looks off, reply with a
           correction and we’ll update it.
         </div>
+
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-[12px] text-slate-200">
+            Open quote
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-[12px] text-slate-200">
+            Edit layout
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-[12px] text-slate-200">
+            Export CAD
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OverlapSnips() {
+  return (
+    <div className="relative mx-auto w-full max-w-xl">
+      {/* subtle glow behind the stack */}
+      <div className="pointer-events-none absolute -inset-6 rounded-[28px] bg-sky-500/10 blur-2xl" />
+
+      {/* Base card */}
+      <div className="relative">
+        <Shot
+          src="/splash/hero-quote.png"
+          alt="Alex-IO interactive quote summary"
+          priority
+          aspect="aspect-[16/10]"
+        />
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-slate-100">
-          Open quote
-        </span>
-        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-slate-100">
-          Edit layout
-        </span>
-        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-slate-100">
-          Export CAD
-        </span>
+      {/* Top snip (Admin health) */}
+      <div className="absolute -right-3 top-7 w-[62%] rotate-[1.5deg] sm:-right-6 sm:top-8 sm:w-[58%]">
+        <Shot
+          src="/splash/admin-health.png"
+          alt="Admin health dashboard"
+          aspect="aspect-[16/10]"
+          className="shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_18px_70px_rgba(0,0,0,0.65)]"
+        />
       </div>
+
+      {/* Bottom snip (Layer previews) */}
+      <div className="absolute -left-3 bottom-7 w-[58%] -rotate-[1.25deg] sm:-left-6 sm:bottom-8 sm:w-[55%]">
+        <Shot
+          src="/splash/layer-previews.png"
+          alt="Per-layer layout previews"
+          aspect="aspect-[16/10]"
+          className="shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_18px_70px_rgba(0,0,0,0.65)]"
+        />
+      </div>
+
+      {/* Keep layout height reserved so overlaps don't collapse */}
+      <div className="pointer-events-none mt-6 h-24 sm:h-28" />
     </div>
   );
 }
@@ -141,7 +160,7 @@ export default function Page() {
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950/10 via-slate-950/35 to-slate-950" />
       </div>
 
-      {/* System-style header band (KEEP AS-IS) */}
+      {/* System-style header band (UNCHANGED) */}
       <header className="relative z-10">
         <div
           className="border-b border-white/10"
@@ -152,7 +171,6 @@ export default function Page() {
         >
           <Container>
             <div className="flex items-center justify-between py-4">
-              {/* Left: system identity */}
               <div>
                 <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-sky-100/90">
                   Powered by
@@ -165,7 +183,6 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* Right: status pill */}
               <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-medium text-sky-50">
                 Automated first response
               </span>
@@ -174,93 +191,117 @@ export default function Page() {
         </div>
       </header>
 
-      {/* HERO */}
+      {/* HERO (new: left story + right overlap snips) */}
       <section className="relative z-10">
         <Container>
           <div className="pb-10 pt-8 sm:pb-12 sm:pt-10">
-            <div className="mx-auto max-w-3xl text-center">
-              <Kicker>EMAIL → QUOTE → LAYOUT → CAD</Kicker>
+            <div className="grid items-start gap-8 lg:grid-cols-12">
+              {/* Left */}
+              <div className="lg:col-span-6">
+                <Kicker>EMAIL → QUOTE → LAYOUT → CAD</Kicker>
 
-              {/* Keep your new hero copy, but make it visually “the headline” */}
-              <p className="mt-3 text-base font-semibold leading-snug tracking-tight text-slate-100 sm:text-lg">
-                Pricing, cavity layout, layered sets, and CAD-ready outputs—one
-                connected workflow that starts with just a single email.
-              </p>
+                <p className="mt-3 text-base leading-relaxed text-slate-300 sm:text-lg">
+                  Pricing, cavity layout, layered sets, and CAD-ready outputs—one
+                  connected workflow that starts with just a single email.
+                </p>
 
-              <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                Designed to feel like a real toolchain: clear, reviewable, and
-                production-minded from the first reply.
-              </p>
-            </div>
+                <div className="mt-5 grid gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
+                    <div className="text-sm leading-relaxed text-slate-300">
+                      Automated first response with specs + pricing, then a link
+                      into the interactive quote.
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
+                    <div className="text-sm leading-relaxed text-slate-300">
+                      Layout editor stays tied to the quote (layers, cavities,
+                      previews).
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
+                    <div className="text-sm leading-relaxed text-slate-300">
+                      Per-layer CAD exports for engineering + vendors (DXF/STEP).
+                    </div>
+                  </div>
+                </div>
 
-            <div className="mt-7">
-              <WorkflowStrip />
-            </div>
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                  <a
+                    href="/quote"
+                    className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
+                  >
+                    Try the interactive quote
+                  </a>
+                  <a
+                    href="mailto:sales@alex-io.com"
+                    className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+                  >
+                    Contact sales
+                  </a>
+                </div>
 
-            {/* Demo + Inline helper (compact, but more intentional) */}
-            <div className="mt-6 grid gap-6 lg:grid-cols-12">
-              <div id="demo" className="lg:col-span-7">
-                <Shot
-                  src="/splash/hero-quote.png"
-                  alt="Alex-IO interactive quote summary"
-                  priority
-                  aspect="aspect-[16/10]"
-                />
+                {/* Email sample integrated into left story */}
+                <div className="mt-6">
+                  <EmailSampleInline />
+                </div>
+              </div>
+
+              {/* Right: overlapping snips */}
+              <div className="lg:col-span-6">
+                <OverlapSnips />
                 <div className="mt-2 text-center text-xs text-slate-400">
-                  Customer view: clear specs, pricing, and next step.
+                  One flow across customer view, previews, and admin visibility.
+                </div>
+              </div>
+            </div>
+
+            {/* “Example Input” moved into its own clean row */}
+            <div className="mt-10 grid gap-5 lg:grid-cols-12">
+              <div className="lg:col-span-7">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+                      EXAMPLE INPUT
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      copy/paste into an email
+                    </span>
+                  </div>
+
+                  <div className="mt-3">
+                    <QuoteHelperPanel className="max-w-none mx-0" />
+                  </div>
                 </div>
               </div>
 
               <div className="lg:col-span-5">
-                <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.025] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
-                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-sky-500/10 via-transparent to-transparent" />
-                  <div className="relative">
-                    <div className="mb-3 flex items-center justify-between">
-                      <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-                        EXAMPLE INPUT
-                      </div>
-                      <span className="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200">
-                        email-ready
-                      </span>
-                    </div>
-
-                    {/* Render the helper inline (no forced max-width) */}
-                    <QuoteHelperPanel className="mx-0 max-w-none" />
-
-                    <div className="mt-3 text-[11px] leading-relaxed text-slate-400">
-                      Tip: we typically undersize foam by ~0.125&quot; for an
-                      easier fit into cartons and mailers.
-                    </div>
-                  </div>
+                <div className="grid gap-3">
+                  <MiniCard
+                    title="Automated first response"
+                    desc="Fast reply with specs + pricing, then link into the interactive quote."
+                  />
+                  <MiniCard
+                    title="Interactive layout editor"
+                    desc="Place cavities, build layers, and keep everything tied to the quote."
+                  />
+                  <MiniCard
+                    title="DXF/STEP exports"
+                    desc="Production-ready outputs per layer (previews + CAD)."
+                  />
                 </div>
               </div>
             </div>
-
-            {/* Feature bullets (cleaner / less pill-y) */}
-            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <MiniCard
-                title="Automated first response"
-                desc="Fast reply with specs + pricing, then link into the interactive quote."
-              />
-              <MiniCard
-                title="Interactive layout editor"
-                desc="Place cavities, build layers, and keep everything tied to the quote."
-              />
-              <MiniCard
-                title="DXF/STEP exports"
-                desc="Production-ready outputs per layer (previews + CAD)."
-              />
-            </div>
-
-            <DividerBand />
           </div>
         </Container>
       </section>
 
-      {/* PRODUCT OVERVIEW */}
+      {/* SYSTEM SECTION (simplified + more premium spacing) */}
       <section className="relative z-10">
         <Container>
-          <div className="pb-12">
+          <div className="pb-10">
             <div className="mx-auto max-w-4xl text-center">
               <Kicker>THE SYSTEM</Kicker>
               <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
@@ -272,7 +313,7 @@ export default function Page() {
               </p>
             </div>
 
-            {/* 2x2 grid, uniform tiles (cropped to consistent ratio) */}
+            {/* Two supporting tiles (keeps it polished, avoids “screenshot wall”) */}
             <div className="mt-7 grid gap-5 lg:grid-cols-2">
               <div>
                 <Shot
@@ -295,43 +336,21 @@ export default function Page() {
                   Per-layer previews: communicate clearly before cutting.
                 </div>
               </div>
+            </div>
 
-              {/* Fill the “dead” feeling with a compact email-first card */}
-              <div>
-                <EmailSnippetCard />
-                <div className="mt-2 text-xs text-slate-400">
-                  Email-first flow: the system feels like a real inbox workflow.
-                </div>
-              </div>
-
-              <div>
-                <Shot
-                  src="/splash/admin-health.png"
-                  alt="Admin health dashboard"
-                  aspect="aspect-[16/10]"
-                />
-                <div className="mt-2 text-xs text-slate-400">
-                  Admin tools: materials, pricing, curves, integrations.
-                </div>
-              </div>
-
-              {/* Keep CAD output visible but prevent it from dominating */}
-              <div className="lg:col-span-2">
-                <div className="mt-1">
-                  <Shot
-                    src="/splash/cad-step.png"
-                    alt="CAD STEP model output"
-                    aspect="aspect-[21/9]"
-                  />
-                  <div className="mt-2 text-xs text-slate-400">
-                    CAD output: DXF/STEP for engineering + vendors.
-                  </div>
-                </div>
+            {/* Wide CAD banner */}
+            <div className="mt-6">
+              <Shot
+                src="/splash/cad-step.png"
+                alt="CAD STEP model output"
+                aspect="aspect-[21/9]"
+              />
+              <div className="mt-2 text-xs text-slate-400">
+                CAD output: DXF/STEP for engineering + vendors.
               </div>
             </div>
 
-            {/* CTA row */}
-            <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <a
                 href="/quote"
                 className="rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
