@@ -11,22 +11,29 @@ function Shot({
   src,
   alt,
   priority,
+  aspect = "aspect-[16/10]",
 }: {
   src: string;
   alt: string;
   priority?: boolean;
+  aspect?: string;
 }) {
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-sky-500/10 via-transparent to-transparent" />
-      <Image
-        src={src}
-        alt={alt}
-        width={1600}
-        height={1000}
-        className="h-auto w-full"
-        priority={priority}
-      />
+
+      {/* Force consistent tile sizing + allow crop */}
+      <div className={`${aspect} w-full overflow-hidden`}>
+        <Image
+          src={src}
+          alt={alt}
+          width={1600}
+          height={1000}
+          className="h-full w-full object-cover"
+          priority={priority}
+        />
+      </div>
+
       <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100">
         <div className="absolute inset-0 bg-white/[0.03]" />
       </div>
@@ -42,17 +49,49 @@ function Kicker({ children }: { children: ReactNode }) {
   );
 }
 
-function MiniCard({
-  title,
-  desc,
-}: {
-  title: string;
-  desc: string;
-}) {
+function MiniCard({ title, desc }: { title: string; desc: string }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
       <div className="text-sm font-semibold text-white">{title}</div>
       <div className="mt-2 text-sm leading-relaxed text-slate-300">{desc}</div>
+    </div>
+  );
+}
+
+function EmailSnippetCard() {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+          FIRST RESPONSE
+        </div>
+        <span className="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200">
+          auto-reply
+        </span>
+      </div>
+
+      <div className="mt-3">
+        <div className="text-sm font-semibold text-white">
+          Subject: Foam quote {`{#}`}&nbsp;— specs + pricing + next steps
+        </div>
+        <div className="mt-2 text-sm leading-relaxed text-slate-300">
+          We pulled the key specs from your email, priced the foam set, and
+          generated an interactive quote. If anything looks off, reply with a
+          correction and we’ll update it.
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-slate-100">
+          Open quote
+        </span>
+        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-slate-100">
+          Edit layout
+        </span>
+        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-slate-100">
+          Export CAD
+        </span>
+      </div>
     </div>
   );
 }
@@ -74,37 +113,36 @@ export default function Page() {
 
       {/* System-style header band (matches app vibe) */}
       <header className="relative z-10">
-  <div
-    className="border-b border-white/10"
-    style={{
-      background:
-        "linear-gradient(135deg, rgba(14,165,233,0.9) 0%, rgba(14,165,233,0.9) 45%, rgba(15,23,42,1) 100%)",
-    }}
-  >
-    <Container>
-      <div className="flex items-center justify-between py-4">
-        {/* Left: system identity */}
-        <div>
-          <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-sky-100/90">
-            Powered by
-          </div>
-          <div className="text-lg font-extrabold text-sky-50 drop-shadow-[0_0_8px_rgba(15,23,42,0.55)]">
-            Alex-IO
-          </div>
-          <div className="mt-0.5 text-xs text-sky-100/90">
-            Quoting · Layout · CAD
-          </div>
+        <div
+          className="border-b border-white/10"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(14,165,233,0.9) 0%, rgba(14,165,233,0.9) 45%, rgba(15,23,42,1) 100%)",
+          }}
+        >
+          <Container>
+            <div className="flex items-center justify-between py-4">
+              {/* Left: system identity */}
+              <div>
+                <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-sky-100/90">
+                  Powered by
+                </div>
+                <div className="text-lg font-extrabold text-sky-50 drop-shadow-[0_0_8px_rgba(15,23,42,0.55)]">
+                  Alex-IO
+                </div>
+                <div className="mt-0.5 text-xs text-sky-100/90">
+                  Quoting · Layout · CAD
+                </div>
+              </div>
+
+              {/* Right: status pill */}
+              <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-medium text-sky-50">
+                Automated first response
+              </span>
+            </div>
+          </Container>
         </div>
-
-        {/* Right: status pill */}
-        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-medium text-sky-50">
-          Automated first response
-        </span>
-      </div>
-    </Container>
-  </div>
-</header>
-
+      </header>
 
       {/* HERO (tight) */}
       <section className="relative z-10">
@@ -113,13 +151,10 @@ export default function Page() {
             <div className="mx-auto max-w-3xl text-center">
               <Kicker>EMAIL → QUOTE → LAYOUT → CAD</Kicker>
 
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                Turn an email into a finished foam package.
-              </h1>
-
+              {/* Removed H1 entirely. Promote subtext into that space (same sizing). */}
               <p className="mt-3 text-sm leading-relaxed text-slate-300 sm:text-base">
-                Pricing, cavity layout, layered sets, and CAD-ready outputs — one
-                connected workflow that feels like real software.
+                Pricing, cavity layout, layered sets, and CAD-ready outputs—one
+                connected workflow that starts with just a single email.
               </p>
             </div>
 
@@ -130,6 +165,7 @@ export default function Page() {
                   src="/splash/hero-quote.png"
                   alt="Alex-IO interactive quote summary"
                   priority
+                  aspect="aspect-[16/10]"
                 />
                 <div className="mt-2 text-center text-xs text-slate-400">
                   Customer view: clear specs, pricing, and next step.
@@ -190,12 +226,13 @@ export default function Page() {
               </p>
             </div>
 
-            {/* 2x2 grid, smaller tiles */}
+            {/* 2x2 grid, uniform tiles (cropped to consistent ratio) */}
             <div className="mt-7 grid gap-5 lg:grid-cols-2">
               <div>
                 <Shot
                   src="/splash/layout-editor.png"
                   alt="Interactive foam layout editor"
+                  aspect="aspect-[16/10]"
                 />
                 <div className="mt-2 text-xs text-slate-400">
                   Layout editor: layers + cavity tools + manufacturing intent.
@@ -206,16 +243,18 @@ export default function Page() {
                 <Shot
                   src="/splash/layer-previews.png"
                   alt="Per-layer layout previews"
+                  aspect="aspect-[16/10]"
                 />
                 <div className="mt-2 text-xs text-slate-400">
                   Per-layer previews: communicate clearly before cutting.
                 </div>
               </div>
 
+              {/* Fill the “dead” feeling with a compact email-first card */}
               <div>
-                <Shot src="/splash/cad-step.png" alt="CAD STEP model output" />
+                <EmailSnippetCard />
                 <div className="mt-2 text-xs text-slate-400">
-                  CAD output: DXF/STEP for engineering + vendors.
+                  Email-first flow: the system feels like a real inbox workflow.
                 </div>
               </div>
 
@@ -223,9 +262,24 @@ export default function Page() {
                 <Shot
                   src="/splash/admin-health.png"
                   alt="Admin health dashboard"
+                  aspect="aspect-[16/10]"
                 />
                 <div className="mt-2 text-xs text-slate-400">
                   Admin tools: materials, pricing, curves, integrations.
+                </div>
+              </div>
+
+              {/* Keep CAD output visible but now it won’t create uneven “tall” cards */}
+              <div className="lg:col-span-2">
+                <div className="mt-1">
+                  <Shot
+                    src="/splash/cad-step.png"
+                    alt="CAD STEP model output"
+                    aspect="aspect-[21/9]"
+                  />
+                  <div className="mt-2 text-xs text-slate-400">
+                    CAD output: DXF/STEP for engineering + vendors.
+                  </div>
                 </div>
               </div>
             </div>
