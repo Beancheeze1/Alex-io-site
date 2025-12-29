@@ -3,6 +3,21 @@ import type { ReactNode } from "react";
 import Image from "next/image";
 import QuoteHelperPanel from "@/components/QuoteHelperPanel";
 
+function gmailComposeUrl(opts: { to: string; subject?: string; body?: string }) {
+  const params = new URLSearchParams({
+    view: "cm",
+    fs: "1",
+    to: opts.to,
+  });
+
+  if (opts.subject) params.set("su", opts.subject);
+  if (opts.body) params.set("body", opts.body);
+
+  return `https://mail.google.com/mail/?${params.toString()}`;
+}
+
+
+
 function Container({ children }: { children: ReactNode }) {
   return <div className="mx-auto w-full max-w-6xl px-4">{children}</div>;
 }
@@ -146,25 +161,25 @@ function OverlapSnips() {
 }
 
 const START_QUOTE_MAILTO =
-  "mailto:sales@alex-io.com?subject=" +
-  encodeURIComponent("Start a quote") +
+  "https://mail.google.com/mail/?view=cm&fs=1" +
+  "&to=" +
+  encodeURIComponent("sales@alex-io.com") +
+  "&su=" +
+  encodeURIComponent("Foam quote request") +
   "&body=" +
   encodeURIComponent(
     [
-      "Hi Alex-IO,",
+      "Outside size (LxWxH, inches):",
+      "Quantity to quote:",
+      "Foam family (PE, EPE, PU):",
+      "Density (e.g., 1.7 lb):",
+      "Cavities / pockets (if any):",
+      "Cavity sizes (LxWxDepth or ØxDepth):",
       "",
-      "Please start a quote for:",
-      "",
-      "- Outside size (L×W×H, inches):",
-      "- Quantity:",
-      "- Foam family (PE/EPE/PU):",
-      "- Density (lb/ft³):",
-      "- Cavities (count + sizes):",
-      "- Any fit/clearance notes (optional):",
-      "",
-      "Thanks!",
+      "Notes:",
     ].join("\n")
   );
+
 
 export default function Page() {
   return (
@@ -266,19 +281,31 @@ export default function Page() {
 
                   {/* KEEP: Start a quote -> sales@alex-io.com */}
                   <a
-                    href={START_QUOTE_MAILTO}
-                    className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
-                  >
-                    Start a quote
-                  </a>
+  href={START_QUOTE_MAILTO}
+  target="_blank"
+  rel="noreferrer"
+  className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+>
+  Start a quote
+</a>
+
 
                   {/* Contact sales -> Chuck */}
-                  <a
-                    href="mailto:chuck@alex-io.com"
-                    className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
-                  >
-                    Contact sales
-                  </a>
+                 <a
+  href={
+    "https://mail.google.com/mail/?view=cm&fs=1" +
+    "&to=" +
+    encodeURIComponent("chuck@alex-io.com") +
+    "&su=" +
+    encodeURIComponent("Alex-IO inquiry")
+  }
+  target="_blank"
+  rel="noreferrer"
+  className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+>
+  Contact sales
+</a>
+
                 </div>
 
                 {/* Email sample integrated into left story */}
