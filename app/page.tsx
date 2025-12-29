@@ -51,9 +51,39 @@ function Kicker({ children }: { children: ReactNode }) {
 
 function MiniCard({ title, desc }: { title: string; desc: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
       <div className="text-sm font-semibold text-white">{title}</div>
       <div className="mt-2 text-sm leading-relaxed text-slate-300">{desc}</div>
+    </div>
+  );
+}
+
+function DividerBand() {
+  return (
+    <div className="relative my-10">
+      <div className="pointer-events-none absolute inset-0 -z-10 opacity-[0.55]">
+        <div className="absolute left-1/2 top-1/2 h-[260px] w-[780px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-500/10 blur-3xl" />
+      </div>
+      <div className="mx-auto h-px w-full max-w-5xl bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+    </div>
+  );
+}
+
+function WorkflowStrip() {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] px-5 py-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-sky-500/10 via-transparent to-transparent" />
+      <div className="relative flex flex-col items-center justify-between gap-3 sm:flex-row">
+        <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+          WORKFLOW
+        </div>
+        <div className="text-sm font-semibold text-slate-100">
+          Email → Quote → Layout → CAD
+        </div>
+        <div className="text-xs text-slate-400">
+          One chain of custody from request → production files.
+        </div>
+      </div>
     </div>
   );
 }
@@ -111,7 +141,7 @@ export default function Page() {
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950/10 via-slate-950/35 to-slate-950" />
       </div>
 
-      {/* System-style header band (matches app vibe) */}
+      {/* System-style header band (KEEP AS-IS) */}
       <header className="relative z-10">
         <div
           className="border-b border-white/10"
@@ -144,22 +174,31 @@ export default function Page() {
         </div>
       </header>
 
-      {/* HERO (tight) */}
+      {/* HERO */}
       <section className="relative z-10">
         <Container>
-          <div className="pb-8 pt-8 sm:pb-10 sm:pt-10">
+          <div className="pb-10 pt-8 sm:pb-12 sm:pt-10">
             <div className="mx-auto max-w-3xl text-center">
               <Kicker>EMAIL → QUOTE → LAYOUT → CAD</Kicker>
 
-              {/* Removed H1 entirely. Promote subtext into that space (same sizing). */}
-              <p className="mt-3 text-sm leading-relaxed text-slate-300 sm:text-base">
+              {/* Keep your new hero copy, but make it visually “the headline” */}
+              <p className="mt-3 text-base font-semibold leading-snug tracking-tight text-slate-100 sm:text-lg">
                 Pricing, cavity layout, layered sets, and CAD-ready outputs—one
                 connected workflow that starts with just a single email.
               </p>
+
+              <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                Designed to feel like a real toolchain: clear, reviewable, and
+                production-minded from the first reply.
+              </p>
             </div>
 
-            {/* Demo + Inline helper (compact) */}
-            <div className="mt-7 grid gap-5 lg:grid-cols-12">
+            <div className="mt-7">
+              <WorkflowStrip />
+            </div>
+
+            {/* Demo + Inline helper (compact, but more intentional) */}
+            <div className="mt-6 grid gap-6 lg:grid-cols-12">
               <div id="demo" className="lg:col-span-7">
                 <Shot
                   src="/splash/hero-quote.png"
@@ -173,26 +212,31 @@ export default function Page() {
               </div>
 
               <div className="lg:col-span-5">
-                <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
+                <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.025] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
                   <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-sky-500/10 via-transparent to-transparent" />
                   <div className="relative">
                     <div className="mb-3 flex items-center justify-between">
                       <div className="text-xs font-semibold tracking-widest text-sky-300/80">
                         EXAMPLE INPUT
                       </div>
-                      <span className="text-[11px] text-slate-400">
-                        copy/paste into an email
+                      <span className="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200">
+                        email-ready
                       </span>
                     </div>
 
                     {/* Render the helper inline (no forced max-width) */}
-                    <QuoteHelperPanel className="max-w-none mx-0" />
+                    <QuoteHelperPanel className="mx-0 max-w-none" />
+
+                    <div className="mt-3 text-[11px] leading-relaxed text-slate-400">
+                      Tip: we typically undersize foam by ~0.125&quot; for an
+                      easier fit into cartons and mailers.
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Feature bullets (small, not scroll-heavy) */}
+            {/* Feature bullets (cleaner / less pill-y) */}
             <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <MiniCard
                 title="Automated first response"
@@ -207,14 +251,16 @@ export default function Page() {
                 desc="Production-ready outputs per layer (previews + CAD)."
               />
             </div>
+
+            <DividerBand />
           </div>
         </Container>
       </section>
 
-      {/* PRODUCT OVERVIEW (single compact grid section) */}
+      {/* PRODUCT OVERVIEW */}
       <section className="relative z-10">
         <Container>
-          <div className="pb-10">
+          <div className="pb-12">
             <div className="mx-auto max-w-4xl text-center">
               <Kicker>THE SYSTEM</Kicker>
               <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
@@ -269,7 +315,7 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* Keep CAD output visible but now it won’t create uneven “tall” cards */}
+              {/* Keep CAD output visible but prevent it from dominating */}
               <div className="lg:col-span-2">
                 <div className="mt-1">
                   <Shot
@@ -284,8 +330,8 @@ export default function Page() {
               </div>
             </div>
 
-            {/* CTA row (tight) */}
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            {/* CTA row */}
+            <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <a
                 href="/quote"
                 className="rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
