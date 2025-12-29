@@ -183,15 +183,16 @@ export default function Page() {
                 </div>
               </div>
 
+              {/* UPDATED PILL */}
               <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-medium text-sky-50">
-                Automated first response
+                Automated Quoting Assistant
               </span>
             </div>
           </Container>
         </div>
       </header>
 
-      {/* HERO (new: left story + right overlap snips) */}
+      {/* HERO (left story + right overlap snips) */}
       <section className="relative z-10">
         <Container>
           <div className="pb-10 pt-8 sm:pb-12 sm:pt-10">
@@ -205,29 +206,38 @@ export default function Page() {
                   connected workflow that starts with just a single email.
                 </p>
 
+                {/* How it works */}
                 <div className="mt-5 grid gap-3">
                   <div className="flex items-start gap-3">
                     <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
                     <div className="text-sm leading-relaxed text-slate-300">
-                      Automated first response with specs + pricing, then a link
-                      into the interactive quote.
+                      Send a normal RFQ email (sizes, quantity, material, and any
+                      cavities).
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
                     <div className="text-sm leading-relaxed text-slate-300">
-                      Layout editor stays tied to the quote (layers, cavities,
-                      previews).
+                      You get an automated first response with specs + pricing
+                      and a link to the interactive quote.
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
                     <div className="text-sm leading-relaxed text-slate-300">
-                      Per-layer CAD exports for engineering + vendors (DXF/STEP).
+                      Build the layout: layers, cavities, previews — all tied to
+                      the quote.
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 h-2 w-2 rounded-full bg-sky-400/90" />
+                    <div className="text-sm leading-relaxed text-slate-300">
+                      Export per-layer DXF/STEP for engineering and vendors.
                     </div>
                   </div>
                 </div>
 
+                {/* CTA */}
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                   <a
                     href="/quote"
@@ -258,7 +268,7 @@ export default function Page() {
               </div>
             </div>
 
-            {/* “Example Input” moved into its own clean row */}
+            {/* Example Input + “why it’s different” cards */}
             <div className="mt-10 grid gap-5 lg:grid-cols-12">
               <div className="lg:col-span-7">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
@@ -280,16 +290,16 @@ export default function Page() {
               <div className="lg:col-span-5">
                 <div className="grid gap-3">
                   <MiniCard
-                    title="Automated first response"
-                    desc="Fast reply with specs + pricing, then link into the interactive quote."
+                    title="Email-first workflow"
+                    desc="Start in the inbox, then jump straight into a real quote and layout—no back-and-forth chaos."
                   />
                   <MiniCard
-                    title="Interactive layout editor"
-                    desc="Place cavities, build layers, and keep everything tied to the quote."
+                    title="Manufacturing intent built-in"
+                    desc="Layers, cavity geometry, and previews are first-class—designed for how foam actually gets cut."
                   />
                   <MiniCard
-                    title="DXF/STEP exports"
-                    desc="Production-ready outputs per layer (previews + CAD)."
+                    title="Per-layer CAD outputs"
+                    desc="DXF/STEP exports per layer so engineering and vendors get exactly what they need."
                   />
                 </div>
               </div>
@@ -298,7 +308,7 @@ export default function Page() {
         </Container>
       </section>
 
-      {/* SYSTEM SECTION (simplified + more premium spacing) */}
+      {/* SYSTEM SECTION */}
       <section className="relative z-10">
         <Container>
           <div className="pb-10">
@@ -313,40 +323,41 @@ export default function Page() {
               </p>
             </div>
 
-            {/* Two supporting tiles (keeps it polished, avoids “screenshot wall”) */}
             <div className="mt-7 grid gap-5 lg:grid-cols-2">
+              {/* SUPPORTING: CAD tile */}
               <div>
                 <Shot
-                  src="/splash/layout-editor.png"
-                  alt="Interactive foam layout editor"
+                  src="/splash/cad-step.png"
+                  alt="CAD STEP model output"
                   aspect="aspect-[16/10]"
                 />
                 <div className="mt-2 text-xs text-slate-400">
-                  Layout editor: layers + cavity tools + manufacturing intent.
+                  CAD output: DXF/STEP for engineering + vendors.
                 </div>
               </div>
 
+              {/* SUPPORTING: Admin tile */}
               <div>
                 <Shot
-                  src="/splash/layer-previews.png"
-                  alt="Per-layer layout previews"
+                  src="/splash/admin-health.png"
+                  alt="Admin health dashboard"
                   aspect="aspect-[16/10]"
                 />
                 <div className="mt-2 text-xs text-slate-400">
-                  Per-layer previews: communicate clearly before cutting.
+                  Admin tools: materials, pricing, curves, integrations.
                 </div>
               </div>
             </div>
 
-            {/* Wide CAD banner */}
+            {/* WIDE BANNER (SWAPPED): now layout editor */}
             <div className="mt-6">
               <Shot
-                src="/splash/cad-step.png"
-                alt="CAD STEP model output"
+                src="/splash/layout-editor.png"
+                alt="Interactive foam layout editor"
                 aspect="aspect-[21/9]"
               />
               <div className="mt-2 text-xs text-slate-400">
-                CAD output: DXF/STEP for engineering + vendors.
+                Layout editor: layers + cavity tools + manufacturing intent.
               </div>
             </div>
 
