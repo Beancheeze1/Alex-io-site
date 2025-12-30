@@ -1,4 +1,4 @@
-// app/demo/quote/demoSeeds.ts
+// app/demo/quote/demoSeed.ts
 //
 // Demo scenarios (100% local, never hits backend).
 // Used by /demo/quote to make the demo feel like a real product.
@@ -25,12 +25,12 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
   {
     id: "mailer",
     label: "Mailer insert (single layer)",
-    subtitle: '18"×12"×2" with mixed cavities',
+    subtitle: '15"×12"×2" with mixed cavities',
     materialLabel: "Expanded Polyethylene (EPE)",
     densityLabel: "1.7 lb/ft³",
     seed: {
       editorMode: "basic",
-      block: { lengthIn: 18, widthIn: 12, thicknessIn: 2 } as any,
+      block: { lengthIn: 15, widthIn: 12, thicknessIn: 2 } as any,
       cavities: [],
       stack: [
         {
@@ -42,35 +42,35 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
             {
               id: "demo-cav-a",
               shape: "rect",
-              lengthIn: 6,
-              widthIn: 4,
+              lengthIn: 5.25,
+              widthIn: 3.5,
               depthIn: 1.5,
               cornerRadiusIn: 0,
-              x: 0.14,
+              x: 0.12,
               y: 0.18,
-              label: "6×4×1.5 in",
+              label: "5.25×3.5×1.5 in",
             },
             {
               id: "demo-cav-b",
               shape: "circle",
-              lengthIn: 3,
-              widthIn: 3,
+              lengthIn: 2.75,
+              widthIn: 2.75,
               depthIn: 1.5,
               cornerRadiusIn: 0,
-              x: 0.68,
+              x: 0.70,
               y: 0.34,
-              label: "Ø3×1.5 in",
+              label: "Ø2.75×1.5 in",
             },
             {
               id: "demo-cav-c",
               shape: "rect",
-              lengthIn: 2.5,
-              widthIn: 2,
+              lengthIn: 2.25,
+              widthIn: 1.75,
               depthIn: 1,
               cornerRadiusIn: 0,
-              x: 0.20,
+              x: 0.18,
               y: 0.62,
-              label: "2.5×2×1 in",
+              label: "2.25×1.75×1 in",
             },
           ],
         } as any,
@@ -81,12 +81,13 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
   {
     id: "twoLayer",
     label: "Two-layer set (top pad + base)",
-    subtitle: 'Top pad 0.5" + Base 1.5" (layered workflow)',
+    subtitle: '15"×12" total — Advanced mode + rounded pocket + cropped corners',
     materialLabel: "Expanded Polyethylene (EPE)",
     densityLabel: "2.0 lb/ft³",
     seed: {
-      editorMode: "basic",
-      block: { lengthIn: 18, widthIn: 12, thicknessIn: 2 } as any,
+      // ADVANCED: demonstrates the advanced editor behavior (no spacing restrictions, etc.)
+      editorMode: "advanced",
+      block: { lengthIn: 15, widthIn: 12, thicknessIn: 2 } as any,
       cavities: [],
       stack: [
         {
@@ -102,17 +103,19 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
           thicknessIn: 1.5,
           cropCorners: false,
           cavities: [
+            // Rounded-rect pocket (advanced vibe)
             {
               id: "demo2-cav-a",
               shape: "rect",
-              lengthIn: 6.5,
-              widthIn: 4.25,
+              lengthIn: 5.75,
+              widthIn: 3.75,
               depthIn: 1.5,
-              cornerRadiusIn: 0,
+              cornerRadiusIn: 0.25,
               x: 0.12,
-              y: 0.18,
-              label: "6.5×4.25×1.5 in",
+              y: 0.20,
+              label: "5.75×3.75×1.5 in (R0.25)",
             },
+            // Circle pocket (keep one secondary)
             {
               id: "demo2-cav-b",
               shape: "circle",
@@ -120,7 +123,7 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
               widthIn: 2.5,
               depthIn: 1.5,
               cornerRadiusIn: 0,
-              x: 0.70,
+              x: 0.72,
               y: 0.40,
               label: "Ø2.5×1.5 in",
             },

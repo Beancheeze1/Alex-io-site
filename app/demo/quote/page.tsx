@@ -59,9 +59,7 @@ function Pill({
         : "bg-sky-500/15 text-sky-200 ring-1 ring-sky-400/20";
 
   return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls} whitespace-nowrap shrink-0`}
-    >
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls}`}>
       {children}
     </span>
   );
@@ -75,8 +73,7 @@ function fmtIn(n: any) {
 }
 
 function SelectedSummary({ c }: { c: Cavity | null }) {
-  if (!c)
-    return <div className="text-slate-400">Select a cavity to inspect.</div>;
+  if (!c) return <div className="text-slate-400">Select a cavity to inspect.</div>;
 
   const isCircle = (c as any).shape === "circle";
   const L = fmtIn((c as any).lengthIn);
@@ -89,8 +86,7 @@ function SelectedSummary({ c }: { c: Cavity | null }) {
         {(c as any).label || "Selected cavity"}
       </div>
       <div className="text-slate-300">
-        Shape:{" "}
-        <span className="text-slate-100">{isCircle ? "Circle" : "Rect"}</span>
+        Shape: <span className="text-slate-100">{isCircle ? "Circle" : "Rect"}</span>
       </div>
       <div className="text-slate-300">
         Size:{" "}
@@ -347,14 +343,8 @@ export default function DemoQuotePage() {
   const wallRuleIn = 0.5;
   const minGapRuleIn = 0.5;
 
-  const minFoamEdge = React.useMemo(
-    () => minFoamEdgeClearanceIn(model.layout as any),
-    [model.layout],
-  );
-  const minGap = React.useMemo(
-    () => minGapBetweenCavitiesIn(model.layout as any),
-    [model.layout],
-  );
+  const minFoamEdge = React.useMemo(() => minFoamEdgeClearanceIn(model.layout as any), [model.layout]);
+  const minGap = React.useMemo(() => minGapBetweenCavitiesIn(model.layout as any), [model.layout]);
 
   const wallPass = minFoamEdge >= wallRuleIn - 1e-6; // equal counts as pass
   const gapPass = minGap === Infinity ? true : minGap >= minGapRuleIn - 1e-6;
@@ -365,6 +355,13 @@ export default function DemoQuotePage() {
   const onStartReal = React.useCallback(() => {
     router.push("/start-quote");
   }, [router]);
+
+  // UI label mapping (no demoSeed changes required)
+  const scenarioUiLabel = React.useMemo(() => {
+    if (scenarioId === "mailer") return "Basic editor";
+    if (scenarioId === "twoLayer") return "Advanced editor";
+    return scenario.label;
+  }, [scenarioId, scenario.label]);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-50">
@@ -384,9 +381,7 @@ export default function DemoQuotePage() {
         {/* Top header row */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-              DEMO QUOTE
-            </div>
+            <div className="text-xs font-semibold tracking-widest text-sky-300/80">DEMO QUOTE</div>
             <div className="mt-1 text-sm text-slate-300">
               Explore a real layout editor — then unlock pricing, apply, exports, and email workflow.
             </div>
@@ -480,13 +475,15 @@ export default function DemoQuotePage() {
           </div>
 
           {/* CENTER: canvas */}
-          <div className="lg:col-span-6">
-            {/* Context row */}
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-slate-300">
-                Scenario:{" "}
-                <span className="text-slate-100 font-semibold">{scenario.label}</span>{" "}
-                <span className="text-slate-400">— {scenario.subtitle}</span>
+          <div className="lg:col-span-5">
+            {/* Context row (LOCKED to 2 lines to prevent jump) */}
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="text-sm text-slate-300 leading-snug">
+                <div>
+                  Scenario:{" "}
+                  <span className="text-slate-100 font-semibold">{scenarioUiLabel}</span>
+                </div>
+                <div className="text-slate-400">— {scenario.subtitle}</div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -516,7 +513,7 @@ export default function DemoQuotePage() {
           </div>
 
           {/* RIGHT: scenario picker + inspector + checks */}
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-4">
             <div className="grid gap-4">
               {/* Scenario picker */}
               <Card title="DEMO SCENARIO" right={<Pill tone="info">Zero backend</Pill>}>
@@ -530,11 +527,19 @@ export default function DemoQuotePage() {
                     onChange={(e) => setScenarioId(e.target.value as DemoScenarioId)}
                     className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 focus:border-sky-400/40"
                   >
-                    {DEMO_SCENARIOS.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.label}
-                      </option>
-                    ))}
+                    {DEMO_SCENARIOS.map((s) => {
+                      const label =
+                        s.id === "mailer"
+                          ? "Basic editor"
+                          : s.id === "twoLayer"
+                            ? "Advanced editor"
+                            : s.label;
+                      return (
+                        <option key={s.id} value={s.id}>
+                          {label}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
@@ -596,9 +601,7 @@ export default function DemoQuotePage() {
                       <div className="text-xs font-semibold tracking-widest text-sky-300/80">
                         MANUFACTURING CHECKS
                       </div>
-                      <Pill tone={checksPass ? "pass" : "warn"}>
-                        {checksPass ? "PASS" : "WARN"}
-                      </Pill>
+                      <Pill tone={checksPass ? "pass" : "warn"}>{checksPass ? "PASS" : "WARN"}</Pill>
                     </div>
 
                     <div className="mt-2 space-y-1 text-sm text-slate-300">
