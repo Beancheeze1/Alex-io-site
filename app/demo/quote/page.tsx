@@ -21,7 +21,7 @@ import { useLayoutModel } from "../../quote/layout/editor/useLayoutModel";
 import type { Cavity } from "../../quote/layout/editor/layoutTypes";
 
 // IMPORTANT: make sure this path matches your actual filename on disk.
-import { DEMO_SCENARIOS, getScenario, type DemoScenarioId } from "./demoSeed";
+import { getScenario } from "./demoSeed";
 
 function Card({
   title,
@@ -274,21 +274,12 @@ function DeliverableRow({
 export default function DemoQuotePage() {
   const router = useRouter();
 
-  // Only show these two in the dropdown (Basic + Advanced)
-  const scenarioOptions = React.useMemo(() => {
-    return DEMO_SCENARIOS.filter((s) => s.id === "mailer" || s.id === "twoLayer").map((s) => {
-      const label = s.id === "mailer" ? "Basic editor" : "Advanced editor";
-      return { ...s, label };
-    });
-  }, []);
+  // LOCKED: Basic editor only (no scenario picker)
+  const scenarioId = "mailer" as const;
+  const scenario = React.useMemo(() => getScenario(scenarioId as any), []);
+  const displayScenarioLabel = "Basic editor";
 
-  // Keep state using the real ids
-  const [scenarioId, setScenarioId] = React.useState<DemoScenarioId>("mailer");
-
-  const scenario = React.useMemo(() => getScenario(scenarioId), [scenarioId]);
-  const displayScenarioLabel = scenarioId === "mailer" ? "Basic editor" : "Advanced editor";
-
-  // Seed once per scenario
+  // Seed once (basic)
   const seed = React.useMemo(() => scenario.seed, [scenario]);
   const model = useLayoutModel(seed);
 
@@ -307,14 +298,7 @@ export default function DemoQuotePage() {
   const [didMove, setDidMove] = React.useState(false);
   const [didResize, setDidResize] = React.useState(false);
 
-  // Reset objectives when scenario changes
-  React.useEffect(() => {
-    initialSnapshotRef.current = null;
-    setDidSelect(false);
-    setDidMove(false);
-    setDidResize(false);
-  }, [scenarioId]);
-
+  // Snapshot baseline once
   React.useEffect(() => {
     if (selectedId) setDidSelect(true);
   }, [selectedId]);
@@ -390,7 +374,8 @@ export default function DemoQuotePage() {
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950/10 via-slate-950/35 to-slate-950" />
       </div>
 
-      <div className="relative z-10 mx-auto w-full max-w-[1600px] px-4 py-8">
+      {/* TIGHTENED: reduce overall width just enough to align right column with action bar edge */}
+      <div className="relative z-10 mx-auto w-full max-w-[1480px] px-4 py-8">
         {/* Top header row */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -424,8 +409,8 @@ export default function DemoQuotePage() {
           <LockedActionBar onStartReal={onStartReal} />
         </div>
 
-        {/* Main grid (explicit widths so center stays wide, no shrink) */}
-        <div className="mt-6 grid gap-5 lg:grid-cols-[360px_minmax(860px,1fr)_380px]">
+        {/* Main grid (keep center wide, right slightly narrower; aligns with action bar now) */}
+        <div className="mt-6 grid gap-5 lg:grid-cols-[360px_minmax(860px,1fr)_340px]">
           {/* LEFT: WOW blocks */}
           <div>
             <div className="grid gap-4">
@@ -489,7 +474,7 @@ export default function DemoQuotePage() {
             </div>
           </div>
 
-          {/* CENTER: canvas (wide again) */}
+          {/* CENTER: canvas */}
           <div>
             {/* Context row */}
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -517,7 +502,8 @@ export default function DemoQuotePage() {
                   model.updateCavityDims(id, { lengthIn, widthIn } as any)
                 }
                 zoom={1}
-                croppedCorners={scenarioId === "twoLayer"}
+                // Basic only in demo now
+                croppedCorners={false}
                 // DEMO: hide the dotted inner wall so the visual edge is clearly the foam edge
                 showInnerWall={false}
                 autoCenterOnMount
@@ -525,33 +511,9 @@ export default function DemoQuotePage() {
             </div>
           </div>
 
-          {/* RIGHT: scenario picker + inspector + checks */}
+          {/* RIGHT: inspector + objectives + checks (DEMO SCENARIO card removed) */}
           <div>
             <div className="grid gap-4">
-              <Card title="DEMO SCENARIO" right={<Pill tone="info">Zero backend</Pill>}>
-                <div className="text-slate-300">
-                  Switch scenarios to see how the editor behaves across common packaging patterns.
-                </div>
-
-                <div className="mt-3">
-                  <select
-                    value={scenarioId}
-                    onChange={(e) => setScenarioId(e.target.value as DemoScenarioId)}
-                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 focus:border-sky-400/40"
-                  >
-                    {scenarioOptions.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="mt-3 text-xs text-slate-400">
-                  Tip: Try resizing a pocket until checks flip to WARN, then fix spacing.
-                </div>
-              </Card>
-
               <Card title="BLOCK (DEMO)">
                 <div className="text-slate-300">
                   Size:{" "}
