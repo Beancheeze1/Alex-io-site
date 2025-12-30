@@ -20,6 +20,7 @@ import InteractiveCanvas from "../../quote/layout/editor/InteractiveCanvas";
 import { useLayoutModel } from "../../quote/layout/editor/useLayoutModel";
 import type { Cavity } from "../../quote/layout/editor/layoutTypes";
 
+// IMPORTANT: make sure this path matches your actual filename on disk.
 import { DEMO_SCENARIOS, getScenario, type DemoScenarioId } from "./demoSeed";
 
 function Card({
@@ -59,7 +60,9 @@ function Pill({
         : "bg-sky-500/15 text-sky-200 ring-1 ring-sky-400/20";
 
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls}`}
+    >
       {children}
     </span>
   );
@@ -73,7 +76,8 @@ function fmtIn(n: any) {
 }
 
 function SelectedSummary({ c }: { c: Cavity | null }) {
-  if (!c) return <div className="text-slate-400">Select a cavity to inspect.</div>;
+  if (!c)
+    return <div className="text-slate-400">Select a cavity to inspect.</div>;
 
   const isCircle = (c as any).shape === "circle";
   const L = fmtIn((c as any).lengthIn);
@@ -86,7 +90,8 @@ function SelectedSummary({ c }: { c: Cavity | null }) {
         {(c as any).label || "Selected cavity"}
       </div>
       <div className="text-slate-300">
-        Shape: <span className="text-slate-100">{isCircle ? "Circle" : "Rect"}</span>
+        Shape:{" "}
+        <span className="text-slate-100">{isCircle ? "Circle" : "Rect"}</span>
       </div>
       <div className="text-slate-300">
         Size:{" "}
@@ -190,7 +195,6 @@ function LockedActionBar({ onStartReal }: { onStartReal: () => void }) {
           </div>
         </div>
 
-        {/* Removed duplicate top CTA here (keep the header CTA). */}
         <div className="hidden sm:block text-xs text-slate-400">
           Click a locked action to see what unlocks.
         </div>
@@ -270,9 +274,19 @@ function DeliverableRow({
 export default function DemoQuotePage() {
   const router = useRouter();
 
-  // Scenario picker (demo-only)
+  // Only show these two in the dropdown (Basic + Advanced)
+  const scenarioOptions = React.useMemo(() => {
+    return DEMO_SCENARIOS.filter((s) => s.id === "mailer" || s.id === "twoLayer").map((s) => {
+      const label = s.id === "mailer" ? "Basic editor" : "Advanced editor";
+      return { ...s, label };
+    });
+  }, []);
+
+  // Keep state using the real ids
   const [scenarioId, setScenarioId] = React.useState<DemoScenarioId>("mailer");
+
   const scenario = React.useMemo(() => getScenario(scenarioId), [scenarioId]);
+  const displayScenarioLabel = scenarioId === "mailer" ? "Basic editor" : "Advanced editor";
 
   // Seed once per scenario
   const seed = React.useMemo(() => scenario.seed, [scenario]);
@@ -343,8 +357,14 @@ export default function DemoQuotePage() {
   const wallRuleIn = 0.5;
   const minGapRuleIn = 0.5;
 
-  const minFoamEdge = React.useMemo(() => minFoamEdgeClearanceIn(model.layout as any), [model.layout]);
-  const minGap = React.useMemo(() => minGapBetweenCavitiesIn(model.layout as any), [model.layout]);
+  const minFoamEdge = React.useMemo(
+    () => minFoamEdgeClearanceIn(model.layout as any),
+    [model.layout],
+  );
+  const minGap = React.useMemo(
+    () => minGapBetweenCavitiesIn(model.layout as any),
+    [model.layout],
+  );
 
   const wallPass = minFoamEdge >= wallRuleIn - 1e-6; // equal counts as pass
   const gapPass = minGap === Infinity ? true : minGap >= minGapRuleIn - 1e-6;
@@ -355,13 +375,6 @@ export default function DemoQuotePage() {
   const onStartReal = React.useCallback(() => {
     router.push("/start-quote");
   }, [router]);
-
-  // UI label mapping (no demoSeed changes required)
-  const scenarioUiLabel = React.useMemo(() => {
-    if (scenarioId === "mailer") return "Basic editor";
-    if (scenarioId === "twoLayer") return "Advanced editor";
-    return scenario.label;
-  }, [scenarioId, scenario.label]);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-50">
@@ -377,11 +390,13 @@ export default function DemoQuotePage() {
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950/10 via-slate-950/35 to-slate-950" />
       </div>
 
-      <div className="relative z-10 mx-auto w-full max-w-[1400px] px-4 py-8">
+      <div className="relative z-10 mx-auto w-full max-w-[1600px] px-4 py-8">
         {/* Top header row */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="text-xs font-semibold tracking-widest text-sky-300/80">DEMO QUOTE</div>
+            <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+              DEMO QUOTE
+            </div>
             <div className="mt-1 text-sm text-slate-300">
               Explore a real layout editor — then unlock pricing, apply, exports, and email workflow.
             </div>
@@ -409,10 +424,10 @@ export default function DemoQuotePage() {
           <LockedActionBar onStartReal={onStartReal} />
         </div>
 
-        {/* Main grid (wide, editor-like) */}
-        <div className="mt-6 grid gap-5 lg:grid-cols-12">
+        {/* Main grid (explicit widths so center stays wide, no shrink) */}
+        <div className="mt-6 grid gap-5 lg:grid-cols-[360px_minmax(860px,1fr)_380px]">
           {/* LEFT: WOW blocks */}
-          <div className="lg:col-span-3">
+          <div>
             <div className="grid gap-4">
               <Card title="WHAT YOU GET IN THE REAL QUOTE">
                 <div className="grid gap-2">
@@ -474,16 +489,14 @@ export default function DemoQuotePage() {
             </div>
           </div>
 
-          {/* CENTER: canvas */}
-          <div className="lg:col-span-5">
-            {/* Context row (LOCKED to 2 lines to prevent jump) */}
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div className="text-sm text-slate-300 leading-snug">
-                <div>
-                  Scenario:{" "}
-                  <span className="text-slate-100 font-semibold">{scenarioUiLabel}</span>
-                </div>
-                <div className="text-slate-400">— {scenario.subtitle}</div>
+          {/* CENTER: canvas (wide again) */}
+          <div>
+            {/* Context row */}
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-slate-300">
+                Scenario:{" "}
+                <span className="text-slate-100 font-semibold">{displayScenarioLabel}</span>{" "}
+                <span className="text-slate-400">— {scenario.subtitle}</span>
               </div>
 
               <div className="flex items-center gap-2">
@@ -513,9 +526,8 @@ export default function DemoQuotePage() {
           </div>
 
           {/* RIGHT: scenario picker + inspector + checks */}
-          <div className="lg:col-span-4">
+          <div>
             <div className="grid gap-4">
-              {/* Scenario picker */}
               <Card title="DEMO SCENARIO" right={<Pill tone="info">Zero backend</Pill>}>
                 <div className="text-slate-300">
                   Switch scenarios to see how the editor behaves across common packaging patterns.
@@ -527,19 +539,11 @@ export default function DemoQuotePage() {
                     onChange={(e) => setScenarioId(e.target.value as DemoScenarioId)}
                     className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 focus:border-sky-400/40"
                   >
-                    {DEMO_SCENARIOS.map((s) => {
-                      const label =
-                        s.id === "mailer"
-                          ? "Basic editor"
-                          : s.id === "twoLayer"
-                            ? "Advanced editor"
-                            : s.label;
-                      return (
-                        <option key={s.id} value={s.id}>
-                          {label}
-                        </option>
-                      );
-                    })}
+                    {scenarioOptions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -548,7 +552,6 @@ export default function DemoQuotePage() {
                 </div>
               </Card>
 
-              {/* Block */}
               <Card title="BLOCK (DEMO)">
                 <div className="text-slate-300">
                   Size:{" "}
@@ -564,12 +567,10 @@ export default function DemoQuotePage() {
                 </div>
               </Card>
 
-              {/* Selected cavity */}
               <Card title="SELECTED CAVITY">
                 <SelectedSummary c={selected as any} />
               </Card>
 
-              {/* Objectives + checks */}
               <Card
                 title="DEMO OBJECTIVES"
                 right={
@@ -601,7 +602,9 @@ export default function DemoQuotePage() {
                       <div className="text-xs font-semibold tracking-widest text-sky-300/80">
                         MANUFACTURING CHECKS
                       </div>
-                      <Pill tone={checksPass ? "pass" : "warn"}>{checksPass ? "PASS" : "WARN"}</Pill>
+                      <Pill tone={checksPass ? "pass" : "warn"}>
+                        {checksPass ? "PASS" : "WARN"}
+                      </Pill>
                     </div>
 
                     <div className="mt-2 space-y-1 text-sm text-slate-300">

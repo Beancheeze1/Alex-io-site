@@ -1,4 +1,4 @@
-// app/demo/quote/demoSeed.ts
+// app/demo/quote/demoSeeds.ts
 //
 // Demo scenarios (100% local, never hits backend).
 // Used by /demo/quote to make the demo feel like a real product.
@@ -10,7 +10,8 @@
 
 import type { LayoutModel } from "../../quote/layout/editor/layoutTypes";
 
-export type DemoScenarioId = "mailer" | "twoLayer" | "tray6";
+// Only keep 2 scenarios now.
+export type DemoScenarioId = "mailer" | "twoLayer";
 
 export type DemoScenario = {
   id: DemoScenarioId;
@@ -24,7 +25,7 @@ export type DemoScenario = {
 export const DEMO_SCENARIOS: DemoScenario[] = [
   {
     id: "mailer",
-    label: "Mailer insert (single layer)",
+    label: "Basic editor",
     subtitle: '15"×12"×2" with mixed cavities',
     materialLabel: "Expanded Polyethylene (EPE)",
     densityLabel: "1.7 lb/ft³",
@@ -80,12 +81,11 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
 
   {
     id: "twoLayer",
-    label: "Two-layer set (top pad + base)",
+    label: "Advanced editor",
     subtitle: '15"×12" total — Advanced mode + rounded pocket + cropped corners',
     materialLabel: "Expanded Polyethylene (EPE)",
     densityLabel: "2.0 lb/ft³",
     seed: {
-      // ADVANCED: demonstrates the advanced editor behavior (no spacing restrictions, etc.)
       editorMode: "advanced",
       block: { lengthIn: 15, widthIn: 12, thicknessIn: 2 } as any,
       cavities: [],
@@ -103,7 +103,7 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
           thicknessIn: 1.5,
           cropCorners: false,
           cavities: [
-            // Rounded-rect pocket (advanced vibe)
+            // Rounded-rect replaces the “small rectangle” idea here.
             {
               id: "demo2-cav-a",
               shape: "rect",
@@ -115,7 +115,6 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
               y: 0.20,
               label: "5.75×3.75×1.5 in (R0.25)",
             },
-            // Circle pocket (keep one secondary)
             {
               id: "demo2-cav-b",
               shape: "circle",
@@ -127,37 +126,6 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
               y: 0.40,
               label: "Ø2.5×1.5 in",
             },
-          ],
-        } as any,
-      ],
-    } as any,
-  },
-
-  {
-    id: "tray6",
-    label: "Tray with 6 pockets",
-    subtitle: '16"×12"×2" with repeated cavities (spacing rules)',
-    materialLabel: "Polyethylene (PE)",
-    densityLabel: "1.7 lb/ft³",
-    seed: {
-      editorMode: "basic",
-      block: { lengthIn: 16, widthIn: 12, thicknessIn: 2 } as any,
-      cavities: [],
-      stack: [
-        {
-          id: "layer-1",
-          label: "Layer 1",
-          thicknessIn: 2,
-          cropCorners: false,
-          cavities: [
-            // 2×3 grid of pockets
-            { id: "t1", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.10, y: 0.16, label: "3×3×1.25 in" },
-            { id: "t2", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.35, y: 0.16, label: "3×3×1.25 in" },
-            { id: "t3", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.60, y: 0.16, label: "3×3×1.25 in" },
-
-            { id: "t4", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.10, y: 0.56, label: "3×3×1.25 in" },
-            { id: "t5", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.35, y: 0.56, label: "3×3×1.25 in" },
-            { id: "t6", shape: "rect", lengthIn: 3, widthIn: 3, depthIn: 1.25, cornerRadiusIn: 0, x: 0.60, y: 0.56, label: "3×3×1.25 in" },
           ],
         } as any,
       ],
