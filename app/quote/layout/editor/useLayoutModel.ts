@@ -437,24 +437,53 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   //
   // Safety:
   // - Only triggers when stack is missing/empty AND there are >1 layers
-  // - Only triggers when there are no legacy cavities to preserve
+  // - If cavities were seeded (e.g. from URL), place them into the intended layer
+  //   via layerCavityLayerIndex / layer_cavity_layer_index (default 1),
+  //   and make that layer active so user sees the cavities immediately.
   const hasStack =
     Array.isArray((initial as any).stack) && (initial as any).stack.length > 0;
 
-  const cavCount = Array.isArray((initial as any).cavities)
-    ? (initial as any).cavities.length
-    : 0;
+  const cavsRaw = Array.isArray((initial as any).cavities)
+    ? [...(initial as any).cavities]
+    : [];
 
+  // Accept both camelCase and snake_case carriers (page.tsx may map either way)
   const layerThicknessesRaw: any =
     (initial as any).layerThicknesses ??
+    (initial as any).layer_thicknesses ??
     (initial as any).layers ??
     (initial as any).block?.layers;
 
   const layerThicknesses: number[] | null = Array.isArray(layerThicknessesRaw)
-    ? layerThicknessesRaw.map((x: any) => Number(x)).filter((n: any) => Number.isFinite(n))
+    ? layerThicknessesRaw
+        .map((x: any) => Number(x))
+        .filter((n: any) => Number.isFinite(n))
     : null;
 
-  if (!hasStack && cavCount === 0 && layerThicknesses && layerThicknesses.length > 1) {
+  const cavityLayerIndexRaw =
+    (initial as any).layerCavityLayerIndex ??
+    (initial as any).layer_cavity_layer_index;
+
+  const cavityLayerIndex = Number(cavityLayerIndexRaw);
+  const targetIdx1 =
+    Number.isFinite(cavityLayerIndex) && cavityLayerIndex >= 1
+      ? Math.floor(cavityLayerIndex)
+      : 1;
+
+  if (!hasStack && layerThicknesses && layerThicknesses.length > 1) {
+    // Normalize cavities (if any) but DO NOT destroy multi-layer intent
+    const seededCavs =
+      cavsRaw.length > 0
+        ? dedupeCavities(
+            cavsRaw.map((c: any, i: number) => ({
+              ...c,
+              id: String(c?.id ?? "").trim() || `seed-cav-${i + 1}`,
+              x: clamp01Or(c?.x, 0.2),
+              y: clamp01Or(c?.y, 0.2),
+            })),
+          )
+        : [];
+
     const stack: LayoutLayer[] = layerThicknesses.map((t, i) => ({
       id: `layer-${i + 1}`,
       label: `Layer ${i + 1}`,
@@ -463,20 +492,24 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
       cropCorners: false,
     }));
 
-    const active = stack[0];
+    // Place seeded cavities into the intended layer (1-based)
+    const targetIdx0 = Math.max(0, Math.min(stack.length - 1, targetIdx1 - 1));
+    if (seededCavs.length) {
+      stack[targetIdx0] = { ...stack[targetIdx0], cavities: seededCavs };
+    }
+
+    const active = stack[targetIdx0];
+    const mirrored = dedupeCavities(active.cavities);
 
     return {
       layout: {
         ...rest,
         block: {
           ...block,
-          thicknessIn: safeInch(
-            active.thicknessIn ?? block.thicknessIn ?? 1,
-            0.5,
-          ),
+          thicknessIn: safeInch(active.thicknessIn ?? block.thicknessIn ?? 1, 0.5),
         },
         stack,
-        cavities: [],
+        cavities: [...mirrored],
         editorMode,
       },
       activeLayerId: active.id,
@@ -556,10 +589,6 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
       activeLayerId: active.id,
     };
   }
-
-  const cavsRaw = Array.isArray((initial as any).cavities)
-    ? [...(initial as any).cavities]
-    : [];
 
   // Legacy single-layer fallback:
   // If the incoming model does NOT include a stack, we treat it as a single-piece

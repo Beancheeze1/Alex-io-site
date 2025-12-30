@@ -174,6 +174,41 @@ function parseLayersParam(
  *  - cavities_l1=1x1x.5;2x2x1
  *  - cavity_l2=... (repeatable)
  */
+
+/**
+ * Read customer prefill from search params:
+ * Supported keys (any):
+ *  - customer_name, name, customer
+ *  - customer_email, email
+ *  - customer_company, company
+ *  - customer_phone, phone
+ */
+function readCustomerFromUrl(url: URL): {
+  name: string;
+  email: string;
+  company: string;
+  phone: string;
+} {
+  const pick = (keys: string[]) => {
+    for (const k of keys) {
+      const all = url.searchParams.getAll(k).map((s) => (s ?? "").trim()).filter(Boolean);
+      if (all.length > 0) return all[0];
+      const v = (url.searchParams.get(k) ?? "").trim();
+      if (v) return v;
+    }
+    return "";
+  };
+
+  return {
+    name: pick(["customer_name", "name", "customer"]),
+    email: pick(["customer_email", "email"]),
+    company: pick(["customer_company", "company"]),
+    phone: pick(["customer_phone", "phone"]),
+  };
+}
+
+
+
 function readLayerCavitiesFromUrl(url: URL, layerIndex1Based: number): string {
   const keyA = `cavities_l${layerIndex1Based}`;
   const keyB = `cavity_l${layerIndex1Based}`;
@@ -565,6 +600,15 @@ export default function LayoutPage({
       let layersInfo: { thicknesses: number[]; labels: string[] } | null = null;
       let perLayerCavityStrs: string[] | null = null;
 
+      // NEW: customer seed from URL (form deep-links)
+      let customerSeed: { name: string; email: string; company: string; phone: string } = {
+        name: "",
+        email: "",
+        company: "",
+        phone: "",
+      };
+
+
       try {
         if (typeof window !== "undefined") {
           const url = new URL(window.location.href);
@@ -592,6 +636,11 @@ export default function LayoutPage({
           if (cavityParts.length > 0) {
             effectiveCavityStr = normalizeCavitiesParam(cavityParts);
           }
+
+          // customer prefill (canonical)
+          customerSeed = readCustomerFromUrl(url);
+
+
 
           // layers + per-layer cavities (canonical) — ONLY ONCE
           // --- Layer seeding (canonical / “conical”): prefer modern params, fall back to legacy ---
@@ -659,7 +708,7 @@ export default function LayoutPage({
 
       try {
         // If we don't have a real quote number, just use fallback layout
-        if (!hasRealQuoteNo) {
+               if (!hasRealQuoteNo) {
           const fallback = buildFallbackLayout(
             effectiveBlockStr,
             effectiveCavityStr,
@@ -671,15 +720,18 @@ export default function LayoutPage({
             setInitialNotes("");
             setInitialQty(null);
             setInitialMaterialId(materialIdOverride ?? null);
-            // no header to pull customer info from in demo mode
-            setInitialCustomerName("");
-            setInitialCustomerEmail("");
-            setInitialCustomerCompany("");
-            setInitialCustomerPhone("");
+
+            // NEW: allow form deep-links to prefill customer fields
+            setInitialCustomerName(customerSeed.name || "");
+            setInitialCustomerEmail(customerSeed.email || "");
+            setInitialCustomerCompany(customerSeed.company || "");
+            setInitialCustomerPhone(customerSeed.phone || "");
+
             setLoadingLayout(false);
           }
           return;
         }
+
 
         // Try to fetch the latest layout package via /api/quote/print
         const res = await fetch(
@@ -726,27 +778,35 @@ export default function LayoutPage({
         }
 
         // pull customer info from quote header when present
-        if (json && json.quote && typeof json.quote === "object") {
+             if (json && json.quote && typeof json.quote === "object") {
           const qh = json.quote as {
             customer_name?: string;
             email?: string | null;
             phone?: string | null;
           };
 
+          const dbName = (qh.customer_name ?? "").toString().trim();
+          const dbEmail = (qh.email ?? "").toString().trim();
+          const dbPhone = (qh.phone ?? "").toString().trim();
+
           if (!cancelled) {
-            setInitialCustomerName((qh.customer_name ?? "").toString());
-            setInitialCustomerEmail((qh.email ?? "").toString());
-            // Company isn’t stored on quotes table yet; keep blank for now.
-            setInitialCustomerCompany("");
-            setInitialCustomerPhone((qh.phone ?? "").toString());
+            // Prefer DB; fall back to URL seed if DB is blank
+            setInitialCustomerName(dbName || customerSeed.name || "");
+            setInitialCustomerEmail(dbEmail || customerSeed.email || "");
+
+            // Company isn’t stored on quotes table yet; allow URL seed to fill it
+            setInitialCustomerCompany(customerSeed.company || "");
+
+            setInitialCustomerPhone(dbPhone || customerSeed.phone || "");
           }
         } else if (!cancelled) {
-          // No header → clear initial customer fields
-          setInitialCustomerName("");
-          setInitialCustomerEmail("");
-          setInitialCustomerCompany("");
-          setInitialCustomerPhone("");
+          // No header → fall back to URL seed (form deep-link)
+          setInitialCustomerName(customerSeed.name || "");
+          setInitialCustomerEmail(customerSeed.email || "");
+          setInitialCustomerCompany(customerSeed.company || "");
+          setInitialCustomerPhone(customerSeed.phone || "");
         }
+
 
         // Prefer DB layout when it contains a real multi-layer stack,
         // even if URL dims/cavities are present (those are often legacy links).
