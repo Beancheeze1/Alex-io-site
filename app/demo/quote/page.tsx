@@ -380,7 +380,8 @@ export default function DemoQuotePage() {
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950/10 via-slate-950/35 to-slate-950" />
       </div>
 
-      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-8">
+      <div className="relative z-10 mx-auto w-full max-w-[1400px] px-4 py-8">
+
         {/* Top header row */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -414,104 +415,106 @@ export default function DemoQuotePage() {
           <LockedActionBar onStartReal={onStartReal} />
         </div>
 
-        {/* Main grid */}
-        <div className="mt-6 grid gap-5 lg:grid-cols-12">
-          {/* Left: canvas + below-canvas WOW blocks */}
-          <div className="lg:col-span-8">
-            {/* Context row */}
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-slate-300">
-                Scenario:{" "}
-                <span className="text-slate-100 font-semibold">{scenario.label}</span>{" "}
-                <span className="text-slate-400">— {scenario.subtitle}</span>
-              </div>
+        {/* Main grid (wide, editor-like) */}
+<div className="mt-6 grid gap-5 lg:grid-cols-12">
+  {/* LEFT: WOW blocks (moved from below canvas) */}
+  <div className="lg:col-span-3">
+    <div className="grid gap-4">
+      <Card title="WHAT YOU GET IN THE REAL QUOTE">
+        <div className="grid gap-2">
+          <DeliverableRow
+            src="/splash/hero-quote.png"
+            title="Interactive quote summary"
+            desc="Quote number, status, and pricing snapshot in one place."
+          />
+          <DeliverableRow
+            src="/splash/layer-previews.png"
+            title="Per-layer previews"
+            desc="Layers, cavities, crop corners — previewed exactly as built."
+          />
+          <DeliverableRow
+            src="/splash/cad-step.png"
+            title="DXF / STEP exports"
+            desc="Per-layer CAD outputs for engineering and vendors."
+          />
+          <DeliverableRow
+            src="/splash/admin-health.png"
+            title="Admin visibility"
+            desc="Materials, curves, pricing, integrations, and audit trail."
+          />
+        </div>
 
-              <div className="flex items-center gap-2">
-                <Pill tone={checksPass ? "pass" : "warn"}>
-                  Manufacturing checks: {checksPass ? "PASS" : "WARN"}
-                </Pill>
-                <Pill tone="info">Demo</Pill>
-              </div>
-            </div>
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={onStartReal}
+            className="w-full rounded-full bg-sky-500/90 px-5 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
+          >
+            Start a real quote →
+          </button>
+        </div>
+      </Card>
 
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
-              <InteractiveCanvas
-                layout={model.layout as any}
-                selectedIds={model.selectedIds}
-                selectAction={model.selectCavity}
-                moveAction={model.updateCavityPosition}
-                resizeAction={(id, lengthIn, widthIn) =>
-                  model.updateCavityDims(id, { lengthIn, widthIn } as any)
-                }
-                zoom={1}
-                croppedCorners={scenarioId === "twoLayer"}
-                // DEMO: hide the dotted inner wall so the visual edge is clearly the foam edge
-                showInnerWall={false}
-                autoCenterOnMount
-              />
-            </div>
+      <Card title="REAL WORKFLOW">
+        <ol className="list-decimal space-y-1 pl-5 text-slate-300">
+          <li>Email specs (size, qty, material, cavities)</li>
+          <li>Auto-pricing + first response</li>
+          <li>Layout + previews (layers, tools, checks)</li>
+          <li>Per-layer DXF/STEP exports</li>
+        </ol>
 
-            {/* NEW: move the bottom-right two blocks under the canvas */}
-            <div className="mt-5 grid gap-4 lg:grid-cols-2">
-              <Card title="WHAT YOU GET IN THE REAL QUOTE">
-                <div className="grid gap-2">
-                  <DeliverableRow
-                    src="/splash/hero-quote.png"
-                    title="Interactive quote summary"
-                    desc="Quote number, status, and pricing snapshot in one place."
-                  />
-                  <DeliverableRow
-                    src="/splash/layer-previews.png"
-                    title="Per-layer previews"
-                    desc="Layers, cavities, crop corners — previewed exactly as built."
-                  />
-                  <DeliverableRow
-                    src="/splash/cad-step.png"
-                    title="DXF / STEP exports"
-                    desc="Per-layer CAD outputs for engineering and vendors."
-                  />
-                  <DeliverableRow
-                    src="/splash/admin-health.png"
-                    title="Admin visibility"
-                    desc="Materials, curves, pricing, integrations, and audit trail."
-                  />
-                </div>
+        <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-slate-300">
+          This demo shows the editor only. Real quotes unlock the entire toolchain.
+        </div>
 
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={onStartReal}
-                    className="w-full rounded-full bg-sky-500/90 px-5 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
-                  >
-                    Start a real quote →
-                  </button>
-                </div>
-              </Card>
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={onStartReal}
+            className="w-full rounded-full bg-white/10 px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+          >
+            Start a real quote
+          </button>
+        </div>
+      </Card>
+    </div>
+  </div>
 
-              <Card title="REAL WORKFLOW">
-                <ol className="list-decimal space-y-1 pl-5 text-slate-300">
-                  <li>Email specs (size, qty, material, cavities)</li>
-                  <li>Auto-pricing + first response</li>
-                  <li>Layout + previews (layers, tools, checks)</li>
-                  <li>Per-layer DXF/STEP exports</li>
-                </ol>
+  {/* CENTER: canvas (same size/behavior) */}
+  <div className="lg:col-span-6">
+    {/* Context row */}
+    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-sm text-slate-300">
+        Scenario:{" "}
+        <span className="text-slate-100 font-semibold">{scenario.label}</span>{" "}
+        <span className="text-slate-400">— {scenario.subtitle}</span>
+      </div>
 
-                <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-slate-300">
-                  This demo shows the editor only. Real quotes unlock the entire toolchain.
-                </div>
+      <div className="flex items-center gap-2">
+        <Pill tone={checksPass ? "pass" : "warn"}>
+          Manufacturing checks: {checksPass ? "PASS" : "WARN"}
+        </Pill>
+        <Pill tone="info">Demo</Pill>
+      </div>
+    </div>
 
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={onStartReal}
-                    className="w-full rounded-full bg-white/10 px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
-                  >
-                    Start a real quote
-                  </button>
-                </div>
-              </Card>
-            </div>
-          </div>
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
+      <InteractiveCanvas
+        layout={model.layout as any}
+        selectedIds={model.selectedIds}
+        selectAction={model.selectCavity}
+        moveAction={model.updateCavityPosition}
+        resizeAction={(id, lengthIn, widthIn) =>
+          model.updateCavityDims(id, { lengthIn, widthIn } as any)
+        }
+        zoom={1}
+        croppedCorners={scenarioId === "twoLayer"}
+        // DEMO: hide the dotted inner wall so the visual edge is clearly the foam edge
+        showInnerWall={false}
+        autoCenterOnMount
+      />
+    </div>
+  </div>
 
           {/* Right: scenario picker + inspector + checks */}
           <div className="lg:col-span-4">
