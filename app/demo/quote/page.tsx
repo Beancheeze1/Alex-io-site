@@ -59,7 +59,9 @@ function Pill({
         : "bg-sky-500/15 text-sky-200 ring-1 ring-sky-400/20";
 
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls} whitespace-nowrap shrink-0`}
+    >
       {children}
     </span>
   );
@@ -73,7 +75,8 @@ function fmtIn(n: any) {
 }
 
 function SelectedSummary({ c }: { c: Cavity | null }) {
-  if (!c) return <div className="text-slate-400">Select a cavity to inspect.</div>;
+  if (!c)
+    return <div className="text-slate-400">Select a cavity to inspect.</div>;
 
   const isCircle = (c as any).shape === "circle";
   const L = fmtIn((c as any).lengthIn);
@@ -86,7 +89,8 @@ function SelectedSummary({ c }: { c: Cavity | null }) {
         {(c as any).label || "Selected cavity"}
       </div>
       <div className="text-slate-300">
-        Shape: <span className="text-slate-100">{isCircle ? "Circle" : "Rect"}</span>
+        Shape:{" "}
+        <span className="text-slate-100">{isCircle ? "Circle" : "Rect"}</span>
       </div>
       <div className="text-slate-300">
         Size:{" "}
@@ -164,7 +168,11 @@ function minGapBetweenCavitiesIn(layout: any): number {
 
 type LockedActionId = "price" | "apply" | "export" | "email";
 
-const LOCKED_ACTIONS: Array<{ id: LockedActionId; label: string; desc: string }> = [
+const LOCKED_ACTIONS: Array<{
+  id: LockedActionId;
+  label: string;
+  desc: string;
+}> = [
   { id: "price", label: "Price this foam set", desc: "Uses live price books + qty breaks." },
   { id: "apply", label: "Apply to quote", desc: "Writes layout + layers back to the quote." },
   { id: "export", label: "Export DXF / STEP", desc: "Per-layer CAD package for vendors." },
@@ -406,7 +414,7 @@ export default function DemoQuotePage() {
           <LockedActionBar onStartReal={onStartReal} />
         </div>
 
-        {/* Main grid (3 + 6 + 3 = 12 columns) */}
+        {/* Main grid (wide, editor-like) */}
         <div className="mt-6 grid gap-5 lg:grid-cols-12">
           {/* LEFT: WOW blocks */}
           <div className="lg:col-span-3">
@@ -507,7 +515,7 @@ export default function DemoQuotePage() {
             </div>
           </div>
 
-          {/* RIGHT: original inspector blocks (back on the right) */}
+          {/* RIGHT: scenario picker + inspector + checks */}
           <div className="lg:col-span-3">
             <div className="grid gap-4">
               {/* Scenario picker */}
@@ -522,7 +530,7 @@ export default function DemoQuotePage() {
                     onChange={(e) => setScenarioId(e.target.value as DemoScenarioId)}
                     className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 focus:border-sky-400/40"
                   >
-                    {DEMO_SCENARIOS.map((s: (typeof DEMO_SCENARIOS)[number]) => (
+                    {DEMO_SCENARIOS.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.label}
                       </option>
