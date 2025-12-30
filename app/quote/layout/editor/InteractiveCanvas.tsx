@@ -34,6 +34,9 @@ type Props = {
   resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
   zoom: number;
   croppedCorners?: boolean;
+    // NEW (demo-only): allow hiding the dotted inner wall without changing real editor behavior
+  showInnerWall?: boolean;
+
 };
 
 type DragState =
@@ -82,6 +85,7 @@ export default function InteractiveCanvas({
   resizeAction,
   zoom,
   croppedCorners = false,
+  showInnerWall = true,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
@@ -415,14 +419,18 @@ export default function InteractiveCanvas({
           {/* 0.5" grid *inside* the block */}
           {drawInchGrid(block, blockPx, blockOffset)}
 
-          {/* inner wall (dashed) - in Advanced mode it collapses to the outer wall */}
-          <path
-            d={innerWallPathD}
-            fill="none"
-            stroke="#94a3b8"
-            strokeDasharray="4 3"
-            strokeWidth={1}
-          />
+                    {/* inner wall (dashed) - in Advanced mode it collapses to the outer wall
+              NEW: allow demo to hide it via showInnerWall={false} */}
+          {showInnerWall && (
+            <path
+              d={innerWallPathD}
+              fill="none"
+              stroke="#94a3b8"
+              strokeDasharray="4 3"
+              strokeWidth={1}
+            />
+          )}
+
 
           {/* cavities */}
           {cavities.map((cavity, index) => {

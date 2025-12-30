@@ -55,11 +55,13 @@ function Pill({
     tone === "pass"
       ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/20"
       : tone === "warn"
-      ? "bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/20"
-      : "bg-sky-500/15 text-sky-200 ring-1 ring-sky-400/20";
+        ? "bg-amber-500/15 text-amber-200 ring-1 ring-amber-400/20"
+        : "bg-sky-500/15 text-sky-200 ring-1 ring-sky-400/20";
 
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls}`}
+    >
       {children}
     </span>
   );
@@ -73,7 +75,8 @@ function fmtIn(n: any) {
 }
 
 function SelectedSummary({ c }: { c: Cavity | null }) {
-  if (!c) return <div className="text-slate-400">Select a cavity to inspect.</div>;
+  if (!c)
+    return <div className="text-slate-400">Select a cavity to inspect.</div>;
 
   const isCircle = (c as any).shape === "circle";
   const L = fmtIn((c as any).lengthIn);
@@ -86,7 +89,8 @@ function SelectedSummary({ c }: { c: Cavity | null }) {
         {(c as any).label || "Selected cavity"}
       </div>
       <div className="text-slate-300">
-        Shape: <span className="text-slate-100">{isCircle ? "Circle" : "Rect"}</span>
+        Shape:{" "}
+        <span className="text-slate-100">{isCircle ? "Circle" : "Rect"}</span>
       </div>
       <div className="text-slate-300">
         Size:{" "}
@@ -110,7 +114,10 @@ function rectFor(c: any, block: any): RectIn {
   return { x1, y1, x2, y2 };
 }
 
-function minWallClearanceIn(layout: any, wallIn: number): number {
+// IMPORTANT (demo correctness):
+// We want the clearance number to be measured to the FOAM EDGE (outer block),
+// and then enforce the rule ">= 0.5\" wall clearance" against that edge clearance.
+function minFoamEdgeClearanceIn(layout: any): number {
   const block = layout?.block ?? {};
   const L = Number(block.lengthIn) || 0;
   const W = Number(block.widthIn) || 0;
@@ -120,10 +127,10 @@ function minWallClearanceIn(layout: any, wallIn: number): number {
 
   for (const c of cavs) {
     const r = rectFor(c, block);
-    const left = r.x1 - wallIn;
-    const right = L - wallIn - r.x2;
-    const top = r.y1 - wallIn;
-    const bottom = W - wallIn - r.y2;
+    const left = r.x1; // distance to foam left edge
+    const right = L - r.x2; // distance to foam right edge
+    const top = r.y1; // distance to foam top edge
+    const bottom = W - r.y2; // distance to foam bottom edge
     minClr = Math.min(minClr, left, right, top, bottom);
   }
 
@@ -161,23 +168,23 @@ function minGapBetweenCavitiesIn(layout: any): number {
 
 type LockedActionId = "price" | "apply" | "export" | "email";
 
-const LOCKED_ACTIONS: Array<{ id: LockedActionId; label: string; desc: string }> = [
+const LOCKED_ACTIONS: Array<{
+  id: LockedActionId;
+  label: string;
+  desc: string;
+}> = [
   { id: "price", label: "Price this foam set", desc: "Uses live price books + qty breaks." },
   { id: "apply", label: "Apply to quote", desc: "Writes layout + layers back to the quote." },
   { id: "export", label: "Export DXF / STEP", desc: "Per-layer CAD package for vendors." },
   { id: "email", label: "Email first response", desc: "Auto-reply with specs + pricing + link." },
 ];
 
-function LockedActionBar({
-  onStartReal,
-}: {
-  onStartReal: () => void;
-}) {
+function LockedActionBar({ onStartReal }: { onStartReal: () => void }) {
   const [open, setOpen] = React.useState<LockedActionId | null>(null);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-xs font-semibold tracking-widest text-sky-300/80">
             REAL SYSTEM ACTIONS (LOCKED IN DEMO)
@@ -187,13 +194,10 @@ function LockedActionBar({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onStartReal}
-          className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-5 py-2 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
-        >
-          Start a real quote
-        </button>
+        {/* Removed duplicate top CTA here (keep the header CTA). */}
+        <div className="hidden sm:block text-xs text-slate-400">
+          Click a locked action to see what unlocks.
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -274,7 +278,7 @@ export default function DemoQuotePage() {
   const [scenarioId, setScenarioId] = React.useState<DemoScenarioId>("mailer");
   const scenario = React.useMemo(() => getScenario(scenarioId), [scenarioId]);
 
-  // Re-key forces the hook to re-initialize cleanly on scenario switch
+  // Seed once per scenario
   const seed = React.useMemo(() => scenario.seed, [scenario]);
   const model = useLayoutModel(seed);
 
@@ -306,9 +310,10 @@ export default function DemoQuotePage() {
   }, [selectedId]);
 
   React.useEffect(() => {
-    // Build a baseline snapshot once per scenario
     if (!initialSnapshotRef.current) {
-      const cavs = Array.isArray((model.layout as any)?.cavities) ? (model.layout as any).cavities : [];
+      const cavs = Array.isArray((model.layout as any)?.cavities)
+        ? (model.layout as any).cavities
+        : [];
       initialSnapshotRef.current = cavs.map((c: any) => ({
         id: c.id,
         x: Number(c.x),
@@ -320,9 +325,10 @@ export default function DemoQuotePage() {
     }
 
     const baseline: any[] = initialSnapshotRef.current || [];
-    const now: any[] = Array.isArray((model.layout as any)?.cavities) ? (model.layout as any).cavities : [];
+    const now: any[] = Array.isArray((model.layout as any)?.cavities)
+      ? (model.layout as any).cavities
+      : [];
 
-    // Detect move/resize as any meaningful delta vs baseline
     for (const b of baseline) {
       const c = now.find((x: any) => x.id === b.id);
       if (!c) continue;
@@ -338,15 +344,21 @@ export default function DemoQuotePage() {
   }, [model.layout]);
 
   // Manufacturing checks (demo-only, computed)
-  const wallIn = 0.5; // Basic mode intent
-  const minGapIn = 0.5;
+  const wallRuleIn = 0.5;
+  const minGapRuleIn = 0.5;
 
-  const minWall = React.useMemo(() => minWallClearanceIn(model.layout as any, wallIn), [model.layout]);
-  const minGap = React.useMemo(() => minGapBetweenCavitiesIn(model.layout as any), [model.layout]);
+  const minFoamEdge = React.useMemo(
+    () => minFoamEdgeClearanceIn(model.layout as any),
+    [model.layout],
+  );
+  const minGap = React.useMemo(
+    () => minGapBetweenCavitiesIn(model.layout as any),
+    [model.layout],
+  );
 
-  const wallPass = minWall >= minGapIn - 1e-6; // treat equal as pass
-  const gapPass = minGap === Infinity ? true : minGap >= minGapIn - 1e-6;
-  const insidePass = true; // enforced by editor clamp; keep simple + honest
+  const wallPass = minFoamEdge >= wallRuleIn - 1e-6; // equal counts as pass
+  const gapPass = minGap === Infinity ? true : minGap >= minGapRuleIn - 1e-6;
+  const insidePass = true; // editor clamps; keep honest + simple
 
   const checksPass = wallPass && gapPass && insidePass;
 
@@ -404,12 +416,13 @@ export default function DemoQuotePage() {
 
         {/* Main grid */}
         <div className="mt-6 grid gap-5 lg:grid-cols-12">
-          {/* Left: canvas + small context row */}
+          {/* Left: canvas + below-canvas WOW blocks */}
           <div className="lg:col-span-8">
             {/* Context row */}
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm text-slate-300">
-                Scenario: <span className="text-slate-100 font-semibold">{scenario.label}</span>{" "}
+                Scenario:{" "}
+                <span className="text-slate-100 font-semibold">{scenario.label}</span>{" "}
                 <span className="text-slate-400">— {scenario.subtitle}</span>
               </div>
 
@@ -431,20 +444,79 @@ export default function DemoQuotePage() {
                   model.updateCavityDims(id, { lengthIn, widthIn } as any)
                 }
                 zoom={1}
-                // show crop corner effect in the two-layer scenario (top pad is cropped)
                 croppedCorners={scenarioId === "twoLayer"}
+                // DEMO: hide the dotted inner wall so the visual edge is clearly the foam edge
+                showInnerWall={false}
               />
+            </div>
+
+            {/* NEW: move the bottom-right two blocks under the canvas */}
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <Card title="WHAT YOU GET IN THE REAL QUOTE">
+                <div className="grid gap-2">
+                  <DeliverableRow
+                    src="/splash/hero-quote.png"
+                    title="Interactive quote summary"
+                    desc="Quote number, status, and pricing snapshot in one place."
+                  />
+                  <DeliverableRow
+                    src="/splash/layer-previews.png"
+                    title="Per-layer previews"
+                    desc="Layers, cavities, crop corners — previewed exactly as built."
+                  />
+                  <DeliverableRow
+                    src="/splash/cad-step.png"
+                    title="DXF / STEP exports"
+                    desc="Per-layer CAD outputs for engineering and vendors."
+                  />
+                  <DeliverableRow
+                    src="/splash/admin-health.png"
+                    title="Admin visibility"
+                    desc="Materials, curves, pricing, integrations, and audit trail."
+                  />
+                </div>
+
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={onStartReal}
+                    className="w-full rounded-full bg-sky-500/90 px-5 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
+                  >
+                    Start a real quote →
+                  </button>
+                </div>
+              </Card>
+
+              <Card title="REAL WORKFLOW">
+                <ol className="list-decimal space-y-1 pl-5 text-slate-300">
+                  <li>Email specs (size, qty, material, cavities)</li>
+                  <li>Auto-pricing + first response</li>
+                  <li>Layout + previews (layers, tools, checks)</li>
+                  <li>Per-layer DXF/STEP exports</li>
+                </ol>
+
+                <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-slate-300">
+                  This demo shows the editor only. Real quotes unlock the entire toolchain.
+                </div>
+
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={onStartReal}
+                    className="w-full rounded-full bg-white/10 px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+                  >
+                    Start a real quote
+                  </button>
+                </div>
+              </Card>
             </div>
           </div>
 
-          {/* Right: scenario picker + cards */}
+          {/* Right: scenario picker + inspector + checks */}
           <div className="lg:col-span-4">
             <div className="grid gap-4">
               {/* Scenario picker */}
-              <Card
-                title="DEMO SCENARIO"
-                right={<Pill tone="info">Zero backend</Pill>}
-              >
+              <Card title="DEMO SCENARIO" right={<Pill tone="info">Zero backend</Pill>}>
                 <div className="text-slate-300">
                   Switch scenarios to see how the editor behaves across common packaging patterns.
                 </div>
@@ -530,7 +602,7 @@ export default function DemoQuotePage() {
                       <div className="flex items-center justify-between">
                         <span>Wall clearance ≥ 0.5"</span>
                         <span className="text-slate-100">
-                          {wallPass ? "✅" : `⚠️ (${minWall.toFixed(3)}")`}
+                          {wallPass ? "✅" : `⚠️ (${minFoamEdge.toFixed(3)}")`}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -549,66 +621,6 @@ export default function DemoQuotePage() {
                       Real quotes enforce + record these checks during Apply and before CAD export.
                     </div>
                   </div>
-                </div>
-              </Card>
-
-              {/* Deliverables */}
-              <Card title="WHAT YOU GET IN THE REAL QUOTE">
-                <div className="grid gap-2">
-                  <DeliverableRow
-                    src="/splash/hero-quote.png"
-                    title="Interactive quote summary"
-                    desc="Quote number, status, and pricing snapshot in one place."
-                  />
-                  <DeliverableRow
-                    src="/splash/layer-previews.png"
-                    title="Per-layer previews"
-                    desc="Layers, cavities, crop corners — previewed exactly as built."
-                  />
-                  <DeliverableRow
-                    src="/splash/cad-step.png"
-                    title="DXF / STEP exports"
-                    desc="Per-layer CAD outputs for engineering and vendors."
-                  />
-                  <DeliverableRow
-                    src="/splash/admin-health.png"
-                    title="Admin visibility"
-                    desc="Materials, curves, pricing, integrations, and audit trail."
-                  />
-                </div>
-
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={onStartReal}
-                    className="w-full rounded-full bg-sky-500/90 px-5 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
-                  >
-                    Start a real quote →
-                  </button>
-                </div>
-              </Card>
-
-              {/* Real workflow (replaces Notes) */}
-              <Card title="REAL WORKFLOW">
-                <ol className="list-decimal space-y-1 pl-5 text-slate-300">
-                  <li>Email specs (size, qty, material, cavities)</li>
-                  <li>Auto-pricing + first response</li>
-                  <li>Layout + previews (layers, tools, checks)</li>
-                  <li>Per-layer DXF/STEP exports</li>
-                </ol>
-
-                <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-slate-300">
-                  This demo shows the editor only. Real quotes unlock the entire toolchain.
-                </div>
-
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={onStartReal}
-                    className="w-full rounded-full bg-white/10 px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
-                  >
-                    Start a real quote
-                  </button>
                 </div>
               </Card>
 
