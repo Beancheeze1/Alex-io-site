@@ -22,7 +22,8 @@
 
 "use client";
 
-import { useRef, useState, MouseEvent } from "react";
+import { useRef, useState, useEffect, MouseEvent } from "react";
+
 
 import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
 
@@ -36,6 +37,7 @@ type Props = {
   croppedCorners?: boolean;
     // NEW (demo-only): allow hiding the dotted inner wall without changing real editor behavior
   showInnerWall?: boolean;
+  autoCenterOnMount?: boolean;
 
 };
 
@@ -86,9 +88,12 @@ export default function InteractiveCanvas({
   zoom,
   croppedCorners = false,
   showInnerWall = true,
+  autoCenterOnMount = false,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<DragState>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
 
   const { block, cavities } = layout;
 
@@ -122,6 +127,25 @@ export default function InteractiveCanvas({
     x: (CANVAS_WIDTH - blockPx.width) / 2,
     y: HEADER_BAND + (CANVAS_HEIGHT - HEADER_BAND - blockPx.height) / 2,
   };
+
+  // NEW (demo-safe): center the scroll position so the block appears centered on first load.
+// This only affects the scroll container, not geometry math.
+useEffect(() => {
+  if (!autoCenterOnMount) return;
+  const el = scrollRef.current;
+  if (!el) return;
+
+  // Wait a tick so layout/scroll sizes are settled.
+  const t = window.setTimeout(() => {
+    const maxX = Math.max(0, el.scrollWidth - el.clientWidth);
+    const maxY = Math.max(0, el.scrollHeight - el.clientHeight);
+    el.scrollLeft = maxX / 2;
+    el.scrollTop = maxY / 2;
+  }, 0);
+
+  return () => window.clearTimeout(t);
+}, [autoCenterOnMount, block.lengthIn, block.widthIn, zoom]);
+
 
   // 1.0" chamfer at upper-left and lower-right corners (45°)
   const CHAMFER_IN = 1;
@@ -378,8 +402,9 @@ export default function InteractiveCanvas({
       onPointerMove={handlePointerMovePan}
       onPointerUp={handlePointerUpPan}
     >
-      <div className="overflow-auto rounded-xl">
-        <svg
+      <div ref={scrollRef} className="overflow-auto rounded-xl">
+  <svg
+
           ref={svgRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}

@@ -447,6 +447,7 @@ export default function DemoQuotePage() {
                 croppedCorners={scenarioId === "twoLayer"}
                 // DEMO: hide the dotted inner wall so the visual edge is clearly the foam edge
                 showInnerWall={false}
+                autoCenterOnMount
               />
             </div>
 
