@@ -199,12 +199,13 @@ function readCustomerFromUrl(url: URL): {
     return "";
   };
 
-  return {
-    name: pick(["customer_name", "name", "customer"]),
-    email: pick(["customer_email", "email"]),
-    company: pick(["customer_company", "company"]),
-    phone: pick(["customer_phone", "phone"]),
+    return {
+    name: pick(["customer_name", "customerName", "name", "customer"]),
+    email: pick(["customer_email", "customerEmail", "email"]),
+    company: pick(["customer_company", "customerCompany", "company"]),
+    phone: pick(["customer_phone", "customerPhone", "phone"]),
   };
+
 }
 
 
@@ -266,11 +267,21 @@ function parseCavityDims(raw: string): {
 
   const num = String.raw`(?:\d+(?:\.\d+)?|\.\d+)`;
 
-  // ---- Circle forms ----
-  // 1) Prefix mark: Ø2.5x1 or @2.5x1
-  const circlePrefixRe = new RegExp(
-    String.raw`(?:ø|@)\s*(${num})\s*[x×]\s*(${num})`,
-  );
+  // 1) Prefix mark: Ø2.5x1 or @2.5x1 (also accept dia/diam/diameter)
+const circlePrefixRe = new RegExp(
+  String.raw`(?:` +
+    // Symbols/prefixes: Ø, ø, @, "dia", "diam", "diameter"
+    String.raw`(?:[Øø@]|dia(?:m(?:eter)?)?)` +
+    String.raw`)\s*` +
+    // Diameter
+    String.raw`(${num})\s*"?\s*` +
+    // Separator: x, ×, by
+    String.raw`(?:[x×]|by)\s*` +
+    // Depth
+    String.raw`(${num})\s*"?`,
+  "iu"
+);
+
 
   // 2) Infix word: 2.5 dia x 1 OR 2.5 diameter x 1 (x/by optional)
   const circleWordRe = new RegExp(
@@ -613,12 +624,44 @@ export default function LayoutPage({
         if (typeof window !== "undefined") {
           const url = new URL(window.location.href);
 
-          // dims / block (canonical)
+                    // dims / block (canonical) + common aliases
           const dimsCandidates: string[] = [];
           const dimsA = url.searchParams.get("dims");
           const dimsB = url.searchParams.get("block");
           if (dimsA) dimsCandidates.push(dimsA);
           if (!dimsA && dimsB) dimsCandidates.push(dimsB);
+
+          // Common "split fields" forms from parsers/forms:
+          //   block_length_in=18&block_width_in=12&block_thickness_in=3
+          //   length=18&width=12&thickness=3
+          const lRaw =
+            url.searchParams.get("block_length_in") ||
+            url.searchParams.get("block_length") ||
+            url.searchParams.get("length") ||
+            "";
+          const wRaw =
+            url.searchParams.get("block_width_in") ||
+            url.searchParams.get("block_width") ||
+            url.searchParams.get("width") ||
+            "";
+          const tRaw =
+            url.searchParams.get("block_thickness_in") ||
+            url.searchParams.get("block_thickness") ||
+            url.searchParams.get("thickness") ||
+            "";
+
+          const l = Number(lRaw);
+          const w = Number(wRaw);
+          const t = Number(tRaw);
+
+          if (
+            Number.isFinite(l) && l > 0 &&
+            Number.isFinite(w) && w > 0 &&
+            Number.isFinite(t) && t > 0
+          ) {
+            dimsCandidates.push(`${l}x${w}x${t}`);
+          }
+
 
           // cavities / cavity (canonical)
           const cavityParts: string[] = [];
