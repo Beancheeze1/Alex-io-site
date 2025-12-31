@@ -66,8 +66,15 @@ type In = {
   toEmail?: string;
   subject?: string;
 
+  // Form flow may send customer fields explicitly:
+  customerName?: string;
+  customerEmail?: string;
+  customerCompany?: string;
+  customerPhone?: string;
+
   // Primary inbound email text field:
   text?: string;
+
 
   // Alias used by many dryRun payloads / older callers:
   body?: string;
@@ -1951,6 +1958,22 @@ export async function POST(req: NextRequest) {
     const threadMsgs = Array.isArray(p.threadMsgs) ? p.threadMsgs : [];
     const dryRun = !!p.dryRun;
 
+    // ------------------- Customer capture (FORM -> ORCH) -------------------
+    // Path-A: only map inbound payload fields into mem if provided.
+    const pCustomerName = String((p as any).customerName || (p as any).customer_name || "").trim();
+    const pCustomerCompany = String((p as any).customerCompany || (p as any).customer_company || "").trim();
+    const pCustomerPhone = String((p as any).customerPhone || (p as any).customer_phone || "").trim();
+
+    // For form flow, the customer email is typically the recipient.
+    // Prefer explicit field, else fall back to toEmail if it looks like an email.
+    const pCustomerEmailExplicit = String((p as any).customerEmail || (p as any).customer_email || "").trim();
+    const pToEmail = String(p.toEmail || "").trim();
+    const pCustomerEmail =
+      pCustomerEmailExplicit ||
+      (pToEmail.includes("@") ? pToEmail : "");
+
+
+
     // FIX: accept "body" as alias for "text" (dryRun + older callers),
     // and if empty, fall back to the latest threadMsgs text (and normalize HTML-ish input).
     const lastText = getLastInboundText(p, threadMsgs);
@@ -1974,6 +1997,24 @@ export async function POST(req: NextRequest) {
     /* ------------------- Parse new turn ------------------- */
 
     let newly = extractAllFromTextAndSubject(lastTextForRegex, subject);
+
+        // ------------------- Form customer -> facts (Path-A) -------------------
+    // Ensure customer info is available for editor seeding + quote header storage.
+    if (pCustomerName && !newly.customerName && !newly.customer_name && !newly.name) {
+      newly.customerName = pCustomerName;
+    }
+    if (pCustomerEmail && !newly.customerEmail && !newly.customer_email && !newly.email) {
+      newly.customerEmail = pCustomerEmail;
+      newly.email = pCustomerEmail; // legacy key used in a few places
+    }
+    if (pCustomerCompany && !newly.customerCompany && !newly.customer_company && !newly.company) {
+      newly.customerCompany = pCustomerCompany;
+    }
+    if (pCustomerPhone && !newly.customerPhone && !newly.customer_phone && !newly.phone) {
+      newly.customerPhone = pCustomerPhone;
+      newly.phone = pCustomerPhone; // legacy key used in quote header store
+    }
+
 
     // Preserve regex-derived fields that must stay authoritative even if we call the LLM.
     const regexDims = newly.dims || null;
