@@ -289,24 +289,89 @@ function buildLayoutEditorUrlFromFacts(f: Mem): string | null {
     // dims (outside block dims) if present
     if (f.dims) url.searchParams.set("dims", String(f.dims));
 
-    // layer_count authoritative if present
-    const n = Number(f.layer_count);
-    if (Number.isFinite(n) && n > 0) {
-      url.searchParams.set("layer_count", String(n));
+    // -----------------------------
+    // CUSTOMER PREFILL (FIX #1)
+    // -----------------------------
+    const customerName = String(
+      f.customerName || f.customer_name || f.name || ""
+    ).trim();
+
+    const customerEmail = String(
+      f.customerEmail || f.customer_email || f.email || ""
+    ).trim();
+
+    const customerCompany = String(
+      f.customerCompany || f.customer_company || f.company || ""
+    ).trim();
+
+    const customerPhone = String(
+      f.customerPhone || f.customer_phone || f.phone || ""
+    ).trim();
+
+    if (customerName) url.searchParams.set("customer_name", customerName);
+    if (customerEmail) url.searchParams.set("customer_email", customerEmail);
+    if (customerCompany) url.searchParams.set("customer_company", customerCompany);
+    if (customerPhone) url.searchParams.set("customer_phone", customerPhone);
+
+    // -----------------------------
+    // LAYERS (FIX #2)
+    // Accept array OR comma-string OR single number
+    // -----------------------------
+    const nRaw = Number(f.layer_count);
+    const nFromMem = Number.isFinite(nRaw) && nRaw > 0 ? nRaw : null;
+
+    // thickness source: layer_thicknesses OR layers[].thickness_in
+    const thRaw = f.layer_thicknesses;
+
+    let thArr: any[] = [];
+    if (Array.isArray(thRaw)) {
+      thArr = thRaw;
+    } else if (typeof thRaw === "string" && thRaw.trim()) {
+      // handle "1,4,1" (or "1 4 1")
+      thArr = thRaw
+        .split(/[, ]+/g)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } else if (typeof thRaw === "number") {
+      thArr = [thRaw];
     }
 
-    // Repeated thickness params (critical)
-    const thRaw = f.layer_thicknesses;
-    const thArr: any[] = Array.isArray(thRaw) ? thRaw : [];
+    // fallback: layers array
+    if ((!thArr || thArr.length === 0) && Array.isArray(f.layers) && f.layers.length) {
+      thArr = f.layers
+        .map((L: any) => L?.thickness_in ?? L?.thickness ?? null)
+        .filter((v: any) => v != null);
+    }
 
+    const thicknessNums: number[] = [];
     for (const v of thArr) {
       const num = Number(v);
       if (!Number.isFinite(num) || num <= 0) continue;
-      // Keep 0.5 canonical as "0.5" (not ".5")
-      url.searchParams.append("layer_thicknesses", num.toString());
+      thicknessNums.push(num);
     }
 
-    // Repeated cavities params (critical)
+    // layer_count: prefer thickness length, else stored layer_count
+    const effectiveCount =
+      thicknessNums.length > 0
+        ? thicknessNums.length
+        : nFromMem != null
+        ? nFromMem
+        : null;
+
+    if (effectiveCount != null && effectiveCount > 0) {
+      url.searchParams.set("layer_count", String(effectiveCount));
+    }
+
+    // Repeated thickness params (critical)
+    if (thicknessNums.length > 0) {
+      for (const num of thicknessNums) {
+        url.searchParams.append("layer_thicknesses", num.toString());
+      }
+    }
+
+    // -----------------------------
+    // CAVITIES (unchanged)
+    // -----------------------------
     const cavArr: any[] = Array.isArray(f.cavityDims) ? f.cavityDims : [];
     for (const c of cavArr) {
       const s = String(c || "").trim();
@@ -322,12 +387,9 @@ function buildLayoutEditorUrlFromFacts(f: Mem): string | null {
       }
     }
 
-    // Repeated numeric layer labels (repeated).
-    // IMPORTANT: The layout editor seeds multi-layer stacks primarily from layer_label.
-    // So we ALWAYS emit numeric labels when layer_count is known (>1), even if the
-    // layers array is absent (dry-run / early-stage flows).
-    //
-    // Canonical format: "Layer 1", "Layer 2", ...
+    // -----------------------------
+    // LAYER LABELS (leave behavior intact)
+    // -----------------------------
     const labels: string[] = [];
     if (Array.isArray(f.layers) && f.layers.length) {
       for (const L of f.layers) {
@@ -339,8 +401,10 @@ function buildLayoutEditorUrlFromFacts(f: Mem): string | null {
 
     if (labels.length) {
       for (const lab of labels) url.searchParams.append("layer_label", lab);
-    } else if (Number.isFinite(n) && n > 1) {
-      for (let i = 1; i <= n; i++) url.searchParams.append("layer_label", `Layer ${i}`);
+    } else if (effectiveCount != null && effectiveCount > 1) {
+      for (let i = 1; i <= effectiveCount; i++) {
+        url.searchParams.append("layer_label", `Layer ${i}`);
+      }
     }
 
     return url.toString();
