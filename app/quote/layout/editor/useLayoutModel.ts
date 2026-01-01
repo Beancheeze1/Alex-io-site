@@ -429,17 +429,6 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   const editorMode: "basic" | "advanced" =
     (initial as any).editorMode === "advanced" ? "advanced" : "basic";
 
-  // ============================
-  // NEW (Path A): layer-intent hydration when stack is missing
-  // ============================
-  // If the incoming model does NOT include a stack, but DOES include
-  // a layer thickness intent array (from email parsing), we seed layers.
-  //
-  // Safety:
-  // - Only triggers when stack is missing/empty AND there are >1 layers
-  // - If cavities were seeded (e.g. from URL), place them into the intended layer
-  //   via layerCavityLayerIndex / layer_cavity_layer_index (default 1),
-  //   and make that layer active so user sees the cavities immediately.
   const hasStack =
     Array.isArray((initial as any).stack) && (initial as any).stack.length > 0;
 
@@ -460,6 +449,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         .filter((n: any) => Number.isFinite(n))
     : null;
 
+  // Accept both camelCase and snake_case for target cavity layer
   const cavityLayerIndexRaw =
     (initial as any).layerCavityLayerIndex ??
     (initial as any).layer_cavity_layer_index;
@@ -470,8 +460,10 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
       ? Math.floor(cavityLayerIndex)
       : 1;
 
+  // ============================
+  // NEW (Path A): layer-intent hydration when stack is missing
+  // ============================
   if (!hasStack && layerThicknesses && layerThicknesses.length > 1) {
-    // Normalize cavities (if any) but DO NOT destroy multi-layer intent
     const seededCavs =
       cavsRaw.length > 0
         ? dedupeCavities(
@@ -492,7 +484,6 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
       cropCorners: false,
     }));
 
-    // Place seeded cavities into the intended layer (1-based)
     const targetIdx0 = Math.max(0, Math.min(stack.length - 1, targetIdx1 - 1));
     if (seededCavs.length) {
       stack[targetIdx0] = { ...stack[targetIdx0], cavities: seededCavs };
@@ -518,13 +509,8 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 
   // Trust pre-existing stack fully
   if (Array.isArray((initial as any).stack) && (initial as any).stack.length) {
-    // IMPORTANT:
-    // Cavity ids must be globally unique across the entire stack.
-    // If two layers both contain "cav-1", React key reuse can cause visual "teleporting"
-    // when switching layers (you see the other layer's last position).
     const seenIds = new Set<string>();
 
-    // Find current max numeric id so we can generate new ids only when needed.
     let maxNum = 0;
     for (const l of (initial as any).stack) {
       for (const c of (l?.cavities ?? []) as Cavity[]) {
@@ -533,21 +519,18 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
       }
     }
 
-    const stack = (initial as any).stack.map((l: any) => {
+    let stack = (initial as any).stack.map((l: any) => {
       const cavsIn = (l.cavities ?? []) as Cavity[];
 
       const cavs = dedupeCavities(
         cavsIn.map((c: Cavity) => {
           const next = { ...c } as Cavity;
 
-          // HARDENING: x/y must always be finite; otherwise drag math can produce NaN
-          // which clamp01() turns into 0 => teleport to the corner.
           (next as any).x = clamp01Or((next as any).x, 0.2);
           (next as any).y = clamp01Or((next as any).y, 0.2);
 
           let id = String((next as any).id ?? "").trim();
           if (!id || seenIds.has(id)) {
-            // Assign a new globally-unique cav-N id (only when duplicate/missing)
             maxNum += 1;
             id = `cav-${maxNum}`;
             (next as any).id = id;
@@ -563,14 +546,82 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         label: l.label,
         thicknessIn: l.thicknessIn,
         cavities: cavs,
-
-        // NEW (Path A): preserve per-layer crop-corners flag if present
         cropCorners: !!l.cropCorners,
       };
     }) as LayoutLayer[];
 
-    const active = stack[0];
-    const mirrored = dedupeCavities(active.cavities);
+    // ----------------------------
+    // NEW (Path A): Seed reconciliation when stack exists
+    //
+    // Goal: prevent “same seeded cavity appears on multiple layers” regressions.
+    // Rules:
+    // 1) If stack already contains any cavities anywhere, IGNORE top-level initial.cavities.
+    // 2) If stack contains zero cavities, and top-level cavities exist, inject them ONLY
+    //    into the intended target layer (layer_cavity_layer_index, default 1).
+    // 3) If a target layer index was explicitly provided, remove ONLY obviously-seeded
+    //    duplicates (seed-cav-*) across layers by signature, keeping the target copy.
+    // ----------------------------
+    const anyCavsInStack = stack.some((l) => (l.cavities?.length ?? 0) > 0);
+
+    const targetIdx0 = Math.max(0, Math.min(stack.length - 1, targetIdx1 - 1));
+    const targetLayerId = stack[targetIdx0]?.id ?? "layer-1";
+
+    if (!anyCavsInStack && cavsRaw.length > 0) {
+      const seededCavs = dedupeCavities(
+        cavsRaw.map((c: any, i: number) => ({
+          ...c,
+          id: String(c?.id ?? "").trim() || `seed-cav-${i + 1}`,
+          x: clamp01Or(c?.x, 0.2),
+          y: clamp01Or(c?.y, 0.2),
+        })),
+      );
+
+      stack = stack.map((l, i) =>
+        i === targetIdx0 ? { ...l, cavities: seededCavs } : l,
+      );
+    }
+
+    const hasExplicitTarget = Number.isFinite(cavityLayerIndex) && cavityLayerIndex >= 1;
+
+    if (hasExplicitTarget) {
+      const targetLayer = stack.find((l) => l.id === targetLayerId) ?? stack[0];
+
+      // Build a set of signatures present on the target layer (seeded intent)
+      const targetSigs = new Set<string>(
+        (targetLayer.cavities ?? []).map((c) => cavitySig(c)),
+      );
+
+      // Remove ONLY obviously-seeded duplicates from non-target layers when a matching
+      // signature already exists on the target layer.
+      stack = stack.map((l) => {
+        if (l.id === targetLayer.id) return l;
+
+        const nextCavs = (l.cavities ?? []).filter((c) => {
+          const id = String((c as any)?.id ?? "");
+          const looksSeeded = id.startsWith("seed-cav-");
+          if (!looksSeeded) return true; // never delete user cavities
+
+          const sig = cavitySig(c);
+          if (!targetSigs.has(sig)) return true;
+
+          // Duplicate seeded cavity → drop it from the wrong layer
+          return false;
+        });
+
+        return nextCavs.length === (l.cavities ?? []).length ? l : { ...l, cavities: nextCavs };
+      });
+    }
+
+    // Choose active layer:
+    // - If explicit target layer exists and has cavities, make it active so user sees seeded pockets.
+    // - Otherwise default to layer 1 (existing behavior).
+    const preferredActive =
+      hasExplicitTarget &&
+      (stack[targetIdx0]?.cavities?.length ?? 0) > 0
+        ? stack[targetIdx0]
+        : stack[0];
+
+    const mirrored = dedupeCavities(preferredActive.cavities);
 
     return {
       layout: {
@@ -578,7 +629,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         block: {
           ...block,
           thicknessIn: safeInch(
-            active.thicknessIn ?? block.thicknessIn ?? 1,
+            preferredActive.thicknessIn ?? block.thicknessIn ?? 1,
             0.5,
           ),
         },
@@ -586,19 +637,15 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         cavities: [...mirrored],
         editorMode,
       },
-      activeLayerId: active.id,
+      activeLayerId: preferredActive.id,
     };
   }
 
   // Legacy single-layer fallback:
-  // If the incoming model does NOT include a stack, we treat it as a single-piece
-  // layout (even if it has cavities). Multi-layer layouts must provide `stack`.
   if (cavsRaw.length) {
-    // Seed stable IDs to prevent phantom duplicates on mount
     const seeded = cavsRaw.map((c, i) => ({
       ...c,
       id: `seed-cav-${i + 1}`,
-      // HARDENING: ensure x/y exist on legacy cavities too
       x: clamp01Or((c as any).x, 0.2),
       y: clamp01Or((c as any).y, 0.2),
     }));
@@ -611,8 +658,6 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         label: "Layer 1",
         thicknessIn: thickness,
         cavities: cavs,
-
-        // NEW (Path A): legacy defaults to square corners
         cropCorners: false,
       },
     ];
@@ -629,7 +674,6 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     };
   }
 
-  // Legacy single-layer fallback
   return {
     layout: {
       ...rest,
@@ -651,7 +695,6 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
 }
 
 function cavitySig(c: Cavity) {
-  // Signature used for de-dupe fallback: shape + dims + corner radius (rounded to 1/8")
   const r8 = (n: number) => Math.round((Number(n) || 0) * 8) / 8;
   return [
     c.shape,
@@ -663,9 +706,6 @@ function cavitySig(c: Cavity) {
 }
 
 function dedupeCavities(list: Cavity[]) {
-  // IMPORTANT:
-  // We must allow multiple cavities with identical dimensions (common in packaging).
-  // So we de-dupe by stable `id` first. Only fall back to a dims signature when `id` is missing.
   const seen = new Set<string>();
   const out: Cavity[] = [];
 
@@ -676,7 +716,6 @@ function dedupeCavities(list: Cavity[]) {
     if (seen.has(key)) continue;
     seen.add(key);
 
-    // HARDENING: final safety — x/y should never be missing in state
     (c as any).x = clamp01Or((c as any).x, 0.2);
     (c as any).y = clamp01Or((c as any).y, 0.2);
 
@@ -698,7 +737,6 @@ function nextCavityNumber(stack: LayoutLayer[]) {
 }
 
 function clamp01(v: number) {
-  // keep existing behavior for normal numeric inputs
   return Math.max(0, Math.min(1, v || 0));
 }
 
@@ -708,7 +746,6 @@ function clamp01Or(v: any, fallback: number) {
   return clamp01(n);
 }
 
-// NEW: keep prior value when incoming coordinate is invalid
 function clamp01OrKeep(v: any, prior: any) {
   const n = Number(v);
   if (!Number.isFinite(n)) {
@@ -731,8 +768,6 @@ function normalizeBlockPatch(p: Partial<BlockDims>) {
   if (p.widthIn != null) o.widthIn = safeInch(p.widthIn, 1);
   if (p.thicknessIn != null) o.thicknessIn = safeInch(p.thicknessIn, 0.5);
 
-  // ✅ NEW (Path A): allow UI to persist corner intent
-  // (kept permissive + additive; if undefined, no change)
   if (p.cornerStyle != null) {
     const cs = String(p.cornerStyle);
     if (cs === "square" || cs === "chamfer") {
@@ -756,7 +791,6 @@ function normalizeCavityPatch(p: Partial<Cavity>) {
   if (p.depthIn != null) o.depthIn = safeInch(p.depthIn, 0.25);
   if (p.cornerRadiusIn != null) o.cornerRadiusIn = safeInch(p.cornerRadiusIn, 0);
   if (p.label != null) o.label = p.label;
-  // NOTE: we do NOT allow editing x/y here — movement goes through updateCavityPosition()
   return o;
 }
 
