@@ -401,7 +401,12 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const matKerf = fmtPercent(material.kerf_pct ?? pricing.raw?.kerf_pct);
 
   const priceBreaks: PriceBreak[] = pricing.price_breaks ?? [];
-  const layoutUrl = buildLayoutUrl(input);
+  const layoutUrl =
+  input.facts?.layout_editor_url ||
+  input.facts?.layoutEditorUrl ||
+  input.facts?.layoutEditorLink ||
+  null;
+
 
   const showMissing = Array.isArray(missing) && missing.length > 0;
   const statusLabel = status || "draft";

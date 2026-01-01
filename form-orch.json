@@ -1,0 +1,11 @@
+﻿{
+  "mode": "ai",
+  "toEmail": "25thhourdesign@gmail.com",
+  "subject": "Form test",
+  "text": "Outside size: 10x10x4.5 in\nQuantity: 50\nMaterial: PE\nDensity: 1.7#\nMade up of (3) layers\nLayer 1 thickness 1\nLayer 2 thickness 8\nLayer 3 thickness 1\nCavities: 2x1x0.5, 5x4x1, 3x3x1",
+  "customerName": "Test Customer",
+  "customerEmail": "customer@example.com",
+  "customerCompany": "Test Co",
+  "customerPhone": "555-555-5555",
+  "dryRun": true
+}
