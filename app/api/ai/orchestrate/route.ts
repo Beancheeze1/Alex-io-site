@@ -2196,17 +2196,44 @@ export async function POST(req: NextRequest) {
 
     // ------------------- Customer capture (FORM -> ORCH) -------------------
     // Path-A: only map inbound payload fields into mem if provided.
-    const pCustomerName = String((p as any).customerName || (p as any).customer_name || "").trim();
-    const pCustomerCompany = String((p as any).customerCompany || (p as any).customer_company || "").trim();
-    const pCustomerPhone = String((p as any).customerPhone || (p as any).customer_phone || "").trim();
+    const pCustomerName = String(
+  (p as any).customerName ||
+    (p as any).customer_name ||
+    (p as any).name ||                 // common form key
+    (p as any).customer?.name ||        // nested form shape
+    ""
+).trim();
 
-    // For form flow, the customer email is typically the recipient.
-    // Prefer explicit field, else fall back to toEmail if it looks like an email.
-    const pCustomerEmailExplicit = String((p as any).customerEmail || (p as any).customer_email || "").trim();
-    const pToEmail = String(p.toEmail || "").trim();
-    const pCustomerEmail =
-      pCustomerEmailExplicit ||
-      (pToEmail.includes("@") ? pToEmail : "");
+const pCustomerCompany = String(
+  (p as any).customerCompany ||
+    (p as any).customer_company ||
+    (p as any).company ||               // common form key
+    (p as any).customer?.company ||     // nested form shape
+    ""
+).trim();
+
+const pCustomerPhone = String(
+  (p as any).customerPhone ||
+    (p as any).customer_phone ||
+    (p as any).phone ||                 // common form key
+    (p as any).customer?.phone ||       // nested form shape
+    ""
+).trim();
+
+
+    // FORM customer email MUST come from explicit customer fields.
+// In form flow, p.toEmail is often the sales mailbox, so do NOT use it as a fallback.
+// (Email->editor flow still works because it supplies the real customer email explicitly.)
+const pCustomerEmailExplicit = String(
+  (p as any).customerEmail ||
+    (p as any).customer_email ||
+    (p as any).email ||               // common form key
+    (p as any).customer?.email ||     // nested form shape
+    ""
+).trim();
+
+const pCustomerEmail = pCustomerEmailExplicit;
+
 
 
 
@@ -2233,6 +2260,57 @@ export async function POST(req: NextRequest) {
     /* ------------------- Parse new turn ------------------- */
 
     let newly = extractAllFromTextAndSubject(lastTextForRegex, subject);
+
+    // ------------------- Form quote fields -> facts (Path-A) -------------------
+// If the form provides structured fields (dims/qty/layers/cavities), merge them in.
+// This is additive and does NOT alter email parsing; it only helps when form payloads
+// already have the data and text is minimal.
+const formFacts: Mem = {};
+
+const pDims = String((p as any).dims || (p as any).dimension || (p as any).dimensions || "").trim();
+if (pDims && !newly.dims) formFacts.dims = normDims(pDims) || pDims;
+
+const pQtyRaw = (p as any).qty ?? (p as any).quantity ?? (p as any).order_qty ?? null;
+const pQtyNum = Number(pQtyRaw);
+if (Number.isFinite(pQtyNum) && pQtyNum > 0 && !newly.qty) formFacts.qty = Math.round(pQtyNum);
+
+const pMaterial = String((p as any).material || (p as any).foam_family || (p as any).foamFamily || "").trim();
+if (pMaterial && !newly.material) formFacts.material = pMaterial;
+
+const pDensity = String((p as any).density || (p as any).density_hint || "").trim();
+if (pDensity && !newly.density) formFacts.density = pDensity;
+
+// Layers (authoritative if provided by the form)
+const pLayerCountRaw = (p as any).layer_count ?? (p as any).layerCount ?? null;
+const pLayerCount = Number(pLayerCountRaw);
+if (Number.isFinite(pLayerCount) && pLayerCount > 0 && newly.layer_count == null) {
+  formFacts.layer_count = Math.round(pLayerCount);
+}
+
+const pLayerTh = (p as any).layer_thicknesses ?? (p as any).layerThicknesses ?? null;
+if (Array.isArray(pLayerTh) && pLayerTh.length && !(newly as any).layer_thicknesses) {
+  const arr = pLayerTh
+    .map((x: any) => Number(x))
+    .filter((x: number) => Number.isFinite(x) && x > 0);
+  if (arr.length) (formFacts as any).layer_thicknesses = arr;
+}
+
+// Cavities (accept either cavityDims or cavities[])
+const pCavArr =
+  (p as any).cavityDims ??
+  (p as any).cavities ??
+  null;
+
+if (Array.isArray(pCavArr) && pCavArr.length && !Array.isArray(newly.cavityDims)) {
+  const arr = pCavArr.map((x: any) => String(x || "").trim()).filter(Boolean);
+  if (arr.length) {
+    formFacts.cavityDims = arr;
+    formFacts.cavityCount = arr.length;
+  }
+}
+
+newly = mergeFacts(newly, formFacts);
+
 
         // ------------------- Form customer -> facts (Path-A) -------------------
     // Ensure customer info is available for editor seeding + quote header storage.

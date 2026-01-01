@@ -1,0 +1,15 @@
+﻿{
+  "mode": "ai",
+  "dryRun": true,
+  "subject": "Form Quote Test",
+  "text": "",
+  "customerName": "Test Person",
+  "customerEmail": "test@example.com",
+  "customerCompany": "Test Co",
+  "customerPhone": "555-555-5555",
+  "dims": "18x12x3",
+  "qty": 250,
+  "layer_count": 3,
+  "layer_thicknesses": [1,1,1],
+  "cavityDims": ["Ø2x1"]
+}
