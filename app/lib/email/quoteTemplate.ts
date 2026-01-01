@@ -16,6 +16,12 @@ export type TemplateSpecs = {
   color?: string | null;
   cavityCount?: number | null;
   cavityDims?: string[];
+
+  // NOTE: upstream sometimes provides dims as a string (e.g. "18x12x3")
+  // even when L_in/W_in/H_in aren't set. We handle this safely below.
+  // Keeping it optional and untyped here avoids forcing upstream changes.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [k: string]: any;
 };
 
 // IMPORTANT: matches orchestrate PriceBreak shape
@@ -256,6 +262,37 @@ function parseInchesLoose(v: any): number | null {
   return null;
 }
 
+/**
+ * Parse "18x12x3" (or "18 × 12 × 3", etc.) into numeric L/W/H.
+ * Returns null if it can’t confidently parse 3 numbers.
+ */
+function parseDimsTripleLoose(v: any): { L: number; W: number; H: number } | null {
+  if (v == null) return null;
+  const s0 = String(v).trim();
+  if (!s0) return null;
+
+  const s = s0.toLowerCase().replace(/×/g, "x");
+  const parts = s
+    .split(/x/i)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  if (parts.length < 3) return null;
+
+  const L = parseInchesLoose(parts[0]);
+  const W = parseInchesLoose(parts[1]);
+  const H = parseInchesLoose(parts[2]);
+
+  if (!Number.isFinite(L as number) || !Number.isFinite(W as number) || !Number.isFinite(H as number)) {
+    return null;
+  }
+
+  // zero/negative guard
+  if ((L as number) <= 0 || (W as number) <= 0 || (H as number) <= 0) return null;
+
+  return { L: L as number, W: W as number, H: H as number };
+}
+
 // Build a layout-editor URL if we have enough info to make it useful.
 function buildLayoutUrl(input: TemplateInput): string | null {
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
@@ -267,15 +304,13 @@ function buildLayoutUrl(input: TemplateInput): string | null {
   if (!qno) return null;
 
   const params = new URLSearchParams();
-  const { L_in, W_in, H_in } = input.specs;
+  const facts: any = input.facts || {};
 
   params.set("quote_no", qno);
 
   // If the original email described layers, we need the editor to boot in
   // multi-layer mode immediately (before "Apply to quote").
   // Orchestrate stores this intent in facts (layer_count / layers / layer_thicknesses).
-  const facts: any = input.facts || {};
-
   const layerCountRaw = Number(facts.layer_count);
   const layersArr = Array.isArray(facts.layers) ? (facts.layers as any[]) : [];
   const thArrRaw = Array.isArray(facts.layer_thicknesses)
@@ -303,8 +338,6 @@ function buildLayoutUrl(input: TemplateInput): string | null {
     if (count && count > 1) params.set("layer_count", String(count));
 
     // Canonical thickness params: REPEATED values (NOT comma strings).
-    // Example:
-    //   layer_thicknesses=1&layer_thicknesses=3&layer_thicknesses=0.5
     const th =
       thFromFacts.length > 0
         ? thFromFacts
@@ -322,8 +355,20 @@ function buildLayoutUrl(input: TemplateInput): string | null {
     }
   }
 
-  if (L_in && W_in && H_in) {
+  // ---------- DIMENSIONS (Path-A fallback) ----------
+  // Prefer canonical L/W/H; if missing, parse from specs.dims or facts.dims.
+  const { L_in, W_in, H_in } = input.specs;
+  const haveTriple = !!(L_in && W_in && H_in);
+
+  if (haveTriple) {
     params.set("dims", `${L_in}x${W_in}x${H_in}`);
+  } else {
+    const dimsFromSpecs = (input.specs as any)?.dims;
+    const dimsFromFacts = facts?.dims || facts?.dimensions || facts?.outside_size;
+    const parsed = parseDimsTripleLoose(dimsFromFacts || dimsFromSpecs);
+    if (parsed) {
+      params.set("dims", `${parsed.L}x${parsed.W}x${parsed.H}`);
+    }
   }
 
   // Canonical cavity params: REPEATED cavity=
@@ -358,10 +403,45 @@ function priceBreakUnit(br: PriceBreak): string {
 export function renderQuoteEmail(input: TemplateInput): string {
   const { quoteNumber, status, specs, material, pricing, missing } = input;
 
-  const outsideSize = fmtInchesTriple(specs.L_in, specs.W_in, specs.H_in);
+  // ---------- DIMENSIONS (Path-A fallback) ----------
+  // Prefer canonical L/W/H; if missing, parse from specs.dims or facts.dims.
+  const facts: any = input.facts || {};
+  let L = Number(specs.L_in);
+  let W = Number(specs.W_in);
+  let H = Number(specs.H_in);
+
+  const haveTriple = Number.isFinite(L) && L > 0 && Number.isFinite(W) && W > 0 && Number.isFinite(H) && H > 0;
+
+  if (!haveTriple) {
+    const dimsFromSpecs = (specs as any)?.dims;
+    const dimsFromFacts = facts?.dims || facts?.dimensions || facts?.outside_size;
+    const parsed = parseDimsTripleLoose(dimsFromFacts || dimsFromSpecs);
+    if (parsed) {
+      L = parsed.L;
+      W = parsed.W;
+      H = parsed.H;
+    } else {
+      // If we can’t parse, keep them as NaN so fmtInchesTriple returns —
+      L = Number.NaN;
+      W = Number.NaN;
+      H = Number.NaN;
+    }
+  }
+
+  const outsideSize = fmtInchesTriple(L as any, W as any, H as any);
   const qty = fmtQty(specs.qty);
+
+  // ---------- DENSITY (Path-A fallback) ----------
+  // Prefer density_pcf; otherwise show a string density if upstream sent it (e.g. "1.70lb").
+  const densityFromSpecsString =
+    typeof (specs as any)?.density === "string" ? String((specs as any).density).trim() : "";
+  const densityFromFactsString =
+    typeof facts?.density === "string" ? String(facts.density).trim() : "";
+
   const densityLabel =
-    specs.density_pcf != null ? `${fmtNumber(specs.density_pcf, 1)} pcf` : "—";
+    specs.density_pcf != null
+      ? `${fmtNumber(specs.density_pcf, 1)} pcf`
+      : densityFromSpecsString || densityFromFactsString || "—";
 
   // ---------- Material / family labels (email + viewer alignment) ----------
 
@@ -401,12 +481,13 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const matKerf = fmtPercent(material.kerf_pct ?? pricing.raw?.kerf_pct);
 
   const priceBreaks: PriceBreak[] = pricing.price_breaks ?? [];
-  const layoutUrl =
-  input.facts?.layout_editor_url ||
-  input.facts?.layoutEditorUrl ||
-  input.facts?.layoutEditorLink ||
-  null;
 
+  // Prefer a precomputed editor link if upstream included it; otherwise build it.
+  const layoutUrl =
+    input.facts?.layout_editor_url ||
+    input.facts?.layoutEditorUrl ||
+    input.facts?.layoutEditorLink ||
+    buildLayoutUrl(input);
 
   const showMissing = Array.isArray(missing) && missing.length > 0;
   const statusLabel = status || "draft";
@@ -414,7 +495,6 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
   const logoUrl = `${base}/alex-io-logo.png`;
 
-  const facts: any = input.facts || {};
   let skivingNote: string;
   if (typeof facts.skiving_note === "string" && facts.skiving_note.trim()) {
     skivingNote = facts.skiving_note.trim();
