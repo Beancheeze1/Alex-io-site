@@ -66,6 +66,12 @@ type In = {
   toEmail?: string;
   subject?: string;
 
+    // Form flow can send layers explicitly (so we don't rely on text parsing):
+  layer_count?: number | string;
+  layer_thicknesses?: number[] | string;
+  layer_cavity_layer_index?: number | string;
+
+
   // Form flow may send customer fields explicitly:
   customerName?: string;
   customerEmail?: string;
@@ -2328,6 +2334,7 @@ newly = mergeFacts(newly, formFacts);
       newly.customerPhone = pCustomerPhone;
       newly.phone = pCustomerPhone; // legacy key used in quote header store
     }
+    
 
 
     // Preserve regex-derived fields that must stay authoritative even if we call the LLM.
@@ -2620,6 +2627,56 @@ newly = mergeFacts(newly, formFacts);
         const customerEmail = merged.customerEmail || merged.email || null;
         const phone = merged.phone || null;
         const status = merged.status || "draft";
+
+            // ------------------- Form layers -> facts (Path-A) -------------------
+    // Only apply if the form provided them AND the regex/LLM didn't already extract layers.
+    const pLayerCountRaw = (p as any).layer_count ?? (p as any).layerCount ?? null;
+    const pLayerCount = Number(pLayerCountRaw);
+
+    const pLayerThicknessesRaw = (p as any).layer_thicknesses ?? (p as any).layerThicknesses ?? null;
+
+    const pLayerCavityIdxRaw =
+      (p as any).layer_cavity_layer_index ?? (p as any).layerCavityLayerIndex ?? null;
+    const pLayerCavityIdx = Number(pLayerCavityIdxRaw);
+
+    // Only set if not already extracted from the inbound text
+    if (!newly.layer_count && Number.isFinite(pLayerCount) && pLayerCount > 0) {
+      newly.layer_count = pLayerCount;
+    }
+
+    // Accept array OR comma-string
+    if (!Array.isArray((newly as any).layer_thicknesses)) {
+      let arr: number[] = [];
+
+      if (Array.isArray(pLayerThicknessesRaw)) {
+        arr = (pLayerThicknessesRaw as any[])
+          .map((x) => Number(x))
+          .filter((x) => Number.isFinite(x) && x > 0);
+      } else if (typeof pLayerThicknessesRaw === "string" && pLayerThicknessesRaw.trim()) {
+        arr = pLayerThicknessesRaw
+          .split(/[, ]+/g)
+          .map((s) => Number(s.trim()))
+          .filter((x) => Number.isFinite(x) && x > 0);
+      }
+
+      // Only apply if length matches layer_count (or if we at least have a count)
+      const n = Number(newly.layer_count);
+      if (arr.length && Number.isFinite(n) && n > 0) {
+        // Force exact length n (pad with 1s if short; trim if long)
+        const exact = arr.slice(0, n);
+        while (exact.length < n) exact.push(1);
+        (newly as any).layer_thicknesses = exact;
+      }
+    }
+
+    if (
+      newly.layer_cavity_layer_index == null &&
+      Number.isFinite(pLayerCavityIdx) &&
+      pLayerCavityIdx >= 1
+    ) {
+      newly.layer_cavity_layer_index = pLayerCavityIdx;
+    }
+
 
         const headerRes = await fetch(`${base}/api/quotes`, {
           method: "POST",

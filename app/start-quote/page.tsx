@@ -1,9 +1,9 @@
 // app/start-quote/page.tsx
 //
-// Start Real Quote (lead capture + email builder)
-// - No backend calls (Path A safe)
-// - Generates an email body the user can copy or open via mailto:
-//   sales@alex-io.com
+// Start Real Quote (lead capture + AUTO-SEND)
+// - Posts to /api/ai/orchestrate (server sends via Graph)
+// - Includes customer fields + layer_count + layer_thicknesses for perfect seeding
+// - Redirects to returned facts.layout_editor_url when available
 //
 
 "use client";
@@ -38,7 +38,14 @@ function buildEmailBody(v: {
   size: string;
   cavities: string;
   notes: string;
+  layerCount: number;
+  layerThicknesses: number[];
 }) {
+  const layersLine =
+    v.layerCount > 1
+      ? `Layers: ${v.layerCount} (${v.layerThicknesses.join(", ")} in)`
+      : `Layers: 1`;
+
   const lines = [
     "Hi Alex-IO team,",
     "",
@@ -53,6 +60,7 @@ function buildEmailBody(v: {
     `Quantity: ${v.qty || "—"}`,
     `Foam: ${v.foam || "—"} (family + density if known)`,
     `Outside size (L×W×H): ${v.size || "—"}`,
+    layersLine,
     `Cavities / pockets: ${v.cavities || "—"}`,
     "",
     "Notes",
@@ -61,6 +69,11 @@ function buildEmailBody(v: {
     "Thanks!",
   ];
   return lines.join("\n");
+}
+
+function toNumOrNull(s: string) {
+  const n = Number(String(s || "").trim());
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 export default function StartQuotePage() {
@@ -75,6 +88,21 @@ export default function StartQuotePage() {
   const [size, setSize] = React.useState("");
   const [cavities, setCavities] = React.useState("");
   const [notes, setNotes] = React.useState("");
+
+  // --- NEW: layers ---
+  const [layerCount, setLayerCount] = React.useState<number>(3);
+  const [layerThicknesses, setLayerThicknesses] = React.useState<number[]>([1, 1, 1]);
+
+  // Keep thickness array length aligned to layerCount (Path-A safe)
+  React.useEffect(() => {
+    setLayerThicknesses((prev) => {
+      const next = Array.from({ length: layerCount }, (_, i) => {
+        const v = prev?.[i];
+        return Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 1;
+      });
+      return next;
+    });
+  }, [layerCount]);
 
   const subject = React.useMemo(() => {
     const c = company?.trim();
@@ -93,22 +121,81 @@ export default function StartQuotePage() {
         size,
         cavities,
         notes,
+        layerCount,
+        layerThicknesses,
       }),
-    [name, company, email, phone, qty, foam, size, cavities, notes],
+    [name, company, email, phone, qty, foam, size, cavities, notes, layerCount, layerThicknesses],
   );
-
-  const mailtoHref = React.useMemo(() => {
-    const to = "sales@alex-io.com";
-    const s = encodeURIComponent(subject);
-    const b = encodeURIComponent(body);
-    return `mailto:${to}?subject=${s}&body=${b}`;
-  }, [subject, body]);
 
   const onCopy = async () => {
     try {
       await navigator.clipboard.writeText(body);
     } catch {
-      // no-op (clipboard may be blocked); user can still select manually
+      // no-op
+    }
+  };
+
+  // --- NEW: auto-send ---
+  const [isSending, setIsSending] = React.useState(false);
+  const [sendError, setSendError] = React.useState<string | null>(null);
+
+  const onSend = async () => {
+    setSendError(null);
+
+    // Minimal client-side validation (don’t block; just improve payload)
+    const qtyNum = toNumOrNull(qty);
+
+    setIsSending(true);
+    try {
+      const r = await fetch(`/api/ai/orchestrate?t=${Date.now()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "ai",
+          toEmail: "sales@alex-io.com",
+          subject,
+          text: body,
+
+          // Explicit customer fields (so editor seeding always has them)
+          customerName: name,
+          customerCompany: company,
+          customerEmail: email,
+          customerPhone: phone,
+
+          // IMPORTANT: pass these explicitly for form flow
+          layer_count: layerCount,
+          layer_thicknesses: layerThicknesses,
+
+          // Optional: also include qty as a real number if parseable
+          // (orchestrate already parses qty from text; this is additive)
+          ...(qtyNum ? { qty: qtyNum } : {}),
+        }),
+      });
+
+      const j = await r.json().catch(() => ({} as any));
+      if (!j?.ok) {
+        setSendError(j?.error || "Send failed");
+        return;
+      }
+
+      const url =
+        j?.facts?.layout_editor_url ||
+        j?.facts?.layoutEditorUrl ||
+        j?.facts?.layout_editor_link ||
+        j?.facts?.layoutEditorLink ||
+        null;
+
+      if (url && typeof url === "string") {
+        window.location.href = url;
+        return;
+      }
+
+      // If no URL returned, still succeeded (email sent). Leave user on page with copy option.
+      setSendError(null);
+    } catch (e: any) {
+      setSendError(String(e?.message || e || "Send failed"));
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -132,8 +219,9 @@ export default function StartQuotePage() {
               START A REAL QUOTE
             </div>
             <div className="mt-1 text-sm text-slate-300">
-              Fill this in and we’ll open a ready-to-send email to{" "}
-              <span className="text-slate-100 font-semibold">sales@alex-io.com</span>.
+              Fill this in and we’ll auto-send to{" "}
+              <span className="text-slate-100 font-semibold">sales@alex-io.com</span>{" "}
+              and open the seeded editor.
             </div>
           </div>
 
@@ -202,6 +290,44 @@ export default function StartQuotePage() {
               />
             </Field>
 
+            {/* NEW: layer dropdown */}
+            <Field label="LAYERS">
+              <select
+                value={String(layerCount)}
+                onChange={(e) => setLayerCount(Number(e.target.value))}
+                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+              >
+                <option value="1">1 layer</option>
+                <option value="2">2 layers</option>
+                <option value="3">3 layers</option>
+                <option value="4">4 layers</option>
+              </select>
+            </Field>
+
+            {/* NEW: thickness inputs (minimal) */}
+            <Field label="LAYER THICKNESSES (in)">
+              <div className="flex gap-2">
+                {Array.from({ length: layerCount }, (_, i) => (
+                  <input
+                    key={i}
+                    value={String(layerThicknesses[i] ?? 1)}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const n = Number(raw);
+                      setLayerThicknesses((prev) => {
+                        const next = [...prev];
+                        next[i] = Number.isFinite(n) && n > 0 ? n : 1;
+                        return next;
+                      });
+                    }}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                    placeholder="1"
+                    inputMode="decimal"
+                  />
+                ))}
+              </div>
+            </Field>
+
             <div className="sm:col-span-2">
               <Field label='OUTSIDE SIZE (L×W×H, inches)'>
                 <input
@@ -237,6 +363,12 @@ export default function StartQuotePage() {
             </div>
           </div>
 
+          {sendError ? (
+            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
+              Send failed: {sendError}
+            </div>
+          ) : null}
+
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
@@ -246,16 +378,18 @@ export default function StartQuotePage() {
               Copy email text
             </button>
 
-            <a
-              href={mailtoHref}
-              className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-5 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
+            <button
+              type="button"
+              disabled={isSending}
+              onClick={onSend}
+              className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-5 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:opacity-60"
             >
-              Open email draft →
-            </a>
+              {isSending ? "Sending…" : "Send & open editor →"}
+            </button>
           </div>
 
           <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-400">
-            Tip: You can also email specs directly. This page just helps format the request cleanly.
+            Tip: This page auto-sends through Alex-IO so the editor opens pre-seeded.
           </div>
         </div>
       </div>
