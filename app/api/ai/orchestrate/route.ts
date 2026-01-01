@@ -296,6 +296,12 @@ function buildLayoutEditorUrlFromFacts(f: Mem): string | null {
     // dims (outside block dims) if present
     if (f.dims) url.searchParams.set("dims", String(f.dims));
 
+    const qtyNum = Number(f.qty ?? f.quantity ?? null);
+if (Number.isFinite(qtyNum) && qtyNum > 0) {
+  url.searchParams.set("qty", String(Math.round(qtyNum)));
+}
+
+
     // -----------------------------
     // CUSTOMER PREFILL (FIX #1)
     // -----------------------------
@@ -2403,6 +2409,12 @@ export async function POST(req: NextRequest) {
     const layerOverallConf = Number((merged as any)?.__extract?.layers?.overall_confidence);
 
     const isLowConfidence = Number.isFinite(layerOverallConf) ? layerOverallConf < 0.6 : false; // if unknown, don’t block
+
+if (merged.dims) {
+  const url = buildLayoutEditorUrlFromFacts(merged);
+  if (url) merged.layout_editor_url = url;
+}
+
 
     if (
       !isLowConfidence &&
