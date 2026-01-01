@@ -1222,6 +1222,7 @@ function grabLayerThicknessesCanonical(
 
   const thicknesses: (number | null)[] = n ? Array.from({ length: n }, () => null) : [];
   let cavityIdx1: number | null = null;
+  
 
   // Evidence + confidence (1-based layers)
   const evidenceByLayer: string[][] = n ? Array.from({ length: n }, () => []) : [];
@@ -1241,6 +1242,7 @@ function grabLayerThicknessesCanonical(
     }
     // cap evidence count
     if (evidenceByLayer[layer1 - 1].length > 2) evidenceByLayer[layer1 - 1].length = 2;
+  
   };
 
   // Set only if empty (first strong signal wins); store evidence/confidence
@@ -1297,6 +1299,7 @@ function grabLayerThicknessesCanonical(
         return Number.isFinite(v) && v > 0 ? v : null;
       }
     }
+  
 
     return null;
   };
@@ -1344,6 +1347,7 @@ function grabLayerThicknessesCanonical(
 
     }
   }
+}
 
   // PASS A: same-line “Layer N ... thickness ...” (very high)
   {
@@ -2751,4 +2755,5 @@ if (merged.dims) {
   } catch (e: any) {
     return err("orchestrate_exception", String(e?.message || e));
   }
+  
 }
