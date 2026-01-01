@@ -383,7 +383,7 @@ if (Number.isFinite(qtyNum) && qtyNum > 0) {
     }
 
     // -----------------------------
-    // CAVITIES (unchanged)
+    // CAVITIES (include through-holes for editor seeding)
     // -----------------------------
     const cavArr: any[] = Array.isArray(f.cavityDims) ? f.cavityDims : [];
     for (const c of cavArr) {
@@ -391,6 +391,22 @@ if (Number.isFinite(qtyNum) && qtyNum > 0) {
       if (!s) continue;
       url.searchParams.append("cavity", s);
     }
+
+    // NEW (Path-A): include through-holes as cavities in the URL so the editor can seed them.
+    // We keep them separate in facts (through_holes_by_layer) but the editor only understands "cavity=" params today.
+    const thByLayer = (f as any).through_holes_by_layer;
+    const idxForTh = Number(f.layer_cavity_layer_index || 1);
+    if (thByLayer && typeof thByLayer === "object" && Number.isFinite(idxForTh) && idxForTh >= 1) {
+      const arr = (thByLayer as any)[String(idxForTh)];
+      if (Array.isArray(arr)) {
+        for (const th of arr) {
+          const s = String(th || "").trim();
+          if (!s) continue;
+          url.searchParams.append("cavity", s);
+        }
+      }
+    }
+
 
     // If we know which layer has cavities (1-based), include it
     if (f.layer_cavity_layer_index != null) {
@@ -1574,10 +1590,101 @@ function recoverCavityDimsFromText(rawText: string, mainDims?: string | null): s
    Initial fact extraction from subject + body
    ============================================================ */
 
+   function extractCustomerFromSignature(rawBody: string): {
+  name?: string;
+  company?: string;
+  email?: string;
+  phone?: string;
+} {
+  const out: { name?: string; company?: string; email?: string; phone?: string } = {};
+  const s = String(rawBody || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  // Use last ~30 non-empty lines as "signature zone"
+  const linesAll = s.split("\n").map((x) => String(x || "").trim());
+  const lines = linesAll.filter(Boolean);
+  const tail = lines.slice(Math.max(0, lines.length - 30));
+
+  const tailText = tail.join("\n");
+
+  // Email: take the LAST email in the tail
+  const emailRe = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+  const emails = tailText.match(emailRe) || [];
+  if (emails.length) out.email = String(emails[emails.length - 1]).trim();
+
+  // Phone: take the LAST phone-like number in the tail
+  const phoneRe = /(?:\+?1[\s.-]?)?(?:\(\s*\d{3}\s*\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}/g;
+  const phones = tailText.match(phoneRe) || [];
+  if (phones.length) out.phone = String(phones[phones.length - 1]).trim();
+
+  // Identify a likely signature start (Thanks, Regards, etc.). If found, use lines after it.
+  let sigStartIdx = -1;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const ln = tail[i].toLowerCase();
+    if (/^(thanks|thank you|regards|best|sincerely|cheers)[,!\- ]*$/.test(ln)) {
+      sigStartIdx = i;
+      break;
+    }
+  }
+
+  const sigLines = sigStartIdx >= 0 ? tail.slice(sigStartIdx + 1) : tail;
+
+  // Remove lines that are obviously email/phone or separators
+  const clean = sigLines
+    .map((x) => String(x || "").trim())
+    .filter(Boolean)
+    .filter((x) => !emailRe.test(x))
+    .filter((x) => !phoneRe.test(x))
+    .filter((x) => !/^[-_]{2,}$/.test(x));
+
+  // Reset regex state (since we used .test with /g above)
+  emailRe.lastIndex = 0;
+
+  // Heuristic:
+  // - first "clean" line is usually name
+  // - second clean line is often company
+  // Only accept if they look like real text (not "Hi Alex", not "Please quote", etc.)
+  const looksLikeName = (x: string) =>
+    /^[A-Za-z][A-Za-z .'-]{1,60}$/.test(x) && !/\b(hi|hello|thanks|regards|please|quote)\b/i.test(x);
+
+  const looksLikeCompany = (x: string) =>
+    /^[A-Za-z0-9][A-Za-z0-9 &.'-]{1,80}$/.test(x) && !/\b(hi|hello|thanks|regards|please|quote)\b/i.test(x);
+
+  if (!out.name) {
+    const n = clean.find((x) => looksLikeName(x));
+    if (n) out.name = n.trim();
+  }
+
+  if (!out.company) {
+    const idxName = out.name ? clean.findIndex((x) => x.trim() === out.name) : -1;
+    const candidates =
+      idxName >= 0 ? clean.slice(idxName + 1, idxName + 3) : clean.slice(0, 3);
+    const c = candidates.find((x) => looksLikeCompany(x) && (!out.name || x !== out.name));
+    if (c) out.company = c.trim();
+  }
+
+  return out;
+}
+
+
 function extractAllFromTextAndSubject(body: string, subject: string): Mem {
   const rawBody = body || "";
   const facts: Mem = {};
   const text = `${subject}\n\n${rawBody}`.replace(/[”“″]/g, '"');
+
+    // NEW (Path-A): signature-based customer parsing (email/name/company/phone)
+  // This fixes the "customer_email seeded from toEmail" issue when the signature provides the real customer email.
+  const sig = extractCustomerFromSignature(rawBody);
+  if (sig.email) {
+    facts.customerEmail = sig.email;
+    facts.email = sig.email; // legacy key used elsewhere
+  }
+  if (sig.name) facts.customerName = sig.name;
+  if (sig.company) facts.customerCompany = sig.company;
+  if (sig.phone) {
+    facts.customerPhone = sig.phone;
+    facts.phone = sig.phone; // legacy key used in quote header store
+  }
+
 
   let outsideDimsWasExplicit = false;
 
