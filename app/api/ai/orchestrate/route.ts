@@ -1580,14 +1580,26 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
     facts.dims = normDims(outsideDims) || outsideDims;
     outsideDimsWasExplicit = true;
   } else {
-    const bodyNoCavity = rawBody
-      .split(/\r?\n/)
-      .filter((ln) => !/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i.test(ln))
-      .join("\n");
+  const bodyNoCavity = rawBody
+  .split(/\r?\n/)
+  .map((ln) => {
+    const s = String(ln || "");
+    const m = s.match(/\b(cavity|cavities|pocket|pockets|cutout|cutouts)\b/i);
+    if (!m) return s;
 
-    const dimsSource = `${subject}\n\n${bodyNoCavity}`;
-    const dims = grabDims(dimsSource);
-    if (dims && !facts.dims) facts.dims = normDims(dims) || dims;
+    // Keep everything BEFORE the cavity keyword so one-line emails still seed outside dims/qty/material.
+    const idx = m.index ?? -1;
+    const keep = idx >= 0 ? s.slice(0, idx) : "";
+    return keep;
+  })
+  .map((s) => String(s || "").trim())
+  .filter(Boolean)
+  .join("\n");
+
+const dimsSource = `${subject}\n\n${bodyNoCavity}`;
+const dims = grabDims(dimsSource);
+if (dims && !facts.dims) facts.dims = normDims(dims) || dims;
+
   }
 
   const qtyVal = grabQty(text);
@@ -1624,6 +1636,28 @@ function extractAllFromTextAndSubject(body: string, subject: string): Mem {
         facts.cavityDims = recovered;
         facts.cavityCount = recovered.length;
       }
+
+// FAILSAFE: if dims is still missing but we did capture triple-dims, choose the largest triple as outside dims.
+// This specifically fixes one-line "18x12x3 ... cavities ..." cases where dims got treated as a cavity.
+if (!facts.dims && Array.isArray(facts.cavityDims) && facts.cavityDims.length) {
+  const triples = facts.cavityDims
+    .map((s: any) => String(s || "").trim())
+    .map((s: string) => {
+      const m = s.match(new RegExp(`^(${NUM})x(${NUM})x(${NUM})$`, "i"));
+      if (!m) return null;
+      const L = Number(m[1]), W = Number(m[2]), H = Number(m[3]);
+      if (!Number.isFinite(L) || !Number.isFinite(W) || !Number.isFinite(H)) return null;
+      return { s: `${canonNumStr(m[1])}x${canonNumStr(m[2])}x${canonNumStr(m[3])}`, v: L * W * H };
+    })
+    .filter(Boolean) as { s: string; v: number }[];
+
+  if (triples.length) {
+    triples.sort((a, b) => b.v - a.v);
+    facts.dims = triples[0].s;
+  }
+}
+
+
     }
   }
 
