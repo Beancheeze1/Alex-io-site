@@ -1,0 +1,7 @@
+﻿{
+  "mode": "ai",
+  "dryRun": true,
+  "toEmail": "sales@alex-io.com",
+  "subject": "Quote request",
+  "body": "Hi Alex,\n\nPlease quote a foam insert with these specs:\n\nOverall / outside foam size: 18 x 12 x 3 in\nQuantity: 250 pcs\nMaterial: EPE foam\nDensity: 1.7#\n\nThis is made up of (3) layers, each 18 x 12:\n- Layer 1 (bottom): thickness 1.0 in\n- Layer 2 (middle): thickness 1.0 in — this layer has the cavities\n- Layer 3 (top): thickness 1.0 in\n\nCavities (in Layer 2):\n- 2 cavities total\n- Cavity A: 4 x 3 x 1 in\n- Cavity B: Ø2.5 x 1 in\n- Also add 1 through-hole: Ø1.0 x 3 in\n\nThanks,\nChuck Johnson\nChuck Co.\n(555) 222-1111\nchuck@example.com\n"
+}

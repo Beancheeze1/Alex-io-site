@@ -382,87 +382,129 @@ if (Number.isFinite(qtyNum) && qtyNum > 0) {
       }
     }
 
-    // -----------------------------
+
+        const forceDepthToLayerThickness = (dim: string, thickness: number): string => {
+      const s = String(dim || "").trim();
+      if (!s) return s;
+
+      // Circle: ØD x depth  -> ØD x thickness
+      const mc = s.match(new RegExp(`^Ø\\s*(${NUM})\\s*[x×]\\s*(${NUM})$`, "i"));
+      if (mc) {
+        const D = canonNumStr(mc[1]);
+        return `Ø${D}x${canonNumStr(String(thickness))}`;
+      }
+
+      // Rect: L x W x D -> L x W x thickness
+      const mr = s.match(new RegExp(`^(${NUM})\\s*[x×]\\s*(${NUM})\\s*[x×]\\s*(${NUM})$`, "i"));
+      if (mr) {
+        const L = canonNumStr(mr[1]);
+        const W = canonNumStr(mr[2]);
+        return `${L}x${W}x${canonNumStr(String(thickness))}`;
+      }
+
+      return s;
+    };
+
+
+        // -----------------------------
     // CAVITIES (include through-holes for editor seeding)
+    // - Prefer per-layer cavities when available (prevents wrong-layer + duplicates)
+    // - Add through-holes as cavities BUT force depth == layer thickness
+    // - De-dupe aggressively so a through-hole can’t appear twice
     // -----------------------------
-    const cavArr: any[] = Array.isArray(f.cavityDims) ? f.cavityDims : [];
-    for (const c of cavArr) {
+
+    // Which layer should receive cavities? (default 1)
+    const idxForCav = Number(f.layer_cavity_layer_index || 1);
+
+    // If we know which layer has cavities (1-based), include it
+    // AND force the editor to open on that layer so cavity seeding happens once.
+    if (Number.isFinite(idxForCav) && idxForCav >= 1) {
+      url.searchParams.set("layer_cavity_layer_index", String(idxForCav));
+      url.searchParams.set("active_layer", String(idxForCav)); // canonical
+      // (Optional compatibility) keep if your editor reads camelCase:
+      url.searchParams.set("activeLayer", String(idxForCav));
+    }
+
+    // Helper: thickness for a 1-based layer index
+    const getLayerThickness1 = (layer1: number): number => {
+      // Prefer numeric thickness array computed earlier in this function
+      if (Array.isArray(thicknessNums) && thicknessNums.length >= layer1) {
+        const v = Number(thicknessNums[layer1 - 1]);
+        if (Number.isFinite(v) && v > 0) return v;
+      }
+
+      // Fallback to raw facts.layer_thicknesses if present
+      const rawArr = (f as any).layer_thicknesses;
+      if (Array.isArray(rawArr) && rawArr.length >= layer1) {
+        const v = Number(rawArr[layer1 - 1]);
+        if (Number.isFinite(v) && v > 0) return v;
+      }
+
+      return 1;
+    };
+
+    // De-dupe set for all cavity params (normalized)
+    const seenCav = new Set<string>();
+    const addCavityParam = (dim: string) => {
+      const s = String(dim || "").trim();
+      if (!s) return;
+      const key = normalizeCavity(s).toLowerCase().trim();
+      if (!key) return;
+      if (seenCav.has(key)) return;
+      seenCav.add(key);
+      url.searchParams.append("cavity", s);
+    };
+
+    // 1) Prefer per-layer cavities if present (fixes wrong-layer and reduces duplication)
+    const cavByLayer = (f as any).cavities_by_layer;
+    const cavArrPreferred =
+      cavByLayer &&
+      typeof cavByLayer === "object" &&
+      Number.isFinite(idxForCav) &&
+      idxForCav >= 1 &&
+      Array.isArray(cavByLayer[String(idxForCav)]) &&
+      cavByLayer[String(idxForCav)].length
+        ? (cavByLayer[String(idxForCav)] as any[])
+        : null;
+
+    const cavArrLegacy: any[] = Array.isArray(f.cavityDims) ? f.cavityDims : [];
+
+    const cavSource = cavArrPreferred || cavArrLegacy;
+
+    for (const c of cavSource) {
       const s = String(c || "").trim();
       if (!s) continue;
-      url.searchParams.append("cavity", s);
+      addCavityParam(s);
     }
 
-   // NEW (Path-A): include through-holes as cavities in the URL so the editor can seed them.
-// Treat through-holes like normal cavities, but force depth == thickness of the layer they’re on.
-// The editor will create a "through" cavity when depth >= layer thickness.
-const thByLayer = (f as any).through_holes_by_layer;
+    // 2) Through-holes: add as cavities BUT force depth == thickness of the cavity layer
+    //    This also prevents duplicates if the through-hole already existed in cavityDims.
+    const thByLayer = (f as any).through_holes_by_layer;
 
-// Which layer should receive cavities? (default 1)
-const idxForCav = Number(f.layer_cavity_layer_index || 1);
+    if (
+      thByLayer &&
+      typeof thByLayer === "object" &&
+      Number.isFinite(idxForCav) &&
+      idxForCav >= 1
+    ) {
+      const arr = (thByLayer as any)[String(idxForCav)];
+      if (Array.isArray(arr) && arr.length) {
+        const layerTh = getLayerThickness1(idxForCav);
 
-// Helper: thickness for a 1-based layer index
-const getLayerThickness1 = (layer1: number): number => {
-  // Prefer numericThicknesses computed earlier in this function (layer_thicknesses / layers fallback)
-  if (Array.isArray(thicknessNums) && thicknessNums.length >= layer1) {
-    const v = Number(thicknessNums[layer1 - 1]);
-    if (Number.isFinite(v) && v > 0) return v;
-  }
+        for (const th of arr) {
+          const raw = String(th || "").trim();
+          if (!raw) continue;
 
-  // Fallback to raw facts.layer_thicknesses if present
-  const rawArr = (f as any).layer_thicknesses;
-  if (Array.isArray(rawArr) && rawArr.length >= layer1) {
-    const v = Number(rawArr[layer1 - 1]);
-    if (Number.isFinite(v) && v > 0) return v;
-  }
+          // Normalize first, then FORCE depth to layer thickness
+          const norm = normalizeCavity(raw);
+          const forced = forceDepthToLayerThickness(norm, layerTh);
 
-  return 1;
-};
-
-if (
-  thByLayer &&
-  typeof thByLayer === "object" &&
-  Number.isFinite(idxForCav) &&
-  idxForCav >= 1
-) {
-  const arr = (thByLayer as any)[String(idxForCav)];
-  if (Array.isArray(arr)) {
-    const layerTh = getLayerThickness1(idxForCav);
-
-    for (const th of arr) {
-      const raw = String(th || "").trim();
-      if (!raw) continue;
-
-      // Expect circle form like "Ø1x3" (after normalizeCavity paths)
-      const norm = normalizeCavity(raw);
-      const m = norm.match(new RegExp(`^Ø\\s*(${NUM})\\s*[x×]\\s*(${NUM})$`, "i"));
-      if (!m) continue;
-
-      const D = canonNumStr(m[1]);
-
-      // FORCE depth to the layer thickness (per your rule)
-      const depth = canonNumStr(String(layerTh));
-
-      url.searchParams.append("cavity", `Ø${D}x${depth}`);
+          // Add once (de-duped)
+          addCavityParam(forced);
+        }
+      }
     }
-  }
-}
 
-
-
-  // If we know which layer has cavities (1-based), include it
-// AND force the editor to open on that layer so cavity seeding happens once
-// (prevents "seed into Layer 1 then also into Layer N" duplication).
-if (f.layer_cavity_layer_index != null) {
-  const idx = Number(f.layer_cavity_layer_index);
-  if (Number.isFinite(idx) && idx >= 1) {
-    url.searchParams.set("layer_cavity_layer_index", String(idx));
-
-    // NEW (Path-A): hint editor to start on the cavity layer
-    // (safe if ignored; fixes double-seed if supported)
-    url.searchParams.set("active_layer", String(idx));
-    url.searchParams.set("activeLayer", String(idx));
-  }
-}
 
 
     // -----------------------------
@@ -1262,6 +1304,13 @@ function grabLayerThicknessesCanonical(
   const lines = String(s).split(/\r?\n/);
   const whole = String(s);
 
+    const sliceToLineEnd = (src: string, start: number, maxLen = 220) => {
+    const nl = src.indexOf("\n", start);
+    const end = nl >= 0 ? Math.min(nl, start + maxLen) : Math.min(src.length, start + maxLen);
+    return src.slice(start, end);
+  };
+
+
   // PASS 0: inline assignments / shorthand (very high)
   {
     const re = new RegExp(
@@ -1273,13 +1322,9 @@ function grabLayerThicknessesCanonical(
       const idx = Number(m[1]);
       const th = Number(m[2]);
       if (Number.isFinite(idx) && idx >= 1 && idx <= n && Number.isFinite(th) && th > 0) {
-        setThIfEmpty(idx, th, 0.98, whole.slice(m.index, Math.min(whole.length, m.index + 90)));
-        noteCavityIfMentions(
-          idx,
-          whole,
-          0.75,
-          whole.slice(m.index, Math.min(whole.length, m.index + 120)),
-        );
+              const snip = sliceToLineEnd(whole, m.index, 220).replace(/\s+/g, " ").trim();
+        noteCavityIfMentions(idx, snip, 0.75, snip);
+
       }
     }
   }
@@ -1294,14 +1339,9 @@ function grabLayerThicknessesCanonical(
       const idx = Number(m[1]);
       const th = Number(m[2]);
       if (Number.isFinite(idx) && idx >= 1 && idx <= n && Number.isFinite(th) && th > 0) {
-        setThIfEmpty(idx, th, 0.98, whole.slice(m.index, Math.min(whole.length, m.index + 90)));
-        noteCavityIfMentions(
-          idx,
-          whole,
-          0.75,
-          whole.slice(m.index, Math.min(whole.length, m.index + 120)),
-        );
-      }
+               const snip = sliceToLineEnd(whole, m.index, 220).replace(/\s+/g, " ").trim();
+        noteCavityIfMentions(idx, snip, 0.75, snip);
+
     }
   }
 
@@ -1319,13 +1359,9 @@ function grabLayerThicknessesCanonical(
       const idx = Number(m[1]);
       const th = Number(m[2]);
       if (Number.isFinite(idx) && idx >= 1 && idx <= n && Number.isFinite(th) && th > 0) {
-        setThIfEmpty(idx, th, 0.98, whole.slice(m.index, Math.min(whole.length, m.index + 90)));
-        noteCavityIfMentions(
-          idx,
-          whole.slice(m.index, Math.min(whole.length, m.index + 220)),
-          0.75,
-          whole.slice(m.index, Math.min(whole.length, m.index + 120)),
-        );
+            const snip = sliceToLineEnd(whole, m.index, 220).replace(/\s+/g, " ").trim();
+        noteCavityIfMentions(idx, snip, 0.75, snip);
+
       }
     }
   }
