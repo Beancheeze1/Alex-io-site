@@ -16,12 +16,6 @@ export type TemplateSpecs = {
   color?: string | null;
   cavityCount?: number | null;
   cavityDims?: string[];
-
-  // NOTE: upstream sometimes provides dims as a string (e.g. "18x12x3")
-  // even when L_in/W_in/H_in aren't set. We handle this safely below.
-  // Keeping it optional and untyped here avoids forcing upstream changes.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [k: string]: any;
 };
 
 // IMPORTANT: matches orchestrate PriceBreak shape
@@ -262,35 +256,20 @@ function parseInchesLoose(v: any): number | null {
   return null;
 }
 
-/**
- * Parse "18x12x3" (or "18 × 12 × 3", etc.) into numeric L/W/H.
- * Returns null if it can’t confidently parse 3 numbers.
- */
-function parseDimsTripleLoose(v: any): { L: number; W: number; H: number } | null {
-  if (v == null) return null;
-  const s0 = String(v).trim();
+// Parse a dims string like "18x12x3" (or "18 × 12 × 3") into numbers.
+function parseDimsTriple(dims: any): { L: number; W: number; H: number } | null {
+  const s0 = String(dims || "").trim();
   if (!s0) return null;
 
-  const s = s0.toLowerCase().replace(/×/g, "x");
-  const parts = s
-    .split(/x/i)
-    .map((p) => p.trim())
-    .filter(Boolean);
+  const s = s0.toLowerCase().replace(/×/g, "x").replace(/\s+/g, "");
+  const m = s.match(/^(-?\d+(?:\.\d+)?)(?:in)?x(-?\d+(?:\.\d+)?)(?:in)?x(-?\d+(?:\.\d+)?)(?:in)?$/);
+  if (!m) return null;
 
-  if (parts.length < 3) return null;
-
-  const L = parseInchesLoose(parts[0]);
-  const W = parseInchesLoose(parts[1]);
-  const H = parseInchesLoose(parts[2]);
-
-  if (!Number.isFinite(L as number) || !Number.isFinite(W as number) || !Number.isFinite(H as number)) {
-    return null;
-  }
-
-  // zero/negative guard
-  if ((L as number) <= 0 || (W as number) <= 0 || (H as number) <= 0) return null;
-
-  return { L: L as number, W: W as number, H: H as number };
+  const L = Number(m[1]);
+  const W = Number(m[2]);
+  const H = Number(m[3]);
+  if (!Number.isFinite(L) || !Number.isFinite(W) || !Number.isFinite(H)) return null;
+  return { L, W, H };
 }
 
 // Build a layout-editor URL if we have enough info to make it useful.
@@ -304,13 +283,15 @@ function buildLayoutUrl(input: TemplateInput): string | null {
   if (!qno) return null;
 
   const params = new URLSearchParams();
-  const facts: any = input.facts || {};
+  const { L_in, W_in, H_in } = input.specs;
 
   params.set("quote_no", qno);
 
   // If the original email described layers, we need the editor to boot in
   // multi-layer mode immediately (before "Apply to quote").
   // Orchestrate stores this intent in facts (layer_count / layers / layer_thicknesses).
+  const facts: any = input.facts || {};
+
   const layerCountRaw = Number(facts.layer_count);
   const layersArr = Array.isArray(facts.layers) ? (facts.layers as any[]) : [];
   const thArrRaw = Array.isArray(facts.layer_thicknesses)
@@ -338,6 +319,8 @@ function buildLayoutUrl(input: TemplateInput): string | null {
     if (count && count > 1) params.set("layer_count", String(count));
 
     // Canonical thickness params: REPEATED values (NOT comma strings).
+    // Example:
+    //   layer_thicknesses=1&layer_thicknesses=3&layer_thicknesses=0.5
     const th =
       thFromFacts.length > 0
         ? thFromFacts
@@ -355,20 +338,8 @@ function buildLayoutUrl(input: TemplateInput): string | null {
     }
   }
 
-  // ---------- DIMENSIONS (Path-A fallback) ----------
-  // Prefer canonical L/W/H; if missing, parse from specs.dims or facts.dims.
-  const { L_in, W_in, H_in } = input.specs;
-  const haveTriple = !!(L_in && W_in && H_in);
-
-  if (haveTriple) {
+  if (L_in && W_in && H_in) {
     params.set("dims", `${L_in}x${W_in}x${H_in}`);
-  } else {
-    const dimsFromSpecs = (input.specs as any)?.dims;
-    const dimsFromFacts = facts?.dims || facts?.dimensions || facts?.outside_size;
-    const parsed = parseDimsTripleLoose(dimsFromFacts || dimsFromSpecs);
-    if (parsed) {
-      params.set("dims", `${parsed.L}x${parsed.W}x${parsed.H}`);
-    }
   }
 
   // Canonical cavity params: REPEATED cavity=
@@ -401,61 +372,143 @@ function priceBreakUnit(br: PriceBreak): string {
 }
 
 export function renderQuoteEmail(input: TemplateInput): string {
-  const { quoteNumber, status, specs, material, pricing, missing } = input;
-
-  // ---------- DIMENSIONS (Path-A fallback) ----------
-  // Prefer canonical L/W/H; if missing, parse from specs.dims or facts.dims.
+  // ============================================================
+  // PATH A: DISPLAY-ONLY NORMALIZATION
+  // Orchestrate currently returns specs in a different shape:
+  //   specs: { dims, qty, material, density, cavityCount, cavityDims, ... }
+  // This template expects:
+  //   specs: { L_in, W_in, H_in, qty, density_pcf, foam_family, ... }
+  // So we normalize from BOTH input.specs and input.facts for rendering.
+  // NO pricing math changes.
+  // ============================================================
   const facts: any = input.facts || {};
-  let L = Number(specs.L_in);
-  let W = Number(specs.W_in);
-  let H = Number(specs.H_in);
+  const specsAny: any = input.specs || {};
+  const pricingAny: any = input.pricing || {};
+  const pricingRaw: any = pricingAny.raw || {};
 
-  const haveTriple = Number.isFinite(L) && L > 0 && Number.isFinite(W) && W > 0 && Number.isFinite(H) && H > 0;
+  const dimsParsed =
+    parseDimsTriple(specsAny.dims) ||
+    parseDimsTriple(facts.dims) ||
+    null;
 
-  if (!haveTriple) {
-    const dimsFromSpecs = (specs as any)?.dims;
-    const dimsFromFacts = facts?.dims || facts?.dimensions || facts?.outside_size;
-    const parsed = parseDimsTripleLoose(dimsFromFacts || dimsFromSpecs);
-    if (parsed) {
-      L = parsed.L;
-      W = parsed.W;
-      H = parsed.H;
-    } else {
-      // If we can’t parse, keep them as NaN so fmtInchesTriple returns —
-      L = Number.NaN;
-      W = Number.NaN;
-      H = Number.NaN;
-    }
-  }
+  const qtyNorm =
+    specsAny.qty != null ? specsAny.qty : facts.qty != null ? facts.qty : null;
 
-  const outsideSize = fmtInchesTriple(L as any, W as any, H as any);
+  // density can arrive as number, "1.70", "1.70lb", etc
+  const densityNorm =
+    specsAny.density_pcf != null
+      ? Number(specsAny.density_pcf)
+      : specsAny.density != null
+        ? Number.parseFloat(String(specsAny.density))
+        : facts.density != null
+          ? Number.parseFloat(String(facts.density))
+          : null;
+
+  const cavityDimsNormRaw =
+    Array.isArray(specsAny.cavityDims)
+      ? specsAny.cavityDims
+      : Array.isArray(specsAny.cavity_dims)
+        ? specsAny.cavity_dims
+        : Array.isArray(facts.cavityDims)
+          ? facts.cavityDims
+          : Array.isArray(facts.cavity_dims)
+            ? facts.cavity_dims
+            : [];
+
+  const cavityCountNorm =
+    specsAny.cavityCount != null
+      ? Number(specsAny.cavityCount)
+      : specsAny.cavity_count != null
+        ? Number(specsAny.cavity_count)
+        : facts.cavityCount != null
+          ? Number(facts.cavityCount)
+          : facts.cavity_count != null
+            ? Number(facts.cavity_count)
+            : null;
+
+  const specs: TemplateSpecs = {
+    L_in: specsAny.L_in != null ? Number(specsAny.L_in) : dimsParsed ? dimsParsed.L : 0,
+    W_in: specsAny.W_in != null ? Number(specsAny.W_in) : dimsParsed ? dimsParsed.W : 0,
+    H_in: specsAny.H_in != null ? Number(specsAny.H_in) : dimsParsed ? dimsParsed.H : 0,
+    qty: qtyNorm,
+    density_pcf: Number.isFinite(densityNorm as any) ? (densityNorm as number) : null,
+    foam_family:
+      specsAny.foam_family != null
+        ? String(specsAny.foam_family)
+        : specsAny.material != null
+          ? String(specsAny.material) // display only; DB truth still preferred later
+          : null,
+    thickness_under_in:
+      specsAny.thickness_under_in != null ? Number(specsAny.thickness_under_in) : null,
+    color: specsAny.color != null ? String(specsAny.color) : null,
+    cavityCount: Number.isFinite(cavityCountNorm as any) ? (cavityCountNorm as number) : null,
+    cavityDims: dedupeCavityList(cavityDimsNormRaw),
+  };
+
+  // Normalize material display fallbacks (still respects material_family rule)
+  const material: TemplateMaterial = {
+    name:
+      input.material?.name && String(input.material.name).trim()
+        ? String(input.material.name).trim()
+        : facts.material_name && String(facts.material_name).trim()
+          ? String(facts.material_name).trim()
+          : null,
+    density_lbft3:
+      input.material?.density_lbft3 != null
+        ? Number(input.material.density_lbft3)
+        : null,
+    kerf_pct:
+      input.material?.kerf_pct != null
+        ? Number(input.material.kerf_pct)
+        : facts.kerf_pct != null
+          ? Number.parseFloat(String(facts.kerf_pct))
+          : pricingRaw.kerf_pct != null
+            ? Number.parseFloat(String(pricingRaw.kerf_pct))
+            : null,
+    min_charge:
+      input.material?.min_charge != null
+        ? Number(input.material.min_charge)
+        : facts.min_charge != null
+          ? Number.parseFloat(String(facts.min_charge))
+          : pricingRaw.min_charge != null
+            ? Number.parseFloat(String(pricingRaw.min_charge))
+            : null,
+  };
+
+  const pricing: TemplatePricing = input.pricing || ({ total: 0 } as any);
+  const quoteNumber = input.quoteNumber || facts.quoteNumber || facts.quote_no || "";
+  const status = input.status || facts.status || "draft";
+
+  // Filter "missing" display so it doesn't contradict known values (display-only)
+  const missingIn = Array.isArray(input.missing) ? input.missing : [];
+  const missing = missingIn.filter((m) => {
+    if (m === "Quantity") return specs.qty == null || String(specs.qty).trim() === "";
+    if (m === "Dimensions") return !(specs.L_in > 0 && specs.W_in > 0 && specs.H_in > 0);
+    if (m === "Density") return !(specs.density_pcf != null && Number.isFinite(specs.density_pcf));
+    // Material can still be legitimately missing even if we have an ID; keep as-is.
+    return true;
+  });
+
+  const outsideSize = fmtInchesTriple(specs.L_in, specs.W_in, specs.H_in);
   const qty = fmtQty(specs.qty);
-
-  // ---------- DENSITY (Path-A fallback) ----------
-  // Prefer density_pcf; otherwise show a string density if upstream sent it (e.g. "1.70lb").
-  const densityFromSpecsString =
-    typeof (specs as any)?.density === "string" ? String((specs as any).density).trim() : "";
-  const densityFromFactsString =
-    typeof facts?.density === "string" ? String(facts.density).trim() : "";
-
   const densityLabel =
-    specs.density_pcf != null
-      ? `${fmtNumber(specs.density_pcf, 1)} pcf`
-      : densityFromSpecsString || densityFromFactsString || "—";
+    specs.density_pcf != null ? `${fmtNumber(specs.density_pcf, 1)} pcf` : "—";
 
   // ---------- Material / family labels (email + viewer alignment) ----------
 
   // IMPORTANT: We do NOT guess or normalize PE/EPE here.
   // We simply surface the material_family string coming from upstream/DB.
   const rawFamilyFromPricing =
-    pricing.raw?.material_family != null
-      ? String(pricing.raw.material_family).trim()
+    pricingRaw?.material_family != null
+      ? String(pricingRaw.material_family).trim()
       : "";
+  const rawFamilyFromFacts =
+    facts.material_family != null ? String(facts.material_family).trim() : "";
   const rawFamilyFromSpecs =
     specs.foam_family != null ? String(specs.foam_family).trim() : "";
 
-  // DB truth: prefer material_family from pricing.raw, then specs.foam_family.
-  const foamFamily = rawFamilyFromPricing || rawFamilyFromSpecs || "";
+  // DB truth: prefer material_family from pricing.raw, then facts.material_family, then specs.foam_family.
+  const foamFamily = rawFamilyFromPricing || rawFamilyFromFacts || rawFamilyFromSpecs || "";
 
   // Grade / specific material name from DB (e.g. "EPE Type III").
   const gradeName = (material.name && material.name.trim()) || "";
@@ -478,16 +531,16 @@ export function renderQuoteEmail(input: TemplateInput): string {
         ? densityLabel
         : "—";
 
-  const matKerf = fmtPercent(material.kerf_pct ?? pricing.raw?.kerf_pct);
+  const matKerf = fmtPercent(material.kerf_pct ?? pricingRaw?.kerf_pct);
 
   const priceBreaks: PriceBreak[] = pricing.price_breaks ?? [];
 
-  // Prefer a precomputed editor link if upstream included it; otherwise build it.
+  // Layout URL: prefer orchestrate-provided URL (facts), otherwise build one from normalized specs.
   const layoutUrl =
-    input.facts?.layout_editor_url ||
-    input.facts?.layoutEditorUrl ||
-    input.facts?.layoutEditorLink ||
-    buildLayoutUrl(input);
+    facts.layout_editor_url ||
+    facts.layoutEditorUrl ||
+    facts.layoutEditorLink ||
+    buildLayoutUrl({ ...input, specs } as any);
 
   const showMissing = Array.isArray(missing) && missing.length > 0;
   const statusLabel = status || "draft";
@@ -523,29 +576,29 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
   const pricingPending = dimsMissing || materialMissing || densityMissing;
 
-  const pieceCi = fmtNumber(pricing.piece_ci ?? pricing.raw?.piece_ci);
-  const orderCi = fmtNumber(pricing.order_ci ?? pricing.raw?.order_ci);
+  const pieceCi = fmtNumber(pricing.piece_ci ?? pricingRaw?.piece_ci);
+  const orderCi = fmtNumber(pricing.order_ci ?? pricingRaw?.order_ci);
   const orderCiWithWaste = fmtNumber(
-    pricing.order_ci_with_waste ?? pricing.raw?.order_ci_with_waste,
+    pricing.order_ci_with_waste ?? pricingRaw?.order_ci_with_waste,
   );
 
   const computedOrderTotal = fmtMoney(
     pricing.total ??
-      pricing.raw?.price_total ??
-      pricing.raw?.total ??
-      pricing.raw?.order_total,
+      pricingRaw?.price_total ??
+      pricingRaw?.total ??
+      pricingRaw?.order_total,
   );
 
   const computedUsedMinCharge =
-    pricing.used_min_charge ?? pricing.raw?.min_charge_applied ?? false;
+    pricing.used_min_charge ?? pricingRaw?.min_charge_applied ?? false;
 
   // When pending, replace numeric-ish pricing fields with — / Pending (keep the same rows & layout).
   const minCharge = pricingPending
     ? "—"
     : material.min_charge != null
       ? fmtMoney(material.min_charge)
-      : pricing.raw?.min_charge
-        ? fmtMoney(pricing.raw.min_charge)
+      : pricingRaw?.min_charge
+        ? fmtMoney(pricingRaw.min_charge)
         : "$0.00";
 
   const orderTotal = pricingPending ? "Pending" : computedOrderTotal;
