@@ -2,12 +2,10 @@
 import type { ReactNode } from "react";
 import Image from "next/image";
 import QuoteHelperPanel from "@/components/QuoteHelperPanel";
+import SplashChatWidget from "@/components/SplashChatWidget";
 
 const DEMO_QUOTE_PATH = "/demo/quote";
 const START_QUOTE_PATH = "/start-quote";
-
-
-
 
 function Container({ children }: { children: ReactNode }) {
   return <div className="mx-auto w-full max-w-6xl px-4">{children}</div>;
@@ -153,8 +151,6 @@ function OverlapSnips() {
 
 // Splash CTAs (locked): demo + start-quote (no mailto)
 
-
-
 export default function Page() {
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-50">
@@ -245,22 +241,21 @@ export default function Page() {
                   </div>
                 </div>
 
-      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-  <a
-    href={START_QUOTE_PATH}
-    className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
-  >
-    Start a Quote
-  </a>
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                  <a
+                    href={START_QUOTE_PATH}
+                    className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
+                  >
+                    Start a Quote
+                  </a>
 
-  <a
-    href={DEMO_QUOTE_PATH}
-    className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
-  >
-    Try the Interactive Quote
-  </a>
-</div>
-
+                  <a
+                    href={DEMO_QUOTE_PATH}
+                    className="inline-flex items-center justify-center rounded-full bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
+                  >
+                    Try the Interactive Quote
+                  </a>
+                </div>
 
                 {/* Email sample integrated into left story */}
                 <div className="mt-6">
@@ -368,15 +363,14 @@ export default function Page() {
               </div>
             </div>
 
-           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-  <a
-    href={START_QUOTE_PATH}
-    className="rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
-  >
-    Start a Quote
-  </a>
-</div>
-
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <a
+                href={START_QUOTE_PATH}
+                className="rounded-full bg-sky-500/90 px-6 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
+              >
+                Start a Quote
+              </a>
+            </div>
 
             <div className="mt-10 text-center text-xs text-slate-500">
               © {new Date().getFullYear()} Alex-IO. All rights reserved.
@@ -384,6 +378,10 @@ export default function Page() {
           </div>
         </Container>
       </section>
+
+      {/* ADDITIVE: Splash chat widget (UI + guided intake). No existing workflows touched. */}
+      <SplashChatWidget startQuotePath={START_QUOTE_PATH} />
     </main>
   );
 }
+
