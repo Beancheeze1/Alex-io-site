@@ -319,7 +319,9 @@ export default function StartQuotePage() {
                 className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
               >
                 <option value="">
-                  {materialOptions.length ? "Select material…" : "Loading materials…"}
+                  {materialOptions.length
+                    ? "Select material…"
+                    : "Loading materials…"}
                 </option>
                 {materialOptions.map((m) => (
                   <option key={m.id} value={String(m.id)}>
@@ -329,7 +331,9 @@ export default function StartQuotePage() {
                 ))}
               </select>
               <div className="mt-1 text-xs text-slate-400">
-                This avoids parsing/guessing. We seed <span className="text-slate-200">material_id</span> into the editor URL.
+                This avoids parsing/guessing. We seed{" "}
+                <span className="text-slate-200">material_id</span> into the
+                editor URL.
               </div>
             </Field>
 
@@ -393,7 +397,7 @@ export default function StartQuotePage() {
             </Field>
 
             <div className="sm:col-span-2">
-              <Field label="OUTSIDE SIZE (L×W×H, inches)">
+              <Field label="OUTSIDE SIZE (L×W×H, inches — H = total stacked layer height)">
                 <input
                   value={size}
                   onChange={(e) => setSize(e.target.value)}
