@@ -102,7 +102,7 @@ export default function StartQuotePage() {
   const [cavities, setCavities] = React.useState("");
   const [notes, setNotes] = React.useState("");
 
-  // NEW: gate editor open on required fields (Path-A: form-only)
+  // Gate editor open on required fields (form-only)
   const [attemptedOpen, setAttemptedOpen] = React.useState(false);
 
   const nameOk = name.trim().length > 0;
@@ -158,7 +158,7 @@ export default function StartQuotePage() {
     1, 1, 1,
   ]);
 
-  // NEW: explicit cavity layer (1-based)
+  // explicit cavity layer (1-based)
   const [cavityLayerIndex, setCavityLayerIndex] = React.useState<number>(2);
 
   // Keep thickness array length aligned to layerCount (Path-A safe)
@@ -182,7 +182,6 @@ export default function StartQuotePage() {
   }, [layerCount]);
 
   const onOpenEditor = () => {
-    // NEW: require name/email/phone before open (form-only)
     setAttemptedOpen(true);
     if (!canOpenEditor) return;
 
@@ -229,7 +228,7 @@ export default function StartQuotePage() {
 
     // Land the user on the intended layer on first open (keep both keys for compatibility)
     p.set("activeLayer", String(cavityLayerIndex));
-    
+    p.set("active_layer", String(cavityLayerIndex));
 
     if (firstCavity) p.set("cavity", firstCavity);
 
@@ -336,7 +335,7 @@ export default function StartQuotePage() {
               />
             </Field>
 
-            {/* NEW: deterministic material selection */}
+            {/* deterministic material selection */}
             <Field label="MATERIAL (PICK ONE)">
               <select
                 value={materialId}
@@ -427,6 +426,12 @@ export default function StartQuotePage() {
                   placeholder="18 × 12 × 2"
                 />
               </Field>
+              <div className="mt-1 text-xs text-slate-400">
+                If this will go in a box/mailer, undersize the foam{" "}
+                <span className="text-slate-200">Length</span> and{" "}
+                <span className="text-slate-200">Width</span> by{" "}
+                <span className="text-slate-200">0.125&quot;</span> for fit.
+              </div>
             </div>
 
             <div className="sm:col-span-2">
@@ -441,6 +446,9 @@ export default function StartQuotePage() {
               <div className="mt-1 text-xs text-slate-400">
                 Tip: For seeding, we’ll take the first “LxWxD” we can find (ex:
                 5x5x1). You can add/edit cavities in the editor.
+                <span className="block mt-1">
+                  Need cavities on other layers? Add them in the editor after you open it.
+                </span>
               </div>
             </div>
 
@@ -468,11 +476,9 @@ export default function StartQuotePage() {
                   ? "bg-sky-500/90 ring-sky-300/20 hover:bg-sky-500"
                   : "bg-slate-700/40 ring-white/10 opacity-70 cursor-not-allowed",
               ].join(" ")}
-              title={
-                canOpenEditor ? "" : "Please fill in Name, Email, and Phone first."
-              }
+              title={canOpenEditor ? "" : "Please fill in Name, Email, and Phone first."}
             >
-              Open seeded editor →
+              Editor — next step →
             </button>
 
             {!canOpenEditor ? (
