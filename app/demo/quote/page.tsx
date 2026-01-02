@@ -272,6 +272,39 @@ function DeliverableRow({
   );
 }
 
+/* ================= Demo cavity source (BULLETPROOF) ================= */
+
+// Demo must show cavities even if the hook chooses a different active layer.
+// We derive cavities directly from stack[] when layout.cavities is empty.
+function getDemoCavities(layout: any): any[] {
+  const direct = Array.isArray(layout?.cavities) ? layout.cavities : [];
+  if (direct.length) return direct;
+
+  const stack = Array.isArray(layout?.stack) ? layout.stack : [];
+  if (!stack.length) return [];
+
+  const activeRaw =
+    (layout as any)?.activeLayer ??
+    (layout as any)?.active_layer ??
+    (layout as any)?.layer_cavity_layer_index;
+
+  const active = Number(activeRaw);
+  const idx = Number.isFinite(active) ? Math.floor(active) - 1 : -1;
+
+  if (idx >= 0 && idx < stack.length) {
+    const cavs = Array.isArray(stack[idx]?.cavities) ? stack[idx].cavities : [];
+    if (cavs.length) return cavs;
+  }
+
+  // Fallback: first layer with cavities
+  for (const layer of stack) {
+    const cavs = Array.isArray(layer?.cavities) ? layer.cavities : [];
+    if (cavs.length) return cavs;
+  }
+
+  return [];
+}
+
 export default function DemoQuotePage() {
   const router = useRouter();
 
@@ -284,13 +317,20 @@ export default function DemoQuotePage() {
   const seed = React.useMemo(() => scenario.seed, [scenario]);
   const model = useLayoutModel(seed);
 
-  const block = model.layout.block as any;
+  // Build a demo-safe layout that ALWAYS exposes cavities to the canvas/checks.
+  const demoCavities = React.useMemo(() => getDemoCavities(model.layout as any), [model.layout]);
+  const layoutForDemo = React.useMemo(
+    () => ({ ...(model.layout as any), cavities: demoCavities }),
+    [model.layout, demoCavities],
+  );
+
+  const block = (layoutForDemo as any).block as any;
 
   // selection
   const selectedId = model.selectedIds[0] ?? null;
   const selected =
     selectedId
-      ? (((model.layout.cavities as any[]) || []).find((c) => c.id === selectedId) ?? null)
+      ? ((demoCavities || []).find((c: any) => c.id === selectedId) ?? null)
       : null;
 
   // Objectives tracking (simple + sticky)
@@ -306,9 +346,7 @@ export default function DemoQuotePage() {
 
   React.useEffect(() => {
     if (!initialSnapshotRef.current) {
-      const cavs = Array.isArray((model.layout as any)?.cavities)
-        ? (model.layout as any).cavities
-        : [];
+      const cavs = Array.isArray((layoutForDemo as any)?.cavities) ? (layoutForDemo as any).cavities : [];
       initialSnapshotRef.current = cavs.map((c: any) => ({
         id: c.id,
         x: Number(c.x),
@@ -320,9 +358,7 @@ export default function DemoQuotePage() {
     }
 
     const baseline: any[] = initialSnapshotRef.current || [];
-    const now: any[] = Array.isArray((model.layout as any)?.cavities)
-      ? (model.layout as any).cavities
-      : [];
+    const now: any[] = Array.isArray((layoutForDemo as any)?.cavities) ? (layoutForDemo as any).cavities : [];
 
     for (const b of baseline) {
       const c = now.find((x: any) => x.id === b.id);
@@ -336,19 +372,19 @@ export default function DemoQuotePage() {
       const dW = Math.abs((Number(c.widthIn) || 0) - (Number(b.widthIn) || 0));
       if (dL >= 0.0625 || dW >= 0.0625) setDidResize(true);
     }
-  }, [model.layout]);
+  }, [layoutForDemo]);
 
   // Manufacturing checks (demo-only, computed)
   const wallRuleIn = 0.5;
   const minGapRuleIn = 0.5;
 
   const minFoamEdge = React.useMemo(
-    () => minFoamEdgeClearanceIn(model.layout as any),
-    [model.layout],
+    () => minFoamEdgeClearanceIn(layoutForDemo as any),
+    [layoutForDemo],
   );
   const minGap = React.useMemo(
-    () => minGapBetweenCavitiesIn(model.layout as any),
-    [model.layout],
+    () => minGapBetweenCavitiesIn(layoutForDemo as any),
+    [layoutForDemo],
   );
 
   const wallPass = minFoamEdge >= wallRuleIn - 1e-6; // equal counts as pass
@@ -495,7 +531,7 @@ export default function DemoQuotePage() {
 
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
               <InteractiveCanvas
-                layout={model.layout as any}
+                layout={layoutForDemo as any}
                 selectedIds={model.selectedIds}
                 selectAction={model.selectCavity}
                 moveAction={model.updateCavityPosition}
