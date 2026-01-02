@@ -76,7 +76,7 @@ async function callOpenAI(params: {
       role: "developer",
       content: [
         {
-          type: "text",
+          type: "input_text",
           text:
             "You are Alex-IO’s website chat widget. Your job is to have a natural, confident conversation " +
             "and extract quoting facts for a foam packaging insert quote. " +
@@ -107,7 +107,7 @@ async function callOpenAI(params: {
       role: "developer",
       content: [
         {
-          type: "text",
+          type: "input_text",
           text:
             "Return ONLY valid JSON (no markdown) matching this shape:\n" +
             "{\n" +
@@ -130,7 +130,7 @@ async function callOpenAI(params: {
       role: "developer",
       content: [
         {
-          type: "text",
+          type: "input_text",
           text:
             "Current known facts JSON:\n" +
             clip(JSON.stringify(params.facts ?? {}), 2000) +
