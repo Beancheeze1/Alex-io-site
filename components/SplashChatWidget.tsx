@@ -5,31 +5,23 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 type WidgetFacts = {
-  // core
   outsideL?: string;
   outsideW?: string;
   outsideH?: string;
   qty?: string;
 
-  // shipping + fit intent
   shipMode?: "box" | "mailer" | "unsure";
 
-  // build intent / layers
-  insertType?: "single" | "set" | "unsure"; // set = base + top pad/lid
+  insertType?: "single" | "set" | "unsure";
   pocketsOn?: "base" | "top" | "both" | "unsure";
 
-  // holding
   holding?: "pockets" | "loose" | "unsure";
   pocketCount?: "1" | "2" | "3+" | "unsure";
 
-  // material
   materialMode?: "recommend" | "known";
   materialText?: string;
 
-  // notes (freeform)
   notes?: string;
-
-  // meta
   createdAtIso?: string;
 };
 
@@ -39,41 +31,10 @@ type Msg = {
   text: string;
 };
 
-const LS_KEY = "alexio_splash_widget_v2"; // bump to avoid old step-state collisions
+const LS_KEY = "alexio_splash_widget_v2"; // bump to avoid old collisions
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
-}
-
-function hasWindow() {
-  return typeof window !== "undefined";
-}
-
-function safeLsGet(key: string): string | null {
-  if (!hasWindow()) return null;
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function safeLsSet(key: string, value: string) {
-  if (!hasWindow()) return;
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-}
-
-function safeLsRemove(key: string) {
-  if (!hasWindow()) return;
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // ignore
-  }
 }
 
 function safeJsonParse<T>(raw: string | null): T | null {
@@ -82,6 +43,38 @@ function safeJsonParse<T>(raw: string | null): T | null {
     return JSON.parse(raw) as T;
   } catch {
     return null;
+  }
+}
+
+// IMPORTANT: never touch localStorage during SSR
+function canUseLocalStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function lsGet(key: string) {
+  if (!canUseLocalStorage()) return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function lsSet(key: string, value: string) {
+  if (!canUseLocalStorage()) return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // ignore
+  }
+}
+
+function lsRemove(key: string) {
+  if (!canUseLocalStorage()) return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore
   }
 }
 
@@ -176,13 +169,13 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
   const [minimizedHint, setMinimizedHint] = React.useState(false);
 
   const [facts, setFacts] = React.useState<WidgetFacts>(() => {
-    const saved = safeJsonParse<{ facts: WidgetFacts }>(safeLsGet(LS_KEY));
+    const saved = safeJsonParse<{ facts: WidgetFacts }>(lsGet(LS_KEY));
     if (saved?.facts) return saved.facts;
     return { createdAtIso: new Date().toISOString() };
   });
 
   const [msgs, setMsgs] = React.useState<Msg[]>(() => {
-    const saved = safeJsonParse<{ msgs: Msg[] }>(safeLsGet(LS_KEY));
+    const saved = safeJsonParse<{ msgs: Msg[] }>(lsGet(LS_KEY));
     if (saved?.msgs?.length) return saved.msgs;
 
     return [
@@ -205,12 +198,12 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
   const [busy, setBusy] = React.useState(false);
 
   const [done, setDone] = React.useState<boolean>(() => {
-    const saved = safeJsonParse<{ done: boolean }>(safeLsGet(LS_KEY));
+    const saved = safeJsonParse<{ done: boolean }>(lsGet(LS_KEY));
     return saved?.done ?? false;
   });
 
   const [quickReplies, setQuickReplies] = React.useState<string[]>(() => {
-    const saved = safeJsonParse<{ quickReplies: string[] }>(safeLsGet(LS_KEY));
+    const saved = safeJsonParse<{ quickReplies: string[] }>(lsGet(LS_KEY));
     return saved?.quickReplies ?? [];
   });
 
@@ -218,7 +211,7 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
 
   // Persist (client only)
   React.useEffect(() => {
-    safeLsSet(
+    lsSet(
       LS_KEY,
       JSON.stringify({
         facts,
@@ -269,7 +262,7 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
     setDone(false);
     setQuickReplies([]);
     setInput("");
-    safeLsRemove(LS_KEY);
+    lsRemove(LS_KEY);
   }
 
   async function callBrain(userText: string) {
@@ -284,14 +277,10 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
       }),
     });
 
-    if (!res.ok) {
-      throw new Error(`brain_http_${res.status}`);
-    }
+    if (!res.ok) throw new Error(`brain_http_${res.status}`);
 
     const data = (await res.json()) as ChatResponse;
-    if (!data || typeof data.assistantMessage !== "string") {
-      throw new Error("brain_bad_payload");
-    }
+    if (!data || typeof data.assistantMessage !== "string") throw new Error("brain_bad_payload");
     return data;
   }
 
@@ -364,7 +353,9 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
             </span>
             <span className="leading-tight">
               <span className="block">Talk to Alex-IO</span>
-              <span className="block text-[11px] font-medium text-slate-300">chat → layout → pricing</span>
+              <span className="block text-[11px] font-medium text-slate-300">
+                chat → layout → pricing
+              </span>
             </span>
             <span className="ml-1 rounded-full border border-white/15 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-200">
               Live
@@ -377,7 +368,9 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div>
                 <div className="text-xs font-semibold tracking-widest text-sky-300/80">ALEX-IO</div>
-                <div className="mt-0.5 text-[11px] text-slate-300">Talk to me like a human. I’ll keep it tight.</div>
+                <div className="mt-0.5 text-[11px] text-slate-300">
+                  Talk to me like a human. I’ll keep it tight.
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -402,7 +395,12 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
             <div ref={listRef} className="max-h-[380px] overflow-y-auto px-4 py-3">
               <div className="space-y-3">
                 {msgs.map((m) => (
-                  <div key={m.id} className={["flex", m.role === "user" ? "justify-end" : "justify-start"].join(" ")}>
+                  <div
+                    key={m.id}
+                    className={["flex", m.role === "user" ? "justify-end" : "justify-start"].join(
+                      " "
+                    )}
+                  >
                     <div
                       className={[
                         "max-w-[88%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed",
@@ -436,7 +434,9 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
 
               {done ? (
                 <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                  <div className="text-xs font-semibold tracking-widest text-sky-300/80">QUICK SUMMARY</div>
+                  <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+                    QUICK SUMMARY
+                  </div>
                   <ul className="mt-2 space-y-1 text-sm text-slate-200">
                     {summaryLines.map((l) => (
                       <li key={l}>• {l}</li>
@@ -454,7 +454,8 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
                   </div>
 
                   <div className="mt-2 text-[11px] text-slate-400">
-                    Opens the seeded editor via <code className="text-slate-300">{startQuotePath}</code>.
+                    Opens the seeded editor via{" "}
+                    <code className="text-slate-300">{startQuotePath}</code>.
                   </div>
                 </div>
               ) : null}

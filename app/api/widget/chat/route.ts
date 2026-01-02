@@ -70,7 +70,7 @@ async function callOpenAI(params: {
           type: "input_text",
           text:
             "You are Alex-IO’s website chat widget. Your job is to have a natural, confident conversation " +
-            "and extract quoting facts for a foam packaging insert quote. " +
+            "and extract quoting facts for a foam packaging insert quote.\n\n" +
             "IMPORTANT RULES:\n" +
             "- Be chatty like a helpful expert, not a form.\n" +
             "- Ask ONE question at a time.\n" +
@@ -118,16 +118,19 @@ async function callOpenAI(params: {
   ];
 
   const body = {
+    // Keep the snapshot model you chose for Structured Outputs.
     model: "gpt-4o-2024-08-06",
-    reasoning: { effort: "low" },
+
     input: inputMessages,
+
+    // Structured Outputs (STRICT) — must include a NAME and a valid json_schema.
     text: {
-  format: {
-    type: "json_schema",
-    name: "widget_chat_schema",
-    strict: true,
-    schema: {
-      type: "object",
+      format: {
+        type: "json_schema",
+        name: "widget_chat_schema",
+        strict: true,
+        schema: {
+          type: "object",
           additionalProperties: false,
           required: ["assistantMessage", "facts", "done", "quickReplies"],
           properties: {
@@ -138,83 +141,80 @@ async function callOpenAI(params: {
               items: { type: "string" },
               maxItems: 6,
             },
-        facts: {
-  type: "object",
-  additionalProperties: false,
+            facts: {
+              type: "object",
+              additionalProperties: false,
 
-  // REQUIRED by OpenAI strict json_schema:
-  // must exist and must include every key in properties
-  required: [
-    "outsideL",
-    "outsideW",
-    "outsideH",
-    "qty",
-    "shipMode",
-    "insertType",
-    "pocketsOn",
-    "holding",
-    "pocketCount",
-    "materialMode",
-    "materialText",
-    "notes",
-    "createdAtIso",
-  ],
+              // Strict mode requires a 'required' array; safest is "all keys"
+              // and allow nulls so the model can say "unknown" cleanly.
+              required: [
+                "outsideL",
+                "outsideW",
+                "outsideH",
+                "qty",
+                "shipMode",
+                "insertType",
+                "pocketsOn",
+                "holding",
+                "pocketCount",
+                "materialMode",
+                "materialText",
+                "notes",
+                "createdAtIso",
+              ],
+              properties: {
+                outsideL: { type: ["string", "null"] },
+                outsideW: { type: ["string", "null"] },
+                outsideH: { type: ["string", "null"] },
+                qty: { type: ["string", "null"] },
 
-  properties: {
-    outsideL: { type: ["string", "null"] },
-    outsideW: { type: ["string", "null"] },
-    outsideH: { type: ["string", "null"] },
-    qty: { type: ["string", "null"] },
+                shipMode: {
+                  anyOf: [
+                    { type: "string", enum: ["box", "mailer", "unsure"] },
+                    { type: "null" },
+                  ],
+                },
 
-    shipMode: {
-      anyOf: [
-        { type: "string", enum: ["box", "mailer", "unsure"] },
-        { type: "null" },
-      ],
-    },
+                insertType: {
+                  anyOf: [
+                    { type: "string", enum: ["single", "set", "unsure"] },
+                    { type: "null" },
+                  ],
+                },
 
-    insertType: {
-      anyOf: [
-        { type: "string", enum: ["single", "set", "unsure"] },
-        { type: "null" },
-      ],
-    },
+                pocketsOn: {
+                  anyOf: [
+                    { type: "string", enum: ["base", "top", "both", "unsure"] },
+                    { type: "null" },
+                  ],
+                },
 
-    pocketsOn: {
-      anyOf: [
-        { type: "string", enum: ["base", "top", "both", "unsure"] },
-        { type: "null" },
-      ],
-    },
+                holding: {
+                  anyOf: [
+                    { type: "string", enum: ["pockets", "loose", "unsure"] },
+                    { type: "null" },
+                  ],
+                },
 
-    holding: {
-      anyOf: [
-        { type: "string", enum: ["pockets", "loose", "unsure"] },
-        { type: "null" },
-      ],
-    },
+                pocketCount: {
+                  anyOf: [
+                    { type: "string", enum: ["1", "2", "3+", "unsure"] },
+                    { type: "null" },
+                  ],
+                },
 
-    pocketCount: {
-      anyOf: [
-        { type: "string", enum: ["1", "2", "3+", "unsure"] },
-        { type: "null" },
-      ],
-    },
+                materialMode: {
+                  anyOf: [
+                    { type: "string", enum: ["recommend", "known"] },
+                    { type: "null" },
+                  ],
+                },
 
-    materialMode: {
-      anyOf: [
-        { type: "string", enum: ["recommend", "known"] },
-        { type: "null" },
-      ],
-    },
-
-    materialText: { type: ["string", "null"] },
-
-    notes: { type: ["string", "null"] },
-    createdAtIso: { type: ["string", "null"] },
-  },
-},
-
+                materialText: { type: ["string", "null"] },
+                notes: { type: ["string", "null"] },
+                createdAtIso: { type: ["string", "null"] },
+              },
+            },
           },
         },
       },
@@ -232,18 +232,19 @@ async function callOpenAI(params: {
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    // IMPORTANT: keep the exact OpenAI error visible in Render logs
-    console.error("widget_chat_openai_http_error", res.status, txt);
-    throw new Error(`openai_http_${res.status}_${txt.slice(0, 180)}`);
+    // Keep the error short but informative in Render logs
+    throw new Error(`openai_http_${res.status}_${txt.slice(0, 220)}`);
   }
 
   const json = (await res.json()) as any;
 
+  // Structured Outputs: prefer output_json when present
   const outputObj =
     json?.output_json && typeof json.output_json === "object" ? json.output_json : null;
 
   if (outputObj) return outputObj;
 
+  // Fallback: parse output_text (should still be JSON string)
   const outputText: string =
     typeof json?.output_text === "string"
       ? json.output_text
@@ -315,9 +316,8 @@ export async function POST(req: NextRequest) {
       { status: 200 }
     );
   } catch (e: any) {
-    // THIS is why you had “no logs”
-    console.error("widget_chat_route_error", e);
-
+    // Keep logs readable (but still show the real reason)
+    console.error("widget_chat_route_error", String(e?.message ?? e));
     return NextResponse.json(
       {
         assistantMessage:
