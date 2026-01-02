@@ -138,30 +138,83 @@ async function callOpenAI(params: {
               items: { type: "string" },
               maxItems: 6,
             },
-            facts: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                outsideL: { type: "string" },
-                outsideW: { type: "string" },
-                outsideH: { type: "string" },
-                qty: { type: "string" },
+        facts: {
+  type: "object",
+  additionalProperties: false,
 
-                shipMode: { type: "string", enum: ["box", "mailer", "unsure"] },
+  // REQUIRED by OpenAI strict json_schema:
+  // must exist and must include every key in properties
+  required: [
+    "outsideL",
+    "outsideW",
+    "outsideH",
+    "qty",
+    "shipMode",
+    "insertType",
+    "pocketsOn",
+    "holding",
+    "pocketCount",
+    "materialMode",
+    "materialText",
+    "notes",
+    "createdAtIso",
+  ],
 
-                insertType: { type: "string", enum: ["single", "set", "unsure"] },
-                pocketsOn: { type: "string", enum: ["base", "top", "both", "unsure"] },
+  properties: {
+    outsideL: { type: ["string", "null"] },
+    outsideW: { type: ["string", "null"] },
+    outsideH: { type: ["string", "null"] },
+    qty: { type: ["string", "null"] },
 
-                holding: { type: "string", enum: ["pockets", "loose", "unsure"] },
-                pocketCount: { type: "string", enum: ["1", "2", "3+", "unsure"] },
+    shipMode: {
+      anyOf: [
+        { type: "string", enum: ["box", "mailer", "unsure"] },
+        { type: "null" },
+      ],
+    },
 
-                materialMode: { type: "string", enum: ["recommend", "known"] },
-                materialText: { type: "string" },
+    insertType: {
+      anyOf: [
+        { type: "string", enum: ["single", "set", "unsure"] },
+        { type: "null" },
+      ],
+    },
 
-                notes: { type: "string" },
-                createdAtIso: { type: "string" },
-              },
-            },
+    pocketsOn: {
+      anyOf: [
+        { type: "string", enum: ["base", "top", "both", "unsure"] },
+        { type: "null" },
+      ],
+    },
+
+    holding: {
+      anyOf: [
+        { type: "string", enum: ["pockets", "loose", "unsure"] },
+        { type: "null" },
+      ],
+    },
+
+    pocketCount: {
+      anyOf: [
+        { type: "string", enum: ["1", "2", "3+", "unsure"] },
+        { type: "null" },
+      ],
+    },
+
+    materialMode: {
+      anyOf: [
+        { type: "string", enum: ["recommend", "known"] },
+        { type: "null" },
+      ],
+    },
+
+    materialText: { type: ["string", "null"] },
+
+    notes: { type: ["string", "null"] },
+    createdAtIso: { type: ["string", "null"] },
+  },
+},
+
           },
         },
       },
