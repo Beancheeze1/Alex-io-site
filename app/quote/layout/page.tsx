@@ -191,21 +191,24 @@ function readCustomerFromUrl(url: URL): {
 } {
   const pick = (keys: string[]) => {
     for (const k of keys) {
-      const all = url.searchParams.getAll(k).map((s) => (s ?? "").trim()).filter(Boolean);
+      const all = url.searchParams
+        .getAll(k)
+        .map((s) => (s ?? "").trim())
+        .filter(Boolean);
       if (all.length > 0) return all[0];
+
       const v = (url.searchParams.get(k) ?? "").trim();
       if (v) return v;
     }
     return "";
   };
 
-    return {
+  return {
     name: pick(["customer_name", "customerName", "name", "customer"]),
     email: pick(["customer_email", "customerEmail", "email"]),
     company: pick(["customer_company", "customerCompany", "company"]),
     phone: pick(["customer_phone", "customerPhone", "phone"]),
   };
-
 }
 
 
