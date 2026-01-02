@@ -45,38 +45,43 @@ function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
 }
 
+function hasWindow() {
+  return typeof window !== "undefined";
+}
+
+function safeLsGet(key: string): string | null {
+  if (!hasWindow()) return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeLsSet(key: string, value: string) {
+  if (!hasWindow()) return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // ignore
+  }
+}
+
+function safeLsRemove(key: string) {
+  if (!hasWindow()) return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 function safeJsonParse<T>(raw: string | null): T | null {
   if (!raw) return null;
   try {
     return JSON.parse(raw) as T;
   } catch {
     return null;
-  }
-}
-
-// SSR-safe localStorage helpers
-function readLS<T>(key: string): T | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return safeJsonParse<T>(window.localStorage.getItem(key));
-  } catch {
-    return null;
-  }
-}
-function writeLS(key: string, value: unknown) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore
-  }
-}
-function removeLS(key: string) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // ignore
   }
 }
 
@@ -164,24 +169,20 @@ type ChatResponse = {
   quickReplies?: string[];
 };
 
-export default function SplashChatWidget({
-  startQuotePath,
-}: {
-  startQuotePath: string;
-}) {
+export default function SplashChatWidget({ startQuotePath }: { startQuotePath: string }) {
   const router = useRouter();
 
   const [open, setOpen] = React.useState(false);
   const [minimizedHint, setMinimizedHint] = React.useState(false);
 
   const [facts, setFacts] = React.useState<WidgetFacts>(() => {
-    const saved = readLS<{ facts: WidgetFacts }>(LS_KEY);
+    const saved = safeJsonParse<{ facts: WidgetFacts }>(safeLsGet(LS_KEY));
     if (saved?.facts) return saved.facts;
     return { createdAtIso: new Date().toISOString() };
   });
 
   const [msgs, setMsgs] = React.useState<Msg[]>(() => {
-    const saved = readLS<{ msgs: Msg[] }>(LS_KEY);
+    const saved = safeJsonParse<{ msgs: Msg[] }>(safeLsGet(LS_KEY));
     if (saved?.msgs?.length) return saved.msgs;
 
     return [
@@ -203,22 +204,29 @@ export default function SplashChatWidget({
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
-  // “done” = the brain says we have enough to open /start-quote
   const [done, setDone] = React.useState<boolean>(() => {
-    const saved = readLS<{ done: boolean }>(LS_KEY);
+    const saved = safeJsonParse<{ done: boolean }>(safeLsGet(LS_KEY));
     return saved?.done ?? false;
   });
 
   const [quickReplies, setQuickReplies] = React.useState<string[]>(() => {
-    const saved = readLS<{ quickReplies: string[] }>(LS_KEY);
+    const saved = safeJsonParse<{ quickReplies: string[] }>(safeLsGet(LS_KEY));
     return saved?.quickReplies ?? [];
   });
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
 
-  // Persist
+  // Persist (client only)
   React.useEffect(() => {
-    writeLS(LS_KEY, { facts, msgs, done, quickReplies });
+    safeLsSet(
+      LS_KEY,
+      JSON.stringify({
+        facts,
+        msgs,
+        done,
+        quickReplies,
+      })
+    );
   }, [facts, msgs, done, quickReplies]);
 
   // Auto scroll
@@ -261,7 +269,7 @@ export default function SplashChatWidget({
     setDone(false);
     setQuickReplies([]);
     setInput("");
-    removeLS(LS_KEY);
+    safeLsRemove(LS_KEY);
   }
 
   async function callBrain(userText: string) {
@@ -276,7 +284,9 @@ export default function SplashChatWidget({
       }),
     });
 
-    if (!res.ok) throw new Error(`brain_http_${res.status}`);
+    if (!res.ok) {
+      throw new Error(`brain_http_${res.status}`);
+    }
 
     const data = (await res.json()) as ChatResponse;
     if (!data || typeof data.assistantMessage !== "string") {
@@ -392,10 +402,7 @@ export default function SplashChatWidget({
             <div ref={listRef} className="max-h-[380px] overflow-y-auto px-4 py-3">
               <div className="space-y-3">
                 {msgs.map((m) => (
-                  <div
-                    key={m.id}
-                    className={["flex", m.role === "user" ? "justify-end" : "justify-start"].join(" ")}
-                  >
+                  <div key={m.id} className={["flex", m.role === "user" ? "justify-end" : "justify-start"].join(" ")}>
                     <div
                       className={[
                         "max-w-[88%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed",

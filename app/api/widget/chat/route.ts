@@ -67,7 +67,6 @@ async function callOpenAI(params: {
       role: "developer",
       content: [
         {
-          // FIX: must be input_text (not "text") for Responses API content blocks
           type: "input_text",
           text:
             "You are Alex-IO’s website chat widget. Your job is to have a natural, confident conversation " +
@@ -118,9 +117,7 @@ async function callOpenAI(params: {
     },
   ];
 
-  // Structured Outputs: force JSON schema so we reliably get parseable output :contentReference[oaicite:1]{index=1}
   const body = {
-    // Use a known snapshot that supports json_schema structured outputs per docs :contentReference[oaicite:2]{index=2}
     model: "gpt-4o-2024-08-06",
     reasoning: { effort: "low" },
     input: inputMessages,
@@ -181,18 +178,18 @@ async function callOpenAI(params: {
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
+    // IMPORTANT: keep the exact OpenAI error visible in Render logs
+    console.error("widget_chat_openai_http_error", res.status, txt);
     throw new Error(`openai_http_${res.status}_${txt.slice(0, 180)}`);
   }
 
   const json = (await res.json()) as any;
 
-  // With structured outputs, prefer output_json when present :contentReference[oaicite:3]{index=3}
   const outputObj =
     json?.output_json && typeof json.output_json === "object" ? json.output_json : null;
 
   if (outputObj) return outputObj;
 
-  // Fallback: parse output_text (should still be JSON string)
   const outputText: string =
     typeof json?.output_text === "string"
       ? json.output_text
@@ -263,7 +260,10 @@ export async function POST(req: NextRequest) {
       },
       { status: 200 }
     );
-  } catch {
+  } catch (e: any) {
+    // THIS is why you had “no logs”
+    console.error("widget_chat_route_error", e);
+
     return NextResponse.json(
       {
         assistantMessage:
