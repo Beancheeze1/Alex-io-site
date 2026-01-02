@@ -1062,12 +1062,18 @@ function grabOutsideDims(raw: string): string | undefined {
 function grabQty(raw: string): number | undefined {
   const t = raw.toLowerCase();
 
-  let m =
+    let m =
+    // NEW: allow colon variants used by the form email text
+    t.match(/\bqty\s*[:\-]?\s*(\d{1,6})\b/) ||
+    t.match(/\bquantity\s*[:\-]?\s*(\d{1,6})\b/) ||
+
+    // existing patterns
     t.match(/\bqty\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
     t.match(/\bquantity\s*(?:is|=|of|to)?\s*(\d{1,6})\b/) ||
     t.match(/\bchange\s+qty(?:uantity)?\s*(?:to|from)?\s*(\d{1,6})\b/) ||
     t.match(/\bmake\s+it\s+(\d{1,6})\b/) ||
     t.match(/\b(\d{1,6})\s*(?:pcs?|pieces?|parts?|sets?)\b/);
+
 
   if (m) return Number(m[1]);
 
@@ -2279,6 +2285,32 @@ if (pDims && !newly.dims) formFacts.dims = normDims(pDims) || pDims;
 const pQtyRaw = (p as any).qty ?? (p as any).quantity ?? (p as any).order_qty ?? null;
 const pQtyNum = Number(pQtyRaw);
 if (Number.isFinite(pQtyNum) && pQtyNum > 0 && !newly.qty) formFacts.qty = Math.round(pQtyNum);
+
+// FORM-FLOW AUTHORITY (REGRESSION FIX):
+// If the client provided explicit customer fields and/or qty, treat them as authoritative
+// for seeding (prevents "missing customer info" + "missing qty" regressions).
+const isFormFlow =
+  !!pCustomerName || !!pCustomerCompany || !!pCustomerEmail || !!pCustomerPhone;
+
+if (isFormFlow) {
+  // Customer
+  if (pCustomerName) newly.customerName = pCustomerName;
+  if (pCustomerCompany) newly.customerCompany = pCustomerCompany;
+  if (pCustomerPhone) {
+    newly.customerPhone = pCustomerPhone;
+    newly.phone = pCustomerPhone; // legacy
+  }
+  if (pCustomerEmail) {
+    newly.customerEmail = pCustomerEmail;
+    newly.email = pCustomerEmail; // legacy
+  }
+
+  // Qty (authoritative if numeric)
+  if (Number.isFinite(pQtyNum) && pQtyNum > 0) {
+    newly.qty = Math.round(pQtyNum);
+  }
+}
+
 
 const pMaterial = String((p as any).material || (p as any).foam_family || (p as any).foamFamily || "").trim();
 if (pMaterial && !newly.material) formFacts.material = pMaterial;
