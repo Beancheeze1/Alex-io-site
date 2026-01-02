@@ -54,6 +54,32 @@ function safeJsonParse<T>(raw: string | null): T | null {
   }
 }
 
+// SSR-safe localStorage helpers
+function readLS<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return safeJsonParse<T>(window.localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+function writeLS(key: string, value: unknown) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
+function removeLS(key: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 function buildPrefillPayload(facts: WidgetFacts) {
   return {
     source: "splash-widget",
@@ -149,13 +175,13 @@ export default function SplashChatWidget({
   const [minimizedHint, setMinimizedHint] = React.useState(false);
 
   const [facts, setFacts] = React.useState<WidgetFacts>(() => {
-    const saved = safeJsonParse<{ facts: WidgetFacts }>(localStorage.getItem(LS_KEY));
+    const saved = readLS<{ facts: WidgetFacts }>(LS_KEY);
     if (saved?.facts) return saved.facts;
     return { createdAtIso: new Date().toISOString() };
   });
 
   const [msgs, setMsgs] = React.useState<Msg[]>(() => {
-    const saved = safeJsonParse<{ msgs: Msg[] }>(localStorage.getItem(LS_KEY));
+    const saved = readLS<{ msgs: Msg[] }>(LS_KEY);
     if (saved?.msgs?.length) return saved.msgs;
 
     return [
@@ -177,43 +203,22 @@ export default function SplashChatWidget({
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
+  // “done” = the brain says we have enough to open /start-quote
   const [done, setDone] = React.useState<boolean>(() => {
-    const saved = safeJsonParse<{ done: boolean }>(localStorage.getItem(LS_KEY));
+    const saved = readLS<{ done: boolean }>(LS_KEY);
     return saved?.done ?? false;
   });
 
   const [quickReplies, setQuickReplies] = React.useState<string[]>(() => {
-    const saved = safeJsonParse<{ quickReplies: string[] }>(localStorage.getItem(LS_KEY));
+    const saved = readLS<{ quickReplies: string[] }>(LS_KEY);
     return saved?.quickReplies ?? [];
   });
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
 
-  // ✅ NEW: refs so callBrain always uses latest state (prevents “stuck/repeat” feel)
-  const msgsRef = React.useRef<Msg[]>(msgs);
-  const factsRef = React.useRef<WidgetFacts>(facts);
-  React.useEffect(() => {
-    msgsRef.current = msgs;
-  }, [msgs]);
-  React.useEffect(() => {
-    factsRef.current = facts;
-  }, [facts]);
-
   // Persist
   React.useEffect(() => {
-    try {
-      localStorage.setItem(
-        LS_KEY,
-        JSON.stringify({
-          facts,
-          msgs,
-          done,
-          quickReplies,
-        })
-      );
-    } catch {
-      // ignore
-    }
+    writeLS(LS_KEY, { facts, msgs, done, quickReplies });
   }, [facts, msgs, done, quickReplies]);
 
   // Auto scroll
@@ -256,54 +261,33 @@ export default function SplashChatWidget({
     setDone(false);
     setQuickReplies([]);
     setInput("");
-    setBusy(false);
-    try {
-      localStorage.removeItem(LS_KEY);
-    } catch {
-      // ignore
-    }
+    removeLS(LS_KEY);
   }
 
-  // ✅ NEW: hard timeout so it can’t hang forever
   async function callBrain(userText: string) {
-    const controller = new AbortController();
-    const timeoutMs = 18000; // 18s feels “alive” but avoids dead hangs
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(`/api/widget/chat?t=${Date.now()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        messages: msgs.map((m) => ({ role: m.role, text: m.text })),
+        userText,
+        facts,
+      }),
+    });
 
-    try {
-      const res = await fetch(`/api/widget/chat?t=${Date.now()}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        signal: controller.signal,
-        body: JSON.stringify({
-          // use refs so we always send current state
-          messages: msgsRef.current.map((m) => ({ role: m.role, text: m.text })),
-          userText,
-          facts: factsRef.current,
-        }),
-      });
+    if (!res.ok) throw new Error(`brain_http_${res.status}`);
 
-      if (!res.ok) {
-        throw new Error(`brain_http_${res.status}`);
-      }
-
-      const data = (await res.json()) as ChatResponse;
-      if (!data || typeof data.assistantMessage !== "string") {
-        throw new Error("brain_bad_payload");
-      }
-      return data;
-    } finally {
-      clearTimeout(timer);
+    const data = (await res.json()) as ChatResponse;
+    if (!data || typeof data.assistantMessage !== "string") {
+      throw new Error("brain_bad_payload");
     }
+    return data;
   }
 
   async function handleSend(text: string) {
     const t = text.trim();
     if (!t) return;
-
-    // ✅ NEW: guard against double-send races (quick-replies especially)
-    if (busy || done) return;
 
     setBusy(true);
     pushUser(t);
@@ -319,12 +303,9 @@ export default function SplashChatWidget({
 
       setDone(Boolean(data.done));
       setQuickReplies(Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []);
-    } catch (e: any) {
-      const isAbort = String(e?.name ?? "").toLowerCase() === "aborterror";
+    } catch {
       pushBot(
-        isAbort
-          ? "Still here — that took too long on my side. Try again (or paste size + qty in one line)."
-          : "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (L×W×H) and qty."
+        "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (L×W×H) and qty."
       );
     } finally {
       setBusy(false);
@@ -373,9 +354,7 @@ export default function SplashChatWidget({
             </span>
             <span className="leading-tight">
               <span className="block">Talk to Alex-IO</span>
-              <span className="block text-[11px] font-medium text-slate-300">
-                chat → layout → pricing
-              </span>
+              <span className="block text-[11px] font-medium text-slate-300">chat → layout → pricing</span>
             </span>
             <span className="ml-1 rounded-full border border-white/15 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-200">
               Live
@@ -388,9 +367,7 @@ export default function SplashChatWidget({
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div>
                 <div className="text-xs font-semibold tracking-widest text-sky-300/80">ALEX-IO</div>
-                <div className="mt-0.5 text-[11px] text-slate-300">
-                  Talk to me like a human. I’ll keep it tight.
-                </div>
+                <div className="mt-0.5 text-[11px] text-slate-300">Talk to me like a human. I’ll keep it tight.</div>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -417,9 +394,7 @@ export default function SplashChatWidget({
                 {msgs.map((m) => (
                   <div
                     key={m.id}
-                    className={["flex", m.role === "user" ? "justify-end" : "justify-start"].join(
-                      " "
-                    )}
+                    className={["flex", m.role === "user" ? "justify-end" : "justify-start"].join(" ")}
                   >
                     <div
                       className={[
@@ -454,9 +429,7 @@ export default function SplashChatWidget({
 
               {done ? (
                 <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                  <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-                    QUICK SUMMARY
-                  </div>
+                  <div className="text-xs font-semibold tracking-widest text-sky-300/80">QUICK SUMMARY</div>
                   <ul className="mt-2 space-y-1 text-sm text-slate-200">
                     {summaryLines.map((l) => (
                       <li key={l}>• {l}</li>
@@ -474,8 +447,7 @@ export default function SplashChatWidget({
                   </div>
 
                   <div className="mt-2 text-[11px] text-slate-400">
-                    Opens the seeded editor via{" "}
-                    <code className="text-slate-300">{startQuotePath}</code>.
+                    Opens the seeded editor via <code className="text-slate-300">{startQuotePath}</code>.
                   </div>
                 </div>
               ) : null}
@@ -505,7 +477,7 @@ export default function SplashChatWidget({
                   disabled={busy || done || !input.trim()}
                   className="rounded-2xl bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {busy ? "…" : "Send"}
+                  Send
                 </button>
               </form>
 

@@ -47,16 +47,11 @@ function hasCoreDims(f: WidgetFacts) {
 }
 
 // Minimal “ready” gate for reveal: dims + qty + shipping + insertType + holding.
-// (Material can be recommended; notes optional.)
 function isReady(f: WidgetFacts) {
   const qtyOk = Boolean(f.qty && String(f.qty).trim().length > 0);
-  const shipOk = Boolean(f.shipMode && f.shipMode !== undefined && f.shipMode !== ("" as any));
-  const insertOk = Boolean(
-    f.insertType && f.insertType !== undefined && f.insertType !== ("" as any)
-  );
-  const holdingOk = Boolean(
-    f.holding && f.holding !== undefined && f.holding !== ("" as any)
-  );
+  const shipOk = Boolean(f.shipMode && f.shipMode !== ("" as any));
+  const insertOk = Boolean(f.insertType && f.insertType !== ("" as any));
+  const holdingOk = Boolean(f.holding && f.holding !== ("" as any));
   return hasCoreDims(f) && qtyOk && shipOk && insertOk && holdingOk;
 }
 
@@ -67,15 +62,12 @@ async function callOpenAI(params: {
 }) {
   const apiKey = requireEnv("OPENAI_API_KEY");
 
-  // Allow override in Render without code edits:
-  // OPENAI_WIDGET_MODEL=gpt-5-mini (recommended default for compatibility)
-  const model = (process.env.OPENAI_WIDGET_MODEL || "gpt-5-mini").trim();
-
   const inputMessages = [
     {
       role: "developer",
       content: [
         {
+          // FIX: must be input_text (not "text") for Responses API content blocks
           type: "input_text",
           text:
             "You are Alex-IO’s website chat widget. Your job is to have a natural, confident conversation " +
@@ -86,8 +78,8 @@ async function callOpenAI(params: {
             "- Never invent facts. If unsure, ask.\n" +
             "- Keep answers short (1–3 short paragraphs).\n" +
             "- When user gives multiple facts at once, acknowledge + move on.\n" +
-            "- You must update a structured facts object.\n" +
-            "- You must propose up to 6 quick replies when useful.\n\n" +
+            "- Update a structured facts object.\n" +
+            "- Propose up to 6 quick replies when useful.\n\n" +
             "Fields you care about:\n" +
             "- outside size L×W×H (in)\n" +
             "- qty\n" +
@@ -98,31 +90,8 @@ async function callOpenAI(params: {
             "- pocketCount: 1/2/3+/unsure if pockets\n" +
             "- material: known text or recommend\n" +
             "- notes\n\n" +
-            "When shipping is box or mailer, mention (briefly) that we typically undersize foam L/W by 0.125\" for drop-in fit.\n" +
-            "When you have enough info, set done=true and the assistant message should invite them to open layout & pricing.",
-        },
-      ],
-    },
-    {
-      role: "developer",
-      content: [
-        {
-          type: "input_text",
-          text:
-            "Return ONLY valid JSON (no markdown) matching this shape:\n" +
-            "{\n" +
-            '  "assistantMessage": string,\n' +
-            '  "facts": { ...partial updates... },\n' +
-            '  "done": boolean,\n' +
-            '  "quickReplies": string[]\n' +
-            "}\n" +
-            "Facts enums:\n" +
-            'shipMode: "box"|"mailer"|"unsure"\n' +
-            'insertType: "single"|"set"|"unsure"\n' +
-            'pocketsOn: "base"|"top"|"both"|"unsure"\n' +
-            'holding: "pockets"|"loose"|"unsure"\n' +
-            'pocketCount: "1"|"2"|"3+"|"unsure"\n' +
-            'materialMode: "recommend"|"known"\n',
+            'When shipping is box or mailer, mention briefly we typically undersize foam L/W by 0.125" for drop-in fit.\n' +
+            "When you have enough info, done=true and invite them to open layout & pricing.",
         },
       ],
     },
@@ -149,10 +118,56 @@ async function callOpenAI(params: {
     },
   ];
 
+  // Structured Outputs: force JSON schema so we reliably get parseable output :contentReference[oaicite:1]{index=1}
   const body = {
-    model,
+    // Use a known snapshot that supports json_schema structured outputs per docs :contentReference[oaicite:2]{index=2}
+    model: "gpt-4o-2024-08-06",
     reasoning: { effort: "low" },
     input: inputMessages,
+    text: {
+      format: {
+        type: "json_schema",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["assistantMessage", "facts", "done", "quickReplies"],
+          properties: {
+            assistantMessage: { type: "string" },
+            done: { type: "boolean" },
+            quickReplies: {
+              type: "array",
+              items: { type: "string" },
+              maxItems: 6,
+            },
+            facts: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                outsideL: { type: "string" },
+                outsideW: { type: "string" },
+                outsideH: { type: "string" },
+                qty: { type: "string" },
+
+                shipMode: { type: "string", enum: ["box", "mailer", "unsure"] },
+
+                insertType: { type: "string", enum: ["single", "set", "unsure"] },
+                pocketsOn: { type: "string", enum: ["base", "top", "both", "unsure"] },
+
+                holding: { type: "string", enum: ["pockets", "loose", "unsure"] },
+                pocketCount: { type: "string", enum: ["1", "2", "3+", "unsure"] },
+
+                materialMode: { type: "string", enum: ["recommend", "known"] },
+                materialText: { type: "string" },
+
+                notes: { type: "string" },
+                createdAtIso: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
   };
 
   const res = await fetch("https://api.openai.com/v1/responses", {
@@ -166,40 +181,41 @@ async function callOpenAI(params: {
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`openai_http_${res.status}_${txt.slice(0, 200)}`);
+    throw new Error(`openai_http_${res.status}_${txt.slice(0, 180)}`);
   }
 
   const json = (await res.json()) as any;
 
+  // With structured outputs, prefer output_json when present :contentReference[oaicite:3]{index=3}
+  const outputObj =
+    json?.output_json && typeof json.output_json === "object" ? json.output_json : null;
+
+  if (outputObj) return outputObj;
+
+  // Fallback: parse output_text (should still be JSON string)
   const outputText: string =
     typeof json?.output_text === "string"
       ? json.output_text
       : (json?.output?.[0]?.content?.find?.((c: any) => c?.type === "output_text")?.text ?? "");
 
-  return String(outputText || "").trim();
+  return JSON.parse(String(outputText || "").trim());
 }
 
-function safeParseBrainJson(raw: string) {
-  try {
-    const obj = JSON.parse(raw);
-    if (!obj || typeof obj !== "object") return null;
-    if (typeof obj.assistantMessage !== "string") return null;
-    if (typeof obj.done !== "boolean") return null;
-    if (!obj.facts || typeof obj.facts !== "object") obj.facts = {};
-    if (!Array.isArray(obj.quickReplies)) obj.quickReplies = [];
-    return obj as {
-      assistantMessage: string;
-      facts: Partial<WidgetFacts>;
-      done: boolean;
-      quickReplies: string[];
-    };
-  } catch {
-    return null;
-  }
+function normalizeBrainObj(obj: any) {
+  if (!obj || typeof obj !== "object") return null;
+  if (typeof obj.assistantMessage !== "string") return null;
+  if (typeof obj.done !== "boolean") return null;
+  if (!obj.facts || typeof obj.facts !== "object") obj.facts = {};
+  if (!Array.isArray(obj.quickReplies)) obj.quickReplies = [];
+  return obj as {
+    assistantMessage: string;
+    facts: Partial<WidgetFacts>;
+    done: boolean;
+    quickReplies: string[];
+  };
 }
 
 export async function POST(req: NextRequest) {
-  let debugWhere = "";
   try {
     const payload = (await req.json()) as Incoming;
 
@@ -219,11 +235,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    debugWhere = "callOpenAI";
-    const raw = await callOpenAI({ messages, userText, facts });
-
-    debugWhere = "parseBrainJson";
-    const parsed = safeParseBrainJson(raw);
+    const rawObj = await callOpenAI({ messages, userText, facts });
+    const parsed = normalizeBrainObj(rawObj);
 
     if (!parsed) {
       return NextResponse.json(
@@ -233,10 +246,6 @@ export async function POST(req: NextRequest) {
           facts: {},
           done: false,
           quickReplies: ["18x12x3", "Qty 250", "Not sure yet"],
-          debug: {
-            where: "model_returned_non_json",
-            model: (process.env.OPENAI_WIDGET_MODEL || "gpt-5-mini").trim(),
-          },
         },
         { status: 200 }
       );
@@ -254,9 +263,7 @@ export async function POST(req: NextRequest) {
       },
       { status: 200 }
     );
-  } catch (e: any) {
-    const errMsg = String(e?.message ?? e ?? "unknown_error");
-
+  } catch {
     return NextResponse.json(
       {
         assistantMessage:
@@ -264,12 +271,6 @@ export async function POST(req: NextRequest) {
         facts: {},
         done: false,
         quickReplies: ["18x12x3", "Qty 250", "Shipping: box", "Shipping: mailer"],
-        debug: {
-          where: debugWhere || "route",
-          error: errMsg,
-          missingKey: errMsg.includes("Missing env: OPENAI_API_KEY") ? "OPENAI_API_KEY" : "",
-          model: (process.env.OPENAI_WIDGET_MODEL || "gpt-5-mini").trim(),
-        },
       },
       { status: 200 }
     );
