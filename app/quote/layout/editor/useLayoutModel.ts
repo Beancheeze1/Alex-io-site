@@ -110,17 +110,18 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
           prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
         const mirrored = dedupeCavities(layer.cavities);
 
-        return {
+       return {
   layout: {
     ...prev.layout,
     block: {
       ...prev.layout.block,
       thicknessIn: safeInch(layer.thicknessIn, 0.5),
     },
-    // ❗ DO NOT persist cavities here
+    cavities: [...mirrored], // ✅ mirror ONLY active layer
   },
   activeLayerId: layer.id,
 };
+
       });
 
       // ✅ FIX: DO NOT blindly clear selection
