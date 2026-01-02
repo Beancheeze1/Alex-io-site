@@ -6,10 +6,17 @@ import { useRouter } from "next/navigation";
 
 type WidgetFacts = {
   // core
-  outsideL?: string; // keep as string for now (user may type "12" or "12.5")
+  outsideL?: string;
   outsideW?: string;
   outsideH?: string;
   qty?: string;
+
+  // shipping + fit intent
+  shipMode?: "box" | "mailer" | "unsure";
+
+  // build intent / layers
+  insertType?: "single" | "set" | "unsure"; // set = base + top pad/lid
+  pocketsOn?: "base" | "top" | "both" | "unsure";
 
   // holding
   holding?: "pockets" | "loose" | "unsure";
@@ -17,12 +24,12 @@ type WidgetFacts = {
 
   // material
   materialMode?: "recommend" | "known";
-  materialText?: string; // "EPE 1.7#", "PU", etc.
+  materialText?: string;
 
-  // notes
+  // notes (freeform)
   notes?: string;
 
-  // meta for future
+  // meta
   createdAtIso?: string;
 };
 
@@ -32,7 +39,7 @@ type Msg = {
   text: string;
 };
 
-const LS_KEY = "alexio_splash_widget_v1";
+const LS_KEY = "alexio_splash_widget_v2"; // bump to avoid old step-state collisions
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
@@ -48,8 +55,6 @@ function safeJsonParse<T>(raw: string | null): T | null {
 }
 
 function buildPrefillPayload(facts: WidgetFacts) {
-  // Keep this conservative and additive.
-  // We will wire /start-quote to consume this in the next step.
   return {
     source: "splash-widget",
     createdAtIso: facts.createdAtIso ?? new Date().toISOString(),
@@ -60,6 +65,9 @@ function buildPrefillPayload(facts: WidgetFacts) {
       units: "in",
     },
     qty: facts.qty ?? "",
+    shipMode: facts.shipMode ?? "",
+    insertType: facts.insertType ?? "",
+    pocketsOn: facts.pocketsOn ?? "",
     holding: facts.holding ?? "",
     pocketCount: facts.pocketCount ?? "",
     material: {
@@ -77,6 +85,24 @@ function summarizeFacts(facts: WidgetFacts) {
       : "(size not set)";
 
   const qty = facts.qty ? `${facts.qty}` : "(qty not set)";
+
+  const ship =
+    facts.shipMode === "box"
+      ? "Box"
+      : facts.shipMode === "mailer"
+        ? "Mailer"
+        : facts.shipMode === "unsure"
+          ? "Not sure"
+          : "(shipping not set)";
+
+  const insert =
+    facts.insertType === "single"
+      ? "Single insert"
+      : facts.insertType === "set"
+        ? `Set (base + top pad${facts.pocketsOn ? `; pockets: ${facts.pocketsOn}` : ""})`
+        : facts.insertType === "unsure"
+          ? "Not sure"
+          : "(insert type not set)";
 
   const holding =
     facts.holding === "pockets"
@@ -97,22 +123,20 @@ function summarizeFacts(facts: WidgetFacts) {
   return [
     `Outside size: ${dims}`,
     `Quantity: ${qty}`,
+    `Shipping: ${ship}`,
+    `Insert: ${insert}`,
     `Holding: ${holding}`,
     `Material: ${material}`,
     facts.notes?.trim() ? `Notes: ${facts.notes.trim()}` : null,
   ].filter(Boolean) as string[];
 }
 
-type Step =
-  | "intro"
-  | "ask_dims"
-  | "ask_qty"
-  | "ask_holding"
-  | "ask_pocket_count"
-  | "ask_material_mode"
-  | "ask_material_text"
-  | "ask_notes"
-  | "done";
+type ChatResponse = {
+  assistantMessage: string;
+  facts: Partial<WidgetFacts>;
+  done: boolean;
+  quickReplies?: string[];
+};
 
 export default function SplashChatWidget({
   startQuotePath,
@@ -133,32 +157,40 @@ export default function SplashChatWidget({
   const [msgs, setMsgs] = React.useState<Msg[]>(() => {
     const saved = safeJsonParse<{ msgs: Msg[] }>(localStorage.getItem(LS_KEY));
     if (saved?.msgs?.length) return saved.msgs;
+
     return [
       {
         id: uid("m"),
         role: "bot",
-        text: "Hi — I can help you get a fast, accurate quote. No forms. I’ll ask just what’s needed.",
+        text:
+          "Hey — I can do this fast. Tell me what you’re making and whatever you already know. " +
+          "I’ll ask the *next best* question and then open the layout + pricing.",
       },
       {
         id: uid("m"),
         role: "bot",
-        text: "To start: what’s the outside size (L×W×H) in inches?",
+        text: "Start with outside foam size if you have it (L×W×H, inches).",
       },
     ];
-  });
-
-  const [step, setStep] = React.useState<Step>(() => {
-    const saved = safeJsonParse<{ step: Step }>(localStorage.getItem(LS_KEY));
-    return saved?.step ?? "ask_dims";
   });
 
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
-  const panelRef = React.useRef<HTMLDivElement | null>(null);
+  // “done” = the brain says we have enough to open /start-quote
+  const [done, setDone] = React.useState<boolean>(() => {
+    const saved = safeJsonParse<{ done: boolean }>(localStorage.getItem(LS_KEY));
+    return saved?.done ?? false;
+  });
+
+  const [quickReplies, setQuickReplies] = React.useState<string[]>(() => {
+    const saved = safeJsonParse<{ quickReplies: string[] }>(localStorage.getItem(LS_KEY));
+    return saved?.quickReplies ?? [];
+  });
+
   const listRef = React.useRef<HTMLDivElement | null>(null);
 
-  // Persist state (safe + additive)
+  // Persist
   React.useEffect(() => {
     try {
       localStorage.setItem(
@@ -166,13 +198,14 @@ export default function SplashChatWidget({
         JSON.stringify({
           facts,
           msgs,
-          step,
+          done,
+          quickReplies,
         })
       );
     } catch {
       // ignore
     }
-  }, [facts, msgs, step]);
+  }, [facts, msgs, done, quickReplies]);
 
   // Auto scroll
   React.useEffect(() => {
@@ -206,15 +239,13 @@ export default function SplashChatWidget({
       {
         id: uid("m"),
         role: "bot",
-        text: "Hi — I can help you get a fast, accurate quote. No forms. I’ll ask just what’s needed.",
-      },
-      {
-        id: uid("m"),
-        role: "bot",
-        text: "To start: what’s the outside size (L×W×H) in inches?",
+        text:
+          "Alright — fresh start. Tell me what you’re making and what you know so far. " +
+          "If you’ve got outside size + qty, even better.",
       },
     ]);
-    setStep("ask_dims");
+    setDone(false);
+    setQuickReplies([]);
     setInput("");
     try {
       localStorage.removeItem(LS_KEY);
@@ -223,133 +254,81 @@ export default function SplashChatWidget({
     }
   }
 
-  function parseDims(raw: string): { l?: string; w?: string; h?: string } {
-    // Accept forms like "12x8x3", "12 x 8 x 3", "12×8×3"
-    const s = raw.trim().toLowerCase().replaceAll("×", "x");
-    const parts = s
-      .split("x")
-      .map((p) => p.trim())
-      .filter(Boolean);
+  async function callBrain(userText: string) {
+    const res = await fetch(`/api/widget/chat?t=${Date.now()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        messages: msgs.map((m) => ({ role: m.role, text: m.text })),
+        userText,
+        facts,
+      }),
+    });
 
-    if (parts.length >= 3) {
-      const l = parts[0].replace(/[^\d.]/g, "");
-      const w = parts[1].replace(/[^\d.]/g, "");
-      const h = parts[2].replace(/[^\d.]/g, "");
-      return { l: l || undefined, w: w || undefined, h: h || undefined };
+    if (!res.ok) {
+      throw new Error(`brain_http_${res.status}`);
     }
-    return {};
+
+    const data = (await res.json()) as ChatResponse;
+    if (!data || typeof data.assistantMessage !== "string") {
+      throw new Error("brain_bad_payload");
+    }
+    return data;
   }
 
   async function handleSend(text: string) {
-    if (!text.trim()) return;
+    const t = text.trim();
+    if (!t) return;
 
     setBusy(true);
-    pushUser(text);
-
-    // Step machine (deterministic)
-    const t = text.trim();
+    pushUser(t);
 
     try {
-      if (step === "ask_dims") {
-        const d = parseDims(t);
-        if (!d.l || !d.w || !d.h) {
-          pushBot("Quick check: please enter outside size as L×W×H (example: 18x12x3).");
-          setBusy(false);
-          return;
-        }
-        setFacts((f) => ({ ...f, outsideL: d.l, outsideW: d.w, outsideH: d.h }));
-        pushBot(`Got it — outside size ${d.l}×${d.w}×${d.h} in.`);
-        pushBot("What quantity should we quote? (an estimate is fine)");
-        setStep("ask_qty");
-        setBusy(false);
-        return;
+      const data = await callBrain(t);
+
+      // Apply fact updates (additive)
+      if (data.facts && typeof data.facts === "object") {
+        setFacts((prev) => ({ ...prev, ...data.facts }));
       }
 
-      if (step === "ask_qty") {
-        const q = t.replace(/[^\d]/g, "");
-        if (!q) {
-          pushBot("What quantity should we quote? (example: 250)");
-          setBusy(false);
-          return;
-        }
-        setFacts((f) => ({ ...f, qty: q }));
-        pushBot(`Perfect — qty ${q}.`);
-        pushBot("Do the parts sit loose, or do they need cut-out pockets?");
-        setStep("ask_holding");
-        setBusy(false);
-        return;
-      }
+      // Bot message
+      pushBot(data.assistantMessage);
 
-      if (step === "ask_material_text") {
-        setFacts((f) => ({ ...f, materialText: t }));
-        pushBot("Thanks — noted.");
-        pushBot("Anything else I should account for? (fragile, orientation, weight, etc.) You can also say “no”.");
-        setStep("ask_notes");
-        setBusy(false);
-        return;
-      }
-
-      if (step === "ask_notes") {
-        const notes = t.toLowerCase() === "no" ? "" : t;
-        setFacts((f) => ({ ...f, notes }));
-        pushBot("Great — that’s enough to generate a solid quote.");
-        setStep("done");
-        setBusy(false);
-        return;
-      }
-
-      // For "done" or unknown, just keep it polite
-      pushBot("If you want to start over, click “Reset”.");
-      setBusy(false);
+      // done + quick replies
+      setDone(Boolean(data.done));
+      setQuickReplies(Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []);
     } catch {
-      pushBot("Sorry — something went wrong. You can click Reset and try again.");
+      // Fallback (still conversational)
+      pushBot(
+        "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (L×W×H) and qty."
+      );
+    } finally {
       setBusy(false);
     }
-  }
-
-  function chooseHolding(v: WidgetFacts["holding"]) {
-    pushUser(
-      v === "pockets" ? "Cut-out pockets" : v === "loose" ? "Loose / no pockets" : "Not sure yet"
-    );
-    setFacts((f) => ({ ...f, holding: v }));
-
-    if (v === "pockets") {
-      pushBot("Got it — cut-out pockets.");
-      pushBot("Roughly how many pockets per insert?");
-      setStep("ask_pocket_count");
-      return;
-    }
-
-    pushBot("Got it.");
-    pushBot("Do you usually use a specific foam, or should I recommend one?");
-    setStep("ask_material_mode");
-  }
-
-  function choosePocketCount(v: WidgetFacts["pocketCount"]) {
-    pushUser(v === "unsure" ? "Not sure" : `${v}`);
-    setFacts((f) => ({ ...f, pocketCount: v }));
-    pushBot("Thanks.");
-    pushBot("Do you usually use a specific foam, or should I recommend one?");
-    setStep("ask_material_mode");
-  }
-
-  function chooseMaterialMode(v: WidgetFacts["materialMode"]) {
-    pushUser(v === "recommend" ? "Recommend one" : "I have a material in mind");
-    setFacts((f) => ({ ...f, materialMode: v }));
-
-    if (v === "known") {
-      pushBot("What material should we use? (example: EPE 1.7#, PE 2.2#, PU 1.5#)");
-      setStep("ask_material_text");
-      return;
-    }
-
-    pushBot("Sounds good — I’ll recommend a material based on what you shared.");
-    pushBot("Anything else I should account for? (fragile, orientation, weight, etc.) You can also say “no”.");
-    setStep("ask_notes");
   }
 
   function openStartQuote() {
-    const payload = buildPrefillPayload(facts);
+    // Add a little “shipping fit” note automatically when box/mailer selected
+    // (This is just notes text; /start-quote already displays the fit hint.)
+    const payloadFacts: WidgetFacts = { ...facts };
+    const noteBits: string[] = [];
+
+    if (payloadFacts.shipMode === "box" || payloadFacts.shipMode === "mailer") {
+      noteBits.push("Fit: For box/mailer, undersize foam L/W by 0.125\" for drop-in fit.");
+    }
+    if (payloadFacts.insertType === "set") {
+      noteBits.push("Insert: Set (base + top pad/lid).");
+      if (payloadFacts.pocketsOn && payloadFacts.pocketsOn !== "unsure") {
+        noteBits.push(`Pockets on: ${payloadFacts.pocketsOn}.`);
+      }
+    }
+    if (noteBits.length) {
+      const existing = (payloadFacts.notes ?? "").trim();
+      payloadFacts.notes = existing ? `${existing}\n${noteBits.join("\n")}` : noteBits.join("\n");
+    }
+
+    const payload = buildPrefillPayload(payloadFacts);
     const prefill = encodeURIComponent(JSON.stringify(payload));
     router.push(`${startQuotePath}?prefill=${prefill}`);
   }
@@ -373,30 +352,27 @@ export default function SplashChatWidget({
               <span className="h-2.5 w-2.5 rounded-full bg-sky-400" />
             </span>
             <span className="leading-tight">
-              <span className="block">Get a fast quote</span>
+              <span className="block">Talk to Alex-IO</span>
               <span className="block text-[11px] font-medium text-slate-300">
                 chat → layout → pricing
               </span>
             </span>
             <span className="ml-1 rounded-full border border-white/15 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-200">
-              New
+              Live
             </span>
           </button>
         )}
 
         {open && (
-          <div
-            ref={panelRef}
-            className="w-[340px] overflow-hidden rounded-2xl border border-white/12 bg-slate-950/85 shadow-[0_18px_70px_rgba(0,0,0,0.65)] backdrop-blur"
-          >
+          <div className="w-[360px] overflow-hidden rounded-2xl border border-white/12 bg-slate-950/85 shadow-[0_18px_70px_rgba(0,0,0,0.65)] backdrop-blur">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div>
                 <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-                  ALEX-IO QUOTE ASSISTANT
+                  ALEX-IO
                 </div>
                 <div className="mt-0.5 text-[11px] text-slate-300">
-                  I’ll ask only what’s needed.
+                  Talk to me like a human. I’ll keep it tight.
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -420,22 +396,18 @@ export default function SplashChatWidget({
             </div>
 
             {/* Messages */}
-            <div
-              ref={listRef}
-              className="max-h-[360px] overflow-y-auto px-4 py-3"
-            >
+            <div ref={listRef} className="max-h-[380px] overflow-y-auto px-4 py-3">
               <div className="space-y-3">
                 {msgs.map((m) => (
                   <div
                     key={m.id}
-                    className={[
-                      "flex",
-                      m.role === "user" ? "justify-end" : "justify-start",
-                    ].join(" ")}
+                    className={["flex", m.role === "user" ? "justify-end" : "justify-start"].join(
+                      " "
+                    )}
                   >
                     <div
                       className={[
-                        "max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                        "max-w-[88%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed",
                         m.role === "user"
                           ? "bg-sky-500/25 text-white ring-1 ring-sky-300/20"
                           : "bg-white/[0.05] text-slate-200 ring-1 ring-white/10",
@@ -447,138 +419,54 @@ export default function SplashChatWidget({
                 ))}
               </div>
 
-              {/* Inline quick buttons */}
-              <div className="mt-3">
-                {step === "ask_holding" && (
-                  <div className="grid gap-2">
+              {/* Quick replies (optional, but still chat-like) */}
+              {!done && quickReplies.length ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {quickReplies.map((q) => (
                     <button
+                      key={q}
                       type="button"
-                      onClick={() => chooseHolding("pockets")}
-                      className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-left text-sm text-slate-100 hover:bg-white/[0.08]"
+                      onClick={() => {
+                        // act like the user typed it
+                        void handleSend(q);
+                      }}
+                      className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[12px] text-slate-100 hover:bg-white/[0.08]"
+                      disabled={busy}
+                      title={q}
                     >
-                      Cut-out pockets
+                      {q}
                     </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* Done card */}
+              {done ? (
+                <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                  <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+                    QUICK SUMMARY
+                  </div>
+                  <ul className="mt-2 space-y-1 text-sm text-slate-200">
+                    {summaryLines.map((l) => (
+                      <li key={l}>• {l}</li>
+                    ))}
+                  </ul>
+
+                  <div className="mt-3 grid gap-2">
                     <button
                       type="button"
-                      onClick={() => chooseHolding("loose")}
-                      className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-left text-sm text-slate-100 hover:bg-white/[0.08]"
+                      onClick={openStartQuote}
+                      className="w-full rounded-full bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500"
                     >
-                      Loose / no pockets
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => chooseHolding("unsure")}
-                      className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-left text-sm text-slate-100 hover:bg-white/[0.08]"
-                    >
-                      Not sure yet
+                      Open layout & pricing
                     </button>
                   </div>
-                )}
 
-                {step === "ask_pocket_count" && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => choosePocketCount("1")}
-                      className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 hover:bg-white/[0.08]"
-                    >
-                      1
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => choosePocketCount("2")}
-                      className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 hover:bg-white/[0.08]"
-                    >
-                      2
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => choosePocketCount("3+")}
-                      className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 hover:bg-white/[0.08]"
-                    >
-                      3+
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => choosePocketCount("unsure")}
-                      className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 hover:bg-white/[0.08]"
-                    >
-                      Not sure
-                    </button>
+                  <div className="mt-2 text-[11px] text-slate-400">
+                    Opens the seeded editor via <code className="text-slate-300">{startQuotePath}</code>.
                   </div>
-                )}
-
-                {step === "ask_material_mode" && (
-                  <div className="grid gap-2">
-                    <button
-                      type="button"
-                      onClick={() => chooseMaterialMode("recommend")}
-                      className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-left text-sm text-slate-100 hover:bg-white/[0.08]"
-                    >
-                      Recommend one
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => chooseMaterialMode("known")}
-                      className="rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2 text-left text-sm text-slate-100 hover:bg-white/[0.08]"
-                    >
-                      I have a material in mind
-                    </button>
-                  </div>
-                )}
-
-                {step === "done" && (
-                  <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                    <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-                      SUMMARY
-                    </div>
-                    <ul className="mt-2 space-y-1 text-sm text-slate-200">
-                      {summaryLines.map((l) => (
-                        <li key={l}>• {l}</li>
-                      ))}
-                    </ul>
-
-                    <div className="mt-3 grid gap-2">
-                      <button
-                        type="button"
-                        onClick={openStartQuote}
-                        className="w-full rounded-full bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500"
-                      >
-                        View layout & pricing
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          pushBot(
-                            "For the reveal build, “Email me this” and “Request review” will be enabled next. (No workflow changes yet.)"
-                          );
-                        }}
-                        className="w-full rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
-                      >
-                        Email me this (next step)
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          pushBot(
-                            "For the reveal build, “Request quick review” will be enabled next. (No workflow changes yet.)"
-                          );
-                        }}
-                        className="w-full rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white ring-1 ring-white/15 hover:bg-white/15"
-                      >
-                        Request quick review (next step)
-                      </button>
-                    </div>
-
-                    <div className="mt-2 text-[11px] text-slate-400">
-                      This opens <code className="text-slate-300">{startQuotePath}</code> with a safe{" "}
-                      <code className="text-slate-300">prefill</code> payload.
-                    </div>
-                  </div>
-                )}
-              </div>
+                </div>
+              ) : null}
             </div>
 
             {/* Input */}
@@ -586,7 +474,7 @@ export default function SplashChatWidget({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (busy) return;
+                  if (busy || done) return;
                   const t = input;
                   setInput("");
                   void handleSend(t);
@@ -597,25 +485,13 @@ export default function SplashChatWidget({
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   rows={1}
-                  placeholder={
-                    step === "ask_dims"
-                      ? "Example: 18x12x3"
-                      : step === "ask_qty"
-                        ? "Example: 250"
-                        : step === "ask_material_text"
-                          ? "Example: EPE 1.7#"
-                          : step === "ask_notes"
-                            ? "Example: fragile electronics"
-                            : step === "done"
-                              ? "Reset to start a new quote"
-                              : "Type here…"
-                  }
-                  disabled={step === "done"}
+                  placeholder={done ? "Reset to start a new quote" : "Type here…"}
+                  disabled={done}
                   className="min-h-[42px] flex-1 resize-none rounded-2xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40 disabled:opacity-60"
                 />
                 <button
                   type="submit"
-                  disabled={busy || step === "done" || !input.trim()}
+                  disabled={busy || done || !input.trim()}
                   className="rounded-2xl bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Send
