@@ -466,6 +466,13 @@ export default function LayoutPage({
   const [initialMaterialId, setInitialMaterialId] =
     React.useState<number | null>(null);
 
+// Holds foam label from form URL (e.g. foam=1.7# Black PE)
+// Used once after materials load
+const materialLabelFromUrlRef = React.useRef<string | null>(null);
+
+
+
+
   // customer initial values (prefill from quote header when available)
   const [initialCustomerName, setInitialCustomerName] =
     React.useState<string>("");
@@ -649,6 +656,7 @@ export default function LayoutPage({
   React.useEffect(() => {
     let cancelled = false;
 
+
     async function load() {
       const materialIdOverride = materialIdFromUrl;
       setLoadingLayout(true);
@@ -669,9 +677,11 @@ export default function LayoutPage({
         phone: "",
       };
 
-            // NEW: keep URL seeds in *locals* to avoid stale React state overwriting them later
-      let qtySeedLocal: number | null = null;
-      let materialSeedLocal: number | null = null;
+      // NEW: keep URL seeds in *locals* to avoid stale React state overwriting them later
+let qtySeedLocal: number | null = null;
+let materialSeedLocal: number | null = null;
+let materialLabelSeedLocal: string | null = null;
+
 
 
       try {
@@ -741,23 +751,40 @@ export default function LayoutPage({
           qtySeedLocal = readQtyFromUrl(url);
 
           const materialSeedRaw =
-            url.searchParams.get("material_id") ||
-            url.searchParams.get("materialId") ||
-            url.searchParams.get("material") ||
-            url.searchParams.get("foam_material_id");
+  url.searchParams.get("material_id") ||
+  url.searchParams.get("materialId") ||
+  url.searchParams.get("material") ||
+  url.searchParams.get("foam_material_id");
 
-          const materialSeedNum = materialSeedRaw ? Number(materialSeedRaw) : NaN;
-          materialSeedLocal =
-            Number.isFinite(materialSeedNum) && materialSeedNum > 0 ? materialSeedNum : null;
+// numeric ID path (email seeding)
+const materialSeedNum = materialSeedRaw ? Number(materialSeedRaw) : NaN;
+materialSeedLocal =
+  Number.isFinite(materialSeedNum) && materialSeedNum > 0
+    ? materialSeedNum
+    : null;
+
+// string label path (form seeding)
+const foamLabel =
+  url.searchParams.get("foam") ||
+  url.searchParams.get("foam_label");
+
+materialLabelSeedLocal = foamLabel ? foamLabel.trim() : null;
+
 
           if (qtySeedLocal != null) {
             setInitialQty(qtySeedLocal);
           }
 
-          if (materialSeedLocal != null) {
-            // keep existing state if already set; otherwise seed it
-            setMaterialIdFromUrl((prev) => (prev == null ? materialSeedLocal : prev));
-          }
+        if (materialSeedLocal != null) {
+  // keep existing state if already set; otherwise seed it
+  setMaterialIdFromUrl((prev) => (prev == null ? materialSeedLocal : prev));
+}
+
+// stash foam label for post-material-load resolution
+if (materialLabelSeedLocal) {
+  materialLabelFromUrlRef.current = materialLabelSeedLocal;
+}
+
 
 
 
@@ -1177,6 +1204,7 @@ function LayoutEditorHost(props: {
   } = props;
 
   const router = useRouter();
+  
 
   const {
     layout,
@@ -1207,6 +1235,8 @@ function LayoutEditorHost(props: {
     }[];
   };
 
+
+  
   const blockThicknessIn = Number(block.thicknessIn) || 0;
 
   // Thickness source of truth:
@@ -1330,7 +1360,8 @@ function LayoutEditorHost(props: {
   // Switching layers can change cavities.length (e.g., 0 -> 3) which looks like
   // "a cavity was added" and this effect will reposition the last cavity.
   // We bail out on layer change and only sync the baseline count.
-  const prevLayerIdRef = React.useRef<string>(effectiveActiveLayerId);
+ const prevLayerIdRef = React.useRef<string | null>(effectiveActiveLayerId);
+
 
   React.useEffect(() => {
     // If we changed layers, do NOT run auto-placement.
@@ -1547,8 +1578,10 @@ function LayoutEditorHost(props: {
   const [materials, setMaterials] = React.useState<MaterialOption[]>([]);
   const [materialsLoading, setMaterialsLoading] = React.useState<boolean>(true);
   const [materialsError, setMaterialsError] = React.useState<string | null>(null);
+  const materialLabelFromUrlRef = React.useRef<string | null>(null);
   const [selectedMaterialId, setSelectedMaterialId] =
-    React.useState<number | null>(initialMaterialId);
+  React.useState<number | null>(initialMaterialId);
+
 
   // Box suggester state (RSC + mailer suggestions)
   const [boxSuggest, setBoxSuggest] = React.useState<BoxSuggestState>({
@@ -1728,6 +1761,7 @@ function LayoutEditorHost(props: {
         const json = await res.json();
 
         if (!cancelled && Array.isArray(json.materials)) {
+
           const mapped: MaterialOption[] = json.materials.map((m: any) => ({
             id: m.id,
             name:
@@ -1741,6 +1775,27 @@ function LayoutEditorHost(props: {
                 : null,
           }));
           setMaterials(mapped);
+
+
+// Form material seeding: resolve foam label → material ID (ONE TIME)
+if (
+  selectedMaterialId == null &&
+  materialLabelFromUrlRef.current
+) {
+  const needle = materialLabelFromUrlRef.current.toLowerCase();
+
+  const match = mapped.find((m) =>
+    m.name.toLowerCase().includes(needle) ||
+    String(m.family).toLowerCase().includes(needle)
+  );
+
+  if (match) {
+    setSelectedMaterialId(match.id);
+    materialLabelFromUrlRef.current = null; // prevent re-run
+  }
+}
+
+
         }
       } catch (err) {
         console.error("Error loading materials for layout editor", err);
