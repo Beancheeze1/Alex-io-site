@@ -669,30 +669,30 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     // Choose active layer:
     // - If explicit target layer exists and has cavities, make it active so user sees seeded pockets.
     // - Otherwise default to layer 1 (existing behavior).
-    const preferredActive =
-      hasExplicitTarget &&
-      (stack[targetIdx0]?.cavities?.length ?? 0) > 0
-        ? stack[targetIdx0]
-        : stack[0];
+const preferredActive =
+  hasExplicitTarget &&
+  (stack[targetIdx0]?.cavities?.length ?? 0) > 0
+    ? stack[targetIdx0]
+    : stack[0];
 
-    const mirrored = dedupeCavities(preferredActive.cavities);
+// ❗ DO NOT mirror seeded cavities into layout.cavities during init
+return {
+  layout: {
+    ...rest,
+    block: {
+      ...block,
+      thicknessIn: safeInch(
+        preferredActive.thicknessIn ?? block.thicknessIn ?? 1,
+        0.5,
+      ),
+    },
+    stack,
+    cavities: [], // <-- THIS IS THE FIX
+    editorMode,
+  },
+  activeLayerId: preferredActive.id,
+};
 
-    return {
-      layout: {
-        ...rest,
-        block: {
-          ...block,
-          thicknessIn: safeInch(
-            preferredActive.thicknessIn ?? block.thicknessIn ?? 1,
-            0.5,
-          ),
-        },
-        stack,
-        cavities: [...mirrored],
-        editorMode,
-      },
-      activeLayerId: preferredActive.id,
-    };
   }
 
   // Legacy single-layer fallback:
