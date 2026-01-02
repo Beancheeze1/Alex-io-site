@@ -32,13 +32,55 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
     seed: {
       editorMode: "basic",
       block: { lengthIn: 15, widthIn: 12, thicknessIn: 2 } as any,
-      cavities: [],
+
+      // IMPORTANT:
+      // /demo/quote/page.tsx renders from layout.cavities (and checks use layout.cavities),
+      // so we must populate seed.cavities for the demo to show cavities on the canvas.
+      cavities: [
+        {
+          id: "demo-cav-a",
+          shape: "rect",
+          lengthIn: 5.25,
+          widthIn: 3.5,
+          depthIn: 1.5,
+          cornerRadiusIn: 0,
+          x: 0.12,
+          y: 0.18,
+          label: "5.25×3.5×1.5 in",
+        },
+        {
+          id: "demo-cav-b",
+          shape: "circle",
+          lengthIn: 2.75,
+          widthIn: 2.75,
+          depthIn: 1.5,
+          cornerRadiusIn: 0,
+          x: 0.70,
+          y: 0.34,
+          label: "Ø2.75×1.5 in",
+        },
+        {
+          id: "demo-cav-c",
+          shape: "rect",
+          lengthIn: 2.25,
+          widthIn: 1.75,
+          depthIn: 1,
+          // Rounded-corner cavity (requested for demo)
+          cornerRadiusIn: 0.25,
+          x: 0.18,
+          y: 0.62,
+          label: "2.25×1.75×1 in (R0.25)",
+        },
+      ],
+
       stack: [
         {
           id: "layer-1",
           label: "Layer 1",
           thicknessIn: 2,
           cropCorners: false,
+
+          // Keep layer cavities consistent with layout.cavities
           cavities: [
             {
               id: "demo-cav-a",
@@ -68,10 +110,10 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
               lengthIn: 2.25,
               widthIn: 1.75,
               depthIn: 1,
-              cornerRadiusIn: 0,
+              cornerRadiusIn: 0.25,
               x: 0.18,
               y: 0.62,
-              label: "2.25×1.75×1 in",
+              label: "2.25×1.75×1 in (R0.25)",
             },
           ],
         } as any,
