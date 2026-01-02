@@ -1,4 +1,4 @@
-// app/demo/quote/demoSeeds.ts
+// app/demo/quote/demoSeed.ts
 //
 // Demo scenarios (100% local, never hits backend).
 // Used by /demo/quote to make the demo feel like a real product.
