@@ -51,8 +51,12 @@ function hasCoreDims(f: WidgetFacts) {
 function isReady(f: WidgetFacts) {
   const qtyOk = Boolean(f.qty && String(f.qty).trim().length > 0);
   const shipOk = Boolean(f.shipMode && f.shipMode !== undefined && f.shipMode !== ("" as any));
-  const insertOk = Boolean(f.insertType && f.insertType !== undefined && f.insertType !== ("" as any));
-  const holdingOk = Boolean(f.holding && f.holding !== undefined && f.holding !== ("" as any));
+  const insertOk = Boolean(
+    f.insertType && f.insertType !== undefined && f.insertType !== ("" as any)
+  );
+  const holdingOk = Boolean(
+    f.holding && f.holding !== undefined && f.holding !== ("" as any)
+  );
   return hasCoreDims(f) && qtyOk && shipOk && insertOk && holdingOk;
 }
 
@@ -63,7 +67,10 @@ async function callOpenAI(params: {
 }) {
   const apiKey = requireEnv("OPENAI_API_KEY");
 
-  // NOTE: Using Responses API (recommended by OpenAI docs). :contentReference[oaicite:1]{index=1}
+  // Allow override in Render without code edits:
+  // OPENAI_WIDGET_MODEL=gpt-5-mini (recommended default for compatibility)
+  const model = (process.env.OPENAI_WIDGET_MODEL || "gpt-5-mini").trim();
+
   const inputMessages = [
     {
       role: "developer",
@@ -143,7 +150,7 @@ async function callOpenAI(params: {
   ];
 
   const body = {
-    model: "gpt-5",
+    model,
     reasoning: { effort: "low" },
     input: inputMessages,
   };
@@ -159,18 +166,15 @@ async function callOpenAI(params: {
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`openai_http_${res.status}_${txt.slice(0, 120)}`);
+    throw new Error(`openai_http_${res.status}_${txt.slice(0, 200)}`);
   }
 
   const json = (await res.json()) as any;
 
-  // Per docs, output_text is available; we’ll be conservative and pull it.
   const outputText: string =
     typeof json?.output_text === "string"
       ? json.output_text
-      : // fallback: try to find first text chunk
-        (json?.output?.[0]?.content?.find?.((c: any) => c?.type === "output_text")?.text ??
-          "");
+      : (json?.output?.[0]?.content?.find?.((c: any) => c?.type === "output_text")?.text ?? "");
 
   return String(outputText || "").trim();
 }
@@ -195,6 +199,7 @@ function safeParseBrainJson(raw: string) {
 }
 
 export async function POST(req: NextRequest) {
+  let debugWhere = "";
   try {
     const payload = (await req.json()) as Incoming;
 
@@ -214,11 +219,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    debugWhere = "callOpenAI";
     const raw = await callOpenAI({ messages, userText, facts });
+
+    debugWhere = "parseBrainJson";
     const parsed = safeParseBrainJson(raw);
 
     if (!parsed) {
-      // fallback response (still helpful)
       return NextResponse.json(
         {
           assistantMessage:
@@ -226,12 +233,15 @@ export async function POST(req: NextRequest) {
           facts: {},
           done: false,
           quickReplies: ["18x12x3", "Qty 250", "Not sure yet"],
+          debug: {
+            where: "model_returned_non_json",
+            model: (process.env.OPENAI_WIDGET_MODEL || "gpt-5-mini").trim(),
+          },
         },
         { status: 200 }
       );
     }
 
-    // Server-side safety: never allow “done” unless minimum set is present.
     const mergedFacts = { ...facts, ...parsed.facts };
     const done = parsed.done && isReady(mergedFacts);
 
@@ -245,6 +255,8 @@ export async function POST(req: NextRequest) {
       { status: 200 }
     );
   } catch (e: any) {
+    const errMsg = String(e?.message ?? e ?? "unknown_error");
+
     return NextResponse.json(
       {
         assistantMessage:
@@ -252,6 +264,12 @@ export async function POST(req: NextRequest) {
         facts: {},
         done: false,
         quickReplies: ["18x12x3", "Qty 250", "Shipping: box", "Shipping: mailer"],
+        debug: {
+          where: debugWhere || "route",
+          error: errMsg,
+          missingKey: errMsg.includes("Missing env: OPENAI_API_KEY") ? "OPENAI_API_KEY" : "",
+          model: (process.env.OPENAI_WIDGET_MODEL || "gpt-5-mini").trim(),
+        },
       },
       { status: 200 }
     );
