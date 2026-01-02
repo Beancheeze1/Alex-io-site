@@ -122,11 +122,12 @@ async function callOpenAI(params: {
     reasoning: { effort: "low" },
     input: inputMessages,
     text: {
-      format: {
-        type: "json_schema",
-        strict: true,
-        schema: {
-          type: "object",
+  format: {
+    type: "json_schema",
+    name: "widget_chat_schema",
+    strict: true,
+    schema: {
+      type: "object",
           additionalProperties: false,
           required: ["assistantMessage", "facts", "done", "quickReplies"],
           properties: {
