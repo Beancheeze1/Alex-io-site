@@ -11,7 +11,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 function Field({
   label,
@@ -89,8 +89,33 @@ type MaterialOption = {
   density_lb_ft3?: number | null;
 };
 
+// Payload shape sent by the splash widget. Keep it permissive.
+type PrefillPayload = {
+  source?: string;
+  createdAtIso?: string;
+  outside?: { l?: string; w?: string; h?: string; units?: string };
+  qty?: string;
+  holding?: string;
+  pocketCount?: string;
+  material?: { mode?: string; text?: string };
+  notes?: string;
+};
+
+function safeDecodePrefill(raw: string | null): PrefillPayload | null {
+  if (!raw) return null;
+  try {
+    const decoded = decodeURIComponent(raw);
+    const obj = JSON.parse(decoded) as PrefillPayload;
+    if (!obj || typeof obj !== "object") return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
+
 export default function StartQuotePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [name, setName] = React.useState("");
   const [company, setCompany] = React.useState("");
@@ -105,16 +130,95 @@ export default function StartQuotePage() {
   // Gate editor open on required fields (form-only)
   const [attemptedOpen, setAttemptedOpen] = React.useState(false);
 
-  const nameOk = name.trim().length > 0;
-  const emailOk = email.trim().length > 0;
-  const phoneOk = phone.trim().length > 0;
-  const canOpenEditor = nameOk && emailOk && phoneOk;
-
   // --- materials (dropdown) ---
   const [materialOptions, setMaterialOptions] = React.useState<MaterialOption[]>(
     []
   );
   const [materialId, setMaterialId] = React.useState<string>("");
+
+  // --- layers ---
+  const [layerCount, setLayerCount] = React.useState<number>(3);
+  const [layerThicknesses, setLayerThicknesses] = React.useState<number[]>([
+    1, 1, 1,
+  ]);
+
+  // explicit cavity layer (1-based)
+  const [cavityLayerIndex, setCavityLayerIndex] = React.useState<number>(2);
+
+  // Track whether this visit came from the splash widget prefill.
+  const [isWidgetPrefill, setIsWidgetPrefill] = React.useState(false);
+
+  // Apply prefill once (Path-A additive).
+  const prefillAppliedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (prefillAppliedRef.current) return;
+
+    const raw = searchParams?.get("prefill") ?? null;
+    const payload = safeDecodePrefill(raw);
+    if (!payload) {
+      prefillAppliedRef.current = true;
+      return;
+    }
+
+    // Only treat as "widget prefill" if explicitly labeled.
+    const fromWidget = payload.source === "splash-widget";
+    setIsWidgetPrefill(fromWidget);
+
+    // Set core fields
+    const l = payload.outside?.l ? String(payload.outside.l).trim() : "";
+    const w = payload.outside?.w ? String(payload.outside.w).trim() : "";
+    const h = payload.outside?.h ? String(payload.outside.h).trim() : "";
+    if (l && w && h) {
+      setSize(`${l}x${w}x${h}`);
+    }
+
+    if (payload.qty != null) {
+      const q = String(payload.qty).replace(/[^\d]/g, "");
+      if (q) setQty(q);
+    }
+
+    // Optional: fold widget info into notes/foam fields (no guessing, no URL logic changes)
+    const holding = payload.holding ? String(payload.holding).trim() : "";
+    const pocketCount = payload.pocketCount ? String(payload.pocketCount).trim() : "";
+    const matMode = payload.material?.mode ? String(payload.material.mode).trim() : "";
+    const matText = payload.material?.text ? String(payload.material.text).trim() : "";
+    const widgetNotes = payload.notes ? String(payload.notes).trim() : "";
+
+    const noteLines: string[] = [];
+    if (holding) {
+      if (holding === "pockets") {
+        noteLines.push(`Holding: Cut-out pockets${pocketCount ? ` (${pocketCount})` : ""}`);
+      } else if (holding === "loose") {
+        noteLines.push("Holding: Loose / no pockets");
+      } else if (holding === "unsure") {
+        noteLines.push("Holding: Not sure yet");
+      } else {
+        noteLines.push(`Holding: ${holding}`);
+      }
+    }
+
+    if (matMode === "known" && matText) {
+      // Keep deterministic dropdown intact; just capture the user intent in foam notes.
+      setFoam(matText);
+    } else if (matMode === "recommend") {
+      noteLines.push("Material: Recommended");
+    }
+
+    if (widgetNotes) noteLines.push(widgetNotes);
+
+    if (noteLines.length) {
+      setNotes(noteLines.join("\n"));
+    }
+
+    prefillAppliedRef.current = true;
+  }, [searchParams]);
+
+  const nameOk = name.trim().length > 0;
+  const emailOk = email.trim().length > 0;
+  const phoneOk = phone.trim().length > 0;
+
+  // Normal behavior unchanged unless widget prefill is present.
+  const canOpenEditor = isWidgetPrefill || (nameOk && emailOk && phoneOk);
 
   // Load materials for dropdown (Path-A minimal: one fetch, best-effort)
   React.useEffect(() => {
@@ -151,15 +255,6 @@ export default function StartQuotePage() {
       cancelled = true;
     };
   }, []);
-
-  // --- layers ---
-  const [layerCount, setLayerCount] = React.useState<number>(3);
-  const [layerThicknesses, setLayerThicknesses] = React.useState<number[]>([
-    1, 1, 1,
-  ]);
-
-  // explicit cavity layer (1-based)
-  const [cavityLayerIndex, setCavityLayerIndex] = React.useState<number>(2);
 
   // Keep thickness array length aligned to layerCount (Path-A safe)
   React.useEffect(() => {
@@ -199,7 +294,7 @@ export default function StartQuotePage() {
     if (dims) p.set("dims", dims);
     if (qtyNum) p.set("qty", String(qtyNum));
 
-    // Customer
+    // Customer (only include if provided; widget path may not collect these yet)
     if (name.trim()) p.set("customer_name", name.trim());
     if (email.trim()) p.set("customer_email", email.trim());
     if (company.trim()) p.set("customer_company", company.trim());
@@ -240,9 +335,9 @@ export default function StartQuotePage() {
     router.push(url);
   };
 
-  const showNameErr = attemptedOpen && !nameOk;
-  const showEmailErr = attemptedOpen && !emailOk;
-  const showPhoneErr = attemptedOpen && !phoneOk;
+  const showNameErr = attemptedOpen && !isWidgetPrefill && !nameOk;
+  const showEmailErr = attemptedOpen && !isWidgetPrefill && !emailOk;
+  const showPhoneErr = attemptedOpen && !isWidgetPrefill && !phoneOk;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-50">
@@ -268,6 +363,13 @@ export default function StartQuotePage() {
               <span className="text-slate-100 font-semibold">seeded editor</span>.
               (No email is sent from this page.)
             </div>
+
+            {isWidgetPrefill ? (
+              <div className="mt-2 text-xs text-slate-400">
+                Detected <span className="text-slate-200">splash widget</span> prefill —
+                contact fields are optional for the reveal flow.
+              </div>
+            ) : null}
           </div>
 
           <button
@@ -476,12 +578,16 @@ export default function StartQuotePage() {
                   ? "bg-sky-500/90 ring-sky-300/20 hover:bg-sky-500"
                   : "bg-slate-700/40 ring-white/10 opacity-70 cursor-not-allowed",
               ].join(" ")}
-              title={canOpenEditor ? "" : "Please fill in Name, Email, and Phone first."}
+              title={
+                canOpenEditor || isWidgetPrefill
+                  ? ""
+                  : "Please fill in Name, Email, and Phone first."
+              }
             >
               Editor — next step →
             </button>
 
-            {!canOpenEditor ? (
+            {!canOpenEditor && !isWidgetPrefill ? (
               <div className="text-xs text-slate-400">
                 Required to open: <span className="text-slate-200">Name</span>,{" "}
                 <span className="text-slate-200">Email</span>,{" "}
