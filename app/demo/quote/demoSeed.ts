@@ -33,9 +33,14 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
       editorMode: "basic",
       block: { lengthIn: 15, widthIn: 12, thicknessIn: 2 } as any,
 
-      // IMPORTANT:
-      // /demo/quote/page.tsx renders from layout.cavities (and checks use layout.cavities),
-      // so we must populate seed.cavities for the demo to show cavities on the canvas.
+      // NOTE:
+      // The editor/hook mirrors cavities from the ACTIVE LAYER in stack[] into layout.cavities.
+      // To guarantee the demo always shows cavities, we:
+      //  - Provide TWO layers (total thickness still = 2")
+      //  - Put the demo cavities on Layer 2 (common default active layer)
+      //  - Add active-layer hints set to 2 (safe no-ops if unused)
+      //
+      // Keep layout.cavities populated too (best-effort), but do not rely on it.
       cavities: [
         {
           id: "demo-cav-a",
@@ -73,14 +78,24 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
         },
       ],
 
+      // Active-layer hints (safe even if ignored by the hook)
+      activeLayer: 2 as any,
+      active_layer: 2 as any,
+      layer_cavity_layer_index: 2 as any,
+
       stack: [
         {
           id: "layer-1",
           label: "Layer 1",
-          thicknessIn: 2,
+          thicknessIn: 1,
           cropCorners: false,
-
-          // Keep layer cavities consistent with layout.cavities
+          cavities: [],
+        } as any,
+        {
+          id: "layer-2",
+          label: "Layer 2",
+          thicknessIn: 1,
+          cropCorners: false,
           cavities: [
             {
               id: "demo-cav-a",
@@ -145,7 +160,6 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
           thicknessIn: 1.5,
           cropCorners: false,
           cavities: [
-            // Rounded-rect replaces the “small rectangle” idea here.
             {
               id: "demo2-cav-a",
               shape: "rect",

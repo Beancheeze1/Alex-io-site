@@ -21,7 +21,7 @@ import { useLayoutModel } from "../../quote/layout/editor/useLayoutModel";
 import type { Cavity } from "../../quote/layout/editor/layoutTypes";
 
 // IMPORTANT: make sure this path matches your actual filename on disk.
-// FIX: demo scenarios are defined in demoSeed.ts (plural).
+// FIX: demo scenarios are defined in demoSeed.ts.
 import { getScenario } from "./demoSeed";
 
 function Card({
