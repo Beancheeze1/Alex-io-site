@@ -102,6 +102,14 @@ export default function StartQuotePage() {
   const [cavities, setCavities] = React.useState("");
   const [notes, setNotes] = React.useState("");
 
+  // NEW: gate editor open on required fields (Path-A: form-only)
+  const [attemptedOpen, setAttemptedOpen] = React.useState(false);
+
+  const nameOk = name.trim().length > 0;
+  const emailOk = email.trim().length > 0;
+  const phoneOk = phone.trim().length > 0;
+  const canOpenEditor = nameOk && emailOk && phoneOk;
+
   // --- materials (dropdown) ---
   const [materialOptions, setMaterialOptions] = React.useState<MaterialOption[]>(
     []
@@ -174,6 +182,10 @@ export default function StartQuotePage() {
   }, [layerCount]);
 
   const onOpenEditor = () => {
+    // NEW: require name/email/phone before open (form-only)
+    setAttemptedOpen(true);
+    if (!canOpenEditor) return;
+
     const quote_no = buildQuoteNo();
 
     const qtyNum = toNumOrNull(qty);
@@ -229,6 +241,10 @@ export default function StartQuotePage() {
     router.push(url);
   };
 
+  const showNameErr = attemptedOpen && !nameOk;
+  const showEmailErr = attemptedOpen && !emailOk;
+  const showPhoneErr = attemptedOpen && !phoneOk;
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-50">
       <div className="pointer-events-none absolute inset-0 opacity-[0.20]">
@@ -273,6 +289,9 @@ export default function StartQuotePage() {
                 className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
                 placeholder="Chuck Johnson"
               />
+              {showNameErr ? (
+                <div className="mt-1 text-xs text-rose-300">Name is required.</div>
+              ) : null}
             </Field>
 
             <Field label="COMPANY">
@@ -291,6 +310,9 @@ export default function StartQuotePage() {
                 className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
                 placeholder="you@company.com"
               />
+              {showEmailErr ? (
+                <div className="mt-1 text-xs text-rose-300">Email is required.</div>
+              ) : null}
             </Field>
 
             <Field label="PHONE">
@@ -300,6 +322,9 @@ export default function StartQuotePage() {
                 className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
                 placeholder="(555) 555-5555"
               />
+              {showPhoneErr ? (
+                <div className="mt-1 text-xs text-rose-300">Phone is required.</div>
+              ) : null}
             </Field>
 
             <Field label="QUANTITY">
@@ -319,9 +344,7 @@ export default function StartQuotePage() {
                 className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
               >
                 <option value="">
-                  {materialOptions.length
-                    ? "Select material…"
-                    : "Loading materials…"}
+                  {materialOptions.length ? "Select material…" : "Loading materials…"}
                 </option>
                 {materialOptions.map((m) => (
                   <option key={m.id} value={String(m.id)}>
@@ -332,8 +355,7 @@ export default function StartQuotePage() {
               </select>
               <div className="mt-1 text-xs text-slate-400">
                 This avoids parsing/guessing. We seed{" "}
-                <span className="text-slate-200">material_id</span> into the
-                editor URL.
+                <span className="text-slate-200">material_id</span> into the editor URL.
               </div>
             </Field>
 
@@ -439,10 +461,27 @@ export default function StartQuotePage() {
             <button
               type="button"
               onClick={onOpenEditor}
-              className="inline-flex items-center justify-center rounded-full bg-sky-500/90 px-5 py-2.5 text-sm font-semibold text-white shadow-sm ring-1 ring-sky-300/20 hover:bg-sky-500"
+              disabled={!canOpenEditor}
+              className={[
+                "inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold text-white shadow-sm ring-1",
+                canOpenEditor
+                  ? "bg-sky-500/90 ring-sky-300/20 hover:bg-sky-500"
+                  : "bg-slate-700/40 ring-white/10 opacity-70 cursor-not-allowed",
+              ].join(" ")}
+              title={
+                canOpenEditor ? "" : "Please fill in Name, Email, and Phone first."
+              }
             >
               Open seeded editor →
             </button>
+
+            {!canOpenEditor ? (
+              <div className="text-xs text-slate-400">
+                Required to open: <span className="text-slate-200">Name</span>,{" "}
+                <span className="text-slate-200">Email</span>,{" "}
+                <span className="text-slate-200">Phone</span>.
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-400">
