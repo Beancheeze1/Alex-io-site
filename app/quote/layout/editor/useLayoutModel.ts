@@ -424,6 +424,60 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
   const { block: _b, cavities: _c, stack: _s, editorMode: _m, ...rest } =
     (initial as any) ?? {};
 
+  // =========================================================
+  // NEW (Path A): form seed alias normalization for qty + material
+  //
+  // Goal:
+  //  - qty from the form URL must show up in whatever key the UI expects
+  //  - foam from the form URL must show up in whatever key the UI expects
+  //
+  // We do NOT parse or guess families (PE vs EPE is protected).
+  // We only mirror the raw string into a few safe carriers.
+  // =========================================================
+  {
+    const src: any = (initial as any) ?? {};
+    const r: any = rest as any;
+
+    // ----- QTY -----
+    // Accept qty / quantity; also seed quantities[] if UI uses a list.
+    const qtyRaw =
+      src.qty ?? src.quantity ?? r.qty ?? r.quantity ?? (r as any).qty_raw;
+
+    const qtyNum = Number(qtyRaw);
+    if (Number.isFinite(qtyNum) && qtyNum > 0) {
+      if (r.qty == null) r.qty = qtyNum;
+      if (r.quantity == null) r.quantity = qtyNum;
+
+      // If UI expects an array of quantities and it's missing, seed it.
+      if (!Array.isArray(r.quantities) || r.quantities.length === 0) {
+        r.quantities = [qtyNum];
+      }
+    }
+
+    // ----- MATERIAL (RAW TEXT) -----
+    // Accept foam / material / material_text and mirror into common carriers.
+    const foamRaw =
+      src.foam ??
+      src.material ??
+      src.materialText ??
+      src.material_text ??
+      r.foam ??
+      r.material ??
+      r.materialText ??
+      r.material_text;
+
+    const foamText = String(foamRaw ?? "").trim();
+    if (foamText) {
+      if (r.foam == null) r.foam = foamText;
+      if (r.material == null) r.material = foamText;
+      if (r.materialText == null) r.materialText = foamText;
+      if (r.material_text == null) r.material_text = foamText;
+
+      // Extra safe carrier (some components use "material_name")
+      if (r.material_name == null) r.material_name = foamText;
+    }
+  }
+
   const block = { ...(initial as any).block };
 
   const editorMode: "basic" | "advanced" =
