@@ -111,16 +111,16 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
         const mirrored = dedupeCavities(layer.cavities);
 
         return {
-          layout: {
-            ...prev.layout,
-            block: {
-              ...prev.layout.block,
-              thicknessIn: safeInch(layer.thicknessIn, 0.5),
-            },
-            cavities: [...mirrored],
-          },
-          activeLayerId: layer.id,
-        };
+  layout: {
+    ...prev.layout,
+    block: {
+      ...prev.layout.block,
+      thicknessIn: safeInch(layer.thicknessIn, 0.5),
+    },
+    // ❗ DO NOT persist cavities here
+  },
+  activeLayerId: layer.id,
+};
       });
 
       // ✅ FIX: DO NOT blindly clear selection
