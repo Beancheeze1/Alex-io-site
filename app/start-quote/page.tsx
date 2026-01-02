@@ -72,9 +72,7 @@ function normalizeDims(input: string) {
 }
 
 function extractFirstCavity(cavitiesText: string) {
-  // Very simple: find first pattern like "5x5x1" or "Ø3x1.5" (we’ll normalize circle to "3x3x1.5" is NOT desired)
   // For now: only support rect-style "LxWxD" as a single cavity seed.
-  // If not found, return null and user can add in editor.
   const s = String(cavitiesText || "")
     .replace(/[×\*]/g, "x")
     .replace(/\s+/g, "");
@@ -84,6 +82,13 @@ function extractFirstCavity(cavitiesText: string) {
   return `${m[1]}x${m[2]}x${m[3]}`;
 }
 
+type MaterialOption = {
+  id: number;
+  name: string;
+  family?: string | null;
+  density_lb_ft3?: number | null;
+};
+
 export default function StartQuotePage() {
   const router = useRouter();
 
@@ -92,10 +97,52 @@ export default function StartQuotePage() {
   const [email, setEmail] = React.useState("");
   const [phone, setPhone] = React.useState("");
   const [qty, setQty] = React.useState("");
-  const [foam, setFoam] = React.useState("");
+  const [foam, setFoam] = React.useState(""); // keep as optional free-text notes
   const [size, setSize] = React.useState("");
   const [cavities, setCavities] = React.useState("");
   const [notes, setNotes] = React.useState("");
+
+  // --- materials (dropdown) ---
+  const [materialOptions, setMaterialOptions] = React.useState<MaterialOption[]>(
+    []
+  );
+  const [materialId, setMaterialId] = React.useState<string>("");
+
+  // Load materials for dropdown (Path-A minimal: one fetch, best-effort)
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const res = await fetch(`/api/materials/options?t=${Date.now()}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as unknown;
+
+        if (!Array.isArray(data)) return;
+
+        const parsed: MaterialOption[] = data
+          .map((x: any) => ({
+            id: Number(x?.id),
+            name: String(x?.name ?? ""),
+            family: x?.family ?? null,
+            density_lb_ft3:
+              x?.density_lb_ft3 == null ? null : Number(x.density_lb_ft3),
+          }))
+          .filter((m) => Number.isFinite(m.id) && m.id > 0 && m.name);
+
+        if (!cancelled) setMaterialOptions(parsed);
+      } catch {
+        // Intentionally silent. If endpoint not present, dropdown will be empty.
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // --- layers ---
   const [layerCount, setLayerCount] = React.useState<number>(3);
@@ -104,7 +151,6 @@ export default function StartQuotePage() {
   ]);
 
   // NEW: explicit cavity layer (1-based)
-  // Default to Layer 2 (common case) but clamp if layerCount changes.
   const [cavityLayerIndex, setCavityLayerIndex] = React.useState<number>(2);
 
   // Keep thickness array length aligned to layerCount (Path-A safe)
@@ -148,6 +194,15 @@ export default function StartQuotePage() {
     if (company.trim()) p.set("customer_company", company.trim());
     if (phone.trim()) p.set("customer_phone", phone.trim());
 
+    // Materials (deterministic)
+    const matIdNum = Number(materialId);
+    if (Number.isFinite(matIdNum) && matIdNum > 0) {
+      p.set("material_id", String(matIdNum));
+
+      const picked = materialOptions.find((m) => m.id === matIdNum);
+      if (picked?.name) p.set("material_label", picked.name);
+    }
+
     // Layers
     p.set("layer_count", String(layerCount));
     for (const t of layerThicknesses) {
@@ -157,8 +212,7 @@ export default function StartQuotePage() {
       p.append("layer_label", `Layer ${i}`);
     }
 
-    // Cavity seeding (single cavity best-effort)
-    // IMPORTANT: this index must match the user’s intent, otherwise the cavity “lands” on the wrong layer.
+    // Cavity seeding
     p.set("layer_cavity_layer_index", String(cavityLayerIndex));
 
     // Land the user on the intended layer on first open (keep both keys for compatibility)
@@ -167,7 +221,7 @@ export default function StartQuotePage() {
 
     if (firstCavity) p.set("cavity", firstCavity);
 
-    // Optional (editor may ignore; safe to pass)
+    // Optional notes / user-entered foam text (kept)
     if (foam.trim()) p.set("foam", foam.trim());
     if (notes.trim()) p.set("notes", notes.trim());
 
@@ -257,12 +311,35 @@ export default function StartQuotePage() {
               />
             </Field>
 
-            <Field label="FOAM (FAMILY + DENSITY)">
+            {/* NEW: deterministic material selection */}
+            <Field label="MATERIAL (PICK ONE)">
+              <select
+                value={materialId}
+                onChange={(e) => setMaterialId(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+              >
+                <option value="">
+                  {materialOptions.length ? "Select material…" : "Loading materials…"}
+                </option>
+                {materialOptions.map((m) => (
+                  <option key={m.id} value={String(m.id)}>
+                    {m.name}
+                    {m.family ? ` — ${m.family}` : ""}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-1 text-xs text-slate-400">
+                This avoids parsing/guessing. We seed <span className="text-slate-200">material_id</span> into the editor URL.
+              </div>
+            </Field>
+
+            {/* Keep your original foam free-text as optional notes */}
+            <Field label="FOAM NOTES (OPTIONAL)">
               <input
                 value={foam}
                 onChange={(e) => setFoam(e.target.value)}
                 className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                placeholder="EPE, 1.7 lb/ft³"
+                placeholder="Any foam notes (optional)"
               />
             </Field>
 
@@ -301,7 +378,6 @@ export default function StartQuotePage() {
               </div>
             </Field>
 
-            {/* NEW: explicit cavity layer selector */}
             <Field label="CAVITY LAYER">
               <select
                 value={String(cavityLayerIndex)}
