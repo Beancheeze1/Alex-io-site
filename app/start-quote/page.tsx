@@ -105,6 +105,10 @@ type PrefillPayload = {
 
   material?: { mode?: string; text?: string }; // mode: recommend|known
   notes?: string;
+
+  // NEW: structured layers from widget
+  layerCount?: string | number; // "1".."4" (or number)
+  layerThicknesses?: Array<string | number>; // e.g. ["3","1"]
 };
 
 function safeDecodePrefill(raw: string | null): PrefillPayload | null {
@@ -124,36 +128,27 @@ function normalizeEnum<T extends string>(v: string, allowed: readonly T[]): T | 
   return (allowed as readonly string[]).includes(s) ? (s as T) : "";
 }
 
-// Best-effort parse for “2 layers 1" top pad + 3" base/body” inside notes.
-// Only applies when it’s unambiguous.
-function tryInferLayersFromText(raw: string): { layerCount?: number; thicknesses?: number[] } {
-  const s = String(raw || "").toLowerCase();
+function clampInt(n: number, min: number, max: number) {
+  const x = Math.floor(Number(n));
+  if (!Number.isFinite(x)) return min;
+  return Math.max(min, Math.min(max, x));
+}
 
-  const mLayers = s.match(/(\d+)\s*layers?/);
-  const layerCount = mLayers ? Math.max(1, Math.min(4, Number(mLayers[1]) || 0)) : undefined;
+function parseLayerCount(v: unknown): number | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  const c = clampInt(n, 1, 4);
+  return c;
+}
 
-  // Top pad thickness (e.g., "1\" top pad" / "1 inch top pad")
-  const mTop =
-    s.match(/(\d+(?:\.\d+)?)\s*(?:\"|inches?|inch|in)\s*(?:top\s*pad|lid|cap)/) ?? null;
-
-  // Base/body thickness (e.g., "3\" body" / "3 inch base")
-  const mBase =
-    s.match(/(\d+(?:\.\d+)?)\s*(?:\"|inches?|inch|in)\s*(?:base|body|bottom|main)/) ?? null;
-
-  const top = mTop ? Number(mTop[1]) : null;
-  const base = mBase ? Number(mBase[1]) : null;
-
-  const topOk = top != null && Number.isFinite(top) && top > 0;
-  const baseOk = base != null && Number.isFinite(base) && base > 0;
-
-  // Only set thicknesses when we clearly have a 2-layer “base + top pad” situation.
-  if (layerCount === 2 && topOk && baseOk) {
-    // Convention: Layer 1 = base/body, Layer 2 = top pad/lid
-    return { layerCount: 2, thicknesses: [base as number, top as number] };
-  }
-
-  // If user said “2 layers” but only one thickness, don’t guess.
-  return { layerCount };
+function parseThicknessArray(v: unknown): number[] | null {
+  if (!Array.isArray(v)) return null;
+  const nums = v
+    .map((x) => Number(String(x ?? "").trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return nums.length ? nums : null;
 }
 
 export default function StartQuotePage() {
@@ -252,31 +247,39 @@ export default function StartQuotePage() {
       setFoam(mt);
     }
 
-    // Best-effort: infer layers + thicknesses from widget notes when clear
-    const widgetNotes = payload.notes ? String(payload.notes).trim() : "";
-    if (widgetNotes) {
-      const inferred = tryInferLayersFromText(widgetNotes);
-      if (inferred.layerCount && Number.isFinite(inferred.layerCount)) {
-        setLayerCount(inferred.layerCount);
-      }
-      if (inferred.thicknesses && inferred.thicknesses.length) {
-        setLayerThicknesses((prev) => {
-          const next = [...prev];
-          for (let i = 0; i < inferred.thicknesses!.length; i++) {
-            next[i] = inferred.thicknesses![i];
-          }
-          return next.slice(0, inferred.thicknesses!.length);
-        });
-        // If we inferred a 2-layer set, default cavities to base (Layer 1) unless already chosen.
-        setCavityLayerIndex((prev) => (Number.isFinite(prev) ? prev : 1));
-      }
+    // NEW: structured layer seeding (no parsing from notes)
+    const lc = parseLayerCount(payload.layerCount);
+    const th = parseThicknessArray(payload.layerThicknesses);
+
+    if (lc) {
+      setLayerCount(lc);
+    }
+    if (th && th.length) {
+      setLayerThicknesses(() => th.slice(0, 4));
+    }
+
+    // Deterministic cavity layer default when possible (no guessing):
+    // - base => layer 1
+    // - top  => last layer (after layerCount applies)
+    // - both/unsure/blank => leave as-is
+    if (pocOn === "base") {
+      setCavityLayerIndex(1);
+    } else if (pocOn === "top") {
+      const effectiveCount = lc ?? layerCount;
+      setCavityLayerIndex(Math.max(1, Math.min(4, effectiveCount)));
     }
 
     // Also fold widget info into NOTES as a readable summary (additive, not replacing user typing)
     const noteLines: string[] = [];
 
-    if (ship) noteLines.push(`Shipping: ${ship === "box" ? "Box" : ship === "mailer" ? "Mailer" : "Not sure"}`);
-    if (ins) noteLines.push(`Insert: ${ins === "single" ? "Single" : ins === "set" ? "Set (base + top)" : "Not sure"}`);
+    if (ship)
+      noteLines.push(
+        `Shipping: ${ship === "box" ? "Box" : ship === "mailer" ? "Mailer" : "Not sure"}`
+      );
+    if (ins)
+      noteLines.push(
+        `Insert: ${ins === "single" ? "Single" : ins === "set" ? "Set (base + top)" : "Not sure"}`
+      );
     if (ins === "set" && pocOn) noteLines.push(`Pockets on: ${pocOn}`);
     if (hold) {
       if (hold === "pockets") noteLines.push(`Holding: Cut-out pockets${pc ? ` (${pc})` : ""}`);
@@ -285,6 +288,8 @@ export default function StartQuotePage() {
     }
     if (mm === "recommend") noteLines.push("Material: Recommended");
     if (mm === "known" && mt) noteLines.push(`Material: ${mt}`);
+
+    const widgetNotes = payload.notes ? String(payload.notes).trim() : "";
     if (widgetNotes) noteLines.push(widgetNotes);
 
     if (noteLines.length) {

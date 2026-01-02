@@ -18,6 +18,11 @@ type WidgetFacts = {
   insertType?: "single" | "set" | "unsure"; // set = base + top pad/lid
   pocketsOn?: "base" | "top" | "both" | "unsure";
 
+  // NEW: layers (structured)
+  // Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).
+  layerCount?: "1" | "2" | "3" | "4";
+  layerThicknesses?: string[]; // e.g. ["3","1"]
+
   // holding
   holding?: "pockets" | "loose" | "unsure";
   pocketCount?: "1" | "2" | "3+" | "unsure";
@@ -74,6 +79,11 @@ function buildPrefillPayload(facts: WidgetFacts) {
       mode: facts.materialMode ?? "",
       text: facts.materialText ?? "",
     },
+
+    // NEW: layers (structured)
+    layerCount: facts.layerCount ?? "",
+    layerThicknesses: Array.isArray(facts.layerThicknesses) ? facts.layerThicknesses : [],
+
     notes: facts.notes ?? "",
   };
 }

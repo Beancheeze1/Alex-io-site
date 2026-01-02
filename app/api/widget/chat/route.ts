@@ -27,6 +27,11 @@ type WidgetFacts = {
   materialMode?: "recommend" | "known";
   materialText?: string;
 
+  // NEW: layers (structured)
+  // Convention: Layer 1 = base/body, higher layers stack upward (top pad = last layer).
+  layerCount?: "1" | "2" | "3" | "4";
+  layerThicknesses?: string[]; // e.g. ["3","1"] for 2 layers: base=3, top=1
+
   notes?: string;
   createdAtIso?: string;
 };
@@ -88,6 +93,8 @@ async function callOpenAI(params: {
             "- pocketsOn: base/top/both if set\n" +
             "- pocketCount: 1/2/3+/unsure if pockets\n" +
             "- material: known text or recommend\n" +
+            "- layers: layerCount (1–4) and layerThicknesses array\n" +
+            "  Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).\n" +
             "- notes\n\n" +
             'When shipping is box or mailer, mention briefly we typically undersize foam L/W by 0.125" for drop-in fit.\n' +
             "When you have enough info, done=true and invite them to open layout & pricing.",
@@ -159,6 +166,8 @@ async function callOpenAI(params: {
                 "pocketCount",
                 "materialMode",
                 "materialText",
+                "layerCount",
+                "layerThicknesses",
                 "notes",
                 "createdAtIso",
               ],
@@ -211,6 +220,18 @@ async function callOpenAI(params: {
                 },
 
                 materialText: { type: ["string", "null"] },
+
+                // NEW: layers
+                layerCount: {
+                  anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }],
+                },
+                layerThicknesses: {
+                  anyOf: [
+                    { type: "array", items: { type: "string" }, maxItems: 4 },
+                    { type: "null" },
+                  ],
+                },
+
                 notes: { type: ["string", "null"] },
                 createdAtIso: { type: ["string", "null"] },
               },
