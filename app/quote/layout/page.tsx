@@ -203,14 +203,44 @@ function readCustomerFromUrl(url: URL): {
     return "";
   };
 
+  const first = pick(["first_name", "firstName", "fname"]);
+  const last = pick(["last_name", "lastName", "lname"]);
+  const combinedName =
+    [first, last].map((s) => (s ?? "").trim()).filter(Boolean).join(" ").trim();
+
   return {
-    name: pick(["customer_name", "customerName", "name", "customer"]),
+    name: pick(["customer_name", "customerName", "name", "customer"]) || combinedName,
     email: pick(["customer_email", "customerEmail", "email"]),
-    company: pick(["customer_company", "customerCompany", "company"]),
-    phone: pick(["customer_phone", "customerPhone", "phone"]),
+    company: pick([
+      "customer_company",
+      "customerCompany",
+      "company",
+      "company_name",
+      "companyName",
+      "organization",
+    ]),
+    phone: pick([
+      "customer_phone",
+      "customerPhone",
+      "phone",
+      "phone_number",
+      "phoneNumber",
+      "tel",
+    ]),
   };
+
 }
 
+function readQtyFromUrl(url: URL): number | null {
+  const keys = ["qty", "quantity", "q", "order_qty", "quote_qty"];
+  for (const k of keys) {
+    const raw = (url.searchParams.get(k) ?? "").trim();
+    if (!raw) continue;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
 
 
 function readLayerCavitiesFromUrl(url: URL, layerIndex1Based: number): string {
@@ -387,21 +417,38 @@ export default function LayoutPage({
   const hasRealQuoteNo = !!quoteNoFromUrl && quoteNoFromUrl.trim().length > 0;
 
   const quoteNo = hasRealQuoteNo ? quoteNoFromUrl.trim() : "Q-AI-EXAMPLE";
-  const [materialIdFromUrl, setMaterialIdFromUrl] =
+    const [materialIdFromUrl, setMaterialIdFromUrl] =
     React.useState<number | null>(() => {
-      const raw = searchParams?.material_id as string | string[] | undefined;
+      const candidates = [
+        searchParams?.material_id,
+        (searchParams as any)?.materialId,
+        (searchParams as any)?.material_id,
+        (searchParams as any)?.material,
+        (searchParams as any)?.foam_material_id,
+      ] as Array<string | string[] | undefined>;
+
+      const raw = candidates.find((v) => typeof v !== "undefined");
       if (!raw) return null;
+
       const first = Array.isArray(raw) ? raw[0] : raw;
-      const parsed = Number(first);
+      const parsed = Number((first ?? "").toString().trim());
       return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     });
+
   React.useEffect(() => {
     try {
       if (typeof window === "undefined") return;
       const url = new URL(window.location.href);
-      const midRaw = url.searchParams.get("material_id");
+            const midRaw =
+        url.searchParams.get("material_id") ||
+        url.searchParams.get("materialId") ||
+        url.searchParams.get("material") ||
+        url.searchParams.get("foam_material_id");
+
       if (!midRaw) return;
+
       const parsed = Number(midRaw);
+
       if (!Number.isFinite(parsed) || parsed <= 0) return;
       setMaterialIdFromUrl((prev) => (prev === parsed ? prev : parsed));
     } catch {
@@ -686,6 +733,29 @@ export default function LayoutPage({
           // customer prefill (canonical)
           customerSeed = readCustomerFromUrl(url);
 
+                    // customer prefill (canonical)
+          customerSeed = readCustomerFromUrl(url);
+
+          // qty + material seed from URL (form deep-links)
+          const qtySeed = readQtyFromUrl(url);
+          const materialSeedRaw =
+            url.searchParams.get("material_id") ||
+            url.searchParams.get("materialId") ||
+            url.searchParams.get("material") ||
+            url.searchParams.get("foam_material_id");
+
+          const materialSeed = materialSeedRaw ? Number(materialSeedRaw) : NaN;
+
+          if (qtySeed != null) {
+            setInitialQty(qtySeed);
+          }
+
+          if (Number.isFinite(materialSeed) && materialSeed > 0) {
+            // only set if we don’t already have a better URL param parsed into state
+            setMaterialIdFromUrl((prev) => (prev == null ? materialSeed : prev));
+          }
+
+
 
 
           // layers + per-layer cavities (canonical) — ONLY ONCE
@@ -925,8 +995,9 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(mergedLayout);
             setInitialNotes(notesFromDb);
-            setInitialQty(qtyFromItems);
-            setInitialMaterialId(materialIdOverride ?? materialIdFromItems);
+                        setInitialQty(qtyFromItems ?? initialQty ?? null);
+            setInitialMaterialId(materialIdOverride ?? materialIdFromItems ?? materialIdFromUrl ?? null);
+
             setLoadingLayout(false);
           }
           return;
@@ -948,8 +1019,9 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
             setInitialNotes(notesFromDb);
-            setInitialQty(qtyFromItems);
-            setInitialMaterialId(materialIdOverride ?? materialIdFromItems);
+            // Qty/material: prefer DB items; fall back to URL-seeded state if DB is missing
+            setInitialQty(qtyFromItems ?? initialQty ?? null);
+            setInitialMaterialId(materialIdOverride ?? materialIdFromItems ?? materialIdFromUrl ?? null);
             setLoadingLayout(false);
           }
           return;
