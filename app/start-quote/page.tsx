@@ -229,7 +229,7 @@ export default function StartQuotePage() {
 
     // Land the user on the intended layer on first open (keep both keys for compatibility)
     p.set("activeLayer", String(cavityLayerIndex));
-    p.set("active_layer", String(cavityLayerIndex));
+    
 
     if (firstCavity) p.set("cavity", firstCavity);
 
