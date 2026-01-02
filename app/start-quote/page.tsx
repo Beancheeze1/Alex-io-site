@@ -95,9 +95,15 @@ type PrefillPayload = {
   createdAtIso?: string;
   outside?: { l?: string; w?: string; h?: string; units?: string };
   qty?: string;
-  holding?: string;
-  pocketCount?: string;
-  material?: { mode?: string; text?: string };
+
+  // NEW (widget v2)
+  shipMode?: string; // "box"|"mailer"|"unsure"
+  insertType?: string; // "single"|"set"|"unsure"
+  pocketsOn?: string; // "base"|"top"|"both"|"unsure"
+  holding?: string; // "pockets"|"loose"|"unsure"
+  pocketCount?: string; // "1"|"2"|"3+"|"unsure"
+
+  material?: { mode?: string; text?: string }; // mode: recommend|known
   notes?: string;
 };
 
@@ -113,6 +119,43 @@ function safeDecodePrefill(raw: string | null): PrefillPayload | null {
   }
 }
 
+function normalizeEnum<T extends string>(v: string, allowed: readonly T[]): T | "" {
+  const s = String(v || "").trim();
+  return (allowed as readonly string[]).includes(s) ? (s as T) : "";
+}
+
+// Best-effort parse for “2 layers 1" top pad + 3" base/body” inside notes.
+// Only applies when it’s unambiguous.
+function tryInferLayersFromText(raw: string): { layerCount?: number; thicknesses?: number[] } {
+  const s = String(raw || "").toLowerCase();
+
+  const mLayers = s.match(/(\d+)\s*layers?/);
+  const layerCount = mLayers ? Math.max(1, Math.min(4, Number(mLayers[1]) || 0)) : undefined;
+
+  // Top pad thickness (e.g., "1\" top pad" / "1 inch top pad")
+  const mTop =
+    s.match(/(\d+(?:\.\d+)?)\s*(?:\"|inches?|inch|in)\s*(?:top\s*pad|lid|cap)/) ?? null;
+
+  // Base/body thickness (e.g., "3\" body" / "3 inch base")
+  const mBase =
+    s.match(/(\d+(?:\.\d+)?)\s*(?:\"|inches?|inch|in)\s*(?:base|body|bottom|main)/) ?? null;
+
+  const top = mTop ? Number(mTop[1]) : null;
+  const base = mBase ? Number(mBase[1]) : null;
+
+  const topOk = top != null && Number.isFinite(top) && top > 0;
+  const baseOk = base != null && Number.isFinite(base) && base > 0;
+
+  // Only set thicknesses when we clearly have a 2-layer “base + top pad” situation.
+  if (layerCount === 2 && topOk && baseOk) {
+    // Convention: Layer 1 = base/body, Layer 2 = top pad/lid
+    return { layerCount: 2, thicknesses: [base as number, top as number] };
+  }
+
+  // If user said “2 layers” but only one thickness, don’t guess.
+  return { layerCount };
+}
+
 export default function StartQuotePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -121,26 +164,32 @@ export default function StartQuotePage() {
   const [company, setCompany] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [phone, setPhone] = React.useState("");
+
   const [qty, setQty] = React.useState("");
-  const [foam, setFoam] = React.useState(""); // keep as optional free-text notes
+  const [foam, setFoam] = React.useState(""); // optional free-text notes
   const [size, setSize] = React.useState("");
   const [cavities, setCavities] = React.useState("");
   const [notes, setNotes] = React.useState("");
+
+  // NEW: widget-collected structured choices become real inputs here
+  const [shipMode, setShipMode] = React.useState<"" | "box" | "mailer" | "unsure">("");
+  const [insertType, setInsertType] = React.useState<"" | "single" | "set" | "unsure">("");
+  const [pocketsOn, setPocketsOn] = React.useState<"" | "base" | "top" | "both" | "unsure">("");
+  const [holding, setHolding] = React.useState<"" | "pockets" | "loose" | "unsure">("");
+  const [pocketCount, setPocketCount] = React.useState<"" | "1" | "2" | "3+" | "unsure">("");
+  const [materialMode, setMaterialMode] = React.useState<"" | "recommend" | "known">("");
+  const [materialText, setMaterialText] = React.useState("");
 
   // Gate editor open on required fields (form-only)
   const [attemptedOpen, setAttemptedOpen] = React.useState(false);
 
   // --- materials (dropdown) ---
-  const [materialOptions, setMaterialOptions] = React.useState<MaterialOption[]>(
-    []
-  );
+  const [materialOptions, setMaterialOptions] = React.useState<MaterialOption[]>([]);
   const [materialId, setMaterialId] = React.useState<string>("");
 
   // --- layers ---
   const [layerCount, setLayerCount] = React.useState<number>(3);
-  const [layerThicknesses, setLayerThicknesses] = React.useState<number[]>([
-    1, 1, 1,
-  ]);
+  const [layerThicknesses, setLayerThicknesses] = React.useState<number[]>([1, 1, 1]);
 
   // explicit cavity layer (1-based)
   const [cavityLayerIndex, setCavityLayerIndex] = React.useState<number>(2);
@@ -164,50 +213,86 @@ export default function StartQuotePage() {
     const fromWidget = payload.source === "splash-widget";
     setIsWidgetPrefill(fromWidget);
 
-    // Set core fields
+    // Core fields
     const l = payload.outside?.l ? String(payload.outside.l).trim() : "";
     const w = payload.outside?.w ? String(payload.outside.w).trim() : "";
     const h = payload.outside?.h ? String(payload.outside.h).trim() : "";
-    if (l && w && h) {
-      setSize(`${l}x${w}x${h}`);
-    }
+    if (l && w && h) setSize(`${l}x${w}x${h}`);
 
     if (payload.qty != null) {
       const q = String(payload.qty).replace(/[^\d]/g, "");
       if (q) setQty(q);
     }
 
-    // Optional: fold widget info into notes/foam fields (no guessing, no URL logic changes)
-    const holding = payload.holding ? String(payload.holding).trim() : "";
-    const pocketCount = payload.pocketCount ? String(payload.pocketCount).trim() : "";
-    const matMode = payload.material?.mode ? String(payload.material.mode).trim() : "";
-    const matText = payload.material?.text ? String(payload.material.text).trim() : "";
-    const widgetNotes = payload.notes ? String(payload.notes).trim() : "";
+    // NEW: map widget structured fields into actual inputs (not just notes)
+    const ship = normalizeEnum(payload.shipMode || "", ["box", "mailer", "unsure"] as const);
+    if (ship) setShipMode(ship);
 
-    const noteLines: string[] = [];
-    if (holding) {
-      if (holding === "pockets") {
-        noteLines.push(`Holding: Cut-out pockets${pocketCount ? ` (${pocketCount})` : ""}`);
-      } else if (holding === "loose") {
-        noteLines.push("Holding: Loose / no pockets");
-      } else if (holding === "unsure") {
-        noteLines.push("Holding: Not sure yet");
-      } else {
-        noteLines.push(`Holding: ${holding}`);
+    const ins = normalizeEnum(payload.insertType || "", ["single", "set", "unsure"] as const);
+    if (ins) setInsertType(ins);
+
+    const pocOn = normalizeEnum(payload.pocketsOn || "", ["base", "top", "both", "unsure"] as const);
+    if (pocOn) setPocketsOn(pocOn);
+
+    const hold = normalizeEnum(payload.holding || "", ["pockets", "loose", "unsure"] as const);
+    if (hold) setHolding(hold);
+
+    const pc = normalizeEnum(payload.pocketCount || "", ["1", "2", "3+", "unsure"] as const);
+    if (pc) setPocketCount(pc);
+
+    const mm = normalizeEnum(payload.material?.mode || "", ["recommend", "known"] as const);
+    if (mm) setMaterialMode(mm);
+
+    const mt = payload.material?.text ? String(payload.material.text).trim() : "";
+    if (mt) setMaterialText(mt);
+
+    // Keep your existing foam notes behavior (but don’t “lose” materialText)
+    if (mm === "known" && mt) {
+      // Keep deterministic dropdown intact; capture intent in foam notes too.
+      setFoam(mt);
+    }
+
+    // Best-effort: infer layers + thicknesses from widget notes when clear
+    const widgetNotes = payload.notes ? String(payload.notes).trim() : "";
+    if (widgetNotes) {
+      const inferred = tryInferLayersFromText(widgetNotes);
+      if (inferred.layerCount && Number.isFinite(inferred.layerCount)) {
+        setLayerCount(inferred.layerCount);
+      }
+      if (inferred.thicknesses && inferred.thicknesses.length) {
+        setLayerThicknesses((prev) => {
+          const next = [...prev];
+          for (let i = 0; i < inferred.thicknesses!.length; i++) {
+            next[i] = inferred.thicknesses![i];
+          }
+          return next.slice(0, inferred.thicknesses!.length);
+        });
+        // If we inferred a 2-layer set, default cavities to base (Layer 1) unless already chosen.
+        setCavityLayerIndex((prev) => (Number.isFinite(prev) ? prev : 1));
       }
     }
 
-    if (matMode === "known" && matText) {
-      // Keep deterministic dropdown intact; just capture the user intent in foam notes.
-      setFoam(matText);
-    } else if (matMode === "recommend") {
-      noteLines.push("Material: Recommended");
-    }
+    // Also fold widget info into NOTES as a readable summary (additive, not replacing user typing)
+    const noteLines: string[] = [];
 
+    if (ship) noteLines.push(`Shipping: ${ship === "box" ? "Box" : ship === "mailer" ? "Mailer" : "Not sure"}`);
+    if (ins) noteLines.push(`Insert: ${ins === "single" ? "Single" : ins === "set" ? "Set (base + top)" : "Not sure"}`);
+    if (ins === "set" && pocOn) noteLines.push(`Pockets on: ${pocOn}`);
+    if (hold) {
+      if (hold === "pockets") noteLines.push(`Holding: Cut-out pockets${pc ? ` (${pc})` : ""}`);
+      if (hold === "loose") noteLines.push("Holding: Loose / no pockets");
+      if (hold === "unsure") noteLines.push("Holding: Not sure yet");
+    }
+    if (mm === "recommend") noteLines.push("Material: Recommended");
+    if (mm === "known" && mt) noteLines.push(`Material: ${mt}`);
     if (widgetNotes) noteLines.push(widgetNotes);
 
     if (noteLines.length) {
-      setNotes(noteLines.join("\n"));
+      setNotes((prev) => {
+        const existing = String(prev || "").trim();
+        const merged = existing ? `${existing}\n\n${noteLines.join("\n")}` : noteLines.join("\n");
+        return merged.trim();
+      });
     }
 
     prefillAppliedRef.current = true;
@@ -239,14 +324,13 @@ export default function StartQuotePage() {
             id: Number(x?.id),
             name: String(x?.name ?? ""),
             family: x?.family ?? null,
-            density_lb_ft3:
-              x?.density_lb_ft3 == null ? null : Number(x.density_lb_ft3),
+            density_lb_ft3: x?.density_lb_ft3 == null ? null : Number(x.density_lb_ft3),
           }))
           .filter((m) => Number.isFinite(m.id) && m.id > 0 && m.name);
 
         if (!cancelled) setMaterialOptions(parsed);
       } catch {
-        // Intentionally silent. If endpoint not present, dropdown will be empty.
+        // silent
       }
     }
 
@@ -304,7 +388,6 @@ export default function StartQuotePage() {
     const matIdNum = Number(materialId);
     if (Number.isFinite(matIdNum) && matIdNum > 0) {
       p.set("material_id", String(matIdNum));
-
       const picked = materialOptions.find((m) => m.id === matIdNum);
       if (picked?.name) p.set("material_label", picked.name);
     }
@@ -320,12 +403,18 @@ export default function StartQuotePage() {
 
     // Cavity seeding
     p.set("layer_cavity_layer_index", String(cavityLayerIndex));
-
-    // Land the user on the intended layer on first open (keep both keys for compatibility)
     p.set("activeLayer", String(cavityLayerIndex));
     p.set("active_layer", String(cavityLayerIndex));
-
     if (firstCavity) p.set("cavity", firstCavity);
+
+    // NEW: pass widget-intent as query params (safe even if ignored)
+    if (shipMode) p.set("ship_mode", shipMode);
+    if (insertType) p.set("insert_type", insertType);
+    if (insertType === "set" && pocketsOn) p.set("pockets_on", pocketsOn);
+    if (holding) p.set("holding", holding);
+    if (holding === "pockets" && pocketCount) p.set("pocket_count", pocketCount);
+    if (materialMode) p.set("material_mode", materialMode);
+    if (materialText.trim()) p.set("material_text", materialText.trim());
 
     // Optional notes / user-entered foam text (kept)
     if (foam.trim()) p.set("foam", foam.trim());
@@ -360,14 +449,14 @@ export default function StartQuotePage() {
             </div>
             <div className="mt-1 text-sm text-slate-300">
               Fill this in and we’ll jump straight into the{" "}
-              <span className="text-slate-100 font-semibold">seeded editor</span>.
-              (No email is sent from this page.)
+              <span className="text-slate-100 font-semibold">seeded editor</span>. (No email is
+              sent from this page.)
             </div>
 
             {isWidgetPrefill ? (
               <div className="mt-2 text-xs text-slate-400">
-                Detected <span className="text-slate-200">splash widget</span> prefill —
-                contact fields are optional for the reveal flow.
+                Detected <span className="text-slate-200">splash widget</span> prefill — contact
+                fields are optional for the reveal flow.
               </div>
             ) : null}
           </div>
@@ -437,6 +526,93 @@ export default function StartQuotePage() {
               />
             </Field>
 
+            <Field label="SHIPPING">
+              <select
+                value={shipMode}
+                onChange={(e) => setShipMode(e.target.value as any)}
+                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+              >
+                <option value="">Select…</option>
+                <option value="mailer">Mailer</option>
+                <option value="box">Box</option>
+                <option value="unsure">Not sure</option>
+              </select>
+              <div className="mt-1 text-xs text-slate-400">
+                Used for fit assumptions (we usually undersize L/W by 0.125&quot; for drop-in fit).
+              </div>
+            </Field>
+
+            <Field label="INSERT TYPE">
+              <select
+                value={insertType}
+                onChange={(e) => {
+                  const v = e.target.value as any;
+                  setInsertType(v);
+                  // keep dependent fields sensible
+                  if (v !== "set") setPocketsOn("");
+                }}
+                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+              >
+                <option value="">Select…</option>
+                <option value="single">Single insert</option>
+                <option value="set">Set (base + top pad/lid)</option>
+                <option value="unsure">Not sure</option>
+              </select>
+            </Field>
+
+            {insertType === "set" ? (
+              <Field label="POCKETS ON (IF SET)">
+                <select
+                  value={pocketsOn}
+                  onChange={(e) => setPocketsOn(e.target.value as any)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                >
+                  <option value="">Select…</option>
+                  <option value="base">Base</option>
+                  <option value="top">Top</option>
+                  <option value="both">Both</option>
+                  <option value="unsure">Not sure</option>
+                </select>
+              </Field>
+            ) : (
+              <div />
+            )}
+
+            <Field label="HOLDING">
+              <select
+                value={holding}
+                onChange={(e) => {
+                  const v = e.target.value as any;
+                  setHolding(v);
+                  if (v !== "pockets") setPocketCount("");
+                }}
+                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+              >
+                <option value="">Select…</option>
+                <option value="pockets">Cut-out pockets</option>
+                <option value="loose">Loose / no pockets</option>
+                <option value="unsure">Not sure</option>
+              </select>
+            </Field>
+
+            {holding === "pockets" ? (
+              <Field label="POCKET COUNT (IF POCKETS)">
+                <select
+                  value={pocketCount}
+                  onChange={(e) => setPocketCount(e.target.value as any)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                >
+                  <option value="">Select…</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3+">3+</option>
+                  <option value="unsure">Not sure</option>
+                </select>
+              </Field>
+            ) : (
+              <div />
+            )}
+
             {/* deterministic material selection */}
             <Field label="MATERIAL (PICK ONE)">
               <select
@@ -459,6 +635,29 @@ export default function StartQuotePage() {
                 <span className="text-slate-200">material_id</span> into the editor URL.
               </div>
             </Field>
+
+            <Field label="MATERIAL MODE (FROM CHAT)">
+              <select
+                value={materialMode}
+                onChange={(e) => setMaterialMode(e.target.value as any)}
+                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+              >
+                <option value="">Select…</option>
+                <option value="recommend">Recommend</option>
+                <option value="known">Known</option>
+              </select>
+            </Field>
+
+            <div className="sm:col-span-2">
+              <Field label="MATERIAL TEXT (IF KNOWN)">
+                <input
+                  value={materialText}
+                  onChange={(e) => setMaterialText(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                  placeholder='Example: "EPE 1.7#"'
+                />
+              </Field>
+            </div>
 
             {/* Keep your original foam free-text as optional notes */}
             <Field label="FOAM NOTES (OPTIONAL)">
@@ -579,9 +778,7 @@ export default function StartQuotePage() {
                   : "bg-slate-700/40 ring-white/10 opacity-70 cursor-not-allowed",
               ].join(" ")}
               title={
-                canOpenEditor || isWidgetPrefill
-                  ? ""
-                  : "Please fill in Name, Email, and Phone first."
+                canOpenEditor || isWidgetPrefill ? "" : "Please fill in Name, Email, and Phone first."
               }
             >
               Editor — next step →
@@ -597,8 +794,8 @@ export default function StartQuotePage() {
           </div>
 
           <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-400">
-            This page does not send email. After you finalize in the editor, use
-            the normal “Apply to quote” flow.
+            This page does not send email. After you finalize in the editor, use the normal “Apply to
+            quote” flow.
           </div>
         </div>
       </div>

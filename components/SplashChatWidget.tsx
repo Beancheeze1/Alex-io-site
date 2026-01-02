@@ -5,23 +5,31 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 type WidgetFacts = {
+  // core
   outsideL?: string;
   outsideW?: string;
   outsideH?: string;
   qty?: string;
 
+  // shipping + fit intent
   shipMode?: "box" | "mailer" | "unsure";
 
-  insertType?: "single" | "set" | "unsure";
+  // build intent / layers
+  insertType?: "single" | "set" | "unsure"; // set = base + top pad/lid
   pocketsOn?: "base" | "top" | "both" | "unsure";
 
+  // holding
   holding?: "pockets" | "loose" | "unsure";
   pocketCount?: "1" | "2" | "3+" | "unsure";
 
+  // material
   materialMode?: "recommend" | "known";
   materialText?: string;
 
+  // notes (freeform)
   notes?: string;
+
+  // meta
   createdAtIso?: string;
 };
 
@@ -31,7 +39,7 @@ type Msg = {
   text: string;
 };
 
-const LS_KEY = "alexio_splash_widget_v2"; // bump to avoid old collisions
+const LS_KEY = "alexio_splash_widget_v2"; // bump to avoid old step-state collisions
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
@@ -43,38 +51,6 @@ function safeJsonParse<T>(raw: string | null): T | null {
     return JSON.parse(raw) as T;
   } catch {
     return null;
-  }
-}
-
-// IMPORTANT: never touch localStorage during SSR
-function canUseLocalStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-}
-
-function lsGet(key: string) {
-  if (!canUseLocalStorage()) return null;
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function lsSet(key: string, value: string) {
-  if (!canUseLocalStorage()) return;
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-}
-
-function lsRemove(key: string) {
-  if (!canUseLocalStorage()) return;
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // ignore
   }
 }
 
@@ -162,20 +138,24 @@ type ChatResponse = {
   quickReplies?: string[];
 };
 
-export default function SplashChatWidget({ startQuotePath }: { startQuotePath: string }) {
+export default function SplashChatWidget({
+  startQuotePath,
+}: {
+  startQuotePath: string;
+}) {
   const router = useRouter();
 
   const [open, setOpen] = React.useState(false);
   const [minimizedHint, setMinimizedHint] = React.useState(false);
 
   const [facts, setFacts] = React.useState<WidgetFacts>(() => {
-    const saved = safeJsonParse<{ facts: WidgetFacts }>(lsGet(LS_KEY));
+    const saved = safeJsonParse<{ facts: WidgetFacts }>(localStorage.getItem(LS_KEY));
     if (saved?.facts) return saved.facts;
     return { createdAtIso: new Date().toISOString() };
   });
 
   const [msgs, setMsgs] = React.useState<Msg[]>(() => {
-    const saved = safeJsonParse<{ msgs: Msg[] }>(lsGet(LS_KEY));
+    const saved = safeJsonParse<{ msgs: Msg[] }>(localStorage.getItem(LS_KEY));
     if (saved?.msgs?.length) return saved.msgs;
 
     return [
@@ -197,29 +177,37 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
+  // “done” = the brain says we have enough to open /start-quote
   const [done, setDone] = React.useState<boolean>(() => {
-    const saved = safeJsonParse<{ done: boolean }>(lsGet(LS_KEY));
+    const saved = safeJsonParse<{ done: boolean }>(localStorage.getItem(LS_KEY));
     return saved?.done ?? false;
   });
 
   const [quickReplies, setQuickReplies] = React.useState<string[]>(() => {
-    const saved = safeJsonParse<{ quickReplies: string[] }>(lsGet(LS_KEY));
+    const saved = safeJsonParse<{ quickReplies: string[] }>(localStorage.getItem(LS_KEY));
     return saved?.quickReplies ?? [];
   });
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
 
-  // Persist (client only)
+  // NEW: lets Enter key submit via the existing <form onSubmit> path
+  const formRef = React.useRef<HTMLFormElement | null>(null);
+
+  // Persist
   React.useEffect(() => {
-    lsSet(
-      LS_KEY,
-      JSON.stringify({
-        facts,
-        msgs,
-        done,
-        quickReplies,
-      })
-    );
+    try {
+      localStorage.setItem(
+        LS_KEY,
+        JSON.stringify({
+          facts,
+          msgs,
+          done,
+          quickReplies,
+        })
+      );
+    } catch {
+      // ignore
+    }
   }, [facts, msgs, done, quickReplies]);
 
   // Auto scroll
@@ -262,7 +250,11 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
     setDone(false);
     setQuickReplies([]);
     setInput("");
-    lsRemove(LS_KEY);
+    try {
+      localStorage.removeItem(LS_KEY);
+    } catch {
+      // ignore
+    }
   }
 
   async function callBrain(userText: string) {
@@ -277,10 +269,14 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
       }),
     });
 
-    if (!res.ok) throw new Error(`brain_http_${res.status}`);
+    if (!res.ok) {
+      throw new Error(`brain_http_${res.status}`);
+    }
 
     const data = (await res.json()) as ChatResponse;
-    if (!data || typeof data.assistantMessage !== "string") throw new Error("brain_bad_payload");
+    if (!data || typeof data.assistantMessage !== "string") {
+      throw new Error("brain_bad_payload");
+    }
     return data;
   }
 
@@ -294,15 +290,19 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
     try {
       const data = await callBrain(t);
 
+      // Apply fact updates (additive)
       if (data.facts && typeof data.facts === "object") {
         setFacts((prev) => ({ ...prev, ...data.facts }));
       }
 
+      // Bot message
       pushBot(data.assistantMessage);
 
+      // done + quick replies
       setDone(Boolean(data.done));
       setQuickReplies(Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []);
     } catch {
+      // Fallback (still conversational)
       pushBot(
         "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (L×W×H) and qty."
       );
@@ -312,6 +312,8 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
   }
 
   function openStartQuote() {
+    // Add a little “shipping fit” note automatically when box/mailer selected
+    // (This is just notes text; /start-quote already displays the fit hint.)
     const payloadFacts: WidgetFacts = { ...facts };
     const noteBits: string[] = [];
 
@@ -338,6 +340,7 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
 
   return (
     <>
+      {/* Bubble */}
       <div className="fixed bottom-5 right-5 z-[80]">
         {!open && (
           <button
@@ -365,9 +368,12 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
 
         {open && (
           <div className="w-[360px] overflow-hidden rounded-2xl border border-white/12 bg-slate-950/85 shadow-[0_18px_70px_rgba(0,0,0,0.65)] backdrop-blur">
+            {/* Header */}
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div>
-                <div className="text-xs font-semibold tracking-widest text-sky-300/80">ALEX-IO</div>
+                <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+                  ALEX-IO
+                </div>
                 <div className="mt-0.5 text-[11px] text-slate-300">
                   Talk to me like a human. I’ll keep it tight.
                 </div>
@@ -392,6 +398,7 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
               </div>
             </div>
 
+            {/* Messages */}
             <div ref={listRef} className="max-h-[380px] overflow-y-auto px-4 py-3">
               <div className="space-y-3">
                 {msgs.map((m) => (
@@ -415,13 +422,16 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
                 ))}
               </div>
 
+              {/* Quick replies */}
               {!done && quickReplies.length ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {quickReplies.map((q) => (
                     <button
                       key={q}
                       type="button"
-                      onClick={() => void handleSend(q)}
+                      onClick={() => {
+                        void handleSend(q);
+                      }}
                       className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[12px] text-slate-100 hover:bg-white/[0.08]"
                       disabled={busy}
                       title={q}
@@ -432,6 +442,7 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
                 </div>
               ) : null}
 
+              {/* Done card */}
               {done ? (
                 <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                   <div className="text-xs font-semibold tracking-widest text-sky-300/80">
@@ -461,8 +472,10 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
               ) : null}
             </div>
 
+            {/* Input */}
             <div className="border-t border-white/10 p-3">
               <form
+                ref={formRef}
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (busy || done) return;
@@ -475,6 +488,14 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Enter sends; Shift+Enter makes a newline.
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      // Let the form onSubmit logic decide if it's allowed (busy/done/input)
+                      formRef.current?.requestSubmit();
+                    }
+                  }}
                   rows={1}
                   placeholder={done ? "Reset to start a new quote" : "Type here…"}
                   disabled={done}
