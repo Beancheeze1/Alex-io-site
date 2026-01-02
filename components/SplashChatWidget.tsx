@@ -177,7 +177,6 @@ export default function SplashChatWidget({
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
-  // “done” = the brain says we have enough to open /start-quote
   const [done, setDone] = React.useState<boolean>(() => {
     const saved = safeJsonParse<{ done: boolean }>(localStorage.getItem(LS_KEY));
     return saved?.done ?? false;
@@ -189,6 +188,16 @@ export default function SplashChatWidget({
   });
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
+
+  // ✅ NEW: refs so callBrain always uses latest state (prevents “stuck/repeat” feel)
+  const msgsRef = React.useRef<Msg[]>(msgs);
+  const factsRef = React.useRef<WidgetFacts>(facts);
+  React.useEffect(() => {
+    msgsRef.current = msgs;
+  }, [msgs]);
+  React.useEffect(() => {
+    factsRef.current = facts;
+  }, [facts]);
 
   // Persist
   React.useEffect(() => {
@@ -247,6 +256,7 @@ export default function SplashChatWidget({
     setDone(false);
     setQuickReplies([]);
     setInput("");
+    setBusy(false);
     try {
       localStorage.removeItem(LS_KEY);
     } catch {
@@ -254,32 +264,46 @@ export default function SplashChatWidget({
     }
   }
 
+  // ✅ NEW: hard timeout so it can’t hang forever
   async function callBrain(userText: string) {
-    const res = await fetch(`/api/widget/chat?t=${Date.now()}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        messages: msgs.map((m) => ({ role: m.role, text: m.text })),
-        userText,
-        facts,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutMs = 18000; // 18s feels “alive” but avoids dead hangs
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (!res.ok) {
-      throw new Error(`brain_http_${res.status}`);
-    }
+    try {
+      const res = await fetch(`/api/widget/chat?t=${Date.now()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        signal: controller.signal,
+        body: JSON.stringify({
+          // use refs so we always send current state
+          messages: msgsRef.current.map((m) => ({ role: m.role, text: m.text })),
+          userText,
+          facts: factsRef.current,
+        }),
+      });
 
-    const data = (await res.json()) as ChatResponse;
-    if (!data || typeof data.assistantMessage !== "string") {
-      throw new Error("brain_bad_payload");
+      if (!res.ok) {
+        throw new Error(`brain_http_${res.status}`);
+      }
+
+      const data = (await res.json()) as ChatResponse;
+      if (!data || typeof data.assistantMessage !== "string") {
+        throw new Error("brain_bad_payload");
+      }
+      return data;
+    } finally {
+      clearTimeout(timer);
     }
-    return data;
   }
 
   async function handleSend(text: string) {
     const t = text.trim();
     if (!t) return;
+
+    // ✅ NEW: guard against double-send races (quick-replies especially)
+    if (busy || done) return;
 
     setBusy(true);
     pushUser(t);
@@ -287,21 +311,20 @@ export default function SplashChatWidget({
     try {
       const data = await callBrain(t);
 
-      // Apply fact updates (additive)
       if (data.facts && typeof data.facts === "object") {
         setFacts((prev) => ({ ...prev, ...data.facts }));
       }
 
-      // Bot message
       pushBot(data.assistantMessage);
 
-      // done + quick replies
       setDone(Boolean(data.done));
       setQuickReplies(Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []);
-    } catch {
-      // Fallback (still conversational)
+    } catch (e: any) {
+      const isAbort = String(e?.name ?? "").toLowerCase() === "aborterror";
       pushBot(
-        "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (L×W×H) and qty."
+        isAbort
+          ? "Still here — that took too long on my side. Try again (or paste size + qty in one line)."
+          : "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (L×W×H) and qty."
       );
     } finally {
       setBusy(false);
@@ -309,13 +332,11 @@ export default function SplashChatWidget({
   }
 
   function openStartQuote() {
-    // Add a little “shipping fit” note automatically when box/mailer selected
-    // (This is just notes text; /start-quote already displays the fit hint.)
     const payloadFacts: WidgetFacts = { ...facts };
     const noteBits: string[] = [];
 
     if (payloadFacts.shipMode === "box" || payloadFacts.shipMode === "mailer") {
-      noteBits.push("Fit: For box/mailer, undersize foam L/W by 0.125\" for drop-in fit.");
+      noteBits.push('Fit: For box/mailer, undersize foam L/W by 0.125" for drop-in fit.');
     }
     if (payloadFacts.insertType === "set") {
       noteBits.push("Insert: Set (base + top pad/lid).");
@@ -337,7 +358,6 @@ export default function SplashChatWidget({
 
   return (
     <>
-      {/* Bubble */}
       <div className="fixed bottom-5 right-5 z-[80]">
         {!open && (
           <button
@@ -365,12 +385,9 @@ export default function SplashChatWidget({
 
         {open && (
           <div className="w-[360px] overflow-hidden rounded-2xl border border-white/12 bg-slate-950/85 shadow-[0_18px_70px_rgba(0,0,0,0.65)] backdrop-blur">
-            {/* Header */}
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div>
-                <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-                  ALEX-IO
-                </div>
+                <div className="text-xs font-semibold tracking-widest text-sky-300/80">ALEX-IO</div>
                 <div className="mt-0.5 text-[11px] text-slate-300">
                   Talk to me like a human. I’ll keep it tight.
                 </div>
@@ -395,7 +412,6 @@ export default function SplashChatWidget({
               </div>
             </div>
 
-            {/* Messages */}
             <div ref={listRef} className="max-h-[380px] overflow-y-auto px-4 py-3">
               <div className="space-y-3">
                 {msgs.map((m) => (
@@ -419,17 +435,13 @@ export default function SplashChatWidget({
                 ))}
               </div>
 
-              {/* Quick replies (optional, but still chat-like) */}
               {!done && quickReplies.length ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {quickReplies.map((q) => (
                     <button
                       key={q}
                       type="button"
-                      onClick={() => {
-                        // act like the user typed it
-                        void handleSend(q);
-                      }}
+                      onClick={() => void handleSend(q)}
                       className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[12px] text-slate-100 hover:bg-white/[0.08]"
                       disabled={busy}
                       title={q}
@@ -440,7 +452,6 @@ export default function SplashChatWidget({
                 </div>
               ) : null}
 
-              {/* Done card */}
               {done ? (
                 <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                   <div className="text-xs font-semibold tracking-widest text-sky-300/80">
@@ -463,13 +474,13 @@ export default function SplashChatWidget({
                   </div>
 
                   <div className="mt-2 text-[11px] text-slate-400">
-                    Opens the seeded editor via <code className="text-slate-300">{startQuotePath}</code>.
+                    Opens the seeded editor via{" "}
+                    <code className="text-slate-300">{startQuotePath}</code>.
                   </div>
                 </div>
               ) : null}
             </div>
 
-            {/* Input */}
             <div className="border-t border-white/10 p-3">
               <form
                 onSubmit={(e) => {
@@ -494,7 +505,7 @@ export default function SplashChatWidget({
                   disabled={busy || done || !input.trim()}
                   className="rounded-2xl bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Send
+                  {busy ? "…" : "Send"}
                 </button>
               </form>
 
