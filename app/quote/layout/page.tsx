@@ -839,8 +839,9 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
-            setInitialQty(null);
-            setInitialMaterialId(materialIdOverride ?? null);
+           setInitialQty(qtySeedLocal ?? null);
+setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUrl ?? null);
+
 
             // NEW: allow form deep-links to prefill customer fields
             setInitialCustomerName(customerSeed.name || "");
@@ -870,8 +871,9 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(fallback);
             setInitialNotes("");
-            setInitialQty(null);
-            setInitialMaterialId(materialIdOverride ?? null);
+            setInitialQty(qtySeedLocal ?? null);
+setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUrl ?? null);
+
             // fallback to URL seed (form deep-link) instead of blanking
             setInitialCustomerName(customerSeed.name || "");
             setInitialCustomerEmail(customerSeed.email || "");
