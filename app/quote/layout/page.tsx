@@ -669,6 +669,10 @@ export default function LayoutPage({
         phone: "",
       };
 
+            // NEW: keep URL seeds in *locals* to avoid stale React state overwriting them later
+      let qtySeedLocal: number | null = null;
+      let materialSeedLocal: number | null = null;
+
 
       try {
         if (typeof window !== "undefined") {
@@ -729,31 +733,32 @@ export default function LayoutPage({
           if (cavityParts.length > 0) {
             effectiveCavityStr = normalizeCavitiesParam(cavityParts);
           }
-
           // customer prefill (canonical)
           customerSeed = readCustomerFromUrl(url);
 
-                    // customer prefill (canonical)
-          customerSeed = readCustomerFromUrl(url);
 
           // qty + material seed from URL (form deep-links)
-          const qtySeed = readQtyFromUrl(url);
+          qtySeedLocal = readQtyFromUrl(url);
+
           const materialSeedRaw =
             url.searchParams.get("material_id") ||
             url.searchParams.get("materialId") ||
             url.searchParams.get("material") ||
             url.searchParams.get("foam_material_id");
 
-          const materialSeed = materialSeedRaw ? Number(materialSeedRaw) : NaN;
+          const materialSeedNum = materialSeedRaw ? Number(materialSeedRaw) : NaN;
+          materialSeedLocal =
+            Number.isFinite(materialSeedNum) && materialSeedNum > 0 ? materialSeedNum : null;
 
-          if (qtySeed != null) {
-            setInitialQty(qtySeed);
+          if (qtySeedLocal != null) {
+            setInitialQty(qtySeedLocal);
           }
 
-          if (Number.isFinite(materialSeed) && materialSeed > 0) {
-            // only set if we don’t already have a better URL param parsed into state
-            setMaterialIdFromUrl((prev) => (prev == null ? materialSeed : prev));
+          if (materialSeedLocal != null) {
+            // keep existing state if already set; otherwise seed it
+            setMaterialIdFromUrl((prev) => (prev == null ? materialSeedLocal : prev));
           }
+
 
 
 
@@ -867,10 +872,11 @@ export default function LayoutPage({
             setInitialNotes("");
             setInitialQty(null);
             setInitialMaterialId(materialIdOverride ?? null);
-            setInitialCustomerName("");
-            setInitialCustomerEmail("");
-            setInitialCustomerCompany("");
-            setInitialCustomerPhone("");
+            // fallback to URL seed (form deep-link) instead of blanking
+            setInitialCustomerName(customerSeed.name || "");
+            setInitialCustomerEmail(customerSeed.email || "");
+            setInitialCustomerCompany(customerSeed.company || "");
+            setInitialCustomerPhone(customerSeed.phone || "");
             setLoadingLayout(false);
           }
           return;
@@ -995,8 +1001,17 @@ export default function LayoutPage({
           if (!cancelled) {
             setInitialLayout(mergedLayout);
             setInitialNotes(notesFromDb);
-                        setInitialQty(qtyFromItems ?? initialQty ?? null);
-            setInitialMaterialId(materialIdOverride ?? materialIdFromItems ?? materialIdFromUrl ?? null);
+                        // Prefer DB items; fall back to URL seeds (locals) to avoid stale React state.
+            setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
+
+            // Prefer explicit override; then DB item; then URL seed local; then state (last resort)
+            setInitialMaterialId(
+              materialIdOverride ??
+                materialIdFromItems ??
+                materialSeedLocal ??
+                materialIdFromUrl ??
+                null,
+            );
 
             setLoadingLayout(false);
           }
@@ -1020,8 +1035,14 @@ export default function LayoutPage({
             setInitialLayout(layoutFromDb);
             setInitialNotes(notesFromDb);
             // Qty/material: prefer DB items; fall back to URL-seeded state if DB is missing
-            setInitialQty(qtyFromItems ?? initialQty ?? null);
-            setInitialMaterialId(materialIdOverride ?? materialIdFromItems ?? materialIdFromUrl ?? null);
+            setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
+            setInitialMaterialId(
+              materialIdOverride ??
+                materialIdFromItems ??
+                materialSeedLocal ??
+                materialIdFromUrl ??
+                null,
+            );
             setLoadingLayout(false);
           }
           return;
@@ -1037,8 +1058,18 @@ export default function LayoutPage({
         if (!cancelled) {
           setInitialLayout(fallback);
           setInitialNotes("");
-          setInitialQty(qtyFromItems);
-          setInitialMaterialId(materialIdOverride ?? materialIdFromItems);
+
+          // Prefer DB items; else URL seeds (locals)
+          setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
+
+          setInitialMaterialId(
+            materialIdOverride ??
+              materialIdFromItems ??
+              materialSeedLocal ??
+              materialIdFromUrl ??
+              null,
+          );
+
           setLoadingLayout(false);
         }
       } catch (err) {
@@ -1054,10 +1085,11 @@ export default function LayoutPage({
           setInitialNotes("");
           setInitialQty(null);
           setInitialMaterialId(materialIdOverride ?? null);
-          setInitialCustomerName("");
-          setInitialCustomerEmail("");
-          setInitialCustomerCompany("");
-          setInitialCustomerPhone("");
+                   setInitialCustomerName(customerSeed.name || "");
+          setInitialCustomerEmail(customerSeed.email || "");
+          setInitialCustomerCompany(customerSeed.company || "");
+          setInitialCustomerPhone(customerSeed.phone || "");
+
           setLoadingLayout(false);
         }
       }
