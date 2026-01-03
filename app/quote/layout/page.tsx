@@ -243,16 +243,42 @@ function readQtyFromUrl(url: URL): number | null {
   return null;
 }
 function readNotesFromUrl(url: URL): string {
-  const raw = url.searchParams.get("notes");
-  if (!raw) return "";
+  // Accept multiple keys because different entry points use different names.
+  // Keep "notes" first as canonical.
+  const keys = [
+    "notes",
+    "note",
+    "customer_notes",
+    "customerNote",
+    "instructions",
+    "special_instructions",
+    "specialInstructions",
+    "message",
+    "details",
+  ];
 
-  try {
-    // URLSearchParams decodes %XX but leaves '+' intact
-    return decodeURIComponent(raw.replace(/\+/g, " ")).trim();
-  } catch {
-    return raw.replace(/\+/g, " ").trim();
+  const parts: string[] = [];
+
+  for (const k of keys) {
+    const all = url.searchParams
+      .getAll(k)
+      .map((s) => (s ?? "").toString())
+      .map((s) => s.replace(/\+/g, " ").trim()) // '+' may survive URLSearchParams decoding
+      .filter(Boolean);
+
+    if (all.length > 0) {
+      parts.push(...all);
+      break; // first matching key wins (prevents double-pulling same content under aliases)
+    }
   }
+
+  // De-dupe while preserving order
+  const unique: string[] = [];
+  for (const p of parts) if (!unique.includes(p)) unique.push(p);
+
+  return unique.join("\n").trim();
 }
+
 
 
 
