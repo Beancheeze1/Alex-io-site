@@ -1607,16 +1607,26 @@ export default function FoamAdvisorPage({
                                       type="button"
                                       className="inline-flex items-center rounded-full border border-emerald-500/70 bg-emerald-500/20 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/30 transition"
                                       onClick={(e) => {
-                                        e.stopPropagation();
-                                        const q = effectiveQuoteNo || "";
-                                        const blk = blockParam || "";
-                                        const mid = firstMatched.id;
-                                        window.location.href = `/quote/layout?quote_no=${encodeURIComponent(
-                                          q,
-                                        )}&block=${encodeURIComponent(
-                                          blk,
-                                        )}&material_id=${mid}`;
-                                      }}
+  e.stopPropagation();
+
+  const mid = firstMatched.id;
+
+  // Preserve ALL existing query params (notes, layers, etc.)
+  const url = new URL(window.location.href);
+  const sp = new URLSearchParams(url.search);
+
+  // Keep/ensure these are present (safe; does not remove anything)
+  const q = effectiveQuoteNo || "";
+  const blk = blockParam || "";
+  if (q) sp.set("quote_no", q);
+  if (blk) sp.set("block", blk);
+
+  // Override/seed material for the editor
+  sp.set("material_id", String(mid));
+
+  window.location.href = `/quote/layout?${sp.toString()}`;
+}}
+
                                     >
                                       Use this in layout
                                     </button>
