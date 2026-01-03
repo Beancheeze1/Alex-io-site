@@ -161,6 +161,33 @@ function tryInferLayersFromText(raw: string): { layerCount?: number; thicknesses
   return { layerCount };
 }
 
+// ---- material text → option matcher (best-effort, unambiguous only) ----
+function normMat(s: string) {
+  return String(s || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9#\.\- ]+/g, ""); // keep # . - and spaces
+}
+
+function findMaterialMatchId(materialText: string, options: MaterialOption[]): number | null {
+  const q = normMat(materialText);
+  if (!q) return null;
+
+  // 1) exact name match
+  const exact = options.filter((o) => normMat(o.name) === q);
+  if (exact.length === 1) return exact[0].id;
+
+  // 2) contains match (either direction), but only accept if unique
+  const contains = options.filter((o) => {
+    const n = normMat(o.name);
+    return n.includes(q) || q.includes(n);
+  });
+  if (contains.length === 1) return contains[0].id;
+
+  return null; // ambiguous or not found
+}
+
 export default function StartQuotePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -267,7 +294,7 @@ export default function StartQuotePage() {
     const lcNum = Number(String(payload.layerCount ?? "").trim());
     const lcOk = Number.isFinite(lcNum) && lcNum >= 1 && lcNum <= 4;
 
-        const ltsRaw = Array.isArray(payload.layerThicknesses) ? payload.layerThicknesses : [];
+    const ltsRaw = Array.isArray(payload.layerThicknesses) ? payload.layerThicknesses : [];
 
     // Preserve positions (do NOT filter) so ["", "1"] stays [null, 1] (not [1]).
     const ltsPos = ltsRaw.map((x) => {
@@ -297,10 +324,9 @@ export default function StartQuotePage() {
       }
     }
 
-
     if (lcOk) setLayerCount(lcNum);
 
-        if (lcOk && ltsPos.length) {
+    if (lcOk && ltsPos.length) {
       setLayerThicknesses(() => {
         const wantLen = Math.max(1, Math.min(4, lcNum));
         const next = Array.from({ length: wantLen }, (_, i) => {
@@ -337,8 +363,16 @@ export default function StartQuotePage() {
     const widgetNotes = payload.notes ? String(payload.notes).trim() : "";
     const noteLines: string[] = [];
 
-    if (ship) noteLines.push(`Shipping: ${ship === "box" ? "Box" : ship === "mailer" ? "Mailer" : "Not sure"}`);
-    if (ins) noteLines.push(`Insert: ${ins === "single" ? "Single" : ins === "set" ? "Set (base + top)" : "Not sure"}`);
+    if (ship)
+      noteLines.push(
+        `Shipping: ${ship === "box" ? "Box" : ship === "mailer" ? "Mailer" : "Not sure"}`
+      );
+    if (ins)
+      noteLines.push(
+        `Insert: ${
+          ins === "single" ? "Single" : ins === "set" ? "Set (base + top)" : "Not sure"
+        }`
+      );
     if (ins === "set" && pocOn) noteLines.push(`Pockets on: ${pocOn}`);
     if (hold) {
       if (hold === "pockets") noteLines.push(`Holding: Cut-out pockets${pc ? ` (${pc})` : ""}`);
@@ -402,6 +436,20 @@ export default function StartQuotePage() {
     };
   }, []);
 
+  // NEW: when widget provides materialText, try to auto-select the real materialId (unambiguous only).
+  React.useEffect(() => {
+    if (!materialOptions.length) return;
+    if (materialId) return;
+
+    const mt = materialText.trim();
+    if (!mt) return;
+
+    const matchId = findMaterialMatchId(mt, materialOptions);
+    if (matchId != null) {
+      setMaterialId(String(matchId));
+    }
+  }, [materialOptions, materialText, materialId]);
+
   // Keep thickness array length aligned to layerCount (Path-A safe)
   React.useEffect(() => {
     setLayerThicknesses((prev) => {
@@ -448,11 +496,19 @@ export default function StartQuotePage() {
 
     // Materials (deterministic)
     const matIdNum = Number(materialId);
-    if (Number.isFinite(matIdNum) && matIdNum > 0) {
+    const hasMaterialId = Number.isFinite(matIdNum) && matIdNum > 0;
+
+    if (hasMaterialId) {
       p.set("material_id", String(matIdNum));
       const picked = materialOptions.find((m) => m.id === matIdNum);
       if (picked?.name) p.set("material_label", picked.name);
+
+      // CRITICAL FIX: only declare "known" when we actually have material_id
+      p.set("material_mode", "known");
     }
+
+    // Always carry the human text forward if present (never lose intent)
+    if (materialText.trim()) p.set("material_text", materialText.trim());
 
     // Layers
     p.set("layer_count", String(layerCount));
@@ -475,8 +531,9 @@ export default function StartQuotePage() {
     if (insertType === "set" && pocketsOn) p.set("pockets_on", pocketsOn);
     if (holding) p.set("holding", holding);
     if (holding === "pockets" && pocketCount) p.set("pocket_count", pocketCount);
-    if (materialMode) p.set("material_mode", materialMode);
-    if (materialText.trim()) p.set("material_text", materialText.trim());
+
+    // Keep the UI field, but DO NOT push "material_mode" unless we have material_id (see above).
+    // This prevents the editor from guessing a random material.
 
     // Optional notes / user-entered foam text (kept)
     if (foam.trim()) p.set("foam", foam.trim());
