@@ -28,12 +28,11 @@ type WidgetFacts = {
   materialText?: string;
 
   // layers (structured)
-  // Convention: Layer 1 = base/body, higher layers stack upward (top pad = last layer).
   layerCount?: "1" | "2" | "3" | "4";
-  layerThicknesses?: string[]; // e.g. ["3","1"]
+  layerThicknesses?: string[]; // e.g. ["3","1"] for 2 layers: base=3, top=1
 
-  // NEW: pocket seed (rect only, LxWxD). This becomes the editor's initial "cavity=" seed.
-  firstCavity?: string; // e.g. "5x5x1"
+  // NEW: cavity seed (rect only, LxWxD)
+  firstCavity?: string;
 
   notes?: string;
   createdAtIso?: string;
@@ -98,11 +97,8 @@ async function callOpenAI(params: {
             "- material: known text or recommend\n" +
             "- layers: layerCount (1–4) and layerThicknesses array\n" +
             "  Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).\n" +
-            "- firstCavity: the main pocket size as rect LxWxD (in), e.g. 5x5x1 (RECT ONLY)\n" +
+            "- firstCavity: first rectangular pocket size as LxWxD (in), if user provides it\n" +
             "- notes\n\n" +
-            "Pocket rule (IMPORTANT):\n" +
-            "- If holding = pockets and firstCavity is missing, ask for the pocket size (LxWxD inches).\n" +
-            "- Do NOT guess a pocket size.\n\n" +
             'When shipping is box or mailer, mention briefly we typically undersize foam L/W by 0.125" for drop-in fit.\n' +
             "When you have enough info, done=true and invite them to open layout & pricing.",
         },
@@ -232,7 +228,7 @@ async function callOpenAI(params: {
                   ],
                 },
 
-                // NEW: rect-only cavity seed "LxWxD"
+                // NEW: first cavity
                 firstCavity: { type: ["string", "null"] },
 
                 notes: { type: ["string", "null"] },
