@@ -26,7 +26,8 @@
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+
 import type {
   BlockDims,
   LayoutModel,
@@ -78,6 +79,34 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
 
   const { layout, activeLayerId } = state;
   const selectedId = selectedIds[0] ?? null;
+
+    // ✅ Path A: one-time hydration sync
+  // On first render, layout.cavities may be empty even though stack[active].cavities is seeded.
+  // Clicking layers calls setActiveLayerId() which mirrors stack -> layout.cavities.
+  // This effect does that mirror once so seeded cavities are visible immediately.
+  useEffect(() => {
+    setState((prev) => {
+      // If already mirrored (legacy / other paths), do nothing.
+      if ((prev.layout.cavities?.length ?? 0) > 0) return prev;
+
+      const active =
+        prev.layout.stack.find((l) => l.id === prev.activeLayerId) ??
+        prev.layout.stack[0];
+
+      if (!active) return prev;
+
+      const mirrored = dedupeCavities(active.cavities);
+
+      return {
+        layout: {
+          ...prev.layout,
+          cavities: [...mirrored],
+        },
+        activeLayerId: active.id,
+      };
+    });
+  }, []);
+
 
   /* ================= selection ================= */
 
