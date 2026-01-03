@@ -31,7 +31,7 @@ type WidgetFacts = {
   // NEW: DB-backed choice (Option B)
   materialId?: number | null;
 
-  // OPTIONAL future hook (Option A for packaging)
+  // OPTIONAL hook (stock packaging seed from widget)
   packagingSku?: string;
 
   // layers (structured)
@@ -93,10 +93,17 @@ function inferFamilyHint(userText: string, facts: WidgetFacts): string | null {
   const t = `${facts.materialText ?? ""} ${userText ?? ""}`.toLowerCase();
 
   // IMPORTANT: Keep PE and Expanded PE separate (no merging).
-  if (t.includes("expanded polyethylene") || t.includes(" epe") || t.includes("epe ")) return "Expanded Polyethylene";
-  if (t.includes("polyethylene") || t.includes(" pe") || t.includes("pe ")) return "Polyethylene";
+  if (
+    t.includes("expanded polyethylene") ||
+    t.includes(" epe") ||
+    t.includes("epe ")
+  )
+    return "Expanded Polyethylene";
+  if (t.includes("polyethylene") || t.includes(" pe") || t.includes("pe "))
+    return "Polyethylene";
 
-  if (t.includes("polyurethane") || t.includes("urethane") || t.includes("pu ")) return "Polyurethane";
+  if (t.includes("polyurethane") || t.includes("urethane") || t.includes("pu "))
+    return "Polyurethane";
 
   return null;
 }
@@ -153,7 +160,10 @@ function formatMaterialOption(m: DbMaterial) {
   return parts.filter(Boolean).join(" · ");
 }
 
-function pickMaterialFromUserText(userText: string, options: DbMaterial[]): DbMaterial | null {
+function pickMaterialFromUserText(
+  userText: string,
+  options: DbMaterial[],
+): DbMaterial | null {
   const t = (userText || "").trim().toLowerCase();
   if (!t) return null;
 
@@ -164,7 +174,8 @@ function pickMaterialFromUserText(userText: string, options: DbMaterial[]): DbMa
   }
 
   // Allow "id: 12" or "12"
-  const idMatch = t.match(/\bid\s*[:#]?\s*(\d+)\b/i) || t.match(/^\s*(\d+)\s*$/);
+  const idMatch =
+    t.match(/\bid\s*[:#]?\s*(\d+)\b/i) || t.match(/^\s*(\d+)\s*$/);
   if (idMatch) {
     const id = Number(idMatch[1]);
     if (Number.isFinite(id)) {
@@ -179,6 +190,146 @@ function pickMaterialFromUserText(userText: string, options: DbMaterial[]): DbMa
   }
 
   return null;
+}
+
+/* =======================================================================
+   Box suggester (widget prefill)
+   - Calls existing POST /api/boxes/suggest (DB-backed)
+   - Seeds facts.packagingSku when shipMode is box/mailer
+   ======================================================================= */
+
+type BoxSuggestReq = {
+  footprint_length_in: number;
+  footprint_width_in: number;
+  stack_depth_in: number;
+  qty?: number | null;
+};
+
+type BoxSuggestBox = {
+  sku: string;
+  description: string;
+  style: "RSC" | "MAILER";
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
+  fit_score: number;
+  notes?: string;
+};
+
+type BoxSuggestResp = {
+  ok: boolean;
+  bestRsc?: BoxSuggestBox | null;
+  bestMailer?: BoxSuggestBox | null;
+  error?: string;
+};
+
+function toFiniteNumber(v: any): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "number" ? v : Number(String(v).trim());
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+function appendNote(existing: string | undefined, line: string) {
+  const base = (existing ?? "").trim();
+  if (!line.trim()) return base || undefined;
+  if (!base) return line.trim();
+  // avoid duplicating the exact same line repeatedly
+  if (base.includes(line.trim())) return base;
+  return `${base}\n${line.trim()}`;
+}
+
+async function maybeSeedPackagingFromBoxesSuggest(args: {
+  origin: string;
+  mergedFacts: WidgetFacts;
+}): Promise<{
+  packagingSku?: string;
+  notes?: string;
+  messageAddon?: string;
+}> {
+  const f = args.mergedFacts;
+
+  // Only try if we have dims + a shipping mode and we haven't already set packagingSku.
+  if (!hasCoreDims(f)) return {};
+  if (!f.shipMode) return {};
+  if (f.packagingSku && String(f.packagingSku).trim().length > 0) return {};
+
+  const L = toFiniteNumber(f.outsideL);
+  const W = toFiniteNumber(f.outsideW);
+  const H = toFiniteNumber(f.outsideH);
+  if (!(L && W && H && L > 0 && W > 0 && H > 0)) return {};
+
+  // Call the trusted route in the same deployment (no hardcoded domain).
+  const url = `${args.origin}/api/boxes/suggest`;
+  const payload: BoxSuggestReq = {
+    footprint_length_in: L,
+    footprint_width_in: W,
+    stack_depth_in: H,
+    qty: toFiniteNumber(f.qty) ?? null,
+  };
+
+  let resp: BoxSuggestResp | null = null;
+
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    resp = (await r.json().catch(() => null)) as BoxSuggestResp | null;
+  } catch {
+    return {};
+  }
+
+  if (!resp || !resp.ok) return {};
+
+  const bestRsc = resp.bestRsc ?? null;
+  const bestMailer = resp.bestMailer ?? null;
+
+  // If the user picked a shipMode, we preselect the matching SKU.
+  if (f.shipMode === "box" && bestRsc?.sku) {
+    return {
+      packagingSku: bestRsc.sku,
+      notes: appendNote(
+        f.notes,
+        `Suggested box (stock): ${bestRsc.sku} — ${bestRsc.description} (inside ${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in})`,
+      ),
+      messageAddon:
+        "I preselected a stock box size that fits your foam — you can tweak it in the editor if needed.",
+    };
+  }
+
+  if (f.shipMode === "mailer" && bestMailer?.sku) {
+    return {
+      packagingSku: bestMailer.sku,
+      notes: appendNote(
+        f.notes,
+        `Suggested mailer (stock): ${bestMailer.sku} — ${bestMailer.description} (inside ${bestMailer.inside_length_in}×${bestMailer.inside_width_in}×${bestMailer.inside_height_in})`,
+      ),
+      messageAddon:
+        "I preselected a stock mailer that fits your foam — you can tweak it in the editor if needed.",
+    };
+  }
+
+  // If unsure, don’t choose — just record both suggestions in notes if present.
+  if (f.shipMode === "unsure") {
+    let notes = f.notes;
+    if (bestRsc?.sku) {
+      notes = appendNote(
+        notes,
+        `Suggested box (stock): ${bestRsc.sku} — ${bestRsc.description} (inside ${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in})`,
+      );
+    }
+    if (bestMailer?.sku) {
+      notes = appendNote(
+        notes,
+        `Suggested mailer (stock): ${bestMailer.sku} — ${bestMailer.description} (inside ${bestMailer.inside_length_in}×${bestMailer.inside_width_in}×${bestMailer.inside_height_in})`,
+      );
+    }
+    return notes !== f.notes ? { notes } : {};
+  }
+
+  return {};
 }
 
 async function callOpenAI(params: {
@@ -315,40 +466,64 @@ async function callOpenAI(params: {
                 qty: { type: ["string", "null"] },
 
                 shipMode: {
-                  anyOf: [{ type: "string", enum: ["box", "mailer", "unsure"] }, { type: "null" }],
+                  anyOf: [
+                    { type: "string", enum: ["box", "mailer", "unsure"] },
+                    { type: "null" },
+                  ],
                 },
 
                 insertType: {
-                  anyOf: [{ type: "string", enum: ["single", "set", "unsure"] }, { type: "null" }],
+                  anyOf: [
+                    { type: "string", enum: ["single", "set", "unsure"] },
+                    { type: "null" },
+                  ],
                 },
 
                 pocketsOn: {
-                  anyOf: [{ type: "string", enum: ["base", "top", "both", "unsure"] }, { type: "null" }],
+                  anyOf: [
+                    { type: "string", enum: ["base", "top", "both", "unsure"] },
+                    { type: "null" },
+                  ],
                 },
 
                 holding: {
-                  anyOf: [{ type: "string", enum: ["pockets", "loose", "unsure"] }, { type: "null" }],
+                  anyOf: [
+                    { type: "string", enum: ["pockets", "loose", "unsure"] },
+                    { type: "null" },
+                  ],
                 },
 
                 pocketCount: {
-                  anyOf: [{ type: "string", enum: ["1", "2", "3+", "unsure"] }, { type: "null" }],
+                  anyOf: [
+                    { type: "string", enum: ["1", "2", "3+", "unsure"] },
+                    { type: "null" },
+                  ],
                 },
 
                 materialMode: {
-                  anyOf: [{ type: "string", enum: ["recommend", "known"] }, { type: "null" }],
+                  anyOf: [
+                    { type: "string", enum: ["recommend", "known"] },
+                    { type: "null" },
+                  ],
                 },
 
                 materialText: { type: ["string", "null"] },
                 materialId: { type: ["number", "null"] },
 
-                // reserved for packaging Option A (widget-driven stock box/mailer)
+                // stock packaging (widget-driven prefill)
                 packagingSku: { type: ["string", "null"] },
 
                 layerCount: {
-                  anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }],
+                  anyOf: [
+                    { type: "string", enum: ["1", "2", "3", "4"] },
+                    { type: "null" },
+                  ],
                 },
                 layerThicknesses: {
-                  anyOf: [{ type: "array", items: { type: "string" }, maxItems: 4 }, { type: "null" }],
+                  anyOf: [
+                    { type: "array", items: { type: "string" }, maxItems: 4 },
+                    { type: "null" },
+                  ],
                 },
 
                 firstCavity: { type: ["string", "null"] },
@@ -379,13 +554,17 @@ async function callOpenAI(params: {
 
   const json = (await res.json()) as any;
 
-  const outputObj = json?.output_json && typeof json.output_json === "object" ? json.output_json : null;
+  const outputObj =
+    json?.output_json && typeof json.output_json === "object"
+      ? json.output_json
+      : null;
   if (outputObj) return outputObj;
 
   const outputText: string =
     typeof json?.output_text === "string"
       ? json.output_text
-      : (json?.output?.[0]?.content?.find?.((c: any) => c?.type === "output_text")?.text ?? "");
+      : (json?.output?.[0]?.content?.find?.((c: any) => c?.type === "output_text")
+          ?.text ?? "");
 
   return JSON.parse(String(outputText || "").trim());
 }
@@ -435,7 +614,9 @@ export async function POST(req: NextRequest) {
 
     // If the user replies "1/2/3" (or names a material) after we previously recommended,
     // we can lock it in even before the model does.
-    const pickedFromText = materialOptions.length ? pickMaterialFromUserText(userText, materialOptions) : null;
+    const pickedFromText = materialOptions.length
+      ? pickMaterialFromUserText(userText, materialOptions)
+      : null;
 
     const rawObj = await callOpenAI({ messages, userText, facts, materialOptions });
     const parsed = normalizeBrainObj(rawObj);
@@ -443,7 +624,8 @@ export async function POST(req: NextRequest) {
     if (!parsed) {
       return NextResponse.json(
         {
-          assistantMessage: "Got it. Real quick — what’s the outside foam size (L×W×H, inches) and the quantity?",
+          assistantMessage:
+            "Got it. Real quick — what’s the outside foam size (L×W×H, inches) and the quantity?",
           facts: {},
           done: false,
           quickReplies: ["18x12x3", "Qty 250", "Not sure yet"],
@@ -459,7 +641,8 @@ export async function POST(req: NextRequest) {
     if (pickedFromText) {
       nextFacts.materialMode = "known";
       nextFacts.materialId = pickedFromText.id;
-      nextFacts.materialText = pickedFromText.name ?? formatMaterialOption(pickedFromText);
+      nextFacts.materialText =
+        pickedFromText.name ?? formatMaterialOption(pickedFromText);
     } else {
       // If model set materialId, try to ensure text is set too.
       const mid = (nextFacts as any).materialId;
@@ -467,17 +650,41 @@ export async function POST(req: NextRequest) {
         const found = materialOptions.find((m) => m.id === Number(mid));
         if (found) {
           nextFacts.materialMode = "known";
-          if (!nextFacts.materialText) nextFacts.materialText = found.name ?? formatMaterialOption(found);
+          if (!nextFacts.materialText)
+            nextFacts.materialText = found.name ?? formatMaterialOption(found);
         }
       }
     }
 
-    const mergedFacts = { ...facts, ...nextFacts };
+    // Merge so we can decide on packaging prefill based on the latest facts
+    const mergedFacts: WidgetFacts = { ...facts, ...nextFacts };
+
+    // ---- NEW: seed packagingSku from trusted /api/boxes/suggest when possible ----
+    let assistantMessage = parsed.assistantMessage;
+
+    // NOTE: origin keeps this environment-safe (no hardcoded domain).
+    const origin = req.nextUrl.origin;
+
+    const pack = await maybeSeedPackagingFromBoxesSuggest({ origin, mergedFacts });
+
+    if (pack.packagingSku) {
+      nextFacts.packagingSku = pack.packagingSku;
+      mergedFacts.packagingSku = pack.packagingSku;
+    }
+    if (pack.notes) {
+      nextFacts.notes = pack.notes;
+      mergedFacts.notes = pack.notes;
+    }
+    if (pack.messageAddon) {
+      // Small additive note, but only if we actually seeded something.
+      assistantMessage = `${assistantMessage}\n\n${pack.messageAddon}`;
+    }
+
     const done = parsed.done && isReady(mergedFacts);
 
     return NextResponse.json(
       {
-        assistantMessage: parsed.assistantMessage,
+        assistantMessage,
         facts: nextFacts,
         done,
         quickReplies: (parsed.quickReplies ?? []).slice(0, 6),
@@ -488,7 +695,8 @@ export async function POST(req: NextRequest) {
     console.error("widget_chat_route_error", String(e?.message ?? e));
     return NextResponse.json(
       {
-        assistantMessage: "I’m here — quick hiccup on my side. Try again with outside size (L×W×H) and qty.",
+        assistantMessage:
+          "I’m here — quick hiccup on my side. Try again with outside size (L×W×H) and qty.",
         facts: {},
         done: false,
         quickReplies: ["18x12x3", "Qty 250", "Shipping: box", "Shipping: mailer"],
