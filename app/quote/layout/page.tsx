@@ -466,9 +466,11 @@ export default function LayoutPage({
   const [initialMaterialId, setInitialMaterialId] =
     React.useState<number | null>(null);
 
-// Holds foam label from form URL (e.g. foam=1.7# Black PE)
-// Used once after materials load
-const materialLabelFromUrlRef = React.useRef<string | null>(null);
+  // Holds foam label from form URL (e.g. foam=1.7# Black PE)
+  // Passed into LayoutEditorHost so it can resolve → material ID after /api/materials loads
+  const [initialMaterialLabel, setInitialMaterialLabel] =
+    React.useState<string | null>(null);
+
 
 
 
@@ -782,7 +784,7 @@ materialLabelSeedLocal = foamLabel ? foamLabel.trim() : null;
 
 // stash foam label for post-material-load resolution
 if (materialLabelSeedLocal) {
-  materialLabelFromUrlRef.current = materialLabelSeedLocal;
+  setInitialMaterialLabel(materialLabelSeedLocal);
 }
 
 
@@ -1152,18 +1154,20 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
   }
 
   return (
-    <LayoutEditorHost
-      quoteNo={quoteNo}
-      hasRealQuoteNo={hasRealQuoteNo}
-      initialLayout={initialLayout}
-      initialNotes={initialNotes}
-      initialQty={initialQty}
-      initialMaterialId={initialMaterialId}
-      initialCustomerName={initialCustomerName}
-      initialCustomerEmail={initialCustomerEmail}
-      initialCustomerCompany={initialCustomerCompany}
-      initialCustomerPhone={initialCustomerPhone}
-    />
+          <LayoutEditorHost
+        quoteNo={quoteNo}
+        hasRealQuoteNo={hasRealQuoteNo}
+        initialLayout={initialLayout}
+        initialNotes={initialNotes}
+        initialQty={initialQty}
+        initialMaterialId={initialMaterialId}
+        initialMaterialLabel={initialMaterialLabel}
+        initialCustomerName={initialCustomerName}
+        initialCustomerEmail={initialCustomerEmail}
+        initialCustomerCompany={initialCustomerCompany}
+        initialCustomerPhone={initialCustomerPhone}
+      />
+
   );
 }
 
@@ -1185,6 +1189,7 @@ function LayoutEditorHost(props: {
   initialNotes: string;
   initialQty: number | null;
   initialMaterialId: number | null;
+  initialMaterialLabel: string | null;
   initialCustomerName: string;
   initialCustomerEmail: string;
   initialCustomerCompany: string;
@@ -1201,6 +1206,8 @@ function LayoutEditorHost(props: {
     initialCustomerEmail,
     initialCustomerCompany,
     initialCustomerPhone,
+        initialMaterialLabel,
+
   } = props;
 
   const router = useRouter();
@@ -1578,7 +1585,10 @@ function LayoutEditorHost(props: {
   const [materials, setMaterials] = React.useState<MaterialOption[]>([]);
   const [materialsLoading, setMaterialsLoading] = React.useState<boolean>(true);
   const [materialsError, setMaterialsError] = React.useState<string | null>(null);
-  const materialLabelFromUrlRef = React.useRef<string | null>(null);
+    const materialLabelFromUrlRef = React.useRef<string | null>(
+    initialMaterialLabel || null,
+  );
+
   const [selectedMaterialId, setSelectedMaterialId] =
   React.useState<number | null>(initialMaterialId);
 
@@ -1782,12 +1792,15 @@ if (
   selectedMaterialId == null &&
   materialLabelFromUrlRef.current
 ) {
-  const needle = materialLabelFromUrlRef.current.toLowerCase();
+   const needle = materialLabelFromUrlRef.current.toLowerCase();
+  const tokens = needle.split(/[^a-z0-9.]+/i).filter((t) => t.length >= 2);
 
-  const match = mapped.find((m) =>
-    m.name.toLowerCase().includes(needle) ||
-    String(m.family).toLowerCase().includes(needle)
-  );
+  const match = mapped.find((m) => {
+    const hay = `${m.name} ${m.family}`.toLowerCase();
+    if (hay.includes(needle)) return true;
+    return tokens.some((t) => hay.includes(t));
+  });
+
 
   if (match) {
     setSelectedMaterialId(match.id);
