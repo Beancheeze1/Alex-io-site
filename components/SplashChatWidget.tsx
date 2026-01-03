@@ -509,11 +509,15 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
-                    }
-                  }}
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    if (busy) return;
+    const t = input;
+    setInput("");
+    void handleSend(t);
+  }
+}}
+
                   rows={1}
                   placeholder={done ? "Add anything else… (or click Open layout & pricing)" : "Type here…"}
                   className="min-h-[42px] flex-1 resize-none rounded-2xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
