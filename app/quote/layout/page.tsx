@@ -243,42 +243,16 @@ function readQtyFromUrl(url: URL): number | null {
   return null;
 }
 function readNotesFromUrl(url: URL): string {
-  // Accept multiple keys because different entry points use different names.
-  // Keep "notes" first as canonical.
-  const keys = [
-    "notes",
-    "note",
-    "customer_notes",
-    "customerNote",
-    "instructions",
-    "special_instructions",
-    "specialInstructions",
-    "message",
-    "details",
-  ];
+  const raw = url.searchParams.get("notes");
+  if (!raw) return "";
 
-  const parts: string[] = [];
-
-  for (const k of keys) {
-    const all = url.searchParams
-      .getAll(k)
-      .map((s) => (s ?? "").toString())
-      .map((s) => s.replace(/\+/g, " ").trim()) // '+' may survive URLSearchParams decoding
-      .filter(Boolean);
-
-    if (all.length > 0) {
-      parts.push(...all);
-      break; // first matching key wins (prevents double-pulling same content under aliases)
-    }
+  try {
+    // URLSearchParams decodes %XX but leaves '+' intact
+    return decodeURIComponent(raw.replace(/\+/g, " ")).trim();
+  } catch {
+    return raw.replace(/\+/g, " ").trim();
   }
-
-  // De-dupe while preserving order
-  const unique: string[] = [];
-  for (const p of parts) if (!unique.includes(p)) unique.push(p);
-
-  return unique.join("\n").trim();
 }
-
 
 
 
@@ -2152,28 +2126,26 @@ if (
 
   /* ---------- Foam Advisor navigation ---------- */
 
-  const handleGoToFoamAdvisor = () => {
-    if (missingCustomerInfo) return;
+ const handleGoToFoamAdvisor = () => {
+  if (missingCustomerInfo) return;
+  if (typeof window === "undefined") return;
 
-    const params = new URLSearchParams();
+  // 🔒 Preserve the full editor URL as the source of truth
+  const returnTo = window.location.href;
 
-    if (hasRealQuoteNo && quoteNo) {
-      params.set("quote_no", quoteNo);
-    }
+  const params = new URLSearchParams();
 
-    const L = Number(block.lengthIn) || 0;
-    const W = Number(block.widthIn) || 0;
-    const T = Number(block.thicknessIn) || 0;
+  if (hasRealQuoteNo && quoteNo) {
+    params.set("quote_no", quoteNo);
+  }
 
-    if (L > 0 && W > 0 && T >= 0) {
-      params.set("block", `${L}x${W}x${T}`);
-    }
+  // Pass full return URL so NOTHING is lost
+  params.set("return_to", returnTo);
 
-    const query = params.toString();
-    const url = query ? `/foam-advisor?${query}` : "/foam-advisor";
+  const url = `/foam-advisor?${params.toString()}`;
+  router.push(url);
+};
 
-    router.push(url);
-  };
 
   /* ---------- Apply-to-Quote ---------- */
 
