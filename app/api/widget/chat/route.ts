@@ -27,10 +27,13 @@ type WidgetFacts = {
   materialMode?: "recommend" | "known";
   materialText?: string;
 
-  // NEW: layers (structured)
+  // layers (structured)
   // Convention: Layer 1 = base/body, higher layers stack upward (top pad = last layer).
   layerCount?: "1" | "2" | "3" | "4";
-  layerThicknesses?: string[]; // e.g. ["3","1"] for 2 layers: base=3, top=1
+  layerThicknesses?: string[]; // e.g. ["3","1"]
+
+  // NEW: pocket seed (rect only, LxWxD). This becomes the editor's initial "cavity=" seed.
+  firstCavity?: string; // e.g. "5x5x1"
 
   notes?: string;
   createdAtIso?: string;
@@ -95,7 +98,11 @@ async function callOpenAI(params: {
             "- material: known text or recommend\n" +
             "- layers: layerCount (1–4) and layerThicknesses array\n" +
             "  Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).\n" +
+            "- firstCavity: the main pocket size as rect LxWxD (in), e.g. 5x5x1 (RECT ONLY)\n" +
             "- notes\n\n" +
+            "Pocket rule (IMPORTANT):\n" +
+            "- If holding = pockets and firstCavity is missing, ask for the pocket size (LxWxD inches).\n" +
+            "- Do NOT guess a pocket size.\n\n" +
             'When shipping is box or mailer, mention briefly we typically undersize foam L/W by 0.125" for drop-in fit.\n' +
             "When you have enough info, done=true and invite them to open layout & pricing.",
         },
@@ -125,12 +132,8 @@ async function callOpenAI(params: {
   ];
 
   const body = {
-    // Keep the snapshot model you chose for Structured Outputs.
     model: "gpt-4o-2024-08-06",
-
     input: inputMessages,
-
-    // Structured Outputs (STRICT) — must include a NAME and a valid json_schema.
     text: {
       format: {
         type: "json_schema",
@@ -151,9 +154,6 @@ async function callOpenAI(params: {
             facts: {
               type: "object",
               additionalProperties: false,
-
-              // Strict mode requires a 'required' array; safest is "all keys"
-              // and allow nulls so the model can say "unknown" cleanly.
               required: [
                 "outsideL",
                 "outsideW",
@@ -168,6 +168,7 @@ async function callOpenAI(params: {
                 "materialText",
                 "layerCount",
                 "layerThicknesses",
+                "firstCavity",
                 "notes",
                 "createdAtIso",
               ],
@@ -221,7 +222,6 @@ async function callOpenAI(params: {
 
                 materialText: { type: ["string", "null"] },
 
-                // NEW: layers
                 layerCount: {
                   anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }],
                 },
@@ -231,6 +231,9 @@ async function callOpenAI(params: {
                     { type: "null" },
                   ],
                 },
+
+                // NEW: rect-only cavity seed "LxWxD"
+                firstCavity: { type: ["string", "null"] },
 
                 notes: { type: ["string", "null"] },
                 createdAtIso: { type: ["string", "null"] },
@@ -253,19 +256,16 @@ async function callOpenAI(params: {
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    // Keep the error short but informative in Render logs
     throw new Error(`openai_http_${res.status}_${txt.slice(0, 220)}`);
   }
 
   const json = (await res.json()) as any;
 
-  // Structured Outputs: prefer output_json when present
   const outputObj =
     json?.output_json && typeof json.output_json === "object" ? json.output_json : null;
 
   if (outputObj) return outputObj;
 
-  // Fallback: parse output_text (should still be JSON string)
   const outputText: string =
     typeof json?.output_text === "string"
       ? json.output_text
@@ -337,7 +337,6 @@ export async function POST(req: NextRequest) {
       { status: 200 }
     );
   } catch (e: any) {
-    // Keep logs readable (but still show the real reason)
     console.error("widget_chat_route_error", String(e?.message ?? e));
     return NextResponse.json(
       {

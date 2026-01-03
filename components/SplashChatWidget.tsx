@@ -18,11 +18,6 @@ type WidgetFacts = {
   insertType?: "single" | "set" | "unsure"; // set = base + top pad/lid
   pocketsOn?: "base" | "top" | "both" | "unsure";
 
-  // NEW: layers (structured)
-  // Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).
-  layerCount?: "1" | "2" | "3" | "4";
-  layerThicknesses?: string[]; // e.g. ["3","1"]
-
   // holding
   holding?: "pockets" | "loose" | "unsure";
   pocketCount?: "1" | "2" | "3+" | "unsure";
@@ -30,6 +25,13 @@ type WidgetFacts = {
   // material
   materialMode?: "recommend" | "known";
   materialText?: string;
+
+  // NEW: layers (structured)
+  layerCount?: "1" | "2" | "3" | "4";
+  layerThicknesses?: string[];
+
+  // NEW: cavity seed (rect only, LxWxD)
+  firstCavity?: string;
 
   // notes (freeform)
   notes?: string;
@@ -80,9 +82,10 @@ function buildPrefillPayload(facts: WidgetFacts) {
       text: facts.materialText ?? "",
     },
 
-    // NEW: layers (structured)
+    // NEW: layers + cavity seed
     layerCount: facts.layerCount ?? "",
     layerThicknesses: Array.isArray(facts.layerThicknesses) ? facts.layerThicknesses : [],
+    firstCavity: facts.firstCavity ?? "",
 
     notes: facts.notes ?? "",
   };
@@ -130,12 +133,16 @@ function summarizeFacts(facts: WidgetFacts) {
         ? "Recommended"
         : "(material not set)";
 
+  const pocket =
+    facts.firstCavity?.trim() ? `Pocket size: ${facts.firstCavity.trim()} in` : null;
+
   return [
     `Outside size: ${dims}`,
     `Quantity: ${qty}`,
     `Shipping: ${ship}`,
     `Insert: ${insert}`,
     `Holding: ${holding}`,
+    pocket,
     `Material: ${material}`,
     facts.notes?.trim() ? `Notes: ${facts.notes.trim()}` : null,
   ].filter(Boolean) as string[];
@@ -485,7 +492,6 @@ export default function SplashChatWidget({
             {/* Input */}
             <div className="border-t border-white/10 p-3">
               <form
-                ref={formRef}
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (busy || done) return;
@@ -499,11 +505,9 @@ export default function SplashChatWidget({
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
-                    // Enter sends; Shift+Enter makes a newline.
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-                      // Let the form onSubmit logic decide if it's allowed (busy/done/input)
-                      formRef.current?.requestSubmit();
+                      (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
                     }
                   }}
                   rows={1}

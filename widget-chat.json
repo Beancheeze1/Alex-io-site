@@ -1,7 +1,7 @@
 ﻿{
   "messages": [
-    { "role": "bot", "text": "Hey — tell me what you're making." }
+    { "role": "bot", "text": "Start with outside foam size if you have it (LxWxH, inches)." }
   ],
-  "userText": "i need a quote on a 10x5x4 mailer with 2 layers of foam on the inside. a 1 inch top pad and 3 inch body foam",
-  "facts": { "createdAtIso": "2026-01-02T00:00:00.000Z" }
+  "userText": "10x5x4 mailer, 2 layers, 1\" top pad and 3\" base",
+  "facts": {}
 }
