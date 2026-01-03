@@ -207,9 +207,6 @@ export default function SplashChatWidget({
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
 
-  // NEW: lets Enter key submit via the existing <form onSubmit> path
-  const formRef = React.useRef<HTMLFormElement | null>(null);
-
   // Persist
   React.useEffect(() => {
     try {
@@ -329,9 +326,17 @@ export default function SplashChatWidget({
   }
 
   function openStartQuote() {
+    // IMPORTANT: Use the most recent persisted facts at click time.
+    // This prevents a “one-render-behind” state from dropping firstCavity (and other fields)
+    // when the user clicks immediately after the last assistant response.
+    const saved = safeJsonParse<{ facts: WidgetFacts }>(localStorage.getItem(LS_KEY));
+    const latestFacts: WidgetFacts | null = saved?.facts && typeof saved.facts === "object" ? saved.facts : null;
+
+    // Prefer latest persisted facts if present; otherwise fall back to current state.
+    const payloadFacts: WidgetFacts = latestFacts ? { ...latestFacts } : { ...facts };
+
     // Add a little “shipping fit” note automatically when box/mailer selected
     // (This is just notes text; /start-quote already displays the fit hint.)
-    const payloadFacts: WidgetFacts = { ...facts };
     const noteBits: string[] = [];
 
     if (payloadFacts.shipMode === "box" || payloadFacts.shipMode === "mailer") {
