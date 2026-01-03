@@ -415,7 +415,8 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
             </div>
 
             {/* Messages */}
-            <div ref={listRef} className="max-h-[380px] overflow-y-auto px-4 py-3">
+            <div ref={listRef} className="max-h-[480px] overflow-y-auto px-4 py-3">
+
               <div className="space-y-3">
                 {msgs.map((m) => (
                   <div
