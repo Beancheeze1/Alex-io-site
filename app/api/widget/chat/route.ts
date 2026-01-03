@@ -1,5 +1,6 @@
 // app/api/widget/chat/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { q } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,11 +28,17 @@ type WidgetFacts = {
   materialMode?: "recommend" | "known";
   materialText?: string;
 
+  // NEW: DB-backed choice (Option B)
+  materialId?: number | null;
+
+  // OPTIONAL future hook (Option A for packaging)
+  packagingSku?: string;
+
   // layers (structured)
   layerCount?: "1" | "2" | "3" | "4";
-  layerThicknesses?: string[]; // e.g. ["3","1"] for 2 layers: base=3, top=1
+  layerThicknesses?: string[];
 
-  // NEW: cavity seed (rect only, LxWxD)
+  // cavity seed (rect only, LxWxD)
   firstCavity?: string;
 
   notes?: string;
@@ -42,6 +49,13 @@ type Incoming = {
   messages?: { role: "bot" | "user"; text: string }[];
   userText?: string;
   facts?: WidgetFacts;
+};
+
+type DbMaterial = {
+  id: number;
+  name: string | null;
+  material_family: string | null;
+  density_lb_ft3: number | null;
 };
 
 function clip(s: string, max: number) {
@@ -62,12 +76,126 @@ function isReady(f: WidgetFacts) {
   return hasCoreDims(f) && qtyOk && shipOk && insertOk && holdingOk;
 }
 
+function wantsFoamRecommendation(userText: string, facts: WidgetFacts) {
+  const t = (userText || "").toLowerCase();
+  const modeAsk =
+    facts.materialMode === "recommend" ||
+    t.includes("recommend") ||
+    t.includes("suggest") ||
+    t.includes("what foam") ||
+    t.includes("which foam") ||
+    t.includes("pick foam") ||
+    t.includes("choose foam");
+  return modeAsk;
+}
+
+function inferFamilyHint(userText: string, facts: WidgetFacts): string | null {
+  const t = `${facts.materialText ?? ""} ${userText ?? ""}`.toLowerCase();
+
+  // IMPORTANT: Keep PE and Expanded PE separate (no merging).
+  if (t.includes("expanded polyethylene") || t.includes(" epe") || t.includes("epe ")) return "Expanded Polyethylene";
+  if (t.includes("polyethylene") || t.includes(" pe") || t.includes("pe ")) return "Polyethylene";
+
+  if (t.includes("polyurethane") || t.includes("urethane") || t.includes("pu ")) return "Polyurethane";
+
+  return null;
+}
+
+async function getTopMaterialsForWidget(args: {
+  familyHint: string | null;
+  limit: number;
+}): Promise<DbMaterial[]> {
+  const limit = Math.max(1, Math.min(args.limit || 3, 6));
+
+  // Prefer matching family if we can infer one; otherwise just take "active" looking materials.
+  if (args.familyHint) {
+    const rows = await q<DbMaterial>(
+      `
+      select id, name, material_family, density_lb_ft3
+      from materials
+      where material_family = $1
+      order by
+        case when density_lb_ft3 is null then 1 else 0 end asc,
+        density_lb_ft3 asc,
+        id asc
+      limit $2
+      `,
+      [args.familyHint, limit],
+    );
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  const rows = await q<DbMaterial>(
+    `
+    select id, name, material_family, density_lb_ft3
+    from materials
+    order by
+      case when material_family is null then 1 else 0 end asc,
+      material_family asc,
+      case when density_lb_ft3 is null then 1 else 0 end asc,
+      density_lb_ft3 asc,
+      id asc
+    limit $1
+    `,
+    [limit],
+  );
+
+  return Array.isArray(rows) ? rows : [];
+}
+
+function formatMaterialOption(m: DbMaterial) {
+  const parts: string[] = [];
+  if (m.name) parts.push(m.name);
+  if (m.material_family) parts.push(m.material_family);
+  if (m.density_lb_ft3 != null && Number.isFinite(Number(m.density_lb_ft3))) {
+    parts.push(`${Number(m.density_lb_ft3).toFixed(1)} lb/ft³`);
+  }
+  return parts.filter(Boolean).join(" · ");
+}
+
+function pickMaterialFromUserText(userText: string, options: DbMaterial[]): DbMaterial | null {
+  const t = (userText || "").trim().toLowerCase();
+  if (!t) return null;
+
+  // Allow "1"/"2"/"3"
+  if (t === "1" || t === "2" || t === "3") {
+    const idx = Number(t) - 1;
+    return options[idx] ?? null;
+  }
+
+  // Allow "id: 12" or "12"
+  const idMatch = t.match(/\bid\s*[:#]?\s*(\d+)\b/i) || t.match(/^\s*(\d+)\s*$/);
+  if (idMatch) {
+    const id = Number(idMatch[1]);
+    if (Number.isFinite(id)) {
+      return options.find((o) => o.id === id) ?? null;
+    }
+  }
+
+  // Fuzzy name contains
+  for (const o of options) {
+    const nm = (o.name ?? "").toLowerCase().trim();
+    if (nm && (t.includes(nm) || nm.includes(t))) return o;
+  }
+
+  return null;
+}
+
 async function callOpenAI(params: {
   messages: { role: "bot" | "user"; text: string }[];
   userText: string;
   facts: WidgetFacts;
+  materialOptions: DbMaterial[];
 }) {
   const apiKey = requireEnv("OPENAI_API_KEY");
+
+  const materialOptionsText =
+    params.materialOptions && params.materialOptions.length
+      ? params.materialOptions
+          .slice(0, 3)
+          .map((m, i) => `${i + 1}) ${formatMaterialOption(m)} (id=${m.id})`)
+          .join("\n")
+      : "(none found)";
 
   const inputMessages = [
     {
@@ -94,13 +222,23 @@ async function callOpenAI(params: {
             "- holding: cut-out pockets vs loose vs unsure\n" +
             "- pocketsOn: base/top/both if set\n" +
             "- pocketCount: 1/2/3+/unsure if pockets\n" +
-            "- material: known text or recommend\n" +
+            "- material:\n" +
+            "   - If user knows it: materialMode='known' + materialText\n" +
+            "   - If user wants us to pick: materialMode='recommend'\n" +
+            "   - If user selects from DB options below: set materialMode='known', materialText, AND materialId\n" +
             "- layers: layerCount (1–4) and layerThicknesses array\n" +
             "  Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).\n" +
             "- firstCavity: first rectangular pocket size as LxWxD (in), if user provides it\n" +
             "- notes\n\n" +
             'When shipping is box or mailer, mention briefly we typically undersize foam L/W by 0.125" for drop-in fit.\n' +
-            "When you have enough info, done=true and invite them to open layout & pricing.",
+            "When you have enough info, done=true and invite them to open layout & pricing.\n\n" +
+            "DB MATERIAL OPTIONS (use these when the user asks you to recommend foam):\n" +
+            materialOptionsText +
+            "\n\n" +
+            "When recommending foam:\n" +
+            "- Recommend ONE best choice and optionally mention 1 alternative.\n" +
+            "- Then ask: 'Pick 1/2/3' (or type the material name).\n" +
+            "- Do NOT invent material IDs; only use ids shown above.",
         },
       ],
     },
@@ -118,7 +256,7 @@ async function callOpenAI(params: {
                 .slice(-12)
                 .map((m) => `${m.role === "user" ? "User" : "Bot"}: ${m.text}`)
                 .join("\n"),
-              4000
+              4000,
             ) +
             "\n\nNewest user message:\n" +
             clip(params.userText, 800),
@@ -162,6 +300,8 @@ async function callOpenAI(params: {
                 "pocketCount",
                 "materialMode",
                 "materialText",
+                "materialId",
+                "packagingSku",
                 "layerCount",
                 "layerThicknesses",
                 "firstCavity",
@@ -175,60 +315,42 @@ async function callOpenAI(params: {
                 qty: { type: ["string", "null"] },
 
                 shipMode: {
-                  anyOf: [
-                    { type: "string", enum: ["box", "mailer", "unsure"] },
-                    { type: "null" },
-                  ],
+                  anyOf: [{ type: "string", enum: ["box", "mailer", "unsure"] }, { type: "null" }],
                 },
 
                 insertType: {
-                  anyOf: [
-                    { type: "string", enum: ["single", "set", "unsure"] },
-                    { type: "null" },
-                  ],
+                  anyOf: [{ type: "string", enum: ["single", "set", "unsure"] }, { type: "null" }],
                 },
 
                 pocketsOn: {
-                  anyOf: [
-                    { type: "string", enum: ["base", "top", "both", "unsure"] },
-                    { type: "null" },
-                  ],
+                  anyOf: [{ type: "string", enum: ["base", "top", "both", "unsure"] }, { type: "null" }],
                 },
 
                 holding: {
-                  anyOf: [
-                    { type: "string", enum: ["pockets", "loose", "unsure"] },
-                    { type: "null" },
-                  ],
+                  anyOf: [{ type: "string", enum: ["pockets", "loose", "unsure"] }, { type: "null" }],
                 },
 
                 pocketCount: {
-                  anyOf: [
-                    { type: "string", enum: ["1", "2", "3+", "unsure"] },
-                    { type: "null" },
-                  ],
+                  anyOf: [{ type: "string", enum: ["1", "2", "3+", "unsure"] }, { type: "null" }],
                 },
 
                 materialMode: {
-                  anyOf: [
-                    { type: "string", enum: ["recommend", "known"] },
-                    { type: "null" },
-                  ],
+                  anyOf: [{ type: "string", enum: ["recommend", "known"] }, { type: "null" }],
                 },
 
                 materialText: { type: ["string", "null"] },
+                materialId: { type: ["number", "null"] },
+
+                // reserved for packaging Option A (widget-driven stock box/mailer)
+                packagingSku: { type: ["string", "null"] },
 
                 layerCount: {
                   anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }],
                 },
                 layerThicknesses: {
-                  anyOf: [
-                    { type: "array", items: { type: "string" }, maxItems: 4 },
-                    { type: "null" },
-                  ],
+                  anyOf: [{ type: "array", items: { type: "string" }, maxItems: 4 }, { type: "null" }],
                 },
 
-                // NEW: first cavity
                 firstCavity: { type: ["string", "null"] },
 
                 notes: { type: ["string", "null"] },
@@ -257,9 +379,7 @@ async function callOpenAI(params: {
 
   const json = (await res.json()) as any;
 
-  const outputObj =
-    json?.output_json && typeof json.output_json === "object" ? json.output_json : null;
-
+  const outputObj = json?.output_json && typeof json.output_json === "object" ? json.output_json : null;
   if (outputObj) return outputObj;
 
   const outputText: string =
@@ -300,49 +420,80 @@ export async function POST(req: NextRequest) {
           done: false,
           quickReplies: ["18x12x3", "Qty 250", "Shipping: box", "Shipping: mailer"],
         },
-        { status: 200 }
+        { status: 200 },
       );
     }
 
-    const rawObj = await callOpenAI({ messages, userText, facts });
+    // ---- DB-backed foam options (Option B) ----
+    let materialOptions: DbMaterial[] = [];
+    const shouldOfferFoam = wantsFoamRecommendation(userText, facts);
+
+    if (shouldOfferFoam) {
+      const familyHint = inferFamilyHint(userText, facts);
+      materialOptions = await getTopMaterialsForWidget({ familyHint, limit: 3 });
+    }
+
+    // If the user replies "1/2/3" (or names a material) after we previously recommended,
+    // we can lock it in even before the model does.
+    const pickedFromText = materialOptions.length ? pickMaterialFromUserText(userText, materialOptions) : null;
+
+    const rawObj = await callOpenAI({ messages, userText, facts, materialOptions });
     const parsed = normalizeBrainObj(rawObj);
 
     if (!parsed) {
       return NextResponse.json(
         {
-          assistantMessage:
-            "Got it. Real quick — what’s the outside foam size (L×W×H, inches) and the quantity?",
+          assistantMessage: "Got it. Real quick — what’s the outside foam size (L×W×H, inches) and the quantity?",
           facts: {},
           done: false,
           quickReplies: ["18x12x3", "Qty 250", "Not sure yet"],
         },
-        { status: 200 }
+        { status: 200 },
       );
     }
 
-    const mergedFacts = { ...facts, ...parsed.facts };
+    // ---- Post-fix: enforce materialId/materialText from DB selection ----
+    const nextFacts: Partial<WidgetFacts> = { ...(parsed.facts ?? {}) };
+
+    // If the user picked by 1/2/3/name, lock it in.
+    if (pickedFromText) {
+      nextFacts.materialMode = "known";
+      nextFacts.materialId = pickedFromText.id;
+      nextFacts.materialText = pickedFromText.name ?? formatMaterialOption(pickedFromText);
+    } else {
+      // If model set materialId, try to ensure text is set too.
+      const mid = (nextFacts as any).materialId;
+      if (mid != null && Number.isFinite(Number(mid)) && materialOptions.length) {
+        const found = materialOptions.find((m) => m.id === Number(mid));
+        if (found) {
+          nextFacts.materialMode = "known";
+          if (!nextFacts.materialText) nextFacts.materialText = found.name ?? formatMaterialOption(found);
+        }
+      }
+    }
+
+    const mergedFacts = { ...facts, ...nextFacts };
     const done = parsed.done && isReady(mergedFacts);
 
     return NextResponse.json(
       {
         assistantMessage: parsed.assistantMessage,
-        facts: parsed.facts,
+        facts: nextFacts,
         done,
         quickReplies: (parsed.quickReplies ?? []).slice(0, 6),
       },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (e: any) {
     console.error("widget_chat_route_error", String(e?.message ?? e));
     return NextResponse.json(
       {
-        assistantMessage:
-          "I’m here — quick hiccup on my side. Try again with outside size (L×W×H) and qty.",
+        assistantMessage: "I’m here — quick hiccup on my side. Try again with outside size (L×W×H) and qty.",
         facts: {},
         done: false,
         quickReplies: ["18x12x3", "Qty 250", "Shipping: box", "Shipping: mailer"],
       },
-      { status: 200 }
+      { status: 200 },
     );
   }
 }
