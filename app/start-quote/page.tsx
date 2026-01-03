@@ -267,22 +267,49 @@ export default function StartQuotePage() {
     const lcNum = Number(String(payload.layerCount ?? "").trim());
     const lcOk = Number.isFinite(lcNum) && lcNum >= 1 && lcNum <= 4;
 
-    const ltsRaw = Array.isArray(payload.layerThicknesses) ? payload.layerThicknesses : [];
-    const ltsNum = ltsRaw
-      .map((x) => Number(String(x ?? "").trim()))
-      .filter((n) => Number.isFinite(n) && n > 0);
+        const ltsRaw = Array.isArray(payload.layerThicknesses) ? payload.layerThicknesses : [];
+
+    // Preserve positions (do NOT filter) so ["", "1"] stays [null, 1] (not [1]).
+    const ltsPos = ltsRaw.map((x) => {
+      const n = Number(String(x ?? "").trim());
+      return Number.isFinite(n) && n > 0 ? n : null;
+    });
+
+    // If we know total outside height and we have exactly one missing thickness in a 2-layer set,
+    // infer the missing one as (outsideH - known).
+    const outsideHNum = Number(String(payload.outside?.h ?? "").trim());
+    if (
+      lcOk &&
+      lcNum === 2 &&
+      Number.isFinite(outsideHNum) &&
+      outsideHNum > 0 &&
+      ltsPos.length >= 2
+    ) {
+      const a = ltsPos[0];
+      const b = ltsPos[1];
+
+      if (a == null && b != null) {
+        const inferred = outsideHNum - b;
+        if (Number.isFinite(inferred) && inferred > 0) ltsPos[0] = inferred;
+      } else if (b == null && a != null) {
+        const inferred = outsideHNum - a;
+        if (Number.isFinite(inferred) && inferred > 0) ltsPos[1] = inferred;
+      }
+    }
+
 
     if (lcOk) setLayerCount(lcNum);
 
-    if (lcOk && ltsNum.length) {
+        if (lcOk && ltsPos.length) {
       setLayerThicknesses(() => {
         const wantLen = Math.max(1, Math.min(4, lcNum));
         const next = Array.from({ length: wantLen }, (_, i) => {
-          const v = ltsNum[i];
-          return Number.isFinite(v) && v > 0 ? v : 1;
+          const v = ltsPos[i];
+          return Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 1;
         });
         return next;
       });
+
       // Reasonable default: cavities on base unless user already picked otherwise
       setCavityLayerIndex(1);
     } else {
