@@ -880,12 +880,11 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   }, [items, primaryItem]);
 
   // Planning notes from layout
-  const notesPreview =
-    layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
-      ? layoutPkg.notes.trim().length > 140
-        ? layoutPkg.notes.trim().slice(0, 140) + "..."
-        : layoutPkg.notes.trim()
-      : null;
+  const notesFull =
+  layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
+    ? layoutPkg.notes.trim()
+    : null;
+
 
   const primaryPricing = primaryItem?.pricing_meta || null;
   const minChargeApplied = !!primaryPricing?.used_min_charge;
@@ -1620,20 +1619,25 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
                         You can open the layout editor from this page or from your emailed quote to adjust pocket locations
                         before finalizing.
                       </div>
-                      {notesPreview && (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "#4b5563",
-                            background: "#eef2ff",
-                            borderRadius: 10,
-                            padding: "6px 8px",
-                          }}
-                        >
-                          <span style={{ fontWeight: 600 }}>Notes: </span>
-                          {notesPreview}
-                        </div>
-                      )}
+                     {notesFull && (
+  <div
+    style={{
+      fontSize: 12,
+      color: "#0f172a",
+      background: "#eef2ff",
+      border: "1px solid #c7d2fe",
+      borderRadius: 12,
+      padding: "8px 10px",
+      lineHeight: 1.4,
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-word",
+    }}
+  >
+    <span style={{ fontWeight: 700 }}>Notes: </span>
+    {notesFull}
+  </div>
+)}
+
                     </>
                   ) : (
                     <div style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.5 }}>
@@ -1968,12 +1972,22 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
                       </div>
                     </div>
 
-                    {notesPreview && (
-                      <div style={{ marginTop: 6, color: "#4b5563", fontSize: 12 }}>
-                        <span style={{ fontWeight: 500 }}>Notes: </span>
-                        {notesPreview}
-                      </div>
-                    )}
+                    {notesFull && (
+  <div
+    style={{
+      marginTop: 8,
+      color: "#0f172a",
+      fontSize: 12,
+      lineHeight: 1.45,
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-word",
+    }}
+  >
+    <span style={{ fontWeight: 700 }}>Notes: </span>
+    {notesFull}
+  </div>
+)}
+
 
                     {/* Per-layer previews (no CAD downloads) */}
                     {(() => {
