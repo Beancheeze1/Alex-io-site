@@ -257,9 +257,18 @@ async function ensureQuoteHeader(args: {
   );
   if (existing) return existing;
 
+  // IMPORTANT:
+  // - quotes.customer_name is NOT NULL in your DB → ALWAYS provide a value
+  // - quotes.created_by_user_id does NOT exist in your DB → NEVER reference it
+  const fallbackCustomerName =
+    typeof args.customerName === "string" && args.customerName.trim().length > 0
+      ? args.customerName.trim()
+      : "Web Lead";
+
   // 2) Create (best-effort, tolerant of schema differences)
-  // Path A: attempt the most complete insert first; if it fails, fall back to minimal.
+  // Path A: attempt the most complete insert first; if it fails, fall back safely.
   try {
+    // Try with updated_by_user_id (common in your schema)
     const created = await one<QuoteRow>(
       `
       insert into quotes (
@@ -269,69 +278,74 @@ async function ensureQuoteHeader(args: {
         email,
         phone,
         company,
-        created_by_user_id,
         updated_by_user_id
       )
-      values ($1, 'draft', $2, $3, $4, $5, $6, $6)
+      values ($1, 'draft', $2, $3, $4, $5, $6)
       returning id, quote_no, status
       `,
       [
         args.quoteNo,
-        args.customerName,
+        fallbackCustomerName,
         args.customerEmail,
         args.customerPhone,
         args.customerCompany,
         args.currentUserId,
       ],
     );
+
     if (created) {
-      console.warn("[layout/apply] Auto-created missing quote header (draft)", {
-        quoteNo: args.quoteNo,
-      });
+      console.warn("[layout/apply] Auto-created missing quote header (draft)", { quoteNo: args.quoteNo });
       return created;
     }
   } catch (e) {
-    console.warn("[layout/apply] Quote header insert (full) failed; will try minimal insert", {
+    console.warn("[layout/apply] Quote header insert (full) failed; will try without updated_by_user_id", {
       quoteNo: args.quoteNo,
       err: String(e),
     });
   }
 
   try {
+    // Try without updated_by_user_id (in case schema differs)
     const created2 = await one<QuoteRow>(
       `
-      insert into quotes (quote_no, status)
-      values ($1, 'draft')
+      insert into quotes (
+        quote_no,
+        status,
+        customer_name,
+        email,
+        phone,
+        company
+      )
+      values ($1, 'draft', $2, $3, $4, $5)
       returning id, quote_no, status
       `,
-      [args.quoteNo],
+      [args.quoteNo, fallbackCustomerName, args.customerEmail, args.customerPhone, args.customerCompany],
     );
+
     if (created2) {
-      console.warn("[layout/apply] Auto-created missing quote header (minimal)", {
-        quoteNo: args.quoteNo,
-      });
+      console.warn("[layout/apply] Auto-created missing quote header (no updated_by_user_id)", { quoteNo: args.quoteNo });
       return created2;
     }
   } catch (e) {
-    console.warn("[layout/apply] Quote header insert (minimal) failed; will try quote_no only", {
+    console.warn("[layout/apply] Quote header insert (no updated_by_user_id) failed; will try minimal", {
       quoteNo: args.quoteNo,
       err: String(e),
     });
   }
 
   try {
+    // Minimal but still satisfies NOT NULL customer_name
     const created3 = await one<QuoteRow>(
       `
-      insert into quotes (quote_no)
-      values ($1)
+      insert into quotes (quote_no, status, customer_name)
+      values ($1, 'draft', $2)
       returning id, quote_no, status
       `,
-      [args.quoteNo],
+      [args.quoteNo, fallbackCustomerName],
     );
+
     if (created3) {
-      console.warn("[layout/apply] Auto-created missing quote header (quote_no only)", {
-        quoteNo: args.quoteNo,
-      });
+      console.warn("[layout/apply] Auto-created missing quote header (minimal)", { quoteNo: args.quoteNo });
       return created3;
     }
   } catch (e) {
@@ -341,9 +355,9 @@ async function ensureQuoteHeader(args: {
     });
   }
 
-  // If we got here, creation failed (schema mismatch or DB issue)
   return null;
 }
+
 
 /* ===================== NEW: ensure primary quote_items exists ===================== */
 
