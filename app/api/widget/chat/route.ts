@@ -106,15 +106,15 @@ function wantsFoamRecommendation(userText: string, facts: WidgetFacts) {
 function inferFamilyHint(userText: string, facts: WidgetFacts): string | null {
   const t = `${facts.materialText ?? ""} ${userText ?? ""}`.toLowerCase();
 
+  // IMPORTANT: Keep PE and Expanded PE separate (no merging).
   if (t.includes("expanded polyethylene") || t.includes(" epe") || t.includes("epe "))
     return "Expanded Polyethylene";
+
   if (t.includes("polyethylene") || t.includes(" pe") || t.includes("pe "))
     return "Polyethylene";
 
   if (t.includes("polyurethane") || t.includes("urethane") || t.includes("pu "))
-    if (t.includes("polyurethane") || t.includes("urethane") || t.includes("pu "))
-  return "Polyurethane Foam";
-
+    return "Polyurethane Foam";
 
   return null;
 }
@@ -125,6 +125,9 @@ async function getTopMaterialsForWidget(args: {
 }): Promise<DbMaterial[]> {
   const limit = Math.max(1, Math.min(args.limit || 3, 6));
 
+  // Preference ordering:
+  // - Polyurethane Foam: prefer 1560, then 1780 (by name contains)
+  // - Polyethylene: prefer density 1.7, then 2.0 (by density_lb_ft3)
   if (args.familyHint) {
     const rows = await q<DbMaterial>(
       `
@@ -132,6 +135,13 @@ async function getTopMaterialsForWidget(args: {
       from materials
       where material_family = $1
       order by
+        case
+          when $1 = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1560%' then 0
+          when $1 = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1780%' then 1
+          when $1 = 'Polyethylene' and density_lb_ft3 = 1.7 then 0
+          when $1 = 'Polyethylene' and density_lb_ft3 = 2.0 then 1
+          else 9
+        end asc,
         case when density_lb_ft3 is null then 1 else 0 end asc,
         density_lb_ft3 asc,
         id asc
@@ -307,7 +317,6 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
     };
   }
 
-  // If unsure: don’t pick a SKU, just store both in notes (if present)
   let notes = f.notes;
   if (bestRsc?.sku) {
     notes = appendNote(
@@ -479,8 +488,6 @@ async function callOpenAI(params: {
     },
   };
 
-  
-
   const res = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -577,7 +584,6 @@ export async function POST(req: NextRequest) {
 
     const mergedFacts: WidgetFacts = { ...facts, ...nextFacts };
 
-    // NEW: seed packagingSku from boxes suggester (hardcoded domain)
     let assistantMessage = parsed.assistantMessage;
 
     const pack = await maybeSeedPackagingFromBoxesSuggest({ mergedFacts });
