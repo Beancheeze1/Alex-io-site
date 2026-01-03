@@ -84,28 +84,31 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   // On first render, layout.cavities may be empty even though stack[active].cavities is seeded.
   // Clicking layers calls setActiveLayerId() which mirrors stack -> layout.cavities.
   // This effect does that mirror once so seeded cavities are visible immediately.
-  useEffect(() => {
-    setState((prev) => {
-      // If already mirrored (legacy / other paths), do nothing.
-      if ((prev.layout.cavities?.length ?? 0) > 0) return prev;
+useEffect(() => {
+  setState((prev) => {
+    // 🔒 NEW: wait until activeLayerId is resolved
+    if (!prev.activeLayerId) return prev;
 
-      const active =
-        prev.layout.stack.find((l) => l.id === prev.activeLayerId) ??
-        prev.layout.stack[0];
+    if ((prev.layout.cavities?.length ?? 0) > 0) return prev;
 
-      if (!active) return prev;
+    const active =
+      prev.layout.stack.find((l) => l.id === prev.activeLayerId) ??
+      prev.layout.stack[0];
 
-      const mirrored = dedupeCavities(active.cavities);
+    if (!active) return prev;
 
-      return {
-        layout: {
-          ...prev.layout,
-          cavities: [...mirrored],
-        },
-        activeLayerId: active.id,
-      };
-    });
-  }, []);
+    const mirrored = dedupeCavities(active.cavities);
+
+    return {
+      layout: {
+        ...prev.layout,
+        cavities: [...mirrored],
+      },
+      activeLayerId: active.id,
+    };
+  });
+}, []);
+
 
 
   /* ================= selection ================= */
