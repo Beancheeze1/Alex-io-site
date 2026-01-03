@@ -112,7 +112,9 @@ function inferFamilyHint(userText: string, facts: WidgetFacts): string | null {
     return "Polyethylene";
 
   if (t.includes("polyurethane") || t.includes("urethane") || t.includes("pu "))
-    return "Polyurethane";
+    if (t.includes("polyurethane") || t.includes("urethane") || t.includes("pu "))
+  return "Polyurethane Foam";
+
 
   return null;
 }
