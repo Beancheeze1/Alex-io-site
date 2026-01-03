@@ -39,6 +39,10 @@
 //     rows marked with notes starting "[LAYOUT-LAYER] ...".
 //   - FIX (Path A): After Apply, PRIMARY quote_item height_in must be FULL STACK DEPTH,
 //     not the active layer thickness. We set PRIMARY.height_in = sum(stack[].thicknessIn).
+//
+//   - NEW (Path A, widget-safe): If the quote header does NOT exist yet (common for
+//     widget/form → editor direct links), we auto-create a draft quote header
+//     so Apply works without needing the email flow.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -46,7 +50,6 @@ import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { buildLayoutExports } from "@/app/lib/layout/exports";
-
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -231,6 +234,115 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
   }
 
   return next;
+}
+
+/* ===================== NEW: ensure quote header exists (widget/form-safe) ===================== */
+
+async function ensureQuoteHeader(args: {
+  quoteNo: string;
+  currentUserId: number | null;
+  customerName: string | null;
+  customerEmail: string | null;
+  customerPhone: string | null;
+  customerCompany: string | null;
+}): Promise<QuoteRow | null> {
+  // 1) Try load
+  const existing = await one<QuoteRow>(
+    `
+    select id, quote_no, status
+    from quotes
+    where quote_no = $1
+    `,
+    [args.quoteNo],
+  );
+  if (existing) return existing;
+
+  // 2) Create (best-effort, tolerant of schema differences)
+  // Path A: attempt the most complete insert first; if it fails, fall back to minimal.
+  try {
+    const created = await one<QuoteRow>(
+      `
+      insert into quotes (
+        quote_no,
+        status,
+        customer_name,
+        email,
+        phone,
+        company,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      values ($1, 'draft', $2, $3, $4, $5, $6, $6)
+      returning id, quote_no, status
+      `,
+      [
+        args.quoteNo,
+        args.customerName,
+        args.customerEmail,
+        args.customerPhone,
+        args.customerCompany,
+        args.currentUserId,
+      ],
+    );
+    if (created) {
+      console.warn("[layout/apply] Auto-created missing quote header (draft)", {
+        quoteNo: args.quoteNo,
+      });
+      return created;
+    }
+  } catch (e) {
+    console.warn("[layout/apply] Quote header insert (full) failed; will try minimal insert", {
+      quoteNo: args.quoteNo,
+      err: String(e),
+    });
+  }
+
+  try {
+    const created2 = await one<QuoteRow>(
+      `
+      insert into quotes (quote_no, status)
+      values ($1, 'draft')
+      returning id, quote_no, status
+      `,
+      [args.quoteNo],
+    );
+    if (created2) {
+      console.warn("[layout/apply] Auto-created missing quote header (minimal)", {
+        quoteNo: args.quoteNo,
+      });
+      return created2;
+    }
+  } catch (e) {
+    console.warn("[layout/apply] Quote header insert (minimal) failed; will try quote_no only", {
+      quoteNo: args.quoteNo,
+      err: String(e),
+    });
+  }
+
+  try {
+    const created3 = await one<QuoteRow>(
+      `
+      insert into quotes (quote_no)
+      values ($1)
+      returning id, quote_no, status
+      `,
+      [args.quoteNo],
+    );
+    if (created3) {
+      console.warn("[layout/apply] Auto-created missing quote header (quote_no only)", {
+        quoteNo: args.quoteNo,
+      });
+      return created3;
+    }
+  } catch (e) {
+    console.error("[layout/apply] Failed to auto-create quote header", {
+      quoteNo: args.quoteNo,
+      err: String(e),
+    });
+  }
+
+  // If we got here, creation failed (schema mismatch or DB issue)
+  return null;
 }
 
 /* ===================== NEW: ensure primary quote_items exists ===================== */
@@ -977,21 +1089,23 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const quote = await one<QuoteRow>(
-      `
-      select id, quote_no, status
-      from quotes
-      where quote_no = $1
-      `,
-      [quoteNo],
-    );
+    // ✅ NEW: Widget/form links may not have a quote header yet.
+    // Create it (draft) if missing, then continue.
+    const quote = await ensureQuoteHeader({
+      quoteNo,
+      currentUserId,
+      customerName,
+      customerEmail,
+      customerPhone,
+      customerCompany,
+    });
 
     if (!quote) {
       return bad(
         {
           ok: false,
           error: "quote_not_found",
-          message: `No quote header found for quote_no ${quoteNo}.`,
+          message: `No quote header found for quote_no ${quoteNo}, and auto-create failed.`,
         },
         404,
       );
@@ -1015,7 +1129,10 @@ export async function POST(req: NextRequest) {
       quoteId: quote.id,
       layoutForSave,
       qtyMaybe,
-      materialIdMaybe: materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0 ? materialIdMaybe : null,
+      materialIdMaybe:
+        materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0
+          ? materialIdMaybe
+          : null,
     });
 
     // FIX (Path A): After Apply, PRIMARY must reflect FULL STACK DEPTH so /api/quotes/calc prices the full set.
