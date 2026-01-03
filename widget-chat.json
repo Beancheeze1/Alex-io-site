@@ -2,6 +2,6 @@
   "messages": [
     { "role": "bot", "text": "Start with outside foam size if you have it (LxWxH, inches)." }
   ],
-  "userText": "10x5x4 mailer, 2 layers, 1\" top pad and 3\" base",
+  "userText": "10x5x4 mailer, qty 50, set, pockets on base, 2 layers (3 base + 1 top). Pocket size 5x3x1.",
   "facts": {}
 }

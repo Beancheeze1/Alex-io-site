@@ -40,6 +40,7 @@ function pad2(n: number) {
 }
 
 function buildQuoteNo() {
+  // Format matches your existing examples: Q-AI-YYYYMMDD-HHMMSS
   const d = new Date();
   const y = d.getFullYear();
   const m = pad2(d.getMonth() + 1);
@@ -51,6 +52,7 @@ function buildQuoteNo() {
 }
 
 function normalizeDims(input: string) {
+  // Accept: "18 x 12 x 3", "18×12×3", "18*12*3", "18,12,3", etc.
   const s = String(input || "")
     .trim()
     .toLowerCase()
@@ -58,16 +60,19 @@ function normalizeDims(input: string) {
     .replace(/,/g, "x")
     .replace(/\s+/g, "");
 
+  // Keep only digits, dot, and 'x'
   const cleaned = s.replace(/[^0-9.x]/g, "");
 
+  // Reduce multiple x’s / weird formats to 3 parts when possible
   const parts = cleaned.split("x").filter(Boolean);
   if (parts.length >= 3) {
     return `${parts[0]}x${parts[1]}x${parts[2]}`;
   }
-  return cleaned;
+  return cleaned; // best effort
 }
 
 function extractFirstCavity(cavitiesText: string) {
+  // For now: only support rect-style "LxWxD" as a single cavity seed.
   const s = String(cavitiesText || "")
     .replace(/[×\*]/g, "x")
     .replace(/\s+/g, "");
@@ -91,18 +96,18 @@ type PrefillPayload = {
   outside?: { l?: string; w?: string; h?: string; units?: string };
   qty?: string;
 
-  shipMode?: string;
-  insertType?: string;
-  pocketsOn?: string;
-  holding?: string;
-  pocketCount?: string;
+  shipMode?: string; // "box"|"mailer"|"unsure"
+  insertType?: string; // "single"|"set"|"unsure"
+  pocketsOn?: string; // "base"|"top"|"both"|"unsure"
+  holding?: string; // "pockets"|"loose"|"unsure"
+  pocketCount?: string; // "1"|"2"|"3+"|"unsure"
 
-  material?: { mode?: string; text?: string };
+  material?: { mode?: string; text?: string }; // mode: recommend|known
 
-  // NEW: layers + cavity seed from widget
-  layerCount?: string;
-  layerThicknesses?: string[];
-  firstCavity?: string;
+  // NEW: layers + cavity seed (from widget)
+  layerCount?: string; // "1".."4"
+  layerThicknesses?: string[]; // e.g. ["3","1"]
+  firstCavity?: string; // e.g. "5x3x1"
 
   notes?: string;
 };
@@ -132,9 +137,11 @@ function tryInferLayersFromText(raw: string): { layerCount?: number; thicknesses
   const mLayers = s.match(/(\d+)\s*layers?/);
   const layerCount = mLayers ? Math.max(1, Math.min(4, Number(mLayers[1]) || 0)) : undefined;
 
+  // Top pad thickness (e.g., "1\" top pad" / "1 inch top pad")
   const mTop =
     s.match(/(\d+(?:\.\d+)?)\s*(?:\"|inches?|inch|in)\s*(?:top\s*pad|lid|cap)/) ?? null;
 
+  // Base/body thickness (e.g., "3\" body" / "3 inch base")
   const mBase =
     s.match(/(\d+(?:\.\d+)?)\s*(?:\"|inches?|inch|in)\s*(?:base|body|bottom|main)/) ?? null;
 
@@ -144,10 +151,13 @@ function tryInferLayersFromText(raw: string): { layerCount?: number; thicknesses
   const topOk = top != null && Number.isFinite(top) && top > 0;
   const baseOk = base != null && Number.isFinite(base) && base > 0;
 
+  // Only set thicknesses when we clearly have a 2-layer “base + top pad” situation.
   if (layerCount === 2 && topOk && baseOk) {
+    // Convention: Layer 1 = base/body, Layer 2 = top pad/lid
     return { layerCount: 2, thicknesses: [base as number, top as number] };
   }
 
+  // If user said “2 layers” but only one thickness, don’t guess.
   return { layerCount };
 }
 
@@ -161,11 +171,12 @@ export default function StartQuotePage() {
   const [phone, setPhone] = React.useState("");
 
   const [qty, setQty] = React.useState("");
-  const [foam, setFoam] = React.useState("");
+  const [foam, setFoam] = React.useState(""); // optional free-text notes
   const [size, setSize] = React.useState("");
   const [cavities, setCavities] = React.useState("");
   const [notes, setNotes] = React.useState("");
 
+  // widget-collected structured choices become real inputs here
   const [shipMode, setShipMode] = React.useState<"" | "box" | "mailer" | "unsure">("");
   const [insertType, setInsertType] = React.useState<"" | "single" | "set" | "unsure">("");
   const [pocketsOn, setPocketsOn] = React.useState<"" | "base" | "top" | "both" | "unsure">("");
@@ -174,18 +185,24 @@ export default function StartQuotePage() {
   const [materialMode, setMaterialMode] = React.useState<"" | "recommend" | "known">("");
   const [materialText, setMaterialText] = React.useState("");
 
+  // Gate editor open on required fields (form-only)
   const [attemptedOpen, setAttemptedOpen] = React.useState(false);
 
+  // --- materials (dropdown) ---
   const [materialOptions, setMaterialOptions] = React.useState<MaterialOption[]>([]);
   const [materialId, setMaterialId] = React.useState<string>("");
 
+  // --- layers ---
   const [layerCount, setLayerCount] = React.useState<number>(3);
   const [layerThicknesses, setLayerThicknesses] = React.useState<number[]>([1, 1, 1]);
 
+  // explicit cavity layer (1-based)
   const [cavityLayerIndex, setCavityLayerIndex] = React.useState<number>(2);
 
+  // Track whether this visit came from the splash widget prefill.
   const [isWidgetPrefill, setIsWidgetPrefill] = React.useState(false);
 
+  // Apply prefill once (Path-A additive).
   const prefillAppliedRef = React.useRef(false);
   React.useEffect(() => {
     if (prefillAppliedRef.current) return;
@@ -197,9 +214,11 @@ export default function StartQuotePage() {
       return;
     }
 
+    // Only treat as "widget prefill" if explicitly labeled.
     const fromWidget = payload.source === "splash-widget";
     setIsWidgetPrefill(fromWidget);
 
+    // Core fields
     const l = payload.outside?.l ? String(payload.outside.l).trim() : "";
     const w = payload.outside?.w ? String(payload.outside.w).trim() : "";
     const h = payload.outside?.h ? String(payload.outside.h).trim() : "";
@@ -210,6 +229,7 @@ export default function StartQuotePage() {
       if (q) setQty(q);
     }
 
+    // Map widget structured fields into actual inputs
     const ship = normalizeEnum(payload.shipMode || "", ["box", "mailer", "unsure"] as const);
     if (ship) setShipMode(ship);
 
@@ -231,45 +251,67 @@ export default function StartQuotePage() {
     const mt = payload.material?.text ? String(payload.material.text).trim() : "";
     if (mt) setMaterialText(mt);
 
+    // Keep your existing foam notes behavior (but don’t “lose” materialText)
     if (mm === "known" && mt) {
       setFoam(mt);
     }
 
-    // NEW: if widget provides a cavity seed, prefill the cavities input
-    const seedCav = payload.firstCavity ? String(payload.firstCavity).trim() : "";
-    if (seedCav) {
-      setCavities((prev) => (String(prev || "").trim() ? prev : seedCav));
+    // --- NEW: cavity seed from widget ---
+    const fc = payload.firstCavity ? String(payload.firstCavity).trim() : "";
+    if (fc) {
+      // Seed the CAVITIES / POCKETS input so the existing form→editor flow adds &cavity=
+      setCavities(fc);
     }
 
-    // Best-effort: infer layers + thicknesses from widget notes when clear (kept)
-    const widgetNotes = payload.notes ? String(payload.notes).trim() : "";
-    if (widgetNotes) {
-      const inferred = tryInferLayersFromText(widgetNotes);
-      if (inferred.layerCount && Number.isFinite(inferred.layerCount)) {
-        setLayerCount(inferred.layerCount);
-      }
-      if (inferred.thicknesses && inferred.thicknesses.length) {
-        setLayerThicknesses((prev) => {
-          const next = [...prev];
-          for (let i = 0; i < inferred.thicknesses!.length; i++) {
-            next[i] = inferred.thicknesses![i];
-          }
-          return next.slice(0, inferred.thicknesses!.length);
+    // Layers: prefer structured payload when present
+    const lcNum = Number(String(payload.layerCount ?? "").trim());
+    const lcOk = Number.isFinite(lcNum) && lcNum >= 1 && lcNum <= 4;
+
+    const ltsRaw = Array.isArray(payload.layerThicknesses) ? payload.layerThicknesses : [];
+    const ltsNum = ltsRaw
+      .map((x) => Number(String(x ?? "").trim()))
+      .filter((n) => Number.isFinite(n) && n > 0);
+
+    if (lcOk) setLayerCount(lcNum);
+
+    if (lcOk && ltsNum.length) {
+      setLayerThicknesses(() => {
+        const wantLen = Math.max(1, Math.min(4, lcNum));
+        const next = Array.from({ length: wantLen }, (_, i) => {
+          const v = ltsNum[i];
+          return Number.isFinite(v) && v > 0 ? v : 1;
         });
-        setCavityLayerIndex((prev) => (Number.isFinite(prev) ? prev : 1));
+        return next;
+      });
+      // Reasonable default: cavities on base unless user already picked otherwise
+      setCavityLayerIndex(1);
+    } else {
+      // Fallback: infer from notes ONLY if unambiguous (existing behavior)
+      const widgetNotes = payload.notes ? String(payload.notes).trim() : "";
+      if (widgetNotes) {
+        const inferred = tryInferLayersFromText(widgetNotes);
+        if (inferred.layerCount && Number.isFinite(inferred.layerCount)) {
+          setLayerCount(inferred.layerCount);
+        }
+        if (inferred.thicknesses && inferred.thicknesses.length) {
+          setLayerThicknesses((prev) => {
+            const next = [...prev];
+            for (let i = 0; i < inferred.thicknesses!.length; i++) {
+              next[i] = inferred.thicknesses![i];
+            }
+            return next.slice(0, inferred.thicknesses!.length);
+          });
+          setCavityLayerIndex(1);
+        }
       }
     }
 
+    // Also fold widget info into NOTES as a readable summary (additive)
+    const widgetNotes = payload.notes ? String(payload.notes).trim() : "";
     const noteLines: string[] = [];
 
-    if (ship)
-      noteLines.push(
-        `Shipping: ${ship === "box" ? "Box" : ship === "mailer" ? "Mailer" : "Not sure"}`
-      );
-    if (ins)
-      noteLines.push(
-        `Insert: ${ins === "single" ? "Single" : ins === "set" ? "Set (base + top)" : "Not sure"}`
-      );
+    if (ship) noteLines.push(`Shipping: ${ship === "box" ? "Box" : ship === "mailer" ? "Mailer" : "Not sure"}`);
+    if (ins) noteLines.push(`Insert: ${ins === "single" ? "Single" : ins === "set" ? "Set (base + top)" : "Not sure"}`);
     if (ins === "set" && pocOn) noteLines.push(`Pockets on: ${pocOn}`);
     if (hold) {
       if (hold === "pockets") noteLines.push(`Holding: Cut-out pockets${pc ? ` (${pc})` : ""}`);
@@ -278,7 +320,6 @@ export default function StartQuotePage() {
     }
     if (mm === "recommend") noteLines.push("Material: Recommended");
     if (mm === "known" && mt) noteLines.push(`Material: ${mt}`);
-    if (seedCav) noteLines.push(`Pocket size: ${seedCav}`);
     if (widgetNotes) noteLines.push(widgetNotes);
 
     if (noteLines.length) {
@@ -296,8 +337,10 @@ export default function StartQuotePage() {
   const emailOk = email.trim().length > 0;
   const phoneOk = phone.trim().length > 0;
 
+  // Normal behavior unchanged unless widget prefill is present.
   const canOpenEditor = isWidgetPrefill || (nameOk && emailOk && phoneOk);
 
+  // Load materials for dropdown (Path-A minimal: one fetch, best-effort)
   React.useEffect(() => {
     let cancelled = false;
 
@@ -332,6 +375,7 @@ export default function StartQuotePage() {
     };
   }, []);
 
+  // Keep thickness array length aligned to layerCount (Path-A safe)
   React.useEffect(() => {
     setLayerThicknesses((prev) => {
       const next = Array.from({ length: layerCount }, (_, i) => {
@@ -342,6 +386,7 @@ export default function StartQuotePage() {
     });
   }, [layerCount]);
 
+  // Keep cavity layer in range when layerCount changes
   React.useEffect(() => {
     setCavityLayerIndex((prev) => {
       const n = Number(prev);
@@ -362,16 +407,19 @@ export default function StartQuotePage() {
 
     const p = new URLSearchParams();
 
+    // Required-ish
     p.set("quote_no", quote_no);
 
     if (dims) p.set("dims", dims);
     if (qtyNum) p.set("qty", String(qtyNum));
 
+    // Customer (only include if provided; widget path may not collect these yet)
     if (name.trim()) p.set("customer_name", name.trim());
     if (email.trim()) p.set("customer_email", email.trim());
     if (company.trim()) p.set("customer_company", company.trim());
     if (phone.trim()) p.set("customer_phone", phone.trim());
 
+    // Materials (deterministic)
     const matIdNum = Number(materialId);
     if (Number.isFinite(matIdNum) && matIdNum > 0) {
       p.set("material_id", String(matIdNum));
@@ -379,6 +427,7 @@ export default function StartQuotePage() {
       if (picked?.name) p.set("material_label", picked.name);
     }
 
+    // Layers
     p.set("layer_count", String(layerCount));
     for (const t of layerThicknesses) {
       p.append("layer_thicknesses", String(Number(t) || 1));
@@ -387,11 +436,13 @@ export default function StartQuotePage() {
       p.append("layer_label", `Layer ${i}`);
     }
 
+    // Cavity seeding
     p.set("layer_cavity_layer_index", String(cavityLayerIndex));
     p.set("activeLayer", String(cavityLayerIndex));
     p.set("active_layer", String(cavityLayerIndex));
     if (firstCavity) p.set("cavity", firstCavity);
 
+    // Pass widget-intent as query params (safe even if ignored)
     if (shipMode) p.set("ship_mode", shipMode);
     if (insertType) p.set("insert_type", insertType);
     if (insertType === "set" && pocketsOn) p.set("pockets_on", pocketsOn);
@@ -400,6 +451,7 @@ export default function StartQuotePage() {
     if (materialMode) p.set("material_mode", materialMode);
     if (materialText.trim()) p.set("material_text", materialText.trim());
 
+    // Optional notes / user-entered foam text (kept)
     if (foam.trim()) p.set("foam", foam.trim());
     if (notes.trim()) p.set("notes", notes.trim());
 
@@ -725,8 +777,8 @@ export default function StartQuotePage() {
                 />
               </Field>
               <div className="mt-1 text-xs text-slate-400">
-                Tip: For seeding, we’ll take the first “LxWxD” we can find (ex: 5x5x1). You can
-                add/edit cavities in the editor.
+                Tip: For seeding, we’ll take the first “LxWxD” we can find (ex:
+                5x5x1). You can add/edit cavities in the editor.
                 <span className="block mt-1">
                   Need cavities on other layers? Add them in the editor after you open it.
                 </span>
@@ -757,7 +809,9 @@ export default function StartQuotePage() {
                   ? "bg-sky-500/90 ring-sky-300/20 hover:bg-sky-500"
                   : "bg-slate-700/40 ring-white/10 opacity-70 cursor-not-allowed",
               ].join(" ")}
-              title={canOpenEditor || isWidgetPrefill ? "" : "Please fill in Name, Email, and Phone first."}
+              title={
+                canOpenEditor || isWidgetPrefill ? "" : "Please fill in Name, Email, and Phone first."
+              }
             >
               Editor — next step →
             </button>
@@ -772,7 +826,8 @@ export default function StartQuotePage() {
           </div>
 
           <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-400">
-            This page does not send email. After you finalize in the editor, use the normal “Apply to quote” flow.
+            This page does not send email. After you finalize in the editor, use the normal “Apply to
+            quote” flow.
           </div>
         </div>
       </div>
