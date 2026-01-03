@@ -477,7 +477,7 @@ async function callOpenAI(params: {
     },
   };
 
-  const apiKey = requireEnv("OPENAI_API_KEY");
+  
 
   const res = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
