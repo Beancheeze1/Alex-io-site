@@ -183,6 +183,7 @@ function parseLayersParam(
  *  - customer_company, company
  *  - customer_phone, phone
  */
+
 function readCustomerFromUrl(url: URL): {
   name: string;
   email: string;
@@ -241,6 +242,18 @@ function readQtyFromUrl(url: URL): number | null {
   }
   return null;
 }
+function readNotesFromUrl(url: URL): string {
+  const raw = url.searchParams.get("notes");
+  if (!raw) return "";
+
+  try {
+    // URLSearchParams decodes %XX but leaves '+' intact
+    return decodeURIComponent(raw.replace(/\+/g, " ")).trim();
+  } catch {
+    return raw.replace(/\+/g, " ").trim();
+  }
+}
+
 
 
 function readLayerCavitiesFromUrl(url: URL, layerIndex1Based: number): string {
@@ -683,6 +696,7 @@ export default function LayoutPage({
 let qtySeedLocal: number | null = null;
 let materialSeedLocal: number | null = null;
 let materialLabelSeedLocal: string | null = null;
+let notesSeedLocal: string = "";
 
 
 
@@ -747,6 +761,10 @@ let materialLabelSeedLocal: string | null = null;
           }
           // customer prefill (canonical)
           customerSeed = readCustomerFromUrl(url);
+
+          // notes seed from URL (form → editor)
+notesSeedLocal = readNotesFromUrl(url);
+
 
 
           // qty + material seed from URL (form deep-links)
@@ -867,7 +885,8 @@ if (materialLabelSeedLocal) {
           );
           if (!cancelled) {
             setInitialLayout(fallback);
-            setInitialNotes("");
+            setInitialNotes(notesSeedLocal || "");
+
            setInitialQty(qtySeedLocal ?? null);
 setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUrl ?? null);
 
@@ -899,7 +918,8 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
           );
           if (!cancelled) {
             setInitialLayout(fallback);
-            setInitialNotes("");
+            setInitialNotes(notesSeedLocal || "");
+
             setInitialQty(qtySeedLocal ?? null);
 setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUrl ?? null);
 
@@ -1031,7 +1051,8 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
 
           if (!cancelled) {
             setInitialLayout(mergedLayout);
-            setInitialNotes(notesFromDb);
+            setInitialNotes(notesSeedLocal || notesFromDb || "");
+
                         // Prefer DB items; fall back to URL seeds (locals) to avoid stale React state.
             setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
 
@@ -1088,7 +1109,8 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         );
         if (!cancelled) {
           setInitialLayout(fallback);
-          setInitialNotes("");
+          setInitialNotes(notesSeedLocal || "");
+
 
           // Prefer DB items; else URL seeds (locals)
           setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
@@ -1113,7 +1135,8 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         );
         if (!cancelled) {
           setInitialLayout(fallback);
-          setInitialNotes("");
+          setInitialNotes(notesSeedLocal || "");
+
           setInitialQty(null);
           setInitialMaterialId(materialIdOverride ?? null);
                    setInitialCustomerName(customerSeed.name || "");
