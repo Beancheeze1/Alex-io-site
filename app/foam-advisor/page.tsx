@@ -1611,20 +1611,26 @@ export default function FoamAdvisorPage({
 
   const mid = firstMatched.id;
 
-  // Preserve ALL existing query params (notes, layers, etc.)
-  const url = new URL(window.location.href);
-  const sp = new URLSearchParams(url.search);
+// Prefer return_to if present — it contains the full editor seed
+const currentUrl = new URL(window.location.href);
+const returnTo = currentUrl.searchParams.get("return_to");
 
-  // Keep/ensure these are present (safe; does not remove anything)
-  const q = effectiveQuoteNo || "";
-  const blk = blockParam || "";
-  if (q) sp.set("quote_no", q);
-  if (blk) sp.set("block", blk);
+let editorUrl: URL;
 
-  // Override/seed material for the editor
-  sp.set("material_id", String(mid));
+if (returnTo) {
+  // Decode once — return_to is already encoded
+  editorUrl = new URL(decodeURIComponent(returnTo));
+} else {
+  // Fallback: current URL (safe for direct entry)
+  editorUrl = new URL(currentUrl.href);
+}
 
-  window.location.href = `/quote/layout?${sp.toString()}`;
+// Override / seed material only
+editorUrl.searchParams.set("material_id", String(mid));
+
+// Navigate back to editor with FULL preserved state
+window.location.href = editorUrl.toString();
+
 }}
 
                                     >
