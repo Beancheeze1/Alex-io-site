@@ -133,8 +133,7 @@ function summarizeFacts(facts: WidgetFacts) {
         ? "Recommended"
         : "(material not set)";
 
-  const pocket =
-    facts.firstCavity?.trim() ? `Pocket size: ${facts.firstCavity.trim()} in` : null;
+  const pocket = facts.firstCavity?.trim() ? `Pocket size: ${facts.firstCavity.trim()} in` : null;
 
   return [
     `Outside size: ${dims}`,
@@ -155,11 +154,7 @@ type ChatResponse = {
   quickReplies?: string[];
 };
 
-export default function SplashChatWidget({
-  startQuotePath,
-}: {
-  startQuotePath: string;
-}) {
+export default function SplashChatWidget({ startQuotePath }: { startQuotePath: string }) {
   const router = useRouter();
 
   const [open, setOpen] = React.useState(false);
@@ -330,7 +325,8 @@ export default function SplashChatWidget({
     // This prevents a “one-render-behind” state from dropping firstCavity (and other fields)
     // when the user clicks immediately after the last assistant response.
     const saved = safeJsonParse<{ facts: WidgetFacts }>(localStorage.getItem(LS_KEY));
-    const latestFacts: WidgetFacts | null = saved?.facts && typeof saved.facts === "object" ? saved.facts : null;
+    const latestFacts: WidgetFacts | null =
+      saved?.facts && typeof saved.facts === "object" ? saved.facts : null;
 
     // Prefer latest persisted facts if present; otherwise fall back to current state.
     const payloadFacts: WidgetFacts = latestFacts ? { ...latestFacts } : { ...facts };
@@ -393,9 +389,7 @@ export default function SplashChatWidget({
             {/* Header */}
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div>
-                <div className="text-xs font-semibold tracking-widest text-sky-300/80">
-                  ALEX-IO
-                </div>
+                <div className="text-xs font-semibold tracking-widest text-sky-300/80">ALEX-IO</div>
                 <div className="mt-0.5 text-[11px] text-slate-300">
                   Talk to me like a human. I’ll keep it tight.
                 </div>
@@ -487,6 +481,11 @@ export default function SplashChatWidget({
                   </div>
 
                   <div className="mt-2 text-[11px] text-slate-400">
+                    You can keep chatting if you want to add or correct anything — I’ll update the
+                    summary. Open the layout when you’re ready.
+                  </div>
+
+                  <div className="mt-2 text-[11px] text-slate-400">
                     Opens the seeded editor via{" "}
                     <code className="text-slate-300">{startQuotePath}</code>.
                   </div>
@@ -499,7 +498,7 @@ export default function SplashChatWidget({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (busy || done) return;
+                  if (busy) return;
                   const t = input;
                   setInput("");
                   void handleSend(t);
@@ -516,13 +515,12 @@ export default function SplashChatWidget({
                     }
                   }}
                   rows={1}
-                  placeholder={done ? "Reset to start a new quote" : "Type here…"}
-                  disabled={done}
-                  className="min-h-[42px] flex-1 resize-none rounded-2xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40 disabled:opacity-60"
+                  placeholder={done ? "Add anything else… (or click Open layout & pricing)" : "Type here…"}
+                  className="min-h-[42px] flex-1 resize-none rounded-2xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
                 />
                 <button
                   type="submit"
-                  disabled={busy || done || !input.trim()}
+                  disabled={busy || !input.trim()}
                   className="rounded-2xl bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Send
