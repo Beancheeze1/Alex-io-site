@@ -28,17 +28,13 @@ type WidgetFacts = {
   materialMode?: "recommend" | "known";
   materialText?: string;
 
-  // DB-backed choice (Option B)
   materialId?: number | null;
 
-  // stock packaging seed from widget (SKU)
   packagingSku?: string;
 
-  // layers (structured)
   layerCount?: "1" | "2" | "3" | "4";
   layerThicknesses?: string[];
 
-  // cavity seed (rect only, LxWxD)
   firstCavity?: string;
 
   notes?: string;
@@ -67,7 +63,6 @@ function hasCoreDims(f: WidgetFacts) {
   return Boolean(f.outsideL && f.outsideW && f.outsideH);
 }
 
-// Minimal “ready” gate for reveal: dims + qty + shipping + insertType + holding.
 function isReady(f: WidgetFacts) {
   const qtyOk = Boolean(f.qty && String(f.qty).trim().length > 0);
   const shipOk = Boolean(f.shipMode && f.shipMode !== ("" as any));
@@ -76,18 +71,11 @@ function isReady(f: WidgetFacts) {
   return hasCoreDims(f) && qtyOk && shipOk && insertOk && holdingOk;
 }
 
-/**
- * FIX 1 (mechanical): broaden the trigger for DB-backed foam recommendation.
- * Previously, normal user phrasing like "need to use?" could bypass the trigger,
- * leading to generic/hallucinated foam answers.
- */
 function wantsFoamRecommendation(userText: string, facts: WidgetFacts) {
   const t = (userText || "").toLowerCase();
 
-  // If we're already in recommend mode, always offer DB options.
   if (facts.materialMode === "recommend") return true;
 
-  // If user is asking what material/foam to use (common phrasing).
   const askPhrases = [
     "recommend",
     "suggest",
@@ -101,10 +89,6 @@ function wantsFoamRecommendation(userText: string, facts: WidgetFacts) {
     "what should i use",
     "what do i need",
     "need to use",
-    "need to use?",
-    "what do we use",
-    "for my device",
-    "for our device",
     "medical device",
     "fragile",
     "delicate",
@@ -112,7 +96,6 @@ function wantsFoamRecommendation(userText: string, facts: WidgetFacts) {
 
   if (askPhrases.some((p) => t.includes(p))) return true;
 
-  // If they mention foam/material and are asking a question, treat as a recommend ask.
   const mentionsFoam = t.includes("foam") || t.includes("material");
   const isQuestion = t.includes("?") || t.startsWith("what ") || t.startsWith("which ");
   if (mentionsFoam && isQuestion) return true;
@@ -123,7 +106,6 @@ function wantsFoamRecommendation(userText: string, facts: WidgetFacts) {
 function inferFamilyHint(userText: string, facts: WidgetFacts): string | null {
   const t = `${facts.materialText ?? ""} ${userText ?? ""}`.toLowerCase();
 
-  // IMPORTANT: Keep PE and Expanded PE separate (no merging).
   if (t.includes("expanded polyethylene") || t.includes(" epe") || t.includes("epe "))
     return "Expanded Polyethylene";
   if (t.includes("polyethylene") || t.includes(" pe") || t.includes("pe "))
@@ -211,9 +193,9 @@ function pickMaterialFromUserText(userText: string, options: DbMaterial[]): DbMa
   return null;
 }
 
-/* =======================================================================
-   Box suggester (widget prefill)
-   ======================================================================= */
+/* =========================
+   Box suggester (prefill)
+   ========================= */
 
 type BoxSuggestReq = {
   footprint_length_in: number;
@@ -256,13 +238,7 @@ function appendNote(existing: string | undefined, line: string) {
   return `${base}\n${add}`;
 }
 
-/**
- * FIX 2 (mechanical): always fetch suggestions when dims exist, even if shipMode is "unsure".
- * - If shipMode is box/mailer: preselect SKU (packagingSku)
- * - If shipMode unsure: store suggestions in notes only (no guessing)
- */
 async function maybeSeedPackagingFromBoxesSuggest(args: {
-  origin: string;
   mergedFacts: WidgetFacts;
 }): Promise<{
   packagingSku?: string;
@@ -278,10 +254,11 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
   const H = toFiniteNumber(f.outsideH);
   if (!(L && W && H && L > 0 && W > 0 && H > 0)) return {};
 
-  // If we already have a SKU, don't spam updates.
   if (f.packagingSku && String(f.packagingSku).trim().length > 0) return {};
 
-  const url = `${args.origin}/api/boxes/suggest`;
+  // 🔒 FIX: use the known-good API domain (avoid proxy/origin ambiguity)
+  const url = `https://api.alex-io.com/api/boxes/suggest`;
+
   const payload: BoxSuggestReq = {
     footprint_length_in: L,
     footprint_width_in: W,
@@ -294,9 +271,12 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
   try {
     const r = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(payload),
+      cache: "no-store",
     });
+
+    if (!r.ok) return {};
     resp = (await r.json().catch(() => null)) as BoxSuggestResp | null;
   } catch {
     return {};
@@ -307,7 +287,6 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
   const bestRsc = resp.bestRsc ?? null;
   const bestMailer = resp.bestMailer ?? null;
 
-  // If shipMode is explicitly box/mailer, set packagingSku to the matching best.
   if (f.shipMode === "box" && bestRsc?.sku) {
     const noteLine = `Suggested box (stock): ${bestRsc.sku} — ${bestRsc.description} (inside ${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in})`;
     return {
@@ -326,7 +305,7 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
     };
   }
 
-  // If unsure (or missing shipMode), do not pick a SKU — just store both suggestions in notes.
+  // If unsure: don’t pick a SKU, just store both in notes (if present)
   let notes = f.notes;
   if (bestRsc?.sku) {
     notes = appendNote(
@@ -342,6 +321,10 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
   }
   return notes !== f.notes ? { notes } : {};
 }
+
+/* =========================
+   OpenAI call (unchanged)
+   ========================= */
 
 async function callOpenAI(params: {
   messages: { role: "bot" | "user"; text: string }[];
@@ -443,11 +426,7 @@ async function callOpenAI(params: {
           properties: {
             assistantMessage: { type: "string" },
             done: { type: "boolean" },
-            quickReplies: {
-              type: "array",
-              items: { type: "string" },
-              maxItems: 6,
-            },
+            quickReplies: { type: "array", items: { type: "string" }, maxItems: 6 },
             facts: {
               type: "object",
               additionalProperties: false,
@@ -476,45 +455,18 @@ async function callOpenAI(params: {
                 outsideW: { type: ["string", "null"] },
                 outsideH: { type: ["string", "null"] },
                 qty: { type: ["string", "null"] },
-
-                shipMode: {
-                  anyOf: [{ type: "string", enum: ["box", "mailer", "unsure"] }, { type: "null" }],
-                },
-
-                insertType: {
-                  anyOf: [{ type: "string", enum: ["single", "set", "unsure"] }, { type: "null" }],
-                },
-
-                pocketsOn: {
-                  anyOf: [{ type: "string", enum: ["base", "top", "both", "unsure"] }, { type: "null" }],
-                },
-
-                holding: {
-                  anyOf: [{ type: "string", enum: ["pockets", "loose", "unsure"] }, { type: "null" }],
-                },
-
-                pocketCount: {
-                  anyOf: [{ type: "string", enum: ["1", "2", "3+", "unsure"] }, { type: "null" }],
-                },
-
-                materialMode: {
-                  anyOf: [{ type: "string", enum: ["recommend", "known"] }, { type: "null" }],
-                },
-
+                shipMode: { anyOf: [{ type: "string", enum: ["box", "mailer", "unsure"] }, { type: "null" }] },
+                insertType: { anyOf: [{ type: "string", enum: ["single", "set", "unsure"] }, { type: "null" }] },
+                pocketsOn: { anyOf: [{ type: "string", enum: ["base", "top", "both", "unsure"] }, { type: "null" }] },
+                holding: { anyOf: [{ type: "string", enum: ["pockets", "loose", "unsure"] }, { type: "null" }] },
+                pocketCount: { anyOf: [{ type: "string", enum: ["1", "2", "3+", "unsure"] }, { type: "null" }] },
+                materialMode: { anyOf: [{ type: "string", enum: ["recommend", "known"] }, { type: "null" }] },
                 materialText: { type: ["string", "null"] },
                 materialId: { type: ["number", "null"] },
-
                 packagingSku: { type: ["string", "null"] },
-
-                layerCount: {
-                  anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }],
-                },
-                layerThicknesses: {
-                  anyOf: [{ type: "array", items: { type: "string" }, maxItems: 4 }, { type: "null" }],
-                },
-
+                layerCount: { anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }] },
+                layerThicknesses: { anyOf: [{ type: "array", items: { type: "string" }, maxItems: 4 }, { type: "null" }] },
                 firstCavity: { type: ["string", "null"] },
-
                 notes: { type: ["string", "null"] },
                 createdAtIso: { type: ["string", "null"] },
               },
@@ -525,12 +477,11 @@ async function callOpenAI(params: {
     },
   };
 
+  const apiKey = requireEnv("OPENAI_API_KEY");
+
   const res = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
@@ -558,12 +509,7 @@ function normalizeBrainObj(obj: any) {
   if (typeof obj.done !== "boolean") return null;
   if (!obj.facts || typeof obj.facts !== "object") obj.facts = {};
   if (!Array.isArray(obj.quickReplies)) obj.quickReplies = [];
-  return obj as {
-    assistantMessage: string;
-    facts: Partial<WidgetFacts>;
-    done: boolean;
-    quickReplies: string[];
-  };
+  return obj as { assistantMessage: string; facts: Partial<WidgetFacts>; done: boolean; quickReplies: string[] };
 }
 
 export async function POST(req: NextRequest) {
@@ -586,10 +532,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ---- DB-backed foam options (Option B) ----
     let materialOptions: DbMaterial[] = [];
     const shouldOfferFoam = wantsFoamRecommendation(userText, facts);
-
     if (shouldOfferFoam) {
       const familyHint = inferFamilyHint(userText, facts);
       materialOptions = await getTopMaterialsForWidget({ familyHint, limit: 3 });
@@ -614,7 +558,6 @@ export async function POST(req: NextRequest) {
 
     const nextFacts: Partial<WidgetFacts> = { ...(parsed.facts ?? {}) };
 
-    // Enforce materialId/materialText from DB selection when applicable
     if (pickedFromText) {
       nextFacts.materialMode = "known";
       nextFacts.materialId = pickedFromText.id;
@@ -632,11 +575,10 @@ export async function POST(req: NextRequest) {
 
     const mergedFacts: WidgetFacts = { ...facts, ...nextFacts };
 
-    // Seed packaging suggestions (SKU when box/mailer; notes always when dims exist)
+    // NEW: seed packagingSku from boxes suggester (hardcoded domain)
     let assistantMessage = parsed.assistantMessage;
-    const origin = req.nextUrl.origin;
 
-    const pack = await maybeSeedPackagingFromBoxesSuggest({ origin, mergedFacts });
+    const pack = await maybeSeedPackagingFromBoxesSuggest({ mergedFacts });
 
     if (pack.packagingSku) {
       nextFacts.packagingSku = pack.packagingSku;
