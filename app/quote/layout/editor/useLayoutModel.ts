@@ -815,8 +815,9 @@ function dedupeCavities(list: Cavity[]) {
     if (seen.has(key)) continue;
     seen.add(key);
 
-    (c as any).x = clamp01OrKeep((c as any).x, (c as any).x);
-(c as any).y = clamp01OrKeep((c as any).y, (c as any).y);
+  // ❗ DO NOT mutate x/y here.
+// Mirroring must be lossless. Drag logic handles clamping.
+
 
 
     out.push(c);
