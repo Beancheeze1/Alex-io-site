@@ -1338,25 +1338,6 @@ function LayoutEditorHost(props: {
     deleteLayer,
   } = useLayoutModel(initialLayout);
 
-    // --- FORCE ACTIVE LAYER FROM URL (TEST ONLY) ---
-  React.useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const url = new URL(window.location.href);
-    const raw = url.searchParams.get("active_layer");
-
-    if (!raw) return;
-
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) return;
-
-    const targetId = `layer-${n}`;
-
-    if (activeLayerId !== targetId) {
-      setActiveLayerId(targetId);
-    }
-  }, [activeLayerId, setActiveLayerId]);
-
 
   const { block, cavities, stack } = layout as LayoutModel & {
     stack?: {
