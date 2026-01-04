@@ -1473,17 +1473,28 @@ function LayoutEditorHost(props: {
   // Switching layers can change cavities.length (e.g., 0 -> 3) which looks like
   // "a cavity was added" and this effect will reposition the last cavity.
   // We bail out on layer change and only sync the baseline count.
- const prevLayerIdRef = React.useRef<string | null>(effectiveActiveLayerId);
+ const prevLayerIdRef = React.useRef<string | null>(null);
+
 
 
   React.useEffect(() => {
     // If we changed layers, do NOT run auto-placement.
     // Just sync our baseline and exit.
-    if (prevLayerIdRef.current !== effectiveActiveLayerId) {
-      prevLayerIdRef.current = effectiveActiveLayerId;
-      prevCavityCountRef.current = cavities.length;
-      return;
-    }
+    // Ignore initial null → first real layer assignment
+if (
+  prevLayerIdRef.current != null &&
+  prevLayerIdRef.current !== effectiveActiveLayerId
+) {
+  prevLayerIdRef.current = effectiveActiveLayerId;
+  prevCavityCountRef.current = cavities.length;
+  return;
+}
+
+// First real layer capture
+if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
+  prevLayerIdRef.current = effectiveActiveLayerId;
+}
+
 
     const prevCount = prevCavityCountRef.current;
 
