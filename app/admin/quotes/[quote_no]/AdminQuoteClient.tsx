@@ -1104,12 +1104,11 @@ const overallQty =
 
   const anyPricing = subtotal > 0;
 
-  const notesPreview =
+    const notesPreview =
     layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
-      ? layoutPkg.notes.trim().length > 160
-        ? layoutPkg.notes.trim().slice(0, 160) + "..."
-        : layoutPkg.notes.trim()
+      ? layoutPkg.notes.trim()
       : null;
+
 
   React.useEffect(() => {
     if (!layoutPkg) return;
@@ -2259,20 +2258,26 @@ const overallQty =
                         <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>Layout package #{layoutPkg.id}</div>
                         <div style={{ color: "#6b7280", fontSize: 12 }}>Saved: {new Date(layoutPkg.created_at).toLocaleString()}</div>
                         {notesPreview && (
-                          <div
+                                                 <div
                             style={{
                               marginTop: 6,
                               color: "#4b5563",
                               fontSize: 12,
                               background: "#eef2ff",
                               borderRadius: 10,
-                              padding: "6px 8px",
-                              maxWidth: 420,
+                              padding: "8px 10px",
+                              maxWidth: 520,
+
+                              // NEW: show full notes safely
+                              whiteSpace: "pre-wrap",
+                              overflowWrap: "anywhere",
+                              lineHeight: 1.35,
                             }}
                           >
-                            <span style={{ fontWeight: 500 }}>Notes: </span>
+                            <span style={{ fontWeight: 600 }}>Notes: </span>
                             {notesPreview}
                           </div>
+
                         )}
 
                         {/* Admin-only: rebuild STEP */}
