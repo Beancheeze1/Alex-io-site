@@ -24,7 +24,6 @@
 
 import { useRef, useState, useEffect, MouseEvent } from "react";
 
-
 import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
 
 type Props = {
@@ -35,10 +34,9 @@ type Props = {
   resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
   zoom: number;
   croppedCorners?: boolean;
-    // NEW (demo-only): allow hiding the dotted inner wall without changing real editor behavior
+  // NEW (demo-only): allow hiding the dotted inner wall without changing real editor behavior
   showInnerWall?: boolean;
   autoCenterOnMount?: boolean;
-
 };
 
 type DragState =
@@ -94,8 +92,16 @@ export default function InteractiveCanvas({
   const [drag, setDrag] = useState<DragState>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-
   const { block, cavities } = layout;
+
+  // ============================
+  // DEBUG (log-only): gate by ?debug_xy=1
+  // ============================
+  const debugXY =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("debug_xy") === "1";
+
+  const lastDebugSigRef = useRef<string>("");
 
   // NEW: gate spacing rules by editor mode (no prop needed)
   const editorMode: "basic" | "advanced" =
@@ -128,24 +134,97 @@ export default function InteractiveCanvas({
     y: HEADER_BAND + (CANVAS_HEIGHT - HEADER_BAND - blockPx.height) / 2,
   };
 
+  // ============================
+  // DEBUG (log-only): canvas math snapshot
+  // ============================
+  useEffect(() => {
+    if (!debugXY) return;
+
+    const first = cavities?.[0];
+    const firstId = first?.id ?? "(none)";
+    const x = (first as any)?.x;
+    const y = (first as any)?.y;
+
+    const cavX =
+      first && Number.isFinite(Number(x))
+        ? blockOffset.x + Number(x) * blockPx.width
+        : null;
+    const cavY =
+      first && Number.isFinite(Number(y))
+        ? blockOffset.y + Number(y) * blockPx.height
+        : null;
+
+    const sig = JSON.stringify({
+      editorMode,
+      zoom: zoom ?? null,
+      L: block.lengthIn ?? null,
+      W: block.widthIn ?? null,
+      firstId,
+      x,
+      y,
+      scale,
+      blockOffsetX: blockOffset.x,
+      blockOffsetY: blockOffset.y,
+      blockPxW: blockPx.width,
+      blockPxH: blockPx.height,
+      cavX,
+      cavY,
+      cavCount: cavities?.length ?? 0,
+    });
+
+    if (sig === lastDebugSigRef.current) return;
+    lastDebugSigRef.current = sig;
+
+    // eslint-disable-next-line no-console
+    console.log("[debug_xy][canvas] first cavity + math", {
+      editorMode,
+      zoom,
+      block: {
+        lengthIn: block.lengthIn,
+        widthIn: block.widthIn,
+        thicknessIn: (block as any).thicknessIn,
+      },
+      first: first
+        ? { id: first.id, x: (first as any).x, y: (first as any).y }
+        : null,
+      scale,
+      blockPx,
+      blockOffset,
+      computed: { cavX, cavY },
+      cavCount: cavities?.length ?? 0,
+    });
+  }, [
+    debugXY,
+    editorMode,
+    zoom,
+    block.lengthIn,
+    block.widthIn,
+    (block as any).thicknessIn,
+    cavities,
+    blockOffset.x,
+    blockOffset.y,
+    blockPx.width,
+    blockPx.height,
+    scale,
+  ]);
+
   // NEW (demo-safe): center the scroll position so the block appears centered on first load.
-// This only affects the scroll container, not geometry math.
-useEffect(() => {
-  if (!autoCenterOnMount) return;
-  const el = scrollRef.current;
-  if (!el) return;
+  // This only affects the scroll container, not geometry math.
+  useEffect(() => {
+    if (!autoCenterOnMount) return;
+    const el = scrollRef.current;
+    if (!el) return;
 
-  // Wait a tick so layout/scroll sizes are settled.
-  const t = window.setTimeout(() => {
-    const maxX = Math.max(0, el.scrollWidth - el.clientWidth);
-    const maxY = Math.max(0, el.scrollHeight - el.clientHeight);
-    el.scrollLeft = maxX / 2;
-    el.scrollTop = maxY / 2;
-  }, 0);
+    // Wait a tick so layout/scroll sizes are settled.
+    const t = window.setTimeout(() => {
+      const maxX = Math.max(0, el.scrollWidth - el.clientWidth);
+      const maxY = Math.max(0, el.scrollHeight - el.clientHeight);
+      el.scrollLeft = maxX / 2;
+      el.scrollTop = maxY / 2;
+    }, 0);
 
-  return () => window.clearTimeout(t);
-}, [autoCenterOnMount, block.lengthIn, block.widthIn, zoom]);
-
+    return () => window.clearTimeout(t);
+  }, [autoCenterOnMount, block.lengthIn, block.widthIn, zoom]);
 
   // 1.0" chamfer at upper-left and lower-right corners (45°)
   const CHAMFER_IN = 1;
@@ -387,10 +466,18 @@ useEffect(() => {
   // If selection disappears mid-drag (due to upstream click/selection clearing),
   // we still compute spacing off the dragged cavity.
   const spacingCavity =
-    selectedCavity || (drag ? cavities.find((c) => c.id === drag.id) || null : null);
+    selectedCavity ||
+    (drag ? cavities.find((c) => c.id === drag.id) || null : null);
 
   const spacing = spacingCavity
-    ? computeSpacing(spacingCavity, block, cavities, blockPx, blockOffset, wallIn)
+    ? computeSpacing(
+        spacingCavity,
+        block,
+        cavities,
+        blockPx,
+        blockOffset,
+        wallIn,
+      )
     : null;
 
   return (
@@ -403,8 +490,7 @@ useEffect(() => {
       onPointerUp={handlePointerUpPan}
     >
       <div ref={scrollRef} className="overflow-auto rounded-xl">
-  <svg
-
+        <svg
           ref={svgRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
@@ -444,7 +530,7 @@ useEffect(() => {
           {/* 0.5" grid *inside* the block */}
           {drawInchGrid(block, blockPx, blockOffset)}
 
-                    {/* inner wall (dashed) - in Advanced mode it collapses to the outer wall
+          {/* inner wall (dashed) - in Advanced mode it collapses to the outer wall
               NEW: allow demo to hide it via showInnerWall={false} */}
           {showInnerWall && (
             <path
@@ -455,7 +541,6 @@ useEffect(() => {
               strokeWidth={1}
             />
           )}
-
 
           {/* cavities */}
           {cavities.map((cavity, index) => {

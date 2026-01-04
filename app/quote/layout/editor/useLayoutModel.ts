@@ -26,7 +26,7 @@
 
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 import type {
   BlockDims,
@@ -80,36 +80,91 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   const { layout, activeLayerId } = state;
   const selectedId = selectedIds[0] ?? null;
 
-    // ✅ Path A: one-time hydration sync
+  // ============================
+  // DEBUG (log-only): gate by ?debug_xy=1
+  // ============================
+  const debugXY =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("debug_xy") === "1";
+
+  const lastDebugSigRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!debugXY) return;
+
+    const active =
+      layout.stack.find((l) => l.id === activeLayerId) ?? layout.stack[0] ?? null;
+
+    const stackFirst = active?.cavities?.[0] ?? null;
+    const mirroredFirst = (layout as any)?.cavities?.[0] ?? null;
+
+    const sig = JSON.stringify({
+      activeLayerId,
+      activeExists: !!active,
+      stackFirst: stackFirst
+        ? { id: stackFirst.id, x: (stackFirst as any).x, y: (stackFirst as any).y }
+        : null,
+      mirroredFirst: mirroredFirst
+        ? {
+            id: (mirroredFirst as any).id,
+            x: (mirroredFirst as any).x,
+            y: (mirroredFirst as any).y,
+          }
+        : null,
+      stackCount: active?.cavities?.length ?? 0,
+      mirroredCount: (layout as any)?.cavities?.length ?? 0,
+    });
+
+    if (sig === lastDebugSigRef.current) return;
+    lastDebugSigRef.current = sig;
+
+    // eslint-disable-next-line no-console
+    console.log("[debug_xy][model] active + first cavity snapshot", {
+      activeLayerId,
+      activeLayerResolved: active?.id ?? null,
+      stackFirst: stackFirst
+        ? { id: stackFirst.id, x: (stackFirst as any).x, y: (stackFirst as any).y }
+        : null,
+      mirroredFirst: mirroredFirst
+        ? {
+            id: (mirroredFirst as any).id,
+            x: (mirroredFirst as any).x,
+            y: (mirroredFirst as any).y,
+          }
+        : null,
+      stackCount: active?.cavities?.length ?? 0,
+      mirroredCount: (layout as any)?.cavities?.length ?? 0,
+    });
+  }, [debugXY, activeLayerId, layout]);
+
+  // ✅ Path A: one-time hydration sync
   // On first render, layout.cavities may be empty even though stack[active].cavities is seeded.
   // Clicking layers calls setActiveLayerId() which mirrors stack -> layout.cavities.
   // This effect does that mirror once so seeded cavities are visible immediately.
-useEffect(() => {
-  setState((prev) => {
-    // 🔒 NEW: wait until activeLayerId is resolved
-    if (!prev.activeLayerId) return prev;
+  useEffect(() => {
+    setState((prev) => {
+      // 🔒 NEW: wait until activeLayerId is resolved
+      if (!prev.activeLayerId) return prev;
 
-    if ((prev.layout.cavities?.length ?? 0) > 0) return prev;
+      if ((prev.layout.cavities?.length ?? 0) > 0) return prev;
 
-    const active =
-      prev.layout.stack.find((l) => l.id === prev.activeLayerId) ??
-      prev.layout.stack[0];
+      const active =
+        prev.layout.stack.find((l) => l.id === prev.activeLayerId) ??
+        prev.layout.stack[0];
 
-    if (!active) return prev;
+      if (!active) return prev;
 
-    const mirrored = dedupeCavities(active.cavities);
+      const mirrored = dedupeCavities(active.cavities);
 
-    return {
-      layout: {
-        ...prev.layout,
-        cavities: [...mirrored],
-      },
-      activeLayerId: active.id,
-    };
-  });
-}, []);
-
-
+      return {
+        layout: {
+          ...prev.layout,
+          cavities: [...mirrored],
+        },
+        activeLayerId: active.id,
+      };
+    });
+  }, []);
 
   /* ================= selection ================= */
 
@@ -142,18 +197,17 @@ useEffect(() => {
           prev.layout.stack.find((l) => l.id === id) ?? prev.layout.stack[0];
         const mirrored = dedupeCavities(layer.cavities);
 
-       return {
-  layout: {
-    ...prev.layout,
-    block: {
-      ...prev.layout.block,
-      thicknessIn: safeInch(layer.thicknessIn, 0.5),
-    },
-    cavities: [...mirrored], // ✅ mirror ONLY active layer
-  },
-  activeLayerId: layer.id,
-};
-
+        return {
+          layout: {
+            ...prev.layout,
+            block: {
+              ...prev.layout.block,
+              thicknessIn: safeInch(layer.thicknessIn, 0.5),
+            },
+            cavities: [...mirrored], // ✅ mirror ONLY active layer
+          },
+          activeLayerId: layer.id,
+        };
       });
 
       // ✅ FIX: DO NOT blindly clear selection
@@ -558,8 +612,7 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
               ...c,
               id: String(c?.id ?? "").trim() || `seed-cav-${i + 1}`,
               x: clamp01OrPreserve(c?.x, (c as any)?.x, 0.2),
-y: clamp01OrPreserve(c?.y, (c as any)?.y, 0.2),
-
+              y: clamp01OrPreserve(c?.y, (c as any)?.y, 0.2),
             })),
           )
         : [];
@@ -614,17 +667,8 @@ y: clamp01OrPreserve(c?.y, (c as any)?.y, 0.2),
         cavsIn.map((c: Cavity) => {
           const next = { ...c } as Cavity;
 
-          (next as any).x = clamp01OrPreserve(
-  (next as any).x,
-  (c as any)?.x,
-  0.2,
-);
-(next as any).y = clamp01OrPreserve(
-  (next as any).y,
-  (c as any)?.y,
-  0.2,
-);
-
+          (next as any).x = clamp01OrPreserve((next as any).x, (c as any)?.x, 0.2);
+          (next as any).y = clamp01OrPreserve((next as any).y, (c as any)?.y, 0.2);
 
           let id = String((next as any).id ?? "").trim();
           if (!id || seenIds.has(id)) {
@@ -668,10 +712,8 @@ y: clamp01OrPreserve(c?.y, (c as any)?.y, 0.2),
         cavsRaw.map((c: any, i: number) => ({
           ...c,
           id: String(c?.id ?? "").trim() || `seed-cav-${i + 1}`,
-x: Number.isFinite(Number(c?.x)) ? clamp01(Number(c.x)) : undefined,
-y: Number.isFinite(Number(c?.y)) ? clamp01(Number(c.y)) : undefined,
-
-
+          x: Number.isFinite(Number(c?.x)) ? clamp01(Number(c.x)) : undefined,
+          y: Number.isFinite(Number(c?.y)) ? clamp01(Number(c.y)) : undefined,
         })),
       );
 
@@ -680,7 +722,8 @@ y: Number.isFinite(Number(c?.y)) ? clamp01(Number(c.y)) : undefined,
       );
     }
 
-    const hasExplicitTarget = Number.isFinite(cavityLayerIndex) && cavityLayerIndex >= 1;
+    const hasExplicitTarget =
+      Number.isFinite(cavityLayerIndex) && cavityLayerIndex >= 1;
 
     if (hasExplicitTarget) {
       const targetLayer = stack.find((l) => l.id === targetLayerId) ?? stack[0];
@@ -707,37 +750,37 @@ y: Number.isFinite(Number(c?.y)) ? clamp01(Number(c.y)) : undefined,
           return false;
         });
 
-        return nextCavs.length === (l.cavities ?? []).length ? l : { ...l, cavities: nextCavs };
+        return nextCavs.length === (l.cavities ?? []).length
+          ? l
+          : { ...l, cavities: nextCavs };
       });
     }
 
     // Choose active layer:
     // - If explicit target layer exists and has cavities, make it active so user sees seeded pockets.
     // - Otherwise default to layer 1 (existing behavior).
-const preferredActive =
-  hasExplicitTarget &&
-  (stack[targetIdx0]?.cavities?.length ?? 0) > 0
-    ? stack[targetIdx0]
-    : stack[0];
+    const preferredActive =
+      hasExplicitTarget && (stack[targetIdx0]?.cavities?.length ?? 0) > 0
+        ? stack[targetIdx0]
+        : stack[0];
 
-// ❗ DO NOT mirror seeded cavities into layout.cavities during init
-return {
-  layout: {
-    ...rest,
-    block: {
-      ...block,
-      thicknessIn: safeInch(
-        preferredActive.thicknessIn ?? block.thicknessIn ?? 1,
-        0.5,
-      ),
-    },
-    stack,
-    cavities: [], // <-- THIS IS THE FIX
-    editorMode,
-  },
-  activeLayerId: preferredActive.id,
-};
-
+    // ❗ DO NOT mirror seeded cavities into layout.cavities during init
+    return {
+      layout: {
+        ...rest,
+        block: {
+          ...block,
+          thicknessIn: safeInch(
+            preferredActive.thicknessIn ?? block.thicknessIn ?? 1,
+            0.5,
+          ),
+        },
+        stack,
+        cavities: [], // <-- THIS IS THE FIX (existing behavior in your pasted file)
+        editorMode,
+      },
+      activeLayerId: preferredActive.id,
+    };
   }
 
   // Legacy single-layer fallback:
@@ -815,10 +858,8 @@ function dedupeCavities(list: Cavity[]) {
     if (seen.has(key)) continue;
     seen.add(key);
 
-  // ❗ DO NOT mutate x/y here.
-// Mirroring must be lossless. Drag logic handles clamping.
-
-
+    // ❗ DO NOT mutate x/y here.
+    // Mirroring must be lossless. Drag logic handles clamping.
 
     out.push(c);
   }
@@ -866,7 +907,6 @@ function clamp01OrPreserve(v: any, prior: any, fallback = 0.2) {
 
   return clamp01(fallback);
 }
-
 
 function safeInch(v: number | undefined, min: number) {
   const n = Number(v);
