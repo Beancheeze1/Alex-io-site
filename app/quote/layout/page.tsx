@@ -1468,6 +1468,8 @@ function LayoutEditorHost(props: {
 
   // When a new cavity is added, try to drop it into "dead space"
   const prevCavityCountRef = React.useRef<number>(cavities.length);
+  const didHydrateRef = React.useRef(false);
+
 
   // NEW: layer-switch guard.
   // Switching layers can change cavities.length (e.g., 0 -> 3) which looks like
@@ -1478,6 +1480,13 @@ function LayoutEditorHost(props: {
 
 
   React.useEffect(() => {
+// 🔒 Hydration guard: on first load, sync baseline and exit.
+// Prevents rehydrated cavities from being treated as "new".
+if (!didHydrateRef.current) {
+  didHydrateRef.current = true;
+  prevCavityCountRef.current = cavities.length;
+  return;
+}
     // If we changed layers, do NOT run auto-placement.
     // Just sync our baseline and exit.
     // Ignore initial null → first real layer assignment
