@@ -668,8 +668,9 @@ y: clamp01OrPreserve(c?.y, (c as any)?.y, 0.2),
         cavsRaw.map((c: any, i: number) => ({
           ...c,
           id: String(c?.id ?? "").trim() || `seed-cav-${i + 1}`,
-          x: clamp01Or(c?.x, 0.2),
-          y: clamp01Or(c?.y, 0.2),
+          x: clamp01OrPreserve(c?.x, (c as any)?.x, 0.2),
+y: clamp01OrPreserve(c?.y, (c as any)?.y, 0.2),
+
         })),
       );
 
@@ -813,8 +814,9 @@ function dedupeCavities(list: Cavity[]) {
     if (seen.has(key)) continue;
     seen.add(key);
 
-    (c as any).x = clamp01Or((c as any).x, 0.2);
-    (c as any).y = clamp01Or((c as any).y, 0.2);
+    (c as any).x = clamp01OrKeep((c as any).x, (c as any).x);
+(c as any).y = clamp01OrKeep((c as any).y, (c as any).y);
+
 
     out.push(c);
   }
