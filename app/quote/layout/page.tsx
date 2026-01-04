@@ -1468,6 +1468,7 @@ function LayoutEditorHost(props: {
 
   // When a new cavity is added, try to drop it into "dead space"
   const prevCavityCountRef = React.useRef<number>(cavities.length);
+  const allowAutoPlaceRef = React.useRef(false);
   const didHydrateRef = React.useRef(false);
 
 
@@ -1508,9 +1509,11 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
     const prevCount = prevCavityCountRef.current;
 
     if (
-      cavities.length > prevCount &&
-      block.lengthIn &&
-      block.widthIn &&
+  allowAutoPlaceRef.current &&
+  cavities.length > prevCount &&
+  block.lengthIn &&
+  block.widthIn &&
+
       Number.isFinite(block.lengthIn) &&
       Number.isFinite(block.widthIn)
     ) {
@@ -1611,6 +1614,7 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
     }
 
     // Always update baseline at end
+    allowAutoPlaceRef.current = false;
     prevCavityCountRef.current = cavities.length;
   }, [
     cavities,
@@ -1986,19 +1990,22 @@ if (
   /* ---------- Palette interactions ---------- */
 
   const handleAddPreset = (shape: CavityShape) => {
-    if (shape === "circle") {
-      addCavity("circle", { lengthIn: 3, widthIn: 3, depthIn: 2 });
-    } else if (shape === "roundedRect") {
-      addCavity("roundedRect", {
-        lengthIn: 4,
-        widthIn: 3,
-        depthIn: 2,
-        cornerRadiusIn: 0.5,
-      });
-    } else {
-      addCavity("rect", { lengthIn: 4, widthIn: 2, depthIn: 2 });
-    }
-  };
+  allowAutoPlaceRef.current = true;
+
+  if (shape === "circle") {
+    addCavity("circle", { lengthIn: 3, widthIn: 3, depthIn: 2 });
+  } else if (shape === "roundedRect") {
+    addCavity("roundedRect", {
+      lengthIn: 4,
+      widthIn: 3,
+      depthIn: 2,
+      cornerRadiusIn: 0.5,
+    });
+  } else {
+    addCavity("rect", { lengthIn: 4, widthIn: 2, depthIn: 2 });
+  }
+};
+
 
   /* ---------- Center selected cavity ---------- */
   const handleCenterSelectedCavity = () => {
