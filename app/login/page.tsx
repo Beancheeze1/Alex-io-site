@@ -12,8 +12,10 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Default landing after login is /admin, but ?next=... overrides it.
-  const next = searchParams.get("next") || "/admin";
+  // If middleware sent us here, it sets ?next=... and we honor it.
+// If no ?next=, we land by role after login.
+const next = searchParams.get("next");
+
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -34,8 +36,9 @@ export default function LoginPage() {
         body: JSON.stringify({ email: email.trim(), password }),
       });
 
+      const data = await res.json().catch(() => null);
+
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
         setError(
           data?.message || "Invalid email or password. Please try again.",
         );
@@ -43,9 +46,23 @@ export default function LoginPage() {
         return;
       }
 
-      // Logged in → send them to the main area (or ?next=...)
-      router.push(next);
+      const role = String(data?.user?.role || "").toLowerCase();
+
+      // Role landing only when no ?next= provided.
+      const fallback =
+        role === "admin"
+          ? "/admin"
+          : role === "cs"
+            ? "/admin/quotes"
+            : role === "sales"
+              ? "/admin/quotes"
+              : "/my-quotes";
+
+      const dest = next || fallback;
+
+      router.push(dest);
       router.refresh();
+
     } catch (err) {
       console.error("Login error:", err);
       setError("There was a problem logging in. Please try again.");

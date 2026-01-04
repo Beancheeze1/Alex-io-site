@@ -2,17 +2,63 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+
 import { q, one } from "@/lib/db";
+import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+
 
 // GET /api/quotes?limit=50
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
+    const user = await getCurrentUserFromRequest(req);
+
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: "unauthorized", message: "Login required." },
+        { status: 401 },
+      );
+    }
+
+    // Only internal roles should read quotes here.
+    const isAdminOrCS = isRoleAllowed(user, ["admin", "cs"]);
+    const isSales = isRoleAllowed(user, ["sales"]);
+
+    if (!isAdminOrCS && !isSales) {
+      return NextResponse.json(
+        { ok: false, error: "forbidden", message: "Not allowed." },
+        { status: 403 },
+      );
+    }
+
     const { searchParams } = new URL(req.url);
-    const limit = Math.min(
-      parseInt(searchParams.get("limit") || "50", 10),
-      200,
-    );
+    const limit = Math.min(parseInt(searchParams.get("limit") || "50", 10), 200);
+
+    if (isSales) {
+      // Sales can only see their own quotes.
+      const rows = await q(
+        `
+        SELECT id,
+               quote_no,
+               customer_name,
+               email,
+               phone,
+               status,
+               sales_rep_id,
+               created_at,
+               updated_at
+        FROM public."quotes"
+        WHERE sales_rep_id = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+      `,
+        [user.id, limit],
+      );
+
+      return NextResponse.json({ ok: true, quotes: rows });
+    }
+
+    // Admin + CS: all quotes
     const rows = await q(
       `
       SELECT id,
@@ -30,6 +76,7 @@ export async function GET(req: Request) {
     `,
       [limit],
     );
+
     return NextResponse.json({ ok: true, quotes: rows });
   } catch (err: any) {
     return NextResponse.json(
@@ -38,6 +85,7 @@ export async function GET(req: Request) {
     );
   }
 }
+
 
 // POST /api/quotes
 // Request shape (now supports rep attribution):
