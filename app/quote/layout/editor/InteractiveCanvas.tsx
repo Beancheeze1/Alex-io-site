@@ -327,8 +327,16 @@ export default function InteractiveCanvas({
     const ptX = e.clientX - svgRect.left;
     const ptY = e.clientY - svgRect.top;
 
-    const cavX = blockOffset.x + cavity.x * blockPx.width;
-    const cavY = blockOffset.y + cavity.y * blockPx.height;
+    const xNorm = Number.isFinite(Number((cavity as any).x))
+  ? Number((cavity as any).x)
+  : 0.2;
+const yNorm = Number.isFinite(Number((cavity as any).y))
+  ? Number((cavity as any).y)
+  : 0.2;
+
+const cavX = blockOffset.x + xNorm * blockPx.width;
+const cavY = blockOffset.y + yNorm * blockPx.height;
+
 
     setDrag({
       mode: "move",
@@ -544,13 +552,22 @@ export default function InteractiveCanvas({
 
           {/* cavities */}
           {cavities.map((cavity, index) => {
-            const cavWidthPx =
-              (cavity.lengthIn / block.lengthIn) * blockPx.width;
-            const cavHeightPx =
-              (cavity.widthIn / block.widthIn) * blockPx.height;
+           const cavWidthPx =
+  (cavity.lengthIn / block.lengthIn) * blockPx.width;
+const cavHeightPx =
+  (cavity.widthIn / block.widthIn) * blockPx.height;
 
-            const cavX = blockOffset.x + cavity.x * blockPx.width;
-            const cavY = blockOffset.y + cavity.y * blockPx.height;
+// NaN-safe normalized coords (SVG treats NaN as 0 → top-left teleport)
+const xNorm = Number.isFinite(Number((cavity as any).x))
+  ? Number((cavity as any).x)
+  : 0.2;
+const yNorm = Number.isFinite(Number((cavity as any).y))
+  ? Number((cavity as any).y)
+  : 0.2;
+
+const cavX = blockOffset.x + xNorm * blockPx.width;
+const cavY = blockOffset.y + yNorm * blockPx.height;
+
 
             const isSelected = selectedIds.includes(cavity.id);
             const isCircle = cavity.shape === "circle";
