@@ -755,14 +755,12 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
           : { ...l, cavities: nextCavs };
       });
     }
-
     // Choose active layer:
-    // - If explicit target layer exists and has cavities, make it active so user sees seeded pockets.
-    // - Otherwise default to layer 1 (existing behavior).
-    const preferredActive =
-      hasExplicitTarget && (stack[targetIdx0]?.cavities?.length ?? 0) > 0
-        ? stack[targetIdx0]
-        : stack[0];
+    // - If an explicit target layer index was provided, ALWAYS make it active.
+    //   (Do not depend on whether cavities are present at init time.)
+    // - Otherwise default to layer 1.
+    const preferredActive = hasExplicitTarget ? stack[targetIdx0] : stack[0];
+
 
     // ❗ DO NOT mirror seeded cavities into layout.cavities during init
     return {
