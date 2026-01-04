@@ -1422,7 +1422,7 @@ export async function POST(req: NextRequest) {
           `
           delete from quote_items
           where quote_id = $1
-            and notes like '[LAYOUT-LAYER] %'
+            and notes like '[LAYOUT-LAYER]%'
           `,
           [quote.id],
         );
