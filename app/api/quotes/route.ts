@@ -98,9 +98,29 @@ export async function GET(req: NextRequest) {
 //   "sales_rep_id": 2,          // optional, direct id (admin tools)
 //   "sales_rep_slug": "chuck"   // optional, looked up via users.sales_slug
 // }
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+
   try {
+    const user = await getCurrentUserFromRequest(req);
+
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: "unauthorized", message: "Login required." },
+        { status: 401 },
+      );
+    }
+
+    // Only internal roles can create quotes here.
+    const canCreate = isRoleAllowed(user, ["admin", "cs", "sales"]);
+    if (!canCreate) {
+      return NextResponse.json(
+        { ok: false, error: "forbidden", message: "Not allowed." },
+        { status: 403 },
+      );
+    }
+
     const body = (await req.json().catch(() => ({}))) || {};
+
 
     const {
       quote_no,
@@ -122,7 +142,9 @@ export async function POST(req: Request) {
     // Resolve sales_rep_id:
     // 1) If a numeric id was provided, trust it.
     // 2) Else, if a slug was provided, look up users.id where sales_slug = slug.
+    // 3) Else, if the caller is SALES, default to their own user.id.
     let salesRepId: number | null = null;
+
 
     if (
       rawSalesRepId !== undefined &&
@@ -130,7 +152,7 @@ export async function POST(req: Request) {
       Number.isFinite(Number(rawSalesRepId))
     ) {
       salesRepId = Number(rawSalesRepId);
-    } else if (rawSalesRepSlug) {
+      } else if (rawSalesRepSlug) {
       const slug = String(rawSalesRepSlug).trim();
       if (slug) {
         try {
@@ -151,7 +173,14 @@ export async function POST(req: Request) {
           salesRepId = null;
         }
       }
+    } else {
+      // Default assignment for SALES creators.
+      const role = (user.role || "").toLowerCase();
+      if (role === "sales") {
+        salesRepId = Number(user.id);
+      }
     }
+
 
     const row = await one(
       `
