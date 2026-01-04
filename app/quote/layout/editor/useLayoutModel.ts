@@ -557,8 +557,9 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
             cavsRaw.map((c: any, i: number) => ({
               ...c,
               id: String(c?.id ?? "").trim() || `seed-cav-${i + 1}`,
-              x: clamp01Or(c?.x, 0.2),
-              y: clamp01Or(c?.y, 0.2),
+              x: clamp01OrPreserve(c?.x, (c as any)?.x, 0.2),
+y: clamp01OrPreserve(c?.y, (c as any)?.y, 0.2),
+
             })),
           )
         : [];
@@ -613,8 +614,17 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         cavsIn.map((c: Cavity) => {
           const next = { ...c } as Cavity;
 
-          (next as any).x = clamp01Or((next as any).x, 0.2);
-          (next as any).y = clamp01Or((next as any).y, 0.2);
+          (next as any).x = clamp01OrPreserve(
+  (next as any).x,
+  (c as any)?.x,
+  0.2,
+);
+(next as any).y = clamp01OrPreserve(
+  (next as any).y,
+  (c as any)?.y,
+  0.2,
+);
+
 
           let id = String((next as any).id ?? "").trim();
           if (!id || seenIds.has(id)) {
@@ -842,6 +852,17 @@ function clamp01OrKeep(v: any, prior: any) {
   }
   return clamp01(n);
 }
+
+function clamp01OrPreserve(v: any, prior: any, fallback = 0.2) {
+  const n = Number(v);
+  if (Number.isFinite(n)) return clamp01(n);
+
+  const p = Number(prior);
+  if (Number.isFinite(p)) return clamp01(p);
+
+  return clamp01(fallback);
+}
+
 
 function safeInch(v: number | undefined, min: number) {
   const n = Number(v);
