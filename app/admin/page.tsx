@@ -11,6 +11,8 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+
 
 type HealthResponse = {
   ok: boolean;
@@ -100,7 +102,36 @@ function useHealth(endpoint: string) {
 }
 
 export default function AdminHomePage() {
+  const router = useRouter();
+
+  // Guard: only admins should see the /admin dashboard.
+  // Sales/CS can still use /admin/quotes, but should not land on this hub.
+  React.useEffect(() => {
+    let active = true;
+
+    async function checkAdmin() {
+      try {
+        const res = await fetch("/api/admin/users?limit=1", { cache: "no-store" });
+
+        // /api/admin/users is admin-only. If we get 401/403, this user is not admin.
+        if (!active) return;
+        if (res.status === 401 || res.status === 403) {
+          router.replace("/admin/quotes");
+        }
+      } catch {
+        // If the check fails (network/etc), do nothing (avoid locking admin out).
+      }
+    }
+
+    checkAdmin();
+
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
   const dbHealth = useHealth("/api/health/db");
+
   const hubspotHealth = useHealth("/api/health/hubspot");
   const emailHealth = useHealth("/api/health/email");
 

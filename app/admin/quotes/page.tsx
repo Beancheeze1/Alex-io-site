@@ -45,6 +45,9 @@ type MaterialUsage = {
 
 export default function AdminQuotesPage() {
   const router = useRouter();
+    const isAdmin = typeof document !== "undefined"
+    ? document.cookie.includes("role=admin") // fallback; real guard is server-side nav/route
+    : false;
   const [quoteNoInput, setQuoteNoInput] = React.useState("");
   const [quotes, setQuotes] = React.useState<QuoteRow[] | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -339,12 +342,15 @@ export default function AdminQuotesPage() {
             >
               {creating ? "Starting…" : "Start new quote"}
             </button>
-            <Link
-              href="/admin"
-              className="text-xs text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
-            >
-              &larr; Back to admin home
-            </Link>
+            {isAdmin && (
+  <Link
+    href="/admin"
+    className="text-xs text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+  >
+    &larr; Back to admin home
+  </Link>
+)}
+
           </div>
         </header>
         {/* Jump to quote + summary */}
