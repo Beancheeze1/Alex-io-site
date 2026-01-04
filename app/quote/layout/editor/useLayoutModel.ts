@@ -668,8 +668,9 @@ y: clamp01OrPreserve(c?.y, (c as any)?.y, 0.2),
         cavsRaw.map((c: any, i: number) => ({
           ...c,
           id: String(c?.id ?? "").trim() || `seed-cav-${i + 1}`,
-          x: clamp01OrPreserve(c?.x, (c as any)?.x, 0.2),
-y: clamp01OrPreserve(c?.y, (c as any)?.y, 0.2),
+x: Number.isFinite(Number(c?.x)) ? clamp01(Number(c.x)) : undefined,
+y: Number.isFinite(Number(c?.y)) ? clamp01(Number(c.y)) : undefined,
+
 
         })),
       );
