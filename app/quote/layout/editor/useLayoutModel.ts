@@ -902,14 +902,18 @@ function clamp01OrKeep(v: any, prior: any) {
 }
 
 function clamp01OrPreserve(v: any, prior: any, fallback = 0.2) {
-  const n = Number(v);
-  if (Number.isFinite(n)) return clamp01(n);
-
+  // If we already had a valid prior value, NEVER override it during hydration
   const p = Number(prior);
   if (Number.isFinite(p)) return clamp01(p);
 
+  // Only accept v if it is a clean finite number
+  const n = Number(v);
+  if (Number.isFinite(n)) return clamp01(n);
+
+  // Fallback ONLY for brand-new cavities
   return clamp01(fallback);
 }
+
 
 function safeInch(v: number | undefined, min: number) {
   const n = Number(v);
