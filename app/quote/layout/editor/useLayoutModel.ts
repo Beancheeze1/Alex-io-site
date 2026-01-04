@@ -599,10 +599,11 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     (initial as any).layer_cavity_layer_index;
 
   const cavityLayerIndex = Number(cavityLayerIndexRaw);
-  const targetIdx1 =
-    Number.isFinite(cavityLayerIndex) && cavityLayerIndex >= 1
-      ? Math.floor(cavityLayerIndex)
-      : 1;
+ const targetIdx1 =
+  Number.isFinite(cavityLayerIndex) && cavityLayerIndex >= 1
+    ? Math.floor(cavityLayerIndex)
+    : 2;
+
 
   // ============================
   // NEW (Path A): layer-intent hydration when stack is missing
@@ -762,7 +763,8 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
     // - If an explicit target layer index was provided, ALWAYS make it active.
     //   (Do not depend on whether cavities are present at init time.)
     // - Otherwise default to layer 1.
-    const preferredActive = hasExplicitTarget ? stack[targetIdx0] : stack[0];
+    const preferredActive = hasExplicitTarget ? stack[targetIdx0] : (stack[1] ?? stack[0]);
+
 
 
     // ❗ DO NOT mirror seeded cavities into layout.cavities during init
