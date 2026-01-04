@@ -49,6 +49,8 @@ export default function AdminQuotesPage() {
   const [quotes, setQuotes] = React.useState<QuoteRow[] | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+    const [creating, setCreating] = React.useState(false);
+
 
   // Client-side filters
   const [statusFilter, setStatusFilter] =
@@ -62,6 +64,49 @@ export default function AdminQuotesPage() {
     React.useState<boolean>(false);
   const [materialStatsError, setMaterialStatsError] =
     React.useState<string | null>(null);
+
+      async function createNewQuoteAndOpenEditor() {
+    if (creating) return;
+    setCreating(true);
+
+    try {
+      // Generate UTC quote number (same format as orchestrate)
+      const now = new Date();
+      const yyyy = now.getUTCFullYear();
+      const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(now.getUTCDate()).padStart(2, "0");
+      const hh = String(now.getUTCHours()).padStart(2, "0");
+      const mi = String(now.getUTCMinutes()).padStart(2, "0");
+      const ss = String(now.getUTCSeconds()).padStart(2, "0");
+
+      const quoteNo = `Q-AI-${yyyy}${mm}${dd}-${hh}${mi}${ss}`;
+
+      // Create draft quote row
+      const res = await fetch("/api/quotes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quote_no: quoteNo,
+          customer_name: "Unassigned",
+          status: "draft",
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error("Failed to create quote");
+      }
+
+      // Open BLANK editor (quote_no only)
+      router.push(`/quote/layout?quote_no=${encodeURIComponent(quoteNo)}`);
+    } catch (err) {
+      console.error("Start new quote failed:", err);
+      alert("Unable to start a new quote.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
 
   function handleJumpSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -285,6 +330,14 @@ export default function AdminQuotesPage() {
           </div>
 
           <div className="flex items-center gap-4">
+                        <button
+              type="button"
+              onClick={createNewQuoteAndOpenEditor}
+              disabled={creating}
+              className="inline-flex items-center justify-center rounded-lg border border-sky-500/70 bg-sky-600/80 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm transition hover:bg-sky-500 disabled:opacity-60"
+            >
+              {creating ? "Starting…" : "Start new quote"}
+            </button>
             <Link
               href="/admin"
               className="text-xs text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
