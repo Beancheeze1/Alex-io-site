@@ -1083,7 +1083,19 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     };
   }, [quoteNoValue]);
 
-  const overallQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
+// NOTE: Admin "Total quantity" should represent the customer's quoted qty,
+// not a sum of all stored quote_items (which includes "Included layer" rows).
+// Pricing is correct either way; this is just the display number.
+//
+// IMPORTANT: do NOT reference primaryItem here because primaryItem is declared later.
+const primaryQtyRaw = items.length > 0 ? Number(items[0]?.qty) : NaN;
+
+const overallQty =
+  Number.isFinite(primaryQtyRaw) && primaryQtyRaw > 0
+    ? (items[0]!.qty ?? 0)
+    : items.reduce((sum, i) => sum + (i.qty || 0), 0);
+
+
 
   const subtotal = items.reduce((sum, i) => {
     const lineTotal = parsePriceField(i.price_total_usd ?? null) ?? 0;
