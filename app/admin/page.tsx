@@ -30,6 +30,36 @@ type ShippingSettingsResponse = {
   message?: string;
 };
 
+type AdminUsersListResponse =
+  | {
+      ok: true;
+      users: Array<{
+        id: number;
+        email: string;
+        name: string;
+        role: string;
+        sales_slug: string | null;
+        created_at: string;
+        updated_at: string;
+      }>;
+    }
+  | { ok: false; error: string; message?: string };
+
+type AdminUserCreateResponse =
+  | {
+      ok: true;
+      user: {
+        id: number;
+        email: string;
+        name: string;
+        role: string;
+        sales_slug: string | null;
+        created_at: string;
+        updated_at: string;
+      };
+    }
+  | { ok: false; error: string; message?: string };
+
 function useHealth(endpoint: string) {
   const [data, setData] = React.useState<HealthResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -184,6 +214,16 @@ export default function AdminHomePage() {
           </h2>
           <div className="grid gap-4 md:grid-cols-2">
             <ShippingSettingsCard />
+          </div>
+        </section>
+
+        {/* Users & Roles (Admin-only via API enforcement) */}
+        <section className="mb-10">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+            Users &amp; Roles
+          </h2>
+          <div className="grid gap-4">
+            <UsersAndRolesCard />
           </div>
         </section>
       </div>
@@ -526,13 +566,276 @@ function ShippingSettingsCard() {
             )}
           </div>
 
-          {error && (
-            <p className="text-[11px] text-rose-300">
-              {error}
-            </p>
-          )}
+          {error && <p className="text-[11px] text-rose-300">{error}</p>}
         </form>
       )}
+    </div>
+  );
+}
+
+// ---------- Users & Roles card ----------
+
+function UsersAndRolesCard() {
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [okMsg, setOkMsg] = React.useState<string | null>(null);
+  const [users, setUsers] = React.useState<AdminUsersListResponse extends any
+    ? any
+    : never>([]);
+
+  const [email, setEmail] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [role, setRole] = React.useState<"viewer" | "sales" | "cs" | "admin">(
+    "viewer",
+  );
+  const [password, setPassword] = React.useState("");
+  const [salesSlug, setSalesSlug] = React.useState("");
+
+  async function loadUsers() {
+    setLoading(true);
+    setError(null);
+    setOkMsg(null);
+
+    try {
+      const res = await fetch("/api/admin/users", { cache: "no-store" });
+      const json = (await res
+        .json()
+        .catch(() => null)) as AdminUsersListResponse | null;
+
+      if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
+        const msg =
+          (json && (json as any).message) ||
+          "Users list is locked. Log in as admin.";
+        setError(msg);
+        setUsers([]);
+      } else {
+        setUsers(json.users || []);
+        setError(null);
+      }
+    } catch (e) {
+      console.error("Failed to load users:", e);
+      setError("Failed to load users.");
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setOkMsg(null);
+
+    const emailTrim = email.trim();
+    const nameTrim = name.trim();
+
+    if (!emailTrim || !nameTrim || !password) {
+      setError("Email, name, and password are required.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: emailTrim,
+          name: nameTrim,
+          role,
+          password,
+          sales_slug: salesSlug.trim() || null,
+        }),
+      });
+
+      const json = (await res
+        .json()
+        .catch(() => null)) as AdminUserCreateResponse | null;
+
+      if (!res.ok || !json || !("ok" in json) || json.ok !== true) {
+        const msg =
+          (json && (json as any).message) ||
+          "Failed to create user. Check role/login.";
+        setError(msg);
+        setOkMsg(null);
+      } else {
+        setOkMsg(`Created user: ${json.user.email} (${json.user.role})`);
+        setError(null);
+        setEmail("");
+        setName("");
+        setPassword("");
+        setSalesSlug("");
+        await loadUsers();
+      }
+    } catch (e) {
+      console.error("Failed to create user:", e);
+      setError("Failed to create user.");
+      setOkMsg(null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+          Create user
+        </div>
+        <span className="inline-flex items-center rounded-full bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-300">
+          Admin only
+        </span>
+      </div>
+
+      <p className="text-xs text-slate-200">
+        Create internal accounts for testing login + role gates (viewer/sales/cs/admin).
+        This tool is enforced server-side; non-admins will receive 401/403 JSON.
+      </p>
+
+      <form onSubmit={handleCreate} className="mt-4 space-y-3">
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="block">
+            <div className="mb-1 text-[11px] text-slate-400">Email</div>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+              placeholder="user@alex-io.com"
+              autoComplete="off"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-1 text-[11px] text-slate-400">Name</div>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+              placeholder="Jane Doe"
+              autoComplete="off"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-1 text-[11px] text-slate-400">Role</div>
+            <select
+              value={role}
+              onChange={(e) =>
+                setRole(e.target.value as "viewer" | "sales" | "cs" | "admin")
+              }
+              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+            >
+              <option value="viewer">viewer</option>
+              <option value="sales">sales</option>
+              <option value="cs">cs</option>
+              <option value="admin">admin</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <div className="mb-1 text-[11px] text-slate-400">Password</div>
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+              placeholder="••••••••"
+              type="password"
+              autoComplete="new-password"
+            />
+          </label>
+
+          <label className="block md:col-span-2">
+            <div className="mb-1 text-[11px] text-slate-400">
+              Sales slug (optional, unique)
+            </div>
+            <input
+              value={salesSlug}
+              onChange={(e) => setSalesSlug(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+              placeholder="chuck (or leave blank)"
+              autoComplete="off"
+            />
+          </label>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={saving}
+            className="inline-flex items-center rounded-full border border-sky-500/60 bg-sky-600/20 px-3 py-1 text-[11px] font-medium text-sky-200 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Creating…" : "Create user"}
+          </button>
+
+          <button
+            type="button"
+            onClick={loadUsers}
+            disabled={loading}
+            className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/30 px-3 py-1 text-[11px] font-medium text-slate-200 transition hover:bg-slate-800/50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? "Refreshing…" : "Refresh list"}
+          </button>
+
+          {okMsg && <span className="text-[11px] text-emerald-300">{okMsg}</span>}
+        </div>
+
+        {error && <p className="text-[11px] text-rose-300">{error}</p>}
+      </form>
+
+      <div className="mt-4 border-t border-slate-800 pt-3">
+        <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+          Existing users
+        </div>
+
+        {loading && (
+          <p className="text-[11px] text-slate-400">Loading users…</p>
+        )}
+
+        {!loading && users && Array.isArray(users) && users.length === 0 && (
+          <p className="text-[11px] text-slate-400">
+            No users returned (or you are not logged in as admin).
+          </p>
+        )}
+
+        {!loading && Array.isArray(users) && users.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[11px]">
+              <thead>
+                <tr className="text-slate-400">
+                  <th className="py-1 pr-3">Email</th>
+                  <th className="py-1 pr-3">Name</th>
+                  <th className="py-1 pr-3">Role</th>
+                  <th className="py-1 pr-3">Sales slug</th>
+                  <th className="py-1 pr-3">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u: any) => (
+                  <tr key={u.id} className="border-t border-slate-800/60">
+                    <td className="py-1 pr-3 text-slate-200">{u.email}</td>
+                    <td className="py-1 pr-3 text-slate-200">{u.name}</td>
+                    <td className="py-1 pr-3 text-slate-200">{u.role}</td>
+                    <td className="py-1 pr-3 text-slate-300">
+                      {u.sales_slug || "—"}
+                    </td>
+                    <td className="py-1 pr-3 text-slate-400">
+                      {typeof u.created_at === "string"
+                        ? u.created_at.slice(0, 10)
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
