@@ -1618,12 +1618,23 @@ const returnTo = currentUrl.searchParams.get("return_to");
 let editorUrl: URL;
 
 if (returnTo) {
+  // IMPORTANT:
+  // return_to is an encoded FULL editor URL. If it contains "%23" (for "#"),
+  // decodeURIComponent() would turn it into a literal "#", and URL parsing
+  // would treat everything after it as a fragment (truncating the query).
+  // So we "protect" %23 by double-encoding it first: %23 -> %2523.
+  const protectedReturnTo = returnTo.replace(/%23/gi, "%2523");
+
   // Decode once — return_to is already encoded
-  editorUrl = new URL(decodeURIComponent(returnTo));
+  const decoded = decodeURIComponent(protectedReturnTo);
+
+  // Now safe to parse as a URL without truncation
+  editorUrl = new URL(decoded);
 } else {
   // Fallback: current URL (safe for direct entry)
   editorUrl = new URL(currentUrl.href);
 }
+
 
 // Override / seed material only
 editorUrl.searchParams.set("material_id", String(mid));
