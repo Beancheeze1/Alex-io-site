@@ -271,6 +271,88 @@ function readLayerCavitiesFromUrl(url: URL, layerIndex1Based: number): string {
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
 
+
+function repairNullCavityXY(layout: LayoutModel): LayoutModel {
+  try {
+    if (!layout || typeof layout !== "object") return layout;
+
+    const block: any = (layout as any).block;
+    const Lb = Number(block?.lengthIn);
+    const Wb = Number(block?.widthIn);
+    if (!Number.isFinite(Lb) || Lb <= 0 || !Number.isFinite(Wb) || Wb <= 0) return layout;
+
+    const isBad = (v: any) => {
+      const n = typeof v === "number" ? v : v != null ? Number(v) : NaN;
+      return !Number.isFinite(n);
+    };
+
+    const repairArray = (cavs: any[] | null | undefined): any[] | null | undefined => {
+      if (!Array.isArray(cavs) || cavs.length === 0) return cavs;
+
+      let anyBad = false;
+      for (const c of cavs) {
+        if (!c || isBad((c as any).x) || isBad((c as any).y)) { anyBad = true; break; }
+      }
+      if (!anyBad) return cavs;
+
+      const count = cavs.length;
+      const cols = Math.ceil(Math.sqrt(count));
+      const rows = Math.ceil(count / cols);
+
+      const availW = Math.max(Lb - 2 * WALL_IN, 1) || Lb;
+      const availH = Math.max(Wb - 2 * WALL_IN, 1) || Wb;
+
+      const cellW = availW / cols;
+      const cellH = availH / rows;
+
+      return cavs.map((c, idx) => {
+        if (!c || (!isBad((c as any).x) && !isBad((c as any).y))) return c;
+
+        const r = Math.floor(idx / cols);
+        const col = idx % cols;
+
+        const xIn = WALL_IN + col * cellW + cellW / 2;
+        const yIn = WALL_IN + r * cellH + cellH / 2;
+
+        const xNorm = Lb > 0 ? xIn / Lb : 0.1;
+        const yNorm = Wb > 0 ? yIn / Wb : 0.1;
+
+        return { ...(c as any), x: xNorm, y: yNorm };
+      });
+    };
+
+    // Clone only if we actually repair something.
+    let changed = false;
+
+    let nextStack: any[] | undefined = undefined;
+    if (Array.isArray((layout as any).stack)) {
+      const stack = (layout as any).stack as any[];
+      nextStack = stack.map((layer) => {
+        if (!layer || typeof layer !== "object") return layer;
+        const cavs = repairArray((layer as any).cavities);
+        if (cavs === (layer as any).cavities) return layer;
+        changed = true;
+        return { ...(layer as any), cavities: cavs };
+      });
+    }
+
+    const nextCavs = repairArray((layout as any).cavities);
+    if (nextCavs !== (layout as any).cavities) changed = true;
+
+    if (!changed) return layout;
+
+    return {
+      ...(layout as any),
+      ...(nextStack ? { stack: nextStack } : null),
+      cavities: nextCavs as any,
+    } as any;
+  } catch {
+    return layout;
+  }
+}
+
+
+
 // NOTE (shop convention): foam OD is typically undersized for box/mailer fit.
 // This is a *note only* (no geometry is changed here).
 const FOAM_FIT_UNDERSIZE_IN = 0.125;
@@ -1050,7 +1132,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
           }
 
           if (!cancelled) {
-            setInitialLayout(mergedLayout);
+            setInitialLayout(repairNullCavityXY(mergedLayout));
             setInitialNotes(notesSeedLocal || notesFromDb || "");
 
                         // Prefer DB items; fall back to URL seeds (locals) to avoid stale React state.
