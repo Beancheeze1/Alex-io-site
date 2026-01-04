@@ -233,6 +233,27 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
     }
   }
 
+  // HARDENING: ensure cavity x/y are always finite numbers before saving to DB.
+  // If x/y are missing/null, JS math can coerce them to 0 on rehydrate (top-left teleport).
+  // Defaulting to 0.2 matches the editor's addCavity() default and prevents teleport.
+  try {
+    const stackAny = (next as any).stack;
+    if (Array.isArray(stackAny)) {
+      for (const layer of stackAny) {
+        const cavsAny = (layer as any)?.cavities;
+        if (!Array.isArray(cavsAny)) continue;
+
+        for (const cav of cavsAny) {
+          if (!cav || typeof cav !== "object") continue;
+          const x = Number((cav as any).x);
+          const y = Number((cav as any).y);
+          if (!Number.isFinite(x)) (cav as any).x = 0.2;
+          if (!Number.isFinite(y)) (cav as any).y = 0.2;
+        }
+      }
+    }
+  } catch {}
+
   return next;
 }
 
