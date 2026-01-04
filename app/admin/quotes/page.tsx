@@ -334,7 +334,8 @@ export default function AdminQuotesPage() {
               type="button"
               onClick={createNewQuoteAndOpenEditor}
               disabled={creating}
-              className="inline-flex items-center justify-center rounded-lg border border-sky-500/70 bg-sky-600/80 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm transition hover:bg-sky-500 disabled:opacity-60"
+              className="inline-flex items-center justify-center rounded-lg border border-sky-300 bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm transition hover:bg-sky-400 disabled:opacity-60 disabled:bg-sky-500/40 disabled:border-sky-500/40"
+
             >
               {creating ? "Starting…" : "Start new quote"}
             </button>

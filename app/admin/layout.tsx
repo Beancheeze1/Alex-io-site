@@ -76,14 +76,7 @@ export default async function AdminLayout({ children }: Props) {
         </div>
 
         <div className="flex items-center gap-3 text-xs text-neutral-200">
-                    {(role === "cs" || role === "sales") && (
-            <Link
-              href="/quote/layout"
-              className="inline-flex items-center rounded-full border border-sky-500/40 bg-sky-500/10 px-3 py-1 text-[11px] font-medium text-sky-200 hover:bg-sky-500/20"
-            >
-              + Start New Quote
-            </Link>
-          )}
+           
 
           <span>{user.name || user.email}</span>
           <span className="rounded-full border border-neutral-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400">
