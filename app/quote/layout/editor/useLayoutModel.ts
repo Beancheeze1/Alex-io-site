@@ -75,6 +75,9 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   const [state, setState] = useState<LayoutState>(() =>
     normalizeInitialLayout(initial),
   );
+const didInitActiveLayerRef = useRef(false);
+
+
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const { layout, activeLayerId } = state;
@@ -142,29 +145,29 @@ export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   // Clicking layers calls setActiveLayerId() which mirrors stack -> layout.cavities.
   // This effect does that mirror once so seeded cavities are visible immediately.
   useEffect(() => {
-    setState((prev) => {
-      // 🔒 NEW: wait until activeLayerId is resolved
-      if (!prev.activeLayerId) return prev;
+  if (didInitActiveLayerRef.current) return;
+  didInitActiveLayerRef.current = true;
 
-      if ((prev.layout.cavities?.length ?? 0) > 0) return prev;
+  setState((prev) => {
+    if (!prev.activeLayerId) return prev;
+    if ((prev.layout.cavities?.length ?? 0) > 0) return prev;
 
-      const active =
-        prev.layout.stack.find((l) => l.id === prev.activeLayerId) ??
-        prev.layout.stack[0];
+    const active =
+      prev.layout.stack.find((l) => l.id === prev.activeLayerId) ??
+      prev.layout.stack[0];
 
-      if (!active) return prev;
+    if (!active) return prev;
 
-      const mirrored = dedupeCavities(active.cavities);
+    return {
+      layout: {
+        ...prev.layout,
+        cavities: dedupeCavities(active.cavities),
+      },
+      activeLayerId: active.id,
+    };
+  });
+}, []);
 
-      return {
-        layout: {
-          ...prev.layout,
-          cavities: [...mirrored],
-        },
-        activeLayerId: active.id,
-      };
-    });
-  }, []);
 
   /* ================= selection ================= */
 
