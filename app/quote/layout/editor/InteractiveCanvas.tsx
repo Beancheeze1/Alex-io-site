@@ -327,16 +327,11 @@ export default function InteractiveCanvas({
     const ptX = e.clientX - svgRect.left;
     const ptY = e.clientY - svgRect.top;
 
-    const xNorm = Number.isFinite(Number((cavity as any).x))
-  ? Number((cavity as any).x)
-  : 0.2;
-const yNorm = Number.isFinite(Number((cavity as any).y))
-  ? Number((cavity as any).y)
-  : 0.2;
+    const xNorm = safeNorm01((cavity as any).x, 0.2);
+    const yNorm = safeNorm01((cavity as any).y, 0.2);
 
-const cavX = blockOffset.x + xNorm * blockPx.width;
-const cavY = blockOffset.y + yNorm * blockPx.height;
-
+    const cavX = blockOffset.x + xNorm * blockPx.width;
+    const cavY = blockOffset.y + yNorm * blockPx.height;
 
     setDrag({
       mode: "move",
@@ -415,11 +410,14 @@ const cavY = blockOffset.y + yNorm * blockPx.height;
       moveAction(drag.id, xNorm, yNorm);
     } else if (drag.mode === "resize") {
       // resize from bottom-right, top-left fixed
-      const startXIn = cav.x * block.lengthIn;
-      const startYIn = cav.y * block.widthIn;
+      const xNorm = safeNorm01((cav as any).x, 0.2);
+      const yNorm = safeNorm01((cav as any).y, 0.2);
 
-      const cavX = blockOffset.x + cav.x * blockPx.width;
-      const cavY = blockOffset.y + cav.y * blockPx.height;
+      const startXIn = xNorm * block.lengthIn;
+      const startYIn = yNorm * block.widthIn;
+
+      const cavX = blockOffset.x + xNorm * blockPx.width;
+      const cavY = blockOffset.y + yNorm * blockPx.height;
 
       const newWidthPx = ptX - cavX;
       const newHeightPx = ptY - cavY;
@@ -552,22 +550,17 @@ const cavY = blockOffset.y + yNorm * blockPx.height;
 
           {/* cavities */}
           {cavities.map((cavity, index) => {
-           const cavWidthPx =
-  (cavity.lengthIn / block.lengthIn) * blockPx.width;
-const cavHeightPx =
-  (cavity.widthIn / block.widthIn) * blockPx.height;
+            const cavWidthPx =
+              (cavity.lengthIn / block.lengthIn) * blockPx.width;
+            const cavHeightPx =
+              (cavity.widthIn / block.widthIn) * blockPx.height;
 
-// NaN-safe normalized coords (SVG treats NaN as 0 → top-left teleport)
-const xNorm = Number.isFinite(Number((cavity as any).x))
-  ? Number((cavity as any).x)
-  : 0.2;
-const yNorm = Number.isFinite(Number((cavity as any).y))
-  ? Number((cavity as any).y)
-  : 0.2;
+            // NaN-safe normalized coords (SVG treats NaN as 0 → top-left teleport)
+            const xNorm = safeNorm01((cavity as any).x, 0.2);
+            const yNorm = safeNorm01((cavity as any).y, 0.2);
 
-const cavX = blockOffset.x + xNorm * blockPx.width;
-const cavY = blockOffset.y + yNorm * blockPx.height;
-
+            const cavX = blockOffset.x + xNorm * blockPx.width;
+            const cavY = blockOffset.y + yNorm * blockPx.height;
 
             const isSelected = selectedIds.includes(cavity.id);
             const isCircle = cavity.shape === "circle";
@@ -657,6 +650,16 @@ const cavY = blockOffset.y + yNorm * blockPx.height;
 
 // ===== helpers =====
 
+function safeNorm01(v: any, fallback: number) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return clamp01(fallback);
+  return clamp01(n);
+}
+
+function clamp01(v: number) {
+  return Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+}
+
 function snapInches(v: number): number {
   if (!Number.isFinite(v)) return 0;
   return Math.round(v / SNAP_IN) * SNAP_IN;
@@ -690,9 +693,9 @@ function violatesMinGap(
   for (const cav of cavities) {
     if (cav.id === id) continue;
 
-    const ox1 = cav.x * block.lengthIn;
+    const ox1 = safeNorm01((cav as any).x, 0.2) * block.lengthIn;
     const ox2 = ox1 + cav.lengthIn;
-    const oy1 = cav.y * block.widthIn;
+    const oy1 = safeNorm01((cav as any).y, 0.2) * block.widthIn;
     const oy2 = oy1 + cav.widthIn;
 
     const gapX = Math.max(0, Math.max(ox1 - x2, x1 - ox2));
@@ -916,8 +919,11 @@ function computeSpacing(
   blockOffset: { x: number; y: number },
   wallIn: number,
 ): SpacingInfo {
-  const cavLeftIn = cav.x * block.lengthIn;
-  const cavTopIn = cav.y * block.widthIn;
+  const cx = safeNorm01((cav as any).x, 0.2);
+  const cy = safeNorm01((cav as any).y, 0.2);
+
+  const cavLeftIn = cx * block.lengthIn;
+  const cavTopIn = cy * block.widthIn;
   const cavRightIn = cavLeftIn + cav.lengthIn;
   const cavBottomIn = cavTopIn + cav.widthIn;
 
@@ -950,8 +956,11 @@ function computeSpacing(
   for (const other of cavities) {
     if (other.id === cav.id) continue;
 
-    const oLeftIn = other.x * block.lengthIn;
-    const oTopIn = other.y * block.widthIn;
+    const ox = safeNorm01((other as any).x, 0.2);
+    const oy = safeNorm01((other as any).y, 0.2);
+
+    const oLeftIn = ox * block.lengthIn;
+    const oTopIn = oy * block.widthIn;
     const oRightIn = oLeftIn + other.lengthIn;
     const oBottomIn = oTopIn + other.widthIn;
 
