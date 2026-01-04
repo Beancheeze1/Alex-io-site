@@ -20,6 +20,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
 import { buildLayoutExports } from "@/app/lib/layout/exports";
+import { getCurrentUserFromRequest } from "@/lib/auth";
+
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -373,6 +375,19 @@ export async function GET(req: NextRequest) {
     console.error("[quote/print] export regeneration failed", e);
   }
 }
+    // --- CAD RBAC (A): redact CAD exports unless admin/sales/cs ---
+    const user = await getCurrentUserFromRequest(req);
+    const role = (user?.role || "").toLowerCase();
+    const cadAllowed = role === "admin" || role === "sales" || role === "cs";
+
+    if (layoutPkg && !cadAllowed) {
+      layoutPkg = {
+        ...layoutPkg,
+        svg_text: null,
+        dxf_text: null,
+        step_text: null,
+      };
+    }
 
 
     /* ---------------- Packaging lines ---------------- */

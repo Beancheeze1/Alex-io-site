@@ -18,6 +18,8 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
+import { getCurrentUserFromRequest } from "@/lib/auth";
+
 
 type InBody = {
   quote_no?: string;
@@ -102,7 +104,15 @@ async function callStepService(layoutJson: any): Promise<{ stepText: string; use
 
 export async function POST(req: Request) {
   try {
+    const user = await getCurrentUserFromRequest(req as any);
+    const role = (user?.role || "").toLowerCase();
+    const allowed = role === "admin" || role === "cs";
+
+    if (!user) return jsonErr(401, "UNAUTHENTICATED", "Sign in required.");
+    if (!allowed) return jsonErr(403, "FORBIDDEN", "Admin/CS access required.");
+
     const body = (await req.json()) as InBody;
+
     const quote_no = String(body?.quote_no || "").trim();
     if (!quote_no) return jsonErr(400, "BAD_REQUEST", "Missing quote_no.");
 

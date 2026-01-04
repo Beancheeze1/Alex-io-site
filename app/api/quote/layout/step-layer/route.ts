@@ -18,6 +18,8 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { buildStepFromLayout } from "@/lib/cad/step";
+import { getCurrentUserFromRequest } from "@/lib/auth";
+
 
 function jsonErr(status: number, error: string, message: string) {
   return NextResponse.json({ ok: false, error, message }, { status });
@@ -111,7 +113,15 @@ function coerceLayerCropToBlockCorners(slicedLayout: any) {
 
 export async function GET(req: Request) {
   try {
+    const user = await getCurrentUserFromRequest(req as any);
+    const role = (user?.role || "").toLowerCase();
+    const cadAllowed = role === "admin" || role === "sales" || role === "cs";
+
+    if (!user) return jsonErr(401, "UNAUTHENTICATED", "Sign in required.");
+    if (!cadAllowed) return jsonErr(403, "FORBIDDEN", "CAD access required.");
+
     const { searchParams } = new URL(req.url);
+
 
     const quote_no = String(searchParams.get("quote_no") || "").trim();
     const layerIndexRaw = String(searchParams.get("layer_index") || "").trim();

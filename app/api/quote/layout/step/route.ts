@@ -15,6 +15,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { getCurrentUserFromRequest } from "@/lib/auth";
+
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,8 +36,20 @@ function json(body: any, status = 200) {
 }
 
 export async function GET(req: NextRequest) {
+  const user = await getCurrentUserFromRequest(req);
+  const role = (user?.role || "").toLowerCase();
+  const cadAllowed = role === "admin" || role === "sales" || role === "cs";
+
+  if (!user) {
+    return json({ ok: false, error: "UNAUTHENTICATED" }, 401);
+  }
+  if (!cadAllowed) {
+    return json({ ok: false, error: "FORBIDDEN", message: "CAD access required." }, 403);
+  }
+
   const url = req.nextUrl;
   const quoteNo = url.searchParams.get("quote_no") || "";
+
 
   if (!quoteNo) {
     return json(
