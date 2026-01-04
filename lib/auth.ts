@@ -157,3 +157,23 @@ export async function getCurrentUserFromCookies(): Promise<CurrentUser | null> {
   if (!payload) return null;
   return getUserById(payload.userId);
 }
+// --- RBAC helpers (Path A, additive) ---
+
+export type Role = "viewer" | "sales" | "cs" | "admin";
+
+function toRole(roleRaw: string | null | undefined): Role | null {
+  const r = (roleRaw || "").trim().toLowerCase();
+  if (r === "viewer" || r === "sales" || r === "cs" || r === "admin") return r;
+  return null; // fail closed
+}
+
+export function isRoleAllowed(
+  user: CurrentUser | null | undefined,
+  allowed: Role[],
+): boolean {
+  if (!user) return false;
+  const r = toRole(user.role);
+  if (!r) return false;
+  return allowed.includes(r);
+}
+
