@@ -1955,7 +1955,8 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
                       </div>
                       <div style={{ textAlign: "right", fontSize: 12 }}>
                         <a
-                          href={"/quote/layout?quote_no=" + encodeURIComponent(quote.quote_no)}
+                          href={"/quote/layout?quote_no=" + encodeURIComponent(quote.quote_no) + "&active_layer=2"}
+
                           style={{
                             display: "inline-block",
                             padding: "4px 10px",
