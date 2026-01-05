@@ -270,6 +270,8 @@ function readLayerCavitiesFromUrl(url: URL, layerIndex1Based: number): string {
 
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
+const CENTER_SNAP_IN = 0.0625; // 1/16" for centering only
+
 
 
 function repairNullCavityXY(layout: LayoutModel): LayoutModel {
@@ -457,6 +459,12 @@ function snapInches(v: number): number {
   if (!Number.isFinite(v)) return 0;
   return Math.round(v / SNAP_IN) * SNAP_IN;
 }
+
+function snapCenterInches(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  return Math.round(v / CENTER_SNAP_IN) * CENTER_SNAP_IN;
+}
+
 
 export default function LayoutPage({
   searchParams,
@@ -2019,8 +2027,9 @@ if (
     let xIn = (block.lengthIn - len) / 2;
     let yIn = (block.widthIn - wid) / 2;
 
-    xIn = snapInches(xIn);
-    yIn = snapInches(yIn);
+   xIn = snapCenterInches(xIn);
+yIn = snapCenterInches(yIn);
+
 
     const minXIn = wallIn;
     const maxXIn = block.lengthIn - wallIn - len;
