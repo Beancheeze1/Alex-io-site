@@ -8,7 +8,7 @@ import { q, one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 
 
-// GET /api/quotes?limit=50
+// GET /api/quotes?limit=25
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUserFromRequest(req);
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const limit = Math.min(parseInt(searchParams.get("limit") || "50", 10), 200);
+    const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 200);
 
     if (isSales) {
       // Sales can only see their own quotes.
