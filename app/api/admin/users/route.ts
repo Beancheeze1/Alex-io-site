@@ -216,3 +216,98 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+// ---------- DELETE: delete user ----------
+export async function DELETE(req: NextRequest) {
+  try {
+    const current = await getCurrentUserFromRequest(req);
+    if (!requireAdmin(current)) {
+      return bad(
+        { ok: false, error: "forbidden", message: "Admin role required." },
+        403,
+      );
+    }
+
+    // Accept id from query string first: /api/admin/users?id=123
+    // Fallback: JSON body { id: 123 } (in case the UI sends it that way).
+    const url = new URL(req.url);
+    const idParam = url.searchParams.get("id");
+
+    let id: number | null =
+      typeof idParam === "string" && idParam.trim().length > 0
+        ? Number(idParam)
+        : null;
+
+    if (!Number.isFinite(id as any)) id = null;
+
+    if (id === null) {
+      const body = (await req.json().catch(() => null)) as any;
+      const bodyId = body?.id;
+      const n = typeof bodyId === "string" || typeof bodyId === "number" ? Number(bodyId) : NaN;
+      if (Number.isFinite(n)) id = n;
+    }
+
+    if (id === null || !Number.isInteger(id) || id <= 0) {
+      return bad(
+        { ok: false, error: "invalid_payload", message: "Expected ?id=<number> (or JSON { id })." },
+        400,
+      );
+    }
+
+    // Prevent deleting yourself (easy way to lock admin out).
+    if (Number(current?.id) === id) {
+      return bad(
+        { ok: false, error: "cannot_delete_self", message: "You cannot delete your own account." },
+        400,
+      );
+    }
+
+    // Confirm user exists (so we can return 404 cleanly).
+    const exists = await one<{ id: number; email: string }>(
+      `select id, email from public.users where id = $1`,
+      [id],
+    ).catch(() => null);
+
+    if (!exists?.id) {
+      return bad(
+        { ok: false, error: "not_found", message: "User not found." },
+        404,
+      );
+    }
+
+    try {
+      await one<{ id: number }>(
+        `delete from public.users where id = $1 returning id`,
+        [id],
+      );
+
+      return ok({ ok: true, deleted_id: id }, 200);
+    } catch (dbErr: any) {
+      const code = String(dbErr?.code || "");
+
+      // Common FK constraint code (e.g., if user is referenced elsewhere).
+      if (code === "23503") {
+        return bad(
+          {
+            ok: false,
+            error: "fk_constraint",
+            message: "User cannot be deleted because it is referenced by other records.",
+          },
+          409,
+        );
+      }
+
+      console.error("DB error deleting user:", dbErr);
+      return bad(
+        { ok: false, error: "db_error", message: "Failed to delete user. Check logs." },
+        500,
+      );
+    }
+  } catch (err: any) {
+    console.error("Error in DELETE /api/admin/users:", err);
+    return bad(
+      { ok: false, error: "server_error", message: "Unexpected error deleting user. Check logs." },
+      500,
+    );
+  }
+}
+
