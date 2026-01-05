@@ -614,6 +614,8 @@ function UsersAndRolesCard() {
   const [users, setUsers] = React.useState<AdminUsersListResponse extends any
     ? any
     : never>([]);
+      const [deletingId, setDeletingId] = React.useState<number | null>(null);
+
 
   const [email, setEmail] = React.useState("");
   const [name, setName] = React.useState("");
@@ -657,6 +659,45 @@ function UsersAndRolesCard() {
     loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+    async function handleDeleteUser(user: { id: number; email: string }) {
+    const ok = window.confirm(
+      `Delete user "${user.email}"?\n\nThis cannot be undone.`,
+    );
+    if (!ok) return;
+
+    setError(null);
+    setOkMsg(null);
+    setDeletingId(user.id);
+
+    try {
+      const res = await fetch(`/api/admin/users?id=${encodeURIComponent(String(user.id))}`, {
+        method: "DELETE",
+        cache: "no-store",
+      });
+
+      const json: any = await res.json().catch(() => null);
+
+      if (!res.ok || !json || json.ok !== true) {
+        const msg =
+          (json && (json.message || json.error)) ||
+          "Failed to delete user. Check role/login.";
+        setError(msg);
+        setOkMsg(null);
+      } else {
+        setOkMsg(`Deleted user: ${user.email}`);
+        setError(null);
+        await loadUsers();
+      }
+    } catch (e) {
+      console.error("Failed to delete user:", e);
+      setError("Failed to delete user.");
+      setOkMsg(null);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -838,17 +879,19 @@ function UsersAndRolesCard() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[11px]">
               <thead>
-                <tr className="text-slate-400">
+                               <tr className="text-slate-400">
                   <th className="py-1 pr-3">Email</th>
                   <th className="py-1 pr-3">Name</th>
                   <th className="py-1 pr-3">Role</th>
                   <th className="py-1 pr-3">Sales slug</th>
                   <th className="py-1 pr-3">Created</th>
+                  <th className="py-1 pr-0 text-right">Delete</th>
                 </tr>
+
               </thead>
               <tbody>
                 {users.map((u: any) => (
-                  <tr key={u.id} className="border-t border-slate-800/60">
+                                <tr key={u.id} className="border-t border-slate-800/60">
                     <td className="py-1 pr-3 text-slate-200">{u.email}</td>
                     <td className="py-1 pr-3 text-slate-200">{u.name}</td>
                     <td className="py-1 pr-3 text-slate-200">{u.role}</td>
@@ -860,7 +903,19 @@ function UsersAndRolesCard() {
                         ? u.created_at.slice(0, 10)
                         : "—"}
                     </td>
+                    <td className="py-1 pr-0 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteUser({ id: u.id, email: u.email })}
+                        disabled={deletingId === u.id || saving || loading}
+                        className="inline-flex items-center rounded-full border border-rose-500/50 bg-rose-600/10 px-2 py-0.5 text-[10px] font-medium text-rose-200 transition hover:bg-rose-600/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        title="Delete user"
+                      >
+                        {deletingId === u.id ? "Deleting…" : "Delete"}
+                      </button>
+                    </td>
                   </tr>
+
                 ))}
               </tbody>
             </table>
