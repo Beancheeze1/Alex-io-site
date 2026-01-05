@@ -552,9 +552,13 @@ export default function AdminQuotesPage() {
                   <th className="px-3 py-2 font-semibold">Customer</th>
                   <th className="px-3 py-2 font-semibold">Status</th>
                   <th className="px-3 py-2 font-semibold">Email / Phone</th>
-                  <th className="px-3 py-2 font-semibold text-right">
-                    Updated
-                  </th>
+                 <th className="px-3 py-2 font-semibold text-right">
+  Updated
+</th>
+<th className="px-3 py-2 font-semibold text-right">
+  Review
+</th>
+
                 </tr>
               </thead>
               <tbody>
@@ -649,8 +653,18 @@ export default function AdminQuotesPage() {
                           )}
                         </td>
                         <td className="px-3 py-2 text-right text-[11px] text-slate-400">
-                          {updated}
-                        </td>
+  {updated}
+</td>
+
+<td className="px-3 py-2 text-right">
+  <Link
+    href={`/quote?quote_no=${encodeURIComponent(q.quote_no)}`}
+    className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] font-medium text-sky-300 transition hover:border-sky-400 hover:text-sky-200"
+  >
+    Review
+  </Link>
+</td>
+
                       </tr>
                     );
                   })}
