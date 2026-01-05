@@ -2149,11 +2149,15 @@ yIn = snapCenterInches(yIn);
       if (mode === "right") nextXIn = block.lengthIn - wallIn - len;
       if (mode === "top") nextYIn = wallIn;
       if (mode === "bottom") nextYIn = block.widthIn - wallIn - wid;
-      if (mode === "centerX") nextXIn = (block.lengthIn - len) / 2;
-      if (mode === "centerY") nextYIn = (block.widthIn - wid) / 2;
+      if (mode === "centerX") nextXIn = snapCenterInches((block.lengthIn - len) / 2);
+if (mode === "centerY") nextYIn = snapCenterInches((block.widthIn - wid) / 2);
 
-      nextXIn = snapInches(nextXIn);
-      nextYIn = snapInches(nextYIn);
+
+      if (mode === "centerX") nextXIn = snapCenterInches(nextXIn);
+else nextXIn = snapInches(nextXIn);
+
+if (mode === "centerY") nextYIn = snapCenterInches(nextYIn);
+else nextYIn = snapInches(nextYIn);
 
       const minXIn = wallIn;
       const maxXIn = block.lengthIn - wallIn - len;
