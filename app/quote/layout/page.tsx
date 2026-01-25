@@ -1489,6 +1489,12 @@ function LayoutEditorHost(props: {
 
   const router = useRouter();
   
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [uploadStatus, setUploadStatus] = React.useState<
+    "idle" | "uploading" | "done" | "error"
+  >("idle");
+  const [uploadError, setUploadError] = React.useState<string | null>(null);
+
 
   const {
     layout,
@@ -2411,6 +2417,53 @@ else nextYIn = snapInches(nextYIn);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editorMode, selectedCavity, nudgeSelected]);
 
+  const openFilePicker = () => {
+    setUploadError(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) return;
+
+    const inputEl = e.currentTarget;
+
+    try {
+      setUploadStatus("uploading");
+      setUploadError(null);
+
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("filename", file.name);
+
+      const base = "/api/sketch-upload";
+      const url = hasRealQuoteNo
+        ? `${base}?quote_no=${encodeURIComponent(quoteNo)}&t=${Date.now()}`
+        : `${base}?t=${Date.now()}`;
+
+      const res = await fetch(url, { method: "POST", body: fd });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Upload failed");
+      }
+
+      const json = await res.json();
+      const newQuoteNo = (json.quoteNo || json.quote_no || "").toString().trim();
+      if (newQuoteNo) {
+        router.push(`/quote/layout?quote_no=${encodeURIComponent(newQuoteNo)}`);
+        return;
+      }
+
+      setUploadStatus("error");
+      setUploadError("Upload succeeded but quoteNo missing");
+    } catch (err: any) {
+      setUploadStatus("error");
+      setUploadError(String(err?.message || err));
+    } finally {
+      inputEl.value = "";
+    }
+  };
+
   /* ---------- Foam Advisor navigation ---------- */
 
  const handleGoToFoamAdvisor = () => {
@@ -2706,6 +2759,13 @@ else nextYIn = snapInches(nextYIn);
 
   return (
     <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".dxf,.pdf"
+        className="hidden"
+        onChange={handleFileSelected}
+      />
       <div className="w-full max-w-none mx-auto">
         <div className="relative rounded-2xl border border-slate-800/80 bg-slate-950/90 shadow-[0_26px_60px_rgba(15,23,42,0.95)] overflow-hidden">
           {/* global grid/glow overlay */}
@@ -3080,6 +3140,15 @@ else nextYIn = snapInches(nextYIn);
 
                     <button
                       type="button"
+                      onClick={openFilePicker}
+                      disabled={uploadStatus === "uploading"}
+                      className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 transition disabled:opacity-60"
+                    >
+                      {uploadStatus === "uploading" ? "Uploading" : "Upload file"}
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={handleApplyToQuote}
                       disabled={!canApplyButton}
                       className="inline-flex flex-1 items-center justify-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
@@ -3097,6 +3166,9 @@ else nextYIn = snapInches(nextYIn);
                         : "Apply to quote"}
                     </button>
                   </div>
+                  {uploadStatus === "error" && uploadError ? (
+                    <div className="mt-1 text-[11px] text-red-300">{uploadError}</div>
+                  ) : null}
                 </div>
 
                 {/* RIGHT: Layer details (stack + per-layer list + per-layer crop) */}
