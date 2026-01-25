@@ -173,7 +173,7 @@ async function forgeNormalizeToDxf(args: {
   filename: string;
   contentType: string;
   sourceType: "pdf" | "dxf";
-}): Promise<{ normalizedDxf: Buffer; manifest: any }> {
+}): Promise<{ normalizedDxf: Buffer; manifest: any; facesBytes: Buffer }> {
   const forgeBase = (process.env.ALEX_FORGE_BASE_URL || "").trim();
   if (!forgeBase) {
     throw new Error("ALEX_FORGE_BASE_URL is not set");
@@ -319,6 +319,7 @@ if (units !== "in" && units !== "mm") {
           return {
             normalizedDxf: Buffer.from(""),
             manifest,
+            facesBytes: Buffer.from(""),
           };
         }
 
@@ -326,6 +327,7 @@ if (units !== "in" && units !== "mm") {
         return {
           normalizedDxf: Buffer.from(dxfText, "utf8"),
           manifest,
+          facesBytes,
         };
       }
 
@@ -345,7 +347,7 @@ if (units !== "in" && units !== "mm") {
             : [{ code: "forge_failed", message: `Forge job ended with status=${status}`, data: { status } }],
         };
 
-        return { normalizedDxf: Buffer.from(""), manifest };
+        return { normalizedDxf: Buffer.from(""), manifest, facesBytes: Buffer.from("") };
       }
     }
 
@@ -360,7 +362,7 @@ if (units !== "in" && units !== "mm") {
     errors: [{ code: "forge_timeout", message: "Forge did not produce faces_json before timeout.", data: { job_id: jobId } }],
   };
 
-  return { normalizedDxf: Buffer.from(""), manifest };
+  return { normalizedDxf: Buffer.from(""), manifest, facesBytes: Buffer.from("") };
 }
 
 export async function POST(req: NextRequest) {
@@ -439,6 +441,7 @@ export async function POST(req: NextRequest) {
       let normalizedFilename = origFilename;
       let normalizedContentType = contentType;
       let manifest: any = null;
+      let facesBytes: Buffer = Buffer.from("");
 
       try {
         const res = await forgeNormalizeToDxf({
@@ -449,6 +452,7 @@ export async function POST(req: NextRequest) {
         });
 
         manifest = res.manifest;
+        facesBytes = res.facesBytes ?? Buffer.from("");
 
         // Loud failure if errors present (contract: errors[] non-empty => reject)
         const errs = Array.isArray(manifest?.errors) ? manifest.errors : [];
@@ -497,6 +501,27 @@ export async function POST(req: NextRequest) {
         ],
       );
 
+      let facesAttachmentId: number | null = null;
+      if (facesBytes && facesBytes.length > 0) {
+        const facesRow = await one<{ id: number }>(
+          `
+          INSERT INTO quote_attachments
+            (quote_id, quote_no, filename, content_type, size_bytes, data)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id;
+          `,
+          [
+            inserted.quote_id,
+            inserted.quote_no,
+            "forge_faces.json",
+            "application/json",
+            facesBytes.length,
+            facesBytes,
+          ],
+        );
+        facesAttachmentId = facesRow?.id ?? null;
+      }
+
       // Per v1: DO NOT run vision parse or auto-apply; return the normalized DXF attachment
       return NextResponse.json(
         {
@@ -509,7 +534,7 @@ export async function POST(req: NextRequest) {
           type: inserted.content_type,
           parsed: null,
           autoQuote: null,
-          forge: { used: true, manifest },
+          forge: { used: true, manifest, faces_attachment_id: facesAttachmentId },
         },
         { status: 200 },
       );

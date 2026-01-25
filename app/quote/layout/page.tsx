@@ -465,6 +465,122 @@ function snapCenterInches(v: number): number {
   return Math.round(v / CENTER_SNAP_IN) * CENTER_SNAP_IN;
 }
 
+type LoopPoint = { x: number; y: number };
+
+function computeLoopBbox(points: LoopPoint[] | null | undefined): {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+} | null {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let any = false;
+
+  for (const p of points) {
+    const x = Number(p?.x);
+    const y = Number(p?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    any = true;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+
+  return any ? { minX, maxX, minY, maxY } : null;
+}
+
+function computeLoopCentroid(points: LoopPoint[] | null | undefined): { x: number; y: number } | null {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  let sumX = 0;
+  let sumY = 0;
+  let count = 0;
+
+  for (const p of points) {
+    const x = Number(p?.x);
+    const y = Number(p?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    sumX += x;
+    sumY += y;
+    count += 1;
+  }
+
+  if (!count) return null;
+  return { x: sumX / count, y: sumY / count };
+}
+
+function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
+  const loops = Array.isArray(facesJson?.loops) ? facesJson.loops : [];
+  const outerIdxRaw = Number(facesJson?.outerLoopIndex);
+  const outerIdx = Number.isFinite(outerIdxRaw) ? outerIdxRaw : 0;
+  const outerLoop = loops[outerIdx];
+  const outerPoints = Array.isArray(outerLoop?.points) ? outerLoop.points : [];
+  const outerBbox = computeLoopBbox(outerPoints);
+
+  const defaultBlock = parseDimsTriple("10x10x2") ?? { L: 10, W: 10, H: 2 };
+
+  const blockLengthIn = outerBbox ? outerBbox.maxX - outerBbox.minX : defaultBlock.L;
+  const blockWidthIn = outerBbox ? outerBbox.maxY - outerBbox.minY : defaultBlock.W;
+  const blockThicknessIn = defaultBlock.H;
+
+  const block = {
+    lengthIn: blockLengthIn,
+    widthIn: blockWidthIn,
+    thicknessIn: blockThicknessIn,
+  };
+
+  const cavities: LayoutModel["cavities"] = [];
+
+  loops.forEach((loop: any, idx: number) => {
+    if (idx === outerIdx) return;
+    const points = Array.isArray(loop?.points) ? loop.points : [];
+    const bbox = computeLoopBbox(points);
+    const centroid = computeLoopCentroid(points);
+    if (!bbox || !centroid) return;
+    if (!outerBbox || blockLengthIn <= 0 || blockWidthIn <= 0) return;
+
+    const lengthIn = bbox.maxX - bbox.minX;
+    const widthIn = bbox.maxY - bbox.minY;
+    const depthIn = 1;
+
+    const x = (centroid.x - outerBbox.minX) / blockLengthIn;
+    const y = (centroid.y - outerBbox.minY) / blockWidthIn;
+
+    const shape: CavityShape = "rect";
+
+    cavities.push({
+      id: `seed-cav-${cavities.length + 1}`,
+      label: `${lengthIn} x ${widthIn} x ${depthIn} in`,
+      shape,
+      cornerRadiusIn: 0,
+      lengthIn,
+      widthIn,
+      depthIn,
+      x,
+      y,
+    });
+  });
+
+  const stackCavs = cavities.map((c) => ({ ...c }));
+
+  return {
+    block,
+    cavities: cavities.map((c) => ({ ...c })),
+    stack: [
+      {
+        id: "seed-layer-1",
+        label: "Layer 1",
+        thicknessIn: blockThicknessIn,
+        cavities: stackCavs,
+      },
+    ],
+  };
+}
+
 
 export default function LayoutPage({
   searchParams,
@@ -1078,6 +1194,54 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
           !!dbLayout &&
           Array.isArray((dbLayout as any).stack) &&
           (dbLayout as any).stack.length > 0;
+
+        if (json && json.ok && (!dbLayout || !dbHasStack)) {
+          try {
+            const latestRes = await fetch(
+              `/api/quote-attachments/latest?quote_no=${encodeURIComponent(
+                quoteNoFromUrl.trim(),
+              )}&filename=${encodeURIComponent("forge_faces.json")}`,
+              { cache: "no-store" },
+            );
+
+            if (latestRes.ok) {
+              const latestJson = await latestRes.json().catch(() => null);
+              const attachmentId = Number(latestJson?.attachment?.id);
+
+              if (Number.isFinite(attachmentId) && attachmentId > 0) {
+                const facesRes = await fetch(
+                  `/api/quote-attachments/${attachmentId}?t=${Date.now()}`,
+                  { cache: "no-store" },
+                );
+
+                if (facesRes.ok) {
+                  const facesText = await facesRes.text();
+                  const facesJson = JSON.parse(facesText);
+                  const seedLayout = facesJsonToLayoutSeed(facesJson);
+
+                  if (!cancelled) {
+                    setInitialLayout(seedLayout);
+                    setInitialNotes(notesSeedLocal || "");
+
+                    setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
+                    setInitialMaterialId(
+                      materialIdOverride ??
+                        materialIdFromItems ??
+                        materialSeedLocal ??
+                        materialIdFromUrl ??
+                        null,
+                    );
+
+                    setLoadingLayout(false);
+                  }
+                  return;
+                }
+              }
+            }
+          } catch (e) {
+            console.warn("Forge faces seed failed; falling back:", e);
+          }
+        }
 
         if (json && json.ok && dbLayout && dbHasStack) {
           const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
