@@ -205,6 +205,15 @@ async function forgeNormalizeToDxf(args: {
     method: "POST",
     body: form,
   });
+
+// NEW: trigger planning step so Forge generates faces_json
+await fetch(`${forgeBase}/api/jobs/${jobId}/plan`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({}),
+});
+
+
   const uploadJson = await uploadResp.json().catch(() => ({} as any));
   if (!uploadResp.ok || !uploadJson?.ok) {
     throw new Error(`Forge upload failed: ${JSON.stringify(uploadJson)}`);
