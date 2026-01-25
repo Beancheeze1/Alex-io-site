@@ -257,10 +257,27 @@ async function forgeNormalizeToDxf(args: {
           else warnings.push(item);
         }
 
-        const units = (stJson.job?.units || facesJson?.units || null) as any;
-        if (units !== "in" && units !== "mm") {
-          errors.push({ code: "units_unknown", message: "Forge did not provide units (mm|in).", data: { units } });
-        }
+        let units = (stJson.job?.units || facesJson?.units || null) as any;
+
+// DXF v1 behavior: DXF often has no explicit units. Default to inches but be loud via warning.
+// PDF stays strict: missing units is an error.
+if (units !== "in" && units !== "mm") {
+  if (args.sourceType === "dxf") {
+    warnings.push({
+      code: "units_defaulted",
+      message: "Forge did not provide units; defaulting to inches for DXF v1.",
+      data: { units_in: units, defaulted_to: "in" },
+    });
+    units = "in";
+  } else {
+    errors.push({
+      code: "units_unknown",
+      message: "Forge did not provide units (mm|in).",
+      data: { units },
+    });
+  }
+}
+
 
         const loopsRaw = Array.isArray(facesJson?.loops) ? facesJson!.loops! : [];
         const loopsClosed = loopsRaw
