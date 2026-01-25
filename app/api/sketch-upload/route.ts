@@ -179,48 +179,28 @@ async function forgeNormalizeToDxf(args: {
     throw new Error("ALEX_FORGE_BASE_URL is not set");
   }
 
-  // 1) create job
-  const createResp = await fetch(`${forgeBase}/api/jobs`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ input_filename: args.filename, input_mime: args.contentType }),
-  });
-  const createJson = (await createResp.json().catch(() => ({}))) as any;
-  if (!createResp.ok || !createJson?.ok || !createJson?.job_id) {
-    throw new Error(`Forge job create failed: ${JSON.stringify(createJson)}`);
-  }
-  const jobId = Number(createJson.job_id);
-
-  // 2) upload file to job
+  // 1) create job + upload file (single call)
   const form = new FormData();
 
   // FIX #1: BlobPart typing -- wrap Buffer as Uint8Array explicitly
   const bytes = new Uint8Array(args.buf);
-  const blobParts: BlobPart[] = [bytes.buffer];
-  const blob = new Blob(blobParts, { type: args.contentType || "application/octet-stream" });
+  const blob = new Blob([bytes], { type: args.contentType || "application/octet-stream" });
 
   form.append("file", blob, args.filename || "input");
 
-  const uploadResp = await fetch(`${forgeBase}/api/jobs/${jobId}/uploads`, {
+  const createResp = await fetch(`${forgeBase}/api/jobs`, {
     method: "POST",
     body: form,
   });
 
-// NEW: trigger planning step so Forge generates faces_json
-await fetch(`${forgeBase}/api/jobs/${jobId}/plan`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({}),
-});
-
-
-  const uploadJson = await uploadResp.json().catch(() => ({} as any));
-  if (!uploadResp.ok || !uploadJson?.ok) {
-    throw new Error(`Forge upload failed: ${JSON.stringify(uploadJson)}`);
+  const createJson = (await createResp.json().catch(() => ({} as any))) as any;
+  if (!createResp.ok || !createJson?.ok || !createJson?.job_id) {
+    throw new Error(`Forge job create/upload failed: ${JSON.stringify(createJson)}`);
   }
+  const jobId = Number(createJson.job_id);
 
   // 3) poll for faces_json artifact or terminal fail
-  const timeoutMs = 25000;
+  const timeoutMs = 60000;
   const started = Date.now();
 
   let last: ForgeJobGet | null = null;
@@ -354,15 +334,11 @@ if (units !== "in" && units !== "mm") {
     await sleep(800);
   }
 
-  const manifest = {
-    source_type: args.sourceType,
-    units: last?.job?.units ?? null,
-    bbox: null,
-    warnings: [],
-    errors: [{ code: "forge_timeout", message: "Forge did not produce faces_json before timeout.", data: { job_id: jobId } }],
-  };
-
-  return { normalizedDxf: Buffer.from(""), manifest, facesBytes: Buffer.from("") };
+  throw new Error(
+    `Forge did not produce faces_json before timeout. job_id=${jobId}. last=${JSON.stringify(
+      last,
+    )}`,
+  );
 }
 
 export async function POST(req: NextRequest) {
