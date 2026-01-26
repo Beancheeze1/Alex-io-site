@@ -92,6 +92,17 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function createQuoteWithAutoNumber(email: string | null) {
+  return one<{ id: number; quote_no: string }>(
+    `
+    INSERT INTO quotes (quote_no, email)
+    VALUES (public.next_quote_no(), $1)
+    RETURNING id, quote_no;
+    `,
+    [email],
+  );
+}
+
 function dxfFromLoops(params: { units: "in" | "mm"; loops: Array<Array<{ x: number; y: number }>> }): string {
   const unitsCode = params.units === "mm" ? 4 : 1; // DXF INSUNITS
 
@@ -363,7 +374,7 @@ export async function POST(req: NextRequest) {
       qpQuoteNo ||
       "";
 
-    const quoteNo = quoteNoRaw.trim() || null;
+    let quoteNo = quoteNoRaw.trim() || null;
 
     const emailRaw = form.get("email") as string | null;
     const email = (emailRaw && emailRaw.toString().trim()) || null;
@@ -406,6 +417,14 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+    }
+
+    if (!quoteNo) {
+      const created = await createQuoteWithAutoNumber(email);
+      if (!created) return err("quote_create_failed", "Could not create quote", 500);
+
+      quoteId = created.id;
+      quoteNo = created.quote_no;
     }
 
     // Feature-flagged Forge ingestion (DXF-primary v1)
