@@ -58,6 +58,208 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
       return err("not_found", `No attachment found for id=${id}`, 404);
     }
 
+    if (row.filename === "forge_faces.json") {
+      let faces: any = null;
+      try {
+        faces = JSON.parse(row.data.toString("utf8"));
+      } catch (e: any) {
+        return NextResponse.json(
+          { ok: false, error: "forge_faces_parse_failed", detail: String(e?.message || e) },
+          { status: 400 },
+        );
+      }
+
+      const unitsRaw = String(faces?.units || "").trim().toLowerCase();
+      const toIn = (v: number) => (unitsRaw === "mm" ? v / 25.4 : v);
+
+      const rawLoops = Array.isArray(faces?.loops) ? faces.loops : [];
+      const loops = rawLoops
+        .map((loop: any) => {
+          const pts = Array.isArray(loop?.points) ? loop.points : [];
+          const clean = pts
+            .map((p: any) => ({ x: toIn(Number(p?.x)), y: toIn(Number(p?.y)) }))
+            .filter((p: any) => Number.isFinite(p.x) && Number.isFinite(p.y));
+          return clean.length >= 3 ? clean : [];
+        })
+        .filter((pts: any[]) => pts.length >= 3);
+
+      if (!loops.length) {
+        return NextResponse.json({ ok: false, error: "no_loops" }, { status: 400 });
+      }
+
+      const areaSigned = (pts: any[]) => {
+        let a = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i];
+          const q = pts[(i + 1) % pts.length];
+          a += p.x * q.y - q.x * p.y;
+        }
+        return a / 2;
+      };
+
+      let outerIdx = 0;
+      let maxArea = 0;
+      for (let i = 0; i < loops.length; i++) {
+        const a = Math.abs(areaSigned(loops[i]));
+        if (a > maxArea) {
+          maxArea = a;
+          outerIdx = i;
+        }
+      }
+
+      const outer = loops[outerIdx];
+      let minX = Infinity;
+      let minY = Infinity;
+      for (const p of outer) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+      }
+      if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+        return NextResponse.json({ ok: false, error: "invalid_outer_loop" }, { status: 400 });
+      }
+
+      const GRID = 0.125;
+      const snap = (v: number) => Math.round(v / GRID) * GRID;
+
+      const translate = (pts: any[]) => pts.map((p: any) => ({ x: p.x - minX, y: p.y - minY }));
+      const translateAndSnap = (pts: any[]) =>
+        pts.map((p: any) => ({ x: snap(p.x - minX), y: snap(p.y - minY) }));
+
+      const outerTranslated = translate(outer);
+      const outerSnapped = translateAndSnap(outer);
+
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      let minTX = Infinity;
+      let minTY = Infinity;
+      for (const p of outerTranslated) {
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+        if (p.x < minTX) minTX = p.x;
+        if (p.y < minTY) minTY = p.y;
+      }
+
+      const blockWidth = snap(maxX - minTX);
+      const blockHeight = snap(maxY - minTY);
+
+      const tol = 1e-3;
+      const isAxisAlignedRect = (pts: any[]) => {
+        let lx = Infinity,
+          ly = Infinity,
+          hx = -Infinity,
+          hy = -Infinity;
+        for (const p of pts) {
+          if (p.x < lx) lx = p.x;
+          if (p.y < ly) ly = p.y;
+          if (p.x > hx) hx = p.x;
+          if (p.y > hy) hy = p.y;
+        }
+
+        const corners: any[] = [];
+        for (const p of pts) {
+          const onX = Math.abs(p.x - lx) <= tol || Math.abs(p.x - hx) <= tol;
+          const onY = Math.abs(p.y - ly) <= tol || Math.abs(p.y - hy) <= tol;
+          if (!onX || !onY) return false;
+          const exists = corners.some(
+            (c) => Math.abs(c.x - p.x) <= tol && Math.abs(c.y - p.y) <= tol,
+          );
+          if (!exists) corners.push(p);
+        }
+
+        return corners.length === 4;
+      };
+
+      const blockIsRect = isAxisAlignedRect(outerTranslated);
+      const block: any = {
+        width: blockWidth,
+        height: blockHeight,
+        shape: blockIsRect ? "rectangle" : "polygon",
+      };
+
+      if (!blockIsRect) {
+        const points =
+          outerSnapped.length > 1 &&
+          outerSnapped[0].x === outerSnapped[outerSnapped.length - 1].x &&
+          outerSnapped[0].y === outerSnapped[outerSnapped.length - 1].y
+            ? outerSnapped.slice(0, -1)
+            : outerSnapped;
+        block.points = points.map((p: any) => ({ x: p.x, y: p.y }));
+      }
+
+      const cavities: any[] = [];
+
+      const isCircle = (pts: any[]) => {
+        if (pts.length < 8) return null;
+        const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
+        const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+        const rs = pts.map((p) => Math.hypot(p.x - cx, p.y - cy));
+        const avgR = rs.reduce((a, b) => a + b, 0) / rs.length;
+        const dev = rs.reduce((a, b) => a + Math.abs(b - avgR), 0) / rs.length;
+        if (avgR > 0 && dev < 0.02) {
+          return { cx, cy, r: avgR };
+        }
+        return null;
+      };
+
+      for (let i = 0; i < loops.length; i++) {
+        if (i === outerIdx) continue;
+
+        const holeTranslated = translate(loops[i]);
+        const holeSnapped = translateAndSnap(loops[i]);
+
+        if (isAxisAlignedRect(holeTranslated)) {
+          let lx = Infinity,
+            ly = Infinity,
+            hx = -Infinity,
+            hy = -Infinity;
+          for (const p of holeTranslated) {
+            if (p.x < lx) lx = p.x;
+            if (p.y < ly) ly = p.y;
+            if (p.x > hx) hx = p.x;
+            if (p.y > hy) hy = p.y;
+          }
+          cavities.push({
+            type: "rectangle",
+            x: snap(lx),
+            y: snap(ly),
+            w: snap(hx - lx),
+            h: snap(hy - ly),
+          });
+          continue;
+        }
+
+        const circle = isCircle(holeTranslated);
+        if (circle) {
+          cavities.push({
+            type: "circle",
+            x: snap(circle.cx),
+            y: snap(circle.cy),
+            r: snap(circle.r),
+          });
+          continue;
+        }
+
+        const points =
+          holeSnapped.length > 1 &&
+          holeSnapped[0].x === holeSnapped[holeSnapped.length - 1].x &&
+          holeSnapped[0].y === holeSnapped[holeSnapped.length - 1].y
+            ? holeSnapped.slice(0, -1)
+            : holeSnapped;
+        cavities.push({
+          type: "polygon",
+          points: points.map((p: any) => ({ x: p.x, y: p.y })),
+        });
+      }
+
+      return NextResponse.json(
+        {
+          block,
+          cavities,
+        },
+        { status: 200 },
+      );
+    }
+
     const contentType = row.content_type || "application/octet-stream";
     const filename = row.filename || `attachment-${id}`;
 
