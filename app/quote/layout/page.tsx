@@ -680,6 +680,7 @@ export default function LayoutPage({
   const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(
     null,
   );
+  const [uploadError, setUploadError] = React.useState<string | null>(null);
   const [initialNotes, setInitialNotes] = React.useState<string>("");
   const [initialQty, setInitialQty] = React.useState<number | null>(null);
   const [initialMaterialId, setInitialMaterialId] =
@@ -1208,46 +1209,66 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
               { cache: "no-store" },
             );
 
-            if (latestRes.ok) {
-              const latestJson = await latestRes.json().catch(() => null);
-              const attachmentId = Number(latestJson?.attachment?.id);
+            const latestJson = await latestRes.json().catch(() => null);
+            if (!latestRes.ok) {
+              if (!cancelled) {
+                setLoadingLayout(false);
+                setUploadError(`Forge seed: latest lookup failed: ${latestRes.status}`);
+              }
+              return;
+            }
 
-              if (Number.isFinite(attachmentId) && attachmentId > 0) {
-                const facesRes = await fetch(
-                  `/api/quote-attachments/${attachmentId}?t=${Date.now()}`,
-                  { cache: "no-store" },
+            const attachmentId = Number(latestJson?.attachment?.id);
+            if (Number.isFinite(attachmentId) && attachmentId > 0) {
+              const facesDownload = await fetch(
+                `/api/quote-attachments/${attachmentId}?t=${Date.now()}`,
+                { cache: "no-store" },
+              );
+
+              if (!facesDownload.ok) {
+                if (!cancelled) {
+                  setLoadingLayout(false);
+                  setUploadError(`Forge seed: download failed: ${facesDownload.status}`);
+                }
+                return;
+              }
+
+              const facesText = await facesDownload.text();
+              let facesJson: any = null;
+              try {
+                facesJson = JSON.parse(facesText);
+              } catch (e) {
+                if (!cancelled) {
+                  setLoadingLayout(false);
+                  setUploadError(`Forge seed: JSON parse failed: ${String(e)}`);
+                }
+                return;
+              }
+
+              const seedLayout = facesJsonToLayoutSeed(facesJson);
+              if (!cancelled) {
+                setInitialLayout(seedLayout);
+                setInitialNotes(notesSeedLocal || "");
+
+                setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
+                setInitialMaterialId(
+                  materialIdOverride ??
+                    materialIdFromItems ??
+                    materialSeedLocal ??
+                    materialIdFromUrl ??
+                    null,
                 );
 
-                if (facesRes.ok) {
-                  const facesText = await facesRes.text();
-                  const facesJson = JSON.parse(facesText);
-                  const seedLayout = facesJsonToLayoutSeed(facesJson);
-
-                  if (!cancelled) {
-                    setInitialLayout(seedLayout);
-                    setInitialNotes(notesSeedLocal || "");
-
-                    setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
-                    setInitialMaterialId(
-                      materialIdOverride ??
-                        materialIdFromItems ??
-                        materialSeedLocal ??
-                        materialIdFromUrl ??
-                        null,
-                    );
-
-                    setLoadingLayout(false);
-                    if (forceForgeSeed) {
-                      try {
-                        const u = new URL(window.location.href);
-                        u.searchParams.delete("force_forge_seed");
-                        window.history.replaceState({}, "", u.toString());
-                      } catch {}
-                    }
-                  }
-                  return;
+                setLoadingLayout(false);
+                if (forceForgeSeed) {
+                  try {
+                    const u = new URL(window.location.href);
+                    u.searchParams.delete("force_forge_seed");
+                    window.history.replaceState({}, "", u.toString());
+                  } catch {}
                 }
               }
+              return;
             }
           } catch (e) {
             console.warn("Forge faces seed failed; falling back:", e);
@@ -1429,6 +1450,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
     serverBlockStr,
     serverCavityStr,
     materialIdFromUrl,
+    setUploadError,
   ]);
 
   if (loadingLayout || !initialLayout) {
@@ -1442,7 +1464,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
   }
 
   return (
-          <LayoutEditorHost
+      <LayoutEditorHost
         quoteNo={quoteNo}
         hasRealQuoteNo={hasRealQuoteNo}
         initialLayout={initialLayout}
@@ -1454,6 +1476,8 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         initialCustomerEmail={initialCustomerEmail}
         initialCustomerCompany={initialCustomerCompany}
         initialCustomerPhone={initialCustomerPhone}
+        uploadError={uploadError}
+        setUploadError={setUploadError}
       />
 
   );
@@ -1482,6 +1506,8 @@ function LayoutEditorHost(props: {
   initialCustomerEmail: string;
   initialCustomerCompany: string;
   initialCustomerPhone: string;
+  uploadError: string | null;
+  setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
 }) {
   const {
     quoteNo,
@@ -1495,6 +1521,8 @@ function LayoutEditorHost(props: {
     initialCustomerCompany,
     initialCustomerPhone,
         initialMaterialLabel,
+    uploadError,
+    setUploadError,
 
   } = props;
 
@@ -1504,7 +1532,6 @@ function LayoutEditorHost(props: {
   const [uploadStatus, setUploadStatus] = React.useState<
     "idle" | "uploading" | "done" | "error"
   >("idle");
-  const [uploadError, setUploadError] = React.useState<string | null>(null);
 
 
   const {
