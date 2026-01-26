@@ -1196,17 +1196,10 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
           (dbLayout as any).stack.length > 0;
 
         const forceForgeSeed =
+          typeof window !== "undefined" &&
           new URLSearchParams(window.location.search).get("force_forge_seed") === "1";
 
-        if (
-          json &&
-          json.ok &&
-          (forceForgeSeed ||
-            !dbLayout ||
-            !dbHasStack ||
-            (Array.isArray((dbLayout as any)?.cavities) &&
-              (dbLayout as any).cavities.length === 0))
-        ) {
+        if (json && json.ok && (forceForgeSeed || !dbLayout || !dbHasStack)) {
           try {
             const latestRes = await fetch(
               `/api/quote-attachments/latest?quote_no=${encodeURIComponent(
@@ -2482,7 +2475,7 @@ else nextYIn = snapInches(nextYIn);
       }
 
       setUploadStatus("done");
-      window.location.assign(
+      router.replace(
         `/quote/layout?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}&force_forge_seed=1`,
       );
       return;
