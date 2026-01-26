@@ -2493,11 +2493,11 @@ else nextYIn = snapInches(nextYIn);
 
       const json = await res.json().catch(() => null);
       if (!json || json.ok !== true) {
-        const baseError = (json?.error || "Upload failed").toString();
-        const forgeDetail = json?.detail?.errors?.[0]?.message;
-        const detailText = forgeDetail ? `: ${forgeDetail}` : "";
         setUploadStatus("error");
-        setUploadError(`${baseError}${detailText}`);
+        const msg =
+          (json && (json.error || json.detail?.error || json.detail?.errors?.[0]?.message)) ||
+          "Upload failed";
+        setUploadError(typeof msg === "string" ? msg : JSON.stringify(msg));
         return;
       }
 

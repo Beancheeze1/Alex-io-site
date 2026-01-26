@@ -25,7 +25,21 @@ function err(error: string, detail?: any, status = 400) {
 
 export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
   try {
-    const id = Number(ctx?.params?.id);
+    const rawParam = (ctx?.params?.id ?? "").toString().trim();
+
+    // Fallback: derive from pathname if params are missing in the runtime
+    let raw = rawParam;
+    if (!raw) {
+      try {
+        const u = new URL(_req.url);
+        const parts = u.pathname.split("/").filter(Boolean);
+        raw = (parts[parts.length - 1] ?? "").toString().trim();
+      } catch {}
+    }
+
+    // Allow only a clean leading integer
+    const m = /^(\d+)/.exec(raw);
+    const id = m ? Number(m[1]) : NaN;
     if (!Number.isFinite(id) || id <= 0) {
       return err("invalid_id", "id must be a positive number");
     }
