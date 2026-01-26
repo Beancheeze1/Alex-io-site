@@ -2429,6 +2429,13 @@ else nextYIn = snapInches(nextYIn);
     const inputEl = e.currentTarget;
 
     try {
+      const currentQuoteNo = (quoteNo || "").trim();
+      if (!currentQuoteNo) {
+        setUploadStatus("error");
+        setUploadError("Missing quote_no in URL");
+        return;
+      }
+
       setUploadStatus("uploading");
       setUploadError(null);
 
@@ -2437,9 +2444,7 @@ else nextYIn = snapInches(nextYIn);
       fd.append("filename", file.name);
 
       const base = "/api/sketch-upload";
-      const url = hasRealQuoteNo
-        ? `${base}?quote_no=${encodeURIComponent(quoteNo)}&t=${Date.now()}`
-        : `${base}?t=${Date.now()}`;
+      const url = `${base}?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`;
 
       const res = await fetch(url, { method: "POST", body: fd });
       if (!res.ok) {
@@ -2447,15 +2452,11 @@ else nextYIn = snapInches(nextYIn);
         throw new Error(text || "Upload failed");
       }
 
-      const json = await res.json();
-      const newQuoteNo = (json.quoteNo || json.quote_no || "").toString().trim();
-      if (newQuoteNo) {
-        router.push(`/quote/layout?quote_no=${encodeURIComponent(newQuoteNo)}`);
-        return;
-      }
-
-      setUploadStatus("error");
-      setUploadError("Upload succeeded but quoteNo missing");
+      await res.json().catch(() => null);
+      router.replace(
+        `/quote/layout?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`,
+      );
+      return;
     } catch (err: any) {
       setUploadStatus("error");
       setUploadError(String(err?.message || err));

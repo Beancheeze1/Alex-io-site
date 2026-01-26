@@ -419,6 +419,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (quoteNo && !quoteId) {
+      return err("quote_not_found", { quoteNo }, 404);
+    }
+
     if (!quoteNo) {
       const created = await createQuoteWithAutoNumber(email);
       if (!created) return err("quote_create_failed", "Could not create quote", 500);
@@ -522,8 +526,8 @@ export async function POST(req: NextRequest) {
         {
           ok: true,
           attachmentId: inserted.id,
-          quoteId: inserted.quote_id,
-          quoteNo: inserted.quote_no,
+          quoteId: quoteId,
+          quoteNo: quoteNo,
           filename: inserted.filename,
           size: inserted.size_bytes,
           type: inserted.content_type,
