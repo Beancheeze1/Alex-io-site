@@ -2442,6 +2442,7 @@ else nextYIn = snapInches(nextYIn);
       const fd = new FormData();
       fd.append("file", file);
       fd.append("filename", file.name);
+      fd.append("quote_no", currentQuoteNo);
 
       const base = "/api/sketch-upload";
       const url = `${base}?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`;
@@ -2452,8 +2453,18 @@ else nextYIn = snapInches(nextYIn);
         throw new Error(text || "Upload failed");
       }
 
-      await res.json().catch(() => null);
-      router.replace(
+      const json = await res.json().catch(() => null);
+      if (!json || json.ok !== true) {
+        const baseError = (json?.error || "Upload failed").toString();
+        const forgeDetail = json?.detail?.errors?.[0]?.message;
+        const detailText = forgeDetail ? `: ${forgeDetail}` : "";
+        setUploadStatus("error");
+        setUploadError(`${baseError}${detailText}`);
+        return;
+      }
+
+      setUploadStatus("done");
+      window.location.assign(
         `/quote/layout?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`,
       );
       return;
