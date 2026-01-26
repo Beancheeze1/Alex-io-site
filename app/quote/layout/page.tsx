@@ -1195,7 +1195,18 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
           Array.isArray((dbLayout as any).stack) &&
           (dbLayout as any).stack.length > 0;
 
-        if (json && json.ok && (!dbLayout || !dbHasStack)) {
+        const forceForgeSeed =
+          new URLSearchParams(window.location.search).get("force_forge_seed") === "1";
+
+        if (
+          json &&
+          json.ok &&
+          (forceForgeSeed ||
+            !dbLayout ||
+            !dbHasStack ||
+            (Array.isArray((dbLayout as any)?.cavities) &&
+              (dbLayout as any).cavities.length === 0))
+        ) {
           try {
             const latestRes = await fetch(
               `/api/quote-attachments/latest?quote_no=${encodeURIComponent(
@@ -1233,6 +1244,13 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
                     );
 
                     setLoadingLayout(false);
+                    if (forceForgeSeed) {
+                      try {
+                        const u = new URL(window.location.href);
+                        u.searchParams.delete("force_forge_seed");
+                        window.history.replaceState({}, "", u.toString());
+                      } catch {}
+                    }
                   }
                   return;
                 }
@@ -2465,7 +2483,7 @@ else nextYIn = snapInches(nextYIn);
 
       setUploadStatus("done");
       window.location.assign(
-        `/quote/layout?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`,
+        `/quote/layout?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}&force_forge_seed=1`,
       );
       return;
     } catch (err: any) {
