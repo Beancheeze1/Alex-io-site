@@ -12,6 +12,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 import { CavityShape, LayoutModel } from "./editor/layoutTypes";
+import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
 
@@ -511,74 +512,6 @@ function computeLoopCentroid(points: LoopPoint[] | null | undefined): { x: numbe
 
   if (!count) return null;
   return { x: sumX / count, y: sumY / count };
-}
-
-function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
-  const loops = Array.isArray(facesJson?.loops) ? facesJson.loops : [];
-  const outerIdxRaw = Number(facesJson?.outerLoopIndex);
-  const outerIdx = Number.isFinite(outerIdxRaw) ? outerIdxRaw : 0;
-  const outerLoop = loops[outerIdx];
-  const outerPoints = Array.isArray(outerLoop?.points) ? outerLoop.points : [];
-  const outerBbox = computeLoopBbox(outerPoints);
-
-  const defaultBlock = parseDimsTriple("10x10x2") ?? { L: 10, W: 10, H: 2 };
-
-  const blockLengthIn = outerBbox ? outerBbox.maxX - outerBbox.minX : defaultBlock.L;
-  const blockWidthIn = outerBbox ? outerBbox.maxY - outerBbox.minY : defaultBlock.W;
-  const blockThicknessIn = defaultBlock.H;
-
-  const block = {
-    lengthIn: blockLengthIn,
-    widthIn: blockWidthIn,
-    thicknessIn: blockThicknessIn,
-  };
-
-  const cavities: LayoutModel["cavities"] = [];
-
-  loops.forEach((loop: any, idx: number) => {
-    if (idx === outerIdx) return;
-    const points = Array.isArray(loop?.points) ? loop.points : [];
-    const bbox = computeLoopBbox(points);
-    const centroid = computeLoopCentroid(points);
-    if (!bbox || !centroid) return;
-    if (!outerBbox || blockLengthIn <= 0 || blockWidthIn <= 0) return;
-
-    const lengthIn = bbox.maxX - bbox.minX;
-    const widthIn = bbox.maxY - bbox.minY;
-    const depthIn = 1;
-
-    const x = (centroid.x - outerBbox.minX) / blockLengthIn;
-    const y = (centroid.y - outerBbox.minY) / blockWidthIn;
-
-    const shape: CavityShape = "rect";
-
-    cavities.push({
-      id: `seed-cav-${cavities.length + 1}`,
-      label: `${lengthIn} x ${widthIn} x ${depthIn} in`,
-      shape,
-      cornerRadiusIn: 0,
-      lengthIn,
-      widthIn,
-      depthIn,
-      x,
-      y,
-    });
-  });
-
-  const stackCavs = cavities.map((c) => ({ ...c }));
-
-  return {
-    block,
-    cavities: cavities.map((c) => ({ ...c })),
-    stack: [
-      {
-        id: "seed-layer-1",
-        label: "Layer 1",
-        thicknessIn: blockThicknessIn,
-        cavities: stackCavs,
-      },
-    ],
-  };
 }
 
 
