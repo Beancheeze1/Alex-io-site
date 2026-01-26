@@ -58,6 +58,91 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
       return err("not_found", `No attachment found for id=${id}`, 404);
     }
 
+    if (row.filename === "forge_faces.json") {
+      const faces = JSON.parse(row.data.toString("utf8"));
+
+      const GRID = 0.125;
+      const snap = (v: number) => Math.round(v / GRID) * GRID;
+
+      const loops = faces.loops || [];
+      if (!loops.length) {
+        return NextResponse.json({ ok: false, error: "no_loops" }, { status: 422 });
+      }
+
+      // --- find outer loop (largest area) ---
+      const area = (pts: any[]) => {
+        let a = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i],
+            q = pts[(i + 1) % pts.length];
+          a += p.x * q.y - q.x * p.y;
+        }
+        return Math.abs(a / 2);
+      };
+
+      loops.sort((a: any, b: any) => area(b.points) - area(a.points));
+      const outer = loops[0].points;
+
+      // --- normalize coords ---
+      const minX = Math.min(...outer.map((p: any) => p.x));
+      const minY = Math.min(...outer.map((p: any) => p.y));
+
+      const norm = (pts: any[]) => pts.map((p: any) => ({ x: snap(p.x - minX), y: snap(p.y - minY) }));
+
+      const outerN = norm(outer);
+
+      const maxX = Math.max(...outerN.map((p: any) => p.x));
+      const maxY = Math.max(...outerN.map((p: any) => p.y));
+
+      const block = {
+        width: snap(maxX),
+        height: snap(maxY),
+      };
+
+      // --- cavities ---
+      const cavities: any[] = [];
+
+      for (let i = 1; i < loops.length; i++) {
+        const pts = norm(loops[i].points);
+
+        // rectangle detection
+        if (pts.length === 4) {
+          const xs = pts.map((p) => p.x),
+            ys = pts.map((p) => p.y);
+          cavities.push({
+            shape: "rect",
+            x: Math.min(...xs),
+            y: Math.min(...ys),
+            w: snap(Math.max(...xs) - Math.min(...xs)),
+            h: snap(Math.max(...ys) - Math.min(...ys)),
+          });
+          continue;
+        }
+
+        // circle detection
+        const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
+        const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+        const rs = pts.map((p) => Math.hypot(p.x - cx, p.y - cy));
+        const avgR = rs.reduce((a, b) => a + b, 0) / rs.length;
+        const dev = rs.reduce((a, b) => a + Math.abs(b - avgR), 0) / rs.length;
+
+        if (dev < 0.02) {
+          cavities.push({ shape: "circle", cx: snap(cx), cy: snap(cy), r: snap(avgR) });
+          continue;
+        }
+
+        cavities.push({ shape: "poly", points: pts });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        layout: {
+          block,
+          cavities,
+        },
+      });
+    }
+
     const contentType = row.content_type || "application/octet-stream";
     const filename = row.filename || `attachment-${id}`;
 
