@@ -59,97 +59,31 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
     }
 
     if (row.filename === "forge_faces.json") {
-      let fallbackToRaw = false;
-      let loopsCount = 0;
-      let payload: any = null;
-
+      // MATCH FORGE: return payload exactly as stored. Do NOT translate, snap, or recompute outer.
+      // The stored JSON already contains: { units, outerLoopIndex, loops:[{points, area, perimeter, edges...}] }.
       try {
         const faces = JSON.parse(row.data.toString("utf8"));
 
-        const unitsRaw = String(faces?.units || "").trim().toLowerCase();
-        const toIn = (v: number) => (unitsRaw === "mm" ? v / 25.4 : v);
-
-        const rawLoops = Array.isArray(faces?.loops) ? faces.loops : [];
-        const normalized = rawLoops
-          .map((loop: any, idx: number) => {
-            const pts = Array.isArray(loop?.points) ? loop.points : [];
-            const clean = pts
-              .map((p: any) => ({ x: toIn(Number(p?.x)), y: toIn(Number(p?.y)) }))
-              .filter((p: any) => Number.isFinite(p.x) && Number.isFinite(p.y));
-            return clean.length >= 3 ? { idx, loop, points: clean } : null;
-          })
-          .filter(Boolean) as Array<{ idx: number; loop: any; points: Array<{ x: number; y: number }> }>;
-
-        loopsCount = normalized.length;
-        if (!normalized.length) {
-          fallbackToRaw = true;
+        // Basic sanity only (no mutation)
+        if (!faces || typeof faces !== "object" || !Array.isArray((faces as any).loops)) {
+          // If somehow malformed, fall back to raw bytes below
+          console.warn("quote-attachments/[id] forge_faces adapter: malformed json; falling back to bytes", {
+            id: row.id,
+          });
         } else {
-          const areaSigned = (pts: any[]) => {
-            let a = 0;
-            for (let i = 0; i < pts.length; i++) {
-              const p = pts[i];
-              const q = pts[(i + 1) % pts.length];
-              a += p.x * q.y - q.x * p.y;
-            }
-            return a / 2;
-          };
-
-          let outerIdx = 0;
-          let maxArea = 0;
-          for (let i = 0; i < normalized.length; i++) {
-            const a = Math.abs(areaSigned(normalized[i].points));
-            if (a > maxArea) {
-              maxArea = a;
-              outerIdx = i;
-            }
-          }
-
-          const outer = normalized[outerIdx].points;
-          let minX = Infinity;
-          let minY = Infinity;
-          for (const p of outer) {
-            if (p.x < minX) minX = p.x;
-            if (p.y < minY) minY = p.y;
-          }
-          if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
-            fallbackToRaw = true;
-          } else {
-            const GRID = 0.125;
-            const snap = (v: number) => Math.round(v / GRID) * GRID;
-
-            const translateAndSnap = (pts: any[]) =>
-              pts.map((p: any) => ({ x: snap(p.x - minX), y: snap(p.y - minY) }));
-
-            const loopsOut = normalized.map((entry) => {
-              const snapped = translateAndSnap(entry.points);
-              return {
-                ...entry.loop,
-                points: snapped.map((p: any) => ({ x: p.x, y: p.y })),
-              };
-            });
-
-            payload = {
-              units: "in",
-              outerLoopIndex: outerIdx,
-              loops: loopsOut,
-            };
-          }
+          const headers = new Headers();
+          headers.set("Cache-Control", "no-store");
+          // Ensure JSON content-type explicitly (avoid browser guessing)
+          headers.set("Content-Type", "application/json; charset=utf-8");
+          return NextResponse.json(faces, { status: 200, headers });
         }
       } catch (e) {
-        fallbackToRaw = true;
+        console.warn("quote-attachments/[id] forge_faces adapter: parse failed; falling back to bytes", {
+          id: row.id,
+          err: String(e),
+        });
       }
-
-      console.info("quote-attachments/[id] forge_faces adapter", {
-        mode: fallbackToRaw ? "bytes" : "json",
-        loops: loopsCount,
-        fallback: fallbackToRaw,
-      });
-
-      if (!fallbackToRaw && payload) {
-        const headers = new Headers();
-        headers.set("Cache-Control", "no-store");
-        return NextResponse.json(payload, { status: 200, headers });
-      }
+      // fall through to raw bytes response
     }
 
     const contentType = row.content_type || "application/octet-stream";
