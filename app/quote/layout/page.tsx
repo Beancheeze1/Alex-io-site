@@ -467,43 +467,6 @@ function snapCenterInches(v: number): number {
 }
 
 type LoopPoint = { x: number; y: number };
-const roundIn = (n: number, places = 3) => {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return x;
-  const p = Math.pow(10, places);
-  // strip binary float junk (e.g. 9.8799999999999)
-  return Math.round(x * p) / p;
-};
-
-function normalizeLayoutNumbers(layout: LayoutModel): LayoutModel {
-  const b = layout.block;
-  const block = {
-    ...b,
-    lengthIn: roundIn(b.lengthIn, 3),
-    widthIn: roundIn(b.widthIn, 3),
-    thicknessIn: roundIn(b.thicknessIn, 3),
-    chamferIn: b.chamferIn == null ? b.chamferIn : roundIn(b.chamferIn, 3),
-  };
-
-  const fixCav = (c: any) => ({
-    ...c,
-    x: roundIn(c.x, 6),
-    y: roundIn(c.y, 6),
-    lengthIn: roundIn(c.lengthIn, 3),
-    widthIn: roundIn(c.widthIn, 3),
-    depthIn: roundIn(c.depthIn, 3),
-    cornerRadiusIn: roundIn(c.cornerRadiusIn ?? 0, 3),
-  });
-
-  const cavities = (layout.cavities || []).map(fixCav);
-  const stack = (layout.stack || []).map((layer: any) => ({
-    ...layer,
-    thicknessIn: roundIn(layer.thicknessIn, 3),
-    cavities: (layer.cavities || []).map(fixCav),
-  }));
-
-  return { ...layout, block, cavities, stack };
-}
 
 function computeLoopBbox(points: LoopPoint[] | null | undefined): {
   minX: number;
@@ -650,7 +613,6 @@ export default function LayoutPage({
   const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(
     null,
   );
-  const [canvasKey, setCanvasKey] = React.useState(0);
   const [facesJson, setFacesJson] = React.useState<any | null>(null);
   const [seed, setSeed] = React.useState<LayoutModel | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
@@ -683,14 +645,11 @@ export default function LayoutPage({
 
   React.useEffect(() => {
     if (!facesJson) return;
-
-    // Build seed from Forge faces json, normalize float junk, then force the editor to remount.
-    const seeded = normalizeLayoutNumbers(facesJsonToLayoutSeed(facesJson));
-
-    setSeed(seeded);
-    setInitialLayout(seeded);          // always replace initialLayout when Forge seed arrives
-    setLoadingLayout(false);           // IMPORTANT: stop spinner only AFTER seed is applied
-    setCanvasKey((k) => k + 1);        // IMPORTANT: forces InteractiveCanvas/editor to re-init with seed
+    const s = facesJsonToLayoutSeed(facesJson);
+    setSeed(s);
+    setInitialLayout(s);
+    setSeedVersion((v) => v + 1);
+    setLoadingLayout(false);
   }, [facesJson]);
 
   /**
@@ -1146,7 +1105,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         }
 
         // pull customer info from quote header when present
-        if (json && json.quote && typeof json.quote === "object") {
+             if (json && json.quote && typeof json.quote === "object") {
           const qh = json.quote as {
             customer_name?: string;
             email?: string | null;
@@ -1190,11 +1149,6 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
 
         if (json && json.ok && (forceForgeSeed || !dbLayout || !dbHasStack)) {
           try {
-            if (forceForgeSeed) {
-              setLoadingLayout(true);
-              setFacesJson(null);
-            }
-
             const latestRes = await fetch(
               `/api/quote-attachments/latest?quote_no=${encodeURIComponent(
                 quoteNoFromUrl.trim(),
@@ -1205,7 +1159,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
             const latestJson = await latestRes.json().catch(() => null);
             if (!latestRes.ok) {
               if (!cancelled) {
-                if (!forceForgeSeed) setLoadingLayout(false);
+                setLoadingLayout(false);
                 setUploadError(`Forge seed: latest lookup failed: ${latestRes.status}`);
               }
               return;
@@ -1220,7 +1174,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
 
               if (!facesDownload.ok) {
                 if (!cancelled) {
-                  if (!forceForgeSeed) setLoadingLayout(false);
+                  setLoadingLayout(false);
                   setUploadError(`Forge seed: download failed: ${facesDownload.status}`);
                 }
                 return;
@@ -1232,14 +1186,9 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
                 facesJson = JSON.parse(facesText);
               } catch (e) {
                 if (!cancelled) {
-                  if (!forceForgeSeed) setLoadingLayout(false);
+                  setLoadingLayout(false);
                   setUploadError(`Forge seed: JSON parse failed: ${String(e)}`);
                 }
-                return;
-              }
-
-              if (forceForgeSeed) {
-                setFacesJson(facesJson);
                 return;
               }
 
@@ -1255,6 +1204,14 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
                     materialIdFromUrl ??
                     null,
                 );
+
+                if (forceForgeSeed) {
+                  try {
+                    const u = new URL(window.location.href);
+                    u.searchParams.delete("force_forge_seed");
+                    window.history.replaceState({}, "", u.toString());
+                  } catch {}
+                }
               }
               return;
             }
@@ -1262,6 +1219,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
             console.warn("Forge faces seed failed; falling back:", e);
           }
         }
+
         if (json && json.ok && dbLayout && dbHasStack) {
           const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
 
@@ -1466,7 +1424,6 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         initialCustomerPhone={initialCustomerPhone}
         uploadError={uploadError}
         setUploadError={setUploadError}
-        canvasKey={canvasKey}
       />
 
   );
@@ -1497,9 +1454,8 @@ function LayoutEditorHost(props: {
   initialCustomerPhone: string;
   uploadError: string | null;
   setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
-  canvasKey?: number;
 }) {
-  const { initialLayout, canvasKey } = props;
+  const { initialLayout } = props;
   const [layoutModel, setLayoutModel] = React.useState<LayoutModel | null>(null);
 
   React.useEffect(() => {
@@ -1511,7 +1467,7 @@ function LayoutEditorHost(props: {
     return null;
   }
 
-  return <LayoutEditorHostReady {...props} layoutModel={layoutModel} canvasKey={canvasKey} />;
+  return <LayoutEditorHostReady {...props} layoutModel={layoutModel} />;
 }
 
 function LayoutEditorHostReady(props: {
@@ -1529,7 +1485,6 @@ function LayoutEditorHostReady(props: {
   uploadError: string | null;
   setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
   layoutModel: LayoutModel;
-  canvasKey?: number;
 }) {
   const {
     quoteNo,
@@ -3640,23 +3595,98 @@ else nextYIn = snapInches(nextYIn);
                   />
                   <div className="relative p-4 overflow-auto">
                     <InteractiveCanvas
-                      key={props.canvasKey}
-                      layout={layout}
+  layout={layout}
+  
+  selectedIds={selectedIds}
+  selectAction={selectCavity}
+  moveAction={(id, xNorm, yNorm) => {
+    // Sticky selection:
+    // If this cavity is already part of the current selection (incl. 2-select),
+    // don't collapse selection while dragging.
+    if (!selectedIds.includes(id)) {
+      selectCavity(id);
+    }
+    updateCavityPosition(id, xNorm, yNorm);
+  }}
+  resizeAction={(id, lengthIn, widthIn) => updateCavityDims(id, { lengthIn, widthIn })}
+  zoom={zoom}
+  croppedCorners={croppedCorners}
+/>
 
-                      selectedIds={selectedIds}
-                      selectAction={selectCavity}
-                      moveAction={(id, xNorm, yNorm) => {
-                        // Sticky selection:
-                        // If this cavity is already part of the current selection (incl. 2-select),
-                        // don't collapse selection while dragging.
-                        if (!selectedIds.includes(id)) {
-                          selectCavity(id);
-                        }
-                        updateCavityPosition(id, xNorm, yNorm);
-                      }}
-                      resizeAction={(id, lengthIn, widthIn) => updateCavityDims(id, { lengthIn, widthIn })}
-                      zoom={zoom}
-                      croppedCorners={croppedCorners}
+                  </div>
+                </div>
+
+                {/* Box suggester preview + bottom cartons row (hidden for now, JSX preserved) */}
+                {false && (
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-xs font-semibold text-slate-100">Box suggester inputs</div>
+                        <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                          Preview only
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        These are the dimensions and quantity the box suggester will use. Next step is wiring this into
+                        the real Box Partners lookup.
+                      </p>
+                      <div className="space-y-1.5 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Foam footprint (L × W)</span>
+                          <span className="font-mono text-slate-50">
+                            {Number(block.lengthIn).toFixed(2)}" × {Number(block.widthIn).toFixed(2)}"
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Stack depth</span>
+                          <span className="font-mono text-slate-50">{totalStackThicknessIn.toFixed(2)}"</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Quoted quantity</span>
+                          <span className="font-mono text-slate-50">{qtyLabel}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+                      <div className="text-xs font-semibold text-slate-100 mb-1">Closest matching cartons (coming soon)</div>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        This panel will show the best fit <span className="text-sky-300 font-medium">RSC</span> and{" "}
+                        <span className="text-sky-300 font-medium">mailer</span> for the foam stack above, based on the
+                        Box Partners catalog. The selection will be saved back to the quote when you apply.
+                      </p>
+                      <div className="grid grid-cols-1 gap-2">
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-slate-100">Best RSC match</div>
+                          <div className="text-[11px] text-slate-500">
+                            Will show: part number, inside dims, and fit score.
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                          <div className="text-[11px] font-semibold text-slate-100">Best Mailer match</div>
+                          <div className="text-[11px] text-slate-500">
+                            Will show: part number, inside dims, and fit score.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* RIGHT: Customer info + cavities list */}
+              <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
+                {/* Customer info card */}
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-slate-100">Customer info</div>
+                    <span
+                      className={
+                        "inline-flex h-1.5 w-1.5 rounded-full " +
+                        (missingCustomerInfo && hasRealQuoteNo
+                          ? "bg-rose-400 shadow-[0_0_8px_rgba(248,113,113,0.9)]"
+                          : "bg-emerald-400/70 shadow-[0_0_7px_rgba(52,211,153,0.85)]")
+                      }
                     />
                   </div>
                   <div className="text-[11px] text-slate-400 mb-2">
@@ -3712,18 +3742,16 @@ else nextYIn = snapInches(nextYIn);
                     </label>
                   </div>
 
-                    {missingCustomerInfo && hasRealQuoteNo && (
-                      <div className="mt-2 text-[11px] text-amber-300">
-                        Enter a name and email to enable <span className="font-semibold">Recommend my foam</span> and{" "}
-                        <span className="font-semibold">Apply to quote</span>.
-                      </div>
-                    )}
-                  </div>
-                </section>
-  
-                {/* RIGHT: Cavities list + editor */}
-                <aside className="w-72 shrink-0 flex flex-col gap-3 bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                  <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
+                  {missingCustomerInfo && hasRealQuoteNo && (
+                    <div className="mt-2 text-[11px] text-amber-300">
+                      Enter a name and email to enable <span className="font-semibold">Recommend my foam</span> and{" "}
+                      <span className="font-semibold">Apply to quote</span>.
+                    </div>
+                  )}
+                </div>
+
+                {/* Cavities list + editor */}
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
                   <div className="text-xs font-semibold text-slate-100">
                     Cavities
                     {activeLayerLabel && (
