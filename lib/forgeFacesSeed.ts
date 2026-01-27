@@ -111,9 +111,8 @@ function snapPretty(n: number) {
 }
 
 export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
-  const loopsRaw = Array.isArray(facesJson?.loops) ? facesJson.loops : [];
-  const outerIdxRaw = Number(facesJson?.outerLoopIndex);
-  const outerIdx = Number.isFinite(outerIdxRaw) ? outerIdxRaw : 0;
+  const faces = facesJson ?? {};
+  const loopsRaw = Array.isArray(faces?.loops) ? faces.loops : [];
 
   const toPts = (loop: any): Pt[] => {
     const pts = Array.isArray(loop?.points) ? loop.points : [];
@@ -121,10 +120,6 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
       .map((p: any) => ({ x: Number(p?.x), y: Number(p?.y) }))
       .filter((p: any) => Number.isFinite(p.x) && Number.isFinite(p.y));
   };
-
-  const outerLoop = loopsRaw[outerIdx];
-  const outerPts = toPts(outerLoop);
-  const outerBB = bbox(outerPts);
 
   // Safe fallback
   const fallback: LayoutModel = {
@@ -135,10 +130,59 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     ],
   };
 
-  if (!outerBB || outerBB.w <= 0 || outerBB.h <= 0) return fallback;
+  // --- Determine outer loop (block footprint) ---
+  const loops = Array.isArray(faces.loops) ? faces.loops : [];
+  if (!loops.length) return fallback;
 
-  const blockLengthIn = snapPretty(outerBB.w);
-  const blockWidthIn = snapPretty(outerBB.h);
+  const areaSigned = (pts: Pt[]) => {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const q = pts[(i + 1) % pts.length];
+      a += p.x * q.y - q.x * p.y;
+    }
+    return a / 2;
+  };
+
+  let outerIdx = 0;
+  let maxArea = 0;
+
+  for (let i = 0; i < loops.length; i++) {
+    const pts = toPts(loops[i]);
+    const a = Math.abs(areaSigned(pts));
+    if (a > maxArea) {
+      maxArea = a;
+      outerIdx = i;
+    }
+  }
+
+  const outerPts = toPts(loops[outerIdx]);
+
+  // --- Compute block bounding box from outer loop ---
+  let outerMinX = Infinity;
+  let outerMinY = Infinity;
+  let outerMaxX = -Infinity;
+  let outerMaxY = -Infinity;
+
+  for (const p of outerPts) {
+    const x = Number(p.x);
+    const y = Number(p.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    outerMinX = Math.min(outerMinX, x);
+    outerMinY = Math.min(outerMinY, y);
+    outerMaxX = Math.max(outerMaxX, x);
+    outerMaxY = Math.max(outerMaxY, y);
+  }
+
+  const blockLen = outerMaxX - outerMinX;
+  const blockWid = outerMaxY - outerMinY;
+
+  if (!Number.isFinite(blockLen) || !Number.isFinite(blockWid) || blockLen <= 0 || blockWid <= 0) {
+    return fallback;
+  }
+
+  const blockLengthIn = snapPretty(blockLen);
+  const blockWidthIn = snapPretty(blockWid);
   const blockThicknessIn = 2; // unchanged default behavior here
 
   const block: LayoutModel["block"] = {
@@ -186,10 +230,15 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
 
     const depthIn = 1;
 
-    // Placement is normalized [0..1] relative to outer bbox origin.
-    // NOTE: faces adapter already translates minX/minY to ~0; we still reference outerBB for safety.
-    const x = (cMean.x - outerBB.minX) / Math.max(1e-9, outerBB.w);
-    const y = (cMean.y - outerBB.minY) / Math.max(1e-9, outerBB.h);
+    // Convert cavity loop center from plan space to block space
+    const cavCenterX_plan = cMean.x;
+    const cavCenterY_plan = cMean.y;
+    const cavCenterX_in = cavCenterX_plan - outerMinX;
+    const cavCenterY_in = cavCenterY_plan - outerMinY;
+
+    // Normalize for editor
+    const x = blockLen > 0 ? cavCenterX_in / blockLen : 0.5;
+    const y = blockWid > 0 ? cavCenterY_in / blockWid : 0.5;
 
     const label = formatCavityLabel({
       shape,
