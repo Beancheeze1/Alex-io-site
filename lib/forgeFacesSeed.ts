@@ -192,7 +192,11 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     if (!bb || bb.w <= 0 || bb.h <= 0) continue;
 
     // Determine center for placement
-    const cMean = centroidMean(pts) ?? { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 };
+    const cMean = {
+  x: (bb.minX + bb.maxX) / 2,
+  y: (bb.minY + bb.maxY) / 2,
+};
+
 
     const circle = detectCircle(pts);
 
