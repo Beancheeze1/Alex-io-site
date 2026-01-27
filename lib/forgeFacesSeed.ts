@@ -220,7 +220,7 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
 
     // Normalize for editor
     const x = blockLen > 0 ? cavCenterX_in / blockLen : 0.5;
-    const y = blockWid > 0 ? cavCenterY_in / blockWid : 0.5;
+    const y = blockWid > 0 ? 1 - (cavCenterY_in / blockWid) : 0.5;
 
     const label = formatCavityLabel({
       shape,
