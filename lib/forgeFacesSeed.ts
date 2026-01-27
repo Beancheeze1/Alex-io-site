@@ -113,6 +113,13 @@ function snapPretty(n: number) {
 export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
   const faces = facesJson ?? {};
   const loopsRaw = Array.isArray(faces?.loops) ? faces.loops : [];
+  const outerIdxRaw = Number(faces?.outerLoopIndex);
+  const outerIdx =
+    Number.isFinite(outerIdxRaw) &&
+    outerIdxRaw >= 0 &&
+    outerIdxRaw < loopsRaw.length
+      ? outerIdxRaw
+      : 0;
 
   const toPts = (loop: any): Pt[] => {
     const pts = Array.isArray(loop?.points) ? loop.points : [];
@@ -130,33 +137,8 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     ],
   };
 
-  // --- Determine outer loop (block footprint) ---
-  const loops = Array.isArray(faces.loops) ? faces.loops : [];
-  if (!loops.length) return fallback;
-
-  const areaSigned = (pts: Pt[]) => {
-    let a = 0;
-    for (let i = 0; i < pts.length; i++) {
-      const p = pts[i];
-      const q = pts[(i + 1) % pts.length];
-      a += p.x * q.y - q.x * p.y;
-    }
-    return a / 2;
-  };
-
-  let outerIdx = 0;
-  let maxArea = 0;
-
-  for (let i = 0; i < loops.length; i++) {
-    const pts = toPts(loops[i]);
-    const a = Math.abs(areaSigned(pts));
-    if (a > maxArea) {
-      maxArea = a;
-      outerIdx = i;
-    }
-  }
-
-  const outerPts = toPts(loops[outerIdx]);
+  if (!loopsRaw.length) return fallback;
+  const outerPts = toPts(loopsRaw[outerIdx]);
 
   // --- Compute block bounding box from outer loop ---
   let outerMinX = Infinity;
@@ -181,8 +163,8 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     return fallback;
   }
 
-  const blockLengthIn = snapPretty(blockLen);
-  const blockWidthIn = snapPretty(blockWid);
+  const blockLengthIn = blockLen;
+  const blockWidthIn = blockWid;
   const blockThicknessIn = 2; // unchanged default behavior here
 
   const block: LayoutModel["block"] = {

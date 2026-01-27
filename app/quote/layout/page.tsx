@@ -613,6 +613,8 @@ export default function LayoutPage({
   const [initialLayout, setInitialLayout] = React.useState<LayoutModel | null>(
     null,
   );
+  const [facesJson, setFacesJson] = React.useState<any | null>(null);
+  const [seed, setSeed] = React.useState<LayoutModel | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
   const [initialNotes, setInitialNotes] = React.useState<string>("");
   const [initialQty, setInitialQty] = React.useState<number | null>(null);
@@ -639,6 +641,14 @@ export default function LayoutPage({
     React.useState<string>("");
 
   const [loadingLayout, setLoadingLayout] = React.useState<boolean>(true);
+
+  React.useEffect(() => {
+    if (!facesJson) return;
+    const s = facesJsonToLayoutSeed(facesJson);
+    setSeed(s);
+    setInitialLayout(s);
+    setLoadingLayout(false);
+  }, [facesJson]);
 
   /**
    * Fallback layout builder, driven by arbitrary dims/cavities strings.
@@ -815,6 +825,8 @@ export default function LayoutPage({
     async function load() {
       const materialIdOverride = materialIdFromUrl;
       setLoadingLayout(true);
+      setFacesJson(null);
+      setSeed(null);
 
       // Re-read dims/cavities/layers from the actual address bar (canonical seed read).
       let effectiveBlockStr = serverBlockStr;
@@ -1178,9 +1190,8 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
                 return;
               }
 
-              const seedLayout = facesJsonToLayoutSeed(facesJson);
               if (!cancelled) {
-                setInitialLayout(seedLayout);
+                setFacesJson(facesJson);
                 setInitialNotes(notesSeedLocal || "");
 
                 setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
@@ -1192,7 +1203,6 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
                     null,
                 );
 
-                setLoadingLayout(false);
                 if (forceForgeSeed) {
                   try {
                     const u = new URL(window.location.href);
