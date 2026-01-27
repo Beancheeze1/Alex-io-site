@@ -1452,10 +1452,41 @@ function LayoutEditorHost(props: {
   uploadError: string | null;
   setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
 }) {
+  const { initialLayout } = props;
+  const [layoutModel, setLayoutModel] = React.useState<LayoutModel | null>(null);
+
+  React.useEffect(() => {
+    if (!initialLayout) return;
+    setLayoutModel(initialLayout);
+  }, [initialLayout]);
+
+  if (!layoutModel) {
+    return null;
+  }
+
+  return <LayoutEditorHostReady {...props} layoutModel={layoutModel} />;
+}
+
+function LayoutEditorHostReady(props: {
+  quoteNo: string;
+  hasRealQuoteNo: boolean;
+  initialLayout: LayoutModel;
+  initialNotes: string;
+  initialQty: number | null;
+  initialMaterialId: number | null;
+  initialMaterialLabel: string | null;
+  initialCustomerName: string;
+  initialCustomerEmail: string;
+  initialCustomerCompany: string;
+  initialCustomerPhone: string;
+  uploadError: string | null;
+  setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
+  layoutModel: LayoutModel;
+}) {
   const {
     quoteNo,
     hasRealQuoteNo,
-    initialLayout,
+    layoutModel,
     initialNotes,
     initialQty,
     initialMaterialId,
@@ -1495,7 +1526,7 @@ function LayoutEditorHost(props: {
     addLayer,
     renameLayer,
     deleteLayer,
-  } = useLayoutModel(initialLayout);
+  } = useLayoutModel(layoutModel);
 
 
   const { block, cavities, stack } = layout as LayoutModel & {
