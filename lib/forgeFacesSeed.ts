@@ -163,8 +163,8 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     return fallback;
   }
 
-  const blockLengthIn = blockLen;
-  const blockWidthIn = blockWid;
+  const blockLengthIn = snapPretty(blockLen);
+  const blockWidthIn = snapPretty(blockWid);
   const blockThicknessIn = 2; // unchanged default behavior here
 
   const block: LayoutModel["block"] = {

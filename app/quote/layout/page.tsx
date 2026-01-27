@@ -620,6 +620,7 @@ export default function LayoutPage({
   const [initialQty, setInitialQty] = React.useState<number | null>(null);
   const [initialMaterialId, setInitialMaterialId] =
     React.useState<number | null>(null);
+  const [seedVersion, setSeedVersion] = React.useState(0);
 
   // Holds foam label from form URL (e.g. foam=1.7# Black PE)
   // Passed into LayoutEditorHost so it can resolve → material ID after /api/materials loads
@@ -647,6 +648,7 @@ export default function LayoutPage({
     const s = facesJsonToLayoutSeed(facesJson);
     setSeed(s);
     setInitialLayout(s);
+    setSeedVersion((v) => v + 1);
     setLoadingLayout(false);
   }, [facesJson]);
 
@@ -1408,6 +1410,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
 
   return (
       <LayoutEditorHost
+        key={`seed-${seedVersion}`}
         quoteNo={quoteNo}
         hasRealQuoteNo={hasRealQuoteNo}
         initialLayout={initialLayout}
