@@ -223,8 +223,18 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     const cavCenterY_in = cavCenterY_plan - outerMinY;
 
     // Normalize for editor
-    const x = blockLen > 0 ? cavCenterX_in / blockLen : 0.5;
-    const y = blockWid > 0 ? 1 - (cavCenterY_in / blockWid) : 0.5;
+    // Normalize for editor (InteractiveCanvas expects TOP-LEFT normalized)
+const cavLeft_in = cavCenterX_in - lengthIn / 2;
+const cavTop_in  = cavCenterY_in + widthIn / 2; // because we later flip to top-origin
+
+const xRaw = blockLen > 0 ? cavLeft_in / blockLen : 0.0;
+const yRaw = blockWid > 0 ? 1 - (cavTop_in / blockWid) : 0.0;
+
+// clamp (defensive)
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const x = clamp01(xRaw);
+const y = clamp01(yRaw);
+
 
     const label = formatCavityLabel({
       shape,
