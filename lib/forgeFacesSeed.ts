@@ -1,4 +1,4 @@
-import { CavityShape, LayoutModel, formatCavityLabel } from "@/app/quote/layout/editor/layoutTypes";
+﻿import { CavityShape, LayoutModel, formatCavityLabel } from "@/app/quote/layout/editor/layoutTypes";
 
 type Pt = { x: number; y: number };
 
@@ -104,9 +104,40 @@ function detectCircle(loopPts: Pt[]) {
   return { cx: c.x, cy: c.y, r: mean, diameter: mean * 2 };
 }
 
-function snapPretty(n: number) {
-  // Match editor label behavior: avoid float junk
-  const rounded = Math.round(n * 1000) / 1000;
+function snapPretty(n: number, units: "in" | "mm" = "in"): number {
+  // Convert mm to inches if needed
+  let val = n;
+  if (units === "mm") {
+    val = n / 25.4;
+  }
+
+  // Round to nearest 1/16" (0.0625") for typical foam cutting precision
+  const sixteenths = Math.round(val * 16);
+  const rounded = sixteenths / 16;
+
+  // If very close to a whole number, snap to it (within 0.01")
+  const whole = Math.round(rounded);
+  if (Math.abs(rounded - whole) < 0.01) {
+    return whole;
+  }
+
+  // If very close to a common fraction, snap to it
+  const eighths = Math.round(val * 8) / 8;
+  if (Math.abs(val - eighths) < 0.005) {
+    return eighths;
+  }
+
+  const quarters = Math.round(val * 4) / 4;
+  if (Math.abs(val - quarters) < 0.005) {
+    return quarters;
+  }
+
+  const halves = Math.round(val * 2) / 2;
+  if (Math.abs(val - halves) < 0.005) {
+    return halves;
+  }
+
+  // Otherwise return sixteenth precision
   return rounded;
 }
 

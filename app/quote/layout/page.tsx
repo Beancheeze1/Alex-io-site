@@ -1424,6 +1424,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         initialCustomerPhone={initialCustomerPhone}
         uploadError={uploadError}
         setUploadError={setUploadError}
+        setFacesJson={setFacesJson}
       />
 
   );
@@ -1454,6 +1455,7 @@ function LayoutEditorHost(props: {
   initialCustomerPhone: string;
   uploadError: string | null;
   setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
+  setFacesJson: React.Dispatch<React.SetStateAction<any | null>>;
 }) {
   const { initialLayout } = props;
   const [layoutModel, setLayoutModel] = React.useState<LayoutModel | null>(null);
@@ -1467,7 +1469,7 @@ function LayoutEditorHost(props: {
     return null;
   }
 
-  return <LayoutEditorHostReady {...props} layoutModel={layoutModel} />;
+  return <LayoutEditorHostReady {...props} layoutModel={layoutModel} setFacesJson={props.setFacesJson} />;
 }
 
 function LayoutEditorHostReady(props: {
@@ -1485,6 +1487,7 @@ function LayoutEditorHostReady(props: {
   uploadError: string | null;
   setUploadError: React.Dispatch<React.SetStateAction<string | null>>;
   layoutModel: LayoutModel;
+  setFacesJson: React.Dispatch<React.SetStateAction<any | null>>;
 }) {
   const {
     quoteNo,
@@ -1500,6 +1503,7 @@ function LayoutEditorHostReady(props: {
         initialMaterialLabel,
     uploadError,
     setUploadError,
+    setFacesJson,
 
   } = props;
 
@@ -2478,11 +2482,49 @@ else nextYIn = snapInches(nextYIn);
         return;
       }
 
-      setUploadStatus("done");
-      router.replace(
-        `/quote/layout?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}&force_forge_seed=1`,
+     setUploadStatus("done");
+
+// FIX: Instead of router.replace (which causes reload), fetch faces directly and update state
+try {
+  const latestRes = await fetch(
+    `/api/quote-attachments/latest?quote_no=${encodeURIComponent(currentQuoteNo)}&filename=${encodeURIComponent("forge_faces.json")}&t=${Date.now()}`,
+    { cache: "no-store" },
+  );
+
+  if (latestRes.ok) {
+    const latestJson = await latestRes.json().catch(() => null);
+    const attachmentId = Number(latestJson?.attachment?.id);
+
+    if (Number.isFinite(attachmentId) && attachmentId > 0) {
+      const facesDownload = await fetch(
+        `/api/quote-attachments/${attachmentId}?t=${Date.now()}`,
+        { cache: "no-store" },
       );
-      return;
+
+      if (facesDownload.ok) {
+        const facesText = await facesDownload.text();
+        const parsedFaces = JSON.parse(facesText);
+
+        // Update state directly - this triggers the useEffect that converts to layout
+        setFacesJson(parsedFaces);
+        setUploadError(null);
+
+        console.log("Converter file loaded successfully!");
+      } else {
+        setUploadError(`Failed to download converted file: ${facesDownload.status}`);
+      }
+    } else {
+      setUploadError("Converter output not found. Please try again.");
+    }
+  } else {
+    setUploadError(`Failed to fetch converter output: ${latestRes.status}`);
+  }
+} catch (err: any) {
+  setUploadError(`Error loading converter output: ${String(err?.message || err)}`);
+  console.error("Error loading faces after upload:", err);
+}
+
+return;
     } catch (err: any) {
       setUploadStatus("error");
       setUploadError(String(err?.message || err));
