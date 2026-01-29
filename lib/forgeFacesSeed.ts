@@ -1,4 +1,4 @@
-﻿import { CavityShape, LayoutModel, formatCavityLabel } from "@/app/quote/layout/editor/layoutTypes";
+import { CavityShape, LayoutModel, formatCavityLabel } from "@/app/quote/layout/editor/layoutTypes";
 
 type Pt = { x: number; y: number };
 
@@ -45,15 +45,73 @@ function uniqSorted(vals: number[], tol = 1e-6) {
 }
 
 function detectChamferOuter(outerPts: Pt[]) {
-  // Detect an axis-aligned rectangle with 45 chamfers (8 vertices typical)
-  if (outerPts.length < 6) return null;
+  // Detect an axis-aligned rectangle with 45 chamfers
+  // Can have 6 points (simplified) or 8 points (classic)
+  console.log("🔍 detectChamferOuter called with", outerPts.length, "points");
+  
+  if (outerPts.length < 6) {
+    console.log("❌ Too few points (<6)");
+    return null;
+  }
 
   const xs = uniqSorted(outerPts.map((p) => p.x));
   const ys = uniqSorted(outerPts.map((p) => p.y));
+  
+  console.log("Unique X coords:", xs.length, xs);
+  console.log("Unique Y coords:", ys.length, ys);
 
-  // Classic chamfered rectangle tends to have 4 unique x and 4 unique y
-  if (xs.length !== 4 || ys.length !== 4) return null;
+  // For 6-point chamfered rectangle: 3 unique X, 3 unique Y
+  // For 8-point chamfered rectangle: 4 unique X, 4 unique Y
+  const is6Point = xs.length === 3 && ys.length === 3;
+  const is8Point = xs.length === 4 && ys.length === 4;
+  
+  if (!is6Point && !is8Point) {
+    console.log("❌ Not 3x3 or 4x4 unique coords (need chamfer pattern)");
+    return null;
+  }
 
+  if (is6Point) {
+    // 6-point pattern: simplified chamfers
+    // Points are at corners with one diagonal cut each
+    const minX = xs[0], midX = xs[1], maxX = xs[2];
+    const minY = ys[0], midY = ys[1], maxY = ys[2];
+
+    // Chamfer size is the distance from corner to the cut
+    const chamferX1 = midX - minX;
+    const chamferX2 = maxX - midX;
+    const chamferY1 = midY - minY;
+    const chamferY2 = maxY - midY;
+
+    // At least 2 of these should be small (the chamfer cuts)
+    const runs = [chamferX1, chamferX2, chamferY1, chamferY2]
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .sort((a, b) => a - b);
+    
+    console.log("6-point chamfer runs (sorted):", runs);
+
+    if (runs.length < 2) {
+      console.log("❌ Not enough valid runs");
+      return null;
+    }
+
+    // The two smallest runs should be the chamfers
+    const smallRuns = runs.slice(0, 2);
+    const avgChamfer = (smallRuns[0] + smallRuns[1]) / 2;
+    
+    // Check if they're reasonably consistent (within 50% tolerance for simplified geometry)
+    const ratio = smallRuns[1] / smallRuns[0];
+    console.log("Small runs ratio:", { run1: smallRuns[0], run2: smallRuns[1], ratio, avgChamfer });
+    
+    if (ratio > 2.0) {
+      console.log("❌ Runs too inconsistent (ratio > 2.0)");
+      return null;
+    }
+
+    console.log("✅ 6-point chamfer detected! Size:", avgChamfer);
+    return { chamferIn: avgChamfer };
+  }
+
+  // 8-point pattern: classic chamfers (original logic)
   const minX = xs[0], x2 = xs[1], x3 = xs[2], maxX = xs[3];
   const minY = ys[0], y2 = ys[1], y3 = ys[2], maxY = ys[3];
 
@@ -63,15 +121,29 @@ function detectChamferOuter(outerPts: Pt[]) {
   const runY2 = maxY - y3;
 
   const runs = [runX1, runX2, runY1, runY2].filter((n) => Number.isFinite(n) && n > 0);
-  if (runs.length !== 4) return null;
+  console.log("8-point chamfer runs:", { runX1, runX2, runY1, runY2, validRuns: runs.length });
+  
+  if (runs.length !== 4) {
+    console.log("❌ Not all 4 runs are valid");
+    return null;
+  }
 
   // Runs should be roughly equal for 45 chamfer; allow some tolerance
   const minRun = Math.min(...runs);
   const maxRun = Math.max(...runs);
-  if (minRun <= 0) return null;
-  if (maxRun / minRun > 1.25) return null;
+  const ratio = maxRun / minRun;
+  console.log("8-point run consistency:", { minRun, maxRun, ratio, threshold: 1.25 });
+  
+  if (minRun <= 0) {
+    console.log("❌ minRun <= 0");
+    return null;
+  }
+  if (ratio > 1.25) {
+    console.log("❌ Runs too inconsistent (ratio > 1.25) - chamfers not uniform");
+    return null;
+  }
 
-  // Use the smallest run as the chamfer run
+  console.log("✅ 8-point chamfer detected! Size:", minRun);
   return { chamferIn: minRun };
 }
 
@@ -143,6 +215,7 @@ function snapPretty(n: number, units: "in" | "mm" = "in"): number {
 
 export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
   const faces = facesJson ?? {};
+  const units = (faces?.units as "in" | "mm") || "in";
   const loopsRaw = Array.isArray(faces?.loops) ? faces.loops : [];
   const outerIdxRaw = Number(faces?.outerLoopIndex);
   const outerIdx =
@@ -194,8 +267,8 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     return fallback;
   }
 
-  const blockLengthIn = snapPretty(blockLen);
-  const blockWidthIn = snapPretty(blockWid);
+  const blockLengthIn = snapPretty(blockLen, units);
+  const blockWidthIn = snapPretty(blockWid, units);
   const blockThicknessIn = 2; // unchanged default behavior here
 
   const block: LayoutModel["block"] = {
@@ -206,9 +279,18 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
 
   // Detect chamfered outside corners (cropped-corner block)
   const chamfer = detectChamferOuter(outerPts);
+  console.log("🔍 Chamfer detection:", {
+    outerPointsCount: outerPts.length,
+    chamferDetected: !!chamfer,
+    chamferSize: chamfer?.chamferIn,
+    outerPoints: outerPts
+  });
   if (chamfer && chamfer.chamferIn > 0) {
     block.cornerStyle = "chamfer";
-    block.chamferIn = snapPretty(chamfer.chamferIn);
+    block.chamferIn = snapPretty(chamfer.chamferIn, units);
+    console.log("✅ Chamfer applied:", block.chamferIn, "inches");
+  } else {
+    console.log("❌ No chamfer detected - using square corners");
   }
 
   const cavities: LayoutModel["cavities"] = [];
@@ -232,13 +314,13 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     const circle = detectCircle(pts);
 
     let shape: CavityShape = "rect";
-    let lengthIn = snapPretty(bb.w);
-    let widthIn = snapPretty(bb.h);
+    let lengthIn = snapPretty(bb.w, units);
+    let widthIn = snapPretty(bb.h, units);
     let cornerRadiusIn = 0;
 
     if (circle) {
       shape = "circle";
-      lengthIn = snapPretty(circle.diameter);
+      lengthIn = snapPretty(circle.diameter, units);
       widthIn = lengthIn;
     } else {
       // Rect stays rect; roundedRect is not inferred here (Path A minimal)
