@@ -227,14 +227,15 @@ export default function InteractiveCanvas({
   }, [autoCenterOnMount, block.lengthIn, block.widthIn, zoom]);
 
   // 1.0" chamfer at upper-left and lower-right corners (45°)
-  const CHAMFER_IN = 1;
+  // Use actual chamfer from block data if available, otherwise fall back to 1"
+  const CHAMFER_IN = block.chamferIn && block.chamferIn > 0 ? block.chamferIn : 1;
 
   const canChamfer =
     croppedCorners &&
     block.lengthIn > CHAMFER_IN * 2 &&
     block.widthIn > CHAMFER_IN * 2;
 
-  // Pixel distance for a 1" run along X and Y (respects physical inches)
+  // Pixel distance for chamfer run along X and Y (respects physical inches from block data)
   const chamferPxX = (CHAMFER_IN / (block.lengthIn || 1)) * blockPx.width;
   const chamferPxY = (CHAMFER_IN / (block.widthIn || 1)) * blockPx.height;
 

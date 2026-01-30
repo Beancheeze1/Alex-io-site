@@ -646,6 +646,18 @@ export default function LayoutPage({
   React.useEffect(() => {
     if (!facesJson) return;
     const s = facesJsonToLayoutSeed(facesJson);
+    
+    // If forge detected chamfers, automatically enable cropCorners on all layers
+    if (s.block?.cornerStyle === "chamfer" && s.block?.chamferIn && s.block.chamferIn > 0) {
+      console.log("🔧 Auto-enabling cropCorners because forge detected chamfers");
+      if (s.stack && Array.isArray(s.stack)) {
+        s.stack = s.stack.map((layer: any) => ({
+          ...layer,
+          cropCorners: true,
+        }));
+      }
+    }
+    
     setSeed(s);
     setInitialLayout(s);
     setSeedVersion((v) => v + 1);
@@ -2620,8 +2632,18 @@ return;
           ? layoutToSave.stack.find((l: any) => l.id === activeLayerId) ?? layoutToSave.stack[0]
           : null;
 
-      layoutToSave.block.cornerStyle = activeLayerForSave?.cropCorners ? "chamfer" : "square";
-      layoutToSave.block.chamferIn = activeLayerForSave?.cropCorners ? 1 : null;
+      // Set cornerStyle based on cropCorners flag, but PRESERVE existing chamferIn if present
+      // (forge may have already detected a chamfer with a specific size)
+      if (activeLayerForSave?.cropCorners) {
+        layoutToSave.block.cornerStyle = "chamfer";
+        // Only set chamferIn to 1 if it's not already set (preserve forge-detected value)
+        if (!layoutToSave.block.chamferIn || layoutToSave.block.chamferIn <= 0) {
+          layoutToSave.block.chamferIn = 1;
+        }
+      } else {
+        layoutToSave.block.cornerStyle = "square";
+        layoutToSave.block.chamferIn = null;
+      }
 
       // IMPORTANT: Build SVG from the SAME layout object we are saving.
       const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
