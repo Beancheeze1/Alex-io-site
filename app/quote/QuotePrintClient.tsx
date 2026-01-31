@@ -1830,7 +1830,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
                                         cursor: isRemovingLayer ? "default" : "pointer",
                                       }}
                                     >
-                                      {isRemovingLayer ? "Removingâ€¦" : "âœ• Remove"}
+                                      {isRemovingLayer ? "Removing..." : "Remove"}
                                     </button>
                                   )}
                                 </>

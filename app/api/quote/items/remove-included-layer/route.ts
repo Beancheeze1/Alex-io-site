@@ -33,7 +33,6 @@ type QuoteRow = {
 type ItemRow = {
   id: number;
   quote_id: number;
-  item_name?: string | null;
   notes?: string | null;
 };
 
@@ -43,9 +42,8 @@ function isIncludedLayerRow(item: ItemRow | null | undefined) {
 }
 
 function isPrimaryFoamRow(item: ItemRow | null | undefined) {
-  const name = String(item?.item_name || "").toLowerCase();
   const notes = String(item?.notes || "").toUpperCase();
-  return name.includes("foam set") || notes.includes("[LAYOUT-PRIMARY]");
+  return notes.includes("[PRIMARY]") || notes.includes("[LAYOUT-PRIMARY]");
 }
 
 export async function POST(req: NextRequest) {
@@ -112,7 +110,7 @@ export async function POST(req: NextRequest) {
 
     const item = await one<ItemRow>(
       `
-      SELECT id, quote_id, item_name, notes
+      SELECT id, quote_id, notes
       FROM public."quote_items"
       WHERE id = $1
         AND quote_id = $2
@@ -154,15 +152,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    await q(
+    const deletedRows = await q(
       `
       DELETE FROM public."quote_items"
       WHERE id = $1
         AND quote_id = $2
         AND notes ILIKE '%[LAYOUT-LAYER]%'
+      RETURNING id
     `,
       [item.id, quote.id],
     );
+
+    if (!Array.isArray(deletedRows) || deletedRows.length !== 1) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "not_deletable",
+          message: "Included layer could not be removed.",
+        },
+        { status: 400 },
+      );
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
