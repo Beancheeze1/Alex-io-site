@@ -47,6 +47,83 @@ type BoxSuggestState = {
   bestMailer: SuggestedBox | null;
 };
 
+type GuidedStep = {
+  id: string;
+  label: string;
+};
+
+function useGuidedInput(steps: GuidedStep[]) {
+  const [enabled, setEnabled] = React.useState(false);
+  const [stepIndex, setStepIndex] = React.useState(0);
+
+  const start = React.useCallback(() => {
+    setEnabled(true);
+    setStepIndex(0);
+  }, []);
+
+  const stop = React.useCallback(() => {
+    setEnabled(false);
+  }, []);
+
+  const next = React.useCallback(() => {
+    setStepIndex((idx) => Math.min(idx + 1, steps.length - 1));
+  }, [steps.length]);
+
+  const prev = React.useCallback(() => {
+    setStepIndex((idx) => Math.max(idx - 1, 0));
+  }, []);
+
+  const goTo = React.useCallback(
+    (id: string) => {
+      const idx = steps.findIndex((s) => s.id === id);
+      if (idx >= 0) {
+        setEnabled(true);
+        setStepIndex(idx);
+      }
+    },
+    [steps],
+  );
+
+  const finish = React.useCallback(() => {
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("guidedInputCompleted", "true");
+      }
+    } catch {}
+    setEnabled(false);
+  }, []);
+
+  React.useEffect(() => {
+    if (!enabled) return;
+    const step = steps[stepIndex];
+    if (!step) return;
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+
+    const el = document.querySelector(`[data-guided="${step.id}"]`);
+    if (!el) return;
+
+    const timer = window.setTimeout(() => {
+      try {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      } catch {}
+    }, 40);
+
+    return () => window.clearTimeout(timer);
+  }, [enabled, stepIndex, steps]);
+
+  return {
+    enabled,
+    stepIndex,
+    steps,
+    start,
+    stop,
+    next,
+    prev,
+    goTo,
+    finish,
+  };
+}
+
 /**
  * Normalize block dims from searchParams (dims= / block=)
  */
@@ -1557,6 +1634,27 @@ function LayoutEditorHostReady(props: {
     }[];
   };
 
+  const guidedSteps = React.useMemo<GuidedStep[]>(
+    () => [
+      { id: "block", label: "Block dimensions" },
+      { id: "cavities", label: "Cavities editor" },
+      { id: "material", label: "Foam material" },
+      { id: "customer", label: "Customer info" },
+      { id: "apply", label: "Apply to quote" },
+    ],
+    [],
+  );
+  const guided = useGuidedInput(guidedSteps);
+  const guidedActiveId = guided.enabled ? guided.steps[guided.stepIndex]?.id : null;
+  const guidedClass = (id: string) => {
+    if (!guided.enabled) return "";
+    if (guidedActiveId === id) {
+      return "relative z-20 ring-2 ring-sky-400/80 shadow-[0_0_22px_rgba(56,189,248,0.35)]";
+    }
+    return "opacity-85";
+  };
+  const isLastGuidedStep = guided.stepIndex >= guided.steps.length - 1;
+  const guidedStepLabel = guided.steps[guided.stepIndex]?.label ?? "";
 
   
   const blockThicknessIn = Number(block.thicknessIn) || 0;
@@ -2897,7 +2995,16 @@ return;
                 </div>
 
                 {/* RIGHT: BETA pill */}
-                <div className="flex items-center justify-end">
+                <div className="flex items-center justify-end gap-2">
+                  {!guided.enabled && (
+                    <button
+                      type="button"
+                      onClick={guided.start}
+                      className="inline-flex items-center rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50 hover:border-sky-300 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                    >
+                      Start Guided Input
+                    </button>
+                  )}
                   <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
                     Layout editor · BETA
@@ -2936,7 +3043,10 @@ return;
             <div className="px-5 pt-3 pb-2 bg-slate-950/95 border-b border-slate-900/80">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {/* LEFT: Layers summary + quick metrics + block dims */}
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 text-[11px] text-slate-200">
+                <div
+                  data-guided="block"
+                  className={`rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 text-[11px] text-slate-200 ${guidedClass("block")}`}
+                >
                   <div className="flex items-start justify-between gap-3 mb-1.5">
                     <div className="flex flex-col gap-0.5">
                       <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
@@ -3051,7 +3161,10 @@ return;
                 </div>
 
                 {/* CENTER: Layout controls (Zoom + Qty + CTA buttons) */}
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 flex flex-col justify-between">
+                <div
+                  data-guided="apply"
+                  className={`rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 flex flex-col justify-between ${guidedClass("apply")}`}
+                >
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-slate-400">
                       <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80" />
@@ -3427,7 +3540,7 @@ return;
 
 
                 {/* Foam material (in left bar) */}
-                <div className="mt-2">
+                <div data-guided="material" className={`mt-2 ${guidedClass("material")}`}>
                   <div className="text-xs font-semibold text-slate-100 mb-1">Foam material</div>
                   <div className="text-[11px] text-slate-400 mb-2">
                     Choose the foam family and grade used for this layout.
@@ -3628,7 +3741,10 @@ return;
               </aside>
 
               {/* CENTER: Big visualizer */}
-              <section className="flex-1 flex flex-col gap-3">
+              <section
+                data-guided="cavities"
+                className={`flex-1 flex flex-col gap-3 ${guidedClass("cavities")}`}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2 text-sm text-slate-50">
@@ -3741,7 +3857,10 @@ return;
               {/* RIGHT: Customer info + cavities list */}
               <aside className="w-72 min-w-[260px] shrink-0 flex flex-col gap-3">
                 {/* Customer info card */}
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
+                <div
+                  data-guided="customer"
+                  className={`bg-slate-900 rounded-2xl border border-slate-800 p-3 ${guidedClass("customer")}`}
+                >
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-xs font-semibold text-slate-100">Customer info</div>
                     <span
@@ -4015,6 +4134,58 @@ return;
           </div>
         </div>
       </div>
+      {guided.enabled && (
+        <div className="fixed bottom-4 right-4 z-50 w-[260px] rounded-2xl border border-slate-800 bg-slate-950/95 p-3 text-[11px] text-slate-100 shadow-[0_18px_40px_rgba(15,23,42,0.6)]">
+          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-400">
+            Guided Input
+          </div>
+          <div className="mt-1 text-xs font-semibold text-slate-100">
+            Step {guided.stepIndex + 1} of {guided.steps.length}{" "}
+            <span className="text-slate-400 font-normal">â€” {guidedStepLabel}</span>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={guided.prev}
+              disabled={guided.stepIndex === 0}
+              className="inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+            >
+              Back
+            </button>
+            {isLastGuidedStep ? (
+              <button
+                type="button"
+                onClick={guided.finish}
+                className="inline-flex items-center justify-center rounded-full border border-sky-500/80 bg-sky-500 px-3 py-1 text-[11px] font-semibold text-slate-950 hover:bg-sky-400 transition"
+              >
+                Finish
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={guided.next}
+                className="inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] text-slate-100 hover:border-sky-400 hover:text-sky-100"
+              >
+                Next
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={guided.stop}
+              className="ml-auto inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+            >
+              Exit
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={guided.finish}
+            className="mt-2 text-[11px] text-slate-400 hover:text-slate-200 underline underline-offset-2"
+          >
+            Donâ€™t show again
+          </button>
+        </div>
+      )}
     </main>
   );
 }
