@@ -39,6 +39,8 @@ export type FoamLayer = {
   thicknessIn: number;
   label?: string | null;
   cavities?: CavityDef[] | null;
+  roundCorners?: boolean | null;
+  roundRadiusIn?: number | null;
 };
 
 export type LayoutForStep = {
@@ -246,11 +248,22 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
           : null;
 
       const cavities = normalizeCavities((layer as any).cavities);
+      const layerRoundRaw =
+        (layer as any).roundCorners ?? (layer as any).round_corners ?? null;
+      const layerRadiusRaw =
+        (layer as any).roundRadiusIn ??
+        (layer as any).round_radius_in ??
+        (layer as any).round_radius ??
+        null;
+      const roundCorners = typeof layerRoundRaw === "boolean" ? layerRoundRaw : null;
+      const roundRadiusIn = safePosNumber(layerRadiusRaw);
 
       normalizedStack.push({
         thicknessIn: t,
         label,
         cavities: cavities.length ? cavities : null,
+        roundCorners,
+        roundRadiusIn: roundRadiusIn ?? null,
       });
     }
   }
