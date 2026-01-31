@@ -1622,6 +1622,7 @@ function LayoutEditorHostReady(props: {
     addLayer,
     renameLayer,
     deleteLayer,
+    importLayerFromSeed,
   } = useLayoutModel(layoutModel);
 
 
@@ -2569,6 +2570,21 @@ else nextYIn = snapInches(nextYIn);
         return;
       }
 
+      const hasExistingLayers = Array.isArray(stack) && stack.length > 0;
+      const hasExistingGeometry =
+        hasExistingLayers && stack.some((layer) => (layer.cavities?.length ?? 0) > 0);
+
+      const shouldPrompt = hasExistingLayers && (stack.length > 1 || hasExistingGeometry);
+
+      let importMode: "append" | "replace" = "replace";
+
+      if (shouldPrompt && typeof window !== "undefined") {
+        const ok = window.confirm(
+          "Import DXF:\nOK = Add as new layer (recommended)\nCancel = Replace current layer",
+        );
+        importMode = ok ? "append" : "replace";
+      }
+
       setUploadStatus("uploading");
       setUploadError(null);
 
@@ -2576,6 +2592,7 @@ else nextYIn = snapInches(nextYIn);
       fd.append("file", file);
       fd.append("filename", file.name);
       fd.append("quote_no", currentQuoteNo);
+      fd.append("importMode", importMode);
 
       const base = "/api/sketch-upload";
       const url = `${base}?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`;
@@ -2619,8 +2636,28 @@ try {
         const facesText = await facesDownload.text();
         const parsedFaces = JSON.parse(facesText);
 
-        // Update state directly - this triggers the useEffect that converts to layout
-        setFacesJson(parsedFaces);
+        const seed = facesJsonToLayoutSeed(parsedFaces);
+
+        if (
+          seed.block?.cornerStyle === "chamfer" &&
+          seed.block?.chamferIn &&
+          seed.block.chamferIn > 0 &&
+          Array.isArray(seed.stack)
+        ) {
+          seed.stack = seed.stack.map((layer: any) => ({
+            ...layer,
+            cropCorners: true,
+          }));
+        }
+
+        const importLabel = file?.name ? `DXF: ${file.name}` : "";
+
+        importLayerFromSeed(seed, {
+          mode: importMode,
+          label: importMode === "append" ? importLabel : undefined,
+          targetLayerId: importMode === "replace" ? activeLayerId : null,
+        });
+
         setUploadError(null);
 
         console.log("Converter file loaded successfully!");

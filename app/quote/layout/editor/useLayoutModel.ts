@@ -69,6 +69,11 @@ export type UseLayoutModelResult = {
   addLayer: () => void;
   renameLayer: (id: string, label: string) => void;
   deleteLayer: (id: string) => void;
+
+  importLayerFromSeed: (
+    seed: LayoutModel,
+    opts?: { mode?: "append" | "replace"; label?: string; targetLayerId?: string | null },
+  ) => void;
 };
 
 export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
@@ -481,6 +486,114 @@ const didInitActiveLayerRef = useRef(false);
     setSelectedIds([]);
   }, []);
 
+  const importLayerFromSeed = useCallback(
+    (
+      seed: LayoutModel,
+      opts?: { mode?: "append" | "replace"; label?: string; targetLayerId?: string | null },
+    ) => {
+      const mode = opts?.mode === "append" ? "append" : "replace";
+      const labelFromSeed = (opts?.label ?? "").trim();
+
+      setState((prev) => {
+        const seedBlock = (seed as any)?.block ?? {};
+        const seedStack = Array.isArray((seed as any)?.stack) ? (seed as any).stack : [];
+        const seedLayer = seedStack[0] ?? null;
+
+        const seedCavsRaw = Array.isArray(seedLayer?.cavities)
+          ? seedLayer.cavities
+          : Array.isArray((seed as any)?.cavities)
+          ? (seed as any).cavities
+          : [];
+
+        const thicknessIn = safeInch(
+          seedLayer?.thicknessIn ?? seedBlock?.thicknessIn ?? prev.layout.block.thicknessIn ?? 1,
+          0.5,
+        );
+
+        const remappedCavs = remapImportedCavities({
+          seedCavs: seedCavsRaw,
+          currentBlock: prev.layout.block,
+          seedBlock,
+          mode,
+          startIndex: nextCavityNumber(prev.layout.stack),
+        });
+
+        const cavities = dedupeCavities(remappedCavs);
+
+        if (mode === "append") {
+          const idx = prev.layout.stack.length + 1;
+          const id = `layer-${idx}`;
+          const label = labelFromSeed || `Layer ${idx}`;
+
+          const nextLayer: LayoutLayer = {
+            id,
+            label,
+            thicknessIn,
+            cavities,
+            cropCorners: !!seedLayer?.cropCorners,
+          };
+
+          return {
+            layout: {
+              ...prev.layout,
+              block: {
+                ...prev.layout.block,
+                thicknessIn,
+              },
+              stack: [...prev.layout.stack, nextLayer],
+              cavities: [...cavities],
+            },
+            activeLayerId: id,
+          };
+        }
+
+        const targetId =
+          (opts?.targetLayerId && prev.layout.stack.find((l) => l.id === opts.targetLayerId)?.id) ??
+          prev.activeLayerId ??
+          prev.layout.stack[0]?.id;
+
+        const target =
+          prev.layout.stack.find((l) => l.id === targetId) ?? prev.layout.stack[0];
+
+        const nextStack = prev.layout.stack.map((l) =>
+          l.id === target.id
+            ? {
+                ...l,
+                thicknessIn,
+                cavities,
+                cropCorners:
+                  seedLayer?.cropCorners != null ? !!seedLayer.cropCorners : !!l.cropCorners,
+              }
+            : l,
+        );
+
+        const nextBlock = {
+          ...prev.layout.block,
+          ...normalizeBlockPatch({
+            lengthIn: seedBlock?.lengthIn,
+            widthIn: seedBlock?.widthIn,
+            thicknessIn,
+            cornerStyle: seedBlock?.cornerStyle,
+            chamferIn: seedBlock?.chamferIn,
+          }),
+        };
+
+        return {
+          layout: {
+            ...prev.layout,
+            block: nextBlock,
+            stack: nextStack,
+            cavities: [...cavities],
+          },
+          activeLayerId: target.id,
+        };
+      });
+
+      setSelectedIds([]);
+    },
+    [],
+  );
+
   return {
     layout,
     editorMode: layout.editorMode ?? "basic",
@@ -502,6 +615,7 @@ const didInitActiveLayerRef = useRef(false);
     addLayer,
     renameLayer,
     deleteLayer,
+    importLayerFromSeed,
   };
 }
 
@@ -879,6 +993,53 @@ function nextCavityNumber(stack: LayoutLayer[]) {
     }
   }
   return max + 1;
+}
+
+function remapImportedCavities(params: {
+  seedCavs: Cavity[];
+  currentBlock: BlockDims;
+  seedBlock: BlockDims;
+  mode: "append" | "replace";
+  startIndex: number;
+}) {
+  const { seedCavs, currentBlock, seedBlock, mode, startIndex } = params;
+
+  const seedLen = Number((seedBlock as any)?.lengthIn);
+  const seedWid = Number((seedBlock as any)?.widthIn);
+  const curLen = Number((currentBlock as any)?.lengthIn);
+  const curWid = Number((currentBlock as any)?.widthIn);
+
+  const canScale =
+    mode === "append" &&
+    Number.isFinite(seedLen) &&
+    Number.isFinite(seedWid) &&
+    Number.isFinite(curLen) &&
+    Number.isFinite(curWid) &&
+    seedLen > 0 &&
+    seedWid > 0 &&
+    curLen > 0 &&
+    curWid > 0;
+
+  let nextId = startIndex;
+
+  return (seedCavs || []).map((c) => {
+    let x = Number((c as any)?.x);
+    let y = Number((c as any)?.y);
+
+    if (canScale) {
+      const absX = (Number.isFinite(x) ? x : 0.2) * seedLen;
+      const absY = (Number.isFinite(y) ? y : 0.2) * seedWid;
+      x = absX / curLen;
+      y = absY / curWid;
+    }
+
+    return {
+      ...c,
+      id: `cav-${nextId++}`,
+      x: clamp01Or(x, 0.2),
+      y: clamp01Or(y, 0.2),
+    } as Cavity;
+  });
 }
 
 function clamp01(v: number) {
