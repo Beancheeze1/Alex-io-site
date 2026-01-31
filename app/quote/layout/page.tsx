@@ -1636,8 +1636,10 @@ function LayoutEditorHostReady(props: {
 
   const guidedSteps = React.useMemo<GuidedStep[]>(
     () => [
-      { id: "block", label: "Block dimensions" },
-      { id: "cavities", label: "Cavities editor" },
+      { id: "layers", label: "Layers" },
+      { id: "cavity-palette", label: "Cavity palette" },
+      { id: "canvas", label: "Canvas" },
+      { id: "box-suggester", label: "Box suggester" },
       { id: "material", label: "Foam material" },
       { id: "customer", label: "Customer info" },
       { id: "apply", label: "Apply to quote" },
@@ -2996,15 +2998,6 @@ return;
 
                 {/* RIGHT: BETA pill */}
                 <div className="flex items-center justify-end gap-2">
-                  {!guided.enabled && (
-                    <button
-                      type="button"
-                      onClick={guided.start}
-                      className="inline-flex items-center rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50 hover:border-sky-300 hover:text-sky-100 hover:bg-sky-500/10 transition"
-                    >
-                      Start Guided Input
-                    </button>
-                  )}
                   <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
                     Layout editor · BETA
@@ -3044,8 +3037,8 @@ return;
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {/* LEFT: Layers summary + quick metrics + block dims */}
                 <div
-                  data-guided="block"
-                  className={`rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 text-[11px] text-slate-200 ${guidedClass("block")}`}
+                  data-guided="layers"
+                  className={`rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 text-[11px] text-slate-200 ${guidedClass("layers")}`}
                 >
                   <div className="flex items-start justify-between gap-3 mb-1.5">
                     <div className="flex flex-col gap-0.5">
@@ -3478,7 +3471,7 @@ return;
             <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
               {/* LEFT: Cavity palette + material + cartons + notes */}
               <aside className="w-52 shrink-0 flex flex-col gap-3">
-                <div>
+                <div data-guided="cavity-palette" className={guidedClass("cavity-palette")}>
                   <div className="text-xs font-semibold text-slate-100 mb-1">Cavity palette</div>
                   <p className="text-[11px] text-slate-400 mb-2">
                     Click a style to add a new pocket, then drag and resize it in the block.
@@ -3576,7 +3569,10 @@ return;
                 </div>
 
                 {/* Closest matching cartons (live suggester, always visible) */}
-                <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3">
+                <div
+                  data-guided="box-suggester"
+                  className={`mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3 ${guidedClass("box-suggester")}`}
+                >
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-xs font-semibold text-slate-100">Closest matching cartons</div>
                     <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
@@ -3742,8 +3738,8 @@ return;
 
               {/* CENTER: Big visualizer */}
               <section
-                data-guided="cavities"
-                className={`flex-1 flex flex-col gap-3 ${guidedClass("cavities")}`}
+                data-guided="canvas"
+                className={`flex-1 flex flex-col gap-3 ${guidedClass("canvas")}`}
               >
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -3759,6 +3755,15 @@ return;
                       </div>
                     )}
                   </div>
+                  {!guided.enabled && (
+                    <button
+                      type="button"
+                      onClick={guided.start}
+                      className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1 text-[11px] font-medium text-slate-100 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                    >
+                      Start Guided Input
+                    </button>
+                  )}
                 </div>
 
                 <p className="text-[11px] text-slate-400 leading-snug">
@@ -4137,11 +4142,10 @@ return;
       {guided.enabled && (
         <div className="fixed bottom-4 right-4 z-50 w-[260px] rounded-2xl border border-slate-800 bg-slate-950/95 p-3 text-[11px] text-slate-100 shadow-[0_18px_40px_rgba(15,23,42,0.6)]">
           <div className="text-[10px] uppercase tracking-[0.18em] text-slate-400">
-            Guided Input
+            GUIDED INPUT
           </div>
           <div className="mt-1 text-xs font-semibold text-slate-100">
-            Step {guided.stepIndex + 1} of {guided.steps.length}{" "}
-            <span className="text-slate-400 font-normal">â€” {guidedStepLabel}</span>
+            Step {guided.stepIndex + 1} of {guided.steps.length} - {guidedStepLabel}
           </div>
           <div className="mt-2 flex items-center gap-2">
             <button
