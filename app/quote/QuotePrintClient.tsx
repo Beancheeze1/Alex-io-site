@@ -49,6 +49,7 @@ type ItemRow = {
   material_name: string | null;
   material_family?: string | null;
   density_lb_ft3?: number | string | null;
+  notes?: string | null;
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
 
@@ -619,6 +620,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
   // Which carton selection is currently being removed (for button disable/spinner)
   const [removingBoxId, setRemovingBoxId] = React.useState<number | null>(null);
+  const [removingLayerItemId, setRemovingLayerItemId] = React.useState<number | null>(null);
 
   // Client-only: selected layer index for previews
   const [selectedLayerIdx, setSelectedLayerIdx] = React.useState<number>(0);
@@ -793,6 +795,37 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
       }
     },
     [quoteNo, refreshRequestedBoxes, reloadQuoteData],
+  );
+
+  const handleRemoveIncludedLayer = React.useCallback(
+    async (itemId: number) => {
+      if (!quoteNo || !itemId) return;
+
+      try {
+        setRemovingLayerItemId(itemId);
+
+        const res = await fetch("/api/quote/items/remove-included-layer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            quote_no: quoteNo,
+            quote_item_id: itemId,
+          }),
+        });
+
+        if (!res.ok) {
+          console.error("Failed to remove included layer:", await res.text().catch(() => ""));
+          return;
+        }
+
+        await reloadQuoteData(quoteNo);
+      } catch (err) {
+        console.error("Error calling /api/quote/items/remove-included-layer:", err);
+      } finally {
+        setRemovingLayerItemId(null);
+      }
+    },
+    [quoteNo, reloadQuoteData],
   );
 
   // Rescue: if router searchParams didn’t have quote_no, fall back to window.location
@@ -1724,6 +1757,8 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
                       {items.map((item, idx) => {
                         const isPrimary = idx === 0;
+                        const isIncludedLayer = String(item?.notes || "").toUpperCase().includes("[LAYOUT-LAYER]");
+                        const isRemovingLayer = removingLayerItemId === item.id;
 
                         // Path A: primary row should show the *stack total thickness* when available,
                         // so the table matches the Specs card.
@@ -1778,6 +1813,26 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
                                     {baseLabel}
                                     {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                   </div>
+                                  {isIncludedLayer && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveIncludedLayer(item.id)}
+                                      disabled={isRemovingLayer}
+                                      style={{
+                                        marginTop: 6,
+                                        padding: "3px 8px",
+                                        borderRadius: 999,
+                                        border: "1px solid #fecaca",
+                                        background: isRemovingLayer ? "#fee2e2" : "#fef2f2",
+                                        color: "#b91c1c",
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                        cursor: isRemovingLayer ? "default" : "pointer",
+                                      }}
+                                    >
+                                      {isRemovingLayer ? "Removingâ€¦" : "âœ• Remove"}
+                                    </button>
+                                  )}
                                 </>
                               )}
                             </td>
