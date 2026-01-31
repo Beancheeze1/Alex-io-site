@@ -1640,8 +1640,10 @@ function LayoutEditorHostReady(props: {
       { id: "layers", label: "Layers" },
       { id: "layer-details", label: "Layer details" },
       { id: "cavity-palette", label: "Cavity palette" },
-      { id: "canvas", label: "Canvas" },
+      { id: "cavity-editor", label: "Cavity editor" },
+      { id: "foam-material", label: "Foam material" },
       { id: "box-suggester", label: "Box suggester" },
+      { id: "notes", label: "Notes" },
       { id: "apply", label: "Apply to quote" },
     ],
     [],
@@ -3536,7 +3538,7 @@ return;
 
 
                 {/* Foam material (in left bar) */}
-                <div data-guided="material" className={`mt-2 ${guidedClass("material")}`}>
+                <div data-guided="foam-material" className={`mt-2 ${guidedClass("foam-material")}`}>
                   <div className="text-xs font-semibold text-slate-100 mb-1">Foam material</div>
                   <div className="text-[11px] text-slate-400 mb-2">
                     Choose the foam family and grade used for this layout.
@@ -3710,7 +3712,10 @@ return;
                 </div>
 
                 {/* Notes / special instructions */}
-                <div className="mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3">
+                <div
+                  data-guided="notes"
+                  className={`mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3 ${guidedClass("notes")}`}
+                >
                   <div className="text-xs font-semibold text-slate-100 mb-1">Notes / special instructions</div>
                   <div className="text-[11px] text-slate-400 mb-2">
                     Optional text for anything the foam layout needs to call out (loose parts, labels, extra protection,
@@ -3943,7 +3948,10 @@ return;
                 </div>
 
                 {/* Cavities list + editor */}
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col">
+                <div
+                  data-guided="cavity-editor"
+                  className={`bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col ${guidedClass("cavity-editor")}`}
+                >
                   <div className="text-xs font-semibold text-slate-100">
                     Cavities
                     {activeLayerLabel && (
