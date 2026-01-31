@@ -1439,6 +1439,16 @@ export async function POST(req: NextRequest) {
           layersLen: Array.isArray(layers) ? layers.length : 0,
         });
       } else {
+        const beforeCount = await one<{ c: number }>(
+          `
+          select count(*)::int as c
+          from quote_items
+          where quote_id = $1
+            and notes like '[LAYOUT-LAYER]%'
+          `,
+          [quote.id],
+        );
+
         await q(
           `
           delete from quote_items
@@ -1503,6 +1513,22 @@ export async function POST(req: NextRequest) {
             [quote.id, blockL, blockW, thickness, baseMaterialId, baseQty, notesForRow],
           );
         }
+
+        const afterCount = await one<{ c: number }>(
+          `
+          select count(*)::int as c
+          from quote_items
+          where quote_id = $1
+            and notes like '[LAYOUT-LAYER]%'
+          `,
+          [quote.id],
+        );
+
+        console.log("[layout/apply] foam-layer sync counts", {
+          quoteId: quote.id,
+          before: beforeCount?.c ?? null,
+          after: afterCount?.c ?? null,
+        });
       }
     } catch (layerErr) {
       console.error("Warning: failed to sync foam layers into quote_items for", quoteNo, layerErr);
