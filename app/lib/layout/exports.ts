@@ -10,6 +10,8 @@
 // - Uses layer.cropCorners to chamfer ONLY that layer’s block outline.
 // - Legacy single-layer { block, cavities } output remains unchanged.
 
+import { buildOuterOutlinePolyline } from "./outline";
+
 export type LayoutExportBundle = {
   svg: string;
   dxf: string;
@@ -24,6 +26,8 @@ type BlockLike = {
   // optional corner metadata (persisted by layout editor)
   cornerStyle?: string | null; // "square" | "chamfer"
   chamferIn?: number | null; // inches
+  roundCorners?: boolean | null;
+  roundRadiusIn?: number | null;
 };
 
 type CavityLike = {
@@ -78,6 +82,31 @@ function escapeText(s: string): string {
 function nnum(v: any, fallback = 0): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function svgPathFromOutline(
+  points: { x: number; y: number }[],
+  opts: { offsetX: number; offsetY: number; scale: number; heightPx: number },
+): string {
+  if (!points.length) return "";
+  const { offsetX, offsetY, scale, heightPx } = opts;
+
+  const mapped = points.map((p) => {
+    const x = offsetX + p.x * scale;
+    const y = offsetY + (heightPx - p.y * scale);
+    return [x, y] as const;
+  });
+
+  const [firstX, firstY] = mapped[0];
+  const parts = [`M ${firstX.toFixed(2)} ${firstY.toFixed(2)}`];
+
+  for (let i = 1; i < mapped.length; i++) {
+    const [x, y] = mapped[i];
+    parts.push(`L ${x.toFixed(2)} ${y.toFixed(2)}`);
+  }
+
+  parts.push("Z");
+  return parts.join(" ");
 }
 
 function getStack(layout: LayoutLike): LayerLike[] | null {
@@ -285,10 +314,22 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     const blockOutline =
       r > 0.001
-        ? `<rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
-          width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
-          rx="${r.toFixed(2)}" ry="${r.toFixed(2)}"
-          fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`
+        ? (() => {
+            const pts = buildOuterOutlinePolyline({
+              lengthIn: L,
+              widthIn: W,
+              roundCorners: true,
+              roundRadiusIn: roundRadiusIn,
+              segments: 12,
+            });
+            const d = svgPathFromOutline(pts, {
+              offsetX: blockX,
+              offsetY: blockY,
+              scale,
+              heightPx: blockH,
+            });
+            return `<path d="${d}" fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
+          })()
         : c > 0.001
         ? (() => {
             const x0 = blockX;
@@ -387,68 +428,6 @@ ${panels.join("\n")}
 
 /* ================= DXF ================= */
 
-const ARC_SEGMENTS = 8;
-
-function arcPoints(
-  cx: number,
-  cy: number,
-  r: number,
-  startDeg: number,
-  endDeg: number,
-  segments: number,
-): [number, number][] {
-  const pts: [number, number][] = [];
-  const start = (startDeg * Math.PI) / 180;
-  const end = (endDeg * Math.PI) / 180;
-  const step = (end - start) / Math.max(1, segments);
-
-  for (let i = 1; i <= segments; i++) {
-    const a = start + step * i;
-    pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
-  }
-
-  return pts;
-}
-
-function roundedRectPoints(
-  len: number,
-  wid: number,
-  radius: number,
-  segments = ARC_SEGMENTS,
-): [number, number][] {
-  const r = Math.max(0, Math.min(radius, len / 2 - 1e-6, wid / 2 - 1e-6));
-  if (r <= 0) {
-    return [
-      [0, 0],
-      [len, 0],
-      [len, wid],
-      [0, wid],
-    ];
-  }
-
-  const pts: [number, number][] = [];
-
-  // Start on bottom edge
-  pts.push([r, 0]);
-  pts.push([len - r, 0]);
-
-  // Bottom-right corner
-  pts.push(...arcPoints(len - r, r, r, -90, 0, segments));
-  // Right edge
-  pts.push([len, wid - r]);
-  // Top-right corner
-  pts.push(...arcPoints(len - r, wid - r, r, 0, 90, segments));
-  // Top edge
-  pts.push([r, wid]);
-  // Top-left corner
-  pts.push(...arcPoints(r, wid - r, r, 90, 180, segments));
-  // Left edge
-  pts.push([0, r]);
-  // Bottom-left corner
-  pts.push(...arcPoints(r, r, r, 180, 270, segments));
-
-  return pts;
-}
 
 // Super-minimal ASCII DXF: ENTITIES section with block outline + cavities.
 // For per-layer exports, we separate entities onto different DXF layers:
@@ -484,13 +463,25 @@ function buildDxf(layout: LayoutLike): string {
   const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
   const chamferInRaw = block.chamferIn;
   const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
+  const round = !!block.roundCorners;
+  const roundRaw = Number(block.roundRadiusIn);
+  const roundRadiusIn =
+    Number.isFinite(roundRaw) && roundRaw > 0 ? roundRaw : DEFAULT_ROUND_RADIUS_IN;
   const c =
     cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
       ? Math.max(0, Math.min(chamferIn, blkLen / 2 - 1e-6, blkWid / 2 - 1e-6))
       : 0;
 
   const blockPts: [number, number][] =
-    c > 0.0001
+    round
+      ? buildOuterOutlinePolyline({
+          lengthIn: blkLen,
+          widthIn: blkWid,
+          roundCorners: true,
+          roundRadiusIn: roundRadiusIn,
+          segments: 12,
+        }).map((pt) => [pt.x, pt.y])
+      : c > 0.0001
       ? [
           [0, 0],
           [blkLen - c, 0],
@@ -639,7 +630,13 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     const blockPts: [number, number][] =
       r > 0.0001
-        ? roundedRectPoints(blkLen, blkWid, r).map(([x, y]) => [x, y + yOff])
+        ? buildOuterOutlinePolyline({
+            lengthIn: blkLen,
+            widthIn: blkWid,
+            roundCorners: true,
+            roundRadiusIn: r,
+            segments: 12,
+          }).map((pt) => [pt.x, pt.y + yOff])
         : c > 0.0001
         ? [
             [0, 0 + yOff],

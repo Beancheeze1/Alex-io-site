@@ -79,6 +79,14 @@ function coerceLayerCropToBlockCorners(slicedLayout: any) {
     layer.cropped_corners ??
     null;
 
+  const roundFlag =
+    layer.roundCorners ??
+    layer.round_corners ??
+    null;
+
+  const roundRadiusRaw =
+    layer.roundRadiusIn ?? layer.round_radius_in ?? layer.round_radius ?? null;
+
   // Some codepaths may store an explicit style.
   const layerCornerStyleRaw =
     typeof layer.cornerStyle === "string" ? layer.cornerStyle.trim().toLowerCase() : "";
@@ -87,13 +95,21 @@ function coerceLayerCropToBlockCorners(slicedLayout: any) {
       ? layerCornerStyleRaw
       : null;
 
+  const wantsRound = typeof roundFlag === "boolean" ? roundFlag : false;
   const wantsChamfer =
-    layerCornerStyle === "chamfer" ? true : layerCornerStyle === "square" ? false : !!cropFlag;
+    !wantsRound &&
+    (layerCornerStyle === "chamfer" ? true : layerCornerStyle === "square" ? false : !!cropFlag);
 
   // Ensure block exists (it should in saved layouts, but keep defensive).
   if (!slicedLayout.block || typeof slicedLayout.block !== "object") slicedLayout.block = {};
 
   slicedLayout.block.cornerStyle = wantsChamfer ? "chamfer" : "square";
+  slicedLayout.block.roundCorners = wantsRound;
+  if (wantsRound) {
+    const n = Number(roundRadiusRaw);
+    slicedLayout.block.roundRadiusIn =
+      Number.isFinite(n) && n > 0 ? n : 0.25;
+  }
 
   // If chamfer is desired and chamferIn is missing, default to 1 inch
   // (matches our established “two-corner chamfer” behavior in exports).

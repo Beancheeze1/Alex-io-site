@@ -19,6 +19,7 @@
 
 import * as React from "react";
 import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
+import { buildOuterOutlinePolyline } from "@/app/lib/layout/outline";
 
 
 type QuoteRow = {
@@ -314,6 +315,31 @@ function emitRoundedRectDXF(entities: string[], x: number, y: number, w: number,
   entities.push(arcEntity(x + rr, y + rr, rr, 180, 270)); // bottom-left
 }
 
+function polylineToSvgPath(
+  pts: { x: number; y: number }[],
+  opts: { widthIn: number; offsetX?: number; offsetY?: number },
+): string {
+  if (!pts.length) return "";
+  const ox = opts.offsetX ?? 0;
+  const oy = opts.offsetY ?? 0;
+  const w = opts.widthIn;
+
+  const mapped = pts.map((p) => ({
+    x: ox + p.x,
+    y: oy + (w - p.y),
+  }));
+
+  const first = mapped[0];
+  const parts = [`M ${first.x} ${first.y}`];
+
+  for (let i = 1; i < mapped.length; i++) {
+    parts.push(`L ${mapped[i].x} ${mapped[i].y}`);
+  }
+
+  parts.push("Z");
+  return parts.join(" ");
+}
+
 type TargetDimsIn = { L: number; W: number };
 
 function getLayerThicknessInFromLayout(layout: any, layerIndex: number): number | null {
@@ -540,6 +566,14 @@ function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: Target
     );
   }
 
+  function emitPolyline(points: { x: number; y: number }[]) {
+    if (points.length < 2) return;
+    entities.push(["0", "LWPOLYLINE", "8", "0", "90", String(points.length), "70", "1"].join("\n"));
+    for (const pt of points) {
+      entities.push(["10", fmt(pt.x), "20", fmt(pt.y)].join("\n"));
+    }
+  }
+
   const entities: string[] = [];
 
  // Block outline: per-layer crop flag wins when a stack exists.
@@ -559,11 +593,22 @@ const layerCrop = !!(
   layer?.cropped_corners ??
   layer?.cornerStyle === "chamfer"
 );
+const layerRound = !!(
+  layer?.roundCorners ??
+  layer?.round_corners
+);
+const roundRadiusRaw =
+  layer?.roundRadiusIn ?? layer?.round_radius_in ?? layer?.round_radius ?? null;
+const roundRadiusIn =
+  Number.isFinite(Number(roundRadiusRaw)) && Number(roundRadiusRaw) > 0
+    ? Number(roundRadiusRaw)
+    : 0.25;
 
 const cornerStyleLegacy = String((layout as any)?.block?.cornerStyle ?? (layout as any)?.block?.corner_style ?? "").toLowerCase();
 const croppedLegacy = !!((layout as any)?.block?.croppedCorners ?? (layout as any)?.block?.cropped_corners);
 
-const wantsChamfer = hasLayers ? layerCrop : cornerStyleLegacy === "chamfer" || croppedLegacy;
+const wantsRound = hasLayers ? layerRound : false;
+const wantsChamfer = !wantsRound && (hasLayers ? layerCrop : cornerStyleLegacy === "chamfer" || croppedLegacy);
 
 const chamferInRaw = (layout as any)?.block?.chamferIn ?? (layout as any)?.block?.chamfer_in;
 const chamferInNum = chamferInRaw == null ? NaN : Number(chamferInRaw);
@@ -576,7 +621,18 @@ const chamferScaled =
     : 0;
 
 
-  if (chamferScaled > 0.0001) {
+  const roundScaled = wantsRound ? Math.max(0, Math.min(roundRadiusIn * scale, L / 2 - 1e-6, W / 2 - 1e-6)) : 0;
+
+  if (roundScaled > 0.0001) {
+    const pts = buildOuterOutlinePolyline({
+      lengthIn: L,
+      widthIn: W,
+      roundCorners: true,
+      roundRadiusIn: roundScaled,
+      segments: 12,
+    });
+    emitPolyline(pts);
+  } else if (chamferScaled > 0.0001) {
     const c = chamferScaled;
 
         // Two-corner chamfer: TOP-LEFT + BOTTOM-RIGHT only.
@@ -825,9 +881,17 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
     layer?.cropped_corners ??
     layer?.cornerStyle === "chamfer"
   );
+  const layerRound = !!(layer?.roundCorners ?? layer?.round_corners);
+  const roundRaw =
+    layer?.roundRadiusIn ?? layer?.round_radius_in ?? layer?.round_radius ?? null;
+  const roundRadiusIn =
+    Number.isFinite(Number(roundRaw)) && Number(roundRaw) > 0
+      ? Number(roundRaw)
+      : 0.25;
   const cornerStyleLegacy = String(layout?.block?.cornerStyle ?? layout?.block?.corner_style ?? "").toLowerCase();
   const croppedLegacy = !!(layout?.block?.croppedCorners ?? layout?.block?.cropped_corners);
-  const wantsChamfer = hasLayers ? layerCrop : cornerStyleLegacy === "chamfer" || croppedLegacy;
+  const wantsRound = hasLayers ? layerRound : false;
+  const wantsChamfer = !wantsRound && (hasLayers ? layerCrop : cornerStyleLegacy === "chamfer" || croppedLegacy);
 
   const chamferInRaw = layout?.block?.chamferIn ?? layout?.block?.chamfer_in;
   const chamferInNum = chamferInRaw == null ? NaN : Number(chamferInRaw);
@@ -838,8 +902,24 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
       ? Math.max(0, Math.min(chamferIn, L / 2 - 1e-6, W / 2 - 1e-6))
       : 0;
 
+  const roundR = wantsRound
+    ? Math.max(0, Math.min(roundRadiusIn, L / 2 - 1e-6, W / 2 - 1e-6))
+    : 0;
+
 const blockOutline =
-  chamfer > 0.0001
+  roundR > 0.0001
+    ? (() => {
+        const pts = buildOuterOutlinePolyline({
+          lengthIn: L,
+          widthIn: W,
+          roundCorners: true,
+          roundRadiusIn: roundR,
+          segments: 12,
+        });
+        const d = polylineToSvgPath(pts, { widthIn: W });
+        return `<path d="${d}" fill="#fff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
+      })()
+    : chamfer > 0.0001
     ? (() => {
         // Diagonal chamfer only: TOP-LEFT + BOTTOM-RIGHT
         const c = chamfer;

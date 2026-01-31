@@ -50,6 +50,8 @@ export type LayoutForStep = {
     // NEW (Path A, additive): pass-through only (microservice may ignore for now)
     cornerStyle?: string | null; // expected: "square" | "chamfer"
     chamferIn?: number | null; // inches
+    roundCorners?: boolean | null;
+    roundRadiusIn?: number | null;
   };
   stack: FoamLayer[];
   cavities?: CavityDef[] | null; // legacy top-level cavities
@@ -216,6 +218,11 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
       ? safePosNumber(blockRaw.chamferIn ?? blockRaw.chamfer_in)
       : null;
 
+  const roundCornersRaw = blockRaw.roundCorners ?? blockRaw.round_corners ?? null;
+  const roundRadiusRaw = blockRaw.roundRadiusIn ?? blockRaw.round_radius_in ?? blockRaw.round_radius ?? null;
+  const roundCorners = typeof roundCornersRaw === "boolean" ? roundCornersRaw : null;
+  const roundRadiusIn = safePosNumber(roundRadiusRaw);
+
   const rawStack = Array.isArray((layout as any).stack) ? (layout as any).stack : [];
   const normalizedStack: FoamLayer[] = [];
 
@@ -256,6 +263,8 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
     thicknessIn,
     cornerStyle,
     chamferIn: chamferInNum,
+    roundCorners,
+    roundRadiusIn: roundRadiusIn ?? null,
   };
 
   if (normalizedStack.length === 0) {
@@ -269,6 +278,30 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
       stack: normalizedStack,
       cavities: null,
     };
+  }
+
+  if (
+    normalizedStack.length === 1 &&
+    (blockOut.roundCorners == null || blockOut.roundRadiusIn == null)
+  ) {
+    const layerRaw = rawStack[0] ?? null;
+    if (layerRaw) {
+      const layerRoundRaw =
+        (layerRaw as any).roundCorners ?? (layerRaw as any).round_corners ?? null;
+      const layerRadiusRaw =
+        (layerRaw as any).roundRadiusIn ??
+        (layerRaw as any).round_radius_in ??
+        (layerRaw as any).round_radius ??
+        null;
+
+      if (blockOut.roundCorners == null && typeof layerRoundRaw === "boolean") {
+        blockOut.roundCorners = layerRoundRaw;
+      }
+      if (blockOut.roundRadiusIn == null) {
+        const n = safePosNumber(layerRadiusRaw);
+        if (n != null) blockOut.roundRadiusIn = n;
+      }
+    }
   }
 
   return {
