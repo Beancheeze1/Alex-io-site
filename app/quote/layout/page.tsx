@@ -2020,6 +2020,35 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
       ? roundRadiusInRaw
       : DEFAULT_ROUND_RADIUS_IN;
 
+  const [roundRadiusDrafts, setRoundRadiusDrafts] = React.useState<Record<string, string>>({});
+
+  const commitRoundRadius = React.useCallback(
+    (layerId: string, fallback: number, raw?: string) => {
+      const source = raw ?? roundRadiusDrafts[layerId];
+      const parsed = Number.parseFloat((source ?? "").toString().trim());
+      const maxRadius = Math.max(
+        0,
+        Math.min(block.lengthIn / 2 - 1e-6, block.widthIn / 2 - 1e-6),
+      );
+
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setRoundRadiusDrafts((prev) => ({
+          ...prev,
+          [layerId]: String(fallback),
+        }));
+        return;
+      }
+
+      const next = Math.min(parsed, maxRadius);
+      setLayerRoundRadiusIn(layerId, next);
+      setRoundRadiusDrafts((prev) => ({
+        ...prev,
+        [layerId]: String(next),
+      }));
+    },
+    [block.lengthIn, block.widthIn, roundRadiusDrafts, setLayerRoundRadiusIn],
+  );
+
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
     "idle" | "saving" | "done" | "error"
@@ -3545,12 +3574,23 @@ return;
                                     type="number"
                                     step={0.01}
                                     min={0}
-                                    value={roundRadius}
+                                    value={roundRadiusDrafts[layer.id] ?? String(roundRadius)}
                                     disabled={!isRound}
                                     onChange={(e) => {
-                                      const v = Number(e.target.value);
-                                      if (!Number.isFinite(v) || v <= 0) return;
-                                      setLayerRoundRadiusIn(layer.id, v);
+                                      setRoundRadiusDrafts((prev) => ({
+                                        ...prev,
+                                        [layer.id]: e.target.value,
+                                      }));
+                                    }}
+                                    onBlur={(e) => {
+                                      commitRoundRadius(layer.id, roundRadius, e.currentTarget.value);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        commitRoundRadius(layer.id, roundRadius, (e.currentTarget as HTMLInputElement).value);
+                                        (e.currentTarget as HTMLInputElement).blur();
+                                      }
                                     }}
                                     className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100 disabled:opacity-60"
                                   />
