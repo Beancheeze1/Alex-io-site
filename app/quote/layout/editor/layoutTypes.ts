@@ -63,6 +63,12 @@ export type LayoutLayer = {
   // - If omitted or false, layer renders with square corners (current behavior).
   // - UI will manage this flag; we do NOT parse it from email.
   cropCorners?: boolean;
+
+  // Per-layer rounded outside corners.
+  // - If omitted or false, render square corners.
+  // - When true, use roundRadiusIn (fallback to default in UI/renderers).
+  roundCorners?: boolean;
+  roundRadiusIn?: number;
 };
 
 export type LayoutModel = {

@@ -349,6 +349,7 @@ function readLayerCavitiesFromUrl(url: URL, layerIndex1Based: number): string {
 const SNAP_IN = 0.125;
 const WALL_IN = 0.5;
 const CENTER_SNAP_IN = 0.0625; // 1/16" for centering only
+const DEFAULT_ROUND_RADIUS_IN = 0.25;
 
 
 
@@ -1614,6 +1615,8 @@ function LayoutEditorHostReady(props: {
     selectCavity,
     setActiveLayerId,
     setLayerCropCorners,
+    setLayerRoundCorners,
+    setLayerRoundRadiusIn,
     updateCavityPosition,
     updateBlockDims,
     updateCavityDims,
@@ -2010,6 +2013,12 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
   // Crop corners is PER-LAYER (active layer).
   // Each layer can independently enable the 1" crop on export.
   const croppedCorners = !!(activeLayer as any)?.cropCorners;
+  const roundCorners = !!(activeLayer as any)?.roundCorners;
+  const roundRadiusInRaw = Number((activeLayer as any)?.roundRadiusIn);
+  const roundRadiusIn =
+    Number.isFinite(roundRadiusInRaw) && roundRadiusInRaw > 0
+      ? roundRadiusInRaw
+      : DEFAULT_ROUND_RADIUS_IN;
 
   const [notes, setNotes] = React.useState(initialNotes || "");
   const [applyStatus, setApplyStatus] = React.useState<
@@ -2772,6 +2781,15 @@ return;
         layoutToSave.stack = layoutToSave.stack.map((l: any) => ({
           ...l,
           cropCorners: !!l.cropCorners,
+          roundCorners: !!l.roundCorners,
+          roundRadiusIn:
+            l.roundCorners
+              ? Number.isFinite(Number(l.roundRadiusIn)) && Number(l.roundRadiusIn) > 0
+                ? Number(l.roundRadiusIn)
+                : DEFAULT_ROUND_RADIUS_IN
+              : Number.isFinite(Number(l.roundRadiusIn))
+                ? Number(l.roundRadiusIn)
+                : undefined,
         }));
       }
 
@@ -2797,6 +2815,9 @@ return;
       const svg = buildSvgFromLayout(layoutToSave as LayoutModel, {
         notes: notes && notes.trim().length > 0 ? notes.trim() : undefined,
         materialLabel: materialLabel || undefined,
+        cropCorners: !!activeLayerForSave?.cropCorners,
+        roundCorners: !!activeLayerForSave?.roundCorners,
+        roundRadiusIn: activeLayerForSave?.roundRadiusIn,
       });
 
       const payload: any = {
@@ -3443,6 +3464,13 @@ return;
                       {layers.map((layer, layerIndex) => {
                         const isActive = activeLayer?.id === layer.id;
                         const layerThick = getLayerThickness(layer.id);
+                        const isCrop = !!(layer as any).cropCorners;
+                        const isRound = !!(layer as any).roundCorners;
+                        const roundRadiusRaw = Number((layer as any).roundRadiusIn);
+                        const roundRadius =
+                          Number.isFinite(roundRadiusRaw) && roundRadiusRaw > 0
+                            ? roundRadiusRaw
+                            : DEFAULT_ROUND_RADIUS_IN;
 
                         return (
                           <div
@@ -3479,15 +3507,53 @@ return;
                                   }}
                                   className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100"
                                 />
+                                <label
+                                  className="ml-2 flex items-center gap-1 text-xs text-slate-400"
+                                  title={isCrop ? "Disable Crop to enable Round corners." : undefined}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isCrop}
+                                    onChange={(e) => {
+                                      const next = e.currentTarget.checked;
+                                      setLayerCropCorners(layer.id, next);
+                                      if (next && isRound) {
+                                        setLayerRoundCorners(layer.id, false);
+                                      }
+                                    }}
+                                  />
+                                  Crop
+                                </label>
                                 <label className="ml-2 flex items-center gap-1 text-xs text-slate-400">
                                   <input
                                     type="checkbox"
-                                    checked={!!layer.cropCorners}
-                                    onChange={(e) =>
-                                      setLayerCropCorners(layer.id, e.currentTarget.checked)
-                                    }
+                                    checked={isRound}
+                                    disabled={isCrop}
+                                    onChange={(e) => {
+                                      const next = e.currentTarget.checked;
+                                      setLayerRoundCorners(layer.id, next);
+                                      if (next && isCrop) {
+                                        setLayerCropCorners(layer.id, false);
+                                      }
+                                    }}
                                   />
-                                  Crop
+                                  Round
+                                </label>
+                                <label className="ml-2 flex items-center gap-1 text-xs text-slate-400">
+                                  <span>Radius (in)</span>
+                                  <input
+                                    type="number"
+                                    step={0.01}
+                                    min={0}
+                                    value={roundRadius}
+                                    disabled={!isRound}
+                                    onChange={(e) => {
+                                      const v = Number(e.target.value);
+                                      if (!Number.isFinite(v) || v <= 0) return;
+                                      setLayerRoundRadiusIn(layer.id, v);
+                                    }}
+                                    className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100 disabled:opacity-60"
+                                  />
                                 </label>
                               </div>
                             </div>
@@ -3834,7 +3900,7 @@ return;
                     className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,rgba(30,64,175,0.3)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.3)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
                   />
                   <div className="relative p-4 overflow-auto">
-                    <InteractiveCanvas
+                  <InteractiveCanvas
   layout={layout}
   
   selectedIds={selectedIds}
@@ -3851,6 +3917,8 @@ return;
   resizeAction={(id, lengthIn, widthIn) => updateCavityDims(id, { lengthIn, widthIn })}
   zoom={zoom}
   croppedCorners={croppedCorners}
+  roundCorners={roundCorners}
+  roundRadiusIn={roundRadiusIn}
 />
 
                   </div>
@@ -4280,7 +4348,13 @@ const formatCavityChip = (id: string): string => {
 
 function buildSvgFromLayout(
   layout: LayoutModel,
-  meta?: { notes?: string; materialLabel?: string | null },
+  meta?: {
+    notes?: string;
+    materialLabel?: string | null;
+    cropCorners?: boolean;
+    roundCorners?: boolean;
+    roundRadiusIn?: number;
+  },
 ): string {
   const { block, cavities } = layout;
 
@@ -4440,8 +4514,13 @@ function buildSvgFromLayout(
   const chamferInRaw = (block as any)?.chamferIn;
   const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
 
+  const wantsRound = !!meta?.roundCorners;
+  const roundRaw = Number(meta?.roundRadiusIn);
+  const roundRadiusIn =
+    Number.isFinite(roundRaw) && roundRaw > 0 ? roundRaw : DEFAULT_ROUND_RADIUS_IN;
+
   const chamferPx =
-    cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
+    !wantsRound && (meta?.cropCorners || cornerStyle === "chamfer") && Number.isFinite(chamferIn) && chamferIn > 0
       ? chamferIn * scale
       : 0;
 
@@ -4451,7 +4530,18 @@ function buildSvgFromLayout(
     Math.min(chamferPx, blockW / 2 - 0.01, blockH / 2 - 0.01),
   );
 
-  if (c > 0.001) {
+  const roundPx = wantsRound ? roundRadiusIn * scale : 0;
+  const r = Math.max(0, Math.min(roundPx, blockW / 2 - 0.01, blockH / 2 - 0.01));
+
+  if (r > 0.001) {
+    svgParts.push(
+      `  <rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}" width="${blockW.toFixed(
+        2,
+      )}" height="${blockH.toFixed(
+        2,
+      )}" rx="${r.toFixed(2)}" ry="${r.toFixed(2)}" fill="#e5e7eb" stroke="#111827" stroke-width="2" />`,
+    );
+  } else if (c > 0.001) {
     const x0 = blockX;
     const y0 = blockY;
     const x1 = blockX + blockW;

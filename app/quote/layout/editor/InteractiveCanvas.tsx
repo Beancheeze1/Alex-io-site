@@ -34,6 +34,8 @@ type Props = {
   resizeAction: (id: string, lengthIn: number, widthIn: number) => void;
   zoom: number;
   croppedCorners?: boolean;
+  roundCorners?: boolean;
+  roundRadiusIn?: number;
   // NEW (demo-only): allow hiding the dotted inner wall without changing real editor behavior
   showInnerWall?: boolean;
   autoCenterOnMount?: boolean;
@@ -85,6 +87,8 @@ export default function InteractiveCanvas({
   resizeAction,
   zoom,
   croppedCorners = false,
+  roundCorners = false,
+  roundRadiusIn = 0,
   showInnerWall = true,
   autoCenterOnMount = false,
 }: Props) {
@@ -230,7 +234,20 @@ export default function InteractiveCanvas({
   // Use actual chamfer from block data if available, otherwise fall back to 1"
   const CHAMFER_IN = block.chamferIn && block.chamferIn > 0 ? block.chamferIn : 1;
 
+  const roundRadiusInSafe =
+    Number.isFinite(Number(roundRadiusIn)) && Number(roundRadiusIn) > 0
+      ? Number(roundRadiusIn)
+      : 0;
+
+  const roundPx = roundCorners ? roundRadiusInSafe * scale : 0;
+  const canRound =
+    roundCorners &&
+    roundPx > 0 &&
+    blockPx.width > 0 &&
+    blockPx.height > 0;
+
   const canChamfer =
+    !canRound &&
     croppedCorners &&
     block.lengthIn > CHAMFER_IN * 2 &&
     block.widthIn > CHAMFER_IN * 2;
@@ -262,6 +279,11 @@ export default function InteractiveCanvas({
         `L ${x0},${y0 + h}`,
         "Z",
       ].join(" ");
+
+  const roundedOuterRadiusPx = Math.max(
+    0,
+    Math.min(roundPx, blockPx.width / 2 - 0.01, blockPx.height / 2 - 0.01),
+  );
 
   // Inner safety wall path (dashed)
   // NOTE: In Advanced mode, wallIn = 0 so the "inner wall" collapses to the outer wall.
@@ -526,13 +548,27 @@ export default function InteractiveCanvas({
           {/* rulers + block label ABOVE the top ruler */}
           {drawRulersWithLabel(block, blockPx, blockOffset)}
 
-          {/* block with optional 1" 45° chamfers at upper-left and lower-right */}
-          <path
-            d={outerBlockPathD}
-            fill="#e5e7eb" // light foam block
-            stroke="#cbd5f5"
-            strokeWidth={2}
-          />
+          {/* block with optional rounded corners or 1" 45° chamfers at upper-left and lower-right */}
+          {canRound && roundedOuterRadiusPx > 0 ? (
+            <rect
+              x={x0}
+              y={y0}
+              width={w}
+              height={h}
+              rx={roundedOuterRadiusPx}
+              ry={roundedOuterRadiusPx}
+              fill="#e5e7eb"
+              stroke="#cbd5f5"
+              strokeWidth={2}
+            />
+          ) : (
+            <path
+              d={outerBlockPathD}
+              fill="#e5e7eb" // light foam block
+              stroke="#cbd5f5"
+              strokeWidth={2}
+            />
+          )}
 
           {/* 0.5" grid *inside* the block */}
           {drawInchGrid(block, blockPx, blockOffset)}

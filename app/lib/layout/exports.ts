@@ -43,6 +43,8 @@ type LayerLike = {
   label?: string | null;
   thicknessIn?: number | null;
   cropCorners?: boolean | null;
+  roundCorners?: boolean | null;
+  roundRadiusIn?: number | null;
   cavities?: CavityLike[] | null;
 };
 
@@ -58,6 +60,7 @@ type LayoutLike = {
 const VIEW_W = 1000;
 const VIEW_H = 700;
 const PADDING = 40;
+const DEFAULT_ROUND_RADIUS_IN = 0.25;
 
 export function buildLayoutExports(layout: LayoutLike): LayoutExportBundle {
   const svg = buildSvg(layout);
@@ -236,6 +239,10 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
     const crop = !!layer.cropCorners;
+    const round = !!layer.roundCorners;
+    const roundRaw = Number(layer.roundRadiusIn);
+    const roundRadiusIn =
+      Number.isFinite(roundRaw) && roundRaw > 0 ? roundRaw : DEFAULT_ROUND_RADIUS_IN;
 
     console.log("[EXPORTS] layer", i, "cropCorners:", crop, "layout.block.cornerStyle:", layout?.block?.cornerStyle);
 
@@ -243,7 +250,7 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
     // If cropCorners is true, force chamfer for THIS layer only.
     const block: BlockLike = {
       ...layout.block,
-      cornerStyle: crop ? "chamfer" : "square",
+      cornerStyle: !round && crop ? "chamfer" : "square",
       chamferIn: layout.block.chamferIn ?? 1,
     };
 
@@ -270,8 +277,19 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
       Math.min(chamferPx, blockW / 2 - 0.01, blockH / 2 - 0.01),
     );
 
+    const roundPx = round ? roundRadiusIn * scale : 0;
+    const r = Math.max(
+      0,
+      Math.min(roundPx, blockW / 2 - 0.01, blockH / 2 - 0.01),
+    );
+
     const blockOutline =
-      c > 0.001
+      r > 0.001
+        ? `<rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
+          width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
+          rx="${r.toFixed(2)}" ry="${r.toFixed(2)}"
+          fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`
+        : c > 0.001
         ? (() => {
             const x0 = blockX;
             const y0 = blockY;
@@ -368,6 +386,69 @@ ${panels.join("\n")}
 }
 
 /* ================= DXF ================= */
+
+const ARC_SEGMENTS = 8;
+
+function arcPoints(
+  cx: number,
+  cy: number,
+  r: number,
+  startDeg: number,
+  endDeg: number,
+  segments: number,
+): [number, number][] {
+  const pts: [number, number][] = [];
+  const start = (startDeg * Math.PI) / 180;
+  const end = (endDeg * Math.PI) / 180;
+  const step = (end - start) / Math.max(1, segments);
+
+  for (let i = 1; i <= segments; i++) {
+    const a = start + step * i;
+    pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+  }
+
+  return pts;
+}
+
+function roundedRectPoints(
+  len: number,
+  wid: number,
+  radius: number,
+  segments = ARC_SEGMENTS,
+): [number, number][] {
+  const r = Math.max(0, Math.min(radius, len / 2 - 1e-6, wid / 2 - 1e-6));
+  if (r <= 0) {
+    return [
+      [0, 0],
+      [len, 0],
+      [len, wid],
+      [0, wid],
+    ];
+  }
+
+  const pts: [number, number][] = [];
+
+  // Start on bottom edge
+  pts.push([r, 0]);
+  pts.push([len - r, 0]);
+
+  // Bottom-right corner
+  pts.push(...arcPoints(len - r, r, r, -90, 0, segments));
+  // Right edge
+  pts.push([len, wid - r]);
+  // Top-right corner
+  pts.push(...arcPoints(len - r, wid - r, r, 0, 90, segments));
+  // Top edge
+  pts.push([r, wid]);
+  // Top-left corner
+  pts.push(...arcPoints(r, wid - r, r, 90, 180, segments));
+  // Left edge
+  pts.push([0, r]);
+  // Bottom-left corner
+  pts.push(...arcPoints(r, r, r, 180, 270, segments));
+
+  return pts;
+}
 
 // Super-minimal ASCII DXF: ENTITIES section with block outline + cavities.
 // For per-layer exports, we separate entities onto different DXF layers:
@@ -538,20 +619,28 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
     
 
     const crop = !!layer.cropCorners;
+    const round = !!layer.roundCorners;
+    const roundRaw = Number(layer.roundRadiusIn);
+    const roundRadiusIn =
+      Number.isFinite(roundRaw) && roundRaw > 0 ? roundRaw : DEFAULT_ROUND_RADIUS_IN;
 
-    const cornerStyle = crop ? "chamfer" : "square";
-    const chamferIn =
-      cornerStyle === "chamfer"
-        ? chamferInDefault
-        : 0;
+    const cornerStyle = !round && crop ? "chamfer" : "square";
+    const chamferIn = cornerStyle === "chamfer" ? chamferInDefault : 0;
 
     const c =
       cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
         ? Math.max(0, Math.min(chamferIn, blkLen / 2 - 1e-6, blkWid / 2 - 1e-6))
         : 0;
 
+    const r =
+      round && Number.isFinite(roundRadiusIn) && roundRadiusIn > 0
+        ? Math.max(0, Math.min(roundRadiusIn, blkLen / 2 - 1e-6, blkWid / 2 - 1e-6))
+        : 0;
+
     const blockPts: [number, number][] =
-      c > 0.0001
+      r > 0.0001
+        ? roundedRectPoints(blkLen, blkWid, r).map(([x, y]) => [x, y + yOff])
+        : c > 0.0001
         ? [
             [0, 0 + yOff],
             [blkLen - c, 0 + yOff],

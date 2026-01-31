@@ -487,11 +487,19 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
   const hasLayers = Array.isArray(layersArr) && layersArr.length > 0;
   const layer = hasLayers ? layersArr![layerIndex] : null;
   const layerCrop = !!(layer?.cropCorners ?? layer?.crop_corners ?? layer?.croppedCorners ?? layer?.cropped_corners);
+  const layerRound = !!(layer?.roundCorners ?? layer?.round_corners);
+  const roundRaw =
+    layer?.roundRadiusIn ?? layer?.round_radius_in ?? layer?.round_radius ?? null;
+  const roundRadiusIn =
+    typeof roundRaw === "number" && Number.isFinite(roundRaw) && roundRaw > 0
+      ? roundRaw
+      : 0.25;
 
   const cornerStyle = String(block.cornerStyle ?? block.corner_style ?? "").toLowerCase();
   const croppedLegacy = !!(block.croppedCorners ?? block.cropped_corners);
 
-  const wantsChamfer = hasLayers ? layerCrop : cornerStyle === "chamfer" || croppedLegacy;
+  const wantsRound = hasLayers ? layerRound : false;
+  const wantsChamfer = !wantsRound && (hasLayers ? layerCrop : cornerStyle === "chamfer" || croppedLegacy);
 
   const chamferInRaw = block.chamferIn ?? block.chamfer_in;
   const chamferInNum = chamferInRaw == null ? 0 : Number(chamferInRaw);
@@ -501,8 +509,14 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
     ? Math.max(0, Math.min(chamferBase, L / 2 - 1e-6, W / 2 - 1e-6))
     : 0;
 
+  const roundR = wantsRound
+    ? Math.max(0, Math.min(roundRadiusIn, L / 2 - 1e-6, W / 2 - 1e-6))
+    : 0;
+
  const blockOutline =
-  chamfer > 0.0001
+  roundR > 0.0001
+    ? `<rect x="0" y="0" width="${L}" height="${W}" rx="${roundR}" ry="${roundR}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`
+    : chamfer > 0.0001
     ? (() => {
         const c = chamfer;
         const d = [

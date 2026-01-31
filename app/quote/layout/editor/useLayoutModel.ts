@@ -58,6 +58,8 @@ export type UseLayoutModelResult = {
 
   setEditorMode: (mode: "basic" | "advanced") => void;
   setLayerCropCorners: (layerId: string, cropCorners: boolean) => void;
+  setLayerRoundCorners: (layerId: string, roundCorners: boolean) => void;
+  setLayerRoundRadiusIn: (layerId: string, roundRadiusIn: number) => void;
 
   updateCavityPosition: (id: string, x: number, y: number) => void;
   updateBlockDims: (patch: Partial<BlockDims>) => void;
@@ -75,6 +77,8 @@ export type UseLayoutModelResult = {
     opts?: { mode?: "append" | "replace"; label?: string; targetLayerId?: string | null },
   ) => void;
 };
+
+const DEFAULT_ROUND_RADIUS_IN = 0.25;
 
 export function useLayoutModel(initial: LayoutModel): UseLayoutModelResult {
   const [state, setState] = useState<LayoutState>(() =>
@@ -253,6 +257,48 @@ const didInitActiveLayerRef = useRef(false);
           ...prev.layout,
           stack: prev.layout.stack.map((l) =>
             l.id === layerId ? { ...l, cropCorners: !!cropCorners } : l,
+          ),
+        },
+      }));
+    },
+    [],
+  );
+
+  const setLayerRoundCorners = useCallback(
+    (layerId: string, roundCorners: boolean) => {
+      setState((prev) => ({
+        ...prev,
+        layout: {
+          ...prev.layout,
+          stack: prev.layout.stack.map((l) => {
+            if (l.id !== layerId) return l;
+            const nextRadius = Number(l.roundRadiusIn);
+            const radius =
+              Number.isFinite(nextRadius) && nextRadius > 0
+                ? nextRadius
+                : DEFAULT_ROUND_RADIUS_IN;
+            return {
+              ...l,
+              roundCorners: !!roundCorners,
+              roundRadiusIn: radius,
+            };
+          }),
+        },
+      }));
+    },
+    [],
+  );
+
+  const setLayerRoundRadiusIn = useCallback(
+    (layerId: string, roundRadiusIn: number) => {
+      setState((prev) => ({
+        ...prev,
+        layout: {
+          ...prev.layout,
+          stack: prev.layout.stack.map((l) =>
+            l.id === layerId
+              ? { ...l, roundRadiusIn: roundRadiusIn }
+              : l,
           ),
         },
       }));
@@ -443,6 +489,8 @@ const didInitActiveLayerRef = useRef(false);
               thicknessIn: 1,
               cavities: [],
               cropCorners: false,
+              roundCorners: false,
+              roundRadiusIn: DEFAULT_ROUND_RADIUS_IN,
             },
           ],
           cavities: [],
@@ -531,6 +579,8 @@ const didInitActiveLayerRef = useRef(false);
             thicknessIn,
             cavities,
             cropCorners: !!seedLayer?.cropCorners,
+            roundCorners: false,
+            roundRadiusIn: DEFAULT_ROUND_RADIUS_IN,
           };
 
           return {
@@ -563,6 +613,11 @@ const didInitActiveLayerRef = useRef(false);
                 cavities,
                 cropCorners:
                   seedLayer?.cropCorners != null ? !!seedLayer.cropCorners : !!l.cropCorners,
+                roundCorners: !!l.roundCorners,
+                roundRadiusIn:
+                  Number.isFinite(Number(l.roundRadiusIn)) && Number(l.roundRadiusIn) > 0
+                    ? Number(l.roundRadiusIn)
+                    : DEFAULT_ROUND_RADIUS_IN,
               }
             : l,
         );
@@ -615,6 +670,8 @@ const didInitActiveLayerRef = useRef(false);
     addLayer,
     renameLayer,
     deleteLayer,
+    setLayerRoundCorners,
+    setLayerRoundRadiusIn,
     importLayerFromSeed,
   };
 }
@@ -741,6 +798,8 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
       thicknessIn: safeInch(t, 0.5),
       cavities: [],
       cropCorners: false,
+      roundCorners: false,
+      roundRadiusIn: DEFAULT_ROUND_RADIUS_IN,
     }));
 
     const targetIdx0 = Math.max(0, Math.min(stack.length - 1, targetIdx1 - 1));
@@ -800,12 +859,23 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         }),
       );
 
+      const roundRaw =
+        (l as any).roundRadiusIn ??
+        (l as any).round_radius_in ??
+        (l as any).round_radius ??
+        null;
+      const roundNum = Number(roundRaw);
+      const roundRadiusIn =
+        Number.isFinite(roundNum) && roundNum > 0 ? roundNum : DEFAULT_ROUND_RADIUS_IN;
+
       return {
         id: l.id,
         label: l.label,
         thicknessIn: l.thicknessIn,
         cavities: cavs,
-        cropCorners: !!l.cropCorners,
+        cropCorners: !!(l as any).cropCorners,
+        roundCorners: !!((l as any).roundCorners ?? (l as any).round_corners),
+        roundRadiusIn,
       };
     }) as LayoutLayer[];
 
@@ -918,6 +988,8 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         thicknessIn: thickness,
         cavities: cavs,
         cropCorners: false,
+        roundCorners: false,
+        roundRadiusIn: DEFAULT_ROUND_RADIUS_IN,
       },
     ];
 
@@ -944,6 +1016,8 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
           thicknessIn: safeInch(block.thicknessIn ?? 1, 0.5),
           cavities: [],
           cropCorners: false,
+          roundCorners: false,
+          roundRadiusIn: DEFAULT_ROUND_RADIUS_IN,
         },
       ],
       cavities: [],
