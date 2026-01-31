@@ -2098,8 +2098,57 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
       // Update the visual selection immediately
       setSelectedCartonKind(kind);
 
-      const sku =
-        kind === "RSC" ? boxSuggest.bestRsc?.sku : boxSuggest.bestMailer?.sku;
+      const chosen = kind === "RSC" ? boxSuggest.bestRsc : boxSuggest.bestMailer;
+      const sku = chosen?.sku;
+
+      const insideL = Number(chosen?.inside_length_in);
+      const insideW = Number(chosen?.inside_width_in);
+      if (Number.isFinite(insideL) && Number.isFinite(insideW) && insideL > 0 && insideW > 0) {
+        const clearance = 0.125;
+        const cand1 = { L: insideL - clearance, W: insideW - clearance };
+        const cand2 = { L: insideW - clearance, W: insideL - clearance };
+
+        const curL = Number(block.lengthIn) || 0;
+        const curW = Number(block.widthIn) || 0;
+
+        const score1 = Math.abs(cand1.L - curL) + Math.abs(cand1.W - curW);
+        const score2 = Math.abs(cand2.L - curL) + Math.abs(cand2.W - curW);
+
+        const pick = score2 < score1 ? cand2 : cand1;
+
+        const nextL = snapInches(Math.max(pick.L, 0));
+        const nextW = snapInches(Math.max(pick.W, 0));
+
+        const layersToCheck =
+          stack && stack.length > 0 ? stack : [{ cavities: cavities ?? [] }];
+
+        let wouldClip = false;
+        for (const layer of layersToCheck) {
+          const cavs = (layer as any)?.cavities ?? [];
+          for (const cav of cavs) {
+            const left = Number(cav.x) * nextL;
+            const top = Number(cav.y) * nextW;
+            const right = left + Number(cav.lengthIn || 0);
+            const bottom = top + Number(cav.widthIn || 0);
+            if (right > nextL || bottom > nextW) {
+              wouldClip = true;
+              break;
+            }
+          }
+          if (wouldClip) break;
+        }
+
+        if (wouldClip) {
+          const ok = window.confirm(
+            "This box would require shrinking the foam footprint and may clip existing cavities. Continue?",
+          );
+          if (ok) {
+            updateBlockDims({ lengthIn: nextL, widthIn: nextW });
+          }
+        } else {
+          updateBlockDims({ lengthIn: nextL, widthIn: nextW });
+        }
+      }
 
       // We need a quote number and a SKU to do anything useful
       if (!quoteNo || !sku) {
@@ -2142,7 +2191,7 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
         console.error("Error in handlePickCarton /api/boxes/add-to-quote", err);
       }
     },
-    [boxSuggest.bestRsc, boxSuggest.bestMailer, quoteNo, qty],
+    [boxSuggest.bestRsc, boxSuggest.bestMailer, quoteNo, qty, block.lengthIn, block.widthIn, stack, cavities, updateBlockDims],
   );
 
   // Local input state for selected cavity dims (to avoid "wonky" inputs)
