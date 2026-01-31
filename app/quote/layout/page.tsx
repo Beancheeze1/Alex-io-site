@@ -1732,7 +1732,6 @@ function LayoutEditorHostReady(props: {
       ? stack.find((layer) => layer.id === activeLayerId) ?? stack[0]
       : null;
 
-  const activeLayerLabel = activeLayer?.label ?? null;
   const selectedCavity = cavities.find((c) => c.id === selectedId) || null;
 
   // Advanced mode removes spacing restrictions (no wall offset, no min gap enforcement)
@@ -1747,6 +1746,16 @@ function LayoutEditorHostReady(props: {
 
   const effectiveActiveLayerId =
     layers && layers.length > 0 ? activeLayerId ?? layers[0].id : null;
+
+  const layerDisplayLabel = (index: number) => `Layer ${index + 1}`;
+  const activeLayerIndex =
+    layers && layers.length > 0
+      ? layers.findIndex((layer) => layer.id === effectiveActiveLayerId)
+      : -1;
+  const activeLayerDisplayLabel =
+    layers && layers.length > 0
+      ? layerDisplayLabel(activeLayerIndex >= 0 ? activeLayerIndex : 0)
+      : null;
 
   // Total stack thickness used for box/carton suggestions.
   // Rule:
@@ -3090,7 +3099,7 @@ return;
                             <>
                               {layers.length} layer{layers.length > 1 ? "s" : ""} · Active:{" "}
                               <span className="font-semibold text-slate-50">
-                                {activeLayerLabel ?? layers[0].label}
+                                {activeLayerDisplayLabel}
                               </span>
                             </>
                           ) : (
@@ -3178,7 +3187,7 @@ return;
                     <span>
                       Active{" "}
                       <span className="text-slate-100 font-semibold">
-                        {activeLayerLabel ?? (layers && layers[0] ? layers[0].label : "—")}
+                        {activeLayerDisplayLabel ?? "—"}
                       </span>
                     </span>
                     <span>
@@ -3431,7 +3440,7 @@ return;
 
                   {layers && layers.length > 0 ? (
                     <div className="max-h-32 overflow-auto space-y-1 mt-0.5">
-                      {layers.map((layer) => {
+                      {layers.map((layer, layerIndex) => {
                         const isActive = activeLayer?.id === layer.id;
                         const layerThick = getLayerThickness(layer.id);
 
@@ -3455,7 +3464,7 @@ return;
                                     (isActive ? "text-sky-100" : "text-slate-100")
                                   }
                                 >
-                                  {layer.label}
+                                  {layerDisplayLabel(layerIndex)}
                                 </button>
                                 <span className="text-[10px] text-slate-400">· Thickness (in)</span>
                                 <input
@@ -3991,8 +4000,10 @@ return;
                 >
                   <div className="text-xs font-semibold text-slate-100">
                     Cavities
-                    {activeLayerLabel && (
-                      <span className="ml-1 text-[11px] font-normal text-slate-400">— {activeLayerLabel}</span>
+                    {activeLayerDisplayLabel && (
+                      <span className="ml-1 text-[11px] font-normal text-slate-400">
+                        — {activeLayerDisplayLabel}
+                      </span>
                     )}
                   </div>
 
