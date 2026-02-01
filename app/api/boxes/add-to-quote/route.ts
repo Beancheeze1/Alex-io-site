@@ -14,15 +14,13 @@
 //   - Looks up the quote by quote_no.
 //   - Looks up the box in public.boxes (by id or sku).
 //   - Upserts a row into public.quote_box_selections:
-//       * If (quote_id, box_id) exists, SETS qty to incomingQty.
+//       * If (quote_id, box_id) exists, sets qty (qty = incomingQty).
 //       * Otherwise inserts a new selection row.
 //   - NEW: After upsert, prices the carton selection using public.box_price_tiers
 //         (base price + up to 4 tiers keyed by box_id).
 //   - Best-effort: inserts a single carton line into public.quote_items using the
 //     box inside dimensions and the primary line's material_id (only when the
 //     selection row is first created, not on subsequent qty bumps).
-//   - NEW: Best-effort keeps the existing carton quote_items row qty in sync,
-//          because the Interactive Quote reads quote_items.
 //   - Returns ok:true + the selection row, and optionally box_item_id.
 //
 // Notes:
@@ -144,7 +142,7 @@ export async function POST(req: NextRequest) {
     const incomingQty = parseQty(body.qty, 1);
 
     // 1) Quote
-    const quote = (await one(
+    const quote = (await one<QuoteRow>(
       `
       SELECT id, quote_no
       FROM public.quotes
@@ -166,7 +164,7 @@ export async function POST(req: NextRequest) {
         return bad({ ok: false, error: "INVALID_BOX_ID" }, 400);
       }
 
-      box = (await one(
+      box = (await one<BoxRow>(
         `
         SELECT id, vendor, style, sku, inside_length_in, inside_width_in, inside_height_in
         FROM public.boxes
@@ -176,7 +174,7 @@ export async function POST(req: NextRequest) {
       )) as BoxRow | null;
     } else if (hasSku) {
       const sku = (body.sku || "").trim();
-      box = (await one(
+      box = (await one<BoxRow>(
         `
         SELECT id, vendor, style, sku, inside_length_in, inside_width_in, inside_height_in
         FROM public.boxes
@@ -191,21 +189,27 @@ export async function POST(req: NextRequest) {
     }
 
     // 3) Upsert selection row
-    const existingSelection = (await one(
+    let selection: SelectionRow | null = null;
+
+    const existingSelection = (await one<{
+      id: number;
+      qty: number;
+    }>(
       `
       SELECT id, qty
       FROM public.quote_box_selections
-      WHERE quote_id = $1 AND box_id = $2
+      WHERE quote_id = $1
+        AND box_id = $2
+      ORDER BY id ASC
+      LIMIT 1
       `,
       [quote.id, box.id],
     )) as { id: number; qty: number } | null;
 
-    let selection: SelectionRow | null;
-
     const isNewSelection = !existingSelection;
 
     if (existingSelection) {
-      // FIX: set to incoming qty (do not increment)
+      // FIX: set qty to incomingQty (do not increment)
       const newQty = incomingQty;
 
       const rows = await q(
@@ -260,8 +264,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3a.5) Keep the carton quote_items row qty in sync (Interactive Quote reads quote_items)
-    // Best-effort: update any existing carton line item that matches this sku.
+    // NEW: Keep the carton quote_items row qty in sync (Interactive Quote reads quote_items.qty).
+    // Best-effort: update any existing carton line item that matches this SKU.
     try {
       await q(
         `
@@ -269,8 +273,6 @@ export async function POST(req: NextRequest) {
         SET qty = $1
         WHERE quote_id = $2
           AND product_id IS NULL
-          AND price_unit_usd IS NULL
-          AND calc_snapshot IS NULL
           AND notes ILIKE $3
         `,
         [selection.qty, quote.id, `%${box.sku}%`],
@@ -280,12 +282,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 3b) Price the carton selection using box_price_tiers (by box_id)
-    //
-    // Schema columns expected:
-    //   box_id, base_unit_price,
-    //   tier1_min_qty, tier1_unit_price, ... tier4...
-    //
-    const tier = (await one(
+    const tier = (await one<TierRow>(
       `
       SELECT
         base_unit_price,
@@ -299,29 +296,35 @@ export async function POST(req: NextRequest) {
       [box.id],
     )) as TierRow | null;
 
-    // Determine unit price for selection.qty
     const qtyForPrice = Math.max(1, selection.qty ?? 1);
 
-    const base = tier?.base_unit_price != null ? Number(tier.base_unit_price) : null;
+    const base =
+      tier?.base_unit_price != null ? Number(tier.base_unit_price) : null;
 
     const tiers = [
       {
         min: tier?.tier1_min_qty ?? null,
-        unit: tier?.tier1_unit_price != null ? Number(tier.tier1_unit_price) : null,
+        unit:
+          tier?.tier1_unit_price != null ? Number(tier.tier1_unit_price) : null,
       },
       {
         min: tier?.tier2_min_qty ?? null,
-        unit: tier?.tier2_unit_price != null ? Number(tier.tier2_unit_price) : null,
+        unit:
+          tier?.tier2_unit_price != null ? Number(tier.tier2_unit_price) : null,
       },
       {
         min: tier?.tier3_min_qty ?? null,
-        unit: tier?.tier3_unit_price != null ? Number(tier.tier3_unit_price) : null,
+        unit:
+          tier?.tier3_unit_price != null ? Number(tier.tier3_unit_price) : null,
       },
       {
         min: tier?.tier4_min_qty ?? null,
-        unit: tier?.tier4_unit_price != null ? Number(tier.tier4_unit_price) : null,
+        unit:
+          tier?.tier4_unit_price != null ? Number(tier.tier4_unit_price) : null,
       },
-    ].filter((t) => t.min != null && Number.isFinite(t.min as any) && (t.min as number) > 0);
+    ].filter(
+      (t) => t.min != null && Number.isFinite(t.min as any) && (t.min as number) > 0,
+    );
 
     let unitPrice: number | null = base;
 
@@ -362,7 +365,7 @@ export async function POST(req: NextRequest) {
     let boxItemId: number | null = null;
 
     if (isNewSelection) {
-      const primaryItem = (await one(
+      const primaryItem = (await one<PrimaryItemRow>(
         `
         SELECT id, material_id
         FROM public.quote_items
@@ -374,23 +377,24 @@ export async function POST(req: NextRequest) {
       )) as PrimaryItemRow | null;
 
       if (primaryItem) {
-        const L = Number(box.inside_length_in) || 0;
-        const W = Number(box.inside_width_in) || 0;
-        const H = Number(box.inside_height_in) || 0;
+        const L = Number(box.inside_length_in);
+        const W = Number(box.inside_width_in);
+        const H = Number(box.inside_height_in);
 
-        const labelParts: string[] = [];
+        if (L > 0 && W > 0 && H > 0) {
+          const labelParts: string[] = [];
 
-        labelParts.push(`${L} x ${W} x ${H} in`);
-        labelParts.push(box.sku);
+          labelParts.push(`${L} x ${W} x ${H} in`);
+          labelParts.push(box.sku);
 
-        if (box.style && box.style.trim().length > 0) {
-          labelParts.push(`(${box.style.trim()})`);
-        }
+          if (box.style && box.style.trim().length > 0) {
+            labelParts.push(`(${box.style.trim()})`);
+          }
 
-        const notes = `Requested shipping carton: ${labelParts.join(" ")}`;
+          const notes = `Requested shipping carton: ${labelParts.join(" ")}`;
 
-        const rows = await q(
-          `
+          const rows = await q(
+            `
             INSERT INTO public.quote_items
               (
                 quote_id,
@@ -421,19 +425,20 @@ export async function POST(req: NextRequest) {
               )
             RETURNING id
             `,
-          [
-            quote.id,
-            L,
-            W,
-            H,
-            primaryItem.material_id,
-            incomingQty,
-            notes,
-          ],
-        );
+            [
+              quote.id,
+              L,
+              W,
+              H,
+              primaryItem.material_id,
+              incomingQty,
+              notes,
+            ],
+          );
 
-        if (rows && rows[0] && typeof rows[0].id === "number") {
-          boxItemId = rows[0].id;
+          if (rows && rows[0] && typeof rows[0].id === "number") {
+            boxItemId = rows[0].id;
+          }
         }
       }
     }
