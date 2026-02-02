@@ -135,32 +135,36 @@ export async function POST(req: NextRequest) {
           ? delSelResult.length
           : 0;
 
-    // 4) NEW: Delete the shadow quote_items row(s) for this carton SKU
-    // These rows were inserted as "Requested shipping carton: ... <sku> ..."
-    // and can surface as unwanted "Included layer" lines if they accumulate.
-    let deletedItemCount = 0;
+   // 4) NEW: Delete ALL carton shadow quote_items rows for this quote.
+// These rows were inserted as "Requested shipping carton: ..." and can surface
+// as unwanted "Included layer" lines if they accumulate.
+// We intentionally delete by prefix only (not SKU) because selections may be empty
+// but ghosts can still exist from previous swaps.
+let deletedItemCount = 0;
 
-    if (sku) {
-      const delItemsResult = await q(
-        `
-        DELETE FROM public."quote_items"
-        WHERE quote_id = $1
-          AND product_id IS NULL
-          AND notes ILIKE 'Requested shipping carton:%'
-          AND notes ILIKE $2
-        `,
-        [quoteId, `%${sku}%`],
-      );
+try {
+  const delItemsResult = await q(
+    `
+    DELETE FROM public."quote_items"
+    WHERE quote_id = $1
+      AND product_id IS NULL
+      AND notes ILIKE 'Requested shipping carton:%'
+    `,
+    [quoteId],
+  );
 
-      deletedItemCount =
-        // @ts-ignore
-        typeof (delItemsResult as any)?.rowCount === "number"
-          ? // @ts-ignore
-            (delItemsResult as any).rowCount
-          : Array.isArray(delItemsResult)
-            ? delItemsResult.length
-            : 0;
-    }
+  deletedItemCount =
+    // @ts-ignore
+    typeof (delItemsResult as any)?.rowCount === "number"
+      ? // @ts-ignore
+        (delItemsResult as any).rowCount
+      : Array.isArray(delItemsResult)
+        ? delItemsResult.length
+        : 0;
+} catch (err) {
+  console.warn("[boxes/remove-from-quote] carton shadow cleanup skipped", err);
+}
+
 
     return NextResponse.json({
       ok: true,
