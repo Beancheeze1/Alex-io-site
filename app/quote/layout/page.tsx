@@ -3108,7 +3108,7 @@ return;
       <input
         ref={fileInputRef}
         type="file"
-        accept=".dxf,.pdf"
+        accept=".dxf,.pdf,.stl"
         className="hidden"
         onChange={handleFileSelected}
       />

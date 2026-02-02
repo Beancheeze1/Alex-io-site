@@ -55,15 +55,23 @@ function extOf(name: string): string {
   return base.slice(idx + 1).toLowerCase();
 }
 
-function isPdfOrDxf(
+function isForgeSupportedUpload(
   filename: string,
   contentType: string,
-): { ok: boolean; sourceType: "pdf" | "dxf" | null } {
+): { ok: boolean; sourceType: "pdf" | "dxf" | "stl" | null } {
   const ext = extOf(filename);
   const ct = (contentType || "").toLowerCase();
 
   if (ext === "pdf" || ct === "application/pdf") return { ok: true, sourceType: "pdf" };
   if (ext === "dxf" || ct.includes("dxf") || ct === "application/dxf") return { ok: true, sourceType: "dxf" };
+  if (
+    ext === "stl" ||
+    ct.includes("stl") ||
+    ct === "model/stl" ||
+    ct === "application/sla"
+  ) {
+    return { ok: true, sourceType: "stl" };
+  }
 
   return { ok: false, sourceType: null };
 }
@@ -183,7 +191,7 @@ async function forgeNormalizeToDxf(args: {
   buf: Buffer;
   filename: string;
   contentType: string;
-  sourceType: "pdf" | "dxf";
+  sourceType: "pdf" | "dxf" | "stl";
 }): Promise<{ normalizedDxf: Buffer; manifest: any; facesBytes: Buffer }> {
   const forgeBase = (process.env.ALEX_FORGE_BASE_URL || "").trim();
   if (!forgeBase) {
@@ -262,7 +270,7 @@ async function forgeNormalizeToDxf(args: {
 // DXF v1 behavior: DXF often has no explicit units. Default to inches but be loud via warning.
 // PDF stays strict: missing units is an error.
 if (units !== "in" && units !== "mm") {
-  if (args.sourceType === "dxf") {
+  if (args.sourceType === "dxf" || args.sourceType === "stl") {
     warnings.push({
       code: "units_defaulted",
       message: "Forge did not provide units; defaulting to inches for DXF v1.",
@@ -433,7 +441,7 @@ export async function POST(req: NextRequest) {
 
     // Feature-flagged Forge ingestion (DXF-primary v1)
     const forgeOn = isForgeEnabled();
-    const kind = isPdfOrDxf(origFilename, contentType);
+    const kind = isForgeSupportedUpload(origFilename, contentType);
 
     if (forgeOn && kind.ok && kind.sourceType) {
       let normalized = buf;
