@@ -1002,6 +1002,49 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
     return Math.round(sum * 100) / 100;
   }, [requestedBoxes, primaryItem]);
 
+// Treat packaging helper rows as NON-foam: if a non-primary quote_item matches the
+// inside dims of a selected requested box (and is not a real [LAYOUT-LAYER]),
+// hide it from the Foam materials section.
+const BOX_DIM_TOL = 0.02;
+
+const dimKey = (L: number, W: number, H: number) =>
+  `${Math.round(L * 100)}|${Math.round(W * 100)}|${Math.round(H * 100)}`;
+
+const requestedBoxDimKeys = React.useMemo(() => {
+  const keys = new Set<string>();
+  for (const rb of requestedBoxes) {
+    const L = Number(rb.inside_length_in);
+    const W = Number(rb.inside_width_in);
+    const H = Number(rb.inside_height_in);
+    if (Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H)) {
+      keys.add(dimKey(L, W, H));
+    }
+  }
+  return keys;
+}, [requestedBoxes]);
+
+const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
+  // Exact key match (fast path)
+  if (requestedBoxDimKeys.size > 0 && requestedBoxDimKeys.has(dimKey(itemL, itemW, itemH))) return true;
+
+  // Tolerant match (handles float noise)
+  for (const rb of requestedBoxes) {
+    const L = Number(rb.inside_length_in);
+    const W = Number(rb.inside_width_in);
+    const H = Number(rb.inside_height_in);
+    if (!Number.isFinite(L) || !Number.isFinite(W) || !Number.isFinite(H)) continue;
+
+    if (
+      Math.abs(itemL - L) < BOX_DIM_TOL &&
+      Math.abs(itemW - W) < BOX_DIM_TOL &&
+      Math.abs(itemH - H) < BOX_DIM_TOL
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
   const effectivePackagingSubtotal = packagingSubtotal > 0 ? packagingSubtotal : derivedPackagingSubtotal;
 
   const effectiveGrandSubtotal = grandSubtotal > 0 ? grandSubtotal : foamSubtotal + effectivePackagingSubtotal;
@@ -1758,6 +1801,15 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
                       {items.map((item, idx) => {
                         const isPrimary = idx === 0;
                         const isIncludedLayer = String(item?.notes || "").toUpperCase().includes("[LAYOUT-LAYER]");
+                        const notesUp = String(item?.notes || "").toUpperCase();
+
+                        // Hide the packaging-derived helper row that gets mislabeled as an Included layer:
+                        // - it is not the primary row
+                        // - it is not a real [LAYOUT-LAYER]
+                        // - its dims match a selected requested box inside dims (e.g., 12x10x4)
+                        if (!isPrimary && !isIncludedLayer && isBoxDimMatch(Number(item.length_in), Number(item.width_in), Number(item.height_in))) {
+                          return null;
+                        }
                         const isRemovingLayer = removingLayerItemId === item.id;
 
                         // Path A: primary row should show the *stack total thickness* when available,
