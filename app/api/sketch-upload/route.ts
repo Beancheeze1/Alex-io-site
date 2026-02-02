@@ -100,6 +100,16 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function postJson(url: string, body: any = {}) {
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  const text = await resp.text();
+  return { ok: resp.ok, status: resp.status, text };
+}
+
 async function createQuoteWithAutoNumber(email: string | null) {
   return one<{ id: number; quote_no: string }>(
     `
@@ -217,6 +227,18 @@ async function forgeNormalizeToDxf(args: {
     throw new Error(`Forge job create/upload failed: ${JSON.stringify(createJson)}`);
   }
   const jobId = Number(createJson.job_id);
+
+  if (args.sourceType !== "dxf") {
+    const resetResp = await postJson(`${forgeBase}/api/jobs/${jobId}/reset-to-ready`);
+    if (!resetResp.ok) {
+      throw new Error(`Forge reset-to-ready failed: ${resetResp.text || resetResp.status}`);
+    }
+
+    const planResp = await postJson(`${forgeBase}/api/jobs/${jobId}/plan`);
+    if (!planResp.ok) {
+      throw new Error(`Forge plan failed: ${planResp.text || planResp.status}`);
+    }
+  }
 
   // 3) poll for faces_json artifact or terminal fail
   const timeoutMs = 60000;
