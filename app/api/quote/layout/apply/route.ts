@@ -1170,10 +1170,10 @@ export async function POST(req: NextRequest) {
           : null,
     });
 
-    // NEW: If Apply provided a qty, keep cartons in sync with the quote qty.
-// This fixes "carton stays at 1 until remove/re-add".
+// NEW: If Apply provided a qty, keep cartons in sync with the quote qty.
+// Also recompute carton pricing (unit + extended) so totals update immediately.
 if (qtyMaybe != null) {
-  // 1) Sync all selected cartons (used for packaging subtotal logic)
+  // 1) Sync selected carton quantities
   await q(
     `
     UPDATE public.quote_box_selections
@@ -1183,7 +1183,38 @@ if (qtyMaybe != null) {
     [qtyMaybe, quote.id],
   );
 
-  // 2) Sync the visible carton line(s) in the Interactive Quote (quote_items)
+  // 2) Recompute unit_price_usd + extended_price_usd using the tier table
+  // (same tier rules as /api/boxes/add-to-quote)
+  await q(
+    `
+    UPDATE public.quote_box_selections qbs
+    SET
+      unit_price_usd = CASE
+        WHEN bpt.tier4_min_qty IS NOT NULL AND qbs.qty >= bpt.tier4_min_qty AND bpt.tier4_unit_price IS NOT NULL THEN bpt.tier4_unit_price
+        WHEN bpt.tier3_min_qty IS NOT NULL AND qbs.qty >= bpt.tier3_min_qty AND bpt.tier3_unit_price IS NOT NULL THEN bpt.tier3_unit_price
+        WHEN bpt.tier2_min_qty IS NOT NULL AND qbs.qty >= bpt.tier2_min_qty AND bpt.tier2_unit_price IS NOT NULL THEN bpt.tier2_unit_price
+        WHEN bpt.tier1_min_qty IS NOT NULL AND qbs.qty >= bpt.tier1_min_qty AND bpt.tier1_unit_price IS NOT NULL THEN bpt.tier1_unit_price
+        ELSE bpt.base_unit_price
+      END,
+      extended_price_usd = ROUND(
+        (
+          CASE
+            WHEN bpt.tier4_min_qty IS NOT NULL AND qbs.qty >= bpt.tier4_min_qty AND bpt.tier4_unit_price IS NOT NULL THEN bpt.tier4_unit_price
+            WHEN bpt.tier3_min_qty IS NOT NULL AND qbs.qty >= bpt.tier3_min_qty AND bpt.tier3_unit_price IS NOT NULL THEN bpt.tier3_unit_price
+            WHEN bpt.tier2_min_qty IS NOT NULL AND qbs.qty >= bpt.tier2_min_qty AND bpt.tier2_unit_price IS NOT NULL THEN bpt.tier2_unit_price
+            WHEN bpt.tier1_min_qty IS NOT NULL AND qbs.qty >= bpt.tier1_min_qty AND bpt.tier1_unit_price IS NOT NULL THEN bpt.tier1_unit_price
+            ELSE bpt.base_unit_price
+          END
+        ) * qbs.qty
+      , 2)
+    FROM public.box_price_tiers bpt
+    WHERE qbs.quote_id = $1
+      AND bpt.box_id = qbs.box_id
+    `,
+    [quote.id],
+  );
+
+  // 3) Sync the visible carton line(s) in the Interactive Quote (quote_items)
   await q(
     `
     UPDATE public.quote_items
