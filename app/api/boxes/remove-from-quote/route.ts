@@ -8,12 +8,13 @@
 //     "selectionId": 123
 //   }
 //
-// Behavior:
+// Behavior (Path A):
 //   - Looks up the quote by quote_no
-//   - Deletes the *carton selection* row from public."quote_box_selections"
-//     that matches (id = selectionId AND quote_id = quote.id)
-//   - Does NOT touch foam/other quote_items (safe for layout + pricing)
-//   - Returns { ok: true, deletedCount } on success
+//   - Looks up the carton selection row (to get its SKU) scoped to the quote
+//   - Deletes the carton selection from public.quote_box_selections
+//   - NEW: Deletes the matching "Requested shipping carton: ..." shadow row(s)
+//          from public.quote_items (prevents ghost "Included layer" lines)
+//   - Returns { ok: true, deletedCount, deletedItemCount, quoteId }
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1) Look up the quote so we can safely scope the delete
+    // 1) Look up quote
     const quote = await one<{
       id: number;
       quote_no: string;
@@ -99,9 +100,24 @@ export async function POST(req: NextRequest) {
     const quoteId = quote.id;
     const selIdNum = Number(selectionId);
 
-    // 2) Delete from quote_box_selections for this quote
-    //    This is what /api/boxes/for-quote reads to show cartons in the print view.
-    const result = await q(
+    // 2) Fetch selection SKU (so we can delete its shadow quote_items rows)
+    const sel = await one<{
+      sku: string | null;
+    }>(
+      `
+      SELECT sku
+      FROM public."quote_box_selections"
+      WHERE id = $1
+        AND quote_id = $2
+      LIMIT 1
+      `,
+      [selIdNum, quoteId],
+    );
+
+    const sku = sel?.sku?.trim() || null;
+
+    // 3) Delete the selection row
+    const delSelResult = await q(
       `
       DELETE FROM public."quote_box_selections"
       WHERE id = $1
@@ -110,21 +126,48 @@ export async function POST(req: NextRequest) {
       [selIdNum, quoteId],
     );
 
-    // q(...) returns an array of rows for SELECT; for DELETE we care about rowCount if available.
     const deletedCount =
-      // @ts-ignore – some pg clients expose rowCount
-      typeof (result as any)?.rowCount === "number"
+      // @ts-ignore
+      typeof (delSelResult as any)?.rowCount === "number"
         ? // @ts-ignore
-          (result as any).rowCount
-        : // fall back to 0/1 based on length, if driver returns deleted rows
-          Array.isArray(result)
-        ? result.length
-        : 0;
+          (delSelResult as any).rowCount
+        : Array.isArray(delSelResult)
+          ? delSelResult.length
+          : 0;
+
+    // 4) NEW: Delete the shadow quote_items row(s) for this carton SKU
+    // These rows were inserted as "Requested shipping carton: ... <sku> ..."
+    // and can surface as unwanted "Included layer" lines if they accumulate.
+    let deletedItemCount = 0;
+
+    if (sku) {
+      const delItemsResult = await q(
+        `
+        DELETE FROM public."quote_items"
+        WHERE quote_id = $1
+          AND product_id IS NULL
+          AND notes ILIKE 'Requested shipping carton:%'
+          AND notes ILIKE $2
+        `,
+        [quoteId, `%${sku}%`],
+      );
+
+      deletedItemCount =
+        // @ts-ignore
+        typeof (delItemsResult as any)?.rowCount === "number"
+          ? // @ts-ignore
+            (delItemsResult as any).rowCount
+          : Array.isArray(delItemsResult)
+            ? delItemsResult.length
+            : 0;
+    }
 
     return NextResponse.json({
       ok: true,
       deletedCount,
+      deletedItemCount,
       quoteId,
+      sku,
     });
   } catch (err: any) {
     console.error("Error in /api/boxes/remove-from-quote:", err);
