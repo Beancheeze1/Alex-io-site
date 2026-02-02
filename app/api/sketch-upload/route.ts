@@ -110,6 +110,38 @@ async function postJson(url: string, body: any = {}) {
   return { ok: resp.ok, status: resp.status, text };
 }
 
+async function stepFacesFromStl(args: {
+  buf: Buffer;
+  filename: string;
+  contentType: string;
+}): Promise<FacesJson> {
+  const base = (process.env.STEP_SERVICE_URL || "").trim().replace(/\/+$/, "");
+  if (!base) throw new Error("STEP_SERVICE_URL is not set");
+
+  const form = new FormData();
+  const bytes = new Uint8Array(args.buf);
+  const blob = new Blob([bytes], { type: args.contentType || "application/octet-stream" });
+  form.append("file", blob, args.filename || "input.stl");
+
+  const resp = await fetch(`${base}/faces-from-stl`, { method: "POST", body: form });
+  const text = await resp.text();
+
+  if (!resp.ok) throw new Error(`STEP faces-from-stl failed: HTTP ${resp.status}: ${text.slice(0, 600)}`);
+
+  let json: any = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`STEP faces-from-stl returned non-JSON: ${text.slice(0, 300)}`);
+  }
+
+  if (!json?.ok || !json?.faces_json) {
+    throw new Error(`STEP faces-from-stl missing ok/faces_json: ${text.slice(0, 600)}`);
+  }
+
+  return json.faces_json as FacesJson;
+}
+
 async function createQuoteWithAutoNumber(email: string | null) {
   return one<{ id: number; quote_no: string }>(
     `
@@ -464,6 +496,61 @@ export async function POST(req: NextRequest) {
     // Feature-flagged Forge ingestion (DXF-primary v1)
     const forgeOn = isForgeEnabled();
     const kind = isForgeSupportedUpload(origFilename, contentType);
+
+    // STL: use STEP microservice to extract faces_json (NOT Forge)
+    if (kind.ok && kind.sourceType === "stl") {
+      let faces: FacesJson;
+      try {
+        faces = await stepFacesFromStl({ buf, filename: origFilename, contentType });
+      } catch (e: any) {
+        return err("step_faces_exception", String(e?.message || e), 500);
+      }
+
+      const facesText = JSON.stringify(faces, null, 2);
+      const facesBytes = Buffer.from(facesText, "utf8");
+
+      // Store original STL
+      const inserted = (await one<AttachRow>(
+        `
+        INSERT INTO quote_attachments
+          (quote_id, quote_no, filename, content_type, size_bytes, data)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, quote_id, quote_no, filename, content_type, size_bytes;
+        `,
+        [quoteId, quoteNo, origFilename, contentType, buf.length, buf],
+      )) as AttachRow | null;
+
+      if (!inserted) {
+        return err("insert_failed", "Could not create quote_attachments row", 500);
+      }
+
+      // Store faces as forge_faces.json so the editor seeding path stays unchanged
+      const facesRow = await one<{ id: number }>(
+        `
+        INSERT INTO quote_attachments
+          (quote_id, quote_no, filename, content_type, size_bytes, data)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id;
+        `,
+        [inserted.quote_id, inserted.quote_no, "forge_faces.json", "application/json", facesBytes.length, facesBytes],
+      );
+
+      return NextResponse.json(
+        {
+          ok: true,
+          attachmentId: inserted.id,
+          quoteId: quoteId,
+          quoteNo: quoteNo,
+          filename: inserted.filename,
+          size: inserted.size_bytes,
+          type: inserted.content_type,
+          parsed: null,
+          autoQuote: null,
+          stl: { used: true, faces_attachment_id: facesRow?.id ?? null },
+        },
+        { status: 200 },
+      );
+    }
 
     if (forgeOn && kind.ok && kind.sourceType) {
       let normalized = buf;
