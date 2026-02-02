@@ -1170,6 +1170,33 @@ export async function POST(req: NextRequest) {
           : null,
     });
 
+    // NEW: If Apply provided a qty, keep cartons in sync with the quote qty.
+// This fixes "carton stays at 1 until remove/re-add".
+if (qtyMaybe != null) {
+  // 1) Sync all selected cartons (used for packaging subtotal logic)
+  await q(
+    `
+    UPDATE public.quote_box_selections
+    SET qty = $1
+    WHERE quote_id = $2
+    `,
+    [qtyMaybe, quote.id],
+  );
+
+  // 2) Sync the visible carton line(s) in the Interactive Quote (quote_items)
+  await q(
+    `
+    UPDATE public.quote_items
+    SET qty = $1
+    WHERE quote_id = $2
+      AND product_id IS NULL
+      AND notes ILIKE 'Requested shipping carton:%'
+    `,
+    [qtyMaybe, quote.id],
+  );
+}
+
+
     // FIX (Path A): After Apply, PRIMARY must reflect FULL STACK DEPTH so /api/quotes/calc prices the full set.
     try {
       const stackDepthIn = sumLayerThickness(layoutForSave);
