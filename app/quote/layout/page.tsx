@@ -2057,6 +2057,14 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
     initialQty != null ? initialQty : "",
   );
 
+    // Keep qty in sync when initialQty arrives asynchronously.
+  // Only seed qty if the user hasn't typed/changed it yet (qty is still blank).
+  React.useEffect(() => {
+    if (initialQty == null) return;
+    setQty((prev) => (prev === "" ? initialQty : prev));
+  }, [initialQty]);
+
+
   // Customer info
   const [customerName, setCustomerName] = React.useState<string>(
     initialCustomerName || "",
