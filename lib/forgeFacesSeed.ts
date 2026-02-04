@@ -313,19 +313,41 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
 
     const circle = detectCircle(pts);
 
-    let shape: CavityShape = "rect";
-    let lengthIn = snapPretty(bb.w, units);
-    let widthIn = snapPretty(bb.h, units);
-    let cornerRadiusIn = 0;
+ let shape: CavityShape = "rect";
+let lengthIn = snapPretty(bb.w, units);
+let widthIn = snapPretty(bb.h, units);
+let cornerRadiusIn = 0;
 
-    if (circle) {
-      shape = "circle";
-      lengthIn = snapPretty(circle.diameter, units);
-      widthIn = lengthIn;
-    } else {
-      // Rect stays rect; roundedRect is not inferred here (Path A minimal)
-      shape = "rect";
-    }
+// NEW (Path A): keep original loop for STL cavities
+// Stored in editor-normalized TOP-LEFT space (same convention as x/y)
+let polyPoints:
+  | { x: number; y: number }[]
+  | undefined = undefined;
+
+if (circle) {
+  shape = "circle";
+  lengthIn = snapPretty(circle.diameter, units);
+  widthIn = lengthIn;
+} else {
+  // NEW: preserve true cavity outline as a polygon (not bbox-rect)
+  shape = "poly";
+
+  polyPoints = pts
+    .map((p) => {
+      const xIn = p.x - outerMinX;
+      const yIn = p.y - outerMinY;
+
+      const xN = blockLen > 0 ? xIn / blockLen : 0;
+      const yN = blockWid > 0 ? 1 - (yIn / blockWid) : 0; // TOP-LEFT normalization
+
+      return {
+        x: xN < 0 ? 0 : xN > 1 ? 1 : xN,
+        y: yN < 0 ? 0 : yN > 1 ? 1 : yN,
+      };
+    })
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+}
+
 
     const depthIn = 1;
 
@@ -356,17 +378,23 @@ const y = clamp01(yRaw);
       depthIn,
     });
 
-    cavities.push({
-      id: `seed-cav-${cavities.length + 1}`,
-      label,
-      shape,
-      cornerRadiusIn,
-      lengthIn,
-      widthIn,
-      depthIn,
-      x,
-      y,
-    });
+  cavities.push({
+  id: `seed-cav-${cavities.length + 1}`,
+  label,
+  shape,
+  cornerRadiusIn,
+  lengthIn,
+  widthIn,
+  depthIn,
+  x,
+  y,
+
+  // NEW (Path A): only present for shape === "poly"
+  ...(shape === "poly" && polyPoints && polyPoints.length >= 3
+    ? { points: polyPoints }
+    : {}),
+});
+
   }
 
   const stackCavs = cavities.map((c) => ({ ...c }));

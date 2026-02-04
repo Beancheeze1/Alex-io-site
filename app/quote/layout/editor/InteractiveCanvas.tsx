@@ -356,6 +356,18 @@ export default function InteractiveCanvas({
     const cavX = blockOffset.x + xNorm * blockPx.width;
     const cavY = blockOffset.y + yNorm * blockPx.height;
 
+// NEW (Path A): polygon cavities are view-only for now (no move)
+// Prevents point drift/regressions while still allowing selection.
+if ((cavity as any).shape === "poly") {
+  selectAction(cavity.id, {
+    additive:
+      editorMode === "advanced" &&
+      (e.shiftKey || e.ctrlKey || (e as any).metaKey),
+  });
+  return;
+}
+
+
     setDrag({
       mode: "move",
       id: cavity.id,
@@ -376,6 +388,16 @@ export default function InteractiveCanvas({
   ) => {
     e.stopPropagation();
     e.preventDefault();
+    // NEW (Path A): polygon cavities are view-only for now (no resize)
+if ((cavity as any).shape === "poly") {
+  selectAction(cavity.id, {
+    additive:
+      editorMode === "advanced" &&
+      (e.shiftKey || e.ctrlKey || (e as any).metaKey),
+  });
+  return;
+}
+
     setDrag({
       mode: "resize",
       id: cavity.id,
@@ -600,8 +622,10 @@ export default function InteractiveCanvas({
             const cavY = blockOffset.y + yNorm * blockPx.height;
 
             const isSelected = selectedIds.includes(cavity.id);
-            const isCircle = cavity.shape === "circle";
-            const isRounded = cavity.shape === "roundedRect";
+const isCircle = cavity.shape === "circle";
+const isRounded = cavity.shape === "roundedRect";
+const isPoly = cavity.shape === "poly" && Array.isArray((cavity as any).points);
+
 
             const cornerRadiusPx = isRounded
               ? Math.min(
@@ -623,30 +647,39 @@ export default function InteractiveCanvas({
 
             return (
               <g key={cavity.id}>
-                {isCircle ? (
-                  <circle
-                    cx={cavX + cavWidthPx / 2}
-                    cy={cavY + cavHeightPx / 2}
-                    r={Math.min(cavWidthPx, cavHeightPx) / 2}
-                    fill={cavityFill}
-                    stroke={strokeColor}
-                    strokeWidth={isSelected ? 2 : 1}
-                    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
-                  />
-                ) : (
-                  <rect
-                    x={cavX}
-                    y={cavY}
-                    width={cavWidthPx}
-                    height={cavHeightPx}
-                    rx={cornerRadiusPx}
-                    ry={cornerRadiusPx}
-                    fill={cavityFill}
-                    stroke={strokeColor}
-                    strokeWidth={isSelected ? 2 : 1}
-                    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
-                  />
-                )}
+              {isPoly ? (
+  <path
+    d={buildPolyPathD((cavity as any).points, blockPx, blockOffset)}
+    fill={cavityFill}
+    stroke={strokeColor}
+    strokeWidth={isSelected ? 2 : 1}
+    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+  />
+) : isCircle ? (
+  <circle
+    cx={cavX + cavWidthPx / 2}
+    cy={cavY + cavHeightPx / 2}
+    r={Math.min(cavWidthPx, cavHeightPx) / 2}
+    fill={cavityFill}
+    stroke={strokeColor}
+    strokeWidth={isSelected ? 2 : 1}
+    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+  />
+) : (
+  <rect
+    x={cavX}
+    y={cavY}
+    width={cavWidthPx}
+    height={cavHeightPx}
+    rx={cornerRadiusPx}
+    ry={cornerRadiusPx}
+    fill={cavityFill}
+    stroke={strokeColor}
+    strokeWidth={isSelected ? 2 : 1}
+    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+  />
+)}
+
 
                 {/* label (computed from dims so it always matches the cavity size) */}
                 <text
@@ -659,20 +692,26 @@ export default function InteractiveCanvas({
                 >
                   {formatCavityLabel(cavity)}
                 </text>
+                
 
-                {/* resize handle */}
-                <rect
-                  x={handleX}
-                  y={handleY}
-                  width={handleSize}
-                  height={handleSize}
-                  rx={2}
-                  ry={2}
-                  fill={handleColor}
-                  stroke="#020617"
-                  strokeWidth={1}
-                  onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
-                />
+                {!isPoly && (
+  <>
+    {/* resize handle */}
+    <rect
+      x={handleX}
+      y={handleY}
+      width={handleSize}
+      height={handleSize}
+      rx={2}
+      ry={2}
+      fill={handleColor}
+      stroke="#020617"
+      strokeWidth={1}
+      onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
+    />
+  </>
+)}
+
               </g>
             );
           })}
@@ -686,6 +725,30 @@ export default function InteractiveCanvas({
 }
 
 // ===== helpers =====
+
+function buildPolyPathD(
+  points: { x: number; y: number }[],
+  blockPx: { width: number; height: number },
+  offset: { x: number; y: number },
+): string {
+  if (!points || points.length < 3) return "";
+
+  const toPx = (pt: { x: number; y: number }) => ({
+    x: offset.x + pt.x * blockPx.width,
+    y: offset.y + pt.y * blockPx.height,
+  });
+
+  const first = toPx(points[0]);
+  let d = `M ${first.x} ${first.y}`;
+
+  for (let i = 1; i < points.length; i++) {
+    const p = toPx(points[i]);
+    d += ` L ${p.x} ${p.y}`;
+  }
+
+  return d + " Z";
+}
+
 
 function safeNorm01(v: any, fallback: number) {
   const n = Number(v);

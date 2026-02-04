@@ -26,7 +26,9 @@ export type BlockDims = {
   chamferIn?: number;
 };
 
-export type CavityShape = "rect" | "circle" | "roundedRect";
+export type CavityShape = "rect" | "circle" | "roundedRect" | "poly";
+
+export type PolyPoint = { x: number; y: number };
 
 export type Cavity = {
   id: string;
@@ -41,7 +43,12 @@ export type Cavity = {
   // These will be assigned later by page.tsx grid placement.
   x: number;
   y: number;
+
+  // NEW (Path A): polygon loop points in normalized TOP-LEFT space
+  // Only present when shape === "poly" (STL/Forge seeded)
+  points?: PolyPoint[];
 };
+
 
 /**
  * A single foam layer in a multi-layer stack.
