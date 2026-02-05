@@ -356,17 +356,16 @@ export default function InteractiveCanvas({
     const cavX = blockOffset.x + xNorm * blockPx.width;
     const cavY = blockOffset.y + yNorm * blockPx.height;
 
-// NEW (Path A): polygon cavities are view-only for now (no move)
-// Prevents point drift/regressions while still allowing selection.
-if ((cavity as any).shape === "poly") {
-  selectAction(cavity.id, {
-    additive:
-      editorMode === "advanced" &&
-      (e.shiftKey || e.ctrlKey || (e as any).metaKey),
-  });
-  return;
-}
-
+    // NEW (Path A): polygon cavities are view-only for now (no move)
+    // Prevents point drift/regressions while still allowing selection.
+    if ((cavity as any).shape === "poly") {
+      selectAction(cavity.id, {
+        additive:
+          editorMode === "advanced" &&
+          (e.shiftKey || e.ctrlKey || (e as any).metaKey),
+      });
+      return;
+    }
 
     setDrag({
       mode: "move",
@@ -389,14 +388,14 @@ if ((cavity as any).shape === "poly") {
     e.stopPropagation();
     e.preventDefault();
     // NEW (Path A): polygon cavities are view-only for now (no resize)
-if ((cavity as any).shape === "poly") {
-  selectAction(cavity.id, {
-    additive:
-      editorMode === "advanced" &&
-      (e.shiftKey || e.ctrlKey || (e as any).metaKey),
-  });
-  return;
-}
+    if ((cavity as any).shape === "poly") {
+      selectAction(cavity.id, {
+        additive:
+          editorMode === "advanced" &&
+          (e.shiftKey || e.ctrlKey || (e as any).metaKey),
+      });
+      return;
+    }
 
     setDrag({
       mode: "resize",
@@ -531,6 +530,10 @@ if ((cavity as any).shape === "poly") {
       )
     : null;
 
+  // NEW (Path A): prevent rendering duplicate cavities that are geometrically identical.
+  // This does NOT change layout state or selection – it only skips drawing duplicates.
+  const seenRenderSigs = new Set<string>();
+
   return (
     // outer wrapper stays neutral – the dark grid comes from the parent
     <div
@@ -609,6 +612,12 @@ if ((cavity as any).shape === "poly") {
 
           {/* cavities */}
           {cavities.map((cavity, index) => {
+            const sig = getCavityRenderSig(cavity);
+            if (sig) {
+              if (seenRenderSigs.has(sig)) return null;
+              seenRenderSigs.add(sig);
+            }
+
             const cavWidthPx =
               (cavity.lengthIn / block.lengthIn) * blockPx.width;
             const cavHeightPx =
@@ -622,10 +631,9 @@ if ((cavity as any).shape === "poly") {
             const cavY = blockOffset.y + yNorm * blockPx.height;
 
             const isSelected = selectedIds.includes(cavity.id);
-const isCircle = cavity.shape === "circle";
-const isRounded = cavity.shape === "roundedRect";
-const isPoly = cavity.shape === "poly" && Array.isArray((cavity as any).points);
-
+            const isCircle = cavity.shape === "circle";
+            const isRounded = cavity.shape === "roundedRect";
+            const isPoly = cavity.shape === "poly" && Array.isArray((cavity as any).points);
 
             const cornerRadiusPx = isRounded
               ? Math.min(
@@ -647,39 +655,38 @@ const isPoly = cavity.shape === "poly" && Array.isArray((cavity as any).points);
 
             return (
               <g key={cavity.id}>
-              {isPoly ? (
-  <path
-    d={buildPolyPathD((cavity as any).points, blockPx, blockOffset)}
-    fill={cavityFill}
-    stroke={strokeColor}
-    strokeWidth={isSelected ? 2 : 1}
-    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
-  />
-) : isCircle ? (
-  <circle
-    cx={cavX + cavWidthPx / 2}
-    cy={cavY + cavHeightPx / 2}
-    r={Math.min(cavWidthPx, cavHeightPx) / 2}
-    fill={cavityFill}
-    stroke={strokeColor}
-    strokeWidth={isSelected ? 2 : 1}
-    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
-  />
-) : (
-  <rect
-    x={cavX}
-    y={cavY}
-    width={cavWidthPx}
-    height={cavHeightPx}
-    rx={cornerRadiusPx}
-    ry={cornerRadiusPx}
-    fill={cavityFill}
-    stroke={strokeColor}
-    strokeWidth={isSelected ? 2 : 1}
-    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
-  />
-)}
-
+                {isPoly ? (
+                  <path
+                    d={buildPolyPathD((cavity as any).points, blockPx, blockOffset)}
+                    fill={cavityFill}
+                    stroke={strokeColor}
+                    strokeWidth={isSelected ? 2 : 1}
+                    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+                  />
+                ) : isCircle ? (
+                  <circle
+                    cx={cavX + cavWidthPx / 2}
+                    cy={cavY + cavHeightPx / 2}
+                    r={Math.min(cavWidthPx, cavHeightPx) / 2}
+                    fill={cavityFill}
+                    stroke={strokeColor}
+                    strokeWidth={isSelected ? 2 : 1}
+                    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+                  />
+                ) : (
+                  <rect
+                    x={cavX}
+                    y={cavY}
+                    width={cavWidthPx}
+                    height={cavHeightPx}
+                    rx={cornerRadiusPx}
+                    ry={cornerRadiusPx}
+                    fill={cavityFill}
+                    stroke={strokeColor}
+                    strokeWidth={isSelected ? 2 : 1}
+                    onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
+                  />
+                )}
 
                 {/* label (computed from dims so it always matches the cavity size) */}
                 <text
@@ -692,26 +699,24 @@ const isPoly = cavity.shape === "poly" && Array.isArray((cavity as any).points);
                 >
                   {formatCavityLabel(cavity)}
                 </text>
-                
 
                 {!isPoly && (
-  <>
-    {/* resize handle */}
-    <rect
-      x={handleX}
-      y={handleY}
-      width={handleSize}
-      height={handleSize}
-      rx={2}
-      ry={2}
-      fill={handleColor}
-      stroke="#020617"
-      strokeWidth={1}
-      onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
-    />
-  </>
-)}
-
+                  <>
+                    {/* resize handle */}
+                    <rect
+                      x={handleX}
+                      y={handleY}
+                      width={handleSize}
+                      height={handleSize}
+                      rx={2}
+                      ry={2}
+                      fill={handleColor}
+                      stroke="#020617"
+                      strokeWidth={1}
+                      onMouseDown={(e) => handleResizeMouseDown(e, cavity)}
+                    />
+                  </>
+                )}
               </g>
             );
           })}
@@ -749,7 +754,6 @@ function buildPolyPathD(
   return d + " Z";
 }
 
-
 function safeNorm01(v: any, fallback: number) {
   const n = Number(v);
   if (!Number.isFinite(n)) return clamp01(fallback);
@@ -770,6 +774,68 @@ function clamp(v: number, min: number, max: number): number {
   if (v < min) return min;
   if (v > max) return max;
   return v;
+}
+
+// NEW: stable geometry signature so identical cavities are only drawn once.
+function getCavityRenderSig(cavity: Cavity): string | null {
+  const shape = String((cavity as any).shape || "rect");
+
+  const r4 = (n: any) => {
+    const v = Number(n);
+    return Number.isFinite(v) ? Math.round(v * 10000) / 10000 : 0;
+  };
+
+  // For poly, use bbox + centroid + area in normalized space (points are normalized 0..1)
+  if (shape === "poly" && Array.isArray((cavity as any).points)) {
+    const pts = (cavity as any).points as { x: number; y: number }[];
+    if (!pts || pts.length < 3) return null;
+
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    let sumx = 0, sumy = 0;
+
+    for (const p of pts) {
+      const x = Number(p.x);
+      const y = Number(p.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      minx = Math.min(minx, x);
+      miny = Math.min(miny, y);
+      maxx = Math.max(maxx, x);
+      maxy = Math.max(maxy, y);
+      sumx += x;
+      sumy += y;
+    }
+
+    const n = pts.length;
+    const cx = sumx / n;
+    const cy = sumy / n;
+
+    // shoelace area (assume closed or open; we close it)
+    let area = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      const x1 = Number(a.x), y1 = Number(a.y);
+      const x2 = Number(b.x), y2 = Number(b.y);
+      if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;
+      area += x1 * y2 - x2 * y1;
+    }
+    area = Math.abs(area) / 2;
+
+    const bw = maxx - minx;
+    const bh = maxy - miny;
+
+    return `poly:${r4(minx)},${r4(miny)},${r4(maxx)},${r4(maxy)},${r4(cx)},${r4(cy)},${r4(bw)},${r4(bh)},${r4(area)}`;
+  }
+
+  // For non-poly shapes, signature by normalized position + size + key params
+  const x = r4((cavity as any).x);
+  const y = r4((cavity as any).y);
+  const len = r4((cavity as any).lengthIn);
+  const wid = r4((cavity as any).widthIn);
+  const cr = r4((cavity as any).cornerRadiusIn);
+  const dia = r4((cavity as any).diameterIn);
+
+  return `${shape}:${x},${y},${len},${wid},${cr},${dia}`;
 }
 
 // simple “keep at least minGapIn between cavities” check
