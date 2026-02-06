@@ -295,8 +295,47 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
 
   const cavities: LayoutModel["cavities"] = [];
 
+    function pointInLoop(pt: Pt, loop: Pt[]): boolean {
+    let inside = false;
+    for (let i = 0, j = loop.length - 1; i < loop.length; j = i++) {
+      const xi = loop[i].x, yi = loop[i].y;
+      const xj = loop[j].x, yj = loop[j].y;
+      const intersect = yi > pt.y !== yj > pt.y && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-18) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  const islandLoopIndices = new Set<number>();
   for (let i = 0; i < loopsRaw.length; i++) {
     if (i === outerIdx) continue;
+    const iLoop = loopsRaw[i];
+    const iArea = typeof iLoop?.area === 'number' ? iLoop.area : 0;
+    if (iArea <= 0) continue;
+    const iPts = toPts(iLoop);
+    if (iPts.length < 3) continue;
+    const iCenter = {
+      x: iPts.reduce((sum, p) => sum + p.x, 0) / iPts.length,
+      y: iPts.reduce((sum, p) => sum + p.y, 0) / iPts.length,
+    };
+    for (let j = 0; j < loopsRaw.length; j++) {
+      if (j === outerIdx || j === i) continue;
+      const jLoop = loopsRaw[j];
+      const jArea = typeof jLoop?.area === 'number' ? jLoop.area : 0;
+      if (jArea >= 0) continue;
+      const jPts = toPts(jLoop);
+      if (jPts.length < 3) continue;
+      if (pointInLoop(iCenter, jPts)) {
+        islandLoopIndices.add(i);
+        break;
+      }
+    }
+  }
+
+  for (let i = 0; i < loopsRaw.length; i++) {
+    if (i === outerIdx) continue;
+    if (islandLoopIndices.has(i)) continue;
+
 
     const pts = toPts(loopsRaw[i]);
     if (pts.length < 3) continue;
