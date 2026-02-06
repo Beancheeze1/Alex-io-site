@@ -477,60 +477,10 @@ function buildLoopsFromSegments(segments: Segment[], tol = 1e-6): Loop[] {
     (l) => l.closed && Number.isFinite(l.area) && Math.abs(l.area) > Math.max(eqTol, 1e-9),
   );
 
-  // CRITICAL: Prune nested "inner loops" created inside cavity boundaries
-  function pointInPoly(pt: Point2, poly: Point2[]): boolean {
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const xi = poly[i].x,
-        yi = poly[i].y;
-      const xj = poly[j].x,
-        yj = poly[j].y;
-      const intersect = yi > pt.y !== yj > pt.y && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + 1e-18) + xi;
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  }
-
-  function centroid(pts: Point2[]): Point2 {
-    let sx = 0,
-      sy = 0;
-    const n = pts.length || 1;
-    for (const p of pts) {
-      sx += p.x;
-      sy += p.y;
-    }
-    return { x: sx / n, y: sy / n };
-  }
-
-  if (closedLoops.length <= 1) return closedLoops;
-
-  const byAbsAreaDesc = [...closedLoops].sort((a, b) => Math.abs(b.area) - Math.abs(a.area));
-  const outer = byAbsAreaDesc[0];
-
-  const dropIdx = new Set<number>();
-
-  // For each loop (excluding outer), if it sits inside another NON-outer loop, drop it
-  for (const l of closedLoops) {
-    if (l.idx === outer.idx) continue;
-
-    const c = centroid(l.points);
-
-    for (const container of closedLoops) {
-      if (container.idx === outer.idx) continue;
-      if (container.idx === l.idx) continue;
-
-      if (Math.abs(container.area) <= Math.abs(l.area) + 1e-12) continue;
-
-      if (pointInPoly(c, container.points)) {
-        dropIdx.add(l.idx);
-        break;
-      }
-    }
-  }
-
-  const pruned = closedLoops.filter((l) => !dropIdx.has(l.idx));
-
-  return pruned;
+  // MODIFIED: Keep ALL closed loops including nested cavities (holes-within-holes)
+  // This allows proper representation of complex geometries where cavities have
+  // their own internal cutouts.
+  return closedLoops;
 }
 
 /* ----------------------- PUBLIC API ----------------------- */

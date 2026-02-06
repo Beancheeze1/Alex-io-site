@@ -356,16 +356,8 @@ export default function InteractiveCanvas({
     const cavX = blockOffset.x + xNorm * blockPx.width;
     const cavY = blockOffset.y + yNorm * blockPx.height;
 
-    // NEW (Path A): polygon cavities are view-only for now (no move)
-    // Prevents point drift/regressions while still allowing selection.
-    if ((cavity as any).shape === "poly") {
-      selectAction(cavity.id, {
-        additive:
-          editorMode === "advanced" &&
-          (e.shiftKey || e.ctrlKey || (e as any).metaKey),
-      });
-      return;
-    }
+    // Poly cavities can now be moved (just not resized)
+    // The move logic uses lengthIn/widthIn which are the bbox dimensions
 
     setDrag({
       mode: "move",
