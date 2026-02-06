@@ -26,6 +26,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { stlToFacesJson } from "@/lib/stl/processor";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -110,37 +111,6 @@ async function postJson(url: string, body: any = {}) {
   return { ok: resp.ok, status: resp.status, text };
 }
 
-async function stepFacesFromStl(args: {
-  buf: Buffer;
-  filename: string;
-  contentType: string;
-}): Promise<FacesJson> {
-  const base = (process.env.STEP_SERVICE_URL || "").trim().replace(/\/+$/, "");
-  if (!base) throw new Error("STEP_SERVICE_URL is not set");
-
-  const form = new FormData();
-  const bytes = new Uint8Array(args.buf);
-  const blob = new Blob([bytes], { type: args.contentType || "application/octet-stream" });
-  form.append("file", blob, args.filename || "input.stl");
-
-  const resp = await fetch(`${base}/faces-from-stl`, { method: "POST", body: form });
-  const text = await resp.text();
-
-  if (!resp.ok) throw new Error(`STEP faces-from-stl failed: HTTP ${resp.status}: ${text.slice(0, 600)}`);
-
-  let json: any = null;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`STEP faces-from-stl returned non-JSON: ${text.slice(0, 300)}`);
-  }
-
-  if (!json?.ok || !json?.faces_json) {
-    throw new Error(`STEP faces-from-stl missing ok/faces_json: ${text.slice(0, 600)}`);
-  }
-
-  return json.faces_json as FacesJson;
-}
 
 async function createQuoteWithAutoNumber(email: string | null) {
   return one<{ id: number; quote_no: string }>(
@@ -497,13 +467,13 @@ export async function POST(req: NextRequest) {
     const forgeOn = isForgeEnabled();
     const kind = isForgeSupportedUpload(origFilename, contentType);
 
-    // STL: use STEP microservice to extract faces_json (NOT Forge)
+        // STL: use in-process extraction (ported from CORS_edit worker)
     if (kind.ok && kind.sourceType === "stl") {
       let faces: FacesJson;
       try {
-        faces = await stepFacesFromStl({ buf, filename: origFilename, contentType });
+        faces = stlToFacesJson(buf);
       } catch (e: any) {
-        return err("step_faces_exception", String(e?.message || e), 500);
+        return err("stl_processing_exception", String(e?.message || e), 500);
       }
 
       const facesText = JSON.stringify(faces, null, 2);
