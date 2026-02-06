@@ -8,136 +8,82 @@
 // PATH A CHANGE:
 // - Add Option A: per-layer exports when layout.stack[] exists.
 // - Uses layer.cropCorners to chamfer ONLY that layer’s block outline.
-// - Legacy single-layer layouts preserved.
-//
-// NEW (Path A, additive):
-// - Preserve poly cavity exports when cav.shape === "poly" and cav.points[] exists.
-//   points[] are normalized in TOP-LEFT space (0..1).
-//
+// - Legacy single-layer { block, cavities } output remains unchanged.
+
+import { buildOuterOutlinePolyline } from "./outline";
+
+export type LayoutExportBundle = {
+  svg: string;
+  dxf: string;
+  step: string;
+};
 
 type BlockLike = {
   lengthIn: number;
   widthIn: number;
   thicknessIn?: number | null;
-  cornerStyle?: "square" | "chamfer" | null;
-  chamferIn?: number | null;
+
+  // optional corner metadata (persisted by layout editor)
+  cornerStyle?: string | null; // "square" | "chamfer"
+  chamferIn?: number | null; // inches
   roundCorners?: boolean | null;
   roundRadiusIn?: number | null;
 };
 
 type CavityLike = {
   id: string;
-  shape: "rect" | "roundedRect" | "circle" | "poly";
+  shape: "rect" | "roundedRect" | "circle";
   x: number; // normalized 0–1 position from left
   y: number; // normalized 0–1 position from top
   lengthIn: number;
   widthIn: number;
   depthIn?: number | null;
   cornerRadiusIn?: number | null;
-
-  // For poly cavities: normalized points in TOP-LEFT space (0..1)
-  points?: Array<{ x: number; y: number }> | null;
-
   label?: string | null;
 };
 
 type LayerLike = {
-  thicknessIn: number;
-  cavities?: CavityLike[] | null;
+  id?: string | null;
+  label?: string | null;
+  thicknessIn?: number | null;
   cropCorners?: boolean | null;
   roundCorners?: boolean | null;
   roundRadiusIn?: number | null;
+  cavities?: CavityLike[] | null;
 };
 
 type LayoutLike = {
-  units?: string | null;
   block: BlockLike;
-  cavities?: CavityLike[] | null;
+  cavities?: CavityLike[];
+
+  // NEW: optional multi-layer stack (source of truth for Option A exports)
   stack?: LayerLike[] | null;
+  layers?: LayerLike[] | null; // tolerate alt key
 };
 
 const VIEW_W = 1000;
 const VIEW_H = 700;
 const PADDING = 40;
-const DEFAULT_ROUND_RADIUS_IN = 1;
+const DEFAULT_ROUND_RADIUS_IN = 0.25;
 
-function escapeText(s: string) {
+export function buildLayoutExports(layout: LayoutLike): LayoutExportBundle {
+  const svg = buildSvg(layout);
+  const dxf = buildDxf(layout);
+  const step = buildStepStub(layout);
+  return { svg, dxf, step };
+}
+
+/* ================= SVG ================= */
+
+function escapeText(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function nnum(v: any, fallback = 0) {
+function nnum(v: any, fallback = 0): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function buildOuterOutlinePolyline(args: {
-  lengthIn: number;
-  widthIn: number;
-  chamferIn?: number;
-  roundCorners?: boolean;
-  roundRadiusIn?: number;
-  segments?: number;
-}): { x: number; y: number }[] {
-  const L = Number(args.lengthIn) || 0;
-  const W = Number(args.widthIn) || 0;
-  const c = Number(args.chamferIn) || 0;
-
-  if (L <= 0 || W <= 0) return [];
-
-  // Rounded corners (approx) — used for SVG only.
-  if (args.roundCorners && (args.roundRadiusIn ?? 0) > 0.001) {
-    const r = Math.max(0, Math.min(Number(args.roundRadiusIn), L / 2 - 0.01, W / 2 - 0.01));
-    const seg = Math.max(6, Number(args.segments) || 12);
-
-    const pts: { x: number; y: number }[] = [];
-
-    const arc = (cx: number, cy: number, a0: number, a1: number) => {
-      for (let i = 0; i <= seg; i++) {
-        const t = i / seg;
-        const a = a0 + (a1 - a0) * t;
-        pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
-      }
-    };
-
-    // CAD space: origin bottom-left.
-    // Build clockwise outline starting at (r,0)
-    pts.push({ x: r, y: 0 });
-    pts.push({ x: L - r, y: 0 });
-    arc(L - r, r, -Math.PI / 2, 0);
-    pts.push({ x: L, y: W - r });
-    arc(L - r, W - r, 0, Math.PI / 2);
-    pts.push({ x: r, y: W });
-    arc(r, W - r, Math.PI / 2, Math.PI);
-    pts.push({ x: 0, y: r });
-    arc(r, r, Math.PI, (3 * Math.PI) / 2);
-
-    return pts;
-  }
-
-  // Chamfer
-  if (c > 0.001 && L > 2 * c && W > 2 * c) {
-    return [
-      { x: c, y: 0 },
-      { x: L - c, y: 0 },
-      { x: L, y: c },
-      { x: L, y: W - c },
-      { x: L - c, y: W },
-      { x: c, y: W },
-      { x: 0, y: W - c },
-      { x: 0, y: c },
-    ];
-  }
-
-  // Square
-  return [
-    { x: 0, y: 0 },
-    { x: L, y: 0 },
-    { x: L, y: W },
-    { x: 0, y: W },
-  ];
-}
-
-// Converts CAD points (inches, origin bottom-left) to SVG path (origin top-left)
 function svgPathFromOutline(
   points: { x: number; y: number }[],
   opts: { offsetX: number; offsetY: number; scale: number; heightPx: number },
@@ -152,10 +98,13 @@ function svgPathFromOutline(
   });
 
   const [firstX, firstY] = mapped[0];
-  const rest = mapped.slice(1);
-
   const parts = [`M ${firstX.toFixed(2)} ${firstY.toFixed(2)}`];
-  for (const [x, y] of rest) parts.push(`L ${x.toFixed(2)} ${y.toFixed(2)}`);
+
+  for (let i = 1; i < mapped.length; i++) {
+    const [x, y] = mapped[i];
+    parts.push(`L ${x.toFixed(2)} ${y.toFixed(2)}`);
+  }
+
   parts.push("Z");
   return parts.join(" ");
 }
@@ -163,7 +112,9 @@ function svgPathFromOutline(
 function getStack(layout: LayoutLike): LayerLike[] | null {
   const s = Array.isArray((layout as any)?.stack)
     ? ((layout as any).stack as LayerLike[])
-    : null;
+    : Array.isArray((layout as any)?.layers)
+      ? ((layout as any).layers as LayerLike[])
+      : null;
 
   if (!s || s.length === 0) return null;
   return s;
@@ -200,10 +151,6 @@ function buildSvg(layout: LayoutLike): string {
   const cornerStyle = String(block.cornerStyle ?? "").toLowerCase();
   const chamferInRaw = block.chamferIn;
   const chamferIn = chamferInRaw == null ? 0 : Number(chamferInRaw);
-  const round = !!block.roundCorners;
-  const roundRaw = Number(block.roundRadiusIn);
-  const roundRadiusIn =
-    Number.isFinite(roundRaw) && roundRaw > 0 ? roundRaw : DEFAULT_ROUND_RADIUS_IN;
 
   const chamferPx =
     cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
@@ -215,54 +162,32 @@ function buildSvg(layout: LayoutLike): string {
     Math.min(chamferPx, blockW / 2 - 0.01, blockH / 2 - 0.01),
   );
 
-  const roundPx = round ? roundRadiusIn * scale : 0;
-  const r = Math.max(
-    0,
-    Math.min(roundPx, blockW / 2 - 0.01, blockH / 2 - 0.01),
-  );
-
   const blockOutline =
-    r > 0.001
+    c > 0.001
       ? (() => {
-          const pts = buildOuterOutlinePolyline({
-            lengthIn: L,
-            widthIn: W,
-            roundCorners: true,
-            roundRadiusIn: roundRadiusIn,
-            segments: 12,
-          });
-          const d = svgPathFromOutline(pts, {
-            offsetX: blockX,
-            offsetY: blockY,
-            scale,
-            heightPx: blockH,
-          });
-          return `<path d="${d}" fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
-        })()
-      : c > 0.001
-      ? (() => {
-          // Chamfered outline for SVG (top-left space)
-          const ptsCad = [
-            { x: c / scale, y: 0 },
-            { x: L - c / scale, y: 0 },
-            { x: L, y: c / scale },
-            { x: L, y: W - c / scale },
-            { x: L - c / scale, y: W },
-            { x: c / scale, y: W },
-            { x: 0, y: W - c / scale },
-            { x: 0, y: c / scale },
-          ];
-          const d = svgPathFromOutline(ptsCad, {
-            offsetX: blockX,
-            offsetY: blockY,
-            scale,
-            heightPx: blockH,
-          });
+          const x0 = blockX;
+          const y0 = blockY;
+          const x1 = blockX + blockW;
+          const y1 = blockY + blockH;
+
+          // Two-corner chamfer (SVG coords: y grows downward):
+          // - Top-left chamfer at (x0,y0)
+          // - Bottom-right chamfer at (x1,y1)
+          const d = [
+            `M ${x0.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+            `L ${x0.toFixed(2)} ${y1.toFixed(2)}`,
+            `L ${(x1 - c).toFixed(2)} ${y1.toFixed(2)}`,
+            `L ${x1.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+            `L ${x1.toFixed(2)} ${y0.toFixed(2)}`,
+            `L ${(x0 + c).toFixed(2)} ${y0.toFixed(2)}`,
+            `Z`,
+          ].join(" ");
+
           return `<path d="${d}" fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
         })()
       : `<rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
-          width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
-          fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
+        width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
+        fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
 
   const cavRects = (cavities as CavityLike[])
     .map((cav) => {
@@ -276,34 +201,6 @@ function buildSvg(layout: LayoutLike): string {
         (cav.shape === "circle"
           ? `Ø${cav.lengthIn}×${cav.depthIn ?? ""}"`.trim()
           : `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn ?? ""}"`.trim());
-
-      if (
-        cav.shape === "poly" &&
-        Array.isArray((cav as any).points) &&
-        (cav as any).points.length >= 3
-      ) {
-        const pts = ((cav as any).points as any[])
-          .map((p) => ({
-            x: blockX + nnum(p?.x) * blockW,
-            y: blockY + nnum(p?.y) * blockH,
-          }))
-          .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-
-        if (pts.length >= 3) {
-          const ptsAttr = pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
-          const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
-          const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
-
-          return `
-  <g>
-    <polygon points="${ptsAttr}" fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-            2,
-          )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${escapeText(label)}</text>
-  </g>`;
-        }
-      }
 
       if (cav.shape === "circle") {
         const r = Math.min(cavW, cavH) / 2;
@@ -355,10 +252,13 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
 <svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg"></svg>`;
   }
 
-  // panel layout
-  const gap = 28;
+  // We render one "panel" per layer, stacked vertically.
+  // Keep VIEW_W constant, grow height.
+  const panelH = VIEW_H;
+  const gap = 30;
   const titleH = 28;
-  const panelH = Math.max(140, Math.min(220, (VIEW_H - 2 * PADDING - gap * (stack.length - 1)) / stack.length));
+
+  const totalH = stack.length * panelH + Math.max(0, stack.length - 1) * gap;
 
   const panels: string[] = [];
 
@@ -432,28 +332,35 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
           })()
         : c > 0.001
         ? (() => {
-            // Chamfered outline for SVG (top-left space)
-            const ptsCad = [
-              { x: c / scale, y: 0 },
-              { x: L - c / scale, y: 0 },
-              { x: L, y: c / scale },
-              { x: L, y: W - c / scale },
-              { x: L - c / scale, y: W },
-              { x: c / scale, y: W },
-              { x: 0, y: W - c / scale },
-              { x: 0, y: c / scale },
-            ];
-            const d = svgPathFromOutline(ptsCad, {
-              offsetX: blockX,
-              offsetY: blockY,
-              scale,
-              heightPx: blockH,
-            });
+            const x0 = blockX;
+            const y0 = blockY;
+            const x1 = blockX + blockW;
+            const y1 = blockY + blockH;
+
+            const d = [
+              `M ${x0.toFixed(2)} ${(y0 + c).toFixed(2)}`,
+              `L ${x0.toFixed(2)} ${y1.toFixed(2)}`,
+              `L ${(x1 - c).toFixed(2)} ${y1.toFixed(2)}`,
+              `L ${x1.toFixed(2)} ${(y1 - c).toFixed(2)}`,
+              `L ${x1.toFixed(2)} ${y0.toFixed(2)}`,
+              `L ${(x0 + c).toFixed(2)} ${y0.toFixed(2)}`,
+              `Z`,
+            ].join(" ");
+
             return `<path d="${d}" fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
           })()
         : `<rect x="${blockX.toFixed(2)}" y="${blockY.toFixed(2)}"
           width="${blockW.toFixed(2)}" height="${blockH.toFixed(2)}"
           fill="#e5f0ff" stroke="#1d4ed8" stroke-width="2" />`;
+
+    const title =
+      (typeof layer.label === "string" && layer.label.trim().length > 0
+        ? layer.label.trim()
+        : `Layer ${i + 1}`) +
+      (layer.thicknessIn != null && Number.isFinite(Number(layer.thicknessIn)) && Number(layer.thicknessIn) > 0
+        ? `  (${Number(layer.thicknessIn)} in)`
+        : "") +
+      (crop ? "  • Cropped corners" : "");
 
     const cavRects = cavs
       .map((cav) => {
@@ -467,34 +374,6 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
           (cav.shape === "circle"
             ? `Ø${cav.lengthIn}×${cav.depthIn ?? ""}"`.trim()
             : `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn ?? ""}"`.trim());
-
-        if (
-          cav.shape === "poly" &&
-          Array.isArray((cav as any).points) &&
-          (cav as any).points.length >= 3
-        ) {
-          const pts = ((cav as any).points as any[])
-            .map((p) => ({
-              x: blockX + nnum(p?.x) * blockW,
-              y: blockY + nnum(p?.y) * blockH,
-            }))
-            .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-
-          if (pts.length >= 3) {
-            const ptsAttr = pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
-            const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
-            const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
-
-            return `
-  <g>
-    <polygon points="${ptsAttr}" fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-              2,
-            )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${escapeText(label)}</text>
-  </g>`;
-          }
-        }
 
         if (cav.shape === "circle") {
           const r = Math.min(cavW, cavH) / 2;
@@ -530,22 +409,30 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
       })
       .join("\n");
 
-    panels.push(
-      `<g>
-  ${blockOutline}
-${cavRects}
-  <text x="${(PADDING + 4).toFixed(2)}" y="${(yOff + 16).toFixed(
-        2,
-      )}" font-size="12" fill="#0f172a">${escapeText(`Layer ${i + 1}`)}</text>
-</g>`,
-    );
+    panels.push(`
+  <g transform="translate(0, 0)">
+    <text x="${PADDING}" y="${(yOff + 18).toFixed(
+      2,
+    )}" font-family="system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
+      font-size="14" fill="#111827">${escapeText(title)}</text>
+    ${blockOutline}
+    ${cavRects}
+  </g>`);
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${VIEW_W}" height="${VIEW_H}" viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg">
+<svg width="${VIEW_W}" height="${totalH}" viewBox="0 0 ${VIEW_W} ${totalH}" xmlns="http://www.w3.org/2000/svg">
 ${panels.join("\n")}
 </svg>`;
 }
+
+/* ================= DXF ================= */
+
+
+// Super-minimal ASCII DXF: ENTITIES section with block outline + cavities.
+// For per-layer exports, we separate entities onto different DXF layers:
+//   - BLOCK_L1, CAVITY_L1, BLOCK_L2, CAVITY_L2, ...
+// This is Option A.
 
 function buildDxf(layout: LayoutLike): string {
   const stack = getStack(layout);
@@ -629,28 +516,6 @@ function buildDxf(layout: LayoutLike): string {
     // Y-FLIP (match STEP): editor y is from TOP, CAD y is from BOTTOM.
     // For rectangles: top-left at yTop = W*(1-y) - height
     // For circles: top-left box at yTop = W*(1-y) - 2r
-    if (
-      cav.shape === "poly" &&
-      Array.isArray((cav as any).points) &&
-      (cav as any).points.length >= 3
-    ) {
-      const pts = ((cav as any).points as any[])
-        .map((p) => [nnum(p?.x) * blkLen, blkWid * (1 - nnum(p?.y))] as [number, number])
-        .filter(([px, py]) => Number.isFinite(px) && Number.isFinite(py));
-
-      if (pts.length >= 3) {
-        push(0, "LWPOLYLINE");
-        push(8, "CAVITY");
-        push(90, pts.length);
-        push(70, 1);
-        for (const [px, py] of pts) {
-          push(10, px);
-          push(20, py);
-        }
-      }
-      continue;
-    }
-
     if (cav.shape === "circle") {
       const r = Math.min(len, wid) / 2;
 
@@ -698,11 +563,15 @@ function buildDxf(layout: LayoutLike): string {
 
   push(0, "ENDSEC");
   push(0, "EOF");
+
   return lines.join("\n");
 }
 
 function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
-  const { block } = layout as any;
+  const block = layout?.block || ({} as any);
+
+  const blkLen = nnum(block?.lengthIn, 0);
+  const blkWid = nnum(block?.widthIn, 0);
 
   const lines: string[] = [];
 
@@ -718,18 +587,28 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
   push(0, "SECTION");
   push(2, "ENTITIES");
 
-  const blkLen = nnum(block?.lengthIn, 0);
-  const blkWid = nnum(block?.widthIn, 0);
+  const baseChamfer = Number(block?.chamferIn);
+  const chamferInDefault =
+    Number.isFinite(baseChamfer) && baseChamfer > 0 ? baseChamfer : 1;
 
-  // stacked: we offset each layer in Y so layers don't overlap in DXF
-  const gap = 1; // in inches
-  const panelH = blkWid;
-  const totalH = stack.length * panelH + gap * (stack.length - 1);
+      // Vertical stacking (match stacked SVG)
+  const layerGap = 1; // inches
+  const layerPitch = blkWid + layerGap; // inches
 
-  // block outlines per layer
+
+  // PATH A: visually stack full-package DXF layers vertically (like the SVG).
+  // DXF units are inches here (we emit raw inch dims), so use an inch gap.
+  const STACK_GAP_IN = 2; // spacing between layers in the full-package DXF
+
   for (let i = 0; i < stack.length; i++) {
     const layer = stack[i] || {};
-    const yOff = i * (panelH + gap);
+    const layerNo = i + 1;
+        const yOff = i * layerPitch;
+
+
+    // Apply vertical offset per layer so they don't overlap.
+    
+
     const crop = !!layer.cropCorners;
     const round = !!layer.roundCorners;
     const roundRaw = Number(layer.roundRadiusIn);
@@ -737,20 +616,25 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
       Number.isFinite(roundRaw) && roundRaw > 0 ? roundRaw : DEFAULT_ROUND_RADIUS_IN;
 
     const cornerStyle = !round && crop ? "chamfer" : "square";
-    const chamferIn = 1;
+    const chamferIn = cornerStyle === "chamfer" ? chamferInDefault : 0;
 
     const c =
-      cornerStyle === "chamfer"
+      cornerStyle === "chamfer" && Number.isFinite(chamferIn) && chamferIn > 0
         ? Math.max(0, Math.min(chamferIn, blkLen / 2 - 1e-6, blkWid / 2 - 1e-6))
         : 0;
 
+    const r =
+      round && Number.isFinite(roundRadiusIn) && roundRadiusIn > 0
+        ? Math.max(0, Math.min(roundRadiusIn, blkLen / 2 - 1e-6, blkWid / 2 - 1e-6))
+        : 0;
+
     const blockPts: [number, number][] =
-      round
+      r > 0.0001
         ? buildOuterOutlinePolyline({
             lengthIn: blkLen,
             widthIn: blkWid,
             roundCorners: true,
-            roundRadiusIn: roundRadiusIn,
+            roundRadiusIn: r,
             segments: 12,
           }).map((pt) => [pt.x, pt.y + yOff])
         : c > 0.0001
@@ -769,20 +653,16 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
             [0, blkWid + yOff],
           ];
 
+    // BLOCK outline on BLOCK_Ln
     push(0, "LWPOLYLINE");
-    push(8, "BLOCK");
+    push(8, `BLOCK_L${layerNo}`);
     push(90, blockPts.length);
     push(70, 1);
+    
     for (const [x, y] of blockPts) {
       push(10, x);
-      push(20, y);
+      push(20, y + yOff);
     }
-  }
-
-  for (let i = 0; i < stack.length; i++) {
-    const layer = stack[i] || {};
-    const yOff = i * (panelH + gap);
-    const layerNo = i + 1;
 
     const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
 
@@ -791,28 +671,6 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
       const wid = nnum(cav.widthIn);
 
       const xLeft = nnum(cav.x) * blkLen;
-
-      if (
-        cav.shape === "poly" &&
-        Array.isArray((cav as any).points) &&
-        (cav as any).points.length >= 3
-      ) {
-        const pts = ((cav as any).points as any[])
-          .map((p) => [nnum(p?.x) * blkLen, blkWid * (1 - nnum(p?.y)) + yOff] as [number, number])
-          .filter(([px, py]) => Number.isFinite(px) && Number.isFinite(py));
-
-        if (pts.length >= 3) {
-          push(0, "LWPOLYLINE");
-          push(8, `CAVITY_L${layerNo}`);
-          push(90, pts.length);
-          push(70, 1);
-          for (const [px, py] of pts) {
-            push(10, px);
-            push(20, py);
-          }
-        }
-        continue;
-      }
 
       if (cav.shape === "circle") {
         const r = Math.min(len, wid) / 2;
@@ -826,12 +684,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
         const cx = x + r;
         const cy = (yTop + r) + yOff;
 
-        push(0, "CIRCLE");
-        push(8, `CAVITY_L${layerNo}`);
-        push(10, cx);
-        push(20, cy);
-        push(30, 0);
-        push(40, r);
+        // push circle...
       } else {
         let x = xLeft;
         let yTop = blkWid * (1 - nnum(cav.y)) - wid;
@@ -876,12 +729,4 @@ function buildStepStub(_layout: LayoutLike): string {
   //
   // Returning "" makes the ?? fallback keep the real stored STEP.
   return "";
-}
-
-export function buildLayoutExports(layout: LayoutLike) {
-  return {
-    svg: buildSvg(layout),
-    dxf: buildDxf(layout),
-    step: buildStepStub(layout),
-  };
 }
