@@ -11,6 +11,10 @@
 // NEW (Path A):
 // - Thread block-level corner metadata through unchanged (cornerStyle/chamferIn).
 //
+// NEW (Path A, additive):
+// - Preserve poly cavities: if a cavity has shape:"poly" (or points[] present),
+//   pass points[] through and normalize shape to "poly" (unless explicitly circle).
+//
 // ENV:
 //   STEP_SERVICE_URL = https://alex-io-step-service.onrender.com
 
@@ -20,6 +24,9 @@ export type CavityDef = {
   depthIn: number;
   x: number;
   y: number;
+
+  // For poly cavities: normalized points in TOP-LEFT space (0..1)
+  points?: Array<{ x: number; y: number }> | null;
 
   shape?: string | null;
   diameterIn?: number | null;
@@ -44,41 +51,44 @@ export type FoamLayer = {
 };
 
 export type LayoutForStep = {
+  units: "in";
   block: {
     lengthIn: number;
     widthIn: number;
-    thicknessIn: number; // total stack height
-
-    // NEW (Path A, additive): pass-through only (microservice may ignore for now)
-    cornerStyle?: string | null; // expected: "square" | "chamfer"
-    chamferIn?: number | null; // inches
-    roundCorners?: boolean | null;
-    roundRadiusIn?: number | null;
+    thicknessIn: number;
+    cornerStyle?: "square" | "chamfer" | null;
+    chamferIn?: number | null;
   };
   stack: FoamLayer[];
-  cavities?: CavityDef[] | null; // legacy top-level cavities
+  materialLegend?: string | null;
+  quoteNo?: string | null;
 };
 
-function isNonEmptyString(v: unknown): v is string {
-  return typeof v === "string" && v.trim().length > 0;
-}
+type StepServiceResponse = {
+  ok: boolean;
+  step_text?: string | null;
+  error?: string | null;
+};
 
-function safePosNumber(v: unknown): number | null {
+function safePosNumber(v: any): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function safeNorm01(v: unknown): number | null {
+function safeNorm01(v: any): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
 }
 
-function normalizeShape(raw: any): "circle" | "rect" | "roundedRect" | null {
+function normalizeShape(raw: any): "circle" | "rect" | "roundedRect" | "poly" | null {
   if (typeof raw !== "string") return null;
   const s = raw.trim().toLowerCase();
   if (!s) return null;
 
   if (s === "circle" || s === "round") return "circle";
+
+  // polygon synonyms
+  if (s === "poly" || s === "polygon") return "poly";
 
   // common rect synonyms
   if (s === "rect" || s === "rectangle" || s === "square") return "rect";
@@ -105,23 +115,27 @@ function coerceCornerRadiusIn(c: any): number | null {
     c?.radiusIn, // some codepaths may use radiusIn for rounded rect
     c?.radius_in,
     c?.r,
-    c?.rx, // sometimes svg-ish naming leaks into objects
-    c?.ry,
+    c?.rx, // sometimes used for rounded rect in SVG
   ];
 
   for (const v of candidates) {
-    const n = safePosNumber(v);
-    if (n != null) return n;
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
   }
   return null;
 }
 
 function coerceDiameterIn(c: any): number | null {
-  const candidates = [c?.diameterIn, c?.diameter_in, c?.diameter, c?.dia, c?.d];
+  const candidates = [
+    c?.diameterIn,
+    c?.diameter_in,
+    c?.diameter,
+    c?.dia,
+  ];
 
   for (const v of candidates) {
-    const n = safePosNumber(v);
-    if (n != null) return n;
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
   }
   return null;
 }
@@ -150,6 +164,13 @@ function normalizeCavities(raw: any[]): CavityDef[] {
       if (!lengthIn || !widthIn || !depthIn || x == null || y == null)
         return null;
 
+      const rawPoints = Array.isArray((c as any).points) ? (c as any).points : null;
+      const points = rawPoints
+        ? rawPoints
+            .map((p: any) => ({ x: Number(p?.x), y: Number(p?.y) }))
+            .filter((p: any) => Number.isFinite(p.x) && Number.isFinite(p.y))
+        : null;
+
       // Shape can come from multiple keys
       const rawShape = c.shape ?? c.cavityShape ?? c.type ?? null;
       let shape = normalizeShape(rawShape);
@@ -167,6 +188,11 @@ function normalizeCavities(raw: any[]): CavityDef[] {
         if (shape == null || shape === "circle") shape = "circle";
       }
 
+      // If points exist, treat as polygon unless explicitly circle.
+      if (points && points.length >= 3 && shape !== "circle") {
+        shape = "poly";
+      }
+
       // Default shape to rect if still unknown
       if (shape == null) shape = "rect";
 
@@ -176,6 +202,8 @@ function normalizeCavities(raw: any[]): CavityDef[] {
         depthIn,
         x,
         y,
+
+        points: points && points.length ? points : null,
 
         shape,
         diameterIn: diameterIn ?? null,
@@ -211,194 +239,91 @@ function normalizeLayoutForStep(layout: any): LayoutForStep | null {
 
   if (!lengthIn || !widthIn || !thicknessIn) return null;
 
-  // NEW (Path A): pass-through only (do not infer)
-  const cornerStyleRaw = typeof blockRaw.cornerStyle === "string" ? blockRaw.cornerStyle.trim() : "";
-  const cornerStyle = cornerStyleRaw ? cornerStyleRaw : null;
-
-  const chamferInNum =
-    blockRaw.chamferIn != null || blockRaw.chamfer_in != null
-      ? safePosNumber(blockRaw.chamferIn ?? blockRaw.chamfer_in)
+  const cornerStyle = (blockRaw.cornerStyle ?? blockRaw.corner_style ?? null) as any;
+  const chamferInRaw = blockRaw.chamferIn ?? blockRaw.chamfer_in ?? null;
+  const chamferInNum = Number(chamferInRaw);
+  const chamferIn =
+    chamferInRaw != null && Number.isFinite(chamferInNum) && chamferInNum >= 0
+      ? chamferInNum
       : null;
 
-  const roundCornersRaw = blockRaw.roundCorners ?? blockRaw.round_corners ?? null;
-  const roundRadiusRaw = blockRaw.roundRadiusIn ?? blockRaw.round_radius_in ?? blockRaw.round_radius ?? null;
-  const roundCorners = typeof roundCornersRaw === "boolean" ? roundCornersRaw : null;
-  const roundRadiusIn = safePosNumber(roundRadiusRaw);
+  let stackRaw: any[] = [];
 
-  const rawStack = Array.isArray((layout as any).stack) ? (layout as any).stack : [];
-  const normalizedStack: FoamLayer[] = [];
-
-  if (rawStack.length > 0) {
-    for (const layer of rawStack) {
-      if (!layer) continue;
-
-      const t = safePosNumber(
-        (layer as any).thicknessIn ??
-          (layer as any).thickness_in ??
-          (layer as any).heightIn ??
-          (layer as any).height_in ??
-          (layer as any).thickness ??
-          (layer as any).height,
-      );
-      if (!t) continue;
-
-      const label =
-        typeof (layer as any).label === "string" && (layer as any).label.trim()
-          ? (layer as any).label.trim()
-          : null;
-
-      const cavities = normalizeCavities((layer as any).cavities);
-      const layerRoundRaw =
-        (layer as any).roundCorners ?? (layer as any).round_corners ?? null;
-      const layerRadiusRaw =
-        (layer as any).roundRadiusIn ??
-        (layer as any).round_radius_in ??
-        (layer as any).round_radius ??
-        null;
-      const roundCorners = typeof layerRoundRaw === "boolean" ? layerRoundRaw : null;
-      const roundRadiusIn = safePosNumber(layerRadiusRaw);
-
-      normalizedStack.push({
-        thicknessIn: t,
-        label,
-        cavities: cavities.length ? cavities : null,
-        roundCorners,
-        roundRadiusIn: roundRadiusIn ?? null,
-      });
-    }
+  if (Array.isArray((layout as any).stack) && (layout as any).stack.length > 0) {
+    stackRaw = (layout as any).stack;
+  } else {
+    // Legacy: promote top-level cavities into stack[0]
+    const cavs = Array.isArray((layout as any).cavities) ? (layout as any).cavities : [];
+    stackRaw = [
+      {
+        thicknessIn,
+        label: "Layer 1",
+        cavities: cavs,
+      },
+    ];
   }
 
-  const legacyCavs = normalizeCavities((layout as any).cavities);
+  const stack: FoamLayer[] = stackRaw.map((layer) => {
+    const t = safePosNumber(layer.thicknessIn ?? layer.thickness_in) ?? thicknessIn;
+    const cavities = normalizeCavities(Array.isArray(layer.cavities) ? layer.cavities : []);
+    const roundCorners = layer.roundCorners ?? layer.round_corners ?? null;
+    const roundRadiusInRaw =
+      layer.roundRadiusIn ?? layer.round_radius_in ?? layer.round_radius ?? null;
+    const rr = Number(roundRadiusInRaw);
+    const roundRadiusIn = Number.isFinite(rr) && rr > 0 ? rr : null;
 
-  const blockOut: LayoutForStep["block"] = {
-    lengthIn,
-    widthIn,
-    thicknessIn,
-    cornerStyle,
-    chamferIn: chamferInNum,
-    roundCorners,
-    roundRadiusIn: roundRadiusIn ?? null,
-  };
-
-  if (normalizedStack.length === 0) {
-    normalizedStack.push({
-      thicknessIn,
-      label: "Foam layer",
-      cavities: legacyCavs.length ? legacyCavs : null,
-    });
     return {
-      block: blockOut,
-      stack: normalizedStack,
-      cavities: null,
+      thicknessIn: t,
+      label: typeof layer.label === "string" ? layer.label : null,
+      cavities,
+      roundCorners: roundCorners == null ? null : !!roundCorners,
+      roundRadiusIn,
     };
-  }
-
-  if (
-    normalizedStack.length === 1 &&
-    (blockOut.roundCorners == null || blockOut.roundRadiusIn == null)
-  ) {
-    const layerRaw = rawStack[0] ?? null;
-    if (layerRaw) {
-      const layerRoundRaw =
-        (layerRaw as any).roundCorners ?? (layerRaw as any).round_corners ?? null;
-      const layerRadiusRaw =
-        (layerRaw as any).roundRadiusIn ??
-        (layerRaw as any).round_radius_in ??
-        (layerRaw as any).round_radius ??
-        null;
-
-      if (blockOut.roundCorners == null && typeof layerRoundRaw === "boolean") {
-        blockOut.roundCorners = layerRoundRaw;
-      }
-      if (blockOut.roundRadiusIn == null) {
-        const n = safePosNumber(layerRadiusRaw);
-        if (n != null) blockOut.roundRadiusIn = n;
-      }
-    }
-  }
+  });
 
   return {
-    block: blockOut,
-    stack: normalizedStack,
-    cavities: legacyCavs.length ? legacyCavs : null,
+    units: "in",
+    block: {
+      lengthIn,
+      widthIn,
+      thicknessIn,
+      cornerStyle: cornerStyle === "chamfer" ? "chamfer" : "square",
+      chamferIn,
+    },
+    stack,
   };
 }
 
-function getStepServiceUrl(): string | null {
-  const raw = process.env.STEP_SERVICE_URL;
-  if (!raw || !raw.trim()) {
-    console.error(
-      "[STEP] Missing STEP_SERVICE_URL env var; cannot contact STEP microservice.",
-    );
-    return null;
-  }
-  return raw.replace(/\/+$/, "");
-}
-
-/**
- * Calls external STEP microservice:
- *   POST {STEP_SERVICE_URL}/step-from-layout
- *   Body JSON: { layout, quoteNo, materialLegend }
- *   Response JSON: { ok:true, step:"..." }
- */
 export async function buildStepFromLayout(
   layout: any,
   quoteNo: string,
   materialLegend: string | null,
-): Promise<string | null> {
-  const baseUrl = getStepServiceUrl();
-  if (!baseUrl) return null;
+): Promise<string> {
+  const payload = normalizeLayoutForStep(layout);
 
-  const normalized = normalizeLayoutForStep(layout);
-  if (!normalized) {
-    console.error("[STEP] Layout missing required block/size fields; cannot build STEP.", {
-      quoteNo,
-      hasBlock: !!layout?.block,
-      hasStack: Array.isArray(layout?.stack),
-    });
-    return null;
+  if (!payload) {
+    throw new Error("STEP: invalid layout payload");
   }
 
-  const url = `${baseUrl}/step-from-layout`;
+  payload.quoteNo = quoteNo;
+  payload.materialLegend = materialLegend ?? null;
 
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), 25_000);
-
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        layout: normalized,
-        quoteNo,
-        materialLegend: materialLegend ?? null,
-      }),
-      signal: ac.signal,
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.error(`[STEP] Microservice HTTP ${res.status}: ${text?.slice(0, 600)}`, { quoteNo });
-      return null;
-    }
-
-    const contentType = res.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      const json = (await res.json().catch(() => null)) as { ok?: boolean; step?: unknown } | null;
-      if (json && json.ok && isNonEmptyString(json.step)) return json.step;
-      console.error("[STEP] Microservice JSON missing ok:true and step string.", { quoteNo, json });
-      return null;
-    }
-
-    const text = await res.text();
-    if (isNonEmptyString(text)) return text;
-
-    console.error("[STEP] Microservice returned empty STEP body.", { quoteNo });
-    return null;
-  } catch (err: any) {
-    console.error("[STEP] Error calling STEP microservice:", err?.name || err, { quoteNo });
-    return null;
-  } finally {
-    clearTimeout(t);
+  const url = process.env.STEP_SERVICE_URL;
+  if (!url) {
+    throw new Error("STEP_SERVICE_URL missing");
   }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const json = (await res.json().catch(() => null)) as StepServiceResponse | null;
+
+  if (!res.ok || !json?.ok || !json.step_text) {
+    throw new Error(json?.error || `STEP service HTTP ${res.status}`);
+  }
+
+  return json.step_text;
 }
