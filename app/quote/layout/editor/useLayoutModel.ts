@@ -315,11 +315,30 @@ const didInitActiveLayerRef = useRef(false);
           ? layer
           : {
               ...layer,
-              cavities: layer.cavities.map((c) =>
-                c.id !== id
-                  ? c
-                  : { ...c, x: clamp01OrKeep(x, c.x), y: clamp01OrKeep(y, c.y) },
-              ),
+              cavities: layer.cavities.map((c) => {
+                if (c.id !== id) return c;
+                
+                const newX = clamp01OrKeep(x, c.x);
+                const newY = clamp01OrKeep(y, c.y);
+                
+                // For poly shapes, translate the points array
+                if ((c as any).shape === "poly" && Array.isArray((c as any).points)) {
+                  const oldX = c.x;
+                  const oldY = c.y;
+                  const deltaX = newX - oldX;
+                  const deltaY = newY - oldY;
+                  
+                  const translatedPoints = ((c as any).points as Array<{x: number; y: number}>).map(pt => ({
+                    x: Math.max(0, Math.min(1, pt.x + deltaX)),
+                    y: Math.max(0, Math.min(1, pt.y + deltaY)),
+                  }));
+                  
+                  return { ...c, x: newX, y: newY, points: translatedPoints };
+                }
+                
+                // For other shapes, just update x and y
+                return { ...c, x: newX, y: newY };
+              }),
             },
       );
 

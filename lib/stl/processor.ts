@@ -500,6 +500,11 @@ export function stlToFacesJson(buf: Buffer): FacesJson {
 
   const loops = buildLoopsFromSegments(res.segments);
 
+  console.log(`[STL Processor] Total loops found: ${loops.length}`);
+  loops.forEach((l, idx) => {
+    console.log(`  Loop ${idx}: closed=${l.closed}, area=${l.area.toFixed(6)}, points=${l.points.length}`);
+  });
+
   // Find outer loop (largest absolute area, should be positive)
   let outerIdx = 0;
   let maxAbsArea = 0;
@@ -511,6 +516,9 @@ export function stlToFacesJson(buf: Buffer): FacesJson {
       outerIdx = i;
     }
   }
+
+  console.log(`[STL Processor] Outer loop identified: index=${outerIdx}, area=${loops[outerIdx].area.toFixed(6)}`);
+  console.log(`[STL Processor] Cavity loops: ${loops.length - 1} (all non-outer loops)`);
 
   return {
     units: "in",
