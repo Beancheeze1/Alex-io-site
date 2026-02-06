@@ -376,27 +376,18 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
             ? `Ø${cav.lengthIn}×${cav.depthIn ?? ""}"`.trim()
             : `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn ?? ""}"`.trim());
 
+        // Check if cavity has custom points array
         const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length > 0;
         
-        console.log('[SVG CAVITY]', cav.id, {
-          hasPoints,
-          pointCount: hasPoints ? (cav as any).points.length : 0,
-          shape: cav.shape
-        });
-        
         if (hasPoints) {
+          // Points are in block-normalized coordinates (0-1 of the block, not the cavity)
           const points = (cav as any).points as Array<{x: number, y: number}>;
-          
-          console.log('[SVG] First 3 points:', points.slice(0, 3));
           
           const svgPoints = points.map(pt => {
             const px = blockX + (pt.x * blockW);
             const py = blockY + (pt.y * blockH);
             return `${px.toFixed(2)},${py.toFixed(2)}`;
           }).join(' ');
-          
-          console.log('[SVG] Transformed (first 50 chars):', svgPoints.substring(0, 50));
-          console.log('[SVG] Block:', { blockX, blockY, blockW, blockH });
           
           return `
   <g>
@@ -408,6 +399,7 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
   </g>`;
         }
         
+        // Circle shape
         if (cav.shape === "circle") {
           const r = Math.min(cavW, cavH) / 2;
           const cx = x + cavW / 2;
@@ -424,10 +416,9 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
   </g>`;
         }
 
+        // Rectangle (with optional rounded corners)
         const rx = cav.cornerRadiusIn ? nnum(cav.cornerRadiusIn) * scale : 0;
         const rxy = Number.isFinite(rx) ? rx : 0;
-
-        console.log('[SVG] Using rectangle for', cav.id);
 
         return `
   <g>
@@ -701,38 +692,26 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
 
     const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
-    
-    console.log('[DXF LAYER DEBUG] Layer', i + 1, 'has', cavs.length, 'cavities');
 
     for (const cav of cavs) {
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
 
+      // Check if cavity has custom points array
       const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length > 0;
-      
-      console.log('[DXF CAVITY] Processing', cav.id, {
-        hasPoints,
-        pointCount: hasPoints ? (cav as any).points.length : 0,
-        lengthIn: len,
-        widthIn: wid,
-        x: cav.x,
-        y: cav.y
-      });
       
       if (hasPoints) {
         const points = (cav as any).points as Array<{x: number, y: number}>;
         
-        console.log('[DXF POINTS] First 3 points:', points.slice(0, 3));
+        console.log('[DXF] Cavity', cav.id, 'using', points.length, 'custom points (block coordinates)');
         
-        // Points are in block-normalized coordinates (0-1 of the block)
+        // Points are ALREADY in block-normalized coordinates (0-1 of the block)
+        // Just scale them to actual DXF coordinates
         const dxfPoints: [number, number][] = points.map(pt => {
           const absX = pt.x * blkLen;
-          const absY = blkWid * (1 - pt.y);
+          const absY = blkWid * (1 - pt.y);  // Flip Y for DXF coordinate system
           return [absX, absY + yOff];
         });
-        
-        console.log('[DXF POINTS] Transformed first 3:', dxfPoints.slice(0, 3));
-        console.log('[DXF POINTS] Block size:', { blkLen, blkWid }, 'yOff:', yOff);
 
         push(0, "LWPOLYLINE");
         push(8, `CAVITY_L${layerNo}`);
@@ -742,9 +721,9 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
           push(10, px);
           push(20, py);
         }
-        console.log('[DXF] ✓ Polygon with', dxfPoints.length, 'points created');
+        console.log('[DXF] ✓ Custom polygon created with', dxfPoints.length, 'points');
       } else {
-        console.log('[DXF] NO POINTS - using bounding box');
+        console.log('[DXF] Cavity', cav.id, 'has NO points, using bounding box');
         
         const xLeft = nnum(cav.x) * blkLen;
         let x = xLeft;
