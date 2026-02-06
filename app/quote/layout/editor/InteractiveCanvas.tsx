@@ -649,8 +649,14 @@ export default function InteractiveCanvas({
               <g key={cavity.id}>
                 {isPoly ? (
                   <path
-                    d={buildPolyPathD((cavity as any).points, blockPx, blockOffset)}
+                    d={buildPolyPathD(
+                      (cavity as any).points,
+                      blockPx,
+                      blockOffset,
+                      (cavity as any).nestedCavities
+                    )}
                     fill={cavityFill}
+                    fillRule="evenodd"
                     stroke={strokeColor}
                     strokeWidth={isSelected ? 2 : 1}
                     onMouseDown={(e) => handleCavityMouseDown(e, cavity)}
@@ -727,6 +733,7 @@ function buildPolyPathD(
   points: { x: number; y: number }[],
   blockPx: { width: number; height: number },
   offset: { x: number; y: number },
+  nestedCavities?: Array<{ points: { x: number; y: number }[] }>,
 ): string {
   if (!points || points.length < 3) return "";
 
@@ -735,6 +742,7 @@ function buildPolyPathD(
     y: offset.y + pt.y * blockPx.height,
   });
 
+  // Main cavity outline
   const first = toPx(points[0]);
   let d = `M ${first.x} ${first.y}`;
 
@@ -743,7 +751,26 @@ function buildPolyPathD(
     d += ` L ${p.x} ${p.y}`;
   }
 
-  return d + " Z";
+  d += " Z";
+
+  // Add nested cavity cutouts (holes within the main cavity)
+  if (nestedCavities && nestedCavities.length > 0) {
+    for (const nested of nestedCavities) {
+      if (!nested.points || nested.points.length < 3) continue;
+      
+      const nestedFirst = toPx(nested.points[0]);
+      d += ` M ${nestedFirst.x} ${nestedFirst.y}`;
+      
+      for (let i = 1; i < nested.points.length; i++) {
+        const p = toPx(nested.points[i]);
+        d += ` L ${p.x} ${p.y}`;
+      }
+      
+      d += " Z";
+    }
+  }
+
+  return d;
 }
 
 function safeNorm01(v: any, fallback: number) {

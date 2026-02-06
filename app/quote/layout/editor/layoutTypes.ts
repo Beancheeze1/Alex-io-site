@@ -47,6 +47,13 @@ export type Cavity = {
   // NEW (Path A): polygon loop points in normalized TOP-LEFT space
   // Only present when shape === "poly" (STL/Forge seeded)
   points?: PolyPoint[];
+  
+  // NEW: Nested cavities (holes within this cavity)
+  // These are cutouts INSIDE the main cavity shape
+  // Rendered using SVG fillRule="evenodd" for proper hole display
+  nestedCavities?: Array<{
+    points: PolyPoint[];
+  }>;
 };
 
 
