@@ -721,7 +721,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
 function buildStepStub(_layout: LayoutLike): string {
   // IMPORTANT (Path A):
-  // /api/quote/print regenerates exports via buildLayoutExports() and then does:
+  // /api/quote/print regenerate s exports via buildLayoutExports() and then does:
   //   step_text: bundle.step ?? layoutPkg.step_text
   //
   // If we return any non-empty string here, we overwrite the real STEP produced
