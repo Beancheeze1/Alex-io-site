@@ -362,6 +362,7 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
         : "") +
       (crop ? "  • Cropped corners" : "");
 
+
     const cavRects = cavs
       .map((cav) => {
         const cavW = nnum(cav.lengthIn) * scale;
@@ -375,6 +376,30 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
             ? `Ø${cav.lengthIn}×${cav.depthIn ?? ""}"`.trim()
             : `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn ?? ""}"`.trim());
 
+        // Check if cavity has custom points array
+        const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length > 0;
+        
+        if (hasPoints) {
+          // Points are in block-normalized coordinates (0-1 of the block, not the cavity)
+          const points = (cav as any).points as Array<{x: number, y: number}>;
+          
+          const svgPoints = points.map(pt => {
+            const px = blockX + (pt.x * blockW);
+            const py = blockY + (pt.y * blockH);
+            return `${px.toFixed(2)},${py.toFixed(2)}`;
+          }).join(' ');
+          
+          return `
+  <g>
+    <polygon points="${svgPoints}" fill="none" stroke="#111827" stroke-width="1" />
+    <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
+            2,
+          )}" text-anchor="middle" dominant-baseline="middle"
+          font-size="10" fill="#111827">${escapeText(label)}</text>
+  </g>`;
+        }
+        
+        // Circle shape
         if (cav.shape === "circle") {
           const r = Math.min(cavW, cavH) / 2;
           const cx = x + cavW / 2;
@@ -391,6 +416,7 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
   </g>`;
         }
 
+        // Rectangle (with optional rounded corners)
         const rx = cav.cornerRadiusIn ? nnum(cav.cornerRadiusIn) * scale : 0;
         const rxy = Number.isFinite(rx) ? rx : 0;
 
@@ -670,7 +696,6 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
     for (const cav of cavs) {
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
-      const xLeft = nnum(cav.x) * blkLen;
 
       // Check if cavity has custom points array
       const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length > 0;
@@ -678,40 +703,15 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
       if (hasPoints) {
         const points = (cav as any).points as Array<{x: number, y: number}>;
         
-        // DEBUG: Log the actual point values
-        console.log('[DXF DEBUG] Cavity', cav.id, 'points:', JSON.stringify(points.slice(0, 3), null, 2));
-        console.log('[DXF DEBUG] Cavity bounds:', { x: cav.x, y: cav.y, lengthIn: len, widthIn: wid });
-        console.log('[DXF DEBUG] Block size:', { blkLen, blkWid });
+        console.log('[DXF] Cavity', cav.id, 'using', points.length, 'custom points (block coordinates)');
         
-        // Check if points are normalized (0-1) or absolute
-        const minX = Math.min(...points.map(p => p.x));
-        const maxX = Math.max(...points.map(p => p.x));
-        const minY = Math.min(...points.map(p => p.y));
-        const maxY = Math.max(...points.map(p => p.y));
-        
-        console.log('[DXF DEBUG] Point ranges:', { minX, maxX, minY, maxY });
-        console.log('[DXF DEBUG] Looks normalized?', maxX <= 1 && maxY <= 1 && minX >= 0 && minY >= 0);
-        
-        // Try both interpretations
-        let dxfPoints: [number, number][];
-        
-        if (maxX <= 1 && maxY <= 1 && minX >= 0 && minY >= 0) {
-          // Points are normalized (0-1)
-          console.log('[DXF DEBUG] Using normalized interpretation');
-          dxfPoints = points.map(pt => {
-            const absX = xLeft + (pt.x * len);
-            const absY = blkWid * (1 - nnum(cav.y)) - wid + (pt.y * wid);
-            return [absX, absY + yOff];
-          });
-        } else {
-          // Points might be absolute in inches
-          console.log('[DXF DEBUG] Using absolute interpretation');
-          dxfPoints = points.map(pt => {
-            const absX = pt.x;
-            const absY = pt.y + yOff;
-            return [absX, absY];
-          });
-        }
+        // Points are ALREADY in block-normalized coordinates (0-1 of the block)
+        // Just scale them to actual DXF coordinates
+        const dxfPoints: [number, number][] = points.map(pt => {
+          const absX = pt.x * blkLen;
+          const absY = blkWid * (1 - pt.y);  // Flip Y for DXF coordinate system
+          return [absX, absY + yOff];
+        });
 
         push(0, "LWPOLYLINE");
         push(8, `CAVITY_L${layerNo}`);
@@ -721,10 +721,11 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
           push(10, px);
           push(20, py);
         }
-        console.log('[DXF] ✓ Custom polygon created');
+        console.log('[DXF] ✓ Custom polygon created with', dxfPoints.length, 'points');
       } else {
-        console.log('[DXF] Cavity', cav.id, 'has NO points array, using bounding box');
+        console.log('[DXF] Cavity', cav.id, 'has NO points, using bounding box');
         
+        const xLeft = nnum(cav.x) * blkLen;
         let x = xLeft;
         let yTop = blkWid * (1 - nnum(cav.y)) - wid;
 
