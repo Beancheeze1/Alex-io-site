@@ -362,6 +362,7 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
         : "") +
       (crop ? "  • Cropped corners" : "");
 
+
     const cavRects = cavs
       .map((cav) => {
         const cavW = nnum(cav.lengthIn) * scale;
@@ -375,6 +376,30 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
             ? `Ø${cav.lengthIn}×${cav.depthIn ?? ""}"`.trim()
             : `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn ?? ""}"`.trim());
 
+        // Check if cavity has custom points array
+        const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length > 0;
+        
+        if (hasPoints) {
+          // Render custom polygon from points array
+          const points = (cav as any).points as Array<{x: number, y: number}>;
+          
+          const svgPoints = points.map(pt => {
+            const px = x + (pt.x * cavW);
+            const py = y + (pt.y * cavH);
+            return `${px.toFixed(2)},${py.toFixed(2)}`;
+          }).join(' ');
+          
+          return `
+  <g>
+    <polygon points="${svgPoints}" fill="none" stroke="#111827" stroke-width="1" />
+    <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
+            2,
+          )}" text-anchor="middle" dominant-baseline="middle"
+          font-size="10" fill="#111827">${escapeText(label)}</text>
+  </g>`;
+        }
+        
+        // Circle shape
         if (cav.shape === "circle") {
           const r = Math.min(cavW, cavH) / 2;
           const cx = x + cavW / 2;
@@ -391,6 +416,7 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
   </g>`;
         }
 
+        // Rectangle (with optional rounded corners)
         const rx = cav.cornerRadiusIn ? nnum(cav.cornerRadiusIn) * scale : 0;
         const rxy = Number.isFinite(rx) ? rx : 0;
 
