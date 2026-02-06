@@ -664,17 +664,17 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
       push(20, y + yOff);
     }
 
+
     const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
 
     for (const cav of cavs) {
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
-
       const xLeft = nnum(cav.x) * blkLen;
 
+      // Circle cavity
       if (cav.shape === "circle") {
         const r = Math.min(len, wid) / 2;
-
         let x = xLeft;
         let yTop = blkWid * (1 - nnum(cav.y)) - (2 * r);
 
@@ -684,8 +684,47 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
         const cx = x + r;
         const cy = (yTop + r) + yOff;
 
-        // push circle...
-      } else {
+        // DXF CIRCLE entity
+        push(0, "CIRCLE");
+        push(8, `CAVITY_L${layerNo}`);
+        push(10, cx.toFixed(4));
+        push(20, cy.toFixed(4));
+        push(40, r.toFixed(4));
+      } 
+      // Rounded rectangle cavity
+      else if (cav.shape === "roundedRect" && cav.cornerRadiusIn && cav.cornerRadiusIn > 0) {
+        let x = xLeft;
+        let yTop = blkWid * (1 - nnum(cav.y)) - wid;
+
+        x = Math.max(0, Math.min(blkLen - len, x));
+        yTop = Math.max(0, Math.min(blkWid - wid, yTop));
+
+        const radius = Math.min(
+          cav.cornerRadiusIn,
+          len / 2 - 0.001,
+          wid / 2 - 0.001
+        );
+
+        // Generate rounded rectangle using buildOuterOutlinePolyline
+        const roundedPts = buildOuterOutlinePolyline({
+          lengthIn: len,
+          widthIn: wid,
+          roundCorners: true,
+          roundRadiusIn: radius,
+          segments: 12,
+        }).map((pt) => [x + pt.x, yTop + pt.y + yOff] as [number, number]);
+
+        push(0, "LWPOLYLINE");
+        push(8, `CAVITY_L${layerNo}`);
+        push(90, roundedPts.length);
+        push(70, 1);
+        for (const [px, py] of roundedPts) {
+          push(10, px);
+          push(20, py);
+        }
+      }
+      // Regular rectangle cavity (default)
+      else {
         let x = xLeft;
         let yTop = blkWid * (1 - nnum(cav.y)) - wid;
 
@@ -708,7 +747,6 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
           push(20, py);
         }
       }
-
     }
   }
 
@@ -721,11 +759,11 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
 function buildStepStub(_layout: LayoutLike): string {
   // IMPORTANT (Path A):
-  // /api/quote/print regenerate s exports via buildLayoutExports() and then does:
+  // /api/quote/print regenerates exports via buildLayoutExports() and then does:
   //   step_text: bundle.step ?? layoutPkg.step_text
   //
   // If we return any non-empty string here, we overwrite the real STEP produced
-  // by the STEP microservice / DB with a stub, causing “blank”/incorrect STEP output.
+  // by the STEP microservice / DB with a stub, causing "blank"/incorrect STEP output.
   //
   // Returning "" makes the ?? fallback keep the real stored STEP.
   return "";
