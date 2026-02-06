@@ -4489,7 +4489,34 @@ function buildSvgFromLayout(
 
     const label = (c as any).label ?? `${c.lengthIn}×${c.widthIn}×${(c as any).depthIn}"`;
 
-    if ((c as any).shape === "circle") {
+    // Check if cavity has custom points array (polygon shape)
+    const hasPoints = Array.isArray((c as any).points) && (c as any).points.length > 0;
+    
+    if (hasPoints) {
+      // Render custom polygon from points array
+      const points = (c as any).points as Array<{x: number, y: number}>;
+      
+      const svgPoints = points.map(pt => {
+        const px = blockX + (pt.x * blockW);
+        const py = blockY + (pt.y * blockH);
+        return `${px.toFixed(2)},${py.toFixed(2)}`;
+      }).join(' ');
+      
+      cavects.push(
+        [
+          `<g>`,
+          `  <polygon points="${svgPoints}" fill="none" stroke="#111827" stroke-width="1" />`,
+          `  <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
+            2,
+          )}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#111827">${escapeText(
+            label,
+          )}</text>`,
+          `</g>`,
+        ].join("\n"),
+      );
+    }
+    // Circle shape
+    else if ((c as any).shape === "circle") {
       const r = Math.min(cavW, cavH) / 2;
       const cx = x + cavW / 2;
       const cy = y + cavH / 2;
@@ -4507,7 +4534,9 @@ function buildSvgFromLayout(
           `</g>`,
         ].join("\n"),
       );
-    } else {
+    } 
+    // Rectangle (with optional rounded corners)
+    else {
       const isRounded = (c as any).shape === "roundedRect";
       const rIn = Number((c as any).cornerRadiusIn) || 0;
       const rPx = isRounded ? Math.max(0, rIn) * scale : 0;
@@ -4528,7 +4557,6 @@ function buildSvgFromLayout(
           `</g>`,
         ].join("\n"),
       );
-
     }
   }
 
