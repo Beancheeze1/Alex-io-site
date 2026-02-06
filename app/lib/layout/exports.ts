@@ -667,13 +667,44 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
 
+    // ============ DEBUG LOGGING START ============
+    console.log('[DXF EXPORT DEBUG] =====================================');
+    console.log('[DXF EXPORT DEBUG] Layer', i + 1, 'has', cavs.length, 'cavities');
+    if (cavs.length > 0) {
+      cavs.forEach((cav, idx) => {
+        console.log(`[DXF EXPORT DEBUG] Cavity ${idx + 1}:`, {
+          id: cav.id,
+          shape: cav.shape,
+          shapeType: typeof cav.shape,
+          lengthIn: cav.lengthIn,
+          widthIn: cav.widthIn,
+          cornerRadiusIn: cav.cornerRadiusIn,
+          allKeys: Object.keys(cav)
+        });
+      });
+    }
+    console.log('[DXF EXPORT DEBUG] =====================================');
+    // ============ DEBUG LOGGING END ============
+
     for (const cav of cavs) {
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
       const xLeft = nnum(cav.x) * blkLen;
 
+      // ============ DEBUG LOGGING START ============
+      console.log('[DXF CAVITY DEBUG]', {
+        id: cav.id,
+        checkingShape: cav.shape,
+        isCircle: cav.shape === "circle",
+        isRoundedRect: cav.shape === "roundedRect",
+        willUseCircle: cav.shape === "circle",
+        willUseRoundedRect: cav.shape === "roundedRect" && cav.cornerRadiusIn && cav.cornerRadiusIn > 0
+      });
+      // ============ DEBUG LOGGING END ============
+
       // Circle cavity
       if (cav.shape === "circle") {
+        console.log('[DXF] Creating CIRCLE for', cav.id);
         const r = Math.min(len, wid) / 2;
         let x = xLeft;
         let yTop = blkWid * (1 - nnum(cav.y)) - (2 * r);
@@ -693,6 +724,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
       } 
       // Rounded rectangle cavity
       else if (cav.shape === "roundedRect" && cav.cornerRadiusIn && cav.cornerRadiusIn > 0) {
+        console.log('[DXF] Creating ROUNDED RECT for', cav.id);
         let x = xLeft;
         let yTop = blkWid * (1 - nnum(cav.y)) - wid;
 
@@ -725,6 +757,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
       }
       // Regular rectangle cavity (default)
       else {
+        console.log('[DXF] Creating PLAIN RECT for', cav.id, '(shape was:', cav.shape, ')');
         let x = xLeft;
         let yTop = blkWid * (1 - nnum(cav.y)) - wid;
 
