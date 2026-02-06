@@ -672,84 +672,37 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
       const wid = nnum(cav.widthIn);
       const xLeft = nnum(cav.x) * blkLen;
 
-      // Determine actual shape for "poly" cavities
-      const cornerRadius = cav.cornerRadiusIn ?? 0;
-      const hasCornerRadius = cornerRadius > 0;
-      const isSquarish = Math.abs(len - wid) < 0.1;
+      // Check if cavity has custom points array
+      const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length > 0;
       
-      let actualShape: "circle" | "roundedRect" | "rect" = "rect";
-      
-      // Handle different input shape values
-      if (cav.shape === "circle") {
-        actualShape = "circle";
-      } else if (cav.shape === "roundedRect") {
-        actualShape = "roundedRect";
-      } else if (cav.shape === "rect") {
-        actualShape = "rect";
-      } else {
-        // For "poly" or any other shape value, determine from properties
-        if (hasCornerRadius) {
-          if (isSquarish && cornerRadius >= Math.min(len, wid) / 2 - 0.1) {
-            actualShape = "circle";
-          } else {
-            actualShape = "roundedRect";
-          }
-        } else {
-          actualShape = "rect";
-        }
-      }
-
-      // Circle cavity
-      if (actualShape === "circle") {
-        const r = Math.min(len, wid) / 2;
-        let x = xLeft;
-        let yTop = blkWid * (1 - nnum(cav.y)) - (2 * r);
-
-        x = Math.max(0, Math.min(blkLen - 2 * r, x));
-        yTop = Math.max(0, Math.min(blkWid - 2 * r, yTop));
-
-        const cx = x + r;
-        const cy = (yTop + r) + yOff;
-
-        push(0, "CIRCLE");
-        push(8, `CAVITY_L${layerNo}`);
-        push(10, cx.toFixed(4));
-        push(20, cy.toFixed(4));
-        push(40, r.toFixed(4));
-      } 
-      // Rounded rectangle cavity
-      else if (actualShape === "roundedRect" && hasCornerRadius) {
-        let x = xLeft;
-        let yTop = blkWid * (1 - nnum(cav.y)) - wid;
-
-        x = Math.max(0, Math.min(blkLen - len, x));
-        yTop = Math.max(0, Math.min(blkWid - wid, yTop));
-
-        const radius = Math.min(
-          cornerRadius,
-          len / 2 - 0.001,
-          wid / 2 - 0.001
-        );
-
-        const roundedPts = buildOuterOutlinePolyline({
-          lengthIn: len,
-          widthIn: wid,
-          roundCorners: true,
-          roundRadiusIn: radius,
-          segments: 12,
-        }).map((pt) => [x + pt.x, yTop + pt.y + yOff] as [number, number]);
+      if (hasPoints) {
+        // Use the custom points array to define the polygon shape
+        const points = (cav as any).points as Array<{x: number, y: number}>;
+        
+        console.log('[DXF] Cavity', cav.id, 'has', points.length, 'custom points');
+        
+        // Transform points from normalized (0-1) coordinates to actual DXF coordinates
+        const dxfPoints: [number, number][] = points.map(pt => {
+          // Points are likely in normalized coordinates relative to the cavity bounding box
+          const absX = xLeft + (pt.x * len);
+          const absY = blkWid * (1 - nnum(cav.y)) - wid + (pt.y * wid);
+          return [absX, absY + yOff];
+        });
 
         push(0, "LWPOLYLINE");
         push(8, `CAVITY_L${layerNo}`);
-        push(90, roundedPts.length);
-        push(70, 1);
-        for (const [px, py] of roundedPts) {
+        push(90, dxfPoints.length);
+        push(70, 1); // closed
+        for (const [px, py] of dxfPoints) {
           push(10, px);
           push(20, py);
         }
+        console.log('[DXF] ✓ Custom polygon created with', dxfPoints.length, 'points');
       }
-      // Regular rectangle cavity
+      // Fallback to simple rectangle if no points array
       else {
+        console.log('[DXF] Cavity', cav.id, 'has no points, using bounding box');
+        
         let x = xLeft;
         let yTop = blkWid * (1 - nnum(cav.y)) - wid;
 
@@ -771,6 +724,7 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
           push(10, px);
           push(20, py);
         }
+        console.log('[DXF] ✓ Rectangle fallback');
       }
     }
   }
