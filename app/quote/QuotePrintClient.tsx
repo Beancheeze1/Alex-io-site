@@ -470,6 +470,18 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
 
   const cavs = getCavitiesForLayer(layout, layerIndex);
 
+    // ✅ ADD THIS DEBUG
+  console.log('[buildSvgPreviewForLayer] Layer', layerIndex, 'has', cavs.length, 'cavities');
+  cavs.forEach((c, i) => {
+    console.log(`[buildSvgPreviewForLayer] Cavity ${i}:`, {
+      shape: (c as any).shape,
+      hasPoints: Array.isArray((c as any).points),
+      pointCount: Array.isArray((c as any).points) ? (c as any).points.length : 0,
+      lengthIn: c.lengthIn,
+      widthIn: c.widthIn
+    });
+  });
+
   const stroke = "#111827";
   const cavStroke = "#ef4444";
 
@@ -596,12 +608,29 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
     .filter(Boolean)
     .join("");
 
+    const finalSvg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`,
+    blockOutline,
+    shapes,
+    `</svg>`,
+  ].join("");
+  
+  // ✅ ADD THIS DEBUG
+  console.log('[buildSvgPreviewForLayer] Final SVG contains <polygon>?', finalSvg.includes('<polygon'));
+  console.log('[buildSvgPreviewForLayer] Final SVG contains <rect>?', finalSvg.includes('<rect'));
+  console.log('[buildSvgPreviewForLayer] SVG length:', finalSvg.length);
+  
+  return finalSvg;
+
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`,
     blockOutline,
     shapes,
     `</svg>`,
   ].join("");
+
+
+  
 }
 
 export default function QuotePrintClient() {
