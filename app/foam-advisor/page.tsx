@@ -82,6 +82,8 @@ type CushionCurvesApiResponse =
 
 type FoamAdvisorStoredState = {
   weightLb?: string;
+  productContactLengthIn?: string;
+  productContactWidthIn?: string;
   contactAreaIn2?: string;
   environment?: EnvironmentOption;
   fragility?: FragilityOption;
@@ -130,6 +132,12 @@ function computeOperatingFraction(
   if (normalized > 1) normalized = 1;
 
   return normalized; // 0–1 across the actual curve psi range
+}
+
+function toPositiveNumber(raw: string): number | null {
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  return v;
 }
 
 export default function FoamAdvisorPage({
@@ -201,12 +209,33 @@ export default function FoamAdvisorPage({
   // ----- Form state -----
 
   const [weightLb, setWeightLb] = React.useState<string>("");
+  const [productContactLengthIn, setProductContactLengthIn] =
+    React.useState<string>("");
+  const [productContactWidthIn, setProductContactWidthIn] =
+    React.useState<string>("");
   const [contactAreaIn2, setContactAreaIn2] =
     React.useState<string>("");
   const [environment, setEnvironment] =
     React.useState<EnvironmentOption>("normal");
   const [fragility, setFragility] =
     React.useState<FragilityOption>("moderate");
+
+  const computedContactAreaIn2 = React.useMemo(() => {
+    const L = toPositiveNumber(productContactLengthIn);
+    const W = toPositiveNumber(productContactWidthIn);
+    if (L == null || W == null) return null;
+    const area = L * W;
+    if (!Number.isFinite(area) || area <= 0) return null;
+    return area;
+  }, [productContactLengthIn, productContactWidthIn]);
+
+  React.useEffect(() => {
+    if (computedContactAreaIn2 == null) {
+      setContactAreaIn2("");
+      return;
+    }
+    setContactAreaIn2(computedContactAreaIn2.toFixed(2));
+  }, [computedContactAreaIn2]);
 
   // Advisor result / status
   const [advisorResult, setAdvisorResult] =
@@ -290,18 +319,6 @@ export default function FoamAdvisorPage({
 
   const hasQuote = !!effectiveQuoteNo;
 
-  // Prefill contact area from block L×W if available
-  React.useEffect(() => {
-    if (!parsedBlock) return;
-    const { L, W } = parsedBlock;
-    if (L > 0 && W > 0) {
-      const area = L * W;
-      setContactAreaIn2((prev) =>
-        prev.trim() ? prev : area.toFixed(1),
-      );
-    }
-  }, [parsedBlock]);
-
   // Load stored form state per quote (sticky inputs)
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -314,6 +331,12 @@ export default function FoamAdvisorPage({
 
       if (parsed.weightLb != null) {
         setWeightLb(String(parsed.weightLb));
+      }
+      if (parsed.productContactLengthIn != null) {
+        setProductContactLengthIn(String(parsed.productContactLengthIn));
+      }
+      if (parsed.productContactWidthIn != null) {
+        setProductContactWidthIn(String(parsed.productContactWidthIn));
       }
       if (parsed.contactAreaIn2 != null) {
         setContactAreaIn2(String(parsed.contactAreaIn2));
@@ -335,6 +358,8 @@ export default function FoamAdvisorPage({
     const key = storageKeyForQuote(effectiveQuoteNo);
     const payload: FoamAdvisorStoredState = {
       weightLb,
+      productContactLengthIn,
+      productContactWidthIn,
       contactAreaIn2,
       environment,
       fragility,
@@ -344,7 +369,15 @@ export default function FoamAdvisorPage({
     } catch {
       // ignore storage errors
     }
-  }, [effectiveQuoteNo, weightLb, contactAreaIn2, environment, fragility]);
+  }, [
+    effectiveQuoteNo,
+    weightLb,
+    productContactLengthIn,
+    productContactWidthIn,
+    contactAreaIn2,
+    environment,
+    fragility,
+  ]);
 
   // Load materials list from existing API (same one the editor uses)
   React.useEffect(() => {
@@ -419,14 +452,22 @@ export default function FoamAdvisorPage({
     setHoverPoint(null);
 
     const w = Number(weightLb);
-    const a = Number(contactAreaIn2);
+    const L = toPositiveNumber(productContactLengthIn);
+    const W = toPositiveNumber(productContactWidthIn);
+    const a = L != null && W != null ? L * W : NaN;
 
     if (!Number.isFinite(w) || w <= 0) {
       alert("Please enter a valid product weight (lb).");
       return;
     }
+    if (L == null || W == null) {
+      alert(
+        "Please enter a valid product contact length and width (in).",
+      );
+      return;
+    }
     if (!Number.isFinite(a) || a <= 0) {
-      alert("Please enter a valid contact area (in²).");
+      alert("Contact area could not be computed.");
       return;
     }
 
@@ -760,22 +801,58 @@ export default function FoamAdvisorPage({
 
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-300">
-                      Contact area (in²)
+                      Product contact length (in)
                     </span>
                     <input
                       type="number"
-                      step="0.1"
+                      step="0.01"
                       min="0"
-                      value={contactAreaIn2}
+                      value={productContactLengthIn}
                       onChange={(e) =>
-                        setContactAreaIn2(e.target.value)
+                        setProductContactLengthIn(e.target.value)
                       }
                       className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                     />
                     <span className="text-[10px] text-slate-500">
-                      Area of foam directly supporting the product.
+                      Length of the area actually touching/supporting the product.
                     </span>
                   </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-slate-300">
+                      Product contact width (in)
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={productContactWidthIn}
+                      onChange={(e) =>
+                        setProductContactWidthIn(e.target.value)
+                      }
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    />
+                    <span className="text-[10px] text-slate-500">
+                      Width of the area actually touching/supporting the product.
+                    </span>
+                  </label>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2">
+                    <div className="text-[11px] text-slate-300">
+                      Contact area (computed)
+                    </div>
+                    <div className="mt-1 flex items-baseline justify-between">
+                      <div className="font-mono text-sky-200 text-[12px]">
+                        {computedContactAreaIn2 != null
+                          ? `${computedContactAreaIn2.toFixed(2)} in`
+                          : ""}
+                      </div>
+                      <div className="text-[10px] text-slate-500">L  W</div>
+                    </div>
+                    <div className="mt-1 text-[10px] text-slate-500">
+                      This drives psi and the cushion curve operating point.
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3">
