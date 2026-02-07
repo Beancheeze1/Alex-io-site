@@ -1,4 +1,4 @@
-// app/start-quote/page.tsx
+﻿// app/start-quote/page.tsx
 //
 // Start Real Quote (lead capture → OPEN EDITOR ONLY)
 // - NO email sending
@@ -12,6 +12,55 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+
+function Section({
+  title,
+  hint,
+  defaultOpen,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details
+      className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"
+      defaultChecked={!!defaultOpen}
+      open={!!defaultOpen}
+    >
+      <summary className="cursor-pointer list-none select-none">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+              {title}
+            </div>
+            {hint ? (
+              <div className="mt-1 text-xs text-slate-400">{hint}</div>
+            ) : null}
+          </div>
+          <div className="text-xs text-slate-400">
+            Click to {defaultOpen ? "collapse" : "expand"}
+          </div>
+        </div>
+      </summary>
+      <div className="mt-4">{children}</div>
+    </details>
+  );
+}
+
+function SummaryRow({ k, v }: { k: string; v: string }) {
+  if (!v) return null;
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-white/10 py-2 last:border-b-0">
+      <div className="text-xs font-semibold tracking-widest text-slate-400">
+        {k}
+      </div>
+      <div className="text-sm text-slate-100 text-right">{v}</div>
+    </div>
+  );
+}
 
 function Field({
   label,
@@ -547,6 +596,31 @@ export default function StartQuotePage() {
   const showEmailErr = attemptedOpen && !isWidgetPrefill && !emailOk;
   const showPhoneErr = attemptedOpen && !isWidgetPrefill && !phoneOk;
 
+  const summaryMaterial =
+    materialId && materialOptions.length
+      ? (() => {
+          const idNum = Number(materialId);
+          const picked = materialOptions.find((m) => m.id === idNum);
+          return picked?.name
+            ? `${picked.name}${picked.family ? `  ${picked.family}` : ""}`
+            : "";
+        })()
+      : materialText.trim()
+        ? materialText.trim()
+        : foam.trim()
+          ? foam.trim()
+          : "";
+
+  const summaryDims = normalizeDims(size);
+  const summaryQty = String(toNumOrNull(qty) ?? "");
+  const summaryLayers = layerCount
+    ? `${layerCount} layer${layerCount === 1 ? "" : "s"} (${layerThicknesses
+        .slice(0, layerCount)
+        .join(", ")} in)`
+    : "";
+
+  const summaryCavity = extractFirstCavity(cavities) ?? "";
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-50">
       <div className="pointer-events-none absolute inset-0 opacity-[0.20]">
@@ -590,296 +664,363 @@ export default function StartQuotePage() {
         </div>
 
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_50px_rgba(0,0,0,0.55)]">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="NAME">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                placeholder="Chuck Johnson"
-              />
-              {showNameErr ? (
-                <div className="mt-1 text-xs text-rose-300">Name is required.</div>
-              ) : null}
-            </Field>
-
-            <Field label="COMPANY">
-              <input
-                value={company}
-                onChange={(e) => setCompany(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                placeholder="Acme Packaging"
-              />
-            </Field>
-
-            <Field label="EMAIL">
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                placeholder="you@company.com"
-              />
-              {showEmailErr ? (
-                <div className="mt-1 text-xs text-rose-300">Email is required.</div>
-              ) : null}
-            </Field>
-
-            <Field label="PHONE">
-              <input
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                placeholder="(555) 555-5555"
-              />
-              {showPhoneErr ? (
-                <div className="mt-1 text-xs text-rose-300">Phone is required.</div>
-              ) : null}
-            </Field>
-
-            <Field label="QUANTITY">
-              <input
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                placeholder="250"
-              />
-            </Field>
-
-            <Field label="SHIPPING">
-              <select
-                value={shipMode}
-                onChange={(e) => setShipMode(e.target.value as any)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-              >
-                <option value="">Select…</option>
-                <option value="mailer">Mailer</option>
-                <option value="box">Box</option>
-                <option value="unsure">Not sure</option>
-              </select>
-              <div className="mt-1 text-xs text-slate-400">
-                Used for fit assumptions (we usually undersize L/W by 0.125&quot; for drop-in fit).
+          {/* PREFILLED SUMMARY (lightweight top) */}
+          {isWidgetPrefill ? (
+            <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+              <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+                PREFILLED FROM CHAT
               </div>
-            </Field>
-
-            <Field label="INSERT TYPE">
-              <select
-                value={insertType}
-                onChange={(e) => {
-                  const v = e.target.value as any;
-                  setInsertType(v);
-                  if (v !== "set") setPocketsOn("");
-                }}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-              >
-                <option value="">Select…</option>
-                <option value="single">Single insert</option>
-                <option value="set">Set (base + top pad/lid)</option>
-                <option value="unsure">Not sure</option>
-              </select>
-            </Field>
-
-            {insertType === "set" ? (
-              <Field label="POCKETS ON (IF SET)">
-                <select
-                  value={pocketsOn}
-                  onChange={(e) => setPocketsOn(e.target.value as any)}
-                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                >
-                  <option value="">Select…</option>
-                  <option value="base">Base</option>
-                  <option value="top">Top</option>
-                  <option value="both">Both</option>
-                  <option value="unsure">Not sure</option>
-                </select>
-              </Field>
-            ) : (
-              <div />
-            )}
-
-            <Field label="HOLDING">
-              <select
-                value={holding}
-                onChange={(e) => {
-                  const v = e.target.value as any;
-                  setHolding(v);
-                  if (v !== "pockets") setPocketCount("");
-                }}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-              >
-                <option value="">Select…</option>
-                <option value="pockets">Cut-out pockets</option>
-                <option value="loose">Loose / no pockets</option>
-                <option value="unsure">Not sure</option>
-              </select>
-            </Field>
-
-            {holding === "pockets" ? (
-              <Field label="POCKET COUNT (IF POCKETS)">
-                <select
-                  value={pocketCount}
-                  onChange={(e) => setPocketCount(e.target.value as any)}
-                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                >
-                  <option value="">Select…</option>
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3+">3+</option>
-                  <option value="unsure">Not sure</option>
-                </select>
-              </Field>
-            ) : (
-              <div />
-            )}
-
-            <Field label="MATERIAL (PICK ONE)">
-              <select
-                value={materialId}
-                onChange={(e) => setMaterialId(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-              >
-                <option value="">
-                  {materialOptions.length ? "Select material…" : "Loading materials…"}
-                </option>
-                {materialOptions.map((m) => (
-                  <option key={m.id} value={String(m.id)}>
-                    {m.name}
-                    {m.family ? ` — ${m.family}` : ""}
-                  </option>
-                ))}
-              </select>
-              <div className="mt-1 text-xs text-slate-400">
-                This avoids parsing/guessing. We seed{" "}
-                <span className="text-slate-200">material_id</span> into the editor URL.
+              <div className="mt-2">
+                <SummaryRow k="Outside size" v={summaryDims || ""} />
+                <SummaryRow k="Qty" v={summaryQty} />
+                <SummaryRow k="Material" v={summaryMaterial} />
+                <SummaryRow k="Layers" v={summaryLayers} />
+                <SummaryRow k="First cavity seed" v={summaryCavity} />
+                <SummaryRow k="Shipping" v={shipMode || ""} />
+                <SummaryRow k="Insert type" v={insertType || ""} />
+                <SummaryRow k="Holding" v={holding || ""} />
               </div>
-            </Field>
+              <div className="mt-3 text-xs text-slate-400">
+                You can adjust anything below. Consider keeping chat-sourced info read-only here
+                and editing final geometry in the editor.
+              </div>
+            </div>
+          ) : null}
 
-            <Field label="MATERIAL MODE (FROM CHAT)">
-              <select
-                value={materialMode}
-                onChange={(e) => setMaterialMode(e.target.value as any)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-              >
-                <option value="">Select…</option>
-                <option value="recommend">Recommend</option>
-                <option value="known">Known</option>
-              </select>
-            </Field>
-
-            <div className="sm:col-span-2">
-              <Field label="MATERIAL TEXT (IF KNOWN)">
+          {/* SECTION 1: Essentials (open by default) */}
+          <Section
+            title="ESSENTIALS"
+            hint="These are the minimum knobs that affect the seeded editor."
+            defaultOpen
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="QUANTITY">
                 <input
-                  value={materialText}
-                  onChange={(e) => setMaterialText(e.target.value)}
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
                   className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                  placeholder='Example: "EPE 1.7#"'
+                  placeholder="250"
                 />
               </Field>
-            </div>
 
-            <Field label="FOAM NOTES (OPTIONAL)">
-              <input
-                value={foam}
-                onChange={(e) => setFoam(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                placeholder="Any foam notes (optional)"
-              />
-            </Field>
+              <Field label="SHIPPING">
+                <select
+                  value={shipMode}
+                  onChange={(e) => setShipMode(e.target.value as any)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                >
+                  <option value="">Select...</option>
+                  <option value="mailer">Mailer</option>
+                  <option value="box">Box</option>
+                  <option value="unsure">Not sure</option>
+                </select>
+                <div className="mt-1 text-xs text-slate-400">
+                  Used for fit assumptions (we usually undersize L/W by 0.125&quot; for drop-in fit).
+                </div>
+              </Field>
 
-            <Field label="LAYERS">
-              <select
-                value={String(layerCount)}
-                onChange={(e) => setLayerCount(Number(e.target.value))}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-              >
-                <option value="1">1 layer</option>
-                <option value="2">2 layers</option>
-                <option value="3">3 layers</option>
-                <option value="4">4 layers</option>
-              </select>
-            </Field>
+              <Field label="INSERT TYPE">
+                <select
+                  value={insertType}
+                  onChange={(e) => {
+                    const v = e.target.value as any;
+                    setInsertType(v);
+                    if (v !== "set") setPocketsOn("");
+                  }}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                >
+                  <option value="">Select...</option>
+                  <option value="single">Single insert</option>
+                  <option value="set">Set (base + top pad/lid)</option>
+                  <option value="unsure">Not sure</option>
+                </select>
+              </Field>
 
-            <Field label="LAYER THICKNESSES (in)">
-              <div className="flex gap-2">
-                {Array.from({ length: layerCount }, (_, i) => (
-                  <input
-                    key={i}
-                    value={String(layerThicknesses[i] ?? 1)}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      setLayerThicknesses((prev) => {
-                        const next = [...prev];
-                        next[i] = Number.isFinite(n) && n > 0 ? n : 1;
-                        return next;
-                      });
-                    }}
+              {insertType === "set" ? (
+                <Field label="POCKETS ON (IF SET)">
+                  <select
+                    value={pocketsOn}
+                    onChange={(e) => setPocketsOn(e.target.value as any)}
                     className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                    placeholder="1"
-                    inputMode="decimal"
+                  >
+                    <option value="">Select...</option>
+                    <option value="base">Base</option>
+                    <option value="top">Top</option>
+                    <option value="both">Both</option>
+                    <option value="unsure">Not sure</option>
+                  </select>
+                </Field>
+              ) : (
+                <div />
+              )}
+
+              <Field label="HOLDING">
+                <select
+                  value={holding}
+                  onChange={(e) => {
+                    const v = e.target.value as any;
+                    setHolding(v);
+                    if (v !== "pockets") setPocketCount("");
+                  }}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                >
+                  <option value="">Select...</option>
+                  <option value="pockets">Cut-out pockets</option>
+                  <option value="loose">Loose / no pockets</option>
+                  <option value="unsure">Not sure</option>
+                </select>
+              </Field>
+
+              {holding === "pockets" ? (
+                <Field label="POCKET COUNT (IF POCKETS)">
+                  <select
+                    value={pocketCount}
+                    onChange={(e) => setPocketCount(e.target.value as any)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                  >
+                    <option value="">Select...</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3+">3+</option>
+                    <option value="unsure">Not sure</option>
+                  </select>
+                </Field>
+              ) : (
+                <div />
+              )}
+
+              <div className="sm:col-span-2">
+                <Field label="OUTSIDE SIZE (LxWxH, inches - H = total stacked layer height)">
+                  <input
+                    value={size}
+                    onChange={(e) => setSize(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                    placeholder="18 x 12 x 2"
                   />
-                ))}
+                </Field>
+                <div className="mt-1 text-xs text-slate-400">
+                  If this will go in a box/mailer, undersize the foam{" "}
+                  <span className="text-slate-200">Length</span> and{" "}
+                  <span className="text-slate-200">Width</span> by{" "}
+                  <span className="text-slate-200">0.125&quot;</span> for fit.
+                </div>
               </div>
-            </Field>
 
-            <Field label="CAVITY LAYER">
-              <select
-                value={String(cavityLayerIndex)}
-                onChange={(e) => setCavityLayerIndex(Number(e.target.value))}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-              >
-                {Array.from({ length: layerCount }, (_, i) => (
-                  <option key={i + 1} value={String(i + 1)}>
-                    Layer {i + 1}
+              <div className="sm:col-span-2">
+                <Field label="CAVITIES / POCKETS">
+                  <input
+                    value={cavities}
+                    onChange={(e) => setCavities(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                    placeholder="Example: 5x5x1 (or 2 cavities: 6x4x1.5, D3x1.5)"
+                  />
+                </Field>
+                <div className="mt-1 text-xs text-slate-400">
+                  Tip: For seeding, we'll take the first "LxWxD" we can find (ex:
+                  5x5x1). You can add/edit cavities in the editor.
+                  <span className="block mt-1">
+                    Need cavities on other layers? Add them in the editor after you open it.
+                  </span>
+                </div>
+              </div>
+            </div>
+          </Section>
+
+          {/* SECTION 2: Material (collapsed by default) */}
+          <Section
+            title="MATERIAL"
+            hint="If you pick a material here, the editor is deterministic (material_id)."
+            defaultOpen={!isWidgetPrefill}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="MATERIAL (PICK ONE)">
+                <select
+                  value={materialId}
+                  onChange={(e) => setMaterialId(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                >
+                  <option value="">
+                    {materialOptions.length ? "Select material..." : "Loading materials..."}
                   </option>
-                ))}
-              </select>
+                  {materialOptions.map((m) => (
+                    <option key={m.id} value={String(m.id)}>
+                      {m.name}
+                      {m.family ? ` - ${m.family}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-1 text-xs text-slate-400">
+                  This avoids parsing/guessing. We seed{" "}
+                  <span className="text-slate-200">material_id</span> into the editor URL.
+                </div>
+              </Field>
+
+              <Field label="MATERIAL MODE (FROM CHAT)">
+                <select
+                  value={materialMode}
+                  onChange={(e) => setMaterialMode(e.target.value as any)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                >
+                  <option value="">Select...</option>
+                  <option value="recommend">Recommend</option>
+                  <option value="known">Known</option>
+                </select>
+              </Field>
+
+              <div className="sm:col-span-2">
+                <Field label="MATERIAL TEXT (IF KNOWN)">
+                  <input
+                    value={materialText}
+                    onChange={(e) => setMaterialText(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                    placeholder='Example: "EPE 1.7#"'
+                  />
+                </Field>
+              </div>
+
+              <Field label="FOAM NOTES (OPTIONAL)">
+                <input
+                  value={foam}
+                  onChange={(e) => setFoam(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                  placeholder="Any foam notes (optional)"
+                />
+              </Field>
+            </div>
+          </Section>
+
+          {/* SECTION 3: Layers (collapsed by default) */}
+          <Section
+            title="LAYERS"
+            hint="Layer count + thicknesses + which layer gets cavities seeded."
+            defaultOpen={!isWidgetPrefill}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="LAYERS">
+                <select
+                  value={String(layerCount)}
+                  onChange={(e) => setLayerCount(Number(e.target.value))}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                >
+                  <option value="1">1 layer</option>
+                  <option value="2">2 layers</option>
+                  <option value="3">3 layers</option>
+                  <option value="4">4 layers</option>
+                </select>
+              </Field>
+
+              <Field label="LAYER THICKNESSES (in)">
+                <div className="flex gap-2">
+                  {Array.from({ length: layerCount }, (_, i) => (
+                    <input
+                      key={i}
+                      value={String(layerThicknesses[i] ?? 1)}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        setLayerThicknesses((prev) => {
+                          const next = [...prev];
+                          next[i] = Number.isFinite(n) && n > 0 ? n : 1;
+                          return next;
+                        });
+                      }}
+                      className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                      placeholder="1"
+                      inputMode="decimal"
+                    />
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="CAVITY LAYER">
+                <select
+                  value={String(cavityLayerIndex)}
+                  onChange={(e) => setCavityLayerIndex(Number(e.target.value))}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                >
+                  {Array.from({ length: layerCount }, (_, i) => (
+                    <option key={i + 1} value={String(i + 1)}>
+                      Layer {i + 1}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </Section>
+
+          {/* SECTION 4: Contact (collapsed if widget prefill) */}
+          <Section
+            title="CONTACT"
+            hint={
+              isWidgetPrefill
+                ? "Optional for widget/reveal flow."
+                : "Required to open editor on manual flow."
+            }
+            defaultOpen={!isWidgetPrefill}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="NAME">
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                  placeholder="Chuck Johnson"
+                />
+                {showNameErr ? (
+                  <div className="mt-1 text-xs text-rose-300">Name is required.</div>
+                ) : null}
+              </Field>
+
+              <Field label="COMPANY">
+                <input
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                  placeholder="Acme Packaging"
+                />
+              </Field>
+
+              <Field label="EMAIL">
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                  placeholder="you@company.com"
+                />
+                {showEmailErr ? (
+                  <div className="mt-1 text-xs text-rose-300">Email is required.</div>
+                ) : null}
+              </Field>
+
+              <Field label="PHONE">
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                  placeholder="(555) 555-5555"
+                />
+                {showPhoneErr ? (
+                  <div className="mt-1 text-xs text-rose-300">Phone is required.</div>
+                ) : null}
+              </Field>
+            </div>
+          </Section>
+
+          {/* SECTION 5: Notes (collapsed) */}
+          <Section
+            title="NOTES"
+            hint="Optional constraints, tolerances, carton constraints, etc."
+            defaultOpen={false}
+          >
+            <Field label="NOTES">
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={4}
+                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
+                placeholder="Any special fit, tolerances, assembly notes, carton constraints, etc."
+              />
             </Field>
-
-            <div className="sm:col-span-2">
-              <Field label="OUTSIDE SIZE (L×W×H, inches — H = total stacked layer height)">
-                <input
-                  value={size}
-                  onChange={(e) => setSize(e.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                  placeholder="18 × 12 × 2"
-                />
-              </Field>
-              <div className="mt-1 text-xs text-slate-400">
-                If this will go in a box/mailer, undersize the foam{" "}
-                <span className="text-slate-200">Length</span> and{" "}
-                <span className="text-slate-200">Width</span> by{" "}
-                <span className="text-slate-200">0.125&quot;</span> for fit.
-              </div>
-            </div>
-
-            <div className="sm:col-span-2">
-              <Field label="CAVITIES / POCKETS">
-                <input
-                  value={cavities}
-                  onChange={(e) => setCavities(e.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                  placeholder="Example: 5x5x1 (or 2 cavities: 6x4x1.5, Ø3x1.5)"
-                />
-              </Field>
-              <div className="mt-1 text-xs text-slate-400">
-                Tip: For seeding, we’ll take the first “LxWxD” we can find (ex:
-                5x5x1). You can add/edit cavities in the editor.
-                <span className="block mt-1">
-                  Need cavities on other layers? Add them in the editor after you open it.
-                </span>
-              </div>
-            </div>
-
-            <div className="sm:col-span-2">
-              <Field label="NOTES">
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={4}
-                  className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-sky-400/40"
-                  placeholder="Any special fit, tolerances, assembly notes, carton constraints, etc."
-                />
-              </Field>
-            </div>
+          </Section>
           </div>
 
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
