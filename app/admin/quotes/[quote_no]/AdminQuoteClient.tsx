@@ -248,7 +248,7 @@ type FlatCavity = {
   y: number; // normalized 0..1
 
   // Used only for admin per-layer preview clarity
-  shape?: "rect" | "circle" | "roundedRect" | null;
+  shape?: "rect" | "circle" | "roundedRect" | "poly" | null;
   diameterIn?: number | null;
 
   // NEW: carry rounded corner radius through so admin previews can render it
@@ -415,7 +415,7 @@ function getLayerThicknessIn(layer: LayoutLayer | null | undefined): number | nu
   return n;
 }
 
-function normalizeShape(raw: any): "rect" | "circle" | "roundedRect" | null {
+function normalizeShape(raw: any): "rect" | "circle" | "roundedRect" | "poly" | null {
   const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
   if (!s) return null;
 
