@@ -691,6 +691,31 @@ const chamferScaled =
       continue;
     }
 
+    // NEW (Path A): polygon cavity  closed LWPOLYLINE (preserve shape)
+    if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
+      const rawPts = (cav as any).points as any[];
+
+      const pts: [number, number][] = rawPts.map((p) => {
+        const px = Math.max(0, Math.min(1, Number(p?.x)));
+        const py = Math.max(0, Math.min(1, Number(p?.y)));
+        const x = px * L;
+        const y = (1 - py) * W; // y-flip: cav.points are top-left origin
+        return [x, y];
+      });
+
+      entities.push(
+        [
+          "0","LWPOLYLINE",
+          "8","0",
+          "90", String(pts.length),
+          "70","1",
+          ...pts.flatMap(([x, y]) => ["10", fmt(x), "20", fmt(y)]),
+        ].join("\n")
+      );
+
+      continue;
+    }
+
     if ((cav.shape === "roundedRect" || cav.cornerRadiusIn) && cav.cornerRadiusIn) {
       emitRoundedRectDXF(entities, left, bottom, cL, cW, cav.cornerRadiusIn);
       continue;
@@ -956,6 +981,24 @@ const blockOutline =
       const rr = d / 2;
       return `<circle cx="${x + w / 2}" cy="${y + h / 2}" r="${rr}"
         fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+    }
+
+    // NEW (Path A): polygon cavity (preserve shape)
+    if (c.shape === "poly" && Array.isArray((c as any).points) && (c as any).points.length >= 3) {
+      const rawPts = (c as any).points as any[];
+
+      // Convert normalized top-left points to this SVG's local coordinate system.
+      // The DXF logic in this file uses local CAD coords: (0,0)=bottom-left, so flip Y here too.
+      const pts = rawPts.map((p) => {
+        const px = Math.max(0, Math.min(1, Number(p?.x)));
+        const py = Math.max(0, Math.min(1, Number(p?.y)));
+        const x = px * L;
+        const y = (1 - py) * W;
+        return { x, y };
+      });
+
+      const d = polylineToSvgPath(pts, { widthIn: W });
+      return `<path d="${d}" fill="none" stroke="#111827" stroke-width="1" />`;
     }
 
     if (c.shape === "roundedRect" || r > 0) {
