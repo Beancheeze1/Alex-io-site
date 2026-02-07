@@ -342,7 +342,7 @@ function normalizeShape(raw: any): "rect" | "roundedRect" | "circle" | null {
   return null;
 }
 
-/** Flatten cavities for a single layer (supports rect + circle + depth). */
+/** Flatten cavities for a single layer (supports rect + circle + depth + POLY). */
 function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
   const out: FlatCavity[] = [];
   if (!layout || typeof layout !== "object") return out;
@@ -372,13 +372,18 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
 
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) continue;
 
-    const shape = normalizeShape(
-      (cav as any).shape ??
-        (cav as any).cavityShape ??
-        (cav as any).cavity_shape ??
-        (cav as any).type ??
-        (cav as any).kind,
-    );
+    // ✅ Check for polygon first (before normalizeShape which might not recognize it)
+    const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length >= 3;
+    
+    const shape = hasPoints 
+      ? "poly"  // ✅ Force poly if has points
+      : normalizeShape(
+          (cav as any).shape ??
+            (cav as any).cavityShape ??
+            (cav as any).cavity_shape ??
+            (cav as any).type ??
+            (cav as any).kind,
+        );
 
     const rawDia = (cav as any).diameterIn ?? (cav as any).diameter_in ?? (cav as any).diameter ?? null;
     const diaNum = rawDia == null ? NaN : Number(rawDia);
@@ -399,6 +404,9 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
     const cornerRadiusIn =
       shape === "roundedRect" && Number.isFinite(radiusNum) && radiusNum > 0 ? radiusNum : null;
 
+    // ✅ Preserve points array
+    const points = hasPoints ? (cav as any).points : null;
+
     out.push({
       lengthIn,
       widthIn: w,
@@ -408,7 +416,8 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
       shape: shape ?? null,
       diameterIn: diameterIn ?? null,
       cornerRadiusIn,
-    });
+      points,  // ✅ Add points array
+    } as any);  // Cast to any since FlatCavity type doesn't include points
   }
 
   return out;
