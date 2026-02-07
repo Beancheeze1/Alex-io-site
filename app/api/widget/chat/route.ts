@@ -152,12 +152,21 @@ async function getTopMaterialsForWidget(args: {
     return Array.isArray(rows) ? rows : [];
   }
 
+  // No family hint: prioritize house foams across all families
   const rows = await q<DbMaterial>(
     `
     select id, name, material_family, density_lb_ft3
     from materials
     order by
       case when material_family is null then 1 else 0 end asc,
+      case
+        -- Prioritize house foams across all families
+        when material_family = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1560%' then 0
+        when material_family = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1780%' then 1
+        when material_family = 'Polyethylene' and density_lb_ft3 = 1.7 then 0
+        when material_family = 'Polyethylene' and density_lb_ft3 = 2.0 then 1
+        else 9
+      end asc,
       material_family asc,
       case when density_lb_ft3 is null then 1 else 0 end asc,
       density_lb_ft3 asc,
