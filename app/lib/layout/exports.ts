@@ -279,8 +279,12 @@ function buildSvg(layout: LayoutLike): string {
           ? `Ø${cav.lengthIn}×${cav.depthIn ?? ""}"`.trim()
           : `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn ?? ""}"`.trim());
 
-      if (cav.shape === "circle") {
-        const r = Math.min(cavW, cavH) / 2;
+      // ✅ USE resolveCavityShape helper (matches buildDxf)
+      const shape = resolveCavityShape(cav);
+
+      if (shape === "circle") {
+        const diaIn = resolvedCircleDiameterIn(cav) ?? Math.min(nnum(cav.lengthIn), nnum(cav.widthIn));
+        const r = (diaIn * scale) / 2;
         const cx = x + cavW / 2;
         const cy = y + cavH / 2;
         return `
@@ -295,35 +299,40 @@ function buildSvg(layout: LayoutLike): string {
   </g>`;
       }
 
-      // NEW: polygon cavity
-      if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
-        const pts = ((cav as any).points as any[])
-          .map((p) => ({
-            x: blockX + nnum(p?.x) * blockW,
-            y: blockY + nnum(p?.y) * blockH,
+      // ✅ polygon cavity (using helper)
+      if (shape === "poly") {
+        const polyPts = resolvedPolyPoints(cav);
+        if (polyPts && polyPts.length >= 3) {
+          const pts = polyPts.map((p) => ({
+            x: blockX + nnum(p.x) * blockW,
+            y: blockY + nnum(p.y) * blockH,
           }));
 
-        // label at bbox center (minimal + stable)
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const p of pts) {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-        const cx = (minX + maxX) / 2;
-        const cy = (minY + maxY) / 2;
+          // label at bbox center (minimal + stable)
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          for (const p of pts) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+          }
+          const cx = (minX + maxX) / 2;
+          const cy = (minY + maxY) / 2;
 
-        const pointsAttr = pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
-        return `
+          const pointsAttr = pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
+          return `
   <g>
     <polygon points="${pointsAttr}" fill="none" stroke="#111827" stroke-width="1" />
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
+        }
       }
 
-      const rx = cav.cornerRadiusIn ? nnum(cav.cornerRadiusIn) * scale : 0;
+      // Rectangle (with optional rounded corners)
+      const rx = shape === "roundedRect" 
+        ? nnum((cav as any).cornerRadiusIn ?? (cav as any).corner_radius_in ?? 0) * scale 
+        : 0;
       const rxy = Number.isFinite(rx) ? rx : 0;
 
       return `
