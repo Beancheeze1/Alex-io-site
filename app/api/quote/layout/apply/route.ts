@@ -49,7 +49,13 @@ import { one, q } from "@/lib/db";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { buildStepFromLayout } from "@/lib/cad/step";
-import { buildLayoutExports } from "@/app/lib/layout/exports";
+import {
+  buildLayoutExports,
+  computeGeometryHash,
+  embedGeometryHashInDxf,
+  embedGeometryHashInStep,
+  embedGeometryHashInSvg,
+} from "@/app/lib/layout/exports";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -58,6 +64,9 @@ type QuoteRow = {
   id: number;
   quote_no: string;
   status: string | null;
+  locked?: boolean | null;
+  geometry_hash?: string | null;
+  locked_at?: string | null;
 };
 
 type LayoutPkgRow = {
@@ -270,7 +279,7 @@ async function ensureQuoteHeader(args: {
   // 1) Try load
   const existing = await one<QuoteRow>(
     `
-    select id, quote_no, status
+    select id, quote_no, status, locked, geometry_hash, locked_at
     from quotes
     where quote_no = $1
     `,
@@ -299,9 +308,12 @@ async function ensureQuoteHeader(args: {
         email,
         phone,
         company,
+        locked,
+        geometry_hash,
+        locked_at,
         updated_by_user_id
       )
-      values ($1, 'draft', $2, $3, $4, $5, $6)
+      values ($1, 'draft', $2, $3, $4, $5, $6, $7, $8, $9)
       returning id, quote_no, status
       `,
       [
@@ -310,6 +322,9 @@ async function ensureQuoteHeader(args: {
         args.customerEmail,
         args.customerPhone,
         args.customerCompany,
+        false,
+        null,
+        null,
         args.currentUserId,
       ],
     );
@@ -335,12 +350,15 @@ async function ensureQuoteHeader(args: {
         customer_name,
         email,
         phone,
-        company
+        company,
+        locked,
+        geometry_hash,
+        locked_at
       )
-      values ($1, 'draft', $2, $3, $4, $5)
+      values ($1, 'draft', $2, $3, $4, $5, $6, $7, $8)
       returning id, quote_no, status
       `,
-      [args.quoteNo, fallbackCustomerName, args.customerEmail, args.customerPhone, args.customerCompany],
+      [args.quoteNo, fallbackCustomerName, args.customerEmail, args.customerPhone, args.customerCompany, false, null, null],
     );
 
     if (created2) {
@@ -358,11 +376,11 @@ async function ensureQuoteHeader(args: {
     // Minimal but still satisfies NOT NULL customer_name
     const created3 = await one<QuoteRow>(
       `
-      insert into quotes (quote_no, status, customer_name)
-      values ($1, 'draft', $2)
+      insert into quotes (quote_no, status, customer_name, locked, geometry_hash, locked_at)
+      values ($1, 'draft', $2, $3, $4, $5)
       returning id, quote_no, status
       `,
-      [args.quoteNo, fallbackCustomerName],
+      [args.quoteNo, fallbackCustomerName, false, null, null],
     );
 
     if (created3) {
@@ -1066,6 +1084,7 @@ export async function POST(req: NextRequest) {
 
   const quoteNo = String(body.quoteNo).trim();
   const layout = body.layout;
+  const action = typeof body.action === "string" ? body.action.trim().toLowerCase() : "";
 
  // ✅ ADD THIS DEBUG LOGGING
   console.log('[APPLY ROUTE] Checking incoming layout data...');
@@ -1114,29 +1133,6 @@ export async function POST(req: NextRequest) {
       });
     }
   }
-  const bundle = buildLayoutExports(layoutForSave);
-
- // ✅ ADD THIS DEBUG LOGGING
-  console.log('[APPLY ROUTE] After buildLayoutExports...');
-  console.log('[APPLY ROUTE] bundle.svg length:', bundle?.svg?.length || 0);
-  console.log('[APPLY ROUTE] bundle.svg has <polygon>?', bundle?.svg?.includes('<polygon') || false);
-  console.log('[APPLY ROUTE] bundle.dxf length:', bundle?.dxf?.length || 0);
-  console.log('[APPLY ROUTE] bundle.dxf has LWPOLYLINE?', bundle?.dxf?.includes('LWPOLYLINE') || false);
-  
-
-  const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
-
-  // Prefer canonical SVG from exports (it must reflect true cavity shapes).
-  // Fall back to client-provided svg only if exports didn't produce one.
-  const svgRawFromClient = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
-  const svgCanonical = (bundle?.svg && typeof bundle.svg === "string" && bundle.svg.trim().length > 0)
-    ? bundle.svg
-    : svgRawFromClient;
-
-  // ✅ Server-enforced chamfer (fixes broken client checkbox)
-  const svgFixed = enforceChamferedBlockInSvg(svgCanonical, layoutForSave);
-
-
   if (!quoteNo) {
     return bad(
       {
@@ -1207,6 +1203,90 @@ export async function POST(req: NextRequest) {
         404,
       );
     }
+
+    const geometryHash = computeGeometryHash(layoutForSave);
+
+    if (quote.locked) {
+      const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";
+      if (!storedHash || geometryHash !== storedHash) {
+        return bad(
+          {
+            ok: false,
+            error: "LockedGeometryError",
+            message: "Geometry is locked and cannot be modified.",
+          },
+          409,
+        );
+      }
+    }
+
+    if (action === "lock") {
+      if (quote.locked) {
+        return bad(
+          {
+            ok: false,
+            error: "LOCKED",
+            message: "Job is already locked.",
+          },
+          409,
+        );
+      }
+      if (quote.geometry_hash && quote.geometry_hash !== geometryHash) {
+        return bad(
+          {
+            ok: false,
+            error: "HASH_MISMATCH",
+            message: "Existing geometry hash does not match current layout.",
+          },
+          409,
+        );
+      }
+
+      await q(
+        `
+        update quotes
+        set
+          locked = true,
+          geometry_hash = $2,
+          locked_at = now(),
+          updated_by_user_id = coalesce($3, updated_by_user_id)
+        where id = $1
+        `,
+        [quote.id, geometryHash, currentUserId],
+      );
+
+      return ok(
+        {
+          ok: true,
+          locked: true,
+          geometry_hash: geometryHash,
+          locked_at: new Date().toISOString(),
+        },
+        200,
+      );
+    }
+
+    const bundle = buildLayoutExports(layoutForSave);
+
+    // ✅ ADD THIS DEBUG LOGGING
+    console.log("[APPLY ROUTE] After buildLayoutExports...");
+    console.log("[APPLY ROUTE] bundle.svg length:", bundle?.svg?.length || 0);
+    console.log("[APPLY ROUTE] bundle.svg has <polygon>?", bundle?.svg?.includes("<polygon") || false);
+    console.log("[APPLY ROUTE] bundle.dxf length:", bundle?.dxf?.length || 0);
+    console.log("[APPLY ROUTE] bundle.dxf has LWPOLYLINE?", bundle?.dxf?.includes("LWPOLYLINE") || false);
+
+    const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
+
+    // Prefer canonical SVG from exports (it must reflect true cavity shapes).
+    // Fall back to client-provided svg only if exports didn't produce one.
+    const svgRawFromClient = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
+    const svgCanonical =
+      bundle?.svg && typeof bundle.svg === "string" && bundle.svg.trim().length > 0
+        ? bundle.svg
+        : svgRawFromClient;
+
+    // ✅ Server-enforced chamfer (fixes broken client checkbox)
+    const svgFixed = enforceChamferedBlockInSvg(svgCanonical, layoutForSave);
 
     // NEW: If quote_items is missing, create the PRIMARY row now (safe self-heal).
     let qtyMaybe: number | null = null;
@@ -1393,13 +1473,16 @@ if (qtyMaybe != null) {
     // so per-layer cropCorners is honored regardless of which layer was active.
     // If bundle.dxf is missing, generate DXF from the CANONICAL (possibly chamfer-enforced) SVG,
     // not from the raw client SVG (which may be legacy/rect-only).
-    const dxf = bundle?.dxf ?? buildDxfFromSvg(svgFixed) ?? buildDxfFromLayout(layoutForSave);
+    const dxfBase = bundle?.dxf ?? buildDxfFromSvg(svgFixed) ?? buildDxfFromLayout(layoutForSave);
+    const dxf = embedGeometryHashInDxf(dxfBase, geometryHash);
 
-    const step = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
+    const stepBase = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
+    const step = embedGeometryHashInStep(stepBase, geometryHash);
 
     // Saved SVG should prefer canonical exports; svgFixed already reflects canonical when available.
     const svgBase = bundle?.svg ?? svgFixed;
-    const svgAnnotated = buildSvgWithAnnotations(layoutForSave, svgBase, materialLegend ?? null, quoteNo);
+    const svgAnnotatedBase = buildSvgWithAnnotations(layoutForSave, svgBase, materialLegend ?? null, quoteNo);
+    const svgAnnotated = embedGeometryHashInSvg(svgAnnotatedBase, geometryHash);
 
 
     const pkg = await one<LayoutPkgRow>(

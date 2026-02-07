@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { computeGeometryHash, embedGeometryHashInStep } from "@/app/lib/layout/exports";
 
 
 function jsonErr(status: number, error: string, message: string) {
@@ -150,9 +151,11 @@ export async function GET(req: Request) {
     const pkg = await one<{
       quote_no: string;
       layout_json: any;
+      locked: boolean | null;
+      geometry_hash: string | null;
     }>(
       `
-      SELECT q.quote_no, lp.layout_json
+      SELECT q.quote_no, q.locked, q.geometry_hash, lp.layout_json
       FROM public.quote_layout_packages lp
       JOIN public.quotes q ON q.id = lp.quote_id
       WHERE q.quote_no = $1
@@ -164,16 +167,25 @@ export async function GET(req: Request) {
 
     if (!pkg) return jsonErr(404, "NOT_FOUND", "No layout package found for this quote.");
 
+    if (!pkg.locked) return jsonErr(423, "LOCK_REQUIRED", "Layout must be locked before exports are allowed.");
+
+    const storedHash = typeof pkg.geometry_hash === "string" ? pkg.geometry_hash : "";
+    const layoutHash = computeGeometryHash(pkg.layout_json);
+    if (!storedHash || layoutHash !== storedHash) {
+      return jsonErr(409, "GEOMETRY_HASH_MISMATCH", "Layout geometry does not match the locked hash.");
+    }
+
     const sliced = sliceLayoutToSingleLayer(pkg.layout_json, layer_index);
     if (!sliced) return jsonErr(404, "NOT_FOUND", "Layer not found for this quote layout.");
 
     // ✅ Path A fix: force block corner metadata from this layer’s crop flag
     coerceLayerCropToBlockCorners(sliced);
 
-    const stepText = await buildStepFromLayout(sliced, quote_no, null);
-    if (!stepText || stepText.trim().length === 0) {
+    const stepBase = await buildStepFromLayout(sliced, quote_no, null);
+    if (!stepBase || stepBase.trim().length === 0) {
       return jsonErr(502, "STEP_FAILED", "STEP service did not return a STEP payload.");
     }
+    const stepText = embedGeometryHashInStep(stepBase, storedHash || layoutHash);
 
     const filename = `${quote_no}-layer-${layer_index + 1}.step`;
 

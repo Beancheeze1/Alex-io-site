@@ -15,6 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { computeGeometryHash, embedGeometryHashInStep } from "@/app/lib/layout/exports";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 
 
@@ -24,11 +25,14 @@ export const runtime = "nodejs";
 type QuoteRow = {
   id: number;
   quote_no: string;
+  locked?: boolean | null;
+  geometry_hash?: string | null;
 };
 
 type LayoutPkgRow = {
   step_text: string | null;
   created_at: string;
+  layout_json: any;
 };
 
 function json(body: any, status = 200) {
@@ -65,7 +69,7 @@ export async function GET(req: NextRequest) {
   try {
     const quote = await one<QuoteRow>(
       `
-      select id, quote_no
+      select id, quote_no, locked, geometry_hash
       from quotes
       where quote_no = $1
       `,
@@ -87,7 +91,8 @@ export async function GET(req: NextRequest) {
       `
       select
         step_text,
-        created_at
+        created_at,
+        layout_json
       from quote_layout_packages
       where quote_id = $1
         and step_text is not null
@@ -109,9 +114,34 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const filename = `${quote.quote_no || quoteNo}.step`;
+    if (!quote.locked) {
+      return json(
+        {
+          ok: false,
+          error: "LOCK_REQUIRED",
+          message: "Layout must be locked before exports are allowed.",
+        },
+        423,
+      );
+    }
 
-    return new NextResponse(pkg.step_text, {
+    const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";
+    const layoutHash = computeGeometryHash(pkg.layout_json);
+    if (!storedHash || layoutHash !== storedHash) {
+      return json(
+        {
+          ok: false,
+          error: "GEOMETRY_HASH_MISMATCH",
+          message: "Layout geometry does not match the locked hash.",
+        },
+        409,
+      );
+    }
+
+    const filename = `${quote.quote_no || quoteNo}.step`;
+    const stepText = embedGeometryHashInStep(pkg.step_text, storedHash || layoutHash);
+
+    return new NextResponse(stepText, {
       status: 200,
       headers: {
         "Content-Type": "application/step",

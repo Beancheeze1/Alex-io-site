@@ -19,7 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
-import { buildLayoutExports } from "@/app/lib/layout/exports";
+import { buildLayoutExports, computeGeometryHash } from "@/app/lib/layout/exports";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 
 
@@ -39,6 +39,8 @@ type QuoteRow = {
   company: string | null;
   status: string;
   created_at: string;
+  locked?: boolean | null;
+  geometry_hash?: string | null;
 
   // NEW: revision label (customer workflow language)
   // Source (Path A): facts.revision (default RevAS) until DB is wired.
@@ -197,7 +199,9 @@ export async function GET(req: NextRequest) {
         phone,
         company,
         status,
-        created_at
+        created_at,
+        locked,
+        geometry_hash
       from quotes
       where quote_no = $1
       `,
@@ -362,19 +366,33 @@ export async function GET(req: NextRequest) {
     );
 
     if (layoutPkg?.layout_json) {
-  try {
-    const bundle = buildLayoutExports(layoutPkg.layout_json);
+      const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";
+      const layoutHash = computeGeometryHash(layoutPkg.layout_json);
+      const lockOk = !!quote.locked && storedHash && layoutHash === storedHash;
 
-    layoutPkg = {
-      ...layoutPkg,
-      svg_text: bundle.svg ?? layoutPkg.svg_text,
-      dxf_text: bundle.dxf ?? layoutPkg.dxf_text,
-      step_text: bundle.step ?? layoutPkg.step_text,
-    };
-  } catch (e) {
-    console.error("[quote/print] export regeneration failed", e);
-  }
-}
+      if (!lockOk) {
+        layoutPkg = {
+          ...layoutPkg,
+          svg_text: null,
+          dxf_text: null,
+          step_text: null,
+          export_error: !quote.locked ? "LOCK_REQUIRED" : "GEOMETRY_HASH_MISMATCH",
+        } as any;
+      } else {
+        try {
+          const bundle = buildLayoutExports(layoutPkg.layout_json);
+
+          layoutPkg = {
+            ...layoutPkg,
+            svg_text: bundle.svg ?? layoutPkg.svg_text,
+            dxf_text: bundle.dxf ?? layoutPkg.dxf_text,
+            step_text: bundle.step ?? layoutPkg.step_text,
+          };
+        } catch (e) {
+          console.error("[quote/print] export regeneration failed", e);
+        }
+      }
+    }
     // --- CAD RBAC (A): redact CAD exports unless admin/sales/cs ---
     const user = await getCurrentUserFromRequest(req);
     const role = (user?.role || "").toLowerCase();

@@ -15,6 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { computeGeometryHash, embedGeometryHashInStep } from "@/app/lib/layout/exports";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,6 +23,8 @@ export const runtime = "nodejs";
 type QuoteRow = {
   id: number;
   quote_no: string;
+  locked?: boolean | null;
+  geometry_hash?: string | null;
 };
 
 type LayoutPkgRow = {
@@ -57,7 +60,7 @@ export async function GET(req: NextRequest) {
   try {
     const quote = await one<QuoteRow>(
       `
-      select id, quote_no
+      select id, quote_no, locked, geometry_hash
       from quotes
       where quote_no = $1
       `,
@@ -107,7 +110,31 @@ export async function GET(req: NextRequest) {
     }
 
     // For the "simple" route, we now just reuse the saved STEP text.
-    const stepText = layoutPkg.step_text;
+    if (!quote.locked) {
+      return bad(
+        {
+          ok: false,
+          error: "LOCK_REQUIRED",
+          message: "Layout must be locked before exports are allowed.",
+        },
+        423,
+      );
+    }
+
+    const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";
+    const layoutHash = computeGeometryHash(layoutPkg.layout_json);
+    if (!storedHash || layoutHash !== storedHash) {
+      return bad(
+        {
+          ok: false,
+          error: "GEOMETRY_HASH_MISMATCH",
+          message: "Layout geometry does not match the locked hash.",
+        },
+        409,
+      );
+    }
+
+    const stepText = embedGeometryHashInStep(layoutPkg.step_text ?? "", storedHash || layoutHash);
 
     if (!stepText) {
       return bad(

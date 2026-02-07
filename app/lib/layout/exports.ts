@@ -10,6 +10,7 @@
 // - Uses layer.cropCorners to chamfer ONLY that layer’s block outline.
 // - Legacy single-layer { block, cavities } output remains unchanged.
 
+import { createHash } from "crypto";
 import { buildOuterOutlinePolyline } from "./outline";
 
 export type LayoutExportBundle = {
@@ -72,10 +73,209 @@ const VIEW_H = 700;
 const PADDING = 40;
 const DEFAULT_ROUND_RADIUS_IN = 0.25;
 
+function normalizeUnits(raw: any): "in" | "mm" | null {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (s === "mm" || s === "millimeter" || s === "millimeters") return "mm";
+  if (s === "in" || s === "inch" || s === "inches") return "in";
+  return null;
+}
+
+function toInches(n: number, units: "in" | "mm" | null): number {
+  if (!Number.isFinite(n)) return n;
+  if (units === "mm") return n / 25.4;
+  return n;
+}
+
+function fixed(n: number, places = 4): string {
+  if (!Number.isFinite(n)) return "0";
+  return n.toFixed(places);
+}
+
+function stableStringify(value: any): string {
+  if (value === null || value === undefined || typeof value !== "object") {
+    const encoded = JSON.stringify(value);
+    return typeof encoded === "string" ? encoded : "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => stableStringify(v)).join(",")}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+}
+
+export function computeGeometryHash(layout: LayoutLike): string {
+  const units =
+    normalizeUnits((layout as any)?.units) ??
+    normalizeUnits((layout as any)?.block?.units) ??
+    null;
+
+  const block = (layout as any)?.block ?? {};
+  const blockL = toInches(Number(block?.lengthIn ?? block?.length_in ?? block?.length), units);
+  const blockW = toInches(Number(block?.widthIn ?? block?.width_in ?? block?.width), units);
+  const blockH = toInches(
+    Number(block?.thicknessIn ?? block?.thickness_in ?? block?.heightIn ?? block?.height_in),
+    units,
+  );
+
+  const stack = getStack(layout);
+  const layerThicknesses: string[] = [];
+  if (stack && stack.length > 0) {
+    for (const layer of stack) {
+      const t = toInches(
+        Number((layer as any)?.thicknessIn ?? (layer as any)?.thickness_in ?? (layer as any)?.heightIn),
+        units,
+      );
+      if (Number.isFinite(t) && t > 0) layerThicknesses.push(fixed(t, 4));
+    }
+  } else if (Number.isFinite(blockH) && blockH > 0) {
+    layerThicknesses.push(fixed(blockH, 4));
+  }
+
+  const materialFamilyRaw =
+    (layout as any)?.materialFamily ??
+    (layout as any)?.material_family ??
+    (layout as any)?.material?.family ??
+    (layout as any)?.material?.material_family ??
+    null;
+  const materialFamily =
+    typeof materialFamilyRaw === "string" && materialFamilyRaw.trim().length > 0
+      ? materialFamilyRaw.trim().toLowerCase()
+      : null;
+
+  const densRaw =
+    (layout as any)?.materialDensity ??
+    (layout as any)?.material_density_lb_ft3 ??
+    (layout as any)?.material?.density_lb_ft3 ??
+    (layout as any)?.material?.density ??
+    null;
+  const densNum = Number(densRaw);
+  const densityLbFt3 = Number.isFinite(densNum) && densNum > 0 ? fixed(densNum, 4) : null;
+
+  const blockLen = Number.isFinite(blockL) && blockL > 0 ? blockL : null;
+  const blockWid = Number.isFinite(blockW) && blockW > 0 ? blockW : null;
+
+  type HashCavity = {
+    layer: number;
+    type: string;
+    shape: string;
+    x: string;
+    y: string;
+    diameter?: string | null;
+    points?: { x: string; y: string }[] | null;
+  };
+
+  const cavitiesOut: HashCavity[] = [];
+
+  const pushCavity = (cav: any, layerIndex: number) => {
+    const shape = resolveCavityShape(cav);
+    const typeRaw = cav?.type ?? cav?.shape ?? shape;
+    const type = typeof typeRaw === "string" ? typeRaw.trim().toLowerCase() : String(typeRaw);
+
+    const x = norm01(cav?.x);
+    const y = norm01(cav?.y);
+
+    const entry: HashCavity = {
+      layer: layerIndex,
+      type,
+      shape,
+      x: fixed(x, 6),
+      y: fixed(y, 6),
+    };
+
+    if (shape === "poly") {
+      const pts = resolvedPolyPoints(cav);
+      entry.points =
+        pts && pts.length
+          ? pts.map((p) => ({ x: fixed(norm01(p.x), 6), y: fixed(norm01(p.y), 6) }))
+          : null;
+    } else if (shape === "circle") {
+      const diaRaw = coerceDiameterIn(cav);
+      const dia = toInches(Number(diaRaw ?? cav?.lengthIn ?? cav?.widthIn), units);
+      entry.diameter = Number.isFinite(dia) && dia > 0 ? fixed(dia, 4) : null;
+    } else {
+      const len = toInches(Number(cav?.lengthIn ?? cav?.length_in), units);
+      const wid = toInches(Number(cav?.widthIn ?? cav?.width_in), units);
+      if (blockLen && blockWid && Number.isFinite(len) && Number.isFinite(wid) && len > 0 && wid > 0) {
+        const wNorm = len / blockLen;
+        const hNorm = wid / blockWid;
+        entry.points = [
+          { x: fixed(0, 6), y: fixed(0, 6) },
+          { x: fixed(wNorm, 6), y: fixed(0, 6) },
+          { x: fixed(wNorm, 6), y: fixed(hNorm, 6) },
+          { x: fixed(0, 6), y: fixed(hNorm, 6) },
+        ];
+      }
+    }
+
+    cavitiesOut.push(entry);
+  };
+
+  if (stack && stack.length > 0) {
+    for (let i = 0; i < stack.length; i++) {
+      const cavs = Array.isArray((stack[i] as any)?.cavities) ? (stack[i] as any).cavities : [];
+      for (const cav of cavs) pushCavity(cav, i);
+    }
+  } else if (Array.isArray((layout as any)?.cavities)) {
+    for (const cav of (layout as any).cavities) pushCavity(cav, 0);
+  }
+
+  const cavities = cavitiesOut
+    .map((c) => ({
+      ...c,
+      __key: stableStringify(c),
+    }))
+    .sort((a, b) => (a.__key < b.__key ? -1 : a.__key > b.__key ? 1 : 0))
+    .map(({ __key, ...rest }) => rest);
+
+  const canonical = {
+    block: {
+      length_in: Number.isFinite(blockL) ? fixed(blockL, 4) : null,
+      width_in: Number.isFinite(blockW) ? fixed(blockW, 4) : null,
+      height_in: Number.isFinite(blockH) ? fixed(blockH, 4) : null,
+    },
+    layers: layerThicknesses,
+    material: {
+      family: materialFamily,
+      density_lb_ft3: densityLbFt3,
+    },
+    cavities,
+  };
+
+  const raw = stableStringify(canonical);
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+export function embedGeometryHashInSvg(svg: string, hash: string): string {
+  if (!svg || !hash) return svg;
+  const marker = "ALEX-IO-GEOMETRY-HASH:";
+  if (svg.includes(marker)) return svg;
+  const comment = `<!-- ${marker} ${hash} -->`;
+  if (svg.startsWith("<?xml")) {
+    const idx = svg.indexOf("?>");
+    if (idx >= 0) return `${svg.slice(0, idx + 2)}\n${comment}${svg.slice(idx + 2)}`;
+  }
+  return `${comment}\n${svg}`;
+}
+
+export function embedGeometryHashInDxf(dxf: string, hash: string): string {
+  if (!dxf || !hash) return dxf;
+  const marker = "ALEX-IO-GEOMETRY-HASH:";
+  if (dxf.includes(marker)) return dxf;
+  return `999\n${marker} ${hash}\n${dxf}`;
+}
+
+export function embedGeometryHashInStep(step: string, hash: string): string {
+  if (!step || !hash) return step;
+  const marker = "ALEX-IO-GEOMETRY-HASH:";
+  if (step.includes(marker)) return step;
+  return `/* ${marker} ${hash} */\n${step}`;
+}
+
 export function buildLayoutExports(layout: LayoutLike): LayoutExportBundle {
-  const svg = buildSvg(layout);
-  const dxf = buildDxf(layout);
-  const step = buildStepStub(layout);
+  const hash = computeGeometryHash(layout);
+  const svg = embedGeometryHashInSvg(buildSvg(layout), hash);
+  const dxf = embedGeometryHashInDxf(buildDxf(layout), hash);
+  const step = embedGeometryHashInStep(buildStepStub(layout), hash);
   return { svg, dxf, step };
 }
 
