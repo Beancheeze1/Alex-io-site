@@ -459,13 +459,18 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
       continue;
     }
 
-    const shape = normalizeShape(
-      (cav as any).shape ??
-        (cav as any).cavityShape ??
-        (cav as any).cavity_shape ??
-        (cav as any).type ??
-        (cav as any).kind,
-    );
+// ✅ Check for polygon first (before normalizeShape which might not recognize it)
+    const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length >= 3;
+    
+    const shape = hasPoints 
+      ? "poly"  // ✅ Force poly if has points
+      : normalizeShape(
+          (cav as any).shape ??
+            (cav as any).cavityShape ??
+            (cav as any).cavity_shape ??
+            (cav as any).type ??
+            (cav as any).kind,
+        );
 
     const rawDia = (cav as any).diameterIn ?? (cav as any).diameter_in ?? (cav as any).diameter ?? null;
     const diaNum = rawDia == null ? NaN : Number(rawDia);
@@ -486,15 +491,20 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
     const rNum = rawR == null ? NaN : Number(rawR);
     const cornerRadiusIn = Number.isFinite(rNum) && rNum > 0 ? rNum : null;
 
-    // NEW (Path A): preserve polygon points for client-side layer DXF downloads
-    let points: { x: number; y: number }[] | null = null;
-    if (shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
-      const rawPts = (cav as any).points as any[];
-      const cleaned = rawPts
-        .map((p) => ({ x: Number(p?.x), y: Number(p?.y) }))
-        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-      points = cleaned.length >= 3 ? cleaned : null;
-    }
+    // ✅ Preserve points array
+    const points = hasPoints ? (cav as any).points : null;
+
+    out.push({
+      lengthIn,
+      widthIn: w,
+      depthIn: Number.isFinite(depthIn || NaN) ? depthIn : null,
+      x,
+      y,
+      shape: shape ?? null,
+      diameterIn: diameterIn ?? null,
+      cornerRadiusIn,
+      points,  // ✅ Add points array
+    } as any);  // Cast to any since FlatCavity type doesn't include points
 
     out.push({
       lengthIn,
