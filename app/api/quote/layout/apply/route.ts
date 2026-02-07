@@ -1474,15 +1474,15 @@ if (qtyMaybe != null) {
     // If bundle.dxf is missing, generate DXF from the CANONICAL (possibly chamfer-enforced) SVG,
     // not from the raw client SVG (which may be legacy/rect-only).
     const dxfBase = bundle?.dxf ?? buildDxfFromSvg(svgFixed) ?? buildDxfFromLayout(layoutForSave);
-    const dxf = embedGeometryHashInDxf(dxfBase, geometryHash);
+    const dxf = embedGeometryHashInDxf(dxfBase, geometryHash ?? "");
 
-    const stepBase = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
-    const step = embedGeometryHashInStep(stepBase, geometryHash);
+    const stepBase = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? "");
+const step = embedGeometryHashInStep(stepBase ?? "", geometryHash ?? "");
 
     // Saved SVG should prefer canonical exports; svgFixed already reflects canonical when available.
     const svgBase = bundle?.svg ?? svgFixed;
-    const svgAnnotatedBase = buildSvgWithAnnotations(layoutForSave, svgBase, materialLegend ?? null, quoteNo);
-    const svgAnnotated = embedGeometryHashInSvg(svgAnnotatedBase, geometryHash);
+  const svgAnnotatedBase = buildSvgWithAnnotations(layoutForSave, svgBase, materialLegend ?? "", quoteNo);
+const svgAnnotated = embedGeometryHashInSvg(svgAnnotatedBase ?? "", geometryHash ?? "");
 
 
     const pkg = await one<LayoutPkgRow>(
