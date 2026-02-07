@@ -2788,14 +2788,34 @@ return;
     }
   };
 
-  /* ---------- Foam Advisor navigation ---------- */
+/* ---------- Foam Advisor navigation ---------- */
 
- const handleGoToFoamAdvisor = () => {
+const handleGoToFoamAdvisor = () => {
   if (missingCustomerInfo) return;
   if (typeof window === "undefined") return;
 
-  // 🔒 Preserve the full editor URL as the source of truth
-  const returnTo = window.location.href;
+  // Build a return_to URL that includes the user's CURRENT form inputs.
+  // The editor already supports URL-prefill for these keys, so this prevents state loss
+  // when navigating away and coming back from /foam-advisor.
+  const editorUrl = new URL(window.location.href);
+
+  // Canonical customer keys (the editor reads these)
+  editorUrl.searchParams.set("customer_name", (customerName || "").trim());
+  editorUrl.searchParams.set("customer_email", (customerEmail || "").trim());
+
+  const company = (customerCompany || "").trim();
+  const phone = (customerPhone || "").trim();
+  if (company) editorUrl.searchParams.set("customer_company", company);
+  else editorUrl.searchParams.delete("customer_company");
+  if (phone) editorUrl.searchParams.set("customer_phone", phone);
+  else editorUrl.searchParams.delete("customer_phone");
+
+  // Qty key (the editor reads qty/quantity/etc — use canonical qty)
+  if (typeof qty === "number" && Number.isFinite(qty) && qty > 0) {
+    editorUrl.searchParams.set("qty", String(qty));
+  } else {
+    editorUrl.searchParams.delete("qty");
+  }
 
   const params = new URLSearchParams();
 
@@ -2803,12 +2823,12 @@ return;
     params.set("quote_no", quoteNo);
   }
 
-  // Pass full return URL so NOTHING is lost
-  params.set("return_to", returnTo);
+  // Pass the FULL editor URL (now including current inputs)
+  params.set("return_to", editorUrl.toString());
 
-  const url = `/foam-advisor?${params.toString()}`;
-  router.push(url);
+  router.push(`/foam-advisor?${params.toString()}`);
 };
+
 
 
   /* ---------- Apply-to-Quote ---------- */
