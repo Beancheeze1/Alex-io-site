@@ -1020,7 +1020,7 @@ const blockOutline =
       });
 
       const d = polylineToSvgPath(pts, { widthIn: W });
-      return `<path d="${d}" fill="none" stroke="#111827" stroke-width="1" />`;
+      return `<path d="${d}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
     }
 
     if (c.shape === "roundedRect" || r > 0) {

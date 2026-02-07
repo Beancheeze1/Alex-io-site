@@ -562,21 +562,21 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
       const left = L * c.x;
       const top = W * c.y;
 
-      // ✅ NEW: Check for polygon shape FIRST
-      if ((c as any).shape === "poly" && Array.isArray((c as any).points) && (c as any).points.length >= 3) {
-        const rawPts = (c as any).points as any[];
-        
-        // Convert normalized points (0-1 in block space) to SVG coordinates
-        const pts = rawPts.map((p: any) => {
-          const px = Math.max(0, Math.min(1, Number(p?.x)));
-          const py = Math.max(0, Math.min(1, Number(p?.y)));
-          const x = px * L;
-          const y = (1 - py) * W;  // Flip Y for SVG (Y grows downward)
-          return `${x},${y}`;
-        }).join(" ");
-        
-        return `<polygon points="${pts}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
-      }
+// ✅ NEW: Check for polygon shape FIRST
+if ((c as any).shape === "poly" && Array.isArray((c as any).points) && (c as any).points.length >= 3) {
+  const rawPts = (c as any).points as any[];
+  
+  // Convert normalized points (0-1 in block space) to SVG coordinates
+  const pts = rawPts.map((p: any) => {
+    const px = Math.max(0, Math.min(1, Number(p?.x)));
+    const py = Math.max(0, Math.min(1, Number(p?.y)));
+    const x = px * L;
+    const y = py * W;  // ✅ CORRECT - No flip needed (matches rect/circle behavior)
+    return `${x},${y}`;
+  }).join(" ");
+  
+  return `<polygon points="${pts}" fill="none" stroke="${cavStroke}" stroke-width="${cavStrokeWidth}" />`;
+}
 
       // For rects we use lengthIn x widthIn.
       // For circles we use diameterIn (fallback already handled).
