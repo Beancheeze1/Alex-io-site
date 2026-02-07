@@ -1,0 +1,6 @@
+﻿{
+  "dims": { "L": 12, "W": 9, "H": 2, "units": "in" },
+  "weight_lb": 8,
+  "drop_height_in": 24,
+  "fragility": "med"
+}
