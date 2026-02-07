@@ -90,6 +90,77 @@ function nnum(v: any, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function norm01(v: any): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+function normalizeShape(raw: any): "circle" | "rect" | "roundedRect" | "poly" | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim().toLowerCase();
+  if (!s) return null;
+  if (s === "circle" || s === "round") return "circle";
+  if (s === "rect" || s === "rectangle" || s === "square") return "rect";
+  if (s === "roundedrect" || s === "rounded-rect" || s === "rounded_rect" || s === "roundrect") return "roundedRect";
+  if (s === "poly" || s === "polygon") return "poly";
+  return null;
+}
+
+function coerceDiameterIn(cav: any): number | null {
+  const candidates = [cav?.diameterIn, cav?.diameter_in, cav?.diameter, cav?.dia, cav?.d];
+  for (const v of candidates) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+function coercePoints(cav: any): { x: number; y: number }[] | null {
+  const pts = cav?.points;
+  if (!Array.isArray(pts) || pts.length < 3) return null;
+
+  const out = pts
+    .map((p: any) => {
+      const x = Number(p?.x);
+      const y = Number(p?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { x: norm01(x), y: norm01(y) };
+    })
+    .filter(Boolean) as { x: number; y: number }[];
+
+  return out.length >= 3 ? out : null;
+}
+
+function resolveCavityShape(cav: any): "circle" | "rect" | "roundedRect" | "poly" {
+  // 1) points implies poly
+  const pts = coercePoints(cav);
+  if (pts) return "poly";
+
+  // 2) explicit shape aliases
+  const rawShape = cav?.shape ?? cav?.cavityShape ?? cav?.type ?? null;
+  let shape = normalizeShape(rawShape);
+
+  // 3) diameter implies circle unless explicitly something else
+  const dia = coerceDiameterIn(cav);
+  if (dia != null && dia > 0) shape = "circle";
+
+  // 4) corner radius implies roundedRect unless circle
+  const cr = Number(cav?.cornerRadiusIn ?? cav?.corner_radius_in ?? cav?.corner_radius ?? cav?.radiusIn ?? cav?.r);
+  if (Number.isFinite(cr) && cr > 0 && shape !== "circle") shape = "roundedRect";
+
+  return shape ?? "rect";
+}
+
+function resolvedPolyPoints(cav: any): { x: number; y: number }[] | null {
+  return coercePoints(cav);
+}
+
+function resolvedCircleDiameterIn(cav: any): number | null {
+  return coerceDiameterIn(cav);
+}
+
+
 function svgPathFromOutline(
   points: { x: number; y: number }[],
   opts: { offsetX: number; offsetY: number; scale: number; heightPx: number },
@@ -410,52 +481,61 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
             ? `Ø${cav.lengthIn}×${cav.depthIn ?? ""}"`.trim()
             : `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn ?? ""}"`.trim());
 
-        if (cav.shape === "circle") {
-          const r = Math.min(cavW, cavH) / 2;
+        const shape = resolveCavityShape(cav);
+
+        if (shape === "circle") {
+          const diaIn = resolvedCircleDiameterIn(cav) ?? Math.min(nnum(cav.lengthIn), nnum(cav.widthIn));
+          const diaPx = diaIn * scale;
+          const r = diaPx / 2;
           const cx = x + cavW / 2;
           const cy = y + cavH / 2;
           return `
   <g>
     <circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(
-            2,
-          )}" fill="none" stroke="#111827" stroke-width="1" />
+          2,
+        )}" fill="none" stroke="#111827" stroke-width="1" />
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(
-            2,
-          )}" text-anchor="middle" dominant-baseline="middle"
+          2,
+        )}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
         }
 
-        // NEW: polygon cavity
-        if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
-          const pts = ((cav as any).points as any[])
-            .map((p) => ({
-              x: blockX + nnum(p?.x) * blockW,
-              y: blockY + nnum(p?.y) * blockH,
+        // polygon cavity
+        if (shape === "poly") {
+          const polyPts = resolvedPolyPoints(cav);
+          if (polyPts && polyPts.length >= 3) {
+            const pts = polyPts.map((p) => ({
+              x: blockX + nnum(p.x) * blockW,
+              y: blockY + nnum(p.y) * blockH,
             }));
 
-          // label at bbox center (minimal + stable)
-          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-          for (const p of pts) {
-            if (p.x < minX) minX = p.x;
-            if (p.x > maxX) maxX = p.x;
-            if (p.y < minY) minY = p.y;
-            if (p.y > maxY) maxY = p.y;
-          }
-          const cx = (minX + maxX) / 2;
-          const cy = (minY + maxY) / 2;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (const p of pts) {
+              if (p.x < minX) minX = p.x;
+              if (p.x > maxX) maxX = p.x;
+              if (p.y < minY) minY = p.y;
+              if (p.y > maxY) maxY = p.y;
+            }
+            const cx = (minX + maxX) / 2;
+            const cy = (minY + maxY) / 2;
 
-          const pointsAttr = pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
-          return `
+            const pointsAttr = pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
+            return `
   <g>
     <polygon points="${pointsAttr}" fill="none" stroke="#111827" stroke-width="1" />
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
+          }
         }
 
         // Rectangle (with optional rounded corners)
-        const rx = cav.cornerRadiusIn ? nnum(cav.cornerRadiusIn) * scale : 0;
+        const rx =
+          resolveCavityShape(cav) === "roundedRect"
+            ? nnum((cav as any).cornerRadiusIn ?? (cav as any).corner_radius_in ?? 0) * scale
+            : 0;
+
         const rxy = Number.isFinite(rx) ? rx : 0;
 
         return `
@@ -573,6 +653,7 @@ function buildDxf(layout: LayoutLike): string {
   for (const cav of cavities as CavityLike[]) {
     const len = nnum(cav.lengthIn);
     const wid = nnum(cav.widthIn);
+    const shape = resolveCavityShape(cav);
 
     // X stays the same
     const xLeft = nnum(cav.x) * blkLen;
@@ -580,8 +661,9 @@ function buildDxf(layout: LayoutLike): string {
     // Y-FLIP (match STEP): editor y is from TOP, CAD y is from BOTTOM.
     // For rectangles: top-left at yTop = W*(1-y) - height
     // For circles: top-left box at yTop = W*(1-y) - 2r
-    if (cav.shape === "circle") {
-      const r = Math.min(len, wid) / 2;
+    if (shape === "circle") {
+      const diaIn = resolvedCircleDiameterIn(cav) ?? Math.min(len, wid);
+      const r = diaIn / 2;
 
       let x = xLeft;
       let yTop = blkWid * (1 - nnum(cav.y)) - (2 * r);
@@ -599,25 +681,23 @@ function buildDxf(layout: LayoutLike): string {
       push(20, cy);
       push(30, 0);
       push(40, r);
-    } else if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
-      const rawPts = (cav as any).points as any[];
+    } else if (shape === "poly") {
+      const polyPts = resolvedPolyPoints(cav);
+      if (polyPts && polyPts.length >= 3) {
+        const pts: [number, number][] = polyPts.map((p) => {
+          const xIn = norm01(p.x) * blkLen;
+          const yIn = blkWid * (1 - norm01(p.y)); // Y-FLIP for CAD
+          return [xIn, yIn];
+        });
 
-      // Map normalized top-left points to CAD inches with Y-flip (top->bottom)
-      const pts: [number, number][] = rawPts.map((p) => {
-        const px = Math.max(0, Math.min(1, nnum(p?.x)));
-        const py = Math.max(0, Math.min(1, nnum(p?.y)));
-        const xIn = px * blkLen;
-        const yIn = blkWid * (1 - py);
-        return [xIn, yIn];
-      });
-
-      push(0, "LWPOLYLINE");
-      push(8, "CAVITY");
-      push(90, pts.length);
-      push(70, 1);
-      for (const [px, py] of pts) {
-        push(10, px);
-        push(20, py);
+        push(0, "LWPOLYLINE");
+        push(8, "CAVITY");
+        push(90, pts.length);
+        push(70, 1);
+        for (const [px, py] of pts) {
+          push(10, px);
+          push(20, py);
+        }
       }
     } else {
       let x = xLeft;
@@ -754,9 +834,11 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
     for (const cav of cavs) {
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
+      const shape = resolveCavityShape(cav);
 
-      if (cav.shape === "circle") {
-        const r = Math.min(len, wid) / 2;
+      if (shape === "circle") {
+        const diaIn = resolvedCircleDiameterIn(cav) ?? Math.min(len, wid);
+        const r = diaIn / 2;
 
         let x = nnum(cav.x) * blkLen;
         let yTop = blkWid * (1 - nnum(cav.y)) - (2 * r);
@@ -774,26 +856,24 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
         push(20, cy);
         push(30, 0);
         push(40, r);
-      } else if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
-        const rawPts = (cav as any).points as any[];
+      } else if (shape === "poly") {
+        const polyPts = resolvedPolyPoints(cav);
+        if (polyPts && polyPts.length >= 3) {
+          const pts: [number, number][] = polyPts.map((p) => {
+            const xIn = norm01(p.x) * blkLen;
+            const yBase = blkWid * (1 - norm01(p.y));
+            const yOut = yBase + yOff;
+            return [xIn, yOut];
+          });
 
-        // Map normalized top-left points to CAD inches with Y-flip (top->bottom)
-        const pts: [number, number][] = rawPts.map((p) => {
-          const px = Math.max(0, Math.min(1, nnum(p?.x)));
-          const py = Math.max(0, Math.min(1, nnum(p?.y)));
-          const xIn = px * blkLen;
-          const yBase = blkWid * (1 - py);
-          const yOut = yBase + yOff;
-          return [xIn, yOut];
-        });
-
-        push(0, "LWPOLYLINE");
-        push(8, `CAVITY_L${layerNo}`);
-        push(90, pts.length);
-        push(70, 1);
-        for (const [px, py] of pts) {
-          push(10, px);
-          push(20, py);
+          push(0, "LWPOLYLINE");
+          push(8, `CAVITY_L${layerNo}`);
+          push(90, pts.length);
+          push(70, 1);
+          for (const [px, py] of pts) {
+            push(10, px);
+            push(20, py);
+          }
         }
       } else {
         const xLeft = nnum(cav.x) * blkLen;
