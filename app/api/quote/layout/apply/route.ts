@@ -1045,6 +1045,8 @@ function buildSvgWithAnnotations(
   return `${svgOpen}\\n${notesGroup}\\n${geometryGroup}\\n${svgClose}`;
 }
 
+
+
 /* ===================== POST: save layout (+ optional qty/material/customer) ===================== */
 
 export async function POST(req: NextRequest) {
@@ -1065,8 +1067,63 @@ export async function POST(req: NextRequest) {
   const quoteNo = String(body.quoteNo).trim();
   const layout = body.layout;
 
+ // ✅ ADD THIS DEBUG LOGGING
+  console.log('[APPLY ROUTE] Checking incoming layout data...');
+  if (layout && layout.stack && Array.isArray(layout.stack)) {
+    console.log('[APPLY ROUTE] Layout has', layout.stack.length, 'layers');
+    for (let i = 0; i < layout.stack.length; i++) {
+      const layer = layout.stack[i];
+      const cavs = Array.isArray(layer?.cavities) ? layer.cavities : [];
+      console.log(`[APPLY ROUTE] Layer ${i}: ${cavs.length} cavities`);
+      cavs.forEach((cav: any, j: number) => {
+        console.log(`[APPLY ROUTE]   Cavity ${j}:`, {
+          shape: cav.shape,
+          hasPoints: Array.isArray(cav.points),
+          pointCount: cav.points?.length || 0,
+          lengthIn: cav.lengthIn,
+          widthIn: cav.widthIn
+        });
+        if (Array.isArray(cav.points) && cav.points.length > 0) {
+          console.log(`[APPLY ROUTE]     First 3 points:`, cav.points.slice(0, 3));
+        }
+      });
+    }
+  }
+
   const layoutForSave = normalizeLayoutForStorage(layout, body);
+
+// ✅ ADD THIS DEBUG LOGGING
+  console.log('[APPLY ROUTE] After normalizeLayoutForStorage...');
+  if (layoutForSave && layoutForSave.stack && Array.isArray(layoutForSave.stack)) {
+    console.log('[APPLY ROUTE] Normalized layout has', layoutForSave.stack.length, 'layers');
+    for (let i = 0; i < layoutForSave.stack.length; i++) {
+      const layer = layoutForSave.stack[i];
+      const cavs = Array.isArray(layer?.cavities) ? layer.cavities : [];
+      console.log(`[APPLY ROUTE] Layer ${i}: ${cavs.length} cavities`);
+      cavs.forEach((cav: any, j: number) => {
+        console.log(`[APPLY ROUTE]   Cavity ${j}:`, {
+          shape: cav.shape,
+          hasPoints: Array.isArray(cav.points),
+          pointCount: cav.points?.length || 0,
+          lengthIn: cav.lengthIn,
+          widthIn: cav.widthIn
+        });
+        if (Array.isArray(cav.points) && cav.points.length > 0) {
+          console.log(`[APPLY ROUTE]     First 3 points:`, cav.points.slice(0, 3));
+        }
+      });
+    }
+  }
   const bundle = buildLayoutExports(layoutForSave);
+
+ // ✅ ADD THIS DEBUG LOGGING
+  console.log('[APPLY ROUTE] After buildLayoutExports...');
+  console.log('[APPLY ROUTE] bundle.svg length:', bundle?.svg?.length || 0);
+  console.log('[APPLY ROUTE] bundle.svg has <polygon>?', bundle?.svg?.includes('<polygon') || false);
+  console.log('[APPLY ROUTE] bundle.dxf length:', bundle?.dxf?.length || 0);
+  console.log('[APPLY ROUTE] bundle.dxf has LWPOLYLINE?', bundle?.dxf?.includes('LWPOLYLINE') || false);
+  
+
   const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
 
   // Prefer canonical SVG from exports (it must reflect true cavity shapes).
