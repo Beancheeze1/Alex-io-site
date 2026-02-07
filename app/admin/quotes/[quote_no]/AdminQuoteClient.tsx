@@ -251,6 +251,7 @@ type FlatCavity = {
   shape?: "rect" | "circle" | "roundedRect" | "poly" | null;
   diameterIn?: number | null;
 
+  points?: { x: number; y: number }[] | null;
   // NEW: carry rounded corner radius through so admin previews can render it
   cornerRadiusIn?: number | null;
 };
@@ -485,6 +486,16 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
     const rNum = rawR == null ? NaN : Number(rawR);
     const cornerRadiusIn = Number.isFinite(rNum) && rNum > 0 ? rNum : null;
 
+    // NEW (Path A): preserve polygon points for client-side layer DXF downloads
+    let points: { x: number; y: number }[] | null = null;
+    if (shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
+      const rawPts = (cav as any).points as any[];
+      const cleaned = rawPts
+        .map((p) => ({ x: Number(p?.x), y: Number(p?.y) }))
+        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+      points = cleaned.length >= 3 ? cleaned : null;
+    }
+
     out.push({
       lengthIn,
       widthIn: w,
@@ -493,6 +504,7 @@ function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity[] {
       y,
       shape: shape ?? null,
       diameterIn: diameterIn ?? null,
+      points,
       cornerRadiusIn,
     });
   }
