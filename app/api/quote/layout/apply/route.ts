@@ -1066,15 +1066,19 @@ export async function POST(req: NextRequest) {
   const layout = body.layout;
 
   const layoutForSave = normalizeLayoutForStorage(layout, body);
-  // Build canonical exports from the normalized layout.
-  // IMPORTANT: This must honor per-layer cropCorners regardless of active layer.
   const bundle = buildLayoutExports(layoutForSave);
   const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
-  const svgRaw = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
-  
+
+  // Prefer canonical SVG from exports (it must reflect true cavity shapes).
+  // Fall back to client-provided svg only if exports didn't produce one.
+  const svgRawFromClient = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
+  const svgCanonical = (bundle?.svg && typeof bundle.svg === "string" && bundle.svg.trim().length > 0)
+    ? bundle.svg
+    : svgRawFromClient;
 
   // ✅ Server-enforced chamfer (fixes broken client checkbox)
-  const svgFixed = enforceChamferedBlockInSvg(svgRaw, layoutForSave);
+  const svgFixed = enforceChamferedBlockInSvg(svgCanonical, layoutForSave);
+
 
   if (!quoteNo) {
     return bad(
@@ -1330,12 +1334,16 @@ if (qtyMaybe != null) {
 
     // ✅ Canonical exports MUST come from buildLayoutExports(layoutForSave)
     // so per-layer cropCorners is honored regardless of which layer was active.
+    // If bundle.dxf is missing, generate DXF from the CANONICAL (possibly chamfer-enforced) SVG,
+    // not from the raw client SVG (which may be legacy/rect-only).
     const dxf = bundle?.dxf ?? buildDxfFromSvg(svgFixed) ?? buildDxfFromLayout(layoutForSave);
 
     const step = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? null);
 
+    // Saved SVG should prefer canonical exports; svgFixed already reflects canonical when available.
     const svgBase = bundle?.svg ?? svgFixed;
     const svgAnnotated = buildSvgWithAnnotations(layoutForSave, svgBase, materialLegend ?? null, quoteNo);
+
 
     const pkg = await one<LayoutPkgRow>(
       `
