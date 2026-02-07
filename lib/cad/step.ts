@@ -27,6 +27,9 @@ export type CavityDef = {
   // explicit rounded-rect support
   cornerRadiusIn?: number | null;
 
+  // NEW: polygon cavities
+  points?: { x: number; y: number }[] | null;
+
   // aliases for microservice
   cavityShape?: string | null;
   type?: string | null;
@@ -73,7 +76,7 @@ function safeNorm01(v: unknown): number | null {
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
 }
 
-function normalizeShape(raw: any): "circle" | "rect" | "roundedRect" | null {
+function normalizeShape(raw: any): "circle" | "rect" | "roundedRect" | "poly" | null {
   if (typeof raw !== "string") return null;
   const s = raw.trim().toLowerCase();
   if (!s) return null;
@@ -91,6 +94,8 @@ function normalizeShape(raw: any): "circle" | "rect" | "roundedRect" | null {
     s === "roundrect"
   )
     return "roundedRect";
+
+  if (s === "poly" || s === "polygon") return "poly";
 
   // If something else comes in, keep it null (we only send the canonical set)
   return null;
@@ -154,6 +159,21 @@ function normalizeCavities(raw: any[]): CavityDef[] {
       const rawShape = c.shape ?? c.cavityShape ?? c.type ?? null;
       let shape = normalizeShape(rawShape);
 
+      let points: { x: number; y: number }[] | null = null;
+      if (shape === "poly" && Array.isArray((c as any).points)) {
+        const rawPts = (c as any).points as any[];
+        const normalized = rawPts
+          .map((p) => {
+            const px = safeNorm01(p?.x);
+            const py = safeNorm01(p?.y);
+            if (px == null || py == null) return null;
+            return { x: px, y: py };
+          })
+          .filter((v): v is { x: number; y: number } => !!v);
+
+        if (normalized.length >= 3) points = normalized;
+      }
+
       const cornerRadiusIn = coerceCornerRadiusIn(c);
       const diameterIn = coerceDiameterIn(c);
 
@@ -180,6 +200,7 @@ function normalizeCavities(raw: any[]): CavityDef[] {
         shape,
         diameterIn: diameterIn ?? null,
         cornerRadiusIn: cornerRadiusIn ?? null,
+        points,
 
         // aliases for microservice
         cavityShape: shape,

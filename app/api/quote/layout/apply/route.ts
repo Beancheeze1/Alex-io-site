@@ -1071,6 +1071,7 @@ export async function POST(req: NextRequest) {
   const bundle = buildLayoutExports(layoutForSave);
   const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
   const svgRaw = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
+  
 
   // ✅ Server-enforced chamfer (fixes broken client checkbox)
   const svgFixed = enforceChamferedBlockInSvg(svgRaw, layoutForSave);
@@ -1085,7 +1086,7 @@ export async function POST(req: NextRequest) {
       400,
     );
   }
-
+  
   let currentUserId: number | null = null;
   try {
     const user = await getCurrentUserFromRequest(req);

@@ -30,15 +30,21 @@ type BlockLike = {
   roundRadiusIn?: number | null;
 };
 
+type CavityPoint = { x: number; y: number };
+
 type CavityLike = {
   id: string;
-  shape: "rect" | "roundedRect" | "circle";
-  x: number; // normalized 0–1 position from left
-  y: number; // normalized 0–1 position from top
+  shape: "rect" | "roundedRect" | "circle" | "poly";
+  x: number; // normalized 01 position from left
+  y: number; // normalized 01 position from top
   lengthIn: number;
   widthIn: number;
   depthIn?: number | null;
   cornerRadiusIn?: number | null;
+
+  // NEW: polygon cavities (normalized points in block coordinates, top-left origin)
+  points?: CavityPoint[] | null;
+
   label?: string | null;
 };
 
@@ -218,6 +224,34 @@ function buildSvg(layout: LayoutLike): string {
   </g>`;
       }
 
+      // NEW: polygon cavity
+      if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
+        const pts = ((cav as any).points as any[])
+          .map((p) => ({
+            x: blockX + nnum(p?.x) * blockW,
+            y: blockY + nnum(p?.y) * blockH,
+          }));
+
+        // label at bbox center (minimal + stable)
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const p of pts) {
+          if (p.x < minX) minX = p.x;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.y > maxY) maxY = p.y;
+        }
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+
+        const pointsAttr = pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
+        return `
+  <g>
+    <polygon points="${pointsAttr}" fill="none" stroke="#111827" stroke-width="1" />
+    <text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}" text-anchor="middle" dominant-baseline="middle"
+          font-size="10" fill="#111827">${escapeText(label)}</text>
+  </g>`;
+      }
+
       const rx = cav.cornerRadiusIn ? nnum(cav.cornerRadiusIn) * scale : 0;
       const rxy = Number.isFinite(rx) ? rx : 0;
 
@@ -376,30 +410,6 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
             ? `Ø${cav.lengthIn}×${cav.depthIn ?? ""}"`.trim()
             : `${cav.lengthIn}×${cav.widthIn}×${cav.depthIn ?? ""}"`.trim());
 
-        // Check if cavity has custom points array
-        const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length > 0;
-        
-        if (hasPoints) {
-          // Points are in block-normalized coordinates (0-1 of the block, not the cavity)
-          const points = (cav as any).points as Array<{x: number, y: number}>;
-          
-          const svgPoints = points.map(pt => {
-            const px = blockX + (pt.x * blockW);
-            const py = blockY + (pt.y * blockH);
-            return `${px.toFixed(2)},${py.toFixed(2)}`;
-          }).join(' ');
-          
-          return `
-  <g>
-    <polygon points="${svgPoints}" fill="none" stroke="#111827" stroke-width="1" />
-    <text x="${(x + cavW / 2).toFixed(2)}" y="${(y + cavH / 2).toFixed(
-            2,
-          )}" text-anchor="middle" dominant-baseline="middle"
-          font-size="10" fill="#111827">${escapeText(label)}</text>
-  </g>`;
-        }
-        
-        // Circle shape
         if (cav.shape === "circle") {
           const r = Math.min(cavW, cavH) / 2;
           const cx = x + cavW / 2;
@@ -412,6 +422,34 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
     <text x="${cx.toFixed(2)}" y="${cy.toFixed(
             2,
           )}" text-anchor="middle" dominant-baseline="middle"
+          font-size="10" fill="#111827">${escapeText(label)}</text>
+  </g>`;
+        }
+
+        // NEW: polygon cavity
+        if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
+          const pts = ((cav as any).points as any[])
+            .map((p) => ({
+              x: blockX + nnum(p?.x) * blockW,
+              y: blockY + nnum(p?.y) * blockH,
+            }));
+
+          // label at bbox center (minimal + stable)
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          for (const p of pts) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+          }
+          const cx = (minX + maxX) / 2;
+          const cy = (minY + maxY) / 2;
+
+          const pointsAttr = pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
+          return `
+  <g>
+    <polygon points="${pointsAttr}" fill="none" stroke="#111827" stroke-width="1" />
+    <text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}" text-anchor="middle" dominant-baseline="middle"
           font-size="10" fill="#111827">${escapeText(label)}</text>
   </g>`;
         }
@@ -561,6 +599,26 @@ function buildDxf(layout: LayoutLike): string {
       push(20, cy);
       push(30, 0);
       push(40, r);
+    } else if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
+      const rawPts = (cav as any).points as any[];
+
+      // Map normalized top-left points to CAD inches with Y-flip (top->bottom)
+      const pts: [number, number][] = rawPts.map((p) => {
+        const px = Math.max(0, Math.min(1, nnum(p?.x)));
+        const py = Math.max(0, Math.min(1, nnum(p?.y)));
+        const xIn = px * blkLen;
+        const yIn = blkWid * (1 - py);
+        return [xIn, yIn];
+      });
+
+      push(0, "LWPOLYLINE");
+      push(8, "CAVITY");
+      push(90, pts.length);
+      push(70, 1);
+      for (const [px, py] of pts) {
+        push(10, px);
+        push(20, py);
+      }
     } else {
       let x = xLeft;
       let yTop = blkWid * (1 - nnum(cav.y)) - wid;
@@ -697,34 +755,47 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
 
-      // Check if cavity has custom points array
-      const hasPoints = Array.isArray((cav as any).points) && (cav as any).points.length > 0;
-      
-      if (hasPoints) {
-        const points = (cav as any).points as Array<{x: number, y: number}>;
-        
-        console.log('[DXF] Cavity', cav.id, 'using', points.length, 'custom points (block coordinates)');
-        
-        // Points are ALREADY in block-normalized coordinates (0-1 of the block)
-        // Just scale them to actual DXF coordinates
-        const dxfPoints: [number, number][] = points.map(pt => {
-          const absX = pt.x * blkLen;
-          const absY = blkWid * (1 - pt.y);  // Flip Y for DXF coordinate system
-          return [absX, absY + yOff];
+      if (cav.shape === "circle") {
+        const r = Math.min(len, wid) / 2;
+
+        let x = nnum(cav.x) * blkLen;
+        let yTop = blkWid * (1 - nnum(cav.y)) - (2 * r);
+
+        // clamp inside the block
+        x = Math.max(0, Math.min(blkLen - 2 * r, x));
+        yTop = Math.max(0, Math.min(blkWid - 2 * r, yTop));
+
+        const cx = x + r;
+        const cy = yTop + r + yOff;
+
+        push(0, "CIRCLE");
+        push(8, `CAVITY_L${layerNo}`);
+        push(10, cx);
+        push(20, cy);
+        push(30, 0);
+        push(40, r);
+      } else if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
+        const rawPts = (cav as any).points as any[];
+
+        // Map normalized top-left points to CAD inches with Y-flip (top->bottom)
+        const pts: [number, number][] = rawPts.map((p) => {
+          const px = Math.max(0, Math.min(1, nnum(p?.x)));
+          const py = Math.max(0, Math.min(1, nnum(p?.y)));
+          const xIn = px * blkLen;
+          const yBase = blkWid * (1 - py);
+          const yOut = yBase + yOff;
+          return [xIn, yOut];
         });
 
         push(0, "LWPOLYLINE");
         push(8, `CAVITY_L${layerNo}`);
-        push(90, dxfPoints.length);
+        push(90, pts.length);
         push(70, 1);
-        for (const [px, py] of dxfPoints) {
+        for (const [px, py] of pts) {
           push(10, px);
           push(20, py);
         }
-        console.log('[DXF] ✓ Custom polygon created with', dxfPoints.length, 'points');
       } else {
-        console.log('[DXF] Cavity', cav.id, 'has NO points, using bounding box');
-        
         const xLeft = nnum(cav.x) * blkLen;
         let x = xLeft;
         let yTop = blkWid * (1 - nnum(cav.y)) - wid;
@@ -747,7 +818,6 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
           push(10, px);
           push(20, py);
         }
-        console.log('[DXF] ✓ Rectangle fallback');
       }
     }
   }
