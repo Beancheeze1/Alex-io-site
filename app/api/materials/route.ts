@@ -5,23 +5,6 @@ import { q } from "@/lib/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/**
- * Cushion recommender for the AI chat bot.
- *
- * Path A:
- * - Prefer in-house foams first (your order), but allow fallbacks.
- * - IMPORTANT: Query DB directly (do NOT call /api/materials via fetch),
- *   because server-to-server HTTP can return empty due to auth/cookie context.
- *
- * INPUT (examples):
- *  {
- *    "dims": { "L":12, "W":9, "H":2, "units":"in" },
- *    "weight_lb": 8,               // optional
- *    "drop_height_in": 24,         // optional
- *    "fragility": "low|med|high"   // optional
- *  }
- */
-
 type Units = "in" | "mm";
 const MM_PER_IN = 25.4;
 
@@ -29,11 +12,11 @@ function toInches(n: number, u: Units) {
   return u === "mm" ? n / MM_PER_IN : n;
 }
 
-function norm(s: any): string {
-  return String(s ?? "").trim();
+function norm(v: any): string {
+  return String(v ?? "").trim();
 }
-function lower(s: any): string {
-  return norm(s).toLowerCase();
+function lower(v: any): string {
+  return norm(v).toLowerCase();
 }
 function num(v: any): number | null {
   if (v == null) return null;
@@ -41,29 +24,13 @@ function num(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Your in-house preference order (most common → less common)
-const IN_HOUSE_ORDER: Array<{
-  label: string;
-  familyMust?: string;          // exact family match (protects PE vs EPE)
-  nameIncludes?: string[];      // all tokens must match (case-insensitive)
-  densityBand?: { min: number; max: number }; // optional density band
-}> = [
-  // PE
-  { label: "1.7# PE", familyMust: "Polyethylene", densityBand: { min: 1.55, max: 1.85 } },
-  // Your DB may use 2.20 pcf for "2#"
-  { label: "2# PE",   familyMust: "Polyethylene", densityBand: { min: 2.00, max: 2.40 } },
-
-  // PU by grade code (name contains 1780/1560/1030 in your screenshot)
-  { label: "1780 PU", familyMust: "Polyurethane Foam", nameIncludes: ["1780"] },
-  { label: "1560 PU", familyMust: "Polyurethane Foam", nameIncludes: ["1560"] },
-  // 2# PU (fallback within PU if you have “2#” naming)
-  { label: "2# PU",   familyMust: "Polyurethane Foam", nameIncludes: ["2", "#"] },
-  { label: "1030 PU", familyMust: "Polyurethane Foam", nameIncludes: ["1030"] },
-
-  // XLPE naming varies; we match name token "xlpe"
-  { label: "2# XLPE", familyMust: "Polyethylene", nameIncludes: ["xlpe"], densityBand: { min: 2.00, max: 2.40 } },
-  { label: "4# XLPE", familyMust: "Polyethylene", nameIncludes: ["xlpe"], densityBand: { min: 3.50, max: 4.60 } },
-];
+type CatalogRow = {
+  id: number;
+  material_name: string;
+  material_family: string | null;
+  density_lb_ft3: number | null;
+  is_active: boolean | null;
+};
 
 type CatalogMaterial = {
   id: number;
@@ -73,7 +40,28 @@ type CatalogMaterial = {
   is_active: boolean | null;
 };
 
-// Returns a 0-based rank if in-house preferred, else null
+// Your in-house preference order (most common → less common)
+// NOTE: PE vs EPE separation is enforced via familyMust.
+const IN_HOUSE_ORDER: Array<{
+  label: string;
+  familyMust?: string;
+  // Optional substring tokens that must exist in name (case-insensitive)
+  nameIncludes?: string[];
+  // Optional density band (pcf) when naming is inconsistent
+  densityBand?: { min: number; max: number };
+}> = [
+  { label: "1.7# PE", familyMust: "Polyethylene", densityBand: { min: 1.55, max: 1.85 } },
+  { label: "2# PE", familyMust: "Polyethylene", densityBand: { min: 2.00, max: 2.40 } },
+
+  { label: "1780 PU", familyMust: "Polyurethane Foam", nameIncludes: ["1780"] },
+  { label: "1560 PU", familyMust: "Polyurethane Foam", nameIncludes: ["1560"] },
+  { label: "2# PU", familyMust: "Polyurethane Foam", nameIncludes: ["2", "#"] },
+  { label: "1030 PU", familyMust: "Polyurethane Foam", nameIncludes: ["1030"] },
+
+  { label: "2# XLPE", familyMust: "Polyethylene", nameIncludes: ["xlpe"], densityBand: { min: 2.00, max: 2.40 } },
+  { label: "4# XLPE", familyMust: "Polyethylene", nameIncludes: ["xlpe"], densityBand: { min: 3.50, max: 4.60 } },
+];
+
 function inHouseRank(m: CatalogMaterial): number | null {
   const n = lower(m.name);
   const f = norm(m.family);
@@ -82,7 +70,6 @@ function inHouseRank(m: CatalogMaterial): number | null {
   for (let i = 0; i < IN_HOUSE_ORDER.length; i++) {
     const rule = IN_HOUSE_ORDER[i];
 
-    // Enforce family gate when provided (keeps PE vs EPE separate).
     if (rule.familyMust && f !== rule.familyMust) continue;
 
     if (rule.nameIncludes && rule.nameIncludes.length) {
@@ -90,11 +77,9 @@ function inHouseRank(m: CatalogMaterial): number | null {
       if (!ok) continue;
     }
 
-    if (rule.densityBand && d != null) {
+    if (rule.densityBand) {
+      if (d == null) continue;
       if (d < rule.densityBand.min || d > rule.densityBand.max) continue;
-    } else if (rule.densityBand && d == null) {
-      // If we need density to decide and it's missing, treat as not a match
-      continue;
     }
 
     return i;
@@ -120,18 +105,19 @@ export async function POST(req: NextRequest) {
     const L = toInches(Number(dims.L || 0), u);
     const W = toInches(Number(dims.W || 0), u);
     const H = toInches(Number(dims.H || 0), u);
+
     if (!(L > 0 && W > 0 && H > 0)) {
       return NextResponse.json({ ok: false, error: "invalid dims" }, { status: 400 });
     }
 
-    // Heuristic density choice
     const weight = Number(body.weight_lb ?? 5);
     const drop = Number(body.drop_height_in ?? 24);
     const frag = body.fragility ?? "med";
 
+    // Heuristic density choice
     let score = 0;
-    score += Math.min(3, Math.max(0, weight / 10));      // 0..3
-    score += Math.min(2, Math.max(0, drop / 24 - 1));    // 0..2
+    score += Math.min(3, Math.max(0, weight / 10)); // 0..3
+    score += Math.min(2, Math.max(0, drop / 24 - 1)); // 0..2
     if (frag === "high") score += 2;
     else if (frag === "med") score += 1;
 
@@ -139,14 +125,8 @@ export async function POST(req: NextRequest) {
     if (score >= 4.5) density_pcf = 4.0;
     else if (score >= 2.5) density_pcf = 2.2;
 
-    // ---- DB-backed materials load (Path A fix) ----
-    const rows = await q<{
-      id: number;
-      material_name: string;
-      material_family: string | null;
-      density_lb_ft3: number | null;
-      is_active: boolean | null;
-    }>(`
+    // DB-backed materials load (no /api/materials)
+    const rows = await q<CatalogRow>(`
       select
         id,
         name as material_name,
@@ -172,11 +152,7 @@ export async function POST(req: NextRequest) {
         ? catalog.filter((m) => m.is_active !== false)
         : catalog;
 
-    // Rank & select candidates
-    // Priority:
-    //  1) in-house rank
-    //  2) closest density to heuristic target
-    //  3) stable fallback by name
+    // Sort: in-house rank → density closeness → stable name
     const sorted = [...activeCatalog].sort((a, b) => {
       const ra = inHouseRank(a);
       const rb = inHouseRank(b);
@@ -200,7 +176,7 @@ export async function POST(req: NextRequest) {
       name: m.name,
       family: m.family,
       density_pcf: m.density_pcf,
-      in_house_rank: inHouseRank(m), // null if not in-house
+      in_house_rank: inHouseRank(m),
     }));
 
     return NextResponse.json(
