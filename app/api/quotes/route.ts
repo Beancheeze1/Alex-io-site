@@ -37,19 +37,22 @@ export async function GET(req: NextRequest) {
       // Sales can only see their own quotes.
       const rows = await q(
         `
-        SELECT id,
-               quote_no,
-               customer_name,
-               email,
-               phone,
-               status,
-               sales_rep_id,
-               locked,
-               geometry_hash,
-               locked_at,
-               created_at,
-               updated_at
-        FROM public."quotes"
+        SELECT q.id,
+               q.quote_no,
+               q.customer_name,
+               q.email,
+               q.phone,
+               q.status,
+               q.sales_rep_id,
+               u.full_name AS sales_rep_name,
+               q.locked,
+               q.geometry_hash,
+               q.locked_at,
+               q.created_at,
+               q.updated_at
+        FROM public."quotes" q
+        LEFT JOIN public."users" u
+          ON u.id = q.sales_rep_id
         WHERE sales_rep_id = $1
         ORDER BY created_at DESC
         LIMIT $2
@@ -63,19 +66,22 @@ export async function GET(req: NextRequest) {
     // Admin + CS: all quotes
     const rows = await q(
       `
-      SELECT id,
-             quote_no,
-             customer_name,
-             email,
-             phone,
-             status,
-             sales_rep_id,
-             locked,
-             geometry_hash,
-             locked_at,
-             created_at,
-             updated_at
-      FROM public."quotes"
+      SELECT q.id,
+             q.quote_no,
+             q.customer_name,
+             q.email,
+             q.phone,
+             q.status,
+             q.sales_rep_id,
+             u.full_name AS sales_rep_name,
+             q.locked,
+             q.geometry_hash,
+             q.locked_at,
+             q.created_at,
+             q.updated_at
+      FROM public."quotes" q
+      LEFT JOIN public."users" u
+        ON u.id = q.sales_rep_id
       ORDER BY created_at DESC
       LIMIT $1
     `,

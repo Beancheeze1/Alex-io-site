@@ -26,6 +26,7 @@ type QuoteRow = {
   email: string | null;
   phone: string | null;
   status: string | null;
+  sales_rep_name?: string | null;
   created_at: string | null;
   updated_at: string | null;
   locked?: boolean | null;
@@ -691,11 +692,16 @@ export default function AdminQuotesPage() {
                           <div className="inline-flex items-center gap-2">
                             {q.locked ? (
                               <span className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-300">
-                                Locked
+                                Released for Mfg
                               </span>
                             ) : (
                               <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/40 px-2 py-1 text-[10px] font-semibold text-slate-300">
                                 Editable
+                              </span>
+                            )}
+                            {q.sales_rep_name && (
+                              <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
+                                {q.sales_rep_name}
                               </span>
                             )}
 
@@ -706,7 +712,7 @@ export default function AdminQuotesPage() {
                               className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] font-medium text-slate-100 transition hover:border-sky-400 disabled:opacity-60"
                               title={q.locked ? "Unlock for revisions" : "Lock for production"}
                             >
-                              {rowBusy[q.quote_no] ? "" : q.locked ? "Unlock" : "Lock"}
+                              {rowBusy[q.quote_no] ? "" : q.locked ? "Unlock" : "RFM"}
                             </button>
 
                             <Link
