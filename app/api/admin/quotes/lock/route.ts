@@ -1,6 +1,14 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { one, q } from "@/lib/db";
-import { computeGeometryHash } from "@/app/lib/layout/exports";
+import { one, q, withTxn } from "@/lib/db";
+import {
+  buildLayoutExports,
+  computeGeometryHash,
+  embedGeometryHashInDxf,
+  embedGeometryHashInStep,
+  embedGeometryHashInSvg,
+} from "@/app/lib/layout/exports";
+import { getCurrentUserFromRequest } from "@/lib/auth";
+import { buildStepFromLayout } from "@/lib/cad/step";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +22,12 @@ type QuoteRow = {
 
 type LayoutPkgRow = {
   id: number;
+  quote_id: number;
   layout_json: any;
+  notes: string | null;
+  svg_text: string | null;
+  dxf_text: string | null;
+  step_text: string | null;
   created_at: string;
 };
 
@@ -23,6 +36,14 @@ function json(body: any, status = 200) {
 }
 
 export async function POST(req: NextRequest) {
+  const user = await getCurrentUserFromRequest(req as any);
+  const role = (user?.role || "").toLowerCase();
+  const isAdmin = role === "admin";
+
+  if (!user) return json({ ok: false, error: "UNAUTHENTICATED" }, 401);
+  if (!isAdmin)
+    return json({ ok: false, error: "FORBIDDEN", message: "Admin access required." }, 403);
+
   const body = (await req.json().catch(() => null)) as any;
   const quoteNo = typeof body?.quoteNo === "string" ? body.quoteNo.trim() : "";
   const lock = !!body?.lock;
@@ -44,6 +65,7 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: "NOT_FOUND", message: "Quote not found." }, 404);
   }
 
+  // UNLOCK (admin only) — leaves packages intact, simply removes the lock gate + stored hash.
   if (!lock) {
     await q(
       `
@@ -59,9 +81,18 @@ export async function POST(req: NextRequest) {
     return json({ ok: true, locked: false });
   }
 
+  // Load the latest package as the staging source we are about to freeze.
   const pkg = await one<LayoutPkgRow>(
     `
-    select id, layout_json, created_at
+    select
+      id,
+      quote_id,
+      layout_json,
+      notes,
+      svg_text,
+      dxf_text,
+      step_text,
+      created_at
     from quote_layout_packages
     where quote_id = $1
     order by created_at desc, id desc
@@ -77,26 +108,113 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Compute the geometry hash from the staging layout we're about to release.
   const hash = computeGeometryHash(pkg.layout_json);
   const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";
 
+  // If already locked, do not allow re-locking if geometry changed.
   if (quote.locked && storedHash && storedHash !== hash) {
     return json(
-      { ok: false, error: "GEOMETRY_HASH_MISMATCH", message: "Stored hash differs from current layout." },
+      {
+        ok: false,
+        error: "GEOMETRY_HASH_MISMATCH",
+        message: "Stored hash differs from current layout.",
+      },
       409,
     );
   }
 
-  await q(
-    `
-    update quotes
-    set locked = true,
-        geometry_hash = $2,
-        locked_at = now()
-    where id = $1
-    `,
-    [quote.id, hash],
-  );
+  // Build a canonical export set for this release snapshot.
+  // Prefer the already-saved exports when present; otherwise, generate minimal exports.
+  const bundle = buildLayoutExports(pkg.layout_json);
 
-  return json({ ok: true, locked: true, geometry_hash: hash });
+  const svgBase =
+    pkg.svg_text && pkg.svg_text.trim().length > 0 ? pkg.svg_text : bundle.svg;
+  const dxfBase =
+    pkg.dxf_text && pkg.dxf_text.trim().length > 0 ? pkg.dxf_text : bundle.dxf;
+
+  // STEP is the only exporter that may require external service.
+  // If missing, generate it now — release is atomic; if STEP fails, release fails.
+  let stepBase =
+    pkg.step_text && pkg.step_text.trim().length > 0 ? pkg.step_text : null;
+  if (!stepBase) {
+    stepBase = await buildStepFromLayout(pkg.layout_json, quoteNo, "");
+  }
+
+  const svgText = embedGeometryHashInSvg(svgBase ?? "", hash);
+  const dxfText = embedGeometryHashInDxf(dxfBase ?? "", hash);
+  const stepText = embedGeometryHashInStep(stepBase ?? "", hash);
+
+  if (!stepText || stepText.trim().length === 0) {
+    return json(
+      { ok: false, error: "STEP_NOT_AVAILABLE", message: "Unable to generate STEP for release." },
+      500,
+    );
+  }
+
+  // Atomic release:
+  // - Verify the staging package did not change
+  // - Insert a new package row that represents the released (frozen) snapshot
+  // - Lock the quote + store geometry_hash
+  const result = await withTxn(async (tx) => {
+    const latest = await tx.query<Pick<LayoutPkgRow, "id" | "layout_json">>(
+      `
+      select id, layout_json
+      from quote_layout_packages
+      where quote_id = $1
+      order by created_at desc, id desc
+      limit 1
+      `,
+      [quote.id],
+    );
+
+    const latestRow = (latest.rows?.[0] as any) || null;
+    if (!latestRow?.layout_json || latestRow.id !== pkg.id) {
+      throw Object.assign(new Error("LAYOUT_CHANGED_DURING_RELEASE"), {
+        code: "LAYOUT_CHANGED_DURING_RELEASE",
+      });
+    }
+
+    const latestHash = computeGeometryHash(latestRow.layout_json);
+    if (latestHash !== hash) {
+      throw Object.assign(new Error("GEOMETRY_CHANGED_DURING_RELEASE"), {
+        code: "GEOMETRY_CHANGED_DURING_RELEASE",
+      });
+    }
+
+    // Insert a RELEASE snapshot as a new package row so exports are immutable post-lock.
+    const inserted = await tx.query<{ id: number }>(
+      `
+      insert into quote_layout_packages (
+        quote_id,
+        layout_json,
+        notes,
+        svg_text,
+        dxf_text,
+        step_text,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $7)
+      returning id
+      `,
+      [quote.id, pkg.layout_json, pkg.notes ?? null, svgText, dxfText, stepText, user.id],
+    );
+
+    await tx.query(
+      `
+      update quotes
+      set locked = true,
+          geometry_hash = $2,
+          locked_at = now(),
+          updated_by_user_id = $3
+      where id = $1
+      `,
+      [quote.id, hash, user.id],
+    );
+
+    return { release_pkg_id: inserted.rows?.[0]?.id ?? null };
+  });
+
+  return json({ ok: true, locked: true, geometry_hash: hash, release_pkg_id: result.release_pkg_id });
 }

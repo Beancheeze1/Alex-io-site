@@ -9,9 +9,9 @@
 // - Saves returned STEP back onto THAT SAME latest package row (step_text)
 // - Returns ok:true
 //
-// Notes:
-// - This does not create a new revision row (minimal + safest).
-// - The download endpoint /api/quote/layout/step will then serve the refreshed STEP.
+// IMPORTANT (Phase 1 RFM hardening):
+// - If the quote is locked (Released for MFG), this endpoint MUST NOT mutate any exports.
+//   Released exports are immutable. Create a new revision (staging) instead.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +19,6 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest } from "@/lib/auth";
-
 
 type InBody = {
   quote_no?: string;
@@ -116,14 +115,15 @@ export async function POST(req: Request) {
     const quote_no = String(body?.quote_no || "").trim();
     if (!quote_no) return jsonErr(400, "BAD_REQUEST", "Missing quote_no.");
 
-    // Load latest layout package for this quote
+    // Load latest layout package for this quote + lock status.
     const pkg = await one<{
       id: number;
       quote_id: number;
       layout_json: any;
+      locked: boolean | null;
     }>(
       `
-      SELECT lp.id, lp.quote_id, lp.layout_json
+      SELECT lp.id, lp.quote_id, lp.layout_json, q.locked
       FROM public.quote_layout_packages lp
       JOIN public.quotes q ON q.id = lp.quote_id
       WHERE q.quote_no = $1
@@ -134,6 +134,14 @@ export async function POST(req: Request) {
     );
 
     if (!pkg) return jsonErr(404, "NOT_FOUND", "No layout package found for this quote.");
+
+    if (pkg.locked) {
+      return jsonErr(
+        409,
+        "LOCKED",
+        "Quote is locked (Released for MFG). STEP exports are immutable; create a new revision instead.",
+      );
+    }
 
     const { stepText, usedUrl } = await callStepService(pkg.layout_json);
 
