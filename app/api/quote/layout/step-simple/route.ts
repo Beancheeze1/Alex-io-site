@@ -2,16 +2,9 @@
 //
 // GET /api/quote/layout/step-simple?quote_no=Q-...
 //
-// Originally intended to return a SIMPLE STEP file (BLOCK primitives only)
-// for the latest layout on a quote. For now, to keep things minimal and
-// avoid extra exporters, this route simply returns the latest saved STEP
-// text from quote_layout_packages.step_text (the same data produced by
-// buildStepFromLayoutFull in /api/quote/layout/apply).
-//
-// Important:
-//   - Reads quote_layout_packages.step_text.
-//   - Does NOT call any buildStepFromLayout* helpers directly.
-//   - /api/quote/layout/step remains the primary BREP export endpoint.
+// RFM/LOCK RULE (Phase 1):
+//   - Only enforce geometry_hash match when quote.locked === true.
+//   - When unlocked, allow export (no hash gate).
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
@@ -47,20 +40,13 @@ export async function GET(req: NextRequest) {
   const user = await getCurrentUserFromRequest(req);
   const role = (user?.role || "").toLowerCase();
 
-  if (!user) {
-    return bad({ ok: false, error: "UNAUTHENTICATED" }, 401);
-  }
+  if (!user) return bad({ ok: false, error: "UNAUTHENTICATED" }, 401);
 
   const url = req.nextUrl;
   const quoteNo = url.searchParams.get("quote_no") || "";
-
   if (!quoteNo) {
     return bad(
-      {
-        ok: false,
-        error: "MISSING_QUOTE_NO",
-        message: "No quote_no was provided in the query string.",
-      },
+      { ok: false, error: "MISSING_QUOTE_NO", message: "No quote_no was provided in the query string." },
       400,
     );
   }
@@ -76,27 +62,12 @@ export async function GET(req: NextRequest) {
     );
 
     if (!quote) {
-      return bad(
-        {
-          ok: false,
-          error: "NOT_FOUND",
-          message: `No quote found with number ${quoteNo}.`,
-        },
-        404,
-      );
+      return bad({ ok: false, error: "NOT_FOUND", message: `No quote found with number ${quoteNo}.` }, 404);
     }
 
     const layoutPkg = await one<LayoutPkgRow>(
       `
-      select
-        id,
-        quote_id,
-        layout_json,
-        notes,
-        svg_text,
-        dxf_text,
-        step_text,
-        created_at
+      select id, quote_id, layout_json, notes, svg_text, dxf_text, step_text, created_at
       from quote_layout_packages
       where quote_id = $1
       order by created_at desc
@@ -107,12 +78,7 @@ export async function GET(req: NextRequest) {
 
     if (!layoutPkg) {
       return bad(
-        {
-          ok: false,
-          error: "LAYOUT_NOT_FOUND",
-          message:
-            "No layout has been saved for this quote yet. Try applying a layout first.",
-        },
+        { ok: false, error: "LAYOUT_NOT_FOUND", message: "No layout has been saved for this quote yet. Try applying a layout first." },
         404,
       );
     }
@@ -121,44 +87,30 @@ export async function GET(req: NextRequest) {
     const isStaff = isAdmin || role === "sales" || role === "cs";
 
     if (quote.locked) {
-      if (!isAdmin) {
-        return bad(
-          { ok: false, error: "FORBIDDEN", message: "Locked exports are admin-only." },
-          403,
-        );
-      }
+      if (!isAdmin) return bad({ ok: false, error: "FORBIDDEN", message: "Locked exports are admin-only." }, 403);
     } else {
-      if (!isStaff) {
-        return bad(
-          { ok: false, error: "FORBIDDEN", message: "Export access denied." },
-          403,
-        );
-      }
+      if (!isStaff) return bad({ ok: false, error: "FORBIDDEN", message: "Export access denied." }, 403);
     }
 
     const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";
     const layoutHash = computeGeometryHash(layoutPkg.layout_json);
-    if (!storedHash || layoutHash !== storedHash) {
-      return bad(
-        {
-          ok: false,
-          error: "GEOMETRY_HASH_MISMATCH",
-          message: "Layout geometry does not match the locked hash.",
-        },
-        409,
-      );
+
+    // ✅ Only enforce hash match when locked
+    if (quote.locked) {
+      if (!storedHash || layoutHash !== storedHash) {
+        return bad(
+          { ok: false, error: "GEOMETRY_HASH_MISMATCH", message: "Layout geometry does not match the locked hash." },
+          409,
+        );
+      }
     }
 
-    const stepText = embedGeometryHashInStep(layoutPkg.step_text ?? "", storedHash || layoutHash);
+    const effectiveHash = quote.locked ? storedHash : layoutHash;
+    const stepText = embedGeometryHashInStep(layoutPkg.step_text ?? "", effectiveHash);
 
-    if (!stepText) {
+    if (!stepText || stepText.trim().length === 0) {
       return bad(
-        {
-          ok: false,
-          error: "STEP_NOT_AVAILABLE",
-          message:
-            "No STEP data has been saved for this quote yet. Try clicking Apply to quote again.",
-        },
+        { ok: false, error: "STEP_NOT_AVAILABLE", message: "No STEP data has been saved for this quote yet. Try clicking Apply to quote again." },
         500,
       );
     }
@@ -175,12 +127,7 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error("Error in /api/quote/layout/step-simple GET:", err);
     return bad(
-      {
-        ok: false,
-        error: "SERVER_ERROR",
-        message:
-          "There was an unexpected problem returning the STEP file for this quote.",
-      },
+      { ok: false, error: "SERVER_ERROR", message: "There was an unexpected problem returning the STEP file for this quote." },
       500,
     );
   }
