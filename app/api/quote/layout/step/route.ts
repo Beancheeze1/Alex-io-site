@@ -42,13 +42,9 @@ function json(body: any, status = 200) {
 export async function GET(req: NextRequest) {
   const user = await getCurrentUserFromRequest(req);
   const role = (user?.role || "").toLowerCase();
-  const cadAllowed = role === "admin" || role === "sales" || role === "cs";
 
   if (!user) {
     return json({ ok: false, error: "UNAUTHENTICATED" }, 401);
-  }
-  if (!cadAllowed) {
-    return json({ ok: false, error: "FORBIDDEN", message: "CAD access required." }, 403);
   }
 
   const url = req.nextUrl;
@@ -114,15 +110,23 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    if (!quote.locked) {
-      return json(
-        {
-          ok: false,
-          error: "LOCK_REQUIRED",
-          message: "Layout must be locked before exports are allowed.",
-        },
-        423,
-      );
+    const isAdmin = role === "admin";
+    const isStaff = isAdmin || role === "sales" || role === "cs";
+
+    if (quote.locked) {
+      if (!isAdmin) {
+        return json(
+          { ok: false, error: "FORBIDDEN", message: "Locked exports are admin-only." },
+          403,
+        );
+      }
+    } else {
+      if (!isStaff) {
+        return json(
+          { ok: false, error: "FORBIDDEN", message: "Export access denied." },
+          403,
+        );
+      }
     }
 
     const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";

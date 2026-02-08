@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { computeGeometryHash, embedGeometryHashInStep } from "@/app/lib/layout/exports";
+import { getCurrentUserFromRequest } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -43,6 +44,13 @@ function bad(body: any, status = 400) {
 }
 
 export async function GET(req: NextRequest) {
+  const user = await getCurrentUserFromRequest(req);
+  const role = (user?.role || "").toLowerCase();
+
+  if (!user) {
+    return bad({ ok: false, error: "UNAUTHENTICATED" }, 401);
+  }
+
   const url = req.nextUrl;
   const quoteNo = url.searchParams.get("quote_no") || "";
 
@@ -109,16 +117,23 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // For the "simple" route, we now just reuse the saved STEP text.
-    if (!quote.locked) {
-      return bad(
-        {
-          ok: false,
-          error: "LOCK_REQUIRED",
-          message: "Layout must be locked before exports are allowed.",
-        },
-        423,
-      );
+    const isAdmin = role === "admin";
+    const isStaff = isAdmin || role === "sales" || role === "cs";
+
+    if (quote.locked) {
+      if (!isAdmin) {
+        return bad(
+          { ok: false, error: "FORBIDDEN", message: "Locked exports are admin-only." },
+          403,
+        );
+      }
+    } else {
+      if (!isStaff) {
+        return bad(
+          { ok: false, error: "FORBIDDEN", message: "Export access denied." },
+          403,
+        );
+      }
     }
 
     const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";

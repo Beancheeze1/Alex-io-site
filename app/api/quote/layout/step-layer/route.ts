@@ -132,10 +132,12 @@ export async function GET(req: Request) {
   try {
     const user = await getCurrentUserFromRequest(req as any);
     const role = (user?.role || "").toLowerCase();
-    const cadAllowed = role === "admin" || role === "sales" || role === "cs";
-
-    if (!user) return jsonErr(401, "UNAUTHENTICATED", "Sign in required.");
-    if (!cadAllowed) return jsonErr(403, "FORBIDDEN", "CAD access required.");
+    if (!user) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "UNAUTHENTICATED" }),
+        { status: 401 },
+      );
+    }
 
     const { searchParams } = new URL(req.url);
 
@@ -167,7 +169,18 @@ export async function GET(req: Request) {
 
     if (!pkg) return jsonErr(404, "NOT_FOUND", "No layout package found for this quote.");
 
-    if (!pkg.locked) return jsonErr(423, "LOCK_REQUIRED", "Layout must be locked before exports are allowed.");
+    const isAdmin = role === "admin";
+    const isStaff = isAdmin || role === "sales" || role === "cs";
+
+    if (pkg.locked) {
+      if (!isAdmin) {
+        return jsonErr(403, "FORBIDDEN", "Locked exports are admin-only.");
+      }
+    } else {
+      if (!isStaff) {
+        return jsonErr(403, "FORBIDDEN", "Export access denied.");
+      }
+    }
 
     const storedHash = typeof pkg.geometry_hash === "string" ? pkg.geometry_hash : "";
     const layoutHash = computeGeometryHash(pkg.layout_json);
