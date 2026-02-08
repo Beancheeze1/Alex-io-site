@@ -7,7 +7,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 
-
 // GET /api/quotes?limit=25
 export async function GET(req: NextRequest) {
   try {
@@ -45,6 +44,9 @@ export async function GET(req: NextRequest) {
                phone,
                status,
                sales_rep_id,
+               locked,
+               geometry_hash,
+               locked_at,
                created_at,
                updated_at
         FROM public."quotes"
@@ -68,6 +70,9 @@ export async function GET(req: NextRequest) {
              phone,
              status,
              sales_rep_id,
+             locked,
+             geometry_hash,
+             locked_at,
              created_at,
              updated_at
       FROM public."quotes"
@@ -86,7 +91,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-
 // POST /api/quotes
 // Request shape (now supports rep attribution):
 // {
@@ -99,7 +103,6 @@ export async function GET(req: NextRequest) {
 //   "sales_rep_slug": "chuck"   // optional, looked up via users.sales_slug
 // }
 export async function POST(req: NextRequest) {
-
   try {
     const user = await getCurrentUserFromRequest(req);
 
@@ -120,7 +123,6 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json().catch(() => ({}))) || {};
-
 
     const {
       quote_no,
@@ -145,14 +147,13 @@ export async function POST(req: NextRequest) {
     // 3) Else, if the caller is SALES, default to their own user.id.
     let salesRepId: number | null = null;
 
-
     if (
       rawSalesRepId !== undefined &&
       rawSalesRepId !== null &&
       Number.isFinite(Number(rawSalesRepId))
     ) {
       salesRepId = Number(rawSalesRepId);
-      } else if (rawSalesRepSlug) {
+    } else if (rawSalesRepSlug) {
       const slug = String(rawSalesRepSlug).trim();
       if (slug) {
         try {
@@ -181,7 +182,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-
     const row = await one(
       `
       INSERT INTO public."quotes"(
@@ -209,6 +209,9 @@ export async function POST(req: NextRequest) {
                 phone,
                 status,
                 sales_rep_id,
+                locked,
+                geometry_hash,
+                locked_at,
                 created_at,
                 updated_at
     `,
