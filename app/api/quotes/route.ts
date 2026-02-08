@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { q, one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { loadFacts } from "@/app/lib/memory";
 
 // GET /api/quotes?limit=25
 export async function GET(req: NextRequest) {
@@ -60,7 +61,19 @@ export async function GET(req: NextRequest) {
         [user.id, limit],
       );
 
-      return NextResponse.json({ ok: true, quotes: rows });
+      const withRevision = await Promise.all(
+        (rows as any[]).map(async (r) => {
+          const facts = await loadFacts(String(r.quote_no));
+          const revRaw =
+            typeof (facts as any)?.revision === "string"
+              ? String((facts as any).revision).trim()
+              : "";
+          const revision = revRaw ? revRaw : "RevAS";
+          return { ...r, revision };
+        }),
+      );
+
+      return NextResponse.json({ ok: true, quotes: withRevision });
     }
 
     // Admin + CS: all quotes
@@ -88,7 +101,19 @@ export async function GET(req: NextRequest) {
       [limit],
     );
 
-    return NextResponse.json({ ok: true, quotes: rows });
+    const withRevision = await Promise.all(
+      (rows as any[]).map(async (r) => {
+        const facts = await loadFacts(String(r.quote_no));
+        const revRaw =
+          typeof (facts as any)?.revision === "string"
+            ? String((facts as any).revision).trim()
+            : "";
+        const revision = revRaw ? revRaw : "RevAS";
+        return { ...r, revision };
+      }),
+    );
+
+    return NextResponse.json({ ok: true, quotes: withRevision });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: String(err?.message ?? err) },

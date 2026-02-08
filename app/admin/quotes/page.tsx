@@ -27,6 +27,7 @@ type QuoteRow = {
   phone: string | null;
   status: string | null;
   sales_rep_name?: string | null;
+  revision?: string | null;
   created_at: string | null;
   updated_at: string | null;
   locked?: boolean | null;
@@ -690,6 +691,17 @@ export default function AdminQuotesPage() {
 
                         <td className="px-3 py-2 text-right">
                           <div className="inline-flex items-center gap-2">
+                            {q.revision && (
+                              <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-200">
+                                {q.revision}
+                              </span>
+                            )}
+
+                            {q.sales_rep_name && (
+                              <span className="inline-flex items-center rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] font-semibold text-indigo-200">
+                                {q.sales_rep_name}
+                              </span>
+                            )}
                             {q.locked ? (
                               <span className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-300">
                                 Released for Mfg
