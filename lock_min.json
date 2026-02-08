@@ -1,0 +1,25 @@
+﻿{
+  "quoteNo": "Q-AI-20260207-223244",
+  "action": "lock",
+  "layout": {
+    "block": {
+      "widthIn": 10,
+      "lengthIn": 10,
+      "chamferIn": 1,
+      "cornerStyle": "chamfer",
+      "thicknessIn": 1,
+      "croppedCorners": true
+    },
+    "stack": [
+      { "id": "layer-1", "label": "Layer 1", "thicknessIn": 2, "cavities": [], "cropCorners": false, "roundCorners": true, "roundRadiusIn": 0.25 },
+      { "id": "layer-2", "label": "Layer 2", "thicknessIn": 1, "cavities": [], "cropCorners": true,  "roundCorners": false, "roundRadiusIn": 0.25 },
+      { "id": "layer-3", "label": "Layer 3", "thicknessIn": 1, "cavities": [
+          { "x": 0.34375, "y": 0.45625, "id": "cav-1", "label": "", "shape": "circle", "depthIn": 2, "widthIn": 3, "lengthIn": 3, "cornerRadiusIn": 0 }
+        ],
+        "cropCorners": false, "roundCorners": true, "roundRadiusIn": 0.25
+      }
+    ],
+    "cavities": [],
+    "editorMode": "basic"
+  }
+}

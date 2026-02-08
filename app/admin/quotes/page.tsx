@@ -28,6 +28,8 @@ type QuoteRow = {
   status: string | null;
   created_at: string | null;
   updated_at: string | null;
+  locked?: boolean | null;
+  locked_at?: string | null;
 };
 
 type QuotesResponse = {
@@ -52,7 +54,8 @@ export default function AdminQuotesPage() {
   const [quotes, setQuotes] = React.useState<QuoteRow[] | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-    const [creating, setCreating] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
+  const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
 
 
   // Client-side filters
@@ -157,6 +160,34 @@ export default function AdminQuotesPage() {
       active = false;
     };
   }, []);
+
+  async function setQuoteLock(quoteNo: string, lock: boolean) {
+    setRowBusy((m) => ({ ...m, [quoteNo]: true }));
+    try {
+      const res = await fetch("/api/admin/quotes/lock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quoteNo, lock }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.message || "Lock action failed");
+      }
+
+      // Refresh list
+      const refreshed = await fetch("/api/quotes?limit=25", { cache: "no-store" });
+      const refreshedJson = await refreshed.json().catch(() => null);
+      if (refreshed.ok && refreshedJson?.ok && Array.isArray(refreshedJson?.quotes)) {
+        setQuotes(refreshedJson.quotes);
+      } else {
+        router.refresh();
+      }
+    } catch (e: any) {
+      alert(e?.message || "Lock action failed");
+    } finally {
+      setRowBusy((m) => ({ ...m, [quoteNo]: false }));
+    }
+  }
 
   const totalCount = quotes?.length ?? 0;
   const recentCount = quotes
@@ -656,14 +687,36 @@ export default function AdminQuotesPage() {
   {updated}
 </td>
 
-<td className="px-3 py-2 text-right">
-  <Link
-    href={`/quote?quote_no=${encodeURIComponent(q.quote_no)}`}
-    className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] font-medium text-sky-300 transition hover:border-sky-400 hover:text-sky-200"
-  >
-    Review
-  </Link>
-</td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="inline-flex items-center gap-2">
+                            {q.locked ? (
+                              <span className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-300">
+                                Locked
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/40 px-2 py-1 text-[10px] font-semibold text-slate-300">
+                                Editable
+                              </span>
+                            )}
+
+                            <button
+                              type="button"
+                              disabled={!!rowBusy[q.quote_no]}
+                              onClick={() => setQuoteLock(q.quote_no, !q.locked)}
+                              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] font-medium text-slate-100 transition hover:border-sky-400 disabled:opacity-60"
+                              title={q.locked ? "Unlock for revisions" : "Lock for production"}
+                            >
+                              {rowBusy[q.quote_no] ? "" : q.locked ? "Unlock" : "Lock"}
+                            </button>
+
+                            <Link
+                              href={`/quote?quote_no=${encodeURIComponent(q.quote_no)}`}
+                              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] font-medium text-sky-300 transition hover:border-sky-400 hover:text-sky-200"
+                            >
+                              Review
+                            </Link>
+                          </div>
+                        </td>
 
                       </tr>
                     );
