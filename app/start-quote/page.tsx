@@ -530,6 +530,13 @@ export default function StartQuotePage() {
     const firstCavity = extractFirstCavity(cavities);
 
     const p = new URLSearchParams();
+    // Sales credit (optional): allow /start-quote?sales=<slug> (or rep=<slug>)
+    // Carry forward into the editor URL as sales_rep_slug.
+    const salesSlugFromUrl =
+      (searchParams.get("sales") || searchParams.get("rep") || "").trim();
+    if (salesSlugFromUrl) {
+      p.set("sales_rep_slug", salesSlugFromUrl);
+    }
 
     // Required-ish
     p.set("quote_no", quote_no);

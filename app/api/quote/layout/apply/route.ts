@@ -1091,6 +1091,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const salesRepSlug =
+    typeof body?.sales_rep_slug === "string" ? body.sales_rep_slug.trim() : "";
+
   const quoteNo = String(body.quoteNo).trim();
   const layout = body.layout;
   const action = typeof body.action === "string" ? body.action.trim().toLowerCase() : "";
@@ -1211,6 +1214,30 @@ export async function POST(req: NextRequest) {
         },
         404,
       );
+    }
+
+    // Optional sales credit (Path A):
+    // If a sales rep slug was provided, set quotes.sales_rep_id only if it is currently NULL.
+    // Never overwrite an existing assignment. Do not touch locked quotes.
+    if (!quote.locked && salesRepSlug) {
+      try {
+        const rep = await one<{ id: number }>(
+          `select id from users where sales_slug = $1 limit 1`,
+          [salesRepSlug],
+        );
+        if (rep?.id) {
+          await q(
+            `update quotes set sales_rep_id = $1 where id = $2 and sales_rep_id is null`,
+            [rep.id, quote.id],
+          );
+        }
+      } catch (e) {
+        console.warn("[layout/apply] sales_rep_slug set skipped", {
+          quoteNo,
+          salesRepSlug,
+          err: String(e),
+        });
+      }
     }
 
     const geometryHash = computeGeometryHash(layoutForSave);

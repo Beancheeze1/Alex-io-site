@@ -598,6 +598,21 @@ export default function LayoutPage({
 }: {
   searchParams?: SearchParams;
 }) {
+  // Optional sales credit carried into the editor URL.
+  // Accept both sales_rep_slug (preferred) and legacy aliases (sales/rep).
+  const initialSalesRepSlugParam = ((
+    (searchParams as any)?.sales_rep_slug ??
+    (searchParams as any)?.sales ??
+    (searchParams as any)?.rep ??
+    ""
+  ) as string | string[] | undefined);
+
+  const [salesRepSlugFromUrl, setSalesRepSlugFromUrl] = React.useState<string>(
+    Array.isArray(initialSalesRepSlugParam)
+      ? (initialSalesRepSlugParam[0] || "").trim()
+      : (initialSalesRepSlugParam || "").trim(),
+  );
+
   const initialQuoteNoParam = (searchParams?.quote_no ??
     searchParams?.quote ??
     "") as string | string[] | undefined;
@@ -614,6 +629,20 @@ export default function LayoutPage({
       const q =
         url.searchParams.get("quote_no") || url.searchParams.get("quote") || "";
       if (q && q !== quoteNoFromUrl) setQuoteNoFromUrl(q);
+    } catch {}
+  }, []);
+
+  React.useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      const s =
+        url.searchParams.get("sales_rep_slug") ||
+        url.searchParams.get("sales") ||
+        url.searchParams.get("rep") ||
+        "";
+      const sTrim = (s || "").trim();
+      if (sTrim !== salesRepSlugFromUrl) setSalesRepSlugFromUrl(sTrim);
     } catch {}
   }, []);
 
@@ -2938,6 +2967,11 @@ const handleGoToFoamAdvisor = () => {
           phone: customerPhone.trim() || null,
         },
       };
+
+      // Sales credit: pass through to backend; backend will only set if quote.sales_rep_id is NULL.
+      if (salesRepSlugFromUrl && salesRepSlugFromUrl.trim().length > 0) {
+        payload.sales_rep_slug = salesRepSlugFromUrl.trim();
+      }
 
       // Attach chosen carton (if any) so the backend can add a box line item
       if (selectedCartonKind && (boxSuggest.bestRsc || boxSuggest.bestMailer)) {

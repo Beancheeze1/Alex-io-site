@@ -964,6 +964,7 @@ function UsersAndRolesCard() {
                   <th className="py-1 pr-3">Name</th>
                   <th className="py-1 pr-3">Role</th>
                   <th className="py-1 pr-3">Sales slug</th>
+                  <th className="py-1 pr-3">Link</th>
                   <th className="py-1 pr-3">Created</th>
                   <th className="py-1 pr-3">Password</th>
                   <th className="py-1 pr-0 text-right">Delete</th>
@@ -978,6 +979,39 @@ function UsersAndRolesCard() {
                     <td className="py-1 pr-3 text-slate-200">{u.role}</td>
                     <td className="py-1 pr-3 text-slate-300">
                       {u.sales_slug || "—"}
+                    </td>
+                    <td className="py-1 pr-3">
+                      {u.sales_slug ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const origin =
+                                typeof window !== "undefined"
+                                  ? window.location.origin
+                                  : "";
+                              const link = `${origin}/start-quote?sales=${encodeURIComponent(
+                                String(u.sales_slug),
+                              )}`;
+
+                              await navigator.clipboard.writeText(link);
+                              setOkMsg(`Copied start link for ${u.email}`);
+                              setError(null);
+                            } catch {
+                              // Clipboard can be blocked; fail silently (no regressions)
+                              setError("Copy failed (clipboard blocked).");
+                              setOkMsg(null);
+                            }
+                          }}
+                          disabled={resettingId === u.id || deletingId === u.id || saving || loading}
+                          className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/30 px-2 py-0.5 text-[10px] font-medium text-slate-200 transition hover:bg-slate-800/50 disabled:cursor-not-allowed disabled:opacity-60"
+                          title="Copy salesperson start link"
+                        >
+                          Copy
+                        </button>
+                      ) : (
+                        <span className="text-slate-500"></span>
+                      )}
                     </td>
                     <td className="py-1 pr-3 text-slate-400">
                       {typeof u.created_at === "string"
@@ -1017,3 +1051,4 @@ function UsersAndRolesCard() {
     </div>
   );
 }
+
