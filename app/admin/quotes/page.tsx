@@ -40,7 +40,7 @@ type QuotesResponse = {
   error?: string;
 };
 
-type StatusFilter = "all" | "draft" | "engineering" | "sent";
+type FilterKey = "all" | "sent" | "rfm" | `sales:${string}`;
 
 type MaterialUsage = {
   name: string;
@@ -61,8 +61,7 @@ export default function AdminQuotesPage() {
 
 
   // Client-side filters
-  const [statusFilter, setStatusFilter] =
-    React.useState<StatusFilter>("all");
+  const [filterKey, setFilterKey] = React.useState<FilterKey>("all");
   const [searchTerm, setSearchTerm] = React.useState("");
 
   // NEW: recent materials widget state
@@ -216,6 +215,16 @@ export default function AdminQuotesPage() {
       ).length
     : 0;
 
+  // NEW: derive unique salesperson pills from live rows (q.sales_rep_name)
+  const salesPills = React.useMemo(() => {
+    const set = new Set<string>();
+    (quotes ?? []).forEach((q) => {
+      const v = (q.sales_rep_name || "").trim();
+      if (v) set.add(v);
+    });
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
+  }, [quotes]);
+
   // Filtered list for the table (status + text search)
   const filteredQuotes: QuoteRow[] = React.useMemo(() => {
     if (!quotes) return [];
@@ -224,20 +233,16 @@ export default function AdminQuotesPage() {
     const hasSearch = term.length > 0;
 
     return quotes.filter((q) => {
-      // Status filter
-      const normalized = normalizeStatus(q.status);
-      if (statusFilter === "draft" && normalized !== "draft") {
-        return false;
-      }
-      if (
-        statusFilter === "engineering" &&
-        normalized !== "engineering" &&
-        normalized !== "in_progress"
-      ) {
-        return false;
-      }
-      if (statusFilter === "sent" && normalized !== "sent") {
-        return false;
+      // Filter pills
+      if (filterKey === "sent") {
+        const s = normalizeStatus(q.status);
+        if (s !== "sent") return false;
+      } else if (filterKey === "rfm") {
+        if (!q.locked) return false;
+      } else if (filterKey.startsWith("sales:")) {
+        const want = filterKey.slice("sales:".length).trim();
+        const have = (q.sales_rep_name || "").trim();
+        if (!want || have !== want) return false;
       }
       // "all" passes everything
 
@@ -256,7 +261,7 @@ export default function AdminQuotesPage() {
 
       return haystack.includes(term);
     });
-  }, [quotes, statusFilter, searchTerm]);
+  }, [quotes, filterKey, searchTerm]);
 
   const showingCount = filteredQuotes.length;
 
@@ -497,28 +502,35 @@ export default function AdminQuotesPage() {
             </div>
 
             <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-              {/* Status filter chips */}
+              {/* Filter chips */}
               <div className="flex flex-wrap gap-1.5">
                 <StatusChip
                   label="All"
-                  active={statusFilter === "all"}
-                  onClick={() => setStatusFilter("all")}
+                  active={filterKey === "all"}
+                  onClick={() => setFilterKey("all")}
                 />
                 <StatusChip
-                  label="Draft"
-                  active={statusFilter === "draft"}
-                  onClick={() => setStatusFilter("draft")}
-                />
-                <StatusChip
-                  label="Engineering"
-                  active={statusFilter === "engineering"}
-                  onClick={() => setStatusFilter("engineering")}
+                  label="RFM"
+                  active={filterKey === "rfm"}
+                  onClick={() => setFilterKey("rfm")}
                 />
                 <StatusChip
                   label="Sent"
-                  active={statusFilter === "sent"}
-                  onClick={() => setStatusFilter("sent")}
+                  active={filterKey === "sent"}
+                  onClick={() => setFilterKey("sent")}
                 />
+
+                {salesPills.map((name) => {
+                  const key: FilterKey = `sales:${name}`;
+                  return (
+                    <StatusChip
+                      key={key}
+                      label={name}
+                      active={filterKey === key}
+                      onClick={() => setFilterKey(key)}
+                    />
+                  );
+                })}
               </div>
 
               {/* Text search */}
