@@ -9,6 +9,7 @@ import {
 } from "@/app/lib/layout/exports";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { buildStepFromLayout } from "@/lib/cad/step";
+import { loadFacts, saveFacts } from "@/app/lib/memory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,31 @@ type LayoutPkgRow = {
   step_text: string | null;
   created_at: string;
 };
+
+function normalizeRevLabel(s?: string | null): string {
+  const t = String(s || "").trim();
+  if (!t) return "";
+  return t.toLowerCase().startsWith("rev") ? t.slice(3).trim() : t;
+}
+
+function nextReleasedLetter(cur?: string | null): string {
+  const t = normalizeRevLabel(cur);
+  if (!t) return "A";
+  const c = t.trim().charAt(0).toUpperCase();
+  const code = c.charCodeAt(0);
+  if (code < 65 || code > 90) return "A";
+  return String.fromCharCode(code + 1);
+}
+
+function nextStageRev(cur?: string | null): string {
+  const t = normalizeRevLabel(cur);
+  // Expect "AS", "BS", ...
+  if (!t || t.length < 2) return "AS";
+  const letter = t.charAt(0).toUpperCase();
+  const code = letter.charCodeAt(0);
+  if (code < 65 || code > 90) return "AS";
+  return String.fromCharCode(code + 1) + "S";
+}
 
 function json(body: any, status = 200) {
   return NextResponse.json(body, { status });
@@ -77,6 +103,19 @@ export async function POST(req: NextRequest) {
       `,
       [quote.id],
     );
+
+    // --- STAGING REV BUMP (Path A) ---
+    try {
+      const facts: any = await loadFacts(quoteNo);
+      const curStage = facts?.stage_rev || facts?.revision || "";
+      const nextStage = nextStageRev(curStage);
+      facts.stage_rev = nextStage;
+      facts.revision = nextStage; // unlocked displays staging
+      await saveFacts(quoteNo, facts);
+    } catch {
+      // non-fatal
+    }
+    // --- END STAGING REV BUMP ---
 
     return json({ ok: true, locked: false });
   }
@@ -215,6 +254,25 @@ export async function POST(req: NextRequest) {
 
     return { release_pkg_id: inserted.rows?.[0]?.id ?? null };
   });
+
+  // --- RELEASED REV MINT (Path A) ---
+  try {
+    const facts: any = await loadFacts(quoteNo);
+    const curReleased = facts?.released_rev || "";
+    const nextReleased = nextReleasedLetter(curReleased);
+    facts.released_rev = nextReleased;
+    facts.revision = nextReleased; // locked displays released
+    if (!facts.stage_rev) {
+      // Ensure staging exists for the chain, but do not advance it here.
+      const cur = facts?.revision || "";
+      facts.stage_rev = normalizeRevLabel(cur).endsWith("S") ? normalizeRevLabel(cur) : "AS";
+    }
+    facts.released_from_stage = facts.stage_rev || null;
+    await saveFacts(quoteNo, facts);
+  } catch {
+    // non-fatal
+  }
+  // --- END RELEASED REV MINT ---
 
   return json({ ok: true, locked: true, geometry_hash: hash, release_pkg_id: result.release_pkg_id });
 }

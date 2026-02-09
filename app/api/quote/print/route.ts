@@ -116,6 +116,21 @@ function safeNum(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeRevLabel(s?: string | null): string {
+  const t = String(s || "").trim();
+  if (!t) return "";
+  return t.toLowerCase().startsWith("rev") ? t.slice(3).trim() : t;
+}
+
+function pickDisplayRevision(facts: any, locked: boolean): string {
+  if (locked) {
+    const r = normalizeRevLabel(facts?.released_rev || facts?.revision || "");
+    return r && !r.endsWith("S") ? r : r.replace(/S$/i, "");
+  }
+  const s = normalizeRevLabel(facts?.stage_rev || facts?.revision || "");
+  return s || "AS";
+}
+
 /**
  * Identify layout-generated reference-only rows.
  * [LAYOUT-LAYER] rows must NEVER be priced.
@@ -216,12 +231,8 @@ export async function GET(req: NextRequest) {
 
     const facts = (await loadFacts(quoteNo)) || {};
 
-    // NEW (Path A): revision is carried via facts for now.
-    // Default new quotes to RevAS when missing.
-    const revision =
-      (typeof (facts as any)?.revision === "string" && (facts as any).revision.trim().length > 0
-        ? String((facts as any).revision).trim()
-        : null) || "RevAS";
+    const locked = !!(quote as any)?.locked;
+    const revision = pickDisplayRevision(facts as any, locked);
 
     // Attach revision to the quote header we return.
     // This does NOT require DB schema changes and is safe for current consumers.
