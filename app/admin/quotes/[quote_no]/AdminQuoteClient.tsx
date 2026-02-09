@@ -1081,8 +1081,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
      NEW: Revision editor (facts-backed via /api/admin/mem)
      ============================================================ */
 
-  const [revisionValue, setRevisionValue] = React.useState<string>("RevAS");
-  const [revisionBusy, setRevisionBusy] = React.useState<boolean>(false);
+  // REVISION (auto, facts-backed). Manual editing disabled (Path A).
+  const [revisionValue, setRevisionValue] = React.useState<string>("AS");
+
+  // Keep the existing UI Saved/Error line wiring (reused for Revise button feedback).
+  const [revisionBusy, setRevisionBusy] = React.useState<boolean>(false); // used by Revise action
   const [revisionError, setRevisionError] = React.useState<string | null>(null);
   const [revisionOkAt, setRevisionOkAt] = React.useState<string | null>(null);
 
@@ -1154,9 +1157,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             setItems(json.items || []);
             setLayoutPkg(json.layoutPkg || null);
 
-            // NEW: Pull revision from facts if present; default RevAS.
+            // REV: /api/quote/print returns facts.revision (authoritative). Fallback "AS".
             const revRaw = (json as any)?.facts?.revision;
-            const rev = typeof revRaw === "string" && revRaw.trim().length > 0 ? revRaw.trim() : "RevAS";
+            const rev = typeof revRaw === "string" && revRaw.trim().length > 0 ? revRaw.trim() : "AS";
             setRevisionValue(rev);
           } else {
             setError("Unexpected response from quote API.");
@@ -1662,54 +1665,44 @@ const overallQty =
     }
   }, [quoteNoValue, rebuildBusy]);
 
-  // NEW: Save revision to facts store via /api/admin/mem
-  const handleSaveRevision = React.useCallback(async () => {
+  // NEW (Path A): Revise = bump staging revision (AS->BS->CS...) by calling admin lock route with lock:false
+  const handleReviseNow = React.useCallback(async () => {
     if (!quoteNoValue) return;
     if (revisionBusy) return;
-
-    const rev = (revisionValue || "").trim();
-    if (!rev) {
-      setRevisionError("Revision cannot be blank.");
-      return;
-    }
 
     setRevisionBusy(true);
     setRevisionError(null);
     setRevisionOkAt(null);
 
     try {
-      const res = await fetch("/api/admin/mem?t=" + String(Date.now()), {
+      const res = await fetch("/api/admin/quotes/lock?t=" + String(Date.now()), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ key: quoteNoValue, revision: rev }),
+        body: JSON.stringify({ quoteNo: quoteNoValue, lock: false }),
       });
 
       const ct = res.headers.get("content-type") || "";
       let json: any = null;
 
-      if (ct.includes("application/json")) {
-        json = await res.json();
-      } else {
-        const text = await res.text();
-        json = { ok: res.ok, message: text };
-      }
+      if (ct.includes("application/json")) json = await res.json();
+      else json = { ok: res.ok, message: await res.text() };
 
       if (!res.ok || !json?.ok) {
-        setRevisionError(json?.error || json?.message || "Save failed.");
+        setRevisionError(json?.error || json?.message || "Revise failed.");
         return;
       }
 
       setRevisionOkAt(new Date().toLocaleString());
-      // Keep UI in sync; also refresh print data so it shows up in facts if needed later.
+      // Refresh print payload so revisionValue updates from facts.revision
       setRefreshTick((x) => x + 1);
     } catch (e: any) {
-      console.error("Admin: revision save failed:", e);
+      console.error("Admin: revise failed:", e);
       setRevisionError(String(e?.message ?? e));
     } finally {
       setRevisionBusy(false);
     }
-  }, [quoteNoValue, revisionBusy, revisionValue]);
+  }, [quoteNoValue, revisionBusy]);
 
     // NEW: Admin-only send to customer (Graph -> /api/ms/send)
   const handleSendToCustomer = React.useCallback(async () => {
@@ -2010,7 +2003,7 @@ const overallQty =
                   </button>
 
 
-                  {/* NEW: Revision editor */}
+                  {/* REV (auto) + Revise button (Path A) */}
                   <div
                     style={{
                       display: "inline-flex",
@@ -2022,33 +2015,16 @@ const overallQty =
                       border: "1px solid rgba(15,23,42,0.20)",
                       color: "#f9fafb",
                     }}
-                    title="Internal revision label stored in facts (e.g., RevAS / RevBS … RevA / RevB …)"
+                    title="Revision is auto-managed (staging: AS/BS/; released: A/B/ when locked)."
                   >
                     <span style={{ fontSize: 11, opacity: 0.95, fontWeight: 700 }}>REV</span>
-                    <input
-                      value={revisionValue}
-                      onChange={(e) => setRevisionValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleSaveRevision();
-                        }
-                      }}
-                      style={{
-                        width: 90,
-                        border: "1px solid rgba(255,255,255,0.35)",
-                        background: "rgba(255,255,255,0.10)",
-                        color: "#ffffff",
-                        borderRadius: 8,
-                        padding: "2px 6px",
-                        fontSize: 11,
-                        outline: "none",
-                      }}
-                      spellCheck={false}
-                    />
+                    <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.2 }}>{revisionValue}</span>
+
+                    <span style={{ width: 1, height: 14, background: "rgba(255,255,255,0.25)", margin: "0 4px" }} />
+
                     <button
                       type="button"
-                      onClick={handleSaveRevision}
+                      onClick={handleReviseNow}
                       disabled={revisionBusy}
                       style={{
                         padding: "2px 8px",
@@ -2060,9 +2036,9 @@ const overallQty =
                         fontWeight: 800,
                         cursor: revisionBusy ? "not-allowed" : "pointer",
                       }}
-                      title="Save revision to facts store"
+                      title="Revise = bump staging revision (ASBSCS...)"
                     >
-                      {revisionBusy ? "Saving..." : "Save"}
+                      {revisionBusy ? "Revising..." : "Revise"}
                     </button>
                   </div>
                 </div>
