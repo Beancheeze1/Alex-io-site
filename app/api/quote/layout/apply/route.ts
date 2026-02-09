@@ -60,6 +60,15 @@ import {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function nextStageRev(cur?: string | null): string {
+  const t = String(cur || "").trim();
+  if (!t || t.length < 2) return "AS";
+  const c = t.charAt(0).toUpperCase();
+  const code = c.charCodeAt(0);
+  if (code < 65 || code > 90) return "AS";
+  return String.fromCharCode(code + 1) + "S";
+}
+
 type QuoteRow = {
   id: number;
   quote_no: string;
@@ -1851,6 +1860,25 @@ const svgAnnotated = embedGeometryHashInSvg(svgAnnotatedBase ?? "", geometryHash
       console.error("[layout/apply] status transition failed for", quoteNo, e);
     }
     // =================== END NEW status transitions ===================
+
+    // --- STAGING REV BUMP ON APPLY (Path A) ---
+    try {
+      const facts: any = await loadFacts(String(quoteNo));
+
+      if (facts?.stage_pending_bump === true) {
+        const curStage = facts.stage_rev || "AS";
+        const nextStage = nextStageRev(curStage);
+
+        facts.stage_rev = nextStage;
+        facts.revision = nextStage;
+        facts.stage_pending_bump = false;
+
+        await saveFacts(String(quoteNo), facts);
+      }
+    } catch {
+      // Non-fatal: apply must succeed even if revision update fails
+    }
+    // --- END STAGING REV BUMP ---
 
     return ok(
       {

@@ -191,6 +191,19 @@ export default function AdminQuotesPage() {
     }
   }
 
+  async function handleReviseQuote(quoteNo: string) {
+    // Arm a single staging bump (do NOT bump yet)
+    await fetch("/api/admin/quotes/revise?t=" + Date.now(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quoteNo }),
+      cache: "no-store",
+    });
+
+    // Go straight to editor
+    router.push(`/quote/layout?quoteNo=${quoteNo}`);
+  }
+
   const totalCount = quotes?.length ?? 0;
   const recentCount = quotes
     ? quotes.filter((q) =>
@@ -725,6 +738,23 @@ export default function AdminQuotesPage() {
                               title={q.locked ? "Unlock for revisions" : "Lock for production"}
                             >
                               {rowBusy[q.quote_no] ? "" : q.locked ? "Unlock" : "RFM"}
+                            </button>
+                            <button
+                              onClick={() => handleReviseQuote(q.quote_no)}
+                              style={{
+                                marginLeft: 8,
+                                padding: "4px 8px",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                borderRadius: 6,
+                                background: "#1f2937",
+                                color: "white",
+                                border: "1px solid #374151",
+                                cursor: "pointer",
+                              }}
+                              title="Revise quote (bumps staging revision on next Apply)"
+                            >
+                              Revise
                             </button>
 
                             <Link
