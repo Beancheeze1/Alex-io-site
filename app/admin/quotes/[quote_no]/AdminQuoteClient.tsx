@@ -1441,7 +1441,30 @@ const overallQty =
     }
   }, [layoutPkg, quoteNoValue, quoteState, revisionValue]);
 
-
+// Add this new handler after handleDownloadStep
+const handleDownload3ViewPdf = React.useCallback(async () => {
+  if (typeof window === "undefined") return;
+  if (!quoteNoValue) return;
+  
+  try {
+    const url = `/api/quote/export-3view-pdf?quote_no=${encodeURIComponent(quoteNoValue)}`;
+    const res = await fetch(url, { cache: "no-store" });
+    
+    if (!res.ok) {
+      console.error("Admin: 3-view PDF fetch failed:", res.status, res.statusText);
+      alert("Failed to generate 3-view PDF. Quote must be locked.");
+      return;
+    }
+    
+    const blob = await res.blob();
+    const baseName = quoteState?.quote_no || quoteNoValue || "quote";
+    const filename = `${baseName}_3View_Drawing${revisionValue ? `_Rev${revisionValue}` : ""}.pdf`;
+    
+    triggerBlobDownload(blob, filename);
+  } catch (err) {
+    console.error("Admin: 3-view PDF download failed:", err);
+  }
+}, [quoteNoValue, quoteState, revisionValue]);
 
   const handleDownloadLayerStep = React.useCallback(
     async (layerIndex: number, layerLabel: string | null, thicknessIn: number | null) => {
@@ -2476,6 +2499,7 @@ const overallQty =
                             Download DXF
                           </button>
 
+                          
                           <button
                             type="button"
                             onClick={handleDownloadStep}
@@ -2492,6 +2516,26 @@ const overallQty =
                             title="Downloads Full Package STEP via /api/quote/layout/step (saved for this quote)."
                           >
                             Download STEP
+                          </button>
+
+                          
+
+                          <button
+                            type="button"
+                            onClick={handleDownload3ViewPdf}
+                            style={{
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              border: "1px solid #0ea5e9",
+                              background: "#e0f2fe",
+                              color: "#0369a1",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                            title="Downloads a 3-view PDF of the full package."
+                          >
+                            Download 3-View PDF
                           </button>
 
                           <button
