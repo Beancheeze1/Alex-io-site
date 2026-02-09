@@ -1480,12 +1480,12 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
           window.open(url, "_blank", "noopener,noreferrer");
           return;
         }
-
+        
         const buf = await res.arrayBuffer();
         const blob = new Blob([buf], { type: "application/octet-stream" });
 
         const baseName = quoteState?.quote_no || quoteNoValue || "quote";
-                const filename = buildLayerFilename({
+        const filename = buildLayerFilename({
           quoteNo: baseName,
           revision: revisionValue,
           layerIndex,
@@ -1494,16 +1494,44 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
           ext: "step",
         });
 
-
         triggerBlobDownload(blob, filename);
       } catch (err) {
         console.error("Admin: layer STEP download failed:", err);
         window.open(url, "_blank", "noopener,noreferrer");
       }
     },
-        [quoteNoValue, quoteState, revisionValue],
-
+    [quoteNoValue, quoteState, revisionValue]
   );
+
+  // NEW: Per-Layer 3-View PDF Download Handler
+  const handleDownloadLayer3ViewPdf = React.useCallback(
+    async (layerIndex: number, layerLabel: string | null) => {
+      if (typeof window === "undefined") return;
+      if (!quoteNoValue) return;
+
+      const url = `/api/quote/export-3view-pdf-layer?quote_no=${encodeURIComponent(quoteNoValue)}&layer_index=${encodeURIComponent(String(layerIndex))}`;
+
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) {
+          console.error("Admin: layer 3-view PDF fetch failed:", res.status, res.statusText);
+          alert("Failed to generate 3-view PDF. Quote must be locked.");
+          return;
+        }
+
+        const blob = await res.blob();
+        const baseName = quoteState?.quote_no || quoteNoValue || "quote";
+        const label = layerLabel || `Layer${layerIndex + 1}`;
+        const filename = `${baseName}_${label}_3View${revisionValue ? `_Rev${revisionValue}` : ""}.pdf`;
+
+        triggerBlobDownload(blob, filename);
+      } catch (err) {
+        console.error("Admin: layer 3-view PDF download failed:", err);
+      }
+    },
+    [quoteNoValue, quoteState, revisionValue]
+  );
+
 
   const handleDownloadLayerDxf = React.useCallback(
     (layerIndex: number, layerLabel: string | null, thicknessIn: number | null) => {
