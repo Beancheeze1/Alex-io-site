@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 
@@ -30,6 +31,11 @@ function bad(body: Err, status = 400) {
 
 function requireAdmin(user: any) {
   return isRoleAllowed(user, ["admin"]);
+}
+
+function makeTempPassword(): string {
+  // 12-ish chars, URL-safe. One-time display in admin UI only.
+  return crypto.randomBytes(9).toString("base64url");
 }
 
 // ---------- GET: list users ----------
@@ -306,6 +312,86 @@ export async function DELETE(req: NextRequest) {
     console.error("Error in DELETE /api/admin/users:", err);
     return bad(
       { ok: false, error: "server_error", message: "Unexpected error deleting user. Check logs." },
+      500,
+    );
+  }
+}
+
+// ---------- PATCH: reset user password (admin) ----------
+export async function PATCH(req: NextRequest) {
+  try {
+    const current = await getCurrentUserFromRequest(req);
+    if (!requireAdmin(current)) {
+      return bad(
+        { ok: false, error: "forbidden", message: "Admin role required." },
+        403,
+      );
+    }
+
+    // Accept id from query string first: /api/admin/users?id=123
+    // Fallback: JSON body { id: 123 }.
+    const url = new URL(req.url);
+    const idParam = url.searchParams.get("id");
+
+    let id: number | null =
+      typeof idParam === "string" && idParam.trim().length > 0
+        ? Number(idParam)
+        : null;
+
+    if (!Number.isFinite(id as any)) id = null;
+
+    if (id === null) {
+      const body = (await req.json().catch(() => null)) as any;
+      const bodyId = body?.id;
+      const n = typeof bodyId === "string" || typeof bodyId === "number" ? Number(bodyId) : NaN;
+      if (Number.isFinite(n)) id = n;
+    }
+
+    if (id === null || !Number.isInteger(id) || id <= 0) {
+      return bad(
+        { ok: false, error: "invalid_payload", message: "Expected ?id=<number> (or JSON { id })." },
+        400,
+      );
+    }
+
+    // Confirm user exists.
+    const exists = await one<{ id: number; email: string }>(
+      `select id, email from public.users where id = $1`,
+      [id],
+    ).catch(() => null);
+
+    if (!exists?.id) {
+      return bad({ ok: false, error: "not_found", message: "User not found." }, 404);
+    }
+
+    // Generate + hash a new temp password (one-time reveal).
+    const tempPassword = makeTempPassword();
+    const password_hash = await bcrypt.hash(tempPassword, 10);
+
+    try {
+      await one<{ id: number }>(
+        `
+        update public.users
+        set password_hash = $2, updated_at = now()
+        where id = $1
+        returning id
+        `,
+        [id, password_hash],
+      );
+
+      // Return temp password ONLY in response (not stored plaintext).
+      return ok({ ok: true, id, email: exists.email, temp_password: tempPassword }, 200);
+    } catch (dbErr: any) {
+      console.error("DB error resetting password:", dbErr);
+      return bad(
+        { ok: false, error: "db_error", message: "Failed to reset password. Check logs." },
+        500,
+      );
+    }
+  } catch (err: any) {
+    console.error("Error in PATCH /api/admin/users:", err);
+    return bad(
+      { ok: false, error: "server_error", message: "Unexpected error resetting password. Check logs." },
       500,
     );
   }

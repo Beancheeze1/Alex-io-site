@@ -611,10 +611,12 @@ function UsersAndRolesCard() {
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [okMsg, setOkMsg] = React.useState<string | null>(null);
-  const [users, setUsers] = React.useState<AdminUsersListResponse extends any
-    ? any
-    : never>([]);
-      const [deletingId, setDeletingId] = React.useState<number | null>(null);
+  const [users, setUsers] = React.useState<AdminUsersListResponse extends any ? any : never>([]);
+  const [deletingId, setDeletingId] = React.useState<number | null>(null);
+
+  const [resettingId, setResettingId] = React.useState<number | null>(null);
+  const [resetForEmail, setResetForEmail] = React.useState<string | null>(null);
+  const [tempPassword, setTempPassword] = React.useState<string | null>(null);
 
 
   const [email, setEmail] = React.useState("");
@@ -660,7 +662,7 @@ function UsersAndRolesCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-    async function handleDeleteUser(user: { id: number; email: string }) {
+  async function handleDeleteUser(user: { id: number; email: string }) {
     const ok = window.confirm(
       `Delete user "${user.email}"?\n\nThis cannot be undone.`,
     );
@@ -695,6 +697,47 @@ function UsersAndRolesCard() {
       setOkMsg(null);
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function handleResetPassword(user: { id: number; email: string }) {
+    const ok = window.confirm(
+      `Reset password for "${user.email}"?\n\nThis will set a NEW temporary password.`,
+    );
+    if (!ok) return;
+
+    setError(null);
+    setOkMsg(null);
+    setTempPassword(null);
+    setResetForEmail(null);
+    setResettingId(user.id);
+
+    try {
+      const res = await fetch(
+        `/api/admin/users?id=${encodeURIComponent(String(user.id))}`,
+        { method: "PATCH", cache: "no-store" },
+      );
+
+      const json: any = await res.json().catch(() => null);
+
+      if (!res.ok || !json || json.ok !== true || typeof json.temp_password !== "string") {
+        const msg =
+          (json && (json.message || json.error)) ||
+          "Failed to reset password. Check role/login.";
+        setError(msg);
+        setOkMsg(null);
+      } else {
+        setResetForEmail(user.email);
+        setTempPassword(json.temp_password);
+        setOkMsg(`Password reset: ${user.email}`);
+        setError(null);
+      }
+    } catch (e) {
+      console.error("Failed to reset password:", e);
+      setError("Failed to reset password.");
+      setOkMsg(null);
+    } finally {
+      setResettingId(null);
     }
   }
 
@@ -855,6 +898,43 @@ function UsersAndRolesCard() {
           </button>
 
           {okMsg && <span className="text-[11px] text-emerald-300">{okMsg}</span>}
+          {tempPassword && resetForEmail && (
+            <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-100">
+              <div className="mb-1 font-medium">
+                Temporary password for <span className="text-amber-200">{resetForEmail}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="rounded bg-black/30 px-2 py-1">{tempPassword}</code>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(tempPassword);
+                      setOkMsg("Copied temporary password.");
+                    } catch {
+                      // no-op; clipboard may be blocked
+                    }
+                  }}
+                  className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/30 px-2 py-0.5 text-[10px] font-medium text-slate-200 transition hover:bg-slate-800/50"
+                >
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTempPassword(null);
+                    setResetForEmail(null);
+                  }}
+                  className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/30 px-2 py-0.5 text-[10px] font-medium text-slate-200 transition hover:bg-slate-800/50"
+                >
+                  Dismiss
+                </button>
+              </div>
+              <div className="mt-1 text-[10px] text-amber-200/80">
+                This password is shown once. It is not stored in plaintext.
+              </div>
+            </div>
+          )}
         </div>
 
         {error && <p className="text-[11px] text-rose-300">{error}</p>}
@@ -885,6 +965,7 @@ function UsersAndRolesCard() {
                   <th className="py-1 pr-3">Role</th>
                   <th className="py-1 pr-3">Sales slug</th>
                   <th className="py-1 pr-3">Created</th>
+                  <th className="py-1 pr-3">Password</th>
                   <th className="py-1 pr-0 text-right">Delete</th>
                 </tr>
 
@@ -902,6 +983,17 @@ function UsersAndRolesCard() {
                       {typeof u.created_at === "string"
                         ? u.created_at.slice(0, 10)
                         : "—"}
+                    </td>
+                    <td className="py-1 pr-3">
+                      <button
+                        type="button"
+                        onClick={() => handleResetPassword({ id: u.id, email: u.email })}
+                        disabled={resettingId === u.id || deletingId === u.id || saving || loading}
+                        className="inline-flex items-center rounded-full border border-amber-500/50 bg-amber-600/10 px-2 py-0.5 text-[10px] font-medium text-amber-200 transition hover:bg-amber-600/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        title="Reset password (sets a new temporary password)"
+                      >
+                        {resettingId === u.id ? "Resetting" : "Reset"}
+                      </button>
                     </td>
                     <td className="py-1 pr-0 text-right">
                       <button
