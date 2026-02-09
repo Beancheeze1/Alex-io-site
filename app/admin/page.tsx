@@ -990,9 +990,7 @@ function UsersAndRolesCard() {
                                 typeof window !== "undefined"
                                   ? window.location.origin
                                   : "";
-                              const link = `${origin}/start-quote?sales=${encodeURIComponent(
-                                String(u.sales_slug),
-                              )}`;
+                              const link = `${origin}/q/${encodeURIComponent(String(u.sales_slug))}`;
 
                               await navigator.clipboard.writeText(link);
                               setOkMsg(`Copied start link for ${u.email}`);
@@ -1051,4 +1049,5 @@ function UsersAndRolesCard() {
     </div>
   );
 }
+
 
