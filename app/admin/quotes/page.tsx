@@ -724,11 +724,6 @@ export default function AdminQuotesPage() {
                                 Editable
                               </span>
                             )}
-                            {q.sales_rep_name && (
-                              <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
-                                {q.sales_rep_name}
-                              </span>
-                            )}
 
                             <button
                               type="button"
