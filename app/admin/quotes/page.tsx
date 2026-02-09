@@ -201,7 +201,7 @@ export default function AdminQuotesPage() {
     });
 
     // Go straight to editor
-    router.push(`/quote/layout?quoteNo=${quoteNo}`);
+    router.push(`/quote/layout?quote_no=${quoteNo}`);
   }
 
   const totalCount = quotes?.length ?? 0;
