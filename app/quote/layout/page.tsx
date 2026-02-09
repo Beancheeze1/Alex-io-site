@@ -2862,6 +2862,23 @@ const handleGoToFoamAdvisor = () => {
 
   /* ---------- Apply-to-Quote ---------- */
 
+  // Sales credit (Path A): compute from current URL at apply-time.
+  // This avoids relying on any specific state variable name/scope.
+  const salesRepSlugForApply = (() => {
+    try {
+      if (typeof window === "undefined") return "";
+      const url = new URL(window.location.href);
+      const raw =
+        url.searchParams.get("sales_rep_slug") ||
+        url.searchParams.get("sales") ||
+        url.searchParams.get("rep") ||
+        "";
+      return (raw || "").trim();
+    } catch {
+      return "";
+    }
+  })();
+
   const handleApplyToQuote = async () => {
     if (!hasRealQuoteNo) {
       alert("This layout isn’t linked to a quote.\nOpen from a real quote email.");
@@ -2969,8 +2986,8 @@ const handleGoToFoamAdvisor = () => {
       };
 
       // Sales credit: pass through to backend; backend will only set if quote.sales_rep_id is NULL.
-      if (salesRepSlugFromUrl && salesRepSlugFromUrl.trim().length > 0) {
-        payload.sales_rep_slug = salesRepSlugFromUrl.trim();
+      if (salesRepSlugForApply && salesRepSlugForApply.length > 0) {
+        payload.sales_rep_slug = salesRepSlugForApply;
       }
 
       // Attach chosen carton (if any) so the backend can add a box line item
