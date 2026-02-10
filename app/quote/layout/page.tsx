@@ -2765,12 +2765,15 @@ else nextYIn = snapInches(nextYIn);
               
               const editorCavities = cavities.map((cav: any, idx: number) => {
                 if (cav.type === "circle") {
+                  const diameter = cav.diameterIn || 1;
                   return {
                     id: `cav_${Date.now()}_${idx}`,
                     shape: "circle" as const,
                     x: cav.x,
                     y: cav.y,
-                    diameterIn: cav.diameterIn || 1,
+                    lengthIn: diameter,  // For circles, lengthIn = diameter
+                    widthIn: diameter,    // For circles, widthIn = diameter
+                    cornerRadiusIn: 0,
                     depthIn: 1,
                     label: null,
                   };
