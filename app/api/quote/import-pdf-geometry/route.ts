@@ -149,57 +149,28 @@ async function extractPdfGeometry(pdfBuffer: Buffer): Promise<{
     const pythonScript = `#!/usr/bin/env python3
 import sys
 import json
-import os
 
-# Debug: print Python paths
-print("Python paths:", file=sys.stderr)
-for p in sys.path:
-    print(f"  {p}", file=sys.stderr)
-
-# Try to find pdfplumber
+# Simple import - pdfplumber should be installed via requirements.txt
 try:
     import pdfplumber
-    print(f"pdfplumber found: {pdfplumber.__version__}", file=sys.stderr)
-except ImportError as e:
-    print(f"pdfplumber import error: {e}", file=sys.stderr)
-    print("Attempting to find package...", file=sys.stderr)
-    
-    # Try different paths
-    possible_paths = [
-        '/usr/local/lib/python3.12/dist-packages',
-        '/usr/local/lib/python3.12/site-packages',
-        '/opt/render/.local/lib/python3.12/site-packages',
-        '/home/ubuntu/.local/lib/python3.12/site-packages',
-        os.path.expanduser('~/.local/lib/python3.12/site-packages')
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            print(f"  Found path: {path}", file=sys.stderr)
-            sys.path.insert(0, path)
-    
-    try:
-        import pdfplumber
-        print(f"pdfplumber loaded from: {pdfplumber.__file__}", file=sys.stderr)
-    except ImportError:
-        # Last resort: try to install
-        print("Installing pdfplumber...", file=sys.stderr)
-        import subprocess
-        result = subprocess.run([sys.executable, "-m", "pip", "install", "--user", "pdfplumber"], 
-                              capture_output=True, text=True)
-        print(result.stdout, file=sys.stderr)
-        print(result.stderr, file=sys.stderr)
-        import pdfplumber
+except ImportError:
+    # If not found, give helpful error
+    print(json.dumps({
+        'error': 'pdfplumber not installed',
+        'message': 'Please install: pip3 install --break-system-packages pdfplumber',
+        'blockWidth': 12,
+        'blockHeight': 12,
+        'shapes': []
+    }))
+    sys.exit(0)
 
 pdf_path = '${tempPdf}'
-print(f"Processing: {pdf_path}", file=sys.stderr)
 
 with pdfplumber.open(pdf_path) as pdf:
     page = pdf.pages[0]
     pts_to_inches = 1.0 / 72.0
     
     curves = page.curves
-    print(f"Found {len(curves)} curves", file=sys.stderr)
     
     if not curves:
         print(json.dumps({'blockWidth': 12, 'blockHeight': 12, 'shapes': []}))
@@ -221,7 +192,6 @@ with pdfplumber.open(pdf_path) as pdf:
     # Block dimensions
     block_width_in = largest_curve['width'] * pts_to_inches
     block_height_in = largest_curve['height'] * pts_to_inches
-    print(f"Block: {block_width_in:.2f} x {block_height_in:.2f} inches", file=sys.stderr)
     
     # Block center in PDF coordinates
     block_center_x = (largest_curve['x0'] + largest_curve['x1']) / 2.0
@@ -248,13 +218,11 @@ with pdfplumber.open(pdf_path) as pdf:
         rel_x_in = rel_x_pts * pts_to_inches
         rel_y_in = rel_y_pts * pts_to_inches
         
-        # Editor coordinates
+        # Editor coordinates (origin at top-left, Y increases down)
         editor_x = (block_width_in / 2.0) + rel_x_in
         editor_y = (block_height_in / 2.0) - rel_y_in
         
         is_circle = abs(width_in - height_in) < 0.1
-        
-        print(f"Cavity: {width_in:.2f}x{height_in:.2f} at ({editor_x:.2f}, {editor_y:.2f})", file=sys.stderr)
         
         shapes.append({
             'type': 'circle' if is_circle else 'rect',
@@ -276,53 +244,50 @@ with pdfplumber.open(pdf_path) as pdf:
     
     await writeFile(scriptPath, pythonScript);
     
-    // Run Python script and capture both stdout and stderr
-    try {
-      const { stdout, stderr } = await execAsync(`python3 ${scriptPath}`);
-      
-      // Log stderr for debugging
-      if (stderr) {
-        console.log('Python debug output:', stderr);
-      }
-      
-      const result = JSON.parse(stdout.trim());
-      
-      // Clean up
-      await unlink(scriptPath).catch(() => {});
-      
-      // Remove duplicates
-      const uniqueShapes: ExtractedShape[] = [];
-      const seen = new Set<string>();
-      
-      for (const shape of result.shapes) {
-        const key = `${shape.type}_${shape.x.toFixed(1)}_${shape.y.toFixed(1)}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          uniqueShapes.push({
-            type: shape.type,
-            x: shape.x,
-            y: shape.y,
-            lengthIn: shape.widthIn,
-            widthIn: shape.heightIn,
-            diameterIn: shape.diameterIn,
-          });
-        }
-      }
-      
-      return {
-        blockDimensions: {
-          lengthIn: result.blockWidth,
-          widthIn: result.blockHeight,
-        },
-        cavities: uniqueShapes,
-      };
-    } catch (execError: any) {
-      // More detailed error logging
-      console.error('Python script execution failed');
-      console.error('stdout:', execError.stdout);
-      console.error('stderr:', execError.stderr);
-      throw new Error(`Python execution failed: ${execError.stderr || execError.message}`);
+    // Run Python script
+    const { stdout, stderr } = await execAsync(`python3 ${scriptPath}`);
+    
+    // Log any warnings
+    if (stderr) {
+      console.log('Python warnings:', stderr);
     }
+    
+    const result = JSON.parse(stdout.trim());
+    
+    // Check for error message
+    if (result.error) {
+      throw new Error(result.message || result.error);
+    }
+    
+    // Clean up
+    await unlink(scriptPath).catch(() => {});
+    
+    // Remove duplicates
+    const uniqueShapes: ExtractedShape[] = [];
+    const seen = new Set<string>();
+    
+    for (const shape of result.shapes) {
+      const key = `${shape.type}_${shape.x.toFixed(1)}_${shape.y.toFixed(1)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueShapes.push({
+          type: shape.type,
+          x: shape.x,
+          y: shape.y,
+          lengthIn: shape.widthIn,
+          widthIn: shape.heightIn,
+          diameterIn: shape.diameterIn,
+        });
+      }
+    }
+    
+    return {
+      blockDimensions: {
+        lengthIn: result.blockWidth,
+        widthIn: result.blockHeight,
+      },
+      cavities: uniqueShapes,
+    };
     
   } finally {
     // Clean up temp file
