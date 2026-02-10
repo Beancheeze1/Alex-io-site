@@ -208,24 +208,32 @@ with pdfplumber.open(pdf_path) as pdf:
         if abs(width_in - block_width_in) < 1.0 and abs(height_in - block_height_in) < 1.0:
             continue
         
-        # Cavity center
-        cavity_center_x = (curve['x0'] + curve['x1']) / 2.0
-        cavity_center_y = (curve['y0'] + curve['y1']) / 2.0
+        # Cavity bounds in PDF coordinates
+        cavity_x0 = curve['x0']
+        cavity_y0 = curve['y0']
+        cavity_x1 = curve['x1']
+        cavity_y1 = curve['y1']
         
-        # Relative position
-        rel_x_pts = cavity_center_x - block_center_x
-        rel_y_pts = cavity_center_y - block_center_y
-        rel_x_in = rel_x_pts * pts_to_inches
-        rel_y_in = rel_y_pts * pts_to_inches
+        # Block bounds in PDF coordinates
+        block_x0 = largest_curve['x0']
+        block_y0 = largest_curve['y0']
+        block_x1 = largest_curve['x1']
+        block_y1 = largest_curve['y1']
         
-        # Absolute position in block (inches from top-left)
-        abs_x_in = (block_width_in / 2.0) + rel_x_in
-        abs_y_in = (block_height_in / 2.0) - rel_y_in
+        # Top-left corner of cavity in PDF coords
+        # PDF: Y increases upward, so "top" = max Y
+        cavity_tl_x_pts = cavity_x0
+        cavity_tl_y_pts = cavity_y1
         
-        # CRITICAL: Editor expects NORMALIZED coordinates (0-1 range)!
-        # Not absolute inches!
-        norm_x = abs_x_in / block_width_in if block_width_in > 0 else 0.5
-        norm_y = abs_y_in / block_height_in if block_height_in > 0 else 0.5
+        # Convert to editor coordinates (origin at block top-left, Y down)
+        # X: distance from block's left edge
+        # Y: distance from block's top edge (flipped)
+        editor_x_in = (cavity_tl_x_pts - block_x0) * pts_to_inches
+        editor_y_in = (block_y1 - cavity_tl_y_pts) * pts_to_inches
+        
+        # Normalize to 0-1 range
+        norm_x = editor_x_in / block_width_in if block_width_in > 0 else 0.0
+        norm_y = editor_y_in / block_height_in if block_height_in > 0 else 0.0
         
         # Clamp to 0-1 range
         norm_x = max(0.0, min(1.0, norm_x))
