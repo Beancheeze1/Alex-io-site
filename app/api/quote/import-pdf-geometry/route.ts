@@ -185,27 +185,50 @@ with pdfplumber.open('${tempPdf}') as pdf:
         width_in = width_pts * pts_to_inches
         height_in = height_pts * pts_to_inches
         
-        # Skip the block boundary
+        # Skip the block boundary (within 0.5" tolerance)
         if block_shape and abs(width_in - block_shape['width']) < 0.5:
             continue
         
-        # Center position (PDF Y-axis goes up from bottom)
-        center_x_pts = (curve['x0'] + curve['x1']) / 2
-        center_y_pts = (curve['y0'] + curve['y1']) / 2
+        # Get bounding box of the shape
+        x0 = curve['x0']
+        y0 = curve['y0']
+        x1 = curve['x1']
+        y1 = curve['y1']
         
-        # Convert to top-left origin for editor
-        page_height_pts = page.height
-        center_y_from_top_pts = page_height_pts - center_y_pts
+        # Center of this shape in PDF coordinates
+        shape_center_x_pts = (x0 + x1) / 2
+        shape_center_y_pts = (y0 + y1) / 2
         
-        center_x_in = center_x_pts * pts_to_inches
-        center_y_in = center_y_from_top_pts * pts_to_inches
+        # Find center of the block (largest shape) in PDF coordinates
+        # We need to find the actual block bounds from curves
+        block_x0 = min(c['x0'] for c in curves if abs(c['width'] * pts_to_inches - block_shape['width']) < 0.5)
+        block_y0 = min(c['y0'] for c in curves if abs(c['width'] * pts_to_inches - block_shape['width']) < 0.5)
+        block_x1 = max(c['x1'] for c in curves if abs(c['width'] * pts_to_inches - block_shape['width']) < 0.5)
+        block_y1 = max(c['y1'] for c in curves if abs(c['width'] * pts_to_inches - block_shape['width']) < 0.5)
+        
+        block_center_x_pts = (block_x0 + block_x1) / 2
+        block_center_y_pts = (block_y0 + block_y1) / 2
+        
+        # Position relative to block center
+        rel_x_pts = shape_center_x_pts - block_center_x_pts
+        rel_y_pts = shape_center_y_pts - block_center_y_pts
+        
+        # Convert to inches
+        rel_x_in = rel_x_pts * pts_to_inches
+        rel_y_in = rel_y_pts * pts_to_inches
+        
+        # Editor uses top-left origin with (0,0) at top-left of block
+        # Block center is at (block_width/2, block_height/2)
+        # So cavity position = center + relative offset
+        x_in = (block_shape['width'] / 2) + rel_x_in
+        y_in = (block_shape['height'] / 2) - rel_y_in  # Flip Y axis
         
         is_circle = abs(width_in - height_in) < 0.1
         
         shapes.append({
             'type': 'circle' if is_circle else 'rect',
-            'x': round(center_x_in, 3),
-            'y': round(center_y_in, 3),
+            'x': round(x_in, 3),
+            'y': round(y_in, 3),
             'widthIn': round(width_in, 3) if not is_circle else None,
             'heightIn': round(height_in, 3) if not is_circle else None,
             'diameterIn': round(width_in, 3) if is_circle else None
