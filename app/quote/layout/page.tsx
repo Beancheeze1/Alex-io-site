@@ -2704,55 +2704,39 @@ else nextYIn = snapInches(nextYIn);
       }
 
       // ===== PDF HANDLING =====
-      // PDFs need special handling - upload but DON'T send to forge
+      // PDFs need special handling - save them directly, then extract geometry
       const isPdf = file.name.toLowerCase().endsWith('.pdf');
       
       if (isPdf) {
         setUploadStatus("uploading");
         setUploadError(null);
         
-        // Upload PDF using sketch-upload but it will save as attachment
-        // The forge processing will fail/timeout, but we don't care - we'll extract geometry ourselves
-        const pdfFormData = new FormData();
-        pdfFormData.append("file", file);
-        pdfFormData.append("filename", file.name);
-        pdfFormData.append("quote_no", currentQuoteNo);
-        
-        // Use sketch-upload just to save the file
-        const uploadUrl = `/api/sketch-upload?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`;
-        const uploadRes = await fetch(uploadUrl, {
-          method: 'POST',
-          body: pdfFormData
-        });
-        
-        // Even if forge times out, we should get an attachmentId
-        const uploadJson = await uploadRes.json().catch(() => null);
-        
-        // Get attachment ID - might be in different places depending on success/failure
-        let attachmentId = uploadJson?.attachmentId || uploadJson?.attachment?.id;
-        
-        // If upload failed completely, try to find the most recent PDF attachment
-        if (!attachmentId) {
-          try {
-            const latestRes = await fetch(
-              `/api/quote-attachments/latest?quote_no=${encodeURIComponent(currentQuoteNo)}&filename=${encodeURIComponent(file.name)}&t=${Date.now()}`,
-              { cache: "no-store" }
-            );
-            const latestJson = await latestRes.json();
-            attachmentId = latestJson?.attachment?.id;
-          } catch (e) {
-            console.error("Could not find uploaded PDF attachment:", e);
-          }
-        }
-        
-        if (!attachmentId) {
-          throw new Error("PDF uploaded but could not get attachment ID");
-        }
-        
-        setUploadStatus("done");
-        
-        // Now extract geometry from the PDF
         try {
+          // Save PDF using dedicated endpoint (bypasses forge)
+          const pdfFormData = new FormData();
+          pdfFormData.append("file", file);
+          pdfFormData.append("quote_no", currentQuoteNo);
+          
+          const saveRes = await fetch('/api/quote-attachments/save-pdf', {
+            method: 'POST',
+            body: pdfFormData
+          });
+          
+          if (!saveRes.ok) {
+            const errorText = await saveRes.text();
+            throw new Error(`PDF save failed: ${errorText}`);
+          }
+          
+          const saveJson = await saveRes.json();
+          const attachmentId = saveJson.id || saveJson.attachmentId;
+          
+          if (!attachmentId) {
+            throw new Error("No attachment ID returned from save");
+          }
+          
+          setUploadStatus("done");
+          
+          // Extract geometry from the saved PDF
           const geomRes = await fetch('/api/quote/import-pdf-geometry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2826,11 +2810,12 @@ else nextYIn = snapInches(nextYIn);
               alert(`PDF imported! ${cavities.length} cavities added.`);
             }
           } else {
-            alert(`PDF uploaded but no geometry found.\n\nCreate layout manually.`);
+            alert(`PDF saved but no geometry found.\n\nCreate layout manually.`);
           }
-        } catch (e) {
-          console.error('PDF extraction failed:', e);
-          alert(`PDF uploaded but extraction failed.\n\nCreate layout manually.`);
+        } catch (e: any) {
+          console.error('PDF upload/extraction failed:', e);
+          setUploadStatus("error");
+          setUploadError(e.message || "PDF upload failed");
         }
         
         inputEl.value = "";
