@@ -144,30 +144,33 @@ async function extractPdfGeometry(pdfBuffer: Buffer): Promise<{
   await writeFile(tempPdf, pdfBuffer);
   
   try {
-    // Create Python script file (easier than inline)
+    // Create Python script file
     const scriptPath = join(tmpdir(), `extract_${Date.now()}.py`);
-    const pythonScript = `
+    const pythonScript = `#!/usr/bin/env python3
 import sys
 import json
 
-try:
-    import pdfplumber
-except ImportError:
-    # Try installing if not available
-    import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pdfplumber", "--break-system-packages"])
-    import pdfplumber
+# Add common package paths
+sys.path.insert(0, '/usr/local/lib/python3.12/dist-packages')
+sys.path.insert(0, '/usr/local/lib/python3.12/site-packages')
+sys.path.insert(0, '/opt/render/.local/lib/python3.12/site-packages')
 
-with pdfplumber.open('${tempPdf}') as pdf:
+import pdfplumber
+
+pdf_path = '${tempPdf}'
+
+with pdfplumber.open(pdf_path) as pdf:
     page = pdf.pages[0]
-    pts_to_inches = 1/72
+    pts_to_inches = 1.0 / 72.0
     
     curves = page.curves
-    shapes = []
+    if not curves:
+        print(json.dumps({'blockWidth': 12, 'blockHeight': 12, 'shapes': []}))
+        sys.exit(0)
     
-    # Find the largest shape (block boundary)
+    # Find the largest shape by area (this is the block outline)
     largest_area = 0
-    block_shape = None
+    largest_curve = None
     
     for curve in curves:
         width_in = curve['width'] * pts_to_inches
@@ -176,67 +179,77 @@ with pdfplumber.open('${tempPdf}') as pdf:
         
         if area > largest_area:
             largest_area = area
-            block_shape = {'width': width_in, 'height': height_in}
+            largest_curve = curve
     
-    # Extract cavities (smaller shapes)
+    # Block dimensions from largest shape
+    block_width_in = largest_curve['width'] * pts_to_inches
+    block_height_in = largest_curve['height'] * pts_to_inches
+    
+    # Block bounds in PDF coordinates
+    block_x0 = largest_curve['x0']
+    block_y0 = largest_curve['y0']
+    block_x1 = largest_curve['x1']
+    block_y1 = largest_curve['y1']
+    block_center_x = (block_x0 + block_x1) / 2.0
+    block_center_y = (block_y0 + block_y1) / 2.0
+    
+    shapes = []
+    
+    # Extract cavity shapes (everything except the block outline)
     for curve in curves:
-        width_pts = curve['width']
-        height_pts = curve['height']
-        width_in = width_pts * pts_to_inches
-        height_in = height_pts * pts_to_inches
+        width_in = curve['width'] * pts_to_inches
+        height_in = curve['height'] * pts_to_inches
         
-        # Skip the block boundary (within 0.5" tolerance)
-        if block_shape and abs(width_in - block_shape['width']) < 0.5:
+        # Skip if this is the block outline (within 1" tolerance)
+        if abs(width_in - block_width_in) < 1.0 and abs(height_in - block_height_in) < 1.0:
             continue
         
-        # Get bounding box of the shape
-        x0 = curve['x0']
-        y0 = curve['y0']
-        x1 = curve['x1']
-        y1 = curve['y1']
+        # Cavity center in PDF coordinates
+        cavity_x0 = curve['x0']
+        cavity_y0 = curve['y0']
+        cavity_x1 = curve['x1']
+        cavity_y1 = curve['y1']
+        cavity_center_x = (cavity_x0 + cavity_x1) / 2.0
+        cavity_center_y = (cavity_y0 + cavity_y1) / 2.0
         
-        # Center of this shape in PDF coordinates
-        shape_center_x_pts = (x0 + x1) / 2
-        shape_center_y_pts = (y0 + y1) / 2
-        
-        # Find center of the block (largest shape) in PDF coordinates
-        # We need to find the actual block bounds from curves
-        block_x0 = min(c['x0'] for c in curves if abs(c['width'] * pts_to_inches - block_shape['width']) < 0.5)
-        block_y0 = min(c['y0'] for c in curves if abs(c['width'] * pts_to_inches - block_shape['width']) < 0.5)
-        block_x1 = max(c['x1'] for c in curves if abs(c['width'] * pts_to_inches - block_shape['width']) < 0.5)
-        block_y1 = max(c['y1'] for c in curves if abs(c['width'] * pts_to_inches - block_shape['width']) < 0.5)
-        
-        block_center_x_pts = (block_x0 + block_x1) / 2
-        block_center_y_pts = (block_y0 + block_y1) / 2
-        
-        # Position relative to block center
-        rel_x_pts = shape_center_x_pts - block_center_x_pts
-        rel_y_pts = shape_center_y_pts - block_center_y_pts
+        # Position relative to block center (in points)
+        rel_x_pts = cavity_center_x - block_center_x
+        rel_y_pts = cavity_center_y - block_center_y
         
         # Convert to inches
         rel_x_in = rel_x_pts * pts_to_inches
         rel_y_in = rel_y_pts * pts_to_inches
         
-        # Editor uses top-left origin with (0,0) at top-left of block
-        # Block center is at (block_width/2, block_height/2)
-        # So cavity position = center + relative offset
-        x_in = (block_shape['width'] / 2) + rel_x_in
-        y_in = (block_shape['height'] / 2) - rel_y_in  # Flip Y axis
+        # Editor coordinate system:
+        # - Origin (0, 0) is at top-left of block
+        # - X increases to the right
+        # - Y increases downward
+        # 
+        # PDF coordinate system:
+        # - Origin is at bottom-left
+        # - Y increases upward
+        #
+        # So: editor_x = block_width/2 + rel_x
+        #     editor_y = block_height/2 - rel_y  (flip Y axis)
         
+        editor_x = (block_width_in / 2.0) + rel_x_in
+        editor_y = (block_height_in / 2.0) - rel_y_in
+        
+        # Determine shape type
         is_circle = abs(width_in - height_in) < 0.1
         
         shapes.append({
             'type': 'circle' if is_circle else 'rect',
-            'x': round(x_in, 3),
-            'y': round(y_in, 3),
+            'x': round(editor_x, 3),
+            'y': round(editor_y, 3),
             'widthIn': round(width_in, 3) if not is_circle else None,
             'heightIn': round(height_in, 3) if not is_circle else None,
             'diameterIn': round(width_in, 3) if is_circle else None
         })
     
     result = {
-        'blockWidth': round(block_shape['width'], 2) if block_shape else 12,
-        'blockHeight': round(block_shape['height'], 2) if block_shape else 12,
+        'blockWidth': round(block_width_in, 2),
+        'blockHeight': round(block_height_in, 2),
         'shapes': shapes
     }
     
@@ -246,7 +259,12 @@ with pdfplumber.open('${tempPdf}') as pdf:
     await writeFile(scriptPath, pythonScript);
     
     // Run Python script
-    const { stdout } = await execAsync(`python3 ${scriptPath}`);
+    const { stdout, stderr } = await execAsync(`python3 ${scriptPath}`);
+    
+    if (stderr && stderr.includes('Error')) {
+      console.error('Python stderr:', stderr);
+    }
+    
     const result = JSON.parse(stdout.trim());
     
     // Clean up
@@ -257,7 +275,7 @@ with pdfplumber.open('${tempPdf}') as pdf:
     const seen = new Set<string>();
     
     for (const shape of result.shapes) {
-      const key = `${shape.type}_${shape.x}_${shape.y}`;
+      const key = `${shape.type}_${shape.x.toFixed(1)}_${shape.y.toFixed(1)}`;
       if (!seen.has(key)) {
         seen.add(key);
         uniqueShapes.push({
