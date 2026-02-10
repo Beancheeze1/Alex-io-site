@@ -2703,6 +2703,125 @@ else nextYIn = snapInches(nextYIn);
         return;
       }
 
+      // ===== PDF HANDLING =====
+      // PDFs need special handling - extract geometry, don't send to forge
+      const isPdf = file.name.toLowerCase().endsWith('.pdf');
+      
+      if (isPdf) {
+        setUploadStatus("uploading");
+        setUploadError(null);
+        
+        // Upload PDF as attachment (NOT through sketch-upload/forge)
+        const pdfFormData = new FormData();
+        pdfFormData.append("file", file);
+        pdfFormData.append("quote_no", currentQuoteNo);
+        
+        const uploadRes = await fetch('/api/quote-attachments/upload', {
+          method: 'POST',
+          body: pdfFormData
+        });
+        
+        if (!uploadRes.ok) {
+          throw new Error("PDF upload failed");
+        }
+        
+        const uploadJson = await uploadRes.json();
+        const attachmentId = uploadJson.attachment?.id || uploadJson.attachmentId;
+        
+        if (!attachmentId) {
+          throw new Error("No attachment ID returned");
+        }
+        
+        setUploadStatus("done");
+        
+        // Extract geometry from PDF
+        try {
+          const geomRes = await fetch('/api/quote/import-pdf-geometry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              quote_no: currentQuoteNo,
+              attachment_id: attachmentId
+            })
+          });
+          
+          const geomData = await geomRes.json();
+          
+          if (geomData.ok && geomData.blockDimensions && geomData.cavities) {
+            const { blockDimensions, cavities } = geomData;
+            const lengthIn = blockDimensions.lengthIn;
+            const widthIn = blockDimensions.widthIn;
+            
+            const confirmed = window.confirm(
+              `PDF geometry extracted!\n\n` +
+              `Block: ${lengthIn.toFixed(2)}" × ${widthIn.toFixed(2)}"\n` +
+              `Found ${cavities.length} cavities\n\n` +
+              `Import this layout?`
+            );
+            
+            if (confirmed && lengthIn > 0 && widthIn > 0) {
+              updateBlockDims({ lengthIn, widthIn });
+              
+              const editorCavities = cavities.map((cav: any, idx: number) => {
+                if (cav.type === "circle") {
+                  return {
+                    id: `cav_${Date.now()}_${idx}`,
+                    shape: "circle" as const,
+                    x: cav.x,
+                    y: cav.y,
+                    diameterIn: cav.diameterIn || 1,
+                    depthIn: 1,
+                    label: null,
+                  };
+                } else {
+                  return {
+                    id: `cav_${Date.now()}_${idx}`,
+                    shape: "rect" as const,
+                    x: cav.x,
+                    y: cav.y,
+                    lengthIn: cav.lengthIn || 1,
+                    widthIn: cav.widthIn || 1,
+                    depthIn: 1,
+                    cornerRadiusIn: 0,
+                    label: null,
+                  };
+                }
+              });
+              
+              const layerSeed: any = {
+                block: { lengthIn, widthIn, cornerStyle: "square" as const, chamferIn: 0 },
+                stack: [{
+                  id: `layer_${Date.now()}`,
+                  label: `PDF Import`,
+                  thicknessIn: 2,
+                  materialId: initialMaterialId || null,
+                  cavities: editorCavities,
+                  cropCorners: false,
+                }]
+              };
+              
+              importLayerFromSeed(layerSeed, {
+                mode: "replace",
+                label: undefined,
+                targetLayerId: activeLayerId,
+              });
+              
+              alert(`PDF imported! ${cavities.length} cavities added.`);
+            }
+          } else {
+            alert(`PDF uploaded but no geometry found.\n\nCreate layout manually.`);
+          }
+        } catch (e) {
+          console.error('PDF extraction failed:', e);
+          alert(`PDF uploaded but extraction failed.\n\nCreate layout manually.`);
+        }
+        
+        inputEl.value = "";
+        return; // EXIT EARLY - do not continue to DXF/STL handling
+      }
+
+      // ===== DXF/STL HANDLING =====
+      // Continue with normal forge converter flow for non-PDF files
       const hasExistingLayers = Array.isArray(stack) && stack.length > 0;
       const hasExistingGeometry =
         hasExistingLayers && stack.some((layer) => (layer.cavities?.length ?? 0) > 0);
@@ -2748,121 +2867,9 @@ else nextYIn = snapInches(nextYIn);
 
      setUploadStatus("done");
 
-// FIX: Check if the upload was a PDF - PDFs need geometry extraction
-const isPdf = file.name.toLowerCase().endsWith('.pdf');
+     
 
-if (isPdf) {
-  setUploadError(null);
-  
-  try {
-    // Extract vector geometry (shapes) from PDF
-    const geomRes = await fetch('/api/quote/import-pdf-geometry', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        quote_no: currentQuoteNo,
-        attachment_id: json.attachmentId
-      })
-    });
-    
-    const geomData = await geomRes.json();
-    
-    if (geomData.ok && geomData.blockDimensions && geomData.cavities) {
-      const { blockDimensions, cavities } = geomData;
-      const lengthIn = blockDimensions.lengthIn;
-      const widthIn = blockDimensions.widthIn;
-      
-      // Show extracted info to user
-      const confirmed = window.confirm(
-        `PDF geometry extracted successfully!\n\n` +
-        `Block: ${lengthIn.toFixed(2)}" × ${widthIn.toFixed(2)}"\n` +
-        `Found ${cavities.length} cavities\n\n` +
-        `Click OK to import this layout, or Cancel to keep current layout.`
-      );
-      
-      if (confirmed && lengthIn > 0 && widthIn > 0) {
-        // Update block dimensions
-        updateBlockDims({ 
-          lengthIn: lengthIn, 
-          widthIn: widthIn 
-        });
-        
-        // Convert extracted cavities to editor format
-        const editorCavities = cavities.map((cav: any, idx: number) => {
-          if (cav.type === "circle") {
-            return {
-              id: `cav_${Date.now()}_${idx}`,
-              shape: "circle" as const,
-              x: cav.x,
-              y: cav.y,
-              diameterIn: cav.diameterIn || 1,
-              depthIn: 1,
-              label: null,
-            };
-          } else {
-            return {
-              id: `cav_${Date.now()}_${idx}`,
-              shape: "rect" as const,
-              x: cav.x,
-              y: cav.y,
-              lengthIn: cav.lengthIn || 1,
-              widthIn: cav.widthIn || 1,
-              depthIn: 1,
-              cornerRadiusIn: 0,
-              label: null,
-            };
-          }
-        });
-        
-        // Create a seed for importing the layer
-        const layerSeed: any = {
-          block: {
-            lengthIn: lengthIn,
-            widthIn: widthIn,
-            cornerStyle: "square" as const,
-            chamferIn: 0,
-          },
-          stack: [
-            {
-              id: `layer_${Date.now()}`,
-              label: `PDF Import`,
-              thicknessIn: 2,
-              materialId: initialMaterialId || null,
-              cavities: editorCavities,
-              cropCorners: false,
-            }
-          ]
-        };
-        
-        // Import the layer (replaces current layout)
-        importLayerFromSeed(layerSeed, {
-          mode: "replace",
-          label: undefined,
-          targetLayerId: activeLayerId,
-        });
-        
-        alert(
-          `PDF imported successfully!\n\n` +
-          `Block: ${lengthIn.toFixed(2)}" × ${widthIn.toFixed(2)}"\n` +
-          `Cavities: ${cavities.length}\n\n` +
-          `You can adjust cavity depths and layer thickness using the controls.`
-        );
-      }
-    } else {
-      alert(
-        `PDF "${file.name}" uploaded successfully, but no geometry could be extracted.\n\n` +
-        `You can manually create the layout using the editor.`
-      );
-    }
-  } catch (e) {
-    console.error('PDF geometry extraction failed:', e);
-    alert(`PDF "${file.name}" uploaded successfully, but geometry extraction failed.\n\nYou can manually create the layout.`);
-  }
-  
-  return;
-}
-
-// For DXF/STL/STEP: fetch faces from forge converter and import the geometry
+// FIX: Instead of router.replace (which causes reload), fetch faces directly and update state
 try {
   const latestRes = await fetch(
     `/api/quote-attachments/latest?quote_no=${encodeURIComponent(currentQuoteNo)}&filename=${encodeURIComponent("forge_faces.json")}&t=${Date.now()}`,
