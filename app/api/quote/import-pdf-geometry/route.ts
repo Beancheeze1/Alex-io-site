@@ -144,12 +144,19 @@ async function extractPdfGeometry(pdfBuffer: Buffer): Promise<{
   await writeFile(tempPdf, pdfBuffer);
   
   try {
-    // Run Python extraction script
+    // Create Python script file (easier than inline)
+    const scriptPath = join(tmpdir(), `extract_${Date.now()}.py`);
     const pythonScript = `
 import sys
-sys.path.insert(0, '/usr/local/lib/python3.12/dist-packages')
-import pdfplumber
 import json
+
+try:
+    import pdfplumber
+except ImportError:
+    # Try installing if not available
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pdfplumber", "--break-system-packages"])
+    import pdfplumber
 
 with pdfplumber.open('${tempPdf}') as pdf:
     page = pdf.pages[0]
@@ -213,8 +220,14 @@ with pdfplumber.open('${tempPdf}') as pdf:
     print(json.dumps(result))
 `;
     
-    const { stdout } = await execAsync(`python3 -c "${pythonScript.replace(/"/g, '\\"')}"`);
+    await writeFile(scriptPath, pythonScript);
+    
+    // Run Python script
+    const { stdout } = await execAsync(`python3 ${scriptPath}`);
     const result = JSON.parse(stdout.trim());
+    
+    // Clean up
+    await unlink(scriptPath).catch(() => {});
     
     // Remove duplicates (shapes at same position)
     const uniqueShapes: ExtractedShape[] = [];
