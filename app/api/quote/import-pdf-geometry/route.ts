@@ -218,16 +218,25 @@ with pdfplumber.open(pdf_path) as pdf:
         rel_x_in = rel_x_pts * pts_to_inches
         rel_y_in = rel_y_pts * pts_to_inches
         
-        # Editor coordinates (origin at top-left, Y increases down)
-        editor_x = (block_width_in / 2.0) + rel_x_in
-        editor_y = (block_height_in / 2.0) - rel_y_in
+        # Absolute position in block (inches from top-left)
+        abs_x_in = (block_width_in / 2.0) + rel_x_in
+        abs_y_in = (block_height_in / 2.0) - rel_y_in
+        
+        # CRITICAL: Editor expects NORMALIZED coordinates (0-1 range)!
+        # Not absolute inches!
+        norm_x = abs_x_in / block_width_in if block_width_in > 0 else 0.5
+        norm_y = abs_y_in / block_height_in if block_height_in > 0 else 0.5
+        
+        # Clamp to 0-1 range
+        norm_x = max(0.0, min(1.0, norm_x))
+        norm_y = max(0.0, min(1.0, norm_y))
         
         is_circle = abs(width_in - height_in) < 0.1
         
         shapes.append({
             'type': 'circle' if is_circle else 'rect',
-            'x': round(editor_x, 3),
-            'y': round(editor_y, 3),
+            'x': round(norm_x, 4),
+            'y': round(norm_y, 4),
             'widthIn': round(width_in, 3) if not is_circle else None,
             'heightIn': round(height_in, 3) if not is_circle else None,
             'diameterIn': round(width_in, 3) if is_circle else None
