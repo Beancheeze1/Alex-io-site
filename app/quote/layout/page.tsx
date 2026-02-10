@@ -2748,7 +2748,121 @@ else nextYIn = snapInches(nextYIn);
 
      setUploadStatus("done");
 
-// FIX: Instead of router.replace (which causes reload), fetch faces directly and update state
+// FIX: Check if the upload was a PDF - PDFs need geometry extraction
+const isPdf = file.name.toLowerCase().endsWith('.pdf');
+
+if (isPdf) {
+  setUploadError(null);
+  
+  try {
+    // Extract vector geometry (shapes) from PDF
+    const geomRes = await fetch('/api/quote/import-pdf-geometry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        quote_no: currentQuoteNo,
+        attachment_id: json.attachmentId
+      })
+    });
+    
+    const geomData = await geomRes.json();
+    
+    if (geomData.ok && geomData.blockDimensions && geomData.cavities) {
+      const { blockDimensions, cavities } = geomData;
+      const lengthIn = blockDimensions.lengthIn;
+      const widthIn = blockDimensions.widthIn;
+      
+      // Show extracted info to user
+      const confirmed = window.confirm(
+        `PDF geometry extracted successfully!\n\n` +
+        `Block: ${lengthIn.toFixed(2)}" × ${widthIn.toFixed(2)}"\n` +
+        `Found ${cavities.length} cavities\n\n` +
+        `Click OK to import this layout, or Cancel to keep current layout.`
+      );
+      
+      if (confirmed && lengthIn > 0 && widthIn > 0) {
+        // Update block dimensions
+        updateBlockDims({ 
+          lengthIn: lengthIn, 
+          widthIn: widthIn 
+        });
+        
+        // Convert extracted cavities to editor format
+        const editorCavities = cavities.map((cav: any, idx: number) => {
+          if (cav.type === "circle") {
+            return {
+              id: `cav_${Date.now()}_${idx}`,
+              shape: "circle" as const,
+              x: cav.x,
+              y: cav.y,
+              diameterIn: cav.diameterIn || 1,
+              depthIn: 1,
+              label: null,
+            };
+          } else {
+            return {
+              id: `cav_${Date.now()}_${idx}`,
+              shape: "rect" as const,
+              x: cav.x,
+              y: cav.y,
+              lengthIn: cav.lengthIn || 1,
+              widthIn: cav.widthIn || 1,
+              depthIn: 1,
+              cornerRadiusIn: 0,
+              label: null,
+            };
+          }
+        });
+        
+        // Create a seed for importing the layer
+        const layerSeed: any = {
+          block: {
+            lengthIn: lengthIn,
+            widthIn: widthIn,
+            cornerStyle: "square" as const,
+            chamferIn: 0,
+          },
+          stack: [
+            {
+              id: `layer_${Date.now()}`,
+              label: `PDF Import`,
+              thicknessIn: 2,
+              materialId: initialMaterialId || null,
+              cavities: editorCavities,
+              cropCorners: false,
+            }
+          ]
+        };
+        
+        // Import the layer (replaces current layout)
+        importLayerFromSeed(layerSeed, {
+          mode: "replace",
+          label: undefined,
+          targetLayerId: activeLayerId,
+        });
+        
+        alert(
+          `PDF imported successfully!\n\n` +
+          `Block: ${lengthIn.toFixed(2)}" × ${widthIn.toFixed(2)}"\n` +
+          `Cavities: ${cavities.length}\n\n` +
+          `You can adjust cavity depths and layer thickness using the controls.`
+        );
+      }
+    } else {
+      alert(
+        `PDF "${file.name}" uploaded successfully, but no geometry could be extracted.\n\n` +
+        `You can manually create the layout using the editor.`
+      );
+    }
+  } catch (e) {
+    console.error('PDF geometry extraction failed:', e);
+    alert(`PDF "${file.name}" uploaded successfully, but geometry extraction failed.\n\nYou can manually create the layout.`);
+  }
+  
+  return;
+}
+
+// For DXF/STL/STEP: fetch faces from forge converter and import the geometry
 try {
   const latestRes = await fetch(
     `/api/quote-attachments/latest?quote_no=${encodeURIComponent(currentQuoteNo)}&filename=${encodeURIComponent("forge_faces.json")}&t=${Date.now()}`,
