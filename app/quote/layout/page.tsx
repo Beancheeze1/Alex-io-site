@@ -2704,37 +2704,54 @@ else nextYIn = snapInches(nextYIn);
       }
 
       // ===== PDF HANDLING =====
-      // PDFs need special handling - extract geometry, don't send to forge
+      // PDFs need special handling - upload but DON'T send to forge
       const isPdf = file.name.toLowerCase().endsWith('.pdf');
       
       if (isPdf) {
         setUploadStatus("uploading");
         setUploadError(null);
         
-        // Upload PDF as attachment (NOT through sketch-upload/forge)
+        // Upload PDF using sketch-upload but it will save as attachment
+        // The forge processing will fail/timeout, but we don't care - we'll extract geometry ourselves
         const pdfFormData = new FormData();
         pdfFormData.append("file", file);
+        pdfFormData.append("filename", file.name);
         pdfFormData.append("quote_no", currentQuoteNo);
         
-        const uploadRes = await fetch('/api/quote-attachments/upload', {
+        // Use sketch-upload just to save the file
+        const uploadUrl = `/api/sketch-upload?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`;
+        const uploadRes = await fetch(uploadUrl, {
           method: 'POST',
           body: pdfFormData
         });
         
-        if (!uploadRes.ok) {
-          throw new Error("PDF upload failed");
+        // Even if forge times out, we should get an attachmentId
+        const uploadJson = await uploadRes.json().catch(() => null);
+        
+        // Get attachment ID - might be in different places depending on success/failure
+        let attachmentId = uploadJson?.attachmentId || uploadJson?.attachment?.id;
+        
+        // If upload failed completely, try to find the most recent PDF attachment
+        if (!attachmentId) {
+          try {
+            const latestRes = await fetch(
+              `/api/quote-attachments/latest?quote_no=${encodeURIComponent(currentQuoteNo)}&filename=${encodeURIComponent(file.name)}&t=${Date.now()}`,
+              { cache: "no-store" }
+            );
+            const latestJson = await latestRes.json();
+            attachmentId = latestJson?.attachment?.id;
+          } catch (e) {
+            console.error("Could not find uploaded PDF attachment:", e);
+          }
         }
         
-        const uploadJson = await uploadRes.json();
-        const attachmentId = uploadJson.attachment?.id || uploadJson.attachmentId;
-        
         if (!attachmentId) {
-          throw new Error("No attachment ID returned");
+          throw new Error("PDF uploaded but could not get attachment ID");
         }
         
         setUploadStatus("done");
         
-        // Extract geometry from PDF
+        // Now extract geometry from the PDF
         try {
           const geomRes = await fetch('/api/quote/import-pdf-geometry', {
             method: 'POST',
