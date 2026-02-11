@@ -287,7 +287,7 @@ export default function AdminCushionCurvesPage() {
                         >
                           <td className="px-3 py-2 text-xs text-slate-100">
                             <Link
-                              href={`/admin/cushion/curves/${m.material_id}`}
+                              href={`/admin/cushion-curves/${m.material_id}`}
                               className="underline-offset-2 hover:underline text-sky-300"
                             >
                               {m.material_name}

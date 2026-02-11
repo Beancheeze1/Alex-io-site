@@ -23,6 +23,46 @@ function toPricePerCuIn(body: any) {
   return p_cuin || (p_cuft ? p_cuft / 1728 : 0) || (p_bf ? p_bf / 144 : 0);
 }
 
+export async function GET(_req: Request, ctx: { params: { id: string } }) {
+  try {
+    const id = Number(ctx.params.id);
+    if (!Number.isFinite(id)) {
+      return NextResponse.json({ ok: false, error: "invalid_id" }, { status: 400 });
+    }
+
+    const { rows } = await pool().query(
+      `
+      SELECT
+        id,
+        name,
+        material_family,
+        density_lb_ft3
+      FROM public.materials
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [id],
+    );
+
+    if (!rows.length) {
+      return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        material: rows[0],
+      },
+      { status: 200 },
+    );
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message || "failed" },
+      { status: 500 },
+    );
+  }
+}
+
 export async function PATCH(_req: Request, ctx: { params: { id: string } }) {
   try {
     const id = Number(ctx.params.id);
