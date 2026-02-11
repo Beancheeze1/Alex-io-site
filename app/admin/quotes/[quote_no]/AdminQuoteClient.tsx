@@ -1280,7 +1280,12 @@ const overallQty =
   }, [layoutPkg]);
 
   const primaryItem = items[0] || null;
-
+
+  const materialId =
+    (primaryItem as any)?.material_id ??
+    (primaryItem as any)?.materialId ??
+    (primaryItem as any)?.material?.id ??
+    null;
   const primaryPricing = primaryItem?.pricing_meta || null;
   const minChargeApplied = !!primaryPricing?.used_min_charge;
   const setupFee = typeof primaryPricing?.setup_fee === "number" ? primaryPricing.setup_fee : null;
@@ -2329,12 +2334,21 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         </a>{" "}
                         to confirm family / density.
                       </li>
-                      <li>
-                        <a href={`/admin/cushion-curves/${primaryItem.material_id}`} style={{ color: "#0369a1", textDecoration: "none" }}>
-                          View cushion curves for this material
-                        </a>{" "}
-                        (foam advisor data).
-                      </li>
+                <li>
+                  {materialId ? (
+                    <a
+                      href={`/admin/cushion-curves/${materialId}`}
+                      style={{ color: "#0369a1", textDecoration: "none" }}
+                    >
+                      View cushion curves for this material
+                    </a>
+                  ) : (
+                    <span style={{ color: "#6b7280" }}>
+                      View cushion curves for this material (missing material)
+                    </span>
+                  )}{" "}
+                  (foam advisor data).
+                </li>
                     </ul>
                   </div>
 
@@ -2843,3 +2857,4 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
     </div>
   );
 }
+
