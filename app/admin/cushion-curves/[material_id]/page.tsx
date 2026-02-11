@@ -55,6 +55,25 @@ export default function CushionCurvesMaterialPage() {
   );
   const [points, setPoints] = React.useState<CushionPoint[]>([]);
 
+  // Optional operating PSI for compare to curve
+  // - Seedable via query string: ?operating_psi=1.25  (or ?psi=1.25)
+  // - Editable by the admin on this page (read-only DB; UI-only)
+  const [operatingPsi, setOperatingPsi] = React.useState<string>("");
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const url = new URL(window.location.href);
+      const seeded =
+        url.searchParams.get("operating_psi") ||
+        url.searchParams.get("psi") ||
+        "";
+      if (seeded && seeded.trim()) setOperatingPsi(seeded.trim());
+    } catch {
+      // ignore
+    }
+  }, [materialId]);
+
   React.useEffect(() => {
     let cancelled = false;
 
@@ -203,6 +222,36 @@ export default function CushionCurvesMaterialPage() {
     };
   }, [points]);
 
+  const operating = React.useMemo(() => {
+    const psi = Number(operatingPsi);
+    if (!Number.isFinite(psi) || psi <= 0) return null;
+    if (!points.length) return null;
+
+    // Find nearest tested point to operating psi
+    let best = points[0];
+    let bestDist = Math.abs(points[0].static_psi - psi);
+
+    for (let i = 1; i < points.length; i++) {
+      const d = Math.abs(points[i].static_psi - psi);
+      if (d < bestDist) {
+        best = points[i];
+        bestDist = d;
+      }
+    }
+
+    const psiMin = summary?.psiMin ?? Math.min(...points.map((p) => p.static_psi));
+    const psiMax = summary?.psiMax ?? Math.max(...points.map((p) => p.static_psi));
+
+    return {
+      psi,
+      nearest: best,
+      nearestDelta: bestDist,
+      inRange: psi >= psiMin && psi <= psiMax,
+      psiMin,
+      psiMax,
+    };
+  }, [operatingPsi, points, summary]);
+
   return (
     <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
       <div className="w-full max-w-6xl mx-auto">
@@ -323,11 +372,19 @@ export default function CushionCurvesMaterialPage() {
                   How this will be used
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Future Path A steps will let Foam Advisor overlay this
-                  material’s curve with the{" "}
-                  <span className="text-sky-300">operating psi</span> and
-                  compare a few candidate foams on the same graph.
+                  Use this curve to validate a foam selection against your{" "}
+                  <span className="text-sky-300">operating psi</span> and compare
+                  candidates.
                 </p>
+
+                <div className="mt-3">
+                  <a
+                    href={`/foam-advisor`}
+                    className="inline-flex items-center justify-center rounded-full border border-slate-200/20 bg-slate-950/40 px-3 py-1.5 text-[11px] font-semibold text-sky-200 hover:bg-slate-950/70"
+                  >
+                    Open Foam Advisor
+                  </a>
+                </div>
               </div>
             </aside>
 
@@ -525,13 +582,53 @@ export default function CushionCurvesMaterialPage() {
               </div>
 
               <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                <div className="text-[11px] text-slate-400">
-                  In a follow-up step, this right panel can also show the{" "}
-                  <span className="text-sky-300">
-                    Foam Advisor operating point
-                  </span>{" "}
-                  and how it compares to this curve.
+                <div className="text-xs font-semibold text-slate-100 mb-1">
+                  Operating point
                 </div>
+
+                <div className="text-[11px] text-slate-400 mb-2">
+                  Enter the operating PSI to see the nearest tested point on this curve.
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] text-slate-400">Operating psi</label>
+                  <input
+                    value={operatingPsi}
+                    onChange={(e) => setOperatingPsi(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="e.g. 1.25"
+                    className="w-24 rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 font-mono outline-none focus:ring-2 focus:ring-sky-500/40"
+                  />
+                </div>
+
+                {!operating && (
+                  <div className="mt-2 text-[11px] text-slate-500">
+                    Add an operating psi to compute a comparison point.
+                  </div>
+                )}
+
+                {operating && (
+                  <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/50 p-2">
+                    <div className="text-[11px] text-slate-400 mb-1">
+                      Nearest tested point{" "}
+                      {!operating.inRange && (
+                        <span className="ml-1 text-amber-200">
+                          (outside tested range {operating.psiMin.toFixed(3)}{operating.psiMax.toFixed(3)} psi)
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-[11px] text-slate-100">
+                      <span className="font-semibold">{operating.nearest.g_level.toFixed(1)} G</span>{" "}
+                      @ <span className="font-mono">{operating.nearest.static_psi.toFixed(3)}</span> psi
+                    </div>
+
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      Deflection <span className="font-mono text-slate-200">{operating.nearest.deflect_pct.toFixed(1)}%</span>{" "}
+                       Δpsi <span className="font-mono text-slate-200">{operating.nearestDelta.toFixed(3)}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </aside>
           </div>
