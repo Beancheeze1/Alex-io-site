@@ -85,8 +85,61 @@ export default function CushionCurvesMaterialPage() {
           return;
         }
 
-        setMaterial(json.material || null);
-        setPoints(Array.isArray(json.points) ? json.points : []);
+        // --- normalize material (API payloads may vary) ---
+        const rawMat =
+          json?.material ??
+          json?.materials ??
+          json?.materialInfo ??
+          json?.data?.material ??
+          null;
+
+        const normMaterial: MaterialInfo | null = rawMat
+          ? {
+              id: Number(rawMat.id ?? rawMat.material_id ?? materialId),
+              name: String(rawMat.name ?? rawMat.material_name ?? rawMat.title ?? `Material #${materialId}`),
+              material_family:
+                rawMat.material_family ??
+                rawMat.family ??
+                rawMat.materialFamily ??
+                rawMat.material_family_name ??
+                null,
+              density_lb_ft3:
+                rawMat.density_lb_ft3 ??
+                rawMat.density ??
+                rawMat.density_pcf ??
+                null,
+            }
+          : null;
+
+        setMaterial(normMaterial);
+
+        // --- normalize points (some endpoints return `curves` instead of `points`) ---
+        const rawPoints = Array.isArray(json?.points)
+          ? json.points
+          : Array.isArray(json?.curves)
+            ? json.curves
+            : [];
+
+        const normPoints: CushionPoint[] = rawPoints
+          .map((p: any) => {
+            const static_psi = Number(p.static_psi ?? p.staticPsi ?? p.psi);
+            const deflect_pct = Number(p.deflect_pct ?? p.deflectPct ?? p.deflection_pct ?? p.deflection);
+            const g_level = Number(p.g_level ?? p.gLevel ?? p.g);
+
+            if (!Number.isFinite(static_psi) || !Number.isFinite(deflect_pct) || !Number.isFinite(g_level)) {
+              return null;
+            }
+
+            return {
+              static_psi,
+              deflect_pct,
+              g_level,
+              source: (p.source ?? p.src ?? null) as string | null,
+            } as CushionPoint;
+          })
+          .filter(Boolean) as CushionPoint[];
+
+        setPoints(normPoints);
         setLoading(false);
       } catch (err: any) {
         if (cancelled) return;
