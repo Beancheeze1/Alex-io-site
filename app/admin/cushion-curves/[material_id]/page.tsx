@@ -182,6 +182,21 @@ export default function CushionCurvesMaterialPage() {
     };
   }, [materialId]);
 
+  const foamAdvisorHref = React.useMemo(() => {
+    // Keep this conservative: only pass what we know exists here.
+    // Material id is always available. Operating psi is optional.
+    const psi = Number(operatingPsi);
+
+    const qp: string[] = [];
+    qp.push(`material_id=${encodeURIComponent(materialId)}`);
+
+    if (Number.isFinite(psi) && psi > 0) {
+      qp.push(`operating_psi=${encodeURIComponent(String(psi))}`);
+    }
+
+    return `/foam-advisor${qp.length ? `?${qp.join("&")}` : ""}`;
+  }, [materialId, operatingPsi]);
+
   const title =
     material && material.material_family
       ? `${material.material_family} – ${material.name}`
@@ -379,7 +394,7 @@ export default function CushionCurvesMaterialPage() {
 
                 <div className="mt-3">
                   <a
-                    href={`/foam-advisor`}
+                    href={foamAdvisorHref}
                     className="inline-flex items-center justify-center rounded-full border border-slate-200/20 bg-slate-950/40 px-3 py-1.5 text-[11px] font-semibold text-sky-200 hover:bg-slate-950/70"
                   >
                     Open Foam Advisor
