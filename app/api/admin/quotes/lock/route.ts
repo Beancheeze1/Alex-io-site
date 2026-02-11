@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: "NOT_FOUND", message: "Quote not found." }, 404);
   }
 
-  // UNLOCK (admin only) — leaves packages intact, simply removes the lock gate + stored hash.
+  // UNLOCK (admin only) ï¿½ leaves packages intact, simply removes the lock gate + stored hash.
   // IMPORTANT: Unlock must NOT bump staging revisions. Revise is the only flow that arms a bump.
   if (!lock) {
     await q(
@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
     pkg.dxf_text && pkg.dxf_text.trim().length > 0 ? pkg.dxf_text : bundle.dxf;
 
   // STEP is the only exporter that may require external service.
-  // If missing, generate it now — release is atomic; if STEP fails, release fails.
+  // If missing, generate it now ï¿½ release is atomic; if STEP fails, release fails.
   let stepBase =
     pkg.step_text && pkg.step_text.trim().length > 0 ? pkg.step_text : null;
   if (!stepBase) {
