@@ -332,7 +332,7 @@ export default function CushionCurvesMaterialPage() {
             </aside>
 
             {/* CENTER: Summary + table */}
-            <section className="flex-1 flex flex-col gap-3">
+            <section className="flex-1 min-w-0 flex flex-col gap-3">
               {error && (
                 <div className="rounded-xl border border-rose-700/70 bg-rose-950/60 px-3 py-2 text-[11px] text-rose-50">
                   Error loading cushion curves:{" "}
@@ -407,13 +407,13 @@ export default function CushionCurvesMaterialPage() {
                   </div>
 
                   {/* Data table, centered like a “canvas” for now */}
-                  <div className="flex-1 bg-slate-900 rounded-2xl border border-slate-800 p-4 overflow-auto">
+              <div className="flex-1 min-w-0 bg-slate-900 rounded-2xl border border-slate-800 p-4 overflow-auto">
                     <div className="text-[11px] text-slate-400 mb-2">
                       Raw cushion curve points. In a future step, this center
                       panel will render a graphical curve using these numbers.
                     </div>
                     <div className="rounded-2xl border border-slate-800 bg-slate-950/80 max-h-[420px] overflow-auto">
-                      <table className="min-w-full text-xs">
+                <table className="min-w-full text-xs table-fixed">
                         <thead className="bg-slate-900/80 sticky top-0 z-10">
                           <tr>
                             <th className="px-3 py-2 text-left font-semibold text-slate-200 border-b border-slate-800">
@@ -449,7 +449,7 @@ export default function CushionCurvesMaterialPage() {
                               <td className="px-3 py-1.5 text-slate-100 font-mono">
                                 {p.g_level.toFixed(1)}
                               </td>
-                              <td className="px-3 py-1.5 text-slate-300">
+                          <td className="px-3 py-1.5 text-slate-300 break-words max-w-[360px]">
                                 {p.source || (
                                   <span className="text-slate-500">—</span>
                                 )}
