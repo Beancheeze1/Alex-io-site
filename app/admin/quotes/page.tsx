@@ -190,7 +190,13 @@ export default function AdminQuotesPage() {
     }
   }
 
-  async function handleReviseQuote(quoteNo: string) {
+  async function handleReviseQuote(quoteNo: string, isLocked: boolean) {
+    // If Released for Mfg, Revise should unlock + open editor without skipping a revision.
+    // IMPORTANT: unlock must NOT bump staging rev (that bump is armed below and applied on next Apply).
+    if (isLocked) {
+      await setQuoteLock(quoteNo, false);
+    }
+
     // Arm a single staging bump (do NOT bump yet)
     await fetch("/api/admin/quotes/revise?t=" + Date.now(), {
       method: "POST",
@@ -739,15 +745,15 @@ export default function AdminQuotesPage() {
 
                             <button
                               type="button"
-                              disabled={!!rowBusy[q.quote_no]}
-                              onClick={() => setQuoteLock(q.quote_no, !q.locked)}
+                              disabled={!!rowBusy[q.quote_no] || !!q.locked}
+                              onClick={() => setQuoteLock(q.quote_no, true)}
                               className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] font-medium text-slate-100 transition hover:border-sky-400 disabled:opacity-60"
-                              title={q.locked ? "Unlock for revisions" : "Lock for production"}
+                              title={q.locked ? "Locked (use Revise to start a new revision)" : "Lock for production"}
                             >
-                              {rowBusy[q.quote_no] ? "" : q.locked ? "Unlock" : "RFM"}
+                              {rowBusy[q.quote_no] ? "" : q.locked ? "Locked" : "RFM"}
                             </button>
                             <button
-                              onClick={() => handleReviseQuote(q.quote_no)}
+                              onClick={() => handleReviseQuote(q.quote_no, !!q.locked)}
                               style={{
                                 marginLeft: 8,
                                 padding: "4px 8px",
@@ -884,3 +890,4 @@ function StatusChip({ label, active, onClick }: StatusChipProps) {
     </button>
   );
 }
+

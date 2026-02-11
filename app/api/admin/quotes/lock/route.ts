@@ -1,4 +1,4 @@
-ï»¿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { one, q, withTxn } from "@/lib/db";
 import {
   buildLayoutExports,
@@ -91,7 +91,8 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: "NOT_FOUND", message: "Quote not found." }, 404);
   }
 
-  // UNLOCK (admin only) â€” leaves packages intact, simply removes the lock gate + stored hash.
+  // UNLOCK (admin only) — leaves packages intact, simply removes the lock gate + stored hash.
+  // IMPORTANT: Unlock must NOT bump staging revisions. Revise is the only flow that arms a bump.
   if (!lock) {
     await q(
       `
@@ -103,19 +104,6 @@ export async function POST(req: NextRequest) {
       `,
       [quote.id],
     );
-
-    // --- STAGING REV BUMP (Path A) ---
-    try {
-      const facts: any = await loadFacts(quoteNo);
-      const curStage = facts?.stage_rev || facts?.revision || "";
-      const nextStage = nextStageRev(curStage);
-      facts.stage_rev = nextStage;
-      facts.revision = nextStage; // unlocked displays staging
-      await saveFacts(quoteNo, facts);
-    } catch {
-      // non-fatal
-    }
-    // --- END STAGING REV BUMP ---
 
     return json({ ok: true, locked: false });
   }
@@ -173,7 +161,7 @@ export async function POST(req: NextRequest) {
     pkg.dxf_text && pkg.dxf_text.trim().length > 0 ? pkg.dxf_text : bundle.dxf;
 
   // STEP is the only exporter that may require external service.
-  // If missing, generate it now â€” release is atomic; if STEP fails, release fails.
+  // If missing, generate it now — release is atomic; if STEP fails, release fails.
   let stepBase =
     pkg.step_text && pkg.step_text.trim().length > 0 ? pkg.step_text : null;
   if (!stepBase) {
@@ -276,3 +264,4 @@ export async function POST(req: NextRequest) {
 
   return json({ ok: true, locked: true, geometry_hash: hash, release_pkg_id: result.release_pkg_id });
 }
+
