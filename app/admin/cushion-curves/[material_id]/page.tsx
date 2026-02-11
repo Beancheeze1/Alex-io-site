@@ -63,64 +63,30 @@ export default function CushionCurvesMaterialPage() {
       setError(null);
 
       try {
-        // 1) Material details (name + family)
-        const matRes = await fetch(`/api/materials/${materialId}`, {
+        // Single source of truth: this endpoint returns BOTH material + points
+        const res = await fetch(`/api/cushion/curves/${materialId}`, {
           cache: "no-store",
         });
 
-        if (!matRes.ok) {
-          throw new Error(`Material lookup HTTP ${matRes.status}`);
-        }
-
-        const matJson = await matRes.json();
+        const json = (await res.json()) as any;
 
         if (cancelled) return;
 
-        if (!matJson?.ok || !matJson?.material) {
-          throw new Error("Material lookup returned invalid payload");
+        if (!res.ok || !json?.ok) {
+          const msg =
+            json?.error ||
+            json?.message ||
+            `HTTP ${res.status}` ||
+            "Unknown error";
+          setError(msg);
+          setMaterial(null);
+          setPoints([]);
+          setLoading(false);
+          return;
         }
 
-        const mat = matJson.material as MaterialInfo;
-        setMaterial(mat);
-
-        // 2) Curve points for this material
-        const curvesRes = await fetch(
-          `/api/cushion/curves?material_id=${encodeURIComponent(materialId)}`,
-          { cache: "no-store" },
-        );
-
-        if (!curvesRes.ok) {
-          throw new Error(`Curves HTTP ${curvesRes.status}`);
-        }
-
-        const curvesJson = await curvesRes.json();
-
-        if (cancelled) return;
-
-        if (!curvesJson?.ok || !Array.isArray(curvesJson?.curves)) {
-          throw new Error("Curves API returned invalid payload");
-        }
-
-        const pts: CushionPoint[] = curvesJson.curves
-          .map((r: any) => {
-            const static_psi = Number(r.static_psi);
-            const deflect_pct = Number(r.deflect_pct);
-            const g_level = Number(r.g_level);
-
-            if (!Number.isFinite(static_psi) || !Number.isFinite(deflect_pct) || !Number.isFinite(g_level)) {
-              return null;
-            }
-
-            return {
-              static_psi,
-              deflect_pct,
-              g_level,
-              source: r.source ?? null,
-            } as CushionPoint;
-          })
-          .filter(Boolean) as CushionPoint[];
-
-        setPoints(pts);
+        setMaterial(json.material || null);
+        setPoints(Array.isArray(json.points) ? json.points : []);
         setLoading(false);
       } catch (err: any) {
         if (cancelled) return;
