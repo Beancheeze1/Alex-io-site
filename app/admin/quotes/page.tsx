@@ -614,7 +614,6 @@ export default function AdminQuotesPage() {
                 <tr>
                   <th className="px-3 py-2 font-semibold">Quote #</th>
                   <th className="px-3 py-2 font-semibold">Customer</th>
-                  <th className="px-3 py-2 font-semibold">Status</th>
                   <th className="px-3 py-2 font-semibold">Email / Phone</th>
                  <th className="px-3 py-2 font-semibold text-right">
   Updated
@@ -629,7 +628,7 @@ export default function AdminQuotesPage() {
                 {loading && !error && (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={4}
                       className="px-3 py-4 text-center text-xs text-slate-400"
                     >
                       Loading quotes…
@@ -640,7 +639,7 @@ export default function AdminQuotesPage() {
                 {!loading && error && (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={4}
                       className="px-3 py-4 text-center text-xs text-rose-300"
                     >
                       Unable to load quote list.
@@ -654,7 +653,7 @@ export default function AdminQuotesPage() {
                   filteredQuotes.length === 0 && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={4}
                         className="px-3 py-4 text-center text-xs text-slate-400"
                       >
                         No quotes match the current filters.
@@ -666,8 +665,6 @@ export default function AdminQuotesPage() {
                   !error &&
                   filteredQuotes &&
                   filteredQuotes.map((q) => {
-                    const statusLabel = displayStatus(q.status);
-                    const statusStyle = chipClassForStatus(q.status);
                     const updated = formatDateTime(
                       q.updated_at || q.created_at,
                     );
@@ -691,13 +688,6 @@ export default function AdminQuotesPage() {
                           {q.customer_name || (
                             <span className="text-slate-500">Unknown</span>
                           )}
-                        </td>
-                        <td className="px-3 py-2 text-xs">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${statusStyle}`}
-                          >
-                            {statusLabel}
-                          </span>
                         </td>
                         <td className="px-3 py-2 text-[11px] text-slate-300">
                           {q.email && (
@@ -890,4 +880,5 @@ function StatusChip({ label, active, onClick }: StatusChipProps) {
     </button>
   );
 }
+
 
