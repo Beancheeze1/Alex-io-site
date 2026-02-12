@@ -209,6 +209,25 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Load current revision for package tagging
+    let currentRevision = "A";
+    try {
+      const facts: any = await loadFacts(quoteNo);
+      currentRevision = facts?.released_rev || facts?.revision || "A";
+    } catch {
+      // Non-fatal: use default
+    }
+
+    // Tag the release package with revision
+    // If the package already has notes with revision, preserve them
+    // Otherwise, add the revision tag
+    let notesForRelease = pkg.notes ?? null;
+    if (notesForRelease && !notesForRelease.startsWith("[REV:")) {
+      notesForRelease = `[REV:${currentRevision}] ${notesForRelease}`;
+    } else if (!notesForRelease) {
+      notesForRelease = `[REV:${currentRevision}] RELEASED`;
+    }
+
     // Insert a RELEASE snapshot as a new package row so exports are immutable post-lock.
     const inserted = await tx.query<{ id: number }>(
       `
@@ -225,7 +244,7 @@ export async function POST(req: NextRequest) {
       values ($1, $2, $3, $4, $5, $6, $7, $7)
       returning id
       `,
-      [quote.id, pkg.layout_json, pkg.notes ?? null, svgText, dxfText, stepText, user.id],
+      [quote.id, pkg.layout_json, notesForRelease, svgText, dxfText, stepText, user.id],
     );
 
     await tx.query(
@@ -264,4 +283,3 @@ export async function POST(req: NextRequest) {
 
   return json({ ok: true, locked: true, geometry_hash: hash, release_pkg_id: result.release_pkg_id });
 }
-

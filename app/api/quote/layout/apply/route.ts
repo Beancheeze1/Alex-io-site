@@ -1313,6 +1313,22 @@ export async function POST(req: NextRequest) {
 
     const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
 
+    // Load current revision to tag the package
+    let currentRevision = "AS";
+    try {
+      const facts: any = await loadFacts(String(quoteNo));
+      currentRevision = facts?.revision || facts?.stage_rev || "AS";
+    } catch {
+      // Non-fatal: use default revision
+    }
+
+    // Auto-prepend revision to notes for package tracking
+    // Format: [REV:A] User notes...
+    // This allows us to show revision in package list without changing DB schema
+    const notesWithRevision = notes 
+      ? `[REV:${currentRevision}] ${notes}`
+      : `[REV:${currentRevision}]`;
+
     // Prefer canonical SVG from exports (it must reflect true cavity shapes).
     // Fall back to client-provided svg only if exports didn't produce one.
     const svgRawFromClient = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
@@ -1536,7 +1552,7 @@ const svgAnnotated = embedGeometryHashInSvg(svgAnnotatedBase ?? "", geometryHash
       values ($1, $2, $3, $4, $5, $6, $7, $7)
       returning id, quote_id, layout_json, notes, svg_text, dxf_text, step_text, created_at
       `,
-      [quote.id, layoutForSave, notes, svgAnnotated, dxf, step, currentUserId],
+      [quote.id, layoutForSave, notesWithRevision, svgAnnotated, dxf, step, currentUserId],
     );
 
     // ===================== NEW: status progression =====================

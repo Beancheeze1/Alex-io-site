@@ -13,6 +13,7 @@ type PackageItem = {
   blockLabel: string;
   cavityCount: number;
   layerCount: number;
+  revision: string | null; // NEW: parsed revision from notes
   notes: string | null;
   createdAt: string;
 };
@@ -197,6 +198,11 @@ export default function LayoutSnapshotSelector({
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">
                             Package #{pkg.packageNumber}
                           </span>
+                          {pkg.revision && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                              Rev {pkg.revision}
+                            </span>
+                          )}
                           <span className="text-xs text-gray-500">
                             {createdDate}
                           </span>
@@ -272,4 +278,5 @@ export default function LayoutSnapshotSelector({
     </div>
   );
 }
+
 

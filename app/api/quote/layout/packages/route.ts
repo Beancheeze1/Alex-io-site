@@ -113,13 +113,28 @@ export async function GET(req: NextRequest) {
     // Count layers
     const layerCount = Array.isArray(layout.stack) ? layout.stack.length : 1;
 
+    // Parse revision from notes (format: [REV:A] user notes...)
+    let revision: string | null = null;
+    let cleanNotes: string | null = null;
+    
+    if (pkg.notes) {
+      const revMatch = pkg.notes.match(/^\[REV:([^\]]+)\]\s*(.*)/);
+      if (revMatch) {
+        revision = revMatch[1]; // e.g., "A", "BS", etc.
+        cleanNotes = revMatch[2] || null; // User notes without the prefix
+      } else {
+        cleanNotes = pkg.notes; // No revision prefix, keep as-is
+      }
+    }
+
     return {
       id: pkg.id,
       packageNumber: index + 1,
       blockLabel,
       cavityCount,
       layerCount,
-      notes: pkg.notes || null,
+      revision, // NEW: extracted revision
+      notes: cleanNotes, // User notes without the [REV:X] prefix
       createdAt: pkg.created_at,
     };
   });
