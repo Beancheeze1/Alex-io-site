@@ -25,7 +25,7 @@ type PackageRow = {
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> | { id: string } }
 ) {
   // Admin-only check
   const user = await getCurrentUserFromRequest(req as any);
@@ -46,20 +46,22 @@ export async function GET(
     );
   }
 
+  // Handle both async and sync params (Next.js 15 compatibility)
+  const params = context.params instanceof Promise ? await context.params : context.params;
   const packageId = parseInt(params.id, 10);
   const { searchParams } = new URL(req.url);
   const quoteNo = searchParams.get("quote_no")?.trim() || "";
 
   if (!Number.isFinite(packageId) || packageId <= 0) {
     return NextResponse.json(
-      { ok: false, error: "INVALID_PACKAGE_ID" },
+      { ok: false, error: "INVALID_PACKAGE_ID", message: `Invalid package ID: ${params.id}` },
       { status: 400 }
     );
   }
 
   if (!quoteNo) {
     return NextResponse.json(
-      { ok: false, error: "MISSING_QUOTE_NO" },
+      { ok: false, error: "MISSING_QUOTE_NO", message: "quote_no parameter is required" },
       { status: 400 }
     );
   }
@@ -85,7 +87,7 @@ export async function GET(
 
   if (!pkg) {
     return NextResponse.json(
-      { ok: false, error: "PACKAGE_NOT_FOUND" },
+      { ok: false, error: "PACKAGE_NOT_FOUND", message: `Package ${packageId} not found for quote ${quoteNo}` },
       { status: 404 }
     );
   }
