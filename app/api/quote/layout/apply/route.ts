@@ -406,7 +406,6 @@ async function ensureQuoteHeader(args: {
   return null;
 }
 
-
 /* ===================== NEW: ensure primary quote_items exists ===================== */
 
 function sumLayerThickness(layout: any): number | null {
@@ -1052,8 +1051,8 @@ function buildSvgWithAnnotations(
   }
 
   if (!lines.length) {
-    const geometryGroupOnly = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\\n${svgChildren}\\n</g>`;
-    return `${svgOpen}\\n${geometryGroupOnly}\\n${svgClose}`;
+    const geometryGroupOnly = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
+    return `${svgOpen}\n${geometryGroupOnly}\n${svgClose}`;
   }
 
   const textYStart = 20;
@@ -1067,12 +1066,10 @@ function buildSvgWithAnnotations(
     .join("");
 
   const notesGroup = `<g id="alex-io-notes">${notesTexts}</g>`;
-  const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\\n${svgChildren}\\n</g>`;
+  const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
 
-  return `${svgOpen}\\n${notesGroup}\\n${geometryGroup}\\n${svgClose}`;
+  return `${svgOpen}\n${notesGroup}\n${geometryGroup}\n${svgClose}`;
 }
-
-
 
 /* ===================== POST: save layout (+ optional qty/material/customer) ===================== */
 
@@ -1098,10 +1095,10 @@ export async function POST(req: NextRequest) {
   const layout = body.layout;
   const action = typeof body.action === "string" ? body.action.trim().toLowerCase() : "";
 
- // ✅ ADD THIS DEBUG LOGGING
-  console.log('[APPLY ROUTE] Checking incoming layout data...');
+  // ✅ ADD THIS DEBUG LOGGING
+  console.log("[APPLY ROUTE] Checking incoming layout data...");
   if (layout && layout.stack && Array.isArray(layout.stack)) {
-    console.log('[APPLY ROUTE] Layout has', layout.stack.length, 'layers');
+    console.log("[APPLY ROUTE] Layout has", layout.stack.length, "layers");
     for (let i = 0; i < layout.stack.length; i++) {
       const layer = layout.stack[i];
       const cavs = Array.isArray(layer?.cavities) ? layer.cavities : [];
@@ -1112,7 +1109,7 @@ export async function POST(req: NextRequest) {
           hasPoints: Array.isArray(cav.points),
           pointCount: cav.points?.length || 0,
           lengthIn: cav.lengthIn,
-          widthIn: cav.widthIn
+          widthIn: cav.widthIn,
         });
         if (Array.isArray(cav.points) && cav.points.length > 0) {
           console.log(`[APPLY ROUTE]     First 3 points:`, cav.points.slice(0, 3));
@@ -1123,10 +1120,10 @@ export async function POST(req: NextRequest) {
 
   const layoutForSave = normalizeLayoutForStorage(layout, body);
 
-// ✅ ADD THIS DEBUG LOGGING
-  console.log('[APPLY ROUTE] After normalizeLayoutForStorage...');
+  // ✅ ADD THIS DEBUG LOGGING
+  console.log("[APPLY ROUTE] After normalizeLayoutForStorage...");
   if (layoutForSave && layoutForSave.stack && Array.isArray(layoutForSave.stack)) {
-    console.log('[APPLY ROUTE] Normalized layout has', layoutForSave.stack.length, 'layers');
+    console.log("[APPLY ROUTE] Normalized layout has", layoutForSave.stack.length, "layers");
     for (let i = 0; i < layoutForSave.stack.length; i++) {
       const layer = layoutForSave.stack[i];
       const cavs = Array.isArray(layer?.cavities) ? layer.cavities : [];
@@ -1137,7 +1134,7 @@ export async function POST(req: NextRequest) {
           hasPoints: Array.isArray(cav.points),
           pointCount: cav.points?.length || 0,
           lengthIn: cav.lengthIn,
-          widthIn: cav.widthIn
+          widthIn: cav.widthIn,
         });
         if (Array.isArray(cav.points) && cav.points.length > 0) {
           console.log(`[APPLY ROUTE]     First 3 points:`, cav.points.slice(0, 3));
@@ -1145,6 +1142,7 @@ export async function POST(req: NextRequest) {
       });
     }
   }
+
   if (!quoteNo) {
     return bad(
       {
@@ -1155,7 +1153,7 @@ export async function POST(req: NextRequest) {
       400,
     );
   }
-  
+
   let currentUserId: number | null = null;
   try {
     const user = await getCurrentUserFromRequest(req);
@@ -1221,15 +1219,9 @@ export async function POST(req: NextRequest) {
     // Never overwrite an existing assignment. Do not touch locked quotes.
     if (!quote.locked && salesRepSlug) {
       try {
-        const rep = await one<{ id: number }>(
-          `select id from users where sales_slug = $1 limit 1`,
-          [salesRepSlug],
-        );
+        const rep = await one<{ id: number }>(`select id from users where sales_slug = $1 limit 1`, [salesRepSlug]);
         if (rep?.id) {
-          await q(
-            `update quotes set sales_rep_id = $1 where id = $2 and sales_rep_id is null`,
-            [rep.id, quote.id],
-          );
+          await q(`update quotes set sales_rep_id = $1 where id = $2 and sales_rep_id is null`, [rep.id, quote.id]);
         }
       } catch (e) {
         console.warn("[layout/apply] sales_rep_slug set skipped", {
@@ -1314,28 +1306,33 @@ export async function POST(req: NextRequest) {
     const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
 
     // Load current revision to tag the package
+    // FIX (Path A): If stage_pending_bump is true, the package we create on this Apply
+    // should be tagged with the *post-bump* revision, not the old one.
     let currentRevision = "AS";
+    let revisionForPkg = "AS";
     try {
       const facts: any = await loadFacts(String(quoteNo));
       currentRevision = facts?.revision || facts?.stage_rev || "AS";
+      revisionForPkg = currentRevision;
+
+      if (facts?.stage_pending_bump === true) {
+        const curStage = facts?.stage_rev || currentRevision || "AS";
+        revisionForPkg = nextStageRev(curStage);
+      }
     } catch {
       // Non-fatal: use default revision
     }
 
     // Auto-prepend revision to notes for package tracking
-    // Format: [REV:A] User notes...
+    // Format: [REV:AS] User notes...
     // This allows us to show revision in package list without changing DB schema
-    const notesWithRevision = notes 
-      ? `[REV:${currentRevision}] ${notes}`
-      : `[REV:${currentRevision}]`;
+    const notesWithRevision = notes ? `[REV:${revisionForPkg}] ${notes}` : `[REV:${revisionForPkg}]`;
 
     // Prefer canonical SVG from exports (it must reflect true cavity shapes).
     // Fall back to client-provided svg only if exports didn't produce one.
     const svgRawFromClient = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
     const svgCanonical =
-      bundle?.svg && typeof bundle.svg === "string" && bundle.svg.trim().length > 0
-        ? bundle.svg
-        : svgRawFromClient;
+      bundle?.svg && typeof bundle.svg === "string" && bundle.svg.trim().length > 0 ? bundle.svg : svgRawFromClient;
 
     // ✅ Server-enforced chamfer (fixes broken client checkbox)
     const svgFixed = enforceChamferedBlockInSvg(svgCanonical, layoutForSave);
@@ -1358,29 +1355,26 @@ export async function POST(req: NextRequest) {
       quoteId: quote.id,
       layoutForSave,
       qtyMaybe,
-      materialIdMaybe:
-        materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0
-          ? materialIdMaybe
-          : null,
+      materialIdMaybe: materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0 ? materialIdMaybe : null,
     });
 
-// NEW: If Apply provided a qty, keep cartons in sync with the quote qty.
-// Also recompute carton pricing (unit + extended) so totals update immediately.
-if (qtyMaybe != null) {
-  // 1) Sync selected carton quantities
-  await q(
-    `
+    // NEW: If Apply provided a qty, keep cartons in sync with the quote qty.
+    // Also recompute carton pricing (unit + extended) so totals update immediately.
+    if (qtyMaybe != null) {
+      // 1) Sync selected carton quantities
+      await q(
+        `
     UPDATE public.quote_box_selections
     SET qty = $1
     WHERE quote_id = $2
     `,
-    [qtyMaybe, quote.id],
-  );
+        [qtyMaybe, quote.id],
+      );
 
-  // 2) Recompute unit_price_usd + extended_price_usd using the tier table
-  // (same tier rules as /api/boxes/add-to-quote)
-  await q(
-    `
+      // 2) Recompute unit_price_usd + extended_price_usd using the tier table
+      // (same tier rules as /api/boxes/add-to-quote)
+      await q(
+        `
     UPDATE public.quote_box_selections qbs
     SET
       unit_price_usd = CASE
@@ -1405,22 +1399,21 @@ if (qtyMaybe != null) {
     WHERE qbs.quote_id = $1
       AND bpt.box_id = qbs.box_id
     `,
-    [quote.id],
-  );
+        [quote.id],
+      );
 
-  // 3) Sync the visible carton line(s) in the Interactive Quote (quote_items)
-  await q(
-    `
+      // 3) Sync the visible carton line(s) in the Interactive Quote (quote_items)
+      await q(
+        `
     UPDATE public.quote_items
     SET qty = $1
     WHERE quote_id = $2
       AND product_id IS NULL
       AND notes ILIKE 'Requested shipping carton:%'
     `,
-    [qtyMaybe, quote.id],
-  );
-}
-
+        [qtyMaybe, quote.id],
+      );
+    }
 
     // FIX (Path A): After Apply, PRIMARY must reflect FULL STACK DEPTH so /api/quotes/calc prices the full set.
     try {
@@ -1529,13 +1522,12 @@ if (qtyMaybe != null) {
     const dxf = embedGeometryHashInDxf(dxfBase, geometryHash ?? "");
 
     const stepBase = await buildStepFromLayout(layoutForSave, quoteNo, materialLegend ?? "");
-const step = embedGeometryHashInStep(stepBase ?? "", geometryHash ?? "");
+    const step = embedGeometryHashInStep(stepBase ?? "", geometryHash ?? "");
 
     // Saved SVG should prefer canonical exports; svgFixed already reflects canonical when available.
     const svgBase = bundle?.svg ?? svgFixed;
-  const svgAnnotatedBase = buildSvgWithAnnotations(layoutForSave, svgBase, materialLegend ?? "", quoteNo);
-const svgAnnotated = embedGeometryHashInSvg(svgAnnotatedBase ?? "", geometryHash ?? "");
-
+    const svgAnnotatedBase = buildSvgWithAnnotations(layoutForSave, svgBase, materialLegend ?? "", quoteNo);
+    const svgAnnotated = embedGeometryHashInSvg(svgAnnotatedBase ?? "", geometryHash ?? "");
 
     const pkg = await one<LayoutPkgRow>(
       `
