@@ -20,6 +20,7 @@
 import * as React from "react";
 import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 import { buildOuterOutlinePolyline } from "@/app/lib/layout/outline";
+import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
 
 
 type QuoteRow = {
@@ -1052,6 +1053,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [quoteState, setQuoteState] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
+  const [loadingPreviousLayout, setLoadingPreviousLayout] = React.useState(false);
 
   const [refreshTick, setRefreshTick] = React.useState<number>(0);
 
@@ -1280,7 +1282,8 @@ const overallQty =
   }, [layoutPkg]);
 
   const primaryItem = items[0] || null;
-
+
+
   const materialId =
     (primaryItem as any)?.material_id ??
     (primaryItem as any)?.materialId ??
@@ -1921,6 +1924,59 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
       setSendBusy(false);
     }
   }, [quoteNoValue, sendBusy, quoteState, primaryItem, subtotal, revisionValue]);
+
+  // NEW: Admin-only handler to load previous layout packages
+  const handleLoadPreviousLayout = React.useCallback(
+    async (packageId: number) => {
+      if (!quoteNoValue) {
+        alert("No quote number available");
+        return;
+      }
+
+      setLoadingPreviousLayout(true);
+      try {
+        const res = await fetch(
+          `/api/quote/layout/packages/${packageId}?quote_no=${encodeURIComponent(
+            quoteNoValue
+          )}`,
+          { cache: "no-store" }
+        );
+
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          throw new Error(json.message || "Failed to load package");
+        }
+
+        const json = await res.json();
+        if (!json.ok || !json.package?.layout) {
+          throw new Error(json.error || "Invalid package data");
+        }
+
+        // Open layout editor in new tab with the loaded package
+        const packageData = encodeURIComponent(
+          JSON.stringify(json.package.layout)
+        );
+        
+        // Also pass notes if available
+        const notesParam = json.package.notes 
+          ? `&notes=${encodeURIComponent(json.package.notes)}`
+          : '';
+        
+        window.open(
+          `/quote/layout?quote_no=${encodeURIComponent(quoteNoValue)}&seed_layout=${packageData}${notesParam}`,
+          "_blank"
+        );
+
+        console.log(`Opened layout editor with Package #${packageId}`);
+      } catch (err: any) {
+        alert(`Error loading layout: ${err.message}`);
+        console.error("Failed to load previous layout:", err);
+      } finally {
+        setLoadingPreviousLayout(false);
+      }
+    },
+    [quoteNoValue]
+  );
 
 
   return (
@@ -2786,15 +2842,33 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 )}
               </div>
 
-              {/* Layout activity */}
+              {/* Layout activity with snapshot selector */}
               {layoutPkg && (
                 <div style={{ ...cardBase, background: "#ffffff", marginTop: 12 }}>
-                  <div style={cardTitleStyle}>Layout activity</div>
+                  <div style={{ 
+                    display: "flex", 
+                    alignItems: "center", 
+                    justifyContent: "space-between",
+                    marginBottom: 8
+                  }}>
+                    <div style={cardTitleStyle}>Layout activity</div>
+                    
+                    {/* Admin-only: Load Previous Layout */}
+                    <div style={{ transform: "scale(0.9)" }}>
+                      <LayoutSnapshotSelector
+                        quoteNo={quoteNoValue}
+                        currentRevision={revisionValue || "AS"}
+                        onLoadLayout={handleLoadPreviousLayout}
+                        disabled={loadingPreviousLayout}
+                      />
+                    </div>
+                  </div>
+                  
                   <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 4 }}>
                     Latest layout package is <strong>#{layoutPkg.id}</strong>, saved on {new Date(layoutPkg.created_at).toLocaleString()}.
                   </p>
                   <p style={{ fontSize: 11, color: "#9ca3af" }}>
-                    Future upgrade: once a history API is wired, this panel will list multiple layout revisions with timestamps.
+                    Use "Load Previous Layout" above to open any saved layout package in the editor for revision.
                   </p>
                 </div>
               )}
