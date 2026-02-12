@@ -1051,8 +1051,8 @@ function buildSvgWithAnnotations(
   }
 
   if (!lines.length) {
-    const geometryGroupOnly = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
-    return `${svgOpen}\n${geometryGroupOnly}\n${svgClose}`;
+    const geometryGroupOnly = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\\n${svgChildren}\\n</g>`;
+    return `${svgOpen}\\n${geometryGroupOnly}\\n${svgClose}`;
   }
 
   const textYStart = 20;
@@ -1066,9 +1066,9 @@ function buildSvgWithAnnotations(
     .join("");
 
   const notesGroup = `<g id="alex-io-notes">${notesTexts}</g>`;
-  const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\n${svgChildren}\n</g>`;
+  const geometryGroup = `<g id="alex-io-geometry" transform="translate(0, ${GEOMETRY_SHIFT_Y})">\\n${svgChildren}\\n</g>`;
 
-  return `${svgOpen}\n${notesGroup}\n${geometryGroup}\n${svgClose}`;
+  return `${svgOpen}\\n${notesGroup}\\n${geometryGroup}\\n${svgClose}`;
 }
 
 /* ===================== POST: save layout (+ optional qty/material/customer) ===================== */
@@ -1219,9 +1219,15 @@ export async function POST(req: NextRequest) {
     // Never overwrite an existing assignment. Do not touch locked quotes.
     if (!quote.locked && salesRepSlug) {
       try {
-        const rep = await one<{ id: number }>(`select id from users where sales_slug = $1 limit 1`, [salesRepSlug]);
+        const rep = await one<{ id: number }>(
+          `select id from users where sales_slug = $1 limit 1`,
+          [salesRepSlug],
+        );
         if (rep?.id) {
-          await q(`update quotes set sales_rep_id = $1 where id = $2 and sales_rep_id is null`, [rep.id, quote.id]);
+          await q(
+            `update quotes set sales_rep_id = $1 where id = $2 and sales_rep_id is null`,
+            [rep.id, quote.id],
+          );
         }
       } catch (e) {
         console.warn("[layout/apply] sales_rep_slug set skipped", {
@@ -1305,34 +1311,53 @@ export async function POST(req: NextRequest) {
 
     const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
 
-    // Load current revision to tag the package
-    // FIX (Path A): If stage_pending_bump is true, the package we create on this Apply
-    // should be tagged with the *post-bump* revision, not the old one.
-    let currentRevision = "AS";
-    let revisionForPkg = "AS";
+    // --- STAGING REV BUMP ON APPLY (Path A) ---
+    // IMPORTANT: bump BEFORE tagging notes/packages so the package carries the current revision.
+    let factsForRev: any = null;
     try {
-      const facts: any = await loadFacts(String(quoteNo));
-      currentRevision = facts?.revision || facts?.stage_rev || "AS";
-      revisionForPkg = currentRevision;
+      factsForRev = await loadFacts(String(quoteNo));
 
-      if (facts?.stage_pending_bump === true) {
-        const curStage = facts?.stage_rev || currentRevision || "AS";
-        revisionForPkg = nextStageRev(curStage);
+      if (factsForRev?.stage_pending_bump === true) {
+        const curStage = factsForRev.stage_rev || factsForRev.revision || "AS";
+        const nextStage = nextStageRev(curStage);
+
+        factsForRev.stage_rev = nextStage;
+        factsForRev.revision = nextStage;
+        factsForRev.stage_pending_bump = false;
+
+        await saveFacts(String(quoteNo), factsForRev);
       }
+    } catch {
+      // Non-fatal: apply must succeed even if revision update fails
+    }
+    // --- END STAGING REV BUMP ---
+
+    // Load current revision to tag the package (after potential bump)
+    let currentRevision = "AS";
+    try {
+      const facts: any = factsForRev ?? (await loadFacts(String(quoteNo)));
+      currentRevision = facts?.revision || facts?.stage_rev || "AS";
     } catch {
       // Non-fatal: use default revision
     }
 
     // Auto-prepend revision to notes for package tracking
-    // Format: [REV:AS] User notes...
+    // Format: [REV:A] User notes...
     // This allows us to show revision in package list without changing DB schema
-    const notesWithRevision = notes ? `[REV:${revisionForPkg}] ${notes}` : `[REV:${revisionForPkg}]`;
+    // Defensive: strip an existing leading [REV:...] to prevent stacking ([REV:B] [REV:B]).
+    const cleanedNotes = notes ? notes.replace(/^\s*\[REV:[^\]]+\]\s*/i, "").trim() : null;
+
+    const notesWithRevision = cleanedNotes
+      ? `[REV:${currentRevision}] ${cleanedNotes}`
+      : `[REV:${currentRevision}]`;
 
     // Prefer canonical SVG from exports (it must reflect true cavity shapes).
     // Fall back to client-provided svg only if exports didn't produce one.
     const svgRawFromClient = typeof body.svg === "string" && body.svg.trim().length > 0 ? body.svg : null;
     const svgCanonical =
-      bundle?.svg && typeof bundle.svg === "string" && bundle.svg.trim().length > 0 ? bundle.svg : svgRawFromClient;
+      bundle?.svg && typeof bundle.svg === "string" && bundle.svg.trim().length > 0
+        ? bundle.svg
+        : svgRawFromClient;
 
     // ✅ Server-enforced chamfer (fixes broken client checkbox)
     const svgFixed = enforceChamferedBlockInSvg(svgCanonical, layoutForSave);
@@ -1355,7 +1380,10 @@ export async function POST(req: NextRequest) {
       quoteId: quote.id,
       layoutForSave,
       qtyMaybe,
-      materialIdMaybe: materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0 ? materialIdMaybe : null,
+      materialIdMaybe:
+        materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0
+          ? materialIdMaybe
+          : null,
     });
 
     // NEW: If Apply provided a qty, keep cartons in sync with the quote qty.
@@ -1895,25 +1923,6 @@ export async function POST(req: NextRequest) {
       console.error("[layout/apply] status transition failed for", quoteNo, e);
     }
     // =================== END NEW status transitions ===================
-
-    // --- STAGING REV BUMP ON APPLY (Path A) ---
-    try {
-      const facts: any = await loadFacts(String(quoteNo));
-
-      if (facts?.stage_pending_bump === true) {
-        const curStage = facts.stage_rev || "AS";
-        const nextStage = nextStageRev(curStage);
-
-        facts.stage_rev = nextStage;
-        facts.revision = nextStage;
-        facts.stage_pending_bump = false;
-
-        await saveFacts(String(quoteNo), facts);
-      }
-    } catch {
-      // Non-fatal: apply must succeed even if revision update fails
-    }
-    // --- END STAGING REV BUMP ---
 
     return ok(
       {
