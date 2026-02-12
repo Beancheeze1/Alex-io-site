@@ -5,9 +5,8 @@
 // - Render by material_family (exact DB value; NO normalization)
 // - Select stores material_id + material_text
 //
-// Follow-up (UI polish, no regressions):
-// - Qty is a real flow input (Foam Specs / Box Setup) instead of just "optional" in Basics
-// - Progress rail: Cavities + Material show DONE when completed
+// Keeps Step B behavior unchanged:
+// - Branching flows, fit freeze, defaults, seeding keys.
 
 "use client";
 
@@ -67,18 +66,52 @@ function fmtIn(n: number | null) {
   return s;
 }
 
-function extractFirstCavity(cavitiesText: string) {
-  const s = String(cavitiesText || "")
-    .replace(/[×\*]/g, "x")
-    .replace(/\s+/g, "");
-  const m = s.match(/(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)/i);
-  if (!m) return null;
-  return `${m[1]}x${m[2]}x${m[3]}`;
-}
-
 function familyLabel(fam: string | null) {
   const t = (fam || "").trim();
   return t ? t : "Other";
+}
+
+/**
+ * Parse a single cavity seed.
+ *
+ * Supports:
+ *  - Rect:   3x2x1
+ *  - Circle: 2.5x1    (DIAMETER x DEPTH)  -> will be normalized to "Ø2.5x1"
+ *
+ * Returns:
+ *  - normalized string for URL param + review display
+ *  - or null if invalid
+ */
+function parseSeedCavity(raw: string): { normalized: string; kind: "rect" | "circle" } | null {
+  const s = String(raw || "")
+    .replace(/[×\*]/g, "x")
+    .replace(/\s+/g, "")
+    .trim();
+  if (!s) return null;
+
+  // numbers-only extraction
+  const nums = s.match(/(\d+(?:\.\d+)?|\.\d+)/g);
+  if (!nums) return null;
+
+  // Rect: 3 numbers => LxWxD
+  if (nums.length >= 3) {
+    const L = Number(nums[0]);
+    const W = Number(nums[1]);
+    const D = Number(nums[2]);
+    if (![L, W, D].every((n) => Number.isFinite(n) && n > 0)) return null;
+    return { normalized: `${L}x${W}x${D}`, kind: "rect" };
+  }
+
+  // Circle shorthand (user-selected standard): 2 numbers => DIA x DEPTH
+  if (nums.length === 2) {
+    const dia = Number(nums[0]);
+    const depth = Number(nums[1]);
+    if (![dia, depth].every((n) => Number.isFinite(n) && n > 0)) return null;
+    // IMPORTANT: editor supports Ø...x... format already (see page.tsx parser)
+    return { normalized: `Ø${dia}x${depth}`, kind: "circle" };
+  }
+
+  return null;
 }
 
 export default function StartQuoteModal() {
@@ -107,6 +140,10 @@ export default function StartQuoteModal() {
   const [activeStep, setActiveStep] = React.useState<
     "type" | "box" | "foam" | "specs" | "cav" | "mat" | "rev"
   >("type");
+
+  const [completedSteps, setCompletedSteps] = React.useState<Set<string>>(
+    () => new Set<string>(),
+  );
 
   const [quoteType, setQuoteType] = React.useState<QuoteType>(
     seededIsCompletePack ? "complete_pack" : "foam_insert",
@@ -312,6 +349,7 @@ export default function StartQuoteModal() {
   // When quote type switches, reset pack state cleanly
   React.useEffect(() => {
     setActiveStep("type");
+    setCompletedSteps(new Set());
     if (quoteType === "foam_insert") {
       setFoamFitFrozen(false);
       setFoamFitDirty(false);
@@ -376,6 +414,7 @@ export default function StartQuoteModal() {
 
   // ---------- Step completion / gating ----------
   const qtyNum = toNumOrNull(qty);
+  const qtyOk = !!qtyNum;
 
   const insertDimsOk =
     quoteType === "foam_insert"
@@ -427,22 +466,23 @@ export default function StartQuoteModal() {
       : true;
 
   const canGoNext = (step: typeof activeStep) => {
-    if (step === "type") return true;
+    // We want qty in-flow (not just "optional"): require it before leaving Type.
+    if (step === "type") return qtyOk;
 
     if (quoteType === "foam_insert") {
-      if (step === "specs") return insertDimsOk;
-      if (step === "cav") return insertDimsOk;
-      if (step === "mat") return insertDimsOk;
-      if (step === "rev") return insertDimsOk;
-      return true;
+      if (step === "specs") return qtyOk && insertDimsOk;
+      if (step === "cav") return qtyOk && insertDimsOk;
+      if (step === "mat") return qtyOk && insertDimsOk;
+      if (step === "rev") return qtyOk && insertDimsOk;
+      return qtyOk;
     }
 
-    if (step === "box") return boxOk;
-    if (step === "foam") return boxOk && foamFitOk && foamConfigOk && thicknessOk;
-    if (step === "cav") return boxOk && foamFitOk && foamConfigOk && thicknessOk;
-    if (step === "mat") return boxOk && foamFitOk && foamConfigOk && thicknessOk;
-    if (step === "rev") return boxOk && foamFitOk && foamConfigOk && thicknessOk;
-    return true;
+    if (step === "box") return qtyOk && boxOk;
+    if (step === "foam") return qtyOk && boxOk && foamFitOk && foamConfigOk && thicknessOk;
+    if (step === "cav") return qtyOk && boxOk && foamFitOk && foamConfigOk && thicknessOk;
+    if (step === "mat") return qtyOk && boxOk && foamFitOk && foamConfigOk && thicknessOk;
+    if (step === "rev") return qtyOk && boxOk && foamFitOk && foamConfigOk && thicknessOk;
+    return qtyOk;
   };
 
   const nextStep = (step: typeof activeStep): typeof activeStep => {
@@ -477,6 +517,14 @@ export default function StartQuoteModal() {
     return "type";
   };
 
+  const markStepComplete = (key: string) => {
+    setCompletedSteps((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+  };
+
   // Steps for rail (dynamic)
   const railSteps: ProgressStep[] = (() => {
     const mk = (
@@ -490,8 +538,13 @@ export default function StartQuoteModal() {
     });
 
     const steps: ProgressStep[] = [];
+
     steps.push(
-      mk("type", "Quote Type", activeStep === "type" ? "active" : "done"),
+      mk(
+        "type",
+        "Quote Type",
+        activeStep === "type" ? "active" : qtyOk ? "done" : "upcoming",
+      ),
     );
 
     if (quoteType === "foam_insert") {
@@ -499,23 +552,48 @@ export default function StartQuoteModal() {
         mk(
           "specs",
           "Foam Specs",
-          activeStep === "specs" ? "active" : insertDimsOk ? "done" : "upcoming",
+          activeStep === "specs"
+            ? "active"
+            : insertDimsOk && qtyOk
+              ? "done"
+              : "upcoming",
         ),
       );
 
-      const cavState: ProgressState =
-        activeStep === "cav"
-          ? "active"
-          : activeStep === "mat" || activeStep === "rev"
-            ? "done"
-            : "upcoming";
-
-      const matState: ProgressState =
-        activeStep === "mat" ? "active" : activeStep === "rev" ? "done" : "upcoming";
-
-      steps.push(mk("cav", "Cavities", cavState));
-      steps.push(mk("mat", "Material", matState));
-      steps.push(mk("rev", "Review", activeStep === "rev" ? "active" : "upcoming"));
+      // Cavities/material are optional — consider "done" once user has progressed past them.
+      steps.push(
+        mk(
+          "cav",
+          "Cavities",
+          activeStep === "cav"
+            ? "active"
+            : completedSteps.has("cav")
+              ? "done"
+              : "upcoming",
+        ),
+      );
+      steps.push(
+        mk(
+          "mat",
+          "Material",
+          activeStep === "mat"
+            ? "active"
+            : completedSteps.has("mat")
+              ? "done"
+              : "upcoming",
+        ),
+      );
+      steps.push(
+        mk(
+          "rev",
+          "Review",
+          activeStep === "rev"
+            ? "active"
+            : completedSteps.has("rev")
+              ? "done"
+              : "upcoming",
+        ),
+      );
       return steps;
     }
 
@@ -523,32 +601,72 @@ export default function StartQuoteModal() {
       mk(
         "box",
         "Box Setup",
-        activeStep === "box" ? "active" : boxOk && foamFitFrozen ? "done" : "upcoming",
+        activeStep === "box"
+          ? "active"
+          : boxOk && foamFitFrozen && qtyOk
+            ? "done"
+            : "upcoming",
       ),
     );
-
     steps.push(
-      mk("foam", "Foam Structure", activeStep === "foam" ? "active" : "upcoming"),
+      mk(
+        "foam",
+        "Foam Structure",
+        activeStep === "foam"
+          ? "active"
+          : completedSteps.has("foam")
+            ? "done"
+            : "upcoming",
+      ),
     );
-
-    const cavState: ProgressState =
-      activeStep === "cav"
-        ? "active"
-        : activeStep === "mat" || activeStep === "rev"
-          ? "done"
-          : "upcoming";
-
-    const matState: ProgressState =
-      activeStep === "mat" ? "active" : activeStep === "rev" ? "done" : "upcoming";
-
-    steps.push(mk("cav", "Cavities", cavState));
-    steps.push(mk("mat", "Material", matState));
-    steps.push(mk("rev", "Review", activeStep === "rev" ? "active" : "upcoming"));
+    steps.push(
+      mk(
+        "cav",
+        "Cavities",
+        activeStep === "cav"
+          ? "active"
+          : completedSteps.has("cav")
+            ? "done"
+            : "upcoming",
+      ),
+    );
+    steps.push(
+      mk(
+        "mat",
+        "Material",
+        activeStep === "mat"
+          ? "active"
+          : completedSteps.has("mat")
+            ? "done"
+            : "upcoming",
+      ),
+    );
+    steps.push(
+      mk(
+        "rev",
+        "Review",
+        activeStep === "rev"
+          ? "active"
+          : completedSteps.has("rev")
+            ? "done"
+            : "upcoming",
+      ),
+    );
     return steps;
   })();
 
+  const normalizedSeed = React.useMemo(() => {
+    const p = parseSeedCavity(cavitySeed);
+    return p?.normalized || "";
+  }, [cavitySeed]);
+
+  const cavitySeedInvalid =
+    cavitySeed.trim().length > 0 && !parseSeedCavity(cavitySeed);
+
   // ---------- Launch (seed editor URL) ----------
   const onLaunchEditor = () => {
+    if (!qtyOk) return;
+
     if (quoteType === "foam_insert") {
       if (!insertDimsOk) return;
     } else {
@@ -558,9 +676,7 @@ export default function StartQuoteModal() {
     const quote_no = buildQuoteNo();
     const p = new URLSearchParams();
 
-    const salesSlugFromUrl = (searchParams.get("sales") ||
-      searchParams.get("rep") ||
-      "").trim();
+    const salesSlugFromUrl = (searchParams.get("sales") || searchParams.get("rep") || "").trim();
     if (salesSlugFromUrl) p.set("sales_rep_slug", salesSlugFromUrl);
 
     p.set("quote_no", quote_no);
@@ -580,6 +696,8 @@ export default function StartQuoteModal() {
     }
     if (materialText.trim()) p.set("material_text", materialText.trim());
 
+    const seedCav = parseSeedCavity(cavitySeed)?.normalized || "";
+
     if (quoteType === "foam_insert") {
       const L = toNumOrNull(insertL);
       const W = toNumOrNull(insertW);
@@ -594,24 +712,37 @@ export default function StartQuoteModal() {
       p.set("activeLayer", "1");
       p.set("active_layer", "1");
 
-      const firstCavity = extractFirstCavity(cavitySeed);
-      if (firstCavity) p.set("cavity", firstCavity);
+      if (seedCav) p.set("cavity", seedCav);
     } else {
+      // Bottom insert dims always based on FOAM FIT (L/W) and bottom thickness (D)
       const L = foamFitLenIn;
       const W = foamFitWidIn;
-      const D = toNumOrNull(bottomThk);
-      const dims = normalizeDims3(L, W, D);
+      const bottomD = toNumOrNull(bottomThk);
+      const dims = normalizeDims3(L, W, bottomD);
       if (dims) p.set("dims", dims);
 
-      p.set("layer_count", "1");
-      p.append("layer_thicknesses", String(D || 1));
-      p.append("layer_label", "Layer 1");
-      p.set("layer_cavity_layer_index", "1");
-      p.set("activeLayer", "1");
-      p.set("active_layer", "1");
+      // IMPORTANT: seed top pad as a second layer when bottom+top is chosen.
+      if (foamConfig === "bottom_top") {
+        const t = toNumOrNull(topThk);
+        p.set("layer_count", "2");
+        p.append("layer_thicknesses", String(bottomD || 1));
+        p.append("layer_label", "Bottom Insert");
+        p.append("layer_thicknesses", String(t || DEFAULT_TOP_PAD_IN));
+        p.append("layer_label", "Top Pad");
+        p.set("layer_cavity_layer_index", "1"); // cavities apply to bottom insert
+        p.set("activeLayer", "1");
+        p.set("active_layer", "1");
+        if (t) p.set("top_pad_in", String(t));
+      } else {
+        p.set("layer_count", "1");
+        p.append("layer_thicknesses", String(bottomD || 1));
+        p.append("layer_label", "Layer 1");
+        p.set("layer_cavity_layer_index", "1");
+        p.set("activeLayer", "1");
+        p.set("active_layer", "1");
+      }
 
-      const firstCavity = extractFirstCavity(cavitySeed);
-      if (firstCavity) p.set("cavity", firstCavity);
+      if (seedCav) p.set("cavity", seedCav);
 
       if (boxLNum) p.set("box_l", String(boxLNum));
       if (boxWNum) p.set("box_w", String(boxWNum));
@@ -620,10 +751,6 @@ export default function StartQuoteModal() {
       p.set("printed", printed ? "1" : "0");
       p.set("pack_type", "complete_pack");
       p.set("foam_config", foamConfig);
-      if (foamConfig === "bottom_top") {
-        const t = toNumOrNull(topThk);
-        if (t) p.set("top_pad_in", String(t));
-      }
       p.set("fit_allow_in", String(FIT_ALLOW_IN));
     }
 
@@ -634,12 +761,16 @@ export default function StartQuoteModal() {
   const onNext = () => {
     if (!canGoNext(activeStep)) return;
 
+    // mark this step as completed
+    markStepComplete(activeStep);
+
     if (quoteType === "complete_pack" && activeStep === "box") {
       const ok = freezeFoamFitFromCurrentBox();
       if (!ok) return;
     }
 
-    setActiveStep(nextStep(activeStep));
+    const nxt = nextStep(activeStep);
+    setActiveStep(nxt);
   };
 
   const onBack = () => {
@@ -658,11 +789,24 @@ export default function StartQuoteModal() {
         aria-hidden="true"
       />
 
-      {/* Modal */}
+      {/* Modal wrapper */}
       <div className="relative mx-auto flex min-h-screen max-w-5xl items-center justify-center px-4 py-10">
-        <div className="w-full overflow-hidden rounded-3xl border border-white/10 bg-[#0B1020] shadow-[0_20px_80px_-20px_rgba(0,0,0,0.8)]">
+        <div className="relative w-full overflow-hidden rounded-3xl border border-white/10 bg-[#0B1020] shadow-[0_20px_80px_-20px_rgba(0,0,0,0.8)]">
+          {/* Grid background (subtle, matches app vibe) */}
+          <div className="pointer-events-none absolute inset-0 opacity-[0.18]">
+            <div
+              className="absolute inset-0"
+              style={{
+                backgroundImage:
+                  "linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
+                backgroundSize: "48px 48px",
+                backgroundPosition: "0 0",
+              }}
+            />
+          </div>
+
           {/* Header */}
-          <div className="flex items-start justify-between gap-4 border-b border-white/10 px-6 py-5">
+          <div className="relative flex items-start justify-between gap-4 border-b border-white/10 px-6 py-5">
             <div>
               <div className="text-xs font-semibold tracking-widest text-sky-300/80">
                 START A QUOTE
@@ -687,613 +831,651 @@ export default function StartQuoteModal() {
             </button>
           </div>
 
-          {/* Body */}
-          <div className="grid grid-cols-1 gap-6 px-6 py-6 md:grid-cols-[240px_1fr]">
-            {/* Left rail */}
-            <div className="md:pr-2">
-              <ProgressRail steps={railSteps} />
+          {/* Body: make scrollable area */}
+          <div className="relative flex max-h-[calc(100vh-180px)] flex-col">
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-[240px_1fr]">
+                {/* Left rail */}
+                <div className="md:pr-2">
+                  <ProgressRail steps={railSteps} />
 
-              <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                <div className="text-xs font-semibold tracking-widest text-slate-400">
-                  BASICS
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                    <div className="text-xs font-semibold tracking-widest text-slate-400">
+                      BASICS
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <MiniField label="Qty (required)">
+                        <input
+                          value={qty}
+                          onChange={(e) => setQty(e.target.value)}
+                          inputMode="numeric"
+                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
+                          placeholder="0"
+                        />
+                        {!qtyOk ? (
+                          <div className="mt-1 text-xs text-amber-200/90">
+                            Required
+                          </div>
+                        ) : null}
+                      </MiniField>
+
+                      <MiniField label="Cavity seed (LxWxD or DiaxDepth)">
+                        <input
+                          value={cavitySeed}
+                          onChange={(e) => setCavitySeed(e.target.value)}
+                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
+                          placeholder='e.g. 3x2x1 or 2.5x1'
+                        />
+                        {cavitySeed.trim() ? (
+                          <div className="mt-1 text-xs text-slate-400">
+                            Normalized:{" "}
+                            <span className="text-slate-200">
+                              {normalizedSeed || "—"}
+                            </span>
+                          </div>
+                        ) : null}
+                      </MiniField>
+
+                      <MiniField label="Material text">
+                        <input
+                          value={materialText}
+                          onChange={(e) => setMaterialText(e.target.value)}
+                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
+                          placeholder="(auto when selected)"
+                        />
+                      </MiniField>
+
+                      <MiniField label="Material ID">
+                        <input
+                          value={materialId}
+                          onChange={(e) => setMaterialId(e.target.value)}
+                          inputMode="numeric"
+                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
+                          placeholder="(auto when selected)"
+                        />
+                      </MiniField>
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  <MiniField label="Qty">
-                    <input
-                      value={qty}
-                      onChange={(e) => setQty(e.target.value)}
-                      inputMode="numeric"
-                      className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                      placeholder="e.g. 25"
-                    />
-                  </MiniField>
 
-                  <MiniField label="Cavity seed (LxWxD)">
-                    <input
-                      value={cavitySeed}
-                      onChange={(e) => setCavitySeed(e.target.value)}
-                      className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                      placeholder="e.g. 3x2x1"
-                    />
-                  </MiniField>
+                {/* Right panel (active step) */}
+                <div>
+                  {activeStep === "type" ? (
+                    <StepCard title="Quote Type" hint="Choose what you're quoting">
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <ChoiceCard
+                            title="Foam Insert"
+                            desc="Foam only (block + cavities)"
+                            selected={quoteType === "foam_insert"}
+                            onClick={() => setQuoteType("foam_insert")}
+                          />
+                          <ChoiceCard
+                            title="Complete Pack"
+                            desc="Box + foam (mailer/RSC + optional printing)"
+                            selected={quoteType === "complete_pack"}
+                            onClick={() => setQuoteType("complete_pack")}
+                          />
+                        </div>
 
-                  <MiniField label="Material text">
-                    <input
-                      value={materialText}
-                      onChange={(e) => setMaterialText(e.target.value)}
-                      className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                      placeholder="(auto when selected)"
-                    />
-                  </MiniField>
+                        {/* Customer info (D) */}
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                            CUSTOMER
+                          </div>
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <TextInput label="Name" value={name} onChange={setName} />
+                            <TextInput label="Email" value={email} onChange={setEmail} />
+                            <TextInput label="Company" value={company} onChange={setCompany} />
+                            <TextInput label="Phone" value={phone} onChange={setPhone} />
+                          </div>
+                          <div className="mt-3 text-sm text-slate-300">
+                            This info will carry into the editor URL (for future recommendations).
+                          </div>
+                        </div>
 
-                  <MiniField label="Material ID">
-                    <input
-                      value={materialId}
-                      onChange={(e) => setMaterialId(e.target.value)}
-                      inputMode="numeric"
-                      className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                      placeholder="(auto when selected)"
-                    />
-                  </MiniField>
+                        {/* Qty in-flow (required) */}
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                            QUANTITY (REQUIRED)
+                          </div>
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <DimInput label="Qty" value={qty} onChange={setQty} />
+                            <MiniStat label="Status" value={qtyOk ? "OK" : "Required"} />
+                          </div>
+                        </div>
+                      </div>
+                    </StepCard>
+                  ) : null}
+
+                  {activeStep === "box" && quoteType === "complete_pack" ? (
+                    <StepCard
+                      title="Box Setup"
+                      hint="Internal box size (ID) + style + printing"
+                    >
+                      <div className="space-y-4">
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                            BOX INTERNAL DIMENSIONS
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <DimInput label="Length (in)" value={boxL} onChange={setBoxL} />
+                            <DimInput label="Width (in)" value={boxW} onChange={setBoxW} />
+                            <DimInput label="Depth (in)" value={boxD} onChange={setBoxD} />
+                          </div>
+
+                          {!boxOk ? (
+                            <div className="mt-3 text-sm text-amber-200/90">
+                              Box L/W/D are required, and L/W must be greater than {FIT_ALLOW_IN}" (fit allowance).
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <ChoiceCard
+                            title="Mailer"
+                            desc="Most common (supports bottom+top pad workflow)"
+                            selected={boxStyle === "mailer"}
+                            onClick={() => setBoxStyle("mailer")}
+                          />
+                          <ChoiceCard
+                            title="RSC"
+                            desc="Regular slotted container"
+                            selected={boxStyle === "rsc"}
+                            onClick={() => setBoxStyle("rsc")}
+                          />
+                        </div>
+
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-xs font-semibold tracking-widest text-slate-400">
+                                PRINTED BOX
+                              </div>
+                              <div className="mt-1 text-sm text-slate-200">
+                                If printed, add a $50 upcharge (shown in review).
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setPrinted((p) => !p)}
+                              className={[
+                                "rounded-xl border px-4 py-2 text-sm font-semibold",
+                                printed
+                                  ? "border-sky-400/60 bg-sky-500/20 text-white"
+                                  : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
+                              ].join(" ")}
+                            >
+                              {printed ? "Printed  +$50" : "Not printed"}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                            FOAM FIT (AUTO)
+                          </div>
+                          <div className="mt-2 text-sm text-slate-200">
+                            Foam L/W = Box ID − {FIT_ALLOW_IN}" for fit.
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <MiniStat label="Foam Length (in)" value={fmtIn(liveFoamLen)} />
+                            <MiniStat label="Foam Width (in)" value={fmtIn(liveFoamWid)} />
+                            <MiniStat label="Max Depth (in)" value={fmtIn(boxDNum)} />
+                          </div>
+                        </div>
+                      </div>
+                    </StepCard>
+                  ) : null}
+
+                  {activeStep === "foam" && quoteType === "complete_pack" ? (
+                    <StepCard
+                      title="Foam Structure"
+                      hint="Top pad is flat; cavities apply to bottom insert only"
+                    >
+                      <div className="space-y-4">
+                        {foamFitFrozen ? (
+                          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                            <div className="text-xs font-semibold tracking-widest text-slate-400">
+                              FROZEN FOAM FIT
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <MiniStat label="Foam Length (in)" value={fmtIn(foamFitLenIn)} />
+                              <MiniStat label="Foam Width (in)" value={fmtIn(foamFitWidIn)} />
+                              <MiniStat label="Box Depth (in)" value={fmtIn(boxDNum)} />
+                            </div>
+
+                            {foamFitDirty ? (
+                              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/30 bg-amber-400/10 px-4 py-3">
+                                <div className="text-sm text-amber-200/90">
+                                  Box dimensions changed. Foam fit has not been recalculated.
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={onRecalcFoamFit}
+                                  className="rounded-xl border border-amber-300/40 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-400/15"
+                                >
+                                  Recalculate foam fit
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-200">
+                            Foam fit will freeze after Box Setup.
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <ChoiceCard
+                            title="Bottom + Top Pad"
+                            desc={`Standard mailer setup (top pad defaults to ${DEFAULT_TOP_PAD_IN}")`}
+                            selected={foamConfig === "bottom_top"}
+                            onClick={() => {
+                              setFoamConfig("bottom_top");
+                              if (thicknessMode === "auto" && boxDNum) {
+                                const top = Math.min(DEFAULT_TOP_PAD_IN, boxDNum);
+                                const bottom = Math.max(0, boxDNum - top);
+                                setTopThk(String(top));
+                                setBottomThk(String(bottom));
+                              }
+                            }}
+                          />
+                          <ChoiceCard
+                            title="Bottom Only"
+                            desc="No top pad"
+                            selected={foamConfig === "bottom_only"}
+                            onClick={() => {
+                              setFoamConfig("bottom_only");
+                              if (thicknessMode === "auto" && boxDNum) {
+                                setBottomThk(String(boxDNum));
+                              }
+                            }}
+                          />
+                          <ChoiceCard
+                            title="Custom"
+                            desc="Advanced (placeholder)"
+                            selected={foamConfig === "custom"}
+                            onClick={() => setFoamConfig("custom")}
+                          />
+                        </div>
+
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                            THICKNESS (IN)
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <DimInput
+                              label="Bottom insert"
+                              value={bottomThk}
+                              onChange={onBottomThkChange}
+                            />
+                            <DimInput
+                              label="Top pad"
+                              value={foamConfig === "bottom_top" ? topThk : ""}
+                              onChange={onTopThkChange}
+                              disabled={foamConfig !== "bottom_top"}
+                            />
+                            <MiniStat
+                              label="Total vs Box Depth"
+                              value={(() => {
+                                const b = toNumOrNull(bottomThk) || 0;
+                                const t =
+                                  foamConfig === "bottom_top"
+                                    ? toNumOrNull(topThk) || 0
+                                    : 0;
+                                const total = b + t;
+                                return boxDNum
+                                  ? `${fmtIn(total)} / ${fmtIn(boxDNum)}`
+                                  : fmtIn(total);
+                              })()}
+                            />
+                          </div>
+
+                          {!thicknessOk ? (
+                            <div className="mt-3 text-sm text-amber-200/90">
+                              Thickness must fit within Box Depth.
+                            </div>
+                          ) : null}
+
+                          {foamConfig === "bottom_top" ? (
+                            <div className="mt-3 text-sm text-slate-300">
+                              Cavities apply to the{" "}
+                              <span className="font-semibold text-white">
+                                bottom insert
+                              </span>{" "}
+                              only. Top pad is flat.
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </StepCard>
+                  ) : null}
+
+                  {activeStep === "specs" && quoteType === "foam_insert" ? (
+                    <StepCard title="Foam Specs" hint="Block size (L × W × D)">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                        <div className="text-xs font-semibold tracking-widest text-slate-400">
+                          FOAM BLOCK DIMENSIONS
+                        </div>
+                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <DimInput label="Length (in)" value={insertL} onChange={setInsertL} />
+                          <DimInput label="Width (in)" value={insertW} onChange={setInsertW} />
+                          <DimInput label="Depth (in)" value={insertD} onChange={setInsertD} />
+                        </div>
+                        {!insertDimsOk ? (
+                          <div className="mt-3 text-sm text-amber-200/90">
+                            Length/Width/Depth are required for Foam Insert.
+                          </div>
+                        ) : null}
+                      </div>
+                    </StepCard>
+                  ) : null}
+
+                  {activeStep === "cav" ? (
+                    <StepCard
+                      title="Cavities"
+                      hint={
+                        quoteType === "complete_pack" && foamConfig === "bottom_top"
+                          ? "Bottom insert only"
+                          : "Optional"
+                      }
+                    >
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                        <div className="text-xs font-semibold tracking-widest text-slate-400">
+                          SEED (OPTIONAL)
+                        </div>
+                        <div className="mt-2 text-sm text-slate-300">
+                          Seed one cavity into the editor as a starting point.
+                        </div>
+                        <div className="mt-3">
+                          <input
+                            value={cavitySeed}
+                            onChange={(e) => setCavitySeed(e.target.value)}
+                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
+                            placeholder='Rect: 3x2x1   |   Round: 2.5x1 (dia x depth)'
+                          />
+                        </div>
+
+                        {cavitySeed.trim() ? (
+                          <div className="mt-2 text-sm text-slate-300">
+                            Normalized:{" "}
+                            <span className="font-semibold text-white">
+                              {normalizedSeed || "—"}
+                            </span>
+                          </div>
+                        ) : null}
+
+                        {cavitySeedInvalid ? (
+                          <div className="mt-3 text-sm text-amber-200/90">
+                            Format must be <b>LxWxD</b> (rect) or <b>DiaxDepth</b> (round). Examples: <b>3x2x1</b>, <b>2.5x1</b>.
+                          </div>
+                        ) : null}
+                      </div>
+                    </StepCard>
+                  ) : null}
+
+                  {activeStep === "mat" ? (
+                    <StepCard
+                      title="Material"
+                      hint="Select from your DB, grouped by family"
+                    >
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="text-sm text-slate-200">
+                            {materialsLoading
+                              ? "Loading materials…"
+                              : materialsError
+                                ? "Materials unavailable"
+                                : `${materials.length} materials`}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={clearMaterial}
+                              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
+                            >
+                              Clear
+                            </button>
+                            <button
+                              type="button"
+                              onClick={loadMaterials}
+                              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
+                            >
+                              Refresh
+                            </button>
+                          </div>
+                        </div>
+
+                        {materialsError ? (
+                          <div className="rounded-2xl border border-amber-300/30 bg-amber-400/10 p-4 text-sm text-amber-200/90">
+                            {materialsError}
+                          </div>
+                        ) : null}
+
+                        {/* Family tabs */}
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+                          <div className="flex flex-wrap gap-2">
+                            {families.length === 0 ? (
+                              <div className="text-sm text-slate-400">No materials.</div>
+                            ) : (
+                              families.map((fam) => {
+                                const isActive = fam === activeFamily;
+                                return (
+                                  <button
+                                    key={fam}
+                                    type="button"
+                                    onClick={() => setActiveFamily(fam)}
+                                    className={[
+                                      "rounded-xl border px-3 py-2 text-sm",
+                                      isActive
+                                        ? "border-sky-400/60 bg-sky-500/10 text-white"
+                                        : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
+                                    ].join(" ")}
+                                  >
+                                    {fam}
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Materials grid */}
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {materialsLoading && materials.length === 0 ? (
+                            <>
+                              <SkeletonCard />
+                              <SkeletonCard />
+                              <SkeletonCard />
+                              <SkeletonCard />
+                            </>
+                          ) : familyMaterials.length === 0 ? (
+                            <div className="col-span-full rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">
+                              No materials in this family.
+                            </div>
+                          ) : (
+                            familyMaterials.map((m) => {
+                              const selected = Number.isFinite(selectedMaterialIdNum)
+                                ? m.id === selectedMaterialIdNum
+                                : false;
+
+                              return (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  onClick={() => onSelectMaterial(m)}
+                                  className={[
+                                    "text-left rounded-2xl border p-4 transition",
+                                    selected
+                                      ? "border-sky-400/60 bg-sky-500/10 shadow-[0_0_0_3px_rgba(56,189,248,0.12)]"
+                                      : "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]",
+                                  ].join(" ")}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="text-sm font-semibold text-white">
+                                        {m.material_name}
+                                      </div>
+                                      <div className="mt-1 text-xs text-slate-400">
+                                        {familyLabel(m.material_family)}
+                                      </div>
+                                    </div>
+
+                                    {m.density_lb_ft3 != null ? (
+                                      <div className="shrink-0 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-1 text-xs text-slate-200">
+                                        {fmtIn(m.density_lb_ft3)}#
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {/* Selected summary */}
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                            SELECTED
+                          </div>
+                          <div className="mt-2 text-sm text-slate-200">
+                            <div>
+                              <span className="text-slate-400">Material ID: </span>
+                              <span className="text-white font-semibold">
+                                {materialId || "-"}
+                              </span>
+                            </div>
+                            <div className="mt-1">
+                              <span className="text-slate-400">Material: </span>
+                              <span className="text-white font-semibold">
+                                {materialText || "-"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </StepCard>
+                  ) : null}
+
+                  {activeStep === "rev" ? (
+                    <StepCard title="Review" hint="Confirm setup and launch the editor">
+                      <div className="space-y-4">
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                            SUMMARY
+                          </div>
+
+                          <div className="mt-3 space-y-2 text-sm text-slate-200">
+                            <Row
+                              k="Quote type"
+                              v={
+                                quoteType === "complete_pack"
+                                  ? "Complete Pack"
+                                  : "Foam Insert"
+                              }
+                            />
+
+                            {quoteType === "foam_insert" ? (
+                              <Row
+                                k="Foam dims"
+                                v={
+                                  normalizeDims3(
+                                    toNumOrNull(insertL),
+                                    toNumOrNull(insertW),
+                                    toNumOrNull(insertD),
+                                  ) || "(missing)"
+                                }
+                              />
+                            ) : (
+                              <>
+                                <Row
+                                  k="Box ID"
+                                  v={normalizeDims3(boxLNum, boxWNum, boxDNum) || "(missing)"}
+                                />
+                                <Row k="Style" v={boxStyle.toUpperCase()} />
+                                <Row k="Printed" v={printed ? "Yes (+$50)" : "No"} />
+                                <Row
+                                  k="Foam fit (L/W)"
+                                  v={
+                                    foamFitLenIn && foamFitWidIn
+                                      ? `${fmtIn(foamFitLenIn)} x ${fmtIn(foamFitWidIn)}`
+                                      : "(missing)"
+                                  }
+                                />
+                                <Row
+                                  k="Foam config"
+                                  v={
+                                    foamConfig === "bottom_top"
+                                      ? "Bottom + Top Pad"
+                                      : foamConfig === "bottom_only"
+                                        ? "Bottom Only"
+                                        : "Custom"
+                                  }
+                                />
+                                <Row
+                                  k="Bottom thickness"
+                                  v={fmtIn(toNumOrNull(bottomThk)) || "(missing)"}
+                                />
+                                {foamConfig === "bottom_top" ? (
+                                  <Row k="Top pad" v={fmtIn(toNumOrNull(topThk)) || String(DEFAULT_TOP_PAD_IN)} />
+                                ) : null}
+                              </>
+                            )}
+
+                            <Row k="Qty" v={qtyNum ? String(qtyNum) : "(missing)"} />
+                            <Row k="Customer" v={name.trim() ? name.trim() : "-"} />
+                            <Row k="Email" v={email.trim() ? email.trim() : "-"} />
+                            <Row k="Company" v={company.trim() ? company.trim() : "-"} />
+                            <Row k="Phone" v={phone.trim() ? phone.trim() : "-"} />
+
+                            <Row k="Material" v={materialText || "-"} />
+                            <Row k="Material ID" v={materialId || "-"} />
+                            <Row
+                              k="Cavity seed"
+                              v={normalizedSeed || "-"}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={close}
+                            className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
+                          >
+                            Cancel
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={onLaunchEditor}
+                            disabled={!qtyOk || (quoteType === "foam_insert" ? !insertDimsOk : (!boxOk || !foamFitOk || !thicknessOk))}
+                            className={[
+                              "rounded-xl px-5 py-2 text-sm font-semibold",
+                              qtyOk && (quoteType === "foam_insert" ? insertDimsOk : (boxOk && foamFitOk && thicknessOk))
+                                ? "bg-sky-500/80 text-white hover:bg-sky-500"
+                                : "cursor-not-allowed bg-sky-500/30 text-white/70",
+                            ].join(" ")}
+                          >
+                            Launch Layout Editor
+                          </button>
+                        </div>
+                      </div>
+                    </StepCard>
+                  ) : null}
                 </div>
               </div>
             </div>
 
-            {/* Right panel (active step) */}
-            <div>
-              {activeStep === "type" ? (
-                <StepCard title="Quote Type" hint="Choose what you're quoting">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <ChoiceCard
-                      title="Foam Insert"
-                      desc="Foam only (block + cavities)"
-                      selected={quoteType === "foam_insert"}
-                      onClick={() => setQuoteType("foam_insert")}
-                    />
-                    <ChoiceCard
-                      title="Complete Pack"
-                      desc="Box + foam (mailer/RSC + optional printing)"
-                      selected={quoteType === "complete_pack"}
-                      onClick={() => setQuoteType("complete_pack")}
-                    />
-                  </div>
-                </StepCard>
-              ) : null}
-
-              {activeStep === "box" && quoteType === "complete_pack" ? (
-                <StepCard
-                  title="Box Setup"
-                  hint="Internal box size (ID) + style + printing"
-                >
-                  <div className="space-y-4">
-                    {/* Qty in flow (Complete Pack) */}
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-400">
-                        QUANTITY
-                      </div>
-                      <div className="mt-3">
-                        <input
-                          value={qty}
-                          onChange={(e) => setQty(e.target.value)}
-                          inputMode="numeric"
-                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
-                          placeholder="e.g. 25"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-400">
-                        BOX INTERNAL DIMENSIONS
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <DimInput label="Length (in)" value={boxL} onChange={setBoxL} />
-                        <DimInput label="Width (in)" value={boxW} onChange={setBoxW} />
-                        <DimInput label="Depth (in)" value={boxD} onChange={setBoxD} />
-                      </div>
-
-                      {!boxOk ? (
-                        <div className="mt-3 text-sm text-amber-200/90">
-                          Box L/W/D are required, and L/W must be greater than {FIT_ALLOW_IN}" (fit allowance).
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <ChoiceCard
-                        title="Mailer"
-                        desc="Most common (supports bottom+top pad workflow)"
-                        selected={boxStyle === "mailer"}
-                        onClick={() => setBoxStyle("mailer")}
-                      />
-                      <ChoiceCard
-                        title="RSC"
-                        desc="Regular slotted container"
-                        selected={boxStyle === "rsc"}
-                        onClick={() => setBoxStyle("rsc")}
-                      />
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
-                            PRINTED BOX
-                          </div>
-                          <div className="mt-1 text-sm text-slate-200">
-                            If printed, add a $50 upcharge (shown in review).
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setPrinted((p) => !p)}
-                          className={[
-                            "rounded-xl border px-4 py-2 text-sm font-semibold",
-                            printed
-                              ? "border-sky-400/60 bg-sky-500/20 text-white"
-                              : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
-                          ].join(" ")}
-                        >
-                          {printed ? "Printed  +$50" : "Not printed"}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-400">
-                        FOAM FIT (AUTO)
-                      </div>
-                      <div className="mt-2 text-sm text-slate-200">
-                        Foam L/W = Box ID − {FIT_ALLOW_IN}" for fit.
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <MiniStat label="Foam Length (in)" value={fmtIn(liveFoamLen)} />
-                        <MiniStat label="Foam Width (in)" value={fmtIn(liveFoamWid)} />
-                        <MiniStat label="Max Depth (in)" value={fmtIn(boxDNum)} />
-                      </div>
-                    </div>
-                  </div>
-                </StepCard>
-              ) : null}
-
-              {activeStep === "foam" && quoteType === "complete_pack" ? (
-                <StepCard
-                  title="Foam Structure"
-                  hint="Top pad is flat; cavities apply to bottom insert only"
-                >
-                  <div className="space-y-4">
-                    {foamFitFrozen ? (
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                        <div className="text-xs font-semibold tracking-widest text-slate-400">
-                          FROZEN FOAM FIT
-                        </div>
-                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                          <MiniStat label="Foam Length (in)" value={fmtIn(foamFitLenIn)} />
-                          <MiniStat label="Foam Width (in)" value={fmtIn(foamFitWidIn)} />
-                          <MiniStat label="Box Depth (in)" value={fmtIn(boxDNum)} />
-                        </div>
-
-                        {foamFitDirty ? (
-                          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/30 bg-amber-400/10 px-4 py-3">
-                            <div className="text-sm text-amber-200/90">
-                              Box dimensions changed. Foam fit has not been recalculated.
-                            </div>
-                            <button
-                              type="button"
-                              onClick={onRecalcFoamFit}
-                              className="rounded-xl border border-amber-300/40 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-400/15"
-                            >
-                              Recalculate foam fit
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-200">
-                        Foam fit will freeze after Box Setup.
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <ChoiceCard
-                        title="Bottom + Top Pad"
-                        desc={`Standard mailer setup (top pad defaults to ${DEFAULT_TOP_PAD_IN}")`}
-                        selected={foamConfig === "bottom_top"}
-                        onClick={() => {
-                          setFoamConfig("bottom_top");
-                          if (thicknessMode === "auto" && boxDNum) {
-                            const top = Math.min(DEFAULT_TOP_PAD_IN, boxDNum);
-                            const bottom = Math.max(0, boxDNum - top);
-                            setTopThk(String(top));
-                            setBottomThk(String(bottom));
-                          }
-                        }}
-                      />
-                      <ChoiceCard
-                        title="Bottom Only"
-                        desc="No top pad"
-                        selected={foamConfig === "bottom_only"}
-                        onClick={() => {
-                          setFoamConfig("bottom_only");
-                          if (thicknessMode === "auto" && boxDNum) {
-                            setBottomThk(String(boxDNum));
-                          }
-                        }}
-                      />
-                      <ChoiceCard
-                        title="Custom"
-                        desc="Advanced (placeholder)"
-                        selected={foamConfig === "custom"}
-                        onClick={() => setFoamConfig("custom")}
-                      />
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-400">
-                        THICKNESS (IN)
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <DimInput
-                          label="Bottom insert"
-                          value={bottomThk}
-                          onChange={onBottomThkChange}
-                        />
-                        <DimInput
-                          label="Top pad"
-                          value={foamConfig === "bottom_top" ? topThk : ""}
-                          onChange={onTopThkChange}
-                          disabled={foamConfig !== "bottom_top"}
-                        />
-                        <MiniStat
-                          label="Total vs Box Depth"
-                          value={(() => {
-                            const b = toNumOrNull(bottomThk) || 0;
-                            const t =
-                              foamConfig === "bottom_top"
-                                ? toNumOrNull(topThk) || 0
-                                : 0;
-                            const total = b + t;
-                            return boxDNum
-                              ? `${fmtIn(total)} / ${fmtIn(boxDNum)}`
-                              : fmtIn(total);
-                          })()}
-                        />
-                      </div>
-
-                      {!thicknessOk ? (
-                        <div className="mt-3 text-sm text-amber-200/90">
-                          Thickness must fit within Box Depth.
-                        </div>
-                      ) : null}
-
-                      {foamConfig === "bottom_top" ? (
-                        <div className="mt-3 text-sm text-slate-300">
-                          Cavities apply to the{" "}
-                          <span className="font-semibold text-white">
-                            bottom insert
-                          </span>{" "}
-                          only. Top pad is flat.
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </StepCard>
-              ) : null}
-
-              {activeStep === "specs" && quoteType === "foam_insert" ? (
-                <StepCard title="Foam Specs" hint="Block size (L × W × D)">
-                  <div className="space-y-4">
-                    {/* Qty in flow (Foam Insert) */}
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-400">
-                        QUANTITY
-                      </div>
-                      <div className="mt-3">
-                        <input
-                          value={qty}
-                          onChange={(e) => setQty(e.target.value)}
-                          inputMode="numeric"
-                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
-                          placeholder="e.g. 25"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-400">
-                        FOAM BLOCK DIMENSIONS
-                      </div>
-                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <DimInput label="Length (in)" value={insertL} onChange={setInsertL} />
-                        <DimInput label="Width (in)" value={insertW} onChange={setInsertW} />
-                        <DimInput label="Depth (in)" value={insertD} onChange={setInsertD} />
-                      </div>
-                      {!insertDimsOk ? (
-                        <div className="mt-3 text-sm text-amber-200/90">
-                          Length/Width/Depth are required for Foam Insert.
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </StepCard>
-              ) : null}
-
-              {activeStep === "cav" ? (
-                <StepCard
-                  title="Cavities"
-                  hint={
-                    quoteType === "complete_pack" && foamConfig === "bottom_top"
-                      ? "Bottom insert only"
-                      : "Optional"
-                  }
-                >
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                    <div className="text-xs font-semibold tracking-widest text-slate-400">
-                      OPTIONAL SEED
-                    </div>
-                    <div className="mt-2 text-sm text-slate-300">
-                      If provided, we’ll seed one cavity into the editor as a starting point.
-                    </div>
-                    <div className="mt-3">
-                      <input
-                        value={cavitySeed}
-                        onChange={(e) => setCavitySeed(e.target.value)}
-                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
-                        placeholder="e.g. 3x2x1"
-                      />
-                    </div>
-                    {cavitySeed.trim() && !extractFirstCavity(cavitySeed) ? (
-                      <div className="mt-3 text-sm text-amber-200/90">
-                        Format must be LxWxD (example: 3x2x1).
-                      </div>
-                    ) : null}
-                  </div>
-                </StepCard>
-              ) : null}
-
-              {activeStep === "mat" ? (
-                <StepCard
-                  title="Material"
-                  hint="Select from your DB, grouped by family"
-                >
-                  <div className="space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="text-sm text-slate-200">
-                        {materialsLoading
-                          ? "Loading materials…"
-                          : materialsError
-                            ? "Materials unavailable"
-                            : `${materials.length} materials`}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={clearMaterial}
-                          className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
-                        >
-                          Clear
-                        </button>
-                        <button
-                          type="button"
-                          onClick={loadMaterials}
-                          className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
-                        >
-                          Refresh
-                        </button>
-                      </div>
-                    </div>
-
-                    {materialsError ? (
-                      <div className="rounded-2xl border border-amber-300/30 bg-amber-400/10 p-4 text-sm text-amber-200/90">
-                        {materialsError}
-                      </div>
-                    ) : null}
-
-                    {/* Family tabs */}
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-                      <div className="flex flex-wrap gap-2">
-                        {families.length === 0 ? (
-                          <div className="text-sm text-slate-400">No materials.</div>
-                        ) : (
-                          families.map((fam) => {
-                            const isActive = fam === activeFamily;
-                            return (
-                              <button
-                                key={fam}
-                                type="button"
-                                onClick={() => setActiveFamily(fam)}
-                                className={[
-                                  "rounded-xl border px-3 py-2 text-sm",
-                                  isActive
-                                    ? "border-sky-400/60 bg-sky-500/10 text-white"
-                                    : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
-                                ].join(" ")}
-                              >
-                                {fam}
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Materials grid */}
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {materialsLoading && materials.length === 0 ? (
-                        <>
-                          <SkeletonCard />
-                          <SkeletonCard />
-                          <SkeletonCard />
-                          <SkeletonCard />
-                        </>
-                      ) : familyMaterials.length === 0 ? (
-                        <div className="col-span-full rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">
-                          No materials in this family.
-                        </div>
-                      ) : (
-                        familyMaterials.map((m) => {
-                          const selected = Number.isFinite(selectedMaterialIdNum)
-                            ? m.id === selectedMaterialIdNum
-                            : false;
-
-                          return (
-                            <button
-                              key={m.id}
-                              type="button"
-                              onClick={() => onSelectMaterial(m)}
-                              className={[
-                                "text-left rounded-2xl border p-4 transition",
-                                selected
-                                  ? "border-sky-400/60 bg-sky-500/10 shadow-[0_0_0_3px_rgba(56,189,248,0.12)]"
-                                  : "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]",
-                              ].join(" ")}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-sm font-semibold text-white">
-                                    {m.material_name}
-                                  </div>
-                                  <div className="mt-1 text-xs text-slate-400">
-                                    {familyLabel(m.material_family)}
-                                  </div>
-                                </div>
-
-                                {m.density_lb_ft3 != null ? (
-                                  <div className="shrink-0 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-1 text-xs text-slate-200">
-                                    {fmtIn(m.density_lb_ft3)}#
-                                  </div>
-                                ) : null}
-                              </div>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-
-                    {/* Selected summary */}
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-400">
-                        SELECTED
-                      </div>
-                      <div className="mt-2 text-sm text-slate-200">
-                        <div>
-                          <span className="text-slate-400">Material ID: </span>
-                          <span className="text-white font-semibold">
-                            {materialId || "-"}
-                          </span>
-                        </div>
-                        <div className="mt-1">
-                          <span className="text-slate-400">Material: </span>
-                          <span className="text-white font-semibold">
-                            {materialText || "-"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </StepCard>
-              ) : null}
-
-              {activeStep === "rev" ? (
-                <StepCard title="Review" hint="Confirm setup and launch the editor">
-                  <div className="space-y-4">
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                      <div className="text-xs font-semibold tracking-widest text-slate-400">
-                        SUMMARY
-                      </div>
-
-                      <div className="mt-3 space-y-2 text-sm text-slate-200">
-                        <Row
-                          k="Quote type"
-                          v={
-                            quoteType === "complete_pack"
-                              ? "Complete Pack"
-                              : "Foam Insert"
-                          }
-                        />
-
-                        {quoteType === "foam_insert" ? (
-                          <Row
-                            k="Foam dims"
-                            v={
-                              normalizeDims3(
-                                toNumOrNull(insertL),
-                                toNumOrNull(insertW),
-                                toNumOrNull(insertD),
-                              ) || "-"
-                            }
-                          />
-                        ) : (
-                          <>
-                            <Row
-                              k="Box ID"
-                              v={normalizeDims3(boxLNum, boxWNum, boxDNum) || "-"}
-                            />
-                            <Row k="Style" v={boxStyle.toUpperCase()} />
-                            <Row k="Printed" v={printed ? "Yes (+$50)" : "No"} />
-                            <Row
-                              k="Foam fit (L/W)"
-                              v={
-                                foamFitLenIn && foamFitWidIn
-                                  ? `${fmtIn(foamFitLenIn)} x ${fmtIn(foamFitWidIn)}`
-                                  : "-"
-                              }
-                            />
-                            <Row
-                              k="Foam config"
-                              v={
-                                foamConfig === "bottom_top"
-                                  ? "Bottom + Top Pad"
-                                  : foamConfig === "bottom_only"
-                                    ? "Bottom Only"
-                                    : "Custom"
-                              }
-                            />
-                            <Row k="Bottom thickness" v={fmtIn(toNumOrNull(bottomThk)) || "-"} />
-                            {foamConfig === "bottom_top" ? (
-                              <Row k="Top pad" v={fmtIn(toNumOrNull(topThk)) || "1"} />
-                            ) : null}
-                          </>
-                        )}
-
-                        <Row k="Qty" v={qtyNum ? String(qtyNum) : "-"} />
-                        <Row k="Material" v={materialText || "-"} />
-                        <Row k="Material ID" v={materialId || "-"} />
-                        <Row
-                          k="Cavity seed"
-                          v={extractFirstCavity(cavitySeed) || "-"}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={close}
-                        className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
-                      >
-                        Cancel
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={onLaunchEditor}
-                        className="rounded-xl bg-sky-500/80 px-5 py-2 text-sm font-semibold text-white hover:bg-sky-500"
-                      >
-                        Launch Layout Editor
-                      </button>
-                    </div>
-                  </div>
-                </StepCard>
-              ) : null}
-
-              {/* Footer Nav (not shown on Review) */}
-              {activeStep !== "rev" ? (
-                <div className="mt-4 flex items-center justify-between gap-3">
+            {/* Sticky footer nav (B) */}
+            {activeStep !== "rev" ? (
+              <div className="relative border-t border-white/10 bg-[#0B1020]/90 px-6 py-4 backdrop-blur">
+                <div className="flex items-center justify-between gap-3">
                   <button
                     type="button"
                     onClick={onBack}
@@ -1322,8 +1504,14 @@ export default function StartQuoteModal() {
                     Next
                   </button>
                 </div>
-              ) : null}
-            </div>
+
+                {cavitySeedInvalid ? (
+                  <div className="mt-2 text-sm text-amber-200/90">
+                    Cavity seed format invalid. Use <b>3x2x1</b> or <b>2.5x1</b>.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1389,6 +1577,30 @@ function DimInput({
             : "border-white/10 bg-white/[0.03] text-white focus:border-sky-400/60",
         ].join(" ")}
         placeholder={disabled ? "-" : "0"}
+      />
+    </div>
+  );
+}
+
+function TextInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-semibold tracking-widest text-slate-400">
+        {label}
+      </div>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
+        placeholder="-"
       />
     </div>
   );
