@@ -5,8 +5,9 @@
 // - Render by material_family (exact DB value; NO normalization)
 // - Select stores material_id + material_text
 //
-// Keeps Step B behavior unchanged:
-// - Branching flows, fit freeze, defaults, seeding keys.
+// Follow-up (UI polish, no regressions):
+// - Qty is a real flow input (Foam Specs / Box Setup) instead of just "optional" in Basics
+// - Progress rail: Cavities + Material show DONE when completed
 
 "use client";
 
@@ -297,7 +298,6 @@ export default function StartQuoteModal() {
 
   const clearMaterial = () => {
     setMaterialId("");
-    // Keep materialText if user typed it manually? For Step C, clearing means clear both.
     setMaterialText("");
   };
 
@@ -490,7 +490,9 @@ export default function StartQuoteModal() {
     });
 
     const steps: ProgressStep[] = [];
-    steps.push(mk("type", "Quote Type", activeStep === "type" ? "active" : "done"));
+    steps.push(
+      mk("type", "Quote Type", activeStep === "type" ? "active" : "done"),
+    );
 
     if (quoteType === "foam_insert") {
       steps.push(
@@ -500,8 +502,19 @@ export default function StartQuoteModal() {
           activeStep === "specs" ? "active" : insertDimsOk ? "done" : "upcoming",
         ),
       );
-      steps.push(mk("cav", "Cavities", activeStep === "cav" ? "active" : "upcoming"));
-      steps.push(mk("mat", "Material", activeStep === "mat" ? "active" : "upcoming"));
+
+      const cavState: ProgressState =
+        activeStep === "cav"
+          ? "active"
+          : activeStep === "mat" || activeStep === "rev"
+            ? "done"
+            : "upcoming";
+
+      const matState: ProgressState =
+        activeStep === "mat" ? "active" : activeStep === "rev" ? "done" : "upcoming";
+
+      steps.push(mk("cav", "Cavities", cavState));
+      steps.push(mk("mat", "Material", matState));
       steps.push(mk("rev", "Review", activeStep === "rev" ? "active" : "upcoming"));
       return steps;
     }
@@ -513,9 +526,23 @@ export default function StartQuoteModal() {
         activeStep === "box" ? "active" : boxOk && foamFitFrozen ? "done" : "upcoming",
       ),
     );
-    steps.push(mk("foam", "Foam Structure", activeStep === "foam" ? "active" : "upcoming"));
-    steps.push(mk("cav", "Cavities", activeStep === "cav" ? "active" : "upcoming"));
-    steps.push(mk("mat", "Material", activeStep === "mat" ? "active" : "upcoming"));
+
+    steps.push(
+      mk("foam", "Foam Structure", activeStep === "foam" ? "active" : "upcoming"),
+    );
+
+    const cavState: ProgressState =
+      activeStep === "cav"
+        ? "active"
+        : activeStep === "mat" || activeStep === "rev"
+          ? "done"
+          : "upcoming";
+
+    const matState: ProgressState =
+      activeStep === "mat" ? "active" : activeStep === "rev" ? "done" : "upcoming";
+
+    steps.push(mk("cav", "Cavities", cavState));
+    steps.push(mk("mat", "Material", matState));
     steps.push(mk("rev", "Review", activeStep === "rev" ? "active" : "upcoming"));
     return steps;
   })();
@@ -531,7 +558,9 @@ export default function StartQuoteModal() {
     const quote_no = buildQuoteNo();
     const p = new URLSearchParams();
 
-    const salesSlugFromUrl = (searchParams.get("sales") || searchParams.get("rep") || "").trim();
+    const salesSlugFromUrl = (searchParams.get("sales") ||
+      searchParams.get("rep") ||
+      "").trim();
     if (salesSlugFromUrl) p.set("sales_rep_slug", salesSlugFromUrl);
 
     p.set("quote_no", quote_no);
@@ -675,7 +704,7 @@ export default function StartQuoteModal() {
                       onChange={(e) => setQty(e.target.value)}
                       inputMode="numeric"
                       className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                      placeholder="(optional)"
+                      placeholder="e.g. 25"
                     />
                   </MiniField>
 
@@ -684,7 +713,7 @@ export default function StartQuoteModal() {
                       value={cavitySeed}
                       onChange={(e) => setCavitySeed(e.target.value)}
                       className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                      placeholder="(optional)"
+                      placeholder="e.g. 3x2x1"
                     />
                   </MiniField>
 
@@ -737,6 +766,22 @@ export default function StartQuoteModal() {
                   hint="Internal box size (ID) + style + printing"
                 >
                   <div className="space-y-4">
+                    {/* Qty in flow (Complete Pack) */}
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                      <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        QUANTITY
+                      </div>
+                      <div className="mt-3">
+                        <input
+                          value={qty}
+                          onChange={(e) => setQty(e.target.value)}
+                          inputMode="numeric"
+                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
+                          placeholder="e.g. 25"
+                        />
+                      </div>
+                    </div>
+
                     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                       <div className="text-xs font-semibold tracking-widest text-slate-400">
                         BOX INTERNAL DIMENSIONS
@@ -940,20 +985,38 @@ export default function StartQuoteModal() {
 
               {activeStep === "specs" && quoteType === "foam_insert" ? (
                 <StepCard title="Foam Specs" hint="Block size (L × W × D)">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                    <div className="text-xs font-semibold tracking-widest text-slate-400">
-                      FOAM BLOCK DIMENSIONS
-                    </div>
-                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <DimInput label="Length (in)" value={insertL} onChange={setInsertL} />
-                      <DimInput label="Width (in)" value={insertW} onChange={setInsertW} />
-                      <DimInput label="Depth (in)" value={insertD} onChange={setInsertD} />
-                    </div>
-                    {!insertDimsOk ? (
-                      <div className="mt-3 text-sm text-amber-200/90">
-                        Length/Width/Depth are required for Foam Insert.
+                  <div className="space-y-4">
+                    {/* Qty in flow (Foam Insert) */}
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                      <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        QUANTITY
                       </div>
-                    ) : null}
+                      <div className="mt-3">
+                        <input
+                          value={qty}
+                          onChange={(e) => setQty(e.target.value)}
+                          inputMode="numeric"
+                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
+                          placeholder="e.g. 25"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                      <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        FOAM BLOCK DIMENSIONS
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <DimInput label="Length (in)" value={insertL} onChange={setInsertL} />
+                        <DimInput label="Width (in)" value={insertW} onChange={setInsertW} />
+                        <DimInput label="Depth (in)" value={insertD} onChange={setInsertD} />
+                      </div>
+                      {!insertDimsOk ? (
+                        <div className="mt-3 text-sm text-amber-200/90">
+                          Length/Width/Depth are required for Foam Insert.
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </StepCard>
               ) : null}
@@ -1161,14 +1224,14 @@ export default function StartQuoteModal() {
                                 toNumOrNull(insertL),
                                 toNumOrNull(insertW),
                                 toNumOrNull(insertD),
-                              ) || "(missing)"
+                              ) || "-"
                             }
                           />
                         ) : (
                           <>
                             <Row
                               k="Box ID"
-                              v={normalizeDims3(boxLNum, boxWNum, boxDNum) || "(missing)"}
+                              v={normalizeDims3(boxLNum, boxWNum, boxDNum) || "-"}
                             />
                             <Row k="Style" v={boxStyle.toUpperCase()} />
                             <Row k="Printed" v={printed ? "Yes (+$50)" : "No"} />
@@ -1177,7 +1240,7 @@ export default function StartQuoteModal() {
                               v={
                                 foamFitLenIn && foamFitWidIn
                                   ? `${fmtIn(foamFitLenIn)} x ${fmtIn(foamFitWidIn)}`
-                                  : "(missing)"
+                                  : "-"
                               }
                             />
                             <Row
@@ -1190,22 +1253,19 @@ export default function StartQuoteModal() {
                                     : "Custom"
                               }
                             />
-                            <Row
-                              k="Bottom thickness"
-                              v={fmtIn(toNumOrNull(bottomThk))}
-                            />
+                            <Row k="Bottom thickness" v={fmtIn(toNumOrNull(bottomThk)) || "-"} />
                             {foamConfig === "bottom_top" ? (
                               <Row k="Top pad" v={fmtIn(toNumOrNull(topThk)) || "1"} />
                             ) : null}
                           </>
                         )}
 
-                        <Row k="Qty" v={qtyNum ? String(qtyNum) : "(optional)"} />
-                        <Row k="Material" v={materialText || "(optional)"} />
-                        <Row k="Material ID" v={materialId || "(optional)"} />
+                        <Row k="Qty" v={qtyNum ? String(qtyNum) : "-"} />
+                        <Row k="Material" v={materialText || "-"} />
+                        <Row k="Material ID" v={materialId || "-"} />
                         <Row
                           k="Cavity seed"
-                          v={extractFirstCavity(cavitySeed) || "(optional)"}
+                          v={extractFirstCavity(cavitySeed) || "-"}
                         />
                       </div>
                     </div>
