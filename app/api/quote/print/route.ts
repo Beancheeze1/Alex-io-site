@@ -141,6 +141,15 @@ function isLayoutLayerRow(it: ItemRow): boolean {
 }
 
 /**
+ * Identify box/packaging items that should NOT be foam-priced.
+ * Box items are priced separately via quote_box_selections.
+ */
+function isPackagingItem(it: ItemRow): boolean {
+  const notes = String(it?.notes || "");
+  return notes.includes("Requested shipping carton") || notes.includes("[PACKAGING]");
+}
+
+/**
  * Authoritative pricing call: POST /api/quotes/calc
  * - MUST match initial email pricing.
  * - We intentionally pass cavities: [] and round_to_bf: false to match your email flow.
@@ -322,6 +331,28 @@ export async function GET(req: NextRequest) {
 
           if (!(qty > 0) || !(materialId > 0)) {
             items.push(it);
+            continue;
+          }
+
+          // FIX: Do not price box/packaging items as foam.
+          // These are priced separately via quote_box_selections.
+          if (isPackagingItem(it)) {
+            items.push({
+              ...it,
+              price_unit_usd: null,
+              price_total_usd: null,
+            });
+            continue;
+          }
+
+          // FIX: Do not price layout-generated layer rows.
+          // These are reference-only and already included in the PRIMARY foam set.
+          if (isLayoutLayerRow(it)) {
+            items.push({
+              ...it,
+              price_unit_usd: null,
+              price_total_usd: null,
+            });
             continue;
           }
 
