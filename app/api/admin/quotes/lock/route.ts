@@ -57,6 +57,17 @@ function nextStageRev(cur?: string | null): string {
   return String.fromCharCode(code + 1) + "S";
 }
 
+function stripLeadingRevTags(raw: string | null): string | null {
+  if (!raw) return null;
+  let s = String(raw);
+
+  // Remove one-or-more leading tokens like: [REV:X] [REV:Y] ...
+  s = s.replace(/^(\s*(?:\[REV:[^\]]+\]\s*)+)+/i, "");
+
+  s = s.trim();
+  return s.length > 0 ? s : null;
+}
+
 function json(body: any, status = 200) {
   return NextResponse.json(body, { status });
 }
@@ -218,13 +229,11 @@ export async function POST(req: NextRequest) {
       // Non-fatal: use default
     }
 
-    // Tag the release package with revision
-    // If the package already has notes with revision, preserve them
-    // Otherwise, add the revision tag
-    let notesForRelease = pkg.notes ?? null;
-    if (notesForRelease && !notesForRelease.startsWith("[REV:")) {
-      notesForRelease = `[REV:${currentRevision}] ${notesForRelease}`;
-    } else if (!notesForRelease) {
+    const humanNotes = stripLeadingRevTags(pkg.notes);
+    let notesForRelease: string;
+    if (humanNotes) {
+      notesForRelease = `[REV:${currentRevision}] ${humanNotes}`;
+    } else {
       notesForRelease = `[REV:${currentRevision}] RELEASED`;
     }
 

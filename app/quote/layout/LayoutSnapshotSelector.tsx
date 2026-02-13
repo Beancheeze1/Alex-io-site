@@ -183,6 +183,8 @@ export default function LayoutSnapshotSelector({
                     minute: "2-digit",
                   }
                 );
+                const safeNotes =
+                  typeof pkg.notes === "string" ? pkg.notes.trim() : "";
 
                 return (
                   <button
@@ -217,9 +219,9 @@ export default function LayoutSnapshotSelector({
                           {pkg.cavityCount === 1 ? "cavity" : "cavities"}
                         </div>
 
-                        {pkg.notes && (
+                        {safeNotes.length > 0 && (
                           <div className="text-xs text-gray-600 mt-1 line-clamp-2">
-                            {pkg.notes}
+                            {safeNotes}
                           </div>
                         )}
                       </div>
@@ -278,5 +280,4 @@ export default function LayoutSnapshotSelector({
     </div>
   );
 }
-
 

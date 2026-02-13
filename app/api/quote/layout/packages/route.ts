@@ -27,6 +27,34 @@ type PackageRow = {
   created_by_user_id: number | null;
 };
 
+function parseRevisionAndCleanNotes(
+  raw: string | null
+): { revision: string | null; notes: string | null } {
+  if (!raw) return { revision: null, notes: null };
+  const s = String(raw);
+
+  // One-or-more leading [REV:...] tags, allowing spaces between them
+  const leadTagsRe = /^(\s*(?:\[REV:[^\]]+\]\s*)+)([\s\S]*)$/i;
+  const m = s.match(leadTagsRe);
+
+  let revision: string | null = null;
+  let rest = s;
+
+  if (m) {
+    const tags = m[1] || "";
+    rest = (m[2] ?? "").trim();
+
+    // First revision token from the tags
+    const firstRev = tags.match(/\[REV:([^\]]+)\]/i);
+    revision = firstRev?.[1] ? String(firstRev[1]).trim() : null;
+  } else {
+    rest = s.trim();
+  }
+
+  const cleanNotes = rest.length > 0 ? rest : null;
+  return { revision, notes: cleanNotes };
+}
+
 export async function GET(req: NextRequest) {
   // Admin-only check
   const user = await getCurrentUserFromRequest(req as any);
@@ -113,19 +141,7 @@ export async function GET(req: NextRequest) {
     // Count layers
     const layerCount = Array.isArray(layout.stack) ? layout.stack.length : 1;
 
-    // Parse revision from notes (format: [REV:A] user notes...)
-    let revision: string | null = null;
-    let cleanNotes: string | null = null;
-    
-    if (pkg.notes) {
-      const revMatch = pkg.notes.match(/^\[REV:([^\]]+)\]\s*(.*)/);
-      if (revMatch) {
-        revision = revMatch[1]; // e.g., "A", "BS", etc.
-        cleanNotes = revMatch[2] || null; // User notes without the prefix
-      } else {
-        cleanNotes = pkg.notes; // No revision prefix, keep as-is
-      }
-    }
+    const parsed = parseRevisionAndCleanNotes(pkg.notes);
 
     return {
       id: pkg.id,
@@ -133,8 +149,8 @@ export async function GET(req: NextRequest) {
       blockLabel,
       cavityCount,
       layerCount,
-      revision, // NEW: extracted revision
-      notes: cleanNotes, // User notes without the [REV:X] prefix
+      revision: parsed.revision, // NEW: extracted revision
+      notes: parsed.notes, // User notes without the [REV:X] prefix
       createdAt: pkg.created_at,
     };
   });
