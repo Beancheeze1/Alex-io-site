@@ -981,11 +981,18 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
     return items.reduce((sum, i) => sum + (i.qty || 0), 0);
   }, [items, primaryItem]);
 
-  // Planning notes from layout
-  const notesFull =
-  layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
-    ? layoutPkg.notes.trim()
-    : null;
+// Planning notes from layout (strip [REV:X] tags for customer view)
+  const notesFull = React.useMemo(() => {
+    if (!layoutPkg?.notes) return null;
+    const raw = layoutPkg.notes.trim();
+    if (raw.length === 0) return null;
+    
+    // Remove leading [REV:X] tags (one or more)
+    const cleaned = raw.replace(/^(\s*(?:\[REV:[^\]]+\]\s*)+)/i, '').trim();
+    
+    // Don't show if only the tag existed
+    return cleaned.length > 0 ? cleaned : null;
+  }, [layoutPkg?.notes]);
 
 
   const primaryPricing = primaryItem?.pricing_meta || null;
