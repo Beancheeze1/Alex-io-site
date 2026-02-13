@@ -1254,10 +1254,18 @@ const overallQty =
 
   const anyPricing = subtotal > 0;
 
-    const notesPreview =
-    layoutPkg && layoutPkg.notes && layoutPkg.notes.trim().length > 0
-      ? layoutPkg.notes.trim()
-      : null;
+    // Strip [REV:X] tags from notes for admin display
+    const notesPreview = React.useMemo(() => {
+      if (!layoutPkg?.notes) return null;
+      const raw = layoutPkg.notes.trim();
+      if (raw.length === 0) return null;
+      
+      // Remove leading [REV:X] tags (one or more)
+      const cleaned = raw.replace(/^(\s*(?:\[REV:[^\]]+\]\s*)+)/i, '').trim();
+      
+      // Don't show if only the tag existed
+      return cleaned.length > 0 ? cleaned : null;
+    }, [layoutPkg?.notes]);
 
 
   React.useEffect(() => {

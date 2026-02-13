@@ -59,6 +59,41 @@ export default function LayoutSnapshotSelector({
     }
   }, [showDropdown]);
 
+  // Custom sort: Revision progression is AS < A < BS < B < CS < C...
+  // Each letter has two stages: XS (staging) then X (released)
+  const sortByRevision = React.useCallback((pkgs: PackageItem[]) => {
+    return [...pkgs].sort((a, b) => {
+      // Extract revision strings, defaulting to empty for nulls
+      const revA = (a.revision || "").trim().toUpperCase();
+      const revB = (b.revision || "").trim().toUpperCase();
+      
+      // If both empty, maintain original order (by creation time)
+      if (!revA && !revB) return a.packageNumber - b.packageNumber;
+      if (!revA) return -1; // Empty comes first
+      if (!revB) return 1;
+      
+      // Extract the letter from the revision (first character)
+      const letterA = revA.charAt(0);
+      const letterB = revB.charAt(0);
+      
+      // Check if staging (ends with 'S')
+      const isStagingA = revA.endsWith('S');
+      const isStagingB = revB.endsWith('S');
+      
+      // Compare letters first
+      if (letterA !== letterB) {
+        return letterA.localeCompare(letterB);
+      }
+      
+      // Same letter: staging (XS) comes before released (X)
+      if (isStagingA && !isStagingB) return -1;
+      if (!isStagingA && isStagingB) return 1;
+      
+      // Same revision type, maintain creation order
+      return a.packageNumber - b.packageNumber;
+    });
+  }, []);
+
   // Fetch packages when component mounts or quoteNo changes
   React.useEffect(() => {
     if (!quoteNo) return;
@@ -79,7 +114,9 @@ export default function LayoutSnapshotSelector({
 
         const json = await res.json();
         if (json.ok && Array.isArray(json.packages)) {
-          setPackages(json.packages);
+          // Sort packages by revision order
+          const sortedPackages = sortByRevision(json.packages);
+          setPackages(sortedPackages);
         } else {
           setError(json.error || "Unknown error");
         }
@@ -91,7 +128,7 @@ export default function LayoutSnapshotSelector({
     }
 
     fetchPackages();
-  }, [quoteNo]);
+  }, [quoteNo, sortByRevision]);
 
   const handleSelectPackage = async (packageId: number) => {
     setLoadingPackageId(packageId);
