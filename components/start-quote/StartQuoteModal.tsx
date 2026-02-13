@@ -118,6 +118,21 @@ export default function StartQuoteModal() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // ---------- Parse prefill data from chatbot ----------
+  const prefillData = React.useMemo(() => {
+    const prefillRaw = searchParams.get("prefill");
+    if (!prefillRaw) return null;
+    
+    try {
+      const decoded = decodeURIComponent(prefillRaw);
+      const parsed = JSON.parse(decoded);
+      return parsed;
+    } catch (err) {
+      console.warn("Failed to parse prefill data:", err);
+      return null;
+    }
+  }, [searchParams]);
+
   // ---------- Close behavior ----------
   const close = React.useCallback(() => {
     if (typeof window !== "undefined" && window.history.length > 1) {
@@ -127,10 +142,13 @@ export default function StartQuoteModal() {
     router.push("/admin");
   }, [router]);
 
-  // ---------- Seeded entry (minimal, safe) ----------
-  const seededType = (searchParams.get("type") ||
+// ---------- Seeded entry (minimal, safe) ----------
+  // Check both direct URL params AND prefill data from chatbot
+  const seededType = (
+    searchParams.get("type") ||
     searchParams.get("quote_type") ||
-    "").trim();
+    ""
+  ).trim();
   const seededIsCompletePack =
     seededType === "complete_pack" ||
     seededType === "completepack" ||
@@ -149,35 +167,39 @@ export default function StartQuoteModal() {
     seededIsCompletePack ? "complete_pack" : "foam_insert",
   );
 
-  // Common
+  // Common - prefer prefill data over URL params
   const [qty, setQty] = React.useState<string>(
-    (searchParams.get("qty") || "").trim(),
+    prefillData?.qty || searchParams.get("qty") || "",
   );
   const [name, setName] = React.useState<string>(
-    (searchParams.get("customer_name") || "").trim(),
+    searchParams.get("customer_name") || "",
   );
   const [email, setEmail] = React.useState<string>(
-    (searchParams.get("customer_email") || "").trim(),
+    searchParams.get("customer_email") || "",
   );
   const [company, setCompany] = React.useState<string>(
-    (searchParams.get("customer_company") || "").trim(),
+    searchParams.get("customer_company") || "",
   );
   const [phone, setPhone] = React.useState<string>(
-    (searchParams.get("customer_phone") || "").trim(),
+    searchParams.get("customer_phone") || "",
   );
 
-  // Material selection (Step C fully wires)
+  // Material selection - prefer prefill data
   const [materialText, setMaterialText] = React.useState<string>(
-    (searchParams.get("material_text") || searchParams.get("material") || "")
-      .trim(),
+    prefillData?.material?.text ||
+    searchParams.get("material_text") ||
+    searchParams.get("material") ||
+    "",
   );
   const [materialId, setMaterialId] = React.useState<string>(
-    (searchParams.get("material_id") || "").trim(),
+    searchParams.get("material_id") || "",
   );
 
-  // Cavities seed
+  // Cavities seed - prefer prefill data
   const [cavitySeed, setCavitySeed] = React.useState<string>(
-    (searchParams.get("cavity") || "").trim(),
+    prefillData?.firstCavity ||
+    searchParams.get("cavity") ||
+    "",
   );
 
   // Foam Insert specs
@@ -185,8 +207,19 @@ export default function StartQuoteModal() {
   const [insertW, setInsertW] = React.useState<string>("");
   const [insertD, setInsertD] = React.useState<string>("");
 
-  // Seed insert dims if provided
+// Seed insert dims if provided (from URL params OR prefill data)
   React.useEffect(() => {
+    // Check prefill data first
+    if (prefillData?.outside?.l && prefillData?.outside?.w && prefillData?.outside?.h) {
+      if (!seededIsCompletePack) {
+        setInsertL(String(prefillData.outside.l));
+        setInsertW(String(prefillData.outside.w));
+        setInsertD(String(prefillData.outside.h));
+      }
+      return;
+    }
+    
+    // Fall back to URL param
     const dims = (searchParams.get("dims") || "").trim();
     if (!dims) return;
     const m = dims
