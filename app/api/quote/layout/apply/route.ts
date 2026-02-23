@@ -279,6 +279,7 @@ function normalizeLayoutForStorage(layout: any, body: any): any {
 
 async function ensureQuoteHeader(args: {
   quoteNo: string;
+  tenantId: number;
   currentUserId: number | null;
   customerName: string | null;
   customerEmail: string | null;
@@ -291,8 +292,9 @@ async function ensureQuoteHeader(args: {
     select id, quote_no, status, locked, geometry_hash, locked_at
     from quotes
     where quote_no = $1
+      and tenant_id = $2
     `,
-    [args.quoteNo],
+    [args.quoteNo, args.tenantId],
   );
   if (existing) return existing;
 
@@ -311,6 +313,7 @@ async function ensureQuoteHeader(args: {
     const created = await one<QuoteRow>(
       `
       insert into quotes (
+        tenant_id,
         quote_no,
         status,
         customer_name,
@@ -322,10 +325,11 @@ async function ensureQuoteHeader(args: {
         locked_at,
         updated_by_user_id
       )
-      values ($1, 'draft', $2, $3, $4, $5, $6, $7, $8, $9)
+      values ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10)
       returning id, quote_no, status
       `,
       [
+        args.tenantId,
         args.quoteNo,
         fallbackCustomerName,
         args.customerEmail,
@@ -354,6 +358,7 @@ async function ensureQuoteHeader(args: {
     const created2 = await one<QuoteRow>(
       `
       insert into quotes (
+        tenant_id,
         quote_no,
         status,
         customer_name,
@@ -364,10 +369,20 @@ async function ensureQuoteHeader(args: {
         geometry_hash,
         locked_at
       )
-      values ($1, 'draft', $2, $3, $4, $5, $6, $7, $8)
+      values ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9)
       returning id, quote_no, status
       `,
-      [args.quoteNo, fallbackCustomerName, args.customerEmail, args.customerPhone, args.customerCompany, false, null, null],
+      [
+        args.tenantId,
+        args.quoteNo,
+        fallbackCustomerName,
+        args.customerEmail,
+        args.customerPhone,
+        args.customerCompany,
+        false,
+        null,
+        null,
+      ],
     );
 
     if (created2) {
@@ -385,11 +400,11 @@ async function ensureQuoteHeader(args: {
     // Minimal but still satisfies NOT NULL customer_name
     const created3 = await one<QuoteRow>(
       `
-      insert into quotes (quote_no, status, customer_name, locked, geometry_hash, locked_at)
-      values ($1, 'draft', $2, $3, $4, $5)
+      insert into quotes (tenant_id, quote_no, status, customer_name, locked, geometry_hash, locked_at)
+      values ($1, $2, 'draft', $3, $4, $5, $6)
       returning id, quote_no, status
       `,
-      [args.quoteNo, fallbackCustomerName, false, null, null],
+      [args.tenantId, args.quoteNo, fallbackCustomerName, false, null, null],
     );
 
     if (created3) {
@@ -1154,13 +1169,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let currentUserId: number | null = null;
-  try {
-    const user = await getCurrentUserFromRequest(req);
-    if (user) currentUserId = user.id;
-  } catch (e) {
-    console.error("getCurrentUserFromRequest failed in layout/apply:", e);
+  const user = await getCurrentUserFromRequest(req);
+  if (!user) {
+    return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
   }
+  const currentUserId: number | null = user.id;
+  const tenantId: number = user.tenant_id;
 
   const rawCustomer = body.customer && typeof body.customer === "object" ? body.customer : null;
 
@@ -1196,6 +1210,7 @@ export async function POST(req: NextRequest) {
     // Create it (draft) if missing, then continue.
     const quote = await ensureQuoteHeader({
       quoteNo,
+      tenantId,
       currentUserId,
       customerName,
       customerEmail,
@@ -1220,13 +1235,13 @@ export async function POST(req: NextRequest) {
     if (!quote.locked && salesRepSlug) {
       try {
         const rep = await one<{ id: number }>(
-          `select id from users where sales_slug = $1 limit 1`,
-          [salesRepSlug],
+          `select id from users where tenant_id = $1 and sales_slug = $2 limit 1`,
+          [tenantId, salesRepSlug],
         );
         if (rep?.id) {
           await q(
-            `update quotes set sales_rep_id = $1 where id = $2 and sales_rep_id is null`,
-            [rep.id, quote.id],
+            `update quotes set sales_rep_id = $1 where tenant_id = $2 and id = $3 and sales_rep_id is null`,
+            [rep.id, tenantId, quote.id],
           );
         }
       } catch (e) {
@@ -1284,9 +1299,9 @@ export async function POST(req: NextRequest) {
           geometry_hash = $2,
           locked_at = now(),
           updated_by_user_id = coalesce($3, updated_by_user_id)
-        where id = $1
+        where id = $1 and tenant_id = $4
         `,
-        [quote.id, geometryHash, currentUserId],
+        [quote.id, geometryHash, currentUserId, tenantId],
       );
 
       return ok(
@@ -1476,9 +1491,9 @@ export async function POST(req: NextRequest) {
             phone = coalesce($4, phone),
             company = coalesce($5, company),
             updated_by_user_id = coalesce($6, updated_by_user_id)
-          where id = $1
+          where id = $1 and tenant_id = $7
         `,
-        [quote.id, customerName, customerEmail, customerPhone, customerCompany, currentUserId],
+        [quote.id, customerName, customerEmail, customerPhone, customerCompany, currentUserId, tenantId],
       );
     }
 
@@ -1588,9 +1603,9 @@ export async function POST(req: NextRequest) {
             else 'applied'
           end,
           updated_by_user_id = coalesce($2, updated_by_user_id)
-        where id = $1
+        where id = $1 and tenant_id = $3
         `,
-        [quote.id, currentUserId],
+        [quote.id, currentUserId, tenantId],
       );
     } catch (e) {
       console.error("[layout/apply] Failed to update quote status for", quoteNo, e);
@@ -1606,9 +1621,9 @@ export async function POST(req: NextRequest) {
         set
           status = case when status = 'draft' then 'applied' else status end,
           updated_by_user_id = coalesce($2, updated_by_user_id)
-        where id = $1
+        where id = $1 and tenant_id = $3
         `,
-        [quote.id, currentUserId],
+        [quote.id, currentUserId, tenantId],
       );
     } catch (e) {
       console.error("[layout/apply] Failed to promote quote status to applied for", quoteNo, e);
@@ -1903,9 +1918,9 @@ export async function POST(req: NextRequest) {
           set
             status = 'revised',
             updated_by_user_id = coalesce($2, updated_by_user_id)
-          where id = $1
+          where id = $1 and tenant_id = $3
           `,
-          [quote.id, currentUserId],
+          [quote.id, currentUserId, tenantId],
         );
       } else if (prevStatus === "draft") {
         await q(
@@ -1914,9 +1929,9 @@ export async function POST(req: NextRequest) {
           set
             status = 'applied',
             updated_by_user_id = coalesce($2, updated_by_user_id)
-          where id = $1
+          where id = $1 and tenant_id = $3
           `,
-          [quote.id, currentUserId],
+          [quote.id, currentUserId, tenantId],
         );
       }
     } catch (e) {
@@ -1966,13 +1981,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const user = await getCurrentUserFromRequest(req);
+    if (!user) return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+    const tenantId = user.tenant_id;
+
     const quote = await one<QuoteRow>(
       `
       select id, quote_no
       from quotes
       where quote_no = $1
+        and tenant_id = $2
       `,
-      [quoteNo],
+      [quoteNo, tenantId],
     );
 
     if (!quote) {
