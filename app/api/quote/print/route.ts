@@ -22,7 +22,6 @@ import { loadFacts } from "@/app/lib/memory";
 import { buildLayoutExports, computeGeometryHash } from "@/app/lib/layout/exports";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 
-
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -210,6 +209,12 @@ export async function GET(req: NextRequest) {
     return bad({ ok: false, error: "MISSING_QUOTE_NO" }, 400);
   }
 
+  // Tenant guard (single-axis): require auth and scope quote lookup by tenant_id.
+  const user = await getCurrentUserFromRequest(req);
+  if (!user) {
+    return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+  }
+
   try {
     /* ---------------- Quote header ---------------- */
 
@@ -228,8 +233,9 @@ export async function GET(req: NextRequest) {
         geometry_hash
       from quotes
       where quote_no = $1
+        and tenant_id = $2
       `,
-      [quoteNo],
+      [quoteNo, user.tenant_id],
     );
 
     if (!quote) {
@@ -435,8 +441,8 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+
     // --- CAD RBAC (A): redact CAD exports unless admin/sales/cs ---
-    const user = await getCurrentUserFromRequest(req);
     const role = (user?.role || "").toLowerCase();
     const cadAllowed = role === "admin" || role === "sales" || role === "cs";
 
@@ -448,7 +454,6 @@ export async function GET(req: NextRequest) {
         step_text: null,
       };
     }
-
 
     /* ---------------- Packaging lines ---------------- */
 
@@ -478,7 +483,10 @@ export async function GET(req: NextRequest) {
     // Only count billable priced items toward foam subtotal.
     const foamSubtotal = items.reduce((s, i) => s + (Number(i.price_total_usd) || 0), 0);
 
-    const packagingSubtotal = packagingLines.reduce((s, l) => s + (Number(l.extended_price_usd) || 0), 0);
+    const packagingSubtotal = packagingLines.reduce(
+      (s, l) => s + (Number(l.extended_price_usd) || 0),
+      0,
+    );
 
     return ok({
       ok: true,
