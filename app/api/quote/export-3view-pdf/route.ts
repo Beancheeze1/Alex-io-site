@@ -44,34 +44,39 @@ type ItemRow = {
 export async function GET(req: NextRequest) {
   try {
     const quoteNo = req.nextUrl.searchParams.get("quote_no");
-    
+
     if (!quoteNo) {
       return err("MISSING_QUOTE_NO", "Provide quote_no parameter", 400);
     }
-    
-    // Check permissions - only admin/sales/cs can export CAD
+
+    // Auth + permissions - only admin/sales/cs can export CAD
     const user = await getCurrentUserFromRequest(req);
+    if (!user) {
+      return err("UNAUTHENTICATED", "Login required.", 401);
+    }
+
     const role = (user?.role || "").toLowerCase();
     const cadAllowed = role === "admin" || role === "sales" || role === "cs";
-    
+
     if (!cadAllowed) {
       return err("PERMISSION_DENIED", "CAD exports require admin/sales/cs role", 403);
     }
-    
-    // Fetch quote
+
+    // Fetch quote (tenant-scoped)
     const quote = await one<QuoteRow>(
       `
       SELECT id, quote_no, customer_name, locked
       FROM quotes
       WHERE quote_no = $1
+        AND tenant_id = $2
       `,
-      [quoteNo]
+      [quoteNo, user.tenant_id],
     );
-    
+
     if (!quote) {
       return err("QUOTE_NOT_FOUND", `Quote ${quoteNo} not found`, 404);
     }
-    
+
     // Fetch layout
     const layout = await one<LayoutRow>(
       `
@@ -81,13 +86,13 @@ export async function GET(req: NextRequest) {
       ORDER BY created_at DESC
       LIMIT 1
       `,
-      [quote.id]
+      [quote.id],
     );
-    
+
     if (!layout || !layout.layout_json) {
       return err("NO_LAYOUT", "Quote has no layout to export", 404);
     }
-    
+
     // Fetch items for material names
     const items = await q<ItemRow>(
       `
@@ -103,16 +108,16 @@ export async function GET(req: NextRequest) {
       WHERE qi.quote_id = $1
       ORDER BY qi.id ASC
       `,
-      [quote.id]
+      [quote.id],
     );
-    
+
     // Convert layout to 3D drawing input
     const drawingInput = layoutToDrawingInput(layout.layout_json, quote, items);
-    
+
     if (!drawingInput) {
       return err("CONVERSION_FAILED", "Could not convert layout to 3D drawing", 500);
     }
-    
+
     // Generate PDF
     let pdfBuffer: Buffer;
     try {
@@ -121,13 +126,13 @@ export async function GET(req: NextRequest) {
       console.error("3-view PDF generation failed:", e);
       return err("PDF_GENERATION_FAILED", String(e?.message || e), 500);
     }
-    
+
     // Return as downloadable file
     const filename = `${quoteNo}_3View_Drawing.pdf`;
-    
+
     // Convert Buffer to Uint8Array for NextResponse
     const uint8Array = new Uint8Array(pdfBuffer);
-    
+
     return new NextResponse(uint8Array, {
       status: 200,
       headers: {
@@ -136,7 +141,6 @@ export async function GET(req: NextRequest) {
         "Content-Length": String(pdfBuffer.length),
       },
     });
-    
   } catch (e: any) {
     console.error("export-3view-pdf exception:", e);
     return err("EXPORT_EXCEPTION", String(e?.message || e), 500);
@@ -146,40 +150,38 @@ export async function GET(req: NextRequest) {
 /**
  * Convert layout JSON to Drawing3DInput format
  */
-function layoutToDrawingInput(
-  layoutJson: any,
-  quote: QuoteRow,
-  items: ItemRow[]
-): Drawing3DInput | null {
+function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]): Drawing3DInput | null {
   try {
     const block = layoutJson?.block || layoutJson?.Block || {};
-    
+
     const lengthIn = Number(block.lengthIn || block.length_in || block.length || 0);
     const widthIn = Number(block.widthIn || block.width_in || block.width || 0);
-    const heightIn = Number(block.thicknessIn || block.thickness_in || block.heightIn || block.height_in || block.height || 0);
-    
+    const heightIn = Number(
+      block.thicknessIn || block.thickness_in || block.heightIn || block.height_in || block.height || 0,
+    );
+
     if (lengthIn <= 0 || widthIn <= 0 || heightIn <= 0) {
       return null;
     }
-    
+
     // Get layers from stack or create single layer
     const stack = layoutJson?.stack || layoutJson?.layers || [];
     const layers: Layer3D[] = [];
-    
+
     if (stack.length > 0) {
       for (let i = 0; i < stack.length; i++) {
         const layerData = stack[i];
         const thicknessIn = Number(layerData?.thicknessIn || layerData?.thickness_in || 0);
-        
+
         if (thicknessIn <= 0) continue;
-        
+
         // Find corresponding material from items
         const item = items[i] || items[0]; // Fallback to first item
         const materialName = item?.material_name || `Layer ${i + 1}`;
-        
+
         const cavities: Cavity3D[] = [];
         const cavs = layerData?.cavities || [];
-        
+
         for (const cav of cavs) {
           const shape = (cav.shape || "rect").toLowerCase();
           const x = Number(cav.x || 0);
@@ -187,7 +189,7 @@ function layoutToDrawingInput(
           const lengthIn = Number(cav.lengthIn || cav.length_in || 0);
           const widthIn = Number(cav.widthIn || cav.width_in || 0);
           const depthIn = Number(cav.depthIn || cav.depth_in || thicknessIn);
-          
+
           cavities.push({
             id: cav.id || `cav_${i}_${cavities.length}`,
             shape: shape as any,
@@ -201,7 +203,7 @@ function layoutToDrawingInput(
             label: cav.label || null,
           });
         }
-        
+
         layers.push({
           id: layerData.id || `layer_${i}`,
           label: layerData.label || `L${i + 1}`,
@@ -214,7 +216,7 @@ function layoutToDrawingInput(
       // Single layer fallback
       const cavities: Cavity3D[] = [];
       const cavs = layoutJson?.cavities || [];
-      
+
       for (let i = 0; i < cavs.length; i++) {
         const cav = cavs[i];
         const shape = (cav.shape || "rect").toLowerCase();
@@ -223,7 +225,7 @@ function layoutToDrawingInput(
         const lengthIn = Number(cav.lengthIn || cav.length_in || 0);
         const widthIn = Number(cav.widthIn || cav.width_in || 0);
         const depthIn = Number(cav.depthIn || cav.depth_in || heightIn);
-        
+
         cavities.push({
           id: cav.id || `cav_${i}`,
           shape: shape as any,
@@ -237,9 +239,9 @@ function layoutToDrawingInput(
           label: cav.label || null,
         });
       }
-      
+
       const materialName = items[0]?.material_name || "Foam";
-      
+
       layers.push({
         id: "layer_1",
         label: "L1",
@@ -248,10 +250,10 @@ function layoutToDrawingInput(
         cavities,
       });
     }
-    
+
     const revision = quote.locked ? "A" : "AS";
     const date = new Date().toISOString().split("T")[0];
-    
+
     return {
       quoteNo: quote.quote_no,
       customerName: quote.customer_name,
@@ -261,7 +263,6 @@ function layoutToDrawingInput(
       date,
       notes: [],
     };
-    
   } catch (e) {
     console.error("layoutToDrawingInput conversion error:", e);
     return null;

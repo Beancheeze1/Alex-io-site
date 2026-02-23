@@ -27,9 +27,7 @@ type PackageRow = {
   created_by_user_id: number | null;
 };
 
-function parseRevisionAndCleanNotes(
-  raw: string | null
-): { revision: string | null; notes: string | null } {
+function parseRevisionAndCleanNotes(raw: string | null): { revision: string | null; notes: string | null } {
   if (!raw) return { revision: null, notes: null };
   const s = String(raw);
 
@@ -62,16 +60,13 @@ export async function GET(req: NextRequest) {
   const isAdmin = role === "admin";
 
   if (!user) {
-    return NextResponse.json(
-      { ok: false, error: "UNAUTHENTICATED" },
-      { status: 401 }
-    );
+    return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
   }
-  
+
   if (!isAdmin) {
     return NextResponse.json(
       { ok: false, error: "FORBIDDEN", message: "Admin access required." },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
@@ -79,23 +74,17 @@ export async function GET(req: NextRequest) {
   const quoteNo = searchParams.get("quote_no")?.trim() || "";
 
   if (!quoteNo) {
-    return NextResponse.json(
-      { ok: false, error: "MISSING_QUOTE_NO" },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, error: "MISSING_QUOTE_NO" }, { status: 400 });
   }
 
-  // Look up quote
+  // Look up quote (tenant-scoped)
   const quote = await one<QuoteRow>(
-    `SELECT id, quote_no FROM quotes WHERE quote_no = $1`,
-    [quoteNo]
+    `SELECT id, quote_no FROM quotes WHERE quote_no = $1 AND tenant_id = $2`,
+    [quoteNo, user.tenant_id],
   );
 
   if (!quote) {
-    return NextResponse.json(
-      { ok: false, error: "QUOTE_NOT_FOUND" },
-      { status: 404 }
-    );
+    return NextResponse.json({ ok: false, error: "QUOTE_NOT_FOUND" }, { status: 404 });
   }
 
   // Load all packages for this quote, ordered by creation date
@@ -112,7 +101,7 @@ export async function GET(req: NextRequest) {
     WHERE quote_id = $1
     ORDER BY created_at ASC, id ASC
     `,
-    [quote.id]
+    [quote.id],
   );
 
   // Load facts to get revision context
@@ -132,10 +121,7 @@ export async function GET(req: NextRequest) {
       cavityCount = layout.cavities.length;
     }
     if (Array.isArray(layout.stack)) {
-      cavityCount = layout.stack.reduce(
-        (sum: number, layer: any) => sum + (layer.cavities?.length || 0),
-        0
-      );
+      cavityCount = layout.stack.reduce((sum: number, layer: any) => sum + (layer.cavities?.length || 0), 0);
     }
 
     // Count layers

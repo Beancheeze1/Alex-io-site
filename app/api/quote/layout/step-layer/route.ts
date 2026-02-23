@@ -118,10 +118,11 @@ export async function GET(req: Request) {
       FROM public.quote_layout_packages lp
       JOIN public.quotes q ON q.id = lp.quote_id
       WHERE q.quote_no = $1
+        AND q.tenant_id = $2
       ORDER BY lp.created_at DESC, lp.id DESC
       LIMIT 1
       `,
-      [quote_no],
+      [quote_no, user.tenant_id],
     );
 
     if (!pkg) return jsonErr(404, "NOT_FOUND", "No layout package found for this quote.");

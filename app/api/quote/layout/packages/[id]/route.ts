@@ -25,7 +25,7 @@ type PackageRow = {
 
 export async function GET(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> | { id: string } }
+  context: { params: Promise<{ id: string }> | { id: string } },
 ) {
   // Admin-only check
   const user = await getCurrentUserFromRequest(req as any);
@@ -33,16 +33,13 @@ export async function GET(
   const isAdmin = role === "admin";
 
   if (!user) {
-    return NextResponse.json(
-      { ok: false, error: "UNAUTHENTICATED" },
-      { status: 401 }
-    );
+    return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
   }
-  
+
   if (!isAdmin) {
     return NextResponse.json(
       { ok: false, error: "FORBIDDEN", message: "Admin access required." },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
@@ -55,18 +52,18 @@ export async function GET(
   if (!Number.isFinite(packageId) || packageId <= 0) {
     return NextResponse.json(
       { ok: false, error: "INVALID_PACKAGE_ID", message: `Invalid package ID: ${params.id}` },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (!quoteNo) {
     return NextResponse.json(
       { ok: false, error: "MISSING_QUOTE_NO", message: "quote_no parameter is required" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  // Load the specific package, verifying it belongs to the correct quote
+  // Load the specific package, verifying it belongs to the correct quote (tenant-scoped)
   const pkg = await one<PackageRow>(
     `
     SELECT 
@@ -80,15 +77,17 @@ export async function GET(
       lp.created_at
     FROM quote_layout_packages lp
     JOIN quotes q ON q.id = lp.quote_id
-    WHERE lp.id = $1 AND q.quote_no = $2
+    WHERE lp.id = $1
+      AND q.quote_no = $2
+      AND q.tenant_id = $3
     `,
-    [packageId, quoteNo]
+    [packageId, quoteNo, user.tenant_id],
   );
 
   if (!pkg) {
     return NextResponse.json(
       { ok: false, error: "PACKAGE_NOT_FOUND", message: `Package ${packageId} not found for quote ${quoteNo}` },
-      { status: 404 }
+      { status: 404 },
     );
   }
 

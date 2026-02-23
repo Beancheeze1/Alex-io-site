@@ -64,8 +64,9 @@ export async function GET(req: NextRequest) {
       select id, quote_no, locked, geometry_hash
       from quotes
       where quote_no = $1
+        and tenant_id = $2
       `,
-      [quoteNo],
+      [quoteNo, user.tenant_id],
     );
 
     if (!quote) {

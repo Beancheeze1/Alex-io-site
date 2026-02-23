@@ -57,8 +57,9 @@ export async function GET(req: NextRequest) {
       select id, quote_no, locked, geometry_hash
       from quotes
       where quote_no = $1
+        and tenant_id = $2
       `,
-      [quoteNo],
+      [quoteNo, user.tenant_id],
     );
 
     if (!quote) {
@@ -78,7 +79,11 @@ export async function GET(req: NextRequest) {
 
     if (!layoutPkg) {
       return bad(
-        { ok: false, error: "LAYOUT_NOT_FOUND", message: "No layout has been saved for this quote yet. Try applying a layout first." },
+        {
+          ok: false,
+          error: "LAYOUT_NOT_FOUND",
+          message: "No layout has been saved for this quote yet. Try applying a layout first.",
+        },
         404,
       );
     }
@@ -110,7 +115,11 @@ export async function GET(req: NextRequest) {
 
     if (!stepText || stepText.trim().length === 0) {
       return bad(
-        { ok: false, error: "STEP_NOT_AVAILABLE", message: "No STEP data has been saved for this quote yet. Try clicking Apply to quote again." },
+        {
+          ok: false,
+          error: "STEP_NOT_AVAILABLE",
+          message: "No STEP data has been saved for this quote yet. Try clicking Apply to quote again.",
+        },
         500,
       );
     }

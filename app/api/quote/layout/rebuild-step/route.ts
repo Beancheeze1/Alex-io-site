@@ -115,7 +115,7 @@ export async function POST(req: Request) {
     const quote_no = String(body?.quote_no || "").trim();
     if (!quote_no) return jsonErr(400, "BAD_REQUEST", "Missing quote_no.");
 
-    // Load latest layout package for this quote + lock status.
+    // Load latest layout package for this quote + lock status (tenant-scoped).
     const pkg = await one<{
       id: number;
       quote_id: number;
@@ -127,10 +127,11 @@ export async function POST(req: Request) {
       FROM public.quote_layout_packages lp
       JOIN public.quotes q ON q.id = lp.quote_id
       WHERE q.quote_no = $1
+        AND q.tenant_id = $2
       ORDER BY lp.created_at DESC, lp.id DESC
       LIMIT 1
     `,
-      [quote_no],
+      [quote_no, user.tenant_id],
     );
 
     if (!pkg) return jsonErr(404, "NOT_FOUND", "No layout package found for this quote.");
