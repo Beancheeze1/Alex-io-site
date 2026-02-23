@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 200);
 
     if (isSales) {
-      // Sales can only see their own quotes.
+      // Sales can only see their own quotes (AND within their tenant).
       const rows = await q(
         `
         SELECT q.id,
@@ -54,11 +54,12 @@ export async function GET(req: NextRequest) {
         FROM public."quotes" q
         LEFT JOIN public."users" u
           ON u.id = q.sales_rep_id
-        WHERE sales_rep_id = $1
-        ORDER BY created_at DESC
-        LIMIT $2
+        WHERE q.tenant_id = $1
+          AND q.sales_rep_id = $2
+        ORDER BY q.created_at DESC
+        LIMIT $3
       `,
-        [user.id, limit],
+        [user.tenant_id, user.id, limit],
       );
 
       const withRevision = await Promise.all(
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: true, quotes: withRevision });
     }
 
-    // Admin + CS: all quotes
+    // Admin + CS: all quotes (within tenant)
     const rows = await q(
       `
       SELECT q.id,
@@ -100,10 +101,11 @@ export async function GET(req: NextRequest) {
       FROM public."quotes" q
       LEFT JOIN public."users" u
         ON u.id = q.sales_rep_id
-      ORDER BY created_at DESC
-      LIMIT $1
+      WHERE q.tenant_id = $1
+      ORDER BY q.created_at DESC
+      LIMIT $2
     `,
-      [limit],
+      [user.tenant_id, limit],
     );
 
     const withRevision = await Promise.all(
@@ -141,7 +143,7 @@ export async function GET(req: NextRequest) {
 //   "phone": "555-1234",
 //   "status": "draft",
 //   "sales_rep_id": 2,          // optional, direct id (admin tools)
-//   "sales_rep_slug": "chuck"   // optional, looked up via users.sales_slug
+//   "sales_rep_slug": "chuck"   // optional, looked up via users.sales_slug (tenant-scoped)
 // }
 export async function POST(req: NextRequest) {
   try {
@@ -183,8 +185,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Resolve sales_rep_id:
-    // 1) If a numeric id was provided, trust it.
-    // 2) Else, if a slug was provided, look up users.id where sales_slug = slug.
+    // 1) If a numeric id was provided, trust it (but keep within tenant by constraining the upsert).
+    // 2) Else, if a slug was provided, look up users.id where sales_slug = slug AND tenant_id = current tenant.
     // 3) Else, if the caller is SALES, default to their own user.id.
     let salesRepId: number | null = null;
 
@@ -202,10 +204,11 @@ export async function POST(req: NextRequest) {
             `
             SELECT id
             FROM public."users"
-            WHERE sales_slug = $1
+            WHERE tenant_id = $1
+              AND sales_slug = $2
             LIMIT 1;
           `,
-            [slug],
+            [user.tenant_id, slug],
           );
           if (userRow && userRow.id) {
             salesRepId = Number(userRow.id);
@@ -223,9 +226,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Tenant-scoped upsert: quote_no unique is global today, so we must prevent cross-tenant overwrite.
+    // We enforce tenant_id in insert and also in ON CONFLICT by keeping tenant_id unchanged.
     const row = await one(
       `
       INSERT INTO public."quotes"(
+        tenant_id,
         quote_no,
         customer_name,
         email,
@@ -233,17 +239,21 @@ export async function POST(req: NextRequest) {
         status,
         sales_rep_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       ON CONFLICT (quote_no) DO UPDATE
         SET customer_name = EXCLUDED.customer_name,
             email         = EXCLUDED.email,
             phone         = EXCLUDED.phone,
             status        = EXCLUDED.status,
+            -- keep tenant_id stable (never cross-tenant)
+            tenant_id     = public."quotes".tenant_id,
             -- Only update sales_rep_id if a new non-null value was provided;
             -- otherwise keep the existing assignment.
             sales_rep_id  = COALESCE(EXCLUDED.sales_rep_id, public."quotes".sales_rep_id),
             updated_at    = now()
+      WHERE public."quotes".tenant_id = $1
       RETURNING id,
+                tenant_id,
                 quote_no,
                 customer_name,
                 email,
@@ -256,12 +266,24 @@ export async function POST(req: NextRequest) {
                 created_at,
                 updated_at
     `,
-      [quote_no, customer_name, email, phone, status, salesRepId],
+      [user.tenant_id, quote_no, customer_name, email, phone, status, salesRepId],
     );
+
+    if (!row) {
+      // Conflict existed but belonged to a different tenant.
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "tenant_conflict",
+          message: "Quote number already exists in another tenant.",
+        },
+        { status: 409 },
+      );
+    }
 
     // --- REVISION INIT (Path A) ---
     try {
-      const quoteNo = String(row?.quote_no ?? "");
+      const quoteNo = String((row as any)?.quote_no ?? "");
       if (quoteNo) {
         const facts: any = await loadFacts(quoteNo);
         // Do not overwrite existing revisions.
