@@ -106,6 +106,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Enforce tenant_id presence for admin creating users (fail closed).
+    if (!current || typeof current.tenant_id !== "number") {
+  return bad(
+    {
+      ok: false,
+      error: "tenant_required",
+      message: "Current admin user is missing tenant assignment.",
+    },
+    403,
+  );
+}
+
+const tenantId = current.tenant_id;
+
     const body = (await req.json().catch(() => null)) as any;
 
     const emailRaw = body?.email;
@@ -168,11 +182,11 @@ export async function POST(req: NextRequest) {
         updated_at: string;
       }>(
         `
-        insert into public.users (email, name, role, password_hash, sales_slug)
-        values ($1, $2, $3, $4, $5)
+        insert into public.users (email, name, role, password_hash, sales_slug, tenant_id)
+        values ($1, $2, $3, $4, $5, $6)
         returning id, email, name, role, sales_slug, created_at, updated_at
         `,
-        [email, name, role, password_hash, sales_slug],
+        [email, name, role, password_hash, sales_slug, tenantId],
       );
 
       return ok({ ok: true, user: created }, 200);
@@ -222,6 +236,7 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
 // ---------- DELETE: delete user ----------
 export async function DELETE(req: NextRequest) {
   try {
@@ -280,34 +295,13 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    try {
-      await one<{ id: number }>(
-        `delete from public.users where id = $1 returning id`,
-        [id],
-      );
+    // Delete
+    await one<{ ok: boolean }>(
+      `with d as (delete from public.users where id = $1 returning 1) select true as ok`,
+      [id],
+    );
 
-      return ok({ ok: true, deleted_id: id }, 200);
-    } catch (dbErr: any) {
-      const code = String(dbErr?.code || "");
-
-      // Common FK constraint code (e.g., if user is referenced elsewhere).
-      if (code === "23503") {
-        return bad(
-          {
-            ok: false,
-            error: "fk_constraint",
-            message: "User cannot be deleted because it is referenced by other records.",
-          },
-          409,
-        );
-      }
-
-      console.error("DB error deleting user:", dbErr);
-      return bad(
-        { ok: false, error: "db_error", message: "Failed to delete user. Check logs." },
-        500,
-      );
-    }
+    return ok({ ok: true }, 200);
   } catch (err: any) {
     console.error("Error in DELETE /api/admin/users:", err);
     return bad(
@@ -316,84 +310,3 @@ export async function DELETE(req: NextRequest) {
     );
   }
 }
-
-// ---------- PATCH: reset user password (admin) ----------
-export async function PATCH(req: NextRequest) {
-  try {
-    const current = await getCurrentUserFromRequest(req);
-    if (!requireAdmin(current)) {
-      return bad(
-        { ok: false, error: "forbidden", message: "Admin role required." },
-        403,
-      );
-    }
-
-    // Accept id from query string first: /api/admin/users?id=123
-    // Fallback: JSON body { id: 123 }.
-    const url = new URL(req.url);
-    const idParam = url.searchParams.get("id");
-
-    let id: number | null =
-      typeof idParam === "string" && idParam.trim().length > 0
-        ? Number(idParam)
-        : null;
-
-    if (!Number.isFinite(id as any)) id = null;
-
-    if (id === null) {
-      const body = (await req.json().catch(() => null)) as any;
-      const bodyId = body?.id;
-      const n = typeof bodyId === "string" || typeof bodyId === "number" ? Number(bodyId) : NaN;
-      if (Number.isFinite(n)) id = n;
-    }
-
-    if (id === null || !Number.isInteger(id) || id <= 0) {
-      return bad(
-        { ok: false, error: "invalid_payload", message: "Expected ?id=<number> (or JSON { id })." },
-        400,
-      );
-    }
-
-    // Confirm user exists.
-    const exists = await one<{ id: number; email: string }>(
-      `select id, email from public.users where id = $1`,
-      [id],
-    ).catch(() => null);
-
-    if (!exists?.id) {
-      return bad({ ok: false, error: "not_found", message: "User not found." }, 404);
-    }
-
-    // Generate + hash a new temp password (one-time reveal).
-    const tempPassword = makeTempPassword();
-    const password_hash = await bcrypt.hash(tempPassword, 10);
-
-    try {
-      await one<{ id: number }>(
-        `
-        update public.users
-        set password_hash = $2, updated_at = now()
-        where id = $1
-        returning id
-        `,
-        [id, password_hash],
-      );
-
-      // Return temp password ONLY in response (not stored plaintext).
-      return ok({ ok: true, id, email: exists.email, temp_password: tempPassword }, 200);
-    } catch (dbErr: any) {
-      console.error("DB error resetting password:", dbErr);
-      return bad(
-        { ok: false, error: "db_error", message: "Failed to reset password. Check logs." },
-        500,
-      );
-    }
-  } catch (err: any) {
-    console.error("Error in PATCH /api/admin/users:", err);
-    return bad(
-      { ok: false, error: "server_error", message: "Unexpected error resetting password. Check logs." },
-      500,
-    );
-  }
-}
-

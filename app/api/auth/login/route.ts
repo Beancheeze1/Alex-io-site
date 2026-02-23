@@ -4,7 +4,7 @@
 // POST JSON: { email, password }
 // On success:
 //   - Sets HTTP-only session cookie
-//   - Returns { ok: true, user: { id, email, name, role } }
+//   - Returns { ok: true, user: { id, email, name, role, tenant_id } }
 
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
@@ -24,6 +24,7 @@ type UserRow = {
   email: string;
   name: string;
   role: string;
+  tenant_id: number;
   password_hash: string;
 };
 
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
   try {
     const user = await one<UserRow>(
       `
-      select id, email, name, role, password_hash
+      select id, email, name, role, tenant_id, password_hash
       from users
       where email = $1
       `,
@@ -75,8 +76,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) {
+    // Enforce tenant_id at login boundary (fail closed).
+    if (typeof user.tenant_id !== "number") {
+      return bad(
+        {
+          error: "tenant_required",
+          message: "User is missing tenant assignment.",
+        },
+        403,
+      );
+    }
+
+    const okPwd = await bcrypt.compare(password, user.password_hash);
+    if (!okPwd) {
       return bad(
         {
           error: "invalid_credentials",
@@ -91,6 +103,7 @@ export async function POST(req: NextRequest) {
       email: user.email,
       name: user.name,
       role: user.role,
+      tenant_id: user.tenant_id,
     };
 
     const token = createSessionToken(safeUser);
@@ -119,17 +132,9 @@ export async function POST(req: NextRequest) {
     return bad(
       {
         error: "server_error",
-        message: "There was a problem logging in. Please try again.",
+        message: "Unexpected error. Check server logs.",
       },
       500,
     );
   }
-}
-
-export function GET() {
-  // Optional: You can expand this later if you want a GET to check basic health.
-  return NextResponse.json(
-    { ok: false, error: "method_not_allowed" },
-    { status: 405 },
-  );
 }

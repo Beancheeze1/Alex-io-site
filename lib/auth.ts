@@ -20,6 +20,7 @@ type SessionPayload = {
   email: string;
   name: string;
   role: string;
+  tenant_id: number;
   iat: number; // issued at (seconds)
   exp: number; // expires at (seconds)
 };
@@ -29,6 +30,7 @@ export type CurrentUser = {
   email: string;
   name: string;
   role: string;
+  tenant_id: number;
 };
 
 function requireEnv(name: string): string {
@@ -52,6 +54,7 @@ export function createSessionToken(user: CurrentUser): string {
     email: user.email,
     name: user.name,
     role: user.role,
+    tenant_id: user.tenant_id,
     iat: nowSec,
     exp: nowSec + SESSION_MAX_AGE_SEC,
   };
@@ -112,9 +115,10 @@ async function getUserById(userId: number): Promise<CurrentUser | null> {
     email: string;
     name: string;
     role: string;
+    tenant_id: number | null;
   }>(
     `
-    select id, email, name, role
+    select id, email, name, role, tenant_id
     from users
     where id = $1
     `,
@@ -123,11 +127,15 @@ async function getUserById(userId: number): Promise<CurrentUser | null> {
 
   if (!row) return null;
 
+  // Enforce tenant_id at auth boundary (fail closed).
+  if (row.tenant_id === null || typeof row.tenant_id !== "number") return null;
+
   return {
     id: row.id,
     email: row.email,
     name: row.name,
     role: row.role,
+    tenant_id: row.tenant_id,
   };
 }
 
@@ -176,4 +184,3 @@ export function isRoleAllowed(
   if (!r) return false;
   return allowed.includes(r);
 }
-
