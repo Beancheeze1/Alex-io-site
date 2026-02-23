@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
       email: user.email,
       name: user.name,
       role: user.role,
+      tenant_id: user.tenant_id,
     },
     role: user.role,
   });
