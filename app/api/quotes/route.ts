@@ -7,11 +7,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 // GET /api/quotes?limit=25
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUserFromRequest(req);
+
+    // Enforce tenant host -> session tenant match (A2 subdomain multi-tenant)
+    const enforced = await enforceTenantMatch(req, user);
+    if (!enforced.ok) {
+      return NextResponse.json(enforced.body, { status: enforced.status });
+    }
 
     if (!user) {
       return NextResponse.json(
@@ -148,6 +155,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUserFromRequest(req);
+
+    // Enforce tenant host -> session tenant match (A2 subdomain multi-tenant)
+    const enforced = await enforceTenantMatch(req, user);
+    if (!enforced.ok) {
+      return NextResponse.json(enforced.body, { status: enforced.status });
+    }
 
     if (!user) {
       return NextResponse.json(
