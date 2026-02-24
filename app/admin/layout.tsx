@@ -26,7 +26,7 @@ export default async function AdminLayout({ children }: Props) {
     redirect("/login?next=/admin");
   }
 
-   // Allow admin, cs, sales into /admin shell; restrict what they can access via nav + per-page guards.
+  // Allow admin, cs, sales into /admin shell; restrict what they can access via nav + per-page guards.
   // Viewer (or unknown) gets pushed out.
   const role = (user.role || "").toLowerCase();
   const isAdmin = role === "admin";
@@ -37,7 +37,6 @@ export default async function AdminLayout({ children }: Props) {
     redirect("/my-quotes");
   }
 
-
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-50">
       <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
@@ -45,11 +44,15 @@ export default async function AdminLayout({ children }: Props) {
           <span className="text-sm font-semibold tracking-wide text-neutral-200">
             Alex-IO Admin
           </span>
-                   <nav className="flex gap-3 text-xs text-neutral-400">
+
+          <nav className="flex gap-3 text-xs text-neutral-400">
             {role === "admin" ? (
               <>
                 <Link href="/admin" className="hover:text-neutral-200">
                   Dashboard
+                </Link>
+                <Link href="/admin/tenants" className="hover:text-neutral-200">
+                  Tenants
                 </Link>
                 <Link href="/admin/materials" className="hover:text-neutral-200">
                   Materials
@@ -72,12 +75,9 @@ export default async function AdminLayout({ children }: Props) {
               </>
             )}
           </nav>
-
         </div>
 
         <div className="flex items-center gap-3 text-xs text-neutral-200">
-           
-
           <span>{user.name || user.email}</span>
           <span className="rounded-full border border-neutral-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400">
             {user.role}

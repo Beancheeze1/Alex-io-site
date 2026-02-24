@@ -60,6 +60,13 @@ export async function POST(req: NextRequest) {
 
     return ok({ ok: true, tenant: rows[0] });
   } catch (e: any) {
-    return bad("create_failed", String(e?.message || e), 500);
+    const msg = String(e?.message || e);
+
+    // Friendly conflict error for onboarding UX
+    if (msg.toLowerCase().includes("tenants_slug") || msg.toLowerCase().includes("unique")) {
+      return bad("slug_taken", "That tenant slug already exists.", 409);
+    }
+
+    return bad("create_failed", msg, 500);
   }
 }
