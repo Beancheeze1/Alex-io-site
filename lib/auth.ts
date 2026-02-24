@@ -139,6 +139,26 @@ async function getUserById(userId: number): Promise<CurrentUser | null> {
   };
 }
 
+// --- Cookie extraction fallback (Path A, additive) ---
+// NextRequest.cookies should work, but in some deployments/routes it can appear empty.
+// This fallback reads the raw Cookie header and extracts SESSION_COOKIE_NAME.
+function getCookieFromHeader(cookieHeader: string | null, name: string): string | null {
+  if (!cookieHeader) return null;
+
+  // Very small, safe parser: "a=b; c=d" -> find exact "name="
+  const parts = cookieHeader.split(";");
+  for (const p of parts) {
+    const s = p.trim();
+    if (!s) continue;
+    if (s.startsWith(name + "=")) {
+      const v = s.slice(name.length + 1);
+      // Cookie values are generally not quoted; keep as-is.
+      return v || null;
+    }
+  }
+  return null;
+}
+
 /**
  * For API routes / Node handlers:
  *   const user = await getCurrentUserFromRequest(req);
@@ -146,7 +166,12 @@ async function getUserById(userId: number): Promise<CurrentUser | null> {
 export async function getCurrentUserFromRequest(
   req: NextRequest,
 ): Promise<CurrentUser | null> {
-  const token = req.cookies.get(SESSION_COOKIE_NAME)?.value || null;
+  const tokenFromCookies = req.cookies.get(SESSION_COOKIE_NAME)?.value || null;
+
+  const token =
+    tokenFromCookies ||
+    getCookieFromHeader(req.headers.get("cookie"), SESSION_COOKIE_NAME);
+
   const payload = verifySessionToken(token);
   if (!payload) return null;
   return getUserById(payload.userId);
@@ -165,6 +190,7 @@ export async function getCurrentUserFromCookies(): Promise<CurrentUser | null> {
   if (!payload) return null;
   return getUserById(payload.userId);
 }
+
 // --- RBAC helpers (Path A, additive) ---
 
 export type Role = "viewer" | "sales" | "cs" | "admin";
