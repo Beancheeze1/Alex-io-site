@@ -7,7 +7,7 @@
 // Path A: minimal + explicit. Nothing auto-runs.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { getCurrentUserFromRequest } from "@/lib/auth";
 import { listMigrations, runPendingMigrations } from "@/lib/migrate";
 
 export const dynamic = "force-dynamic";
@@ -27,14 +27,27 @@ function bad(body: Err, status = 400) {
   return NextResponse.json(body, { status });
 }
 
-function requireAdmin(user: any) {
-  return isRoleAllowed(user, ["admin"]);
+function isAdminUser(user: any): boolean {
+  const role =
+    String(user?.role || user?.user?.role || "")
+      .trim()
+      .toLowerCase();
+
+  return role === "admin";
 }
 
 export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUserFromRequest(req);
-    if (!requireAdmin(user)) {
+
+    if (!user) {
+      return bad(
+        { ok: false, error: "unauthorized", message: "Login required." },
+        401,
+      );
+    }
+
+    if (!isAdminUser(user)) {
       return bad(
         { ok: false, error: "forbidden", message: "Admin role required." },
         403,
@@ -58,7 +71,15 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUserFromRequest(req);
-    if (!requireAdmin(user)) {
+
+    if (!user) {
+      return bad(
+        { ok: false, error: "unauthorized", message: "Login required." },
+        401,
+      );
+    }
+
+    if (!isAdminUser(user)) {
       return bad(
         { ok: false, error: "forbidden", message: "Admin role required." },
         403,
