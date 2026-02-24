@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { parsePdfToQuoteData, selectBestDimensions, convertToInches, type ParsedPdfData } from "@/lib/pdf/parser";
+import { getCurrentUserFromRequest } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -37,6 +38,9 @@ type AttachRow = {
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getCurrentUserFromRequest(req);
+    if (!user) return err("UNAUTHENTICATED", "Login required.", 401);
+
     const contentType = req.headers.get("content-type") || "";
     
     let pdfBuffer: Buffer | null = null;
@@ -77,6 +81,18 @@ export async function POST(req: NextRequest) {
       
       pdfBuffer = attach.data;
       quoteNo = quoteNo || attach.quote_no;
+      if (quoteNo) {
+        const quote = await one<{ id: number }>(
+          `
+          select id
+          from quotes
+          where quote_no = $1
+            and tenant_id = $2
+          `,
+          [quoteNo, user.tenant_id],
+        );
+        if (!quote) return err("QUOTE_NOT_FOUND", `No quote found for quote_no ${quoteNo}.`, 404);
+      }
       
     } else if (contentType.includes("multipart/form-data")) {
       // Handle file upload
@@ -94,9 +110,33 @@ export async function POST(req: NextRequest) {
       
       const arrayBuffer = await file.arrayBuffer();
       pdfBuffer = Buffer.from(arrayBuffer);
+
+      if (quoteNo) {
+        const quote = await one<{ id: number }>(
+          `
+          select id
+          from quotes
+          where quote_no = $1
+            and tenant_id = $2
+          `,
+          [quoteNo, user.tenant_id],
+        );
+        if (!quote) return err("QUOTE_NOT_FOUND", `No quote found for quote_no ${quoteNo}.`, 404);
+      }
       
       // Optionally store this PDF if quote_no is provided
       if (quoteNo) {
+        const quote = await one<{ id: number }>(
+          `
+          select id
+          from quotes
+          where quote_no = $1
+            and tenant_id = $2
+          `,
+          [quoteNo, user.tenant_id],
+        );
+        if (!quote) return err("QUOTE_NOT_FOUND", `No quote found for quote_no ${quoteNo}.`, 404);
+
         const stored = await one<{ id: number }>(
           `
           INSERT INTO quote_attachments (quote_no, filename, content_type, size_bytes, data)

@@ -16,6 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
+import { getCurrentUserFromRequest } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +49,14 @@ function isPrimaryFoamRow(item: ItemRow | null | undefined) {
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getCurrentUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: "UNAUTHENTICATED", message: "Login required." },
+        { status: 401 },
+      );
+    }
+
     let body: InBody;
     try {
       body = (await req.json()) as InBody;
@@ -92,9 +101,10 @@ export async function POST(req: NextRequest) {
       SELECT id, quote_no
       FROM public."quotes"
       WHERE quote_no = $1
+        AND tenant_id = $2
       LIMIT 1
     `,
-      [quoteNo],
+      [quoteNo, user.tenant_id],
     );
 
     if (!quote) {

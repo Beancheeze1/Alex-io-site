@@ -13,6 +13,7 @@ import { promisify } from "util";
 import { writeFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
+import { getCurrentUserFromRequest } from "@/lib/auth";
 
 const execAsync = promisify(exec);
 
@@ -54,6 +55,9 @@ export type GeometryExtractionResult = {
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getCurrentUserFromRequest(req);
+    if (!user) return err("UNAUTHENTICATED", "Login required.", 401);
+
     const contentType = req.headers.get("content-type") || "";
     
     let pdfBuffer: Buffer | null = null;
@@ -88,6 +92,18 @@ export async function POST(req: NextRequest) {
       
       pdfBuffer = attach.data;
       quoteNo = quoteNo || attach.quote_no;
+      if (quoteNo) {
+        const quote = await one<{ id: number }>(
+          `
+          select id
+          from quotes
+          where quote_no = $1
+            and tenant_id = $2
+          `,
+          [quoteNo, user.tenant_id],
+        );
+        if (!quote) return err("QUOTE_NOT_FOUND", `No quote found for quote_no ${quoteNo}.`, 404);
+      }
       
     } else if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData();
@@ -101,9 +117,22 @@ export async function POST(req: NextRequest) {
       if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
         return err("NOT_A_PDF", "File must be a PDF", 400);
       }
-      
+
       const arrayBuffer = await file.arrayBuffer();
       pdfBuffer = Buffer.from(arrayBuffer);
+
+      if (quoteNo) {
+        const quote = await one<{ id: number }>(
+          `
+          select id
+          from quotes
+          where quote_no = $1
+            and tenant_id = $2
+          `,
+          [quoteNo, user.tenant_id],
+        );
+        if (!quote) return err("QUOTE_NOT_FOUND", `No quote found for quote_no ${quoteNo}.`, 404);
+      }
       
     } else {
       return err("INVALID_CONTENT_TYPE", "Send JSON with attachment_id or multipart/form-data with file", 400);
