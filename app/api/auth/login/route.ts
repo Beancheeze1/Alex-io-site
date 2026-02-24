@@ -116,15 +116,16 @@ export async function POST(req: NextRequest) {
       { status: 200 },
     );
 
-    res.cookies.set({
-      name: SESSION_COOKIE_NAME,
-      value: token,
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: SESSION_MAX_AGE_SEC,
-    });
+res.cookies.set({
+  name: SESSION_COOKIE_NAME,
+  value: token,
+  httpOnly: true,
+  secure: true,
+  sameSite: "lax",
+  path: "/",
+  domain: ".api.alex-io.com",   // <-- critical
+  maxAge: SESSION_MAX_AGE_SEC,
+});
 
     return res;
   } catch (err) {
