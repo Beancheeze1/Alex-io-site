@@ -47,6 +47,13 @@ type BoxSuggestState = {
   bestMailer: SuggestedBox | null;
 };
 
+type TenantTheme = {
+  brandName?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  logoUrl?: string;
+};
+
 type GuidedStep = {
   id: string;
   label: string;
@@ -631,6 +638,47 @@ export default function LayoutPage({
       if (q && q !== quoteNoFromUrl) setQuoteNoFromUrl(q);
     } catch {}
   }, []);
+
+  // --- Tenant theme (public editor only; scoped to this page) ---
+  const [tenantTheme, setTenantTheme] = React.useState<TenantTheme>({});
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadTheme() {
+      try {
+        const res = await fetch(`/api/tenant/theme?t=${Math.random()}`, {
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        const theme =
+          json && json.ok && json.theme_json ? (json.theme_json as TenantTheme) : {};
+        if (!cancelled) setTenantTheme(theme || {});
+      } catch {
+        if (!cancelled) setTenantTheme({});
+      }
+    }
+
+    loadTheme();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const tenantCssVars = React.useMemo(() => {
+    const primary =
+      typeof tenantTheme?.primaryColor === "string" && tenantTheme.primaryColor.trim()
+        ? tenantTheme.primaryColor.trim()
+        : "#2563eb"; // default blue
+    const secondary =
+      typeof tenantTheme?.secondaryColor === "string" && tenantTheme.secondaryColor.trim()
+        ? tenantTheme.secondaryColor.trim()
+        : "#0ea5e9"; // default sky
+    return {
+      ["--tenant-primary" as any]: primary,
+      ["--tenant-secondary" as any]: secondary,
+    } as any;
+  }, [tenantTheme]);
 
   React.useEffect(() => {
     try {
@@ -3299,9 +3347,61 @@ const handleGoToFoamAdvisor = () => {
     Number(block.lengthIn) > 0 &&
     Number(block.widthIn) > 0 &&
     totalStackThicknessIn > 0;
+    
+    // --- Tenant theme (public editor only; scoped to this page) ---
+type TenantTheme = {
+  brandName?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  logoUrl?: string;
+};
+
+const [tenantTheme, setTenantTheme] = React.useState<TenantTheme>({});
+
+React.useEffect(() => {
+  let cancelled = false;
+
+  async function loadTheme() {
+    try {
+      const res = await fetch(`/api/tenant/theme?t=${Math.random()}`, {
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => null);
+      const theme =
+        json && json.ok && json.theme_json ? (json.theme_json as TenantTheme) : {};
+      if (!cancelled) setTenantTheme(theme || {});
+    } catch {
+      if (!cancelled) setTenantTheme({});
+    }
+  }
+
+  loadTheme();
+  return () => {
+    cancelled = true;
+  };
+}, []);
+
+const tenantCssVars = React.useMemo(() => {
+  const primary =
+    typeof tenantTheme?.primaryColor === "string" && tenantTheme.primaryColor.trim()
+      ? tenantTheme.primaryColor.trim()
+      : "#2563eb";
+  const secondary =
+    typeof tenantTheme?.secondaryColor === "string" && tenantTheme.secondaryColor.trim()
+      ? tenantTheme.secondaryColor.trim()
+      : "#0ea5e9";
+
+  return {
+    ["--tenant-primary" as any]: primary,
+    ["--tenant-secondary" as any]: secondary,
+  } as any;
+}, [tenantTheme]);
 
   return (
-    <main className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4">
+    <main
+  style={tenantCssVars}
+  className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4"
+>
       <input
         ref={fileInputRef}
         type="file"
@@ -3322,9 +3422,22 @@ const handleGoToFoamAdvisor = () => {
               <div className="flex items-center gap-4 w-full">
                 {/* LEFT: powered by + quote */}
                 <div className="flex flex-col">
-                  <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-sky-50/90">
-                    Powered by Alex-IO
-                  </div>
+                  <div className="flex items-center gap-2">
+  {typeof tenantTheme?.logoUrl === "string" && tenantTheme.logoUrl.trim() ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={tenantTheme.logoUrl.trim()}
+      alt="Tenant logo"
+      className="h-6 w-6 rounded bg-white/5 object-contain"
+    />
+  ) : null}
+
+  <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-sky-50/90">
+    {typeof tenantTheme?.brandName === "string" && tenantTheme.brandName.trim()
+      ? tenantTheme.brandName.trim()
+      : "Alex-IO"}
+  </div>
+</div>
                   <div className="mt-1 text-xs text-sky-50/95">
                     Quote{" "}
                     <span className="font-mono font-semibold text-slate-50">{quoteNo}</span>

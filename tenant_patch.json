@@ -1,0 +1,10 @@
+{
+  "name": "Acme",
+  "active": true,
+  "theme_json": {
+    "brandName": "Acme Packaging",
+    "primaryColor": "#0A3D62",
+    "secondaryColor": "#1E90FF",
+    "logoUrl": "https://example.com/logo.png"
+  }
+}
