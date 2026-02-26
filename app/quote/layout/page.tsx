@@ -1569,7 +1569,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
 
   if (loadingLayout || !initialLayout) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.12),transparent_60%)]">
+    <main className="min-h-screen flex items-center justify-center bg-slate-950 bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--tenant-secondary)_16%,transparent),transparent_60%),radial-gradient(circle_at_bottom,_color-mix(in_srgb,var(--tenant-primary)_12%,transparent),transparent_60%)]">
         <div className="rounded-xl border border-slate-800/80 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-[0_18px_45px_rgba(15,23,42,0.9)]">
           Loading layout preview&hellip;
         </div>
@@ -1736,7 +1736,7 @@ function LayoutEditorHostReady(props: {
   const guidedClass = (id: string) => {
     if (!guided.enabled) return "";
     if (guidedActiveId === id) {
-      return "relative z-20 ring-2 ring-sky-400/80 shadow-[0_0_22px_rgba(56,189,248,0.35)]";
+    return "relative z-20 ring-2 ring-[color:var(--tenant-primary)] shadow-[0_0_22px_color-mix(in_srgb,var(--tenant-primary)_35%,transparent)]";
     }
     return "opacity-85";
   };
@@ -3402,7 +3402,7 @@ const tenantCssVars = React.useMemo(() => {
   return (
     <main
   style={tenantCssVars}
-  className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),transparent_60%),radial-gradient(circle_at_bottom,_rgba(37,99,235,0.14),transparent_60%)] flex items-stretch py-8 px-4"
+      className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--tenant-secondary)_14%,transparent),transparent_60%),radial-gradient(circle_at_bottom,_color-mix(in_srgb,var(--tenant-primary)_14%,transparent),transparent_60%)] flex items-stretch py-8 px-4"
 >
       <input
         ref={fileInputRef}
@@ -3416,7 +3416,7 @@ const tenantCssVars = React.useMemo(() => {
           {/* global grid/glow overlay */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 opacity-65 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),transparent_55%),linear-gradient(to_right,rgba(15,23,42,0.95)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.95)_1px,transparent_1px)] [background-size:460px_460px,28px_28px,28px_28px]"
+            className="pointer-events-none absolute inset-0 opacity-65 bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--tenant-secondary)_16%,transparent),transparent_55%),linear-gradient(to_right,rgba(15,23,42,0.95)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.95)_1px,transparent_1px)] [background-size:460px_460px,28px_28px,28px_28px]"
           />
           <div className="relative">
             {/* Header */}
@@ -3439,17 +3439,17 @@ const tenantCssVars = React.useMemo(() => {
     />
   ) : null}
 
-  <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-sky-50/90">
+              <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-[color:color-mix(in_srgb,var(--tenant-secondary)_85%,white)]">
     {typeof tenantTheme?.brandName === "string" && tenantTheme.brandName.trim()
       ? tenantTheme.brandName.trim()
       : "Alex-IO"}
   </div>
 </div>
-                  <div className="mt-1 text-xs text-sky-50/95">
+                  <div className="mt-1 text-xs text-[color:color-mix(in_srgb,var(--tenant-secondary)_88%,white)]">
                     Quote{" "}
                     <span className="font-mono font-semibold text-slate-50">{quoteNo}</span>
                     {hasRealQuoteNo ? (
-                      <span className="ml-1 text-sky-100/90">· Linked to active quote</span>
+                      <span className="ml-1 text-[color:color-mix(in_srgb,var(--tenant-secondary)_90%,white)]">· Linked to active quote</span>
                     ) : (
                       <span className="ml-1 text-amber-50/90">· Demo view (no quote linked)</span>
                     )}
@@ -3459,10 +3459,10 @@ const tenantCssVars = React.useMemo(() => {
                 {/* CENTER: stylized title */}
                 <div className="flex-1 text-center">
                   <div className="inline-flex flex-col items-center gap-1">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-100/70">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[color:color-mix(in_srgb,var(--tenant-secondary)_72%,white)]">
                       Foam layout tools
                     </div>
-                    <div className="text-2xl md:text-[26px] font-extrabold leading-snug bg-gradient-to-r from-sky-50 via-cyan-200 to-sky-100 bg-clip-text text-transparent drop-shadow-[0_0_18px_rgba(15,23,42,0.9)]">
+                    <div className="text-2xl md:text-[26px] font-extrabold leading-snug bg-gradient-to-r from-[color:var(--tenant-primary)] via-[color:var(--tenant-secondary)] to-[color:var(--tenant-primary)] bg-clip-text text-transparent drop-shadow-[0_0_18px_rgba(15,23,42,0.9)]">
                       Interactive foam layout editor
                     </div>
                   </div>
@@ -3470,7 +3470,7 @@ const tenantCssVars = React.useMemo(() => {
 
                 {/* RIGHT: BETA pill */}
                 <div className="flex items-center justify-end gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--tenant-secondary)_82%,white)]">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
                     Layout editor · BETA
                   </span>
@@ -3481,7 +3481,7 @@ const tenantCssVars = React.useMemo(() => {
             {/* How this works */}
             <div className="border-b border-slate-800/80 bg-slate-950/95 px-6 py-3 text-[11px] text-slate-200 flex flex-wrap items-start gap-4">
               <div className="flex items-center gap-2 font-semibold text-[var(--tenant-secondary)]">
-                <span className="inline-flex h-5 w-1.5 items-center justify-center rounded-full border border-sky-400/70 bg-sky-500/20 text-[10px] font-bold shadow-[0_0_14px_rgba(56,189,248,0.7)]">
+                <span className="inline-flex h-5 w-1.5 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_70%,transparent)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[10px] font-bold shadow-[0_0_14px_color-mix(in_srgb,var(--tenant-secondary)_55%,transparent)]">
                   ?
                 </span>
                 How this layout editor works
@@ -3543,7 +3543,7 @@ const tenantCssVars = React.useMemo(() => {
                     <button
                       type="button"
                       onClick={addLayer}
-                      className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-[11px] text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                      className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-[11px] text-slate-200 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
                     >
                       + Layer
                     </button>
@@ -3632,7 +3632,7 @@ const tenantCssVars = React.useMemo(() => {
                 >
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-slate-400">
-                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-400/80" />
+                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-[color:color-mix(in_srgb,var(--tenant-secondary)_75%,transparent)]" />
                       Layout controls
                     </div>
 
@@ -3802,7 +3802,7 @@ const tenantCssVars = React.useMemo(() => {
                       type="button"
                       onClick={handleGoToFoamAdvisor}
                       disabled={missingCustomerInfo}
-                      className="inline-flex flex-1 items-center justify-center rounded-full border border-sky-500/60 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-500/10 hover:border-sky-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="inline-flex flex-1 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_55%,transparent)] bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--tenant-secondary)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:border-[color:var(--tenant-secondary)] transition disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Recommend my foam
                     </button>
@@ -3820,7 +3820,7 @@ const tenantCssVars = React.useMemo(() => {
                       type="button"
                       onClick={handleApplyToQuote}
                       disabled={!canApplyButton}
-                      className="inline-flex flex-1 items-center justify-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
+                      className="inline-flex flex-1 items-center justify-center rounded-full border border-[color:var(--tenant-primary)] bg-[color:var(--tenant-primary)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[color:color-mix(in_srgb,var(--tenant-primary)_85%,white)] transition disabled:opacity-60"
                     >
                       {!hasRealQuoteNo
                         ? "Link to a quote first"
@@ -3881,8 +3881,8 @@ const tenantCssVars = React.useMemo(() => {
                             className={
                               "rounded-lg border px-2.5 py-1 flex items-center justify-between gap-2 " +
                               (isActive
-                                ? "border-sky-500/80 bg-[var(--tenant-secondary)]/10"
-                                : "border-slate-700 bg-slate-900/80 hover:border-sky-400/70")
+                                ? "border-[color:var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)]"
+                                : "border-slate-700 bg-slate-900/80 hover:border-[color:color-mix(in_srgb,var(--tenant-secondary)_70%,transparent)]")
                             }
                           >
                             <div className="flex flex-col gap-0.5 flex-1">
@@ -4012,7 +4012,7 @@ const tenantCssVars = React.useMemo(() => {
                 <button
                   type="button"
                   onClick={() => handleAddPreset("rect")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-[color:var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
                 >
                   <div className="font-semibold text-slate-50 flex items-center gap-2">
                     <span className="inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-slate-400/70 bg-slate-900/80" />
@@ -4024,7 +4024,7 @@ const tenantCssVars = React.useMemo(() => {
                 <button
                   type="button"
                   onClick={() => handleAddPreset("circle")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-[color:var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
                 >
                   <div className="font-semibold text-slate-50 flex items-center gap-2">
                     <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 bg-slate-900/80" />
@@ -4036,7 +4036,7 @@ const tenantCssVars = React.useMemo(() => {
                               <button
                                 type="button"
                                 onClick={() => handleAddPreset("roundedRect")}
-                                className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-sky-400 hover:bg-sky-500/10 transition"
+                                className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-[color:var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
                               >
                                 <div className="font-semibold text-slate-50 flex items-center gap-2">
                                   <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
@@ -4167,7 +4167,7 @@ const tenantCssVars = React.useMemo(() => {
                                 {boxSuggest.bestRsc.inside_height_in}"
                               </span>
                             </span>
-                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-[var(--tenant-secondary)]/10 px-2 py-0.5 text-[10px] text-[var(--tenant-secondary)]">
+                            <span className="inline-flex items-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_70%,transparent)] bg-[var(--tenant-secondary)]/10 px-2 py-0.5 text-[10px] text-[var(--tenant-secondary)]">
                               Fit score: {boxSuggest.bestRsc.fit_score}
                             </span>
                           </div>
@@ -4183,8 +4183,8 @@ const tenantCssVars = React.useMemo(() => {
                               className={
                                 "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium " +
                                 (selectedCartonKind === "RSC"
-                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
-                                  : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10")
+                                  ? "border-[color:var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[color:color-mix(in_srgb,var(--tenant-secondary)_88%,white)]"
+                                  : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)]")
                               }
                             >
                               {selectedCartonKind === "RSC" ? "Selected carton" : "Pick this box"}
@@ -4208,7 +4208,7 @@ const tenantCssVars = React.useMemo(() => {
                                 {boxSuggest.bestMailer.inside_height_in}"
                               </span>
                             </span>
-                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-[var(--tenant-secondary)]/10 px-2 py-0.5 text-[10px] text-[var(--tenant-secondary)]">
+                            <span className="inline-flex items-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_70%,transparent)] bg-[var(--tenant-secondary)]/10 px-2 py-0.5 text-[10px] text-[var(--tenant-secondary)]">
                               Fit score: {boxSuggest.bestMailer.fit_score}
                             </span>
                           </div>
@@ -4224,8 +4224,8 @@ const tenantCssVars = React.useMemo(() => {
                               className={
                                 "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium " +
                                 (selectedCartonKind === "MAILER"
-                                  ? "border-sky-400 bg-sky-500/20 text-sky-50"
-                                  : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10")
+                                  ? "border-[color:var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[color:color-mix(in_srgb,var(--tenant-secondary)_88%,white)]"
+                                  : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)]")
                               }
                             >
                               {selectedCartonKind === "MAILER" ? "Selected carton" : "Pick this box"}
@@ -4279,7 +4279,7 @@ const tenantCssVars = React.useMemo(() => {
                   <div>
                     <div className="flex items-center gap-2 text-sm text-slate-50">
                       <span className="font-semibold">Foam layout preview</span>
-                      <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-[var(--tenant-secondary)] text-[11px] font-medium">
+                      <span className="px-2 py-0.5 rounded-full bg-[color:color-mix(in_srgb,var(--tenant-secondary)_15%,transparent)] border border-[color:color-mix(in_srgb,var(--tenant-secondary)_60%,transparent)] text-[color:color-mix(in_srgb,var(--tenant-secondary)_85%,white)] text-[11px] font-medium">
                         Interactive layout
                       </span>
                     </div>
@@ -4293,7 +4293,7 @@ const tenantCssVars = React.useMemo(() => {
                     <button
                       type="button"
                       onClick={guided.start}
-                      className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1 text-[11px] font-medium text-amber-300 hover:border-sky-400 hover:text-amber-200 hover:bg-sky-500/10 transition"
+                      className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1 text-[11px] font-medium text-amber-300 hover:border-[color:var(--tenant-secondary)] hover:text-amber-200 hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
                     >
                       Start Guided Input
                     </button>
@@ -4311,7 +4311,7 @@ const tenantCssVars = React.useMemo(() => {
                 <div className="relative flex-1 rounded-2xl border border-slate-800/90 bg-slate-950 overflow-hidden shadow-[0_22px_55px_rgba(15,23,42,0.95)]">
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,rgba(30,64,175,0.3)_1px,transparent_1px),linear-gradient(to_bottom,rgba(30,64,175,0.3)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
+                className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,color-mix(in_srgb,var(--tenant-primary)_30%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--tenant-primary)_30%,transparent)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
                   />
                   <div className="relative p-4 overflow-auto">
                   <InteractiveCanvas
@@ -4569,7 +4569,7 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("length");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
                             />
                           </label>
                           <label className="flex flex-col gap-1">
@@ -4586,7 +4586,7 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("depth");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
                             />
                           </label>
                         </div>
@@ -4606,7 +4606,7 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("length");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
                             />
                           </label>
                           <label className="flex flex-col gap-1">
@@ -4623,7 +4623,7 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("width");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
                             />
                           </label>
                           <label className="flex flex-col gap-1">
@@ -4640,7 +4640,7 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("depth");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
                             />
                           </label>
                           {editorMode === "advanced" && selectedCavity.shape === "roundedRect" && (
@@ -4658,7 +4658,7 @@ const tenantCssVars = React.useMemo(() => {
                                                               commitCavityField("cornerRadius");
                                                             }
                                                           }}
-                                                          className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
                                                         />
                                                       </label>
                           )}
@@ -4669,7 +4669,7 @@ const tenantCssVars = React.useMemo(() => {
                       <button
                         type="button"
                         onClick={handleCenterSelectedCavity}
-                        className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-100 hover:border-sky-400 hover:text-sky-100 hover:bg-sky-500/10 transition"
+                        className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-100 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
                       >
                         Center this cavity in block
                       </button>
@@ -4702,7 +4702,7 @@ const tenantCssVars = React.useMemo(() => {
               <button
                 type="button"
                 onClick={guided.finish}
-                className="inline-flex items-center justify-center rounded-full border border-sky-500/80 bg-sky-500 px-3 py-1 text-[11px] font-semibold text-slate-950 hover:bg-sky-400 transition"
+                className="inline-flex items-center justify-center rounded-full border border-[color:var(--tenant-primary)] bg-[color:var(--tenant-primary)] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[color:color-mix(in_srgb,var(--tenant-primary)_85%,white)] transition"
               >
                 Finish
               </button>
@@ -4710,7 +4710,7 @@ const tenantCssVars = React.useMemo(() => {
               <button
                 type="button"
                 onClick={guided.next}
-                className="inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] text-slate-100 hover:border-sky-400 hover:text-sky-100"
+                className="inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] text-slate-100 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary)_85%,white)]"
               >
                 Next
               </button>
