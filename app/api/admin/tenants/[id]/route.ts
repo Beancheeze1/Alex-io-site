@@ -21,13 +21,14 @@ function bad(error: string, message?: string, status = 400) {
   return NextResponse.json({ ok: false, error, message }, { status });
 }
 
-const THEME_EDIT_EMAIL_ALLOWLIST = new Set<string>([
+// Tenant writes (create/update/disable/theme) are OWNER-ONLY via email allowlist.
+const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
   "25thhourdesign@gmail.com",
 ]);
 
-function canEditTheme(user: any): boolean {
+function canWriteTenants(user: any): boolean {
   const email = String(user?.email || "").trim().toLowerCase();
-  return THEME_EDIT_EMAIL_ALLOWLIST.has(email);
+  return TENANT_WRITE_EMAIL_ALLOWLIST.has(email);
 }
 
 type Ctx = { params: { id: string } };
@@ -66,9 +67,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return bad("forbidden", "Admin role required.", 403);
   }
 
-if (!canEditTheme(user)) {
-  return bad("forbidden", "Theme edits not allowed.", 403);
-}
+  // OWNER ONLY — no one else can change tenants
+  if (!canWriteTenants(user)) {
+    return bad("forbidden", "Tenant changes are restricted.", 403);
+  }
 
   const id = Number(ctx?.params?.id);
   if (!Number.isFinite(id) || id <= 0) {
@@ -85,20 +87,14 @@ if (!canEditTheme(user)) {
   const activeRaw = body?.active;
   const themeRaw = body?.theme_json;
 
-  const name =
-    typeof nameRaw === "string" ? nameRaw.trim() : undefined;
-
-  const active =
-    typeof activeRaw === "boolean" ? activeRaw : undefined;
-
-  const theme_json =
-    themeRaw !== undefined ? themeRaw : undefined; // allow {} or null if you want (explicit)
+  const name = typeof nameRaw === "string" ? nameRaw.trim() : undefined;
+  const active = typeof activeRaw === "boolean" ? activeRaw : undefined;
+  const theme_json = themeRaw !== undefined ? themeRaw : undefined; // explicit set
 
   if (name === undefined && active === undefined && theme_json === undefined) {
     return bad("no_changes", "Provide at least one field to update.", 400);
   }
 
-  // Keep update explicit. If theme_json is provided, we set it as-is.
   const updated = await one(
     `
     update tenants

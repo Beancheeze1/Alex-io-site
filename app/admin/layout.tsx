@@ -18,6 +18,16 @@ type Props = {
   children: ReactNode;
 };
 
+// Owner-only tenant admin allowlist (UI)
+const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
+  "25thhourdesign@gmail.com",
+]);
+
+function canSeeTenantsLink(user: any): boolean {
+  const email = String(user?.email || "").trim().toLowerCase();
+  return TENANT_WRITE_EMAIL_ALLOWLIST.has(email);
+}
+
 export default async function AdminLayout({ children }: Props) {
   const user = await getCurrentUserFromCookies();
 
@@ -37,6 +47,8 @@ export default async function AdminLayout({ children }: Props) {
     redirect("/my-quotes");
   }
 
+  const showTenants = role === "admin" && canSeeTenantsLink(user);
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-50">
       <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
@@ -51,9 +63,13 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin" className="hover:text-neutral-200">
                   Dashboard
                 </Link>
-                <Link href="/admin/tenants" className="hover:text-neutral-200">
-                  Tenants
-                </Link>
+
+                {showTenants ? (
+                  <Link href="/admin/tenants" className="hover:text-neutral-200">
+                    Tenants
+                  </Link>
+                ) : null}
+
                 <Link href="/admin/materials" className="hover:text-neutral-200">
                   Materials
                 </Link>

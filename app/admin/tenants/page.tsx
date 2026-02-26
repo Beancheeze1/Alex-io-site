@@ -45,6 +45,16 @@ function themeOf(t: Tenant) {
   };
 }
 
+// Owner-only tenant admin allowlist (UI)
+const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
+  "25thhourdesign@gmail.com",
+]);
+
+function canWriteTenantsEmail(email: string | null | undefined): boolean {
+  const e = String(email || "").trim().toLowerCase();
+  return TENANT_WRITE_EMAIL_ALLOWLIST.has(e);
+}
+
 export default function TenantsPage() {
   const [tenants, setTenants] = React.useState<Tenant[]>([]);
   const [name, setName] = React.useState("");
@@ -52,6 +62,23 @@ export default function TenantsPage() {
   const [createError, setCreateError] = React.useState<string | null>(null);
 
   const [edit, setEdit] = React.useState<Record<number, EditState>>({});
+
+  const [authLoading, setAuthLoading] = React.useState(true);
+  const [authedEmail, setAuthedEmail] = React.useState<string | null>(null);
+
+  async function loadWhoAmI() {
+    try {
+      const res = await fetch(`/api/auth/whoami?t=${Math.random()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      const email =
+        json?.ok && json?.authenticated && json?.user?.email ? String(json.user.email) : null;
+      setAuthedEmail(email);
+    } catch {
+      setAuthedEmail(null);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
 
   async function load() {
     const res = await fetch("/api/admin/tenants", { cache: "no-store" });
@@ -150,17 +177,47 @@ export default function TenantsPage() {
   }
 
   React.useEffect(() => {
-    load();
+    loadWhoAmI();
   }, []);
+
+  React.useEffect(() => {
+    if (!authLoading) {
+      load();
+    }
+  }, [authLoading]);
+
+  const canWrite = canWriteTenantsEmail(authedEmail);
+
+  if (authLoading) {
+    return (
+      <div className="p-6">
+        <div className="text-sm text-neutral-300">Loading…</div>
+      </div>
+    );
+  }
+
+  if (!canWrite) {
+    return (
+      <div className="p-6 space-y-3">
+        <h1 className="text-lg font-semibold">Tenants</h1>
+        <div className="rounded border border-neutral-800 bg-neutral-950 p-4">
+          <div className="text-sm font-semibold text-neutral-200">Restricted</div>
+          <div className="mt-1 text-sm text-neutral-400">
+            Tenant management is restricted to the owner.
+          </div>
+          <div className="mt-2 text-xs text-neutral-500">
+            Signed in as: <span className="font-mono">{authedEmail || "unknown"}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-baseline justify-between">
         <h1 className="text-lg font-semibold">Tenants</h1>
-        <button
-          className="text-xs text-neutral-400 hover:text-neutral-200"
-          onClick={load}
-        >
+        <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={load}>
           Refresh
         </button>
       </div>
@@ -181,15 +238,10 @@ export default function TenantsPage() {
             onChange={(e) => setSlug(e.target.value)}
           />
           <div className="flex items-center gap-3">
-            <button
-              className="bg-blue-600 px-3 py-2 rounded text-sm"
-              onClick={createTenant}
-            >
+            <button className="bg-blue-600 px-3 py-2 rounded text-sm" onClick={createTenant}>
               Create
             </button>
-            {createError ? (
-              <span className="text-xs text-red-400">{createError}</span>
-            ) : null}
+            {createError ? <span className="text-xs text-red-400">{createError}</span> : null}
           </div>
         </div>
       </div>
@@ -199,10 +251,7 @@ export default function TenantsPage() {
           const s = edit[t.id];
           const tenantUrl = `https://${t.slug}.api.alex-io.com`;
           return (
-            <div
-              key={t.id}
-              className="border border-neutral-800 p-4 rounded space-y-3"
-            >
+            <div key={t.id} className="border border-neutral-800 p-4 rounded space-y-3">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="text-sm font-semibold">{t.name}</div>
@@ -239,9 +288,7 @@ export default function TenantsPage() {
                         checked={s.active}
                         onChange={(e) => updateEdit(t.id, { active: e.target.checked })}
                       />
-                      <span className="text-neutral-200">
-                        {s.active ? "Enabled" : "Disabled"}
-                      </span>
+                      <span className="text-neutral-200">{s.active ? "Enabled" : "Disabled"}</span>
                     </label>
                   </div>
 
@@ -280,9 +327,7 @@ export default function TenantsPage() {
                     <input
                       className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
                       value={s.secondaryColor}
-                      onChange={(e) =>
-                        updateEdit(t.id, { secondaryColor: e.target.value })
-                      }
+                      onChange={(e) => updateEdit(t.id, { secondaryColor: e.target.value })}
                       placeholder="#1E90FF"
                     />
                   </div>
@@ -317,9 +362,7 @@ export default function TenantsPage() {
                               <div className="h-7 w-7 rounded bg-white/10" />
                             )}
 
-                            <div className="text-sm font-extrabold text-slate-50">
-                              {brand}
-                            </div>
+                            <div className="text-sm font-extrabold text-slate-50">{brand}</div>
 
                             <div className="ml-auto flex items-center gap-1">
                               <span
@@ -352,13 +395,9 @@ export default function TenantsPage() {
                       {s.saving ? "Saving..." : "Save"}
                     </button>
 
-                    {s.ok ? (
-                      <span className="text-xs text-green-400">Saved.</span>
-                    ) : null}
+                    {s.ok ? <span className="text-xs text-green-400">Saved.</span> : null}
 
-                    {s.error ? (
-                      <span className="text-xs text-red-400">{s.error}</span>
-                    ) : null}
+                    {s.error ? <span className="text-xs text-red-400">{s.error}</span> : null}
                   </div>
                 </div>
               )}

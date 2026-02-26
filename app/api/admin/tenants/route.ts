@@ -3,6 +3,8 @@
 // Admin-only tenant management.
 // GET  -> list tenants
 // POST -> create tenant
+//
+// Tenant writes are OWNER-ONLY via email allowlist.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
@@ -17,6 +19,15 @@ function ok(body: any, status = 200) {
 
 function bad(error: string, message?: string, status = 400) {
   return NextResponse.json({ ok: false, error, message }, { status });
+}
+
+const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
+  "25thhourdesign@gmail.com",
+]);
+
+function canWriteTenants(user: any): boolean {
+  const email = String(user?.email || "").trim().toLowerCase();
+  return TENANT_WRITE_EMAIL_ALLOWLIST.has(email);
 }
 
 export async function GET(req: NextRequest) {
@@ -38,6 +49,11 @@ export async function POST(req: NextRequest) {
   const user = await getCurrentUserFromRequest(req);
   if (!isRoleAllowed(user, ["admin"])) {
     return bad("forbidden", "Admin role required.", 403);
+  }
+
+  // OWNER ONLY — no one else can create tenants
+  if (!canWriteTenants(user)) {
+    return bad("forbidden", "Tenant changes are restricted.", 403);
   }
 
   const body = await req.json().catch(() => null);
