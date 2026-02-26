@@ -28,6 +28,23 @@ function getThemeField(theme: any, key: string): string {
   return typeof v === "string" ? v : "";
 }
 
+function themeOf(t: Tenant) {
+  const th = (t?.theme_json || {}) as any;
+  return {
+    brandName:
+      typeof th?.brandName === "string" && th.brandName.trim() ? th.brandName.trim() : "",
+    primaryColor:
+      typeof th?.primaryColor === "string" && th.primaryColor.trim()
+        ? th.primaryColor.trim()
+        : "",
+    secondaryColor:
+      typeof th?.secondaryColor === "string" && th.secondaryColor.trim()
+        ? th.secondaryColor.trim()
+        : "",
+    logoUrl: typeof th?.logoUrl === "string" && th.logoUrl.trim() ? th.logoUrl.trim() : "",
+  };
+}
+
 export default function TenantsPage() {
   const [tenants, setTenants] = React.useState<Tenant[]>([]);
   const [name, setName] = React.useState("");
@@ -269,6 +286,62 @@ export default function TenantsPage() {
                       placeholder="#1E90FF"
                     />
                   </div>
+
+                  {(() => {
+                    const th = themeOf(t);
+                    const brand = th.brandName || t.name || t.slug;
+                    const primary = th.primaryColor || "#2563eb";
+                    const secondary = th.secondaryColor || "#0ea5e9";
+
+                    return (
+                      <div className="mt-3 rounded-2xl border border-slate-800/80 bg-slate-950/60 p-3">
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                          Preview
+                        </div>
+
+                        <div
+                          className="mt-2 rounded-xl border border-slate-800/80 px-3 py-2"
+                          style={{
+                            background: `linear-gradient(to right, ${primary}, ${secondary}, #0f172a)`,
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            {th.logoUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={th.logoUrl}
+                                alt="Tenant logo preview"
+                                className="h-7 w-7 rounded bg-white/5 object-contain"
+                              />
+                            ) : (
+                              <div className="h-7 w-7 rounded bg-white/10" />
+                            )}
+
+                            <div className="text-sm font-extrabold text-slate-50">
+                              {brand}
+                            </div>
+
+                            <div className="ml-auto flex items-center gap-1">
+                              <span
+                                className="h-4 w-4 rounded border border-white/20"
+                                title={`primary: ${primary}`}
+                                style={{ background: primary }}
+                              />
+                              <span
+                                className="h-4 w-4 rounded border border-white/20"
+                                title={`secondary: ${secondary}`}
+                                style={{ background: secondary }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 text-[11px] text-slate-400">
+                          Uses tenant theme_json (read-only preview)
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div className="md:col-span-2 flex items-center gap-3">
                     <button

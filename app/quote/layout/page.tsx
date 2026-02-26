@@ -680,6 +680,8 @@ export default function LayoutPage({
     } as any;
   }, [tenantTheme]);
 
+  
+
   React.useEffect(() => {
     try {
       if (typeof window === "undefined") return;
@@ -3418,7 +3420,12 @@ const tenantCssVars = React.useMemo(() => {
           />
           <div className="relative">
             {/* Header */}
-            <div className="border-b border-slate-800/80 bg-gradient-to-r from-sky-500 via-sky-500/80 to-slate-900 px-6 py-4">
+            <div
+  className="border-b border-slate-800/80 px-6 py-4"
+  style={{
+    background: `linear-gradient(to right, var(--tenant-primary), var(--tenant-secondary), #0f172a)`
+  }}
+>
               <div className="flex items-center gap-4 w-full">
                 {/* LEFT: powered by + quote */}
                 <div className="flex flex-col">
@@ -3473,7 +3480,7 @@ const tenantCssVars = React.useMemo(() => {
 
             {/* How this works */}
             <div className="border-b border-slate-800/80 bg-slate-950/95 px-6 py-3 text-[11px] text-slate-200 flex flex-wrap items-start gap-4">
-              <div className="flex items-center gap-2 font-semibold text-sky-200">
+              <div className="flex items-center gap-2 font-semibold text-[var(--tenant-secondary)]">
                 <span className="inline-flex h-5 w-1.5 items-center justify-center rounded-full border border-sky-400/70 bg-sky-500/20 text-[10px] font-bold shadow-[0_0_14px_rgba(56,189,248,0.7)]">
                   ?
                 </span>
@@ -3482,17 +3489,17 @@ const tenantCssVars = React.useMemo(() => {
 
               <ul className="flex flex-wrap gap-x-4 gap-y-1">
                 <li>
-                  <span className="text-sky-300 mr-1">1.</span>
+                  <span className="text-[var(--tenant-secondary)] mr-1">1.</span>
                   Adjust the foam block, add cavities from the left palette.
                 </li>
                 <li>
-                  <span className="text-sky-300 mr-1">2.</span>
+                  <span className="text-[var(--tenant-secondary)] mr-1">2.</span>
                   Drag / resize in the center canvas to fine-tune placement.
                 </li>
                 <li>
-                  <span className="text-sky-300 mr-1">3.</span>
+                  <span className="text-[var(--tenant-secondary)] mr-1">3.</span>
                   Fill in customer + material, then{" "}
-                  <span className="font-semibold text-sky-200">Apply to quote</span>.
+                  <span className="font-semibold text-[var(--tenant-secondary)]">Apply to quote</span>.
                 </li>
               </ul>
             </div>
@@ -3637,7 +3644,7 @@ const tenantCssVars = React.useMemo(() => {
                         className={
                           "px-2.5 py-0.5 rounded-full transition " +
                           (editorMode === "basic"
-                            ? "bg-sky-500 text-slate-950 font-semibold"
+                            ? "bg-[var(--tenant-primary)] text-slate-950 font-semibold"
                             : "text-slate-300 hover:text-slate-100")
                         }
                       >
@@ -3672,9 +3679,9 @@ const tenantCssVars = React.useMemo(() => {
                         step={0.05}
                         value={zoom}
                         onChange={(e) => setZoom(Number(e.target.value))}
-                        className="w-32 accent-sky-400"
+                      className="w-32 accent-[var(--tenant-secondary)]"
                       />
-                      <span className="ml-1 text-sky-200 font-mono">{Math.round(zoom * 100)}%</span>
+                      <span className="ml-1 text-[var(--tenant-secondary)] font-mono">{Math.round(zoom * 100)}%</span>
                     </div>
                     <div className="flex items-center gap-2 text-[11px] text-slate-400">
                       <span>Qty</span>
@@ -3874,7 +3881,7 @@ const tenantCssVars = React.useMemo(() => {
                             className={
                               "rounded-lg border px-2.5 py-1 flex items-center justify-between gap-2 " +
                               (isActive
-                                ? "border-sky-500/80 bg-sky-500/10"
+                                ? "border-sky-500/80 bg-[var(--tenant-secondary)]/10"
                                 : "border-slate-700 bg-slate-900/80 hover:border-sky-400/70")
                             }
                           >
@@ -3885,7 +3892,7 @@ const tenantCssVars = React.useMemo(() => {
                                   onClick={() => setActiveLayerId(layer.id)}
                                   className={
                                     "text-xs font-medium " +
-                                    (isActive ? "text-sky-100" : "text-slate-100")
+                                    (isActive ? "text-[var(--tenant-secondary)]" : "text-slate-100")
                                   }
                                 >
                                   {layerDisplayLabel(layerIndex)}
@@ -4106,15 +4113,15 @@ const tenantCssVars = React.useMemo(() => {
 
                   <p className="text-[11px] text-slate-400 mb-2">
                     Uses the foam footprint{" "}
-                    <span className="font-mono text-sky-200">{footprintLabel}</span>, stack depth{" "}
-                    <span className="font-mono text-sky-200">{stackDepthLabel}</span> and quoted qty{" "}
-                    <span className="font-mono text-sky-200">{qtyLabel}</span> to suggest a best-fit{" "}
-                    <span className="text-sky-300 font-medium">RSC</span> and{" "}
-                    <span className="text-sky-300 font-medium">mailer</span>.
+                    <span className="font-mono text-[var(--tenant-secondary)]">{footprintLabel}</span>, stack depth{" "}
+                    <span className="font-mono text-[var(--tenant-secondary)]">{stackDepthLabel}</span> and quoted qty{" "}
+                    <span className="font-mono text-[var(--tenant-secondary)]">{qtyLabel}</span> to suggest a best-fit{" "}
+                    <span className="text-[var(--tenant-secondary)] font-medium">RSC</span> and{" "}
+                    <span className="text-[var(--tenant-secondary)] font-medium">mailer</span>.
                   </p>
 
                   {selectedCartonKind && (
-                    <div className="mb-2 text-[11px] text-sky-200">
+                    <div className="mb-2 text-[11px] text-[var(--tenant-secondary)]">
                       Selected carton:{" "}
                       <span className="font-mono">
                         {selectedCartonKind === "RSC" ? boxSuggest.bestRsc?.sku : boxSuggest.bestMailer?.sku}
@@ -4149,7 +4156,7 @@ const tenantCssVars = React.useMemo(() => {
                         <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
                           <div className="flex items-center justify-between mb-0.5">
                             <div className="font-semibold text-slate-100">Best RSC match</div>
-                            <span className="font-mono text-sky-300 text-[10px]">{boxSuggest.bestRsc.sku}</span>
+                            <span className="font-mono text-[var(--tenant-secondary)] text-[10px]">{boxSuggest.bestRsc.sku}</span>
                           </div>
                           <div className="text-slate-300">{boxSuggest.bestRsc.description}</div>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
@@ -4160,7 +4167,7 @@ const tenantCssVars = React.useMemo(() => {
                                 {boxSuggest.bestRsc.inside_height_in}"
                               </span>
                             </span>
-                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-[var(--tenant-secondary)]/10 px-2 py-0.5 text-[10px] text-[var(--tenant-secondary)]">
                               Fit score: {boxSuggest.bestRsc.fit_score}
                             </span>
                           </div>
@@ -4190,7 +4197,7 @@ const tenantCssVars = React.useMemo(() => {
                         <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
                           <div className="flex items-center justify-between mb-0.5">
                             <div className="font-semibold text-slate-100">Best mailer match</div>
-                            <span className="font-mono text-sky-300 text-[10px]">{boxSuggest.bestMailer.sku}</span>
+                            <span className="font-mono text-[var(--tenant-secondary)] text-[10px]">{boxSuggest.bestMailer.sku}</span>
                           </div>
                           <div className="text-slate-300">{boxSuggest.bestMailer.description}</div>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
@@ -4201,7 +4208,7 @@ const tenantCssVars = React.useMemo(() => {
                                 {boxSuggest.bestMailer.inside_height_in}"
                               </span>
                             </span>
-                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">
+                            <span className="inline-flex items-center rounded-full border border-sky-500/70 bg-[var(--tenant-secondary)]/10 px-2 py-0.5 text-[10px] text-[var(--tenant-secondary)]">
                               Fit score: {boxSuggest.bestMailer.fit_score}
                             </span>
                           </div>
@@ -4272,7 +4279,7 @@ const tenantCssVars = React.useMemo(() => {
                   <div>
                     <div className="flex items-center gap-2 text-sm text-slate-50">
                       <span className="font-semibold">Foam layout preview</span>
-                      <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-sky-100 text-[11px] font-medium">
+                      <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/60 text-[var(--tenant-secondary)] text-[11px] font-medium">
                         Interactive layout
                       </span>
                     </div>
@@ -4366,8 +4373,8 @@ const tenantCssVars = React.useMemo(() => {
                     <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
                       <div className="text-xs font-semibold text-slate-100 mb-1">Closest matching cartons (coming soon)</div>
                       <p className="text-[11px] text-slate-400 mb-2">
-                        This panel will show the best fit <span className="text-sky-300 font-medium">RSC</span> and{" "}
-                        <span className="text-sky-300 font-medium">mailer</span> for the foam stack above, based on the
+                        This panel will show the best fit <span className="text-[var(--tenant-secondary)] font-medium">RSC</span> and{" "}
+                        <span className="text-[var(--tenant-secondary)] font-medium">mailer</span> for the foam stack above, based on the
                         Box Partners catalog. The selection will be saved back to the quote when you apply.
                       </p>
                       <div className="grid grid-cols-1 gap-2">
@@ -4409,7 +4416,7 @@ const tenantCssVars = React.useMemo(() => {
                   </div>
                   <div className="text-[11px] text-slate-400 mb-2">
                     Add who this foam layout is for.{" "}
-                    <span className="text-sky-300">
+                    <span className="text-[var(--tenant-secondary)]">
                       Name + email are required before recommending foam or applying to the quote.
                     </span>
                   </div>

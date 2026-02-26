@@ -21,6 +21,15 @@ function bad(error: string, message?: string, status = 400) {
   return NextResponse.json({ ok: false, error, message }, { status });
 }
 
+const THEME_EDIT_EMAIL_ALLOWLIST = new Set<string>([
+  "25thhourdesign@gmail.com",
+]);
+
+function canEditTheme(user: any): boolean {
+  const email = String(user?.email || "").trim().toLowerCase();
+  return THEME_EDIT_EMAIL_ALLOWLIST.has(email);
+}
+
 type Ctx = { params: { id: string } };
 
 export async function GET(req: NextRequest, ctx: Ctx) {
@@ -56,6 +65,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (!isRoleAllowed(user, ["admin"])) {
     return bad("forbidden", "Admin role required.", 403);
   }
+
+if (!canEditTheme(user)) {
+  return bad("forbidden", "Theme edits not allowed.", 403);
+}
 
   const id = Number(ctx?.params?.id);
   if (!Number.isFinite(id) || id <= 0) {
