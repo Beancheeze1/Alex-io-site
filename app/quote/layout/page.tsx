@@ -647,7 +647,11 @@ export default function LayoutPage({
 
     async function loadTheme() {
       try {
-        const res = await fetch(`/api/tenant/theme?t=${Math.random()}`, {
+        const u = new URL(window.location.href);
+        const tenant =
+          (u.searchParams.get("tenant") || u.searchParams.get("t") || "").trim();
+        const tenantQs = tenant ? `&tenant=${encodeURIComponent(tenant)}` : "";
+        const res = await fetch(`/api/tenant/theme?t=${Math.random()}${tenantQs}`, {
           cache: "no-store",
         });
         const json = await res.json().catch(() => null);
@@ -3365,7 +3369,11 @@ React.useEffect(() => {
 
   async function loadTheme() {
     try {
-      const res = await fetch(`/api/tenant/theme?t=${Math.random()}`, {
+      const u = new URL(window.location.href);
+      const tenant =
+        (u.searchParams.get("tenant") || u.searchParams.get("t") || "").trim();
+      const tenantQs = tenant ? `&tenant=${encodeURIComponent(tenant)}` : "";
+      const res = await fetch(`/api/tenant/theme?t=${Math.random()}${tenantQs}`, {
         cache: "no-store",
       });
       const json = await res.json().catch(() => null);
