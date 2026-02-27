@@ -818,6 +818,46 @@ export default function StartQuoteModal() {
 
   return (
     <div className="fixed inset-0 z-50">
+      <style jsx global>{`
+        /* Start Quote modal: bind leftover sky accents to tenant vars (local override) */
+        .text-sky-300\/80,
+        .text-sky-200,
+        .text-sky-100,
+        .text-sky-50 {
+          color: color-mix(in srgb, var(--tenant-secondary) 78%, white) !important;
+        }
+
+        .border-sky-400\/60,
+        .border-sky-400\/70,
+        .border-sky-500\/60,
+        .border-sky-500\/70,
+        .border-sky-500\/80 {
+          border-color: color-mix(in srgb, var(--tenant-secondary) 70%, transparent) !important;
+        }
+
+        .bg-sky-500\/10,
+        .bg-sky-500\/15,
+        .bg-sky-500\/20,
+        .bg-sky-500\/30 {
+          background-color: color-mix(in srgb, var(--tenant-secondary) 16%, transparent) !important;
+        }
+
+        .bg-sky-500\/80,
+        .bg-sky-500 {
+          background-color: var(--tenant-primary) !important;
+        }
+
+        .hover\:bg-sky-500:hover,
+        .hover\:bg-sky-500\/10:hover {
+          background-color: color-mix(in srgb, var(--tenant-primary) 85%, white) !important;
+        }
+
+        /* Input focus */
+        .focus\:border-sky-400\/60:focus {
+          border-color: color-mix(in srgb, var(--tenant-secondary) 70%, transparent) !important;
+          box-shadow: 0 0 0 2px color-mix(in srgb, var(--tenant-secondary) 22%, transparent) !important;
+        }
+      `}</style>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
