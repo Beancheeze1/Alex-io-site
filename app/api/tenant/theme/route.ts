@@ -21,7 +21,13 @@ function ok(body: any, status = 200) {
 export async function GET(req: NextRequest) {
   try {
     const tenantSlugHeader = (req.headers.get("x-tenant-slug") || "").trim();
-    const tenantSlug = tenantSlugHeader ? tenantSlugHeader.toLowerCase() : "";
+    const tenantSlugFromHeader = tenantSlugHeader ? tenantSlugHeader.toLowerCase() : "";
+
+    const qpTenant = (req.nextUrl.searchParams.get("tenant") || "").trim();
+    const qpT = (req.nextUrl.searchParams.get("t") || "").trim();
+    const tenantSlugFromQuery = (qpTenant || qpT).toLowerCase();
+
+    const tenantSlug = tenantSlugFromHeader || tenantSlugFromQuery || "";
     const slugToFind = tenantSlug || "default";
 
     const row = await one<{
