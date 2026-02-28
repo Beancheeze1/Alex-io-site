@@ -28,20 +28,28 @@ function getThemeField(theme: any, key: string): string {
   return typeof v === "string" ? v : "";
 }
 
+function coreHost(): string {
+  // Always treat the "default" tenant as the core apex host.
+  return "api.alex-io.com";
+}
+
 function tenantHostForSlug(slug: string): string {
-  // Example: current host is api.alex-io.com or default.api.alex-io.com
-  // We want: <slug>.api.alex-io.com (or <slug>.alex-io.com if base changes later)
+  const s = String(slug || "").trim().toLowerCase();
+
+  // Default tenant uses the core host (no "default." prefix)
+  if (s === "default") return coreHost();
+
+  // For non-default tenants, build <slug>.<base>
   const host =
     typeof window !== "undefined" && window.location && window.location.host
       ? window.location.host
-      : "api.alex-io.com";
+      : coreHost();
 
   const parts = host.split(".");
-  // If host already includes a tenant subdomain, strip it (keep last 3 labels: api.alex-io.com)
-  const base =
-    parts.length >= 3 ? parts.slice(-3).join(".") : host;
+  // Keep last 3 labels (api.alex-io.com). If host is already <tenant>.api.alex-io.com, strip tenant.
+  const base = parts.length >= 3 ? parts.slice(-3).join(".") : host;
 
-  return `${slug}.${base}`;
+  return `${s}.${base}`;
 }
 
 function tenantAdminUrl(slug: string): string {
@@ -50,6 +58,10 @@ function tenantAdminUrl(slug: string): string {
 
 function tenantRootUrl(slug: string): string {
   return `https://${tenantHostForSlug(slug)}`;
+}
+
+function tenantDisplayHost(slug: string): string {
+  return tenantHostForSlug(slug);
 }
 
 function themeOf(t: Tenant) {
@@ -275,6 +287,7 @@ export default function TenantsPage() {
           const s = edit[t.id];
           const adminUrl = tenantAdminUrl(t.slug);
           const rootUrl = tenantRootUrl(t.slug);
+          const displayHost = tenantDisplayHost(t.slug);
           return (
             <div key={t.id} className="border border-neutral-800 p-4 rounded space-y-3">
               <div className="flex items-start justify-between gap-4">
@@ -287,7 +300,7 @@ export default function TenantsPage() {
                     rel="noreferrer"
                     title="Open this tenant's admin in a new tab"
                   >
-                    {t.slug}.api.alex-io.com
+                    {displayHost}
                   </a>
                   <div className="text-[11px] text-neutral-500">ID: {t.id}</div>
                 </div>
