@@ -414,7 +414,7 @@ function drawCavityTopView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:
     const cx = sx + (cavLeftIn + diamIn / 2) * scX;
     // cav.y is 0=top of block → PDF y=sy+sH; increasing y goes downward
     const cy = sy + sH - (cavTopIn + diamIn / 2) * scY;
-    page.drawCircle({ x:cx, y:cy, size:r, borderColor:C.cavityLine, borderWidth:0.9, borderDashArray:[3,2] });
+    page.drawCircle({ x:cx, y:cy, size:r, borderColor:C.cavityLine, borderWidth:0.9 });
 
   } else if (cav.shape === "roundedRect") {
     const cavLeftIn = cav.x * bL;
@@ -426,7 +426,7 @@ function drawCavityTopView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:
     const cw  = cav.lengthIn*scX;
     const ch  = cav.widthIn*scY;
     const rPx = Math.min((cav.cornerRadiusIn||0)*Math.min(scX,scY), cw/2-0.5, ch/2-0.5);
-    drawRoundedRectOutline(page, cx, cy, cw, ch, rPx, C.cavityLine, 0.9, true);
+    drawRoundedRectOutline(page, cx, cy, cw, ch, rPx, C.cavityLine, 0.9, false);
 
   } else if (cav.shape === "poly" && Array.isArray(cav.points) && cav.points.length >= 3) {
     // points are normalised 0-1 over the block face (x=left→right, y=top→bottom)
@@ -434,11 +434,11 @@ function drawCavityTopView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:
       x: sx + p.x * sW,
       y: sy + sH - p.y * sH,   // flip y: 0=top→PDF top of block
     }));
-    drawPolyLine(page, pts, true, C.cavityLine, 0.9, true);
+    drawPolyLine(page, pts, true, C.cavityLine, 0.9, false);
     if (cav.nestedCavities) {
       for (const n of cav.nestedCavities) {
         if (!n.points||n.points.length<3) continue;
-        drawPolyLine(page, n.points.map(p=>({x:sx+p.x*sW, y:sy+sH-p.y*sH})), true, C.cavityLine, 0.7, true);
+        drawPolyLine(page, n.points.map(p=>({x:sx+p.x*sW, y:sy+sH-p.y*sH})), true, C.cavityLine, 0.7, false);
       }
     }
 
@@ -450,7 +450,7 @@ function drawCavityTopView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:
     const cx = sx + cavLeftIn * scX;
     const cy = sy + sH - (cavTopIn + cav.widthIn) * scY;
     page.drawRectangle({ x:cx, y:cy, width:cav.lengthIn*scX, height:cav.widthIn*scY,
-      borderColor:C.cavityLine, borderWidth:0.9, borderDashArray:[3,2] });
+      borderColor:C.cavityLine, borderWidth:0.9 });
   }
 }
 
@@ -463,9 +463,14 @@ function drawCavityFrontView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, s
     cavX = sx + Math.min(...xs)*sW;
     cavW = (Math.max(...xs)-Math.min(...xs))*sW;
   } else if (cav.shape==="circle") {
-    const r = (cav.lengthIn/2)*scX;
-    cavX = sx + (cav.x + cav.lengthIn/2)*scX*bL - r;
-    cavW = r*2;
+    const diamIn = cav.diameterIn || Math.min(cav.lengthIn, cav.widthIn);
+    const r = (diamIn / 2) * scX;
+
+    // cav.x is normalized 0..1 (leftright). Convert to inches first.
+    const cavLeftIn = cav.x * bL;
+
+    cavX = sx + cavLeftIn * scX;
+    cavW = r * 2;
   } else {
     cavX = sx + cav.x*scX*bL;
     cavW = cav.lengthIn*scX;
