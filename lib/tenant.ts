@@ -21,7 +21,8 @@ export function extractSlugFromHost(host: string | null): string | null {
   // remove port if present
   const clean = host.split(":")[0].toLowerCase();
 
-  if (clean === "api.alex-io.com") return null;
+  // Core host maps to Default tenant slug
+  if (clean === "api.alex-io.com") return "default";
 
   const parts = clean.split(".");
   if (parts.length < 4) return null;

@@ -20,8 +20,8 @@ function extractTenantSlugFromHost(hostRaw: string | null): string | null {
   // Strip port if present
   const host = hostRaw.split(":")[0].toLowerCase();
 
-  // Core host (no tenant)
-  if (host === "api.alex-io.com") return null;
+  // Core host = Default tenant
+  if (host === "api.alex-io.com") return "default";
 
   // Expect: TENANT.api.alex-io.com
   const parts = host.split(".");
@@ -44,7 +44,6 @@ export function middleware(req: NextRequest) {
   if (tenantSlug) {
     requestHeaders.set("x-tenant-slug", tenantSlug);
   } else {
-    // Fail-closed: do not set any tenant header on core host
     requestHeaders.delete("x-tenant-slug");
   }
 
