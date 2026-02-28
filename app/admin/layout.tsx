@@ -8,7 +8,9 @@
 import { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { getCurrentUserFromCookies } from "@/lib/auth";
+import { resolveTenantFromHost } from "@/lib/tenant";
 import LogoutButton from "@/components/LogoutButton";
 
 export const runtime = "nodejs";
@@ -49,12 +51,34 @@ export default async function AdminLayout({ children }: Props) {
 
   const showTenants = role === "admin" && canSeeTenantsLink(user);
 
+  // Tenant-aware admin header label:
+  // - Core host (api.alex-io.com) -> "Alex-IO Admin"
+  // - Tenant host (<slug>.api.alex-io.com) -> "<Tenant Name> Admin" (brandName preferred)
+  let adminHeaderLabel = "Alex-IO Admin";
+  try {
+    const h = await headers();
+    const host = h.get("host");
+    const tenant = await resolveTenantFromHost(host);
+
+    if (tenant) {
+      const brandName =
+        typeof tenant.theme_json?.brandName === "string"
+          ? tenant.theme_json.brandName.trim()
+          : "";
+      const name = (brandName || tenant.name || tenant.slug || "Tenant").trim();
+      adminHeaderLabel = `${name} Admin`;
+    }
+  } catch {
+    // Fail closed to core label (no throw, no regression)
+    adminHeaderLabel = "Alex-IO Admin";
+  }
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-50">
       <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
         <div className="flex items-baseline gap-4">
           <span className="text-sm font-semibold tracking-wide text-neutral-200">
-            Alex-IO Admin
+            {adminHeaderLabel}
           </span>
 
           <nav className="flex gap-3 text-xs text-neutral-400">
