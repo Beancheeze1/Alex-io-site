@@ -12,10 +12,13 @@ import { enforceTenantMatch } from "@/lib/tenant-enforce";
 // GET /api/quotes?limit=25
 export async function GET(req: NextRequest) {
   try {
-    const user = await getCurrentUserFromRequest(req);
+    const { searchParams } = new URL(req.url);
+    const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 200);
+
+    const user = await getCurrentUserFromRequest(req as any);
 
     // Enforce tenant host -> session tenant match (A2 subdomain multi-tenant)
-    const enforced = await enforceTenantMatch(req, user);
+    const enforced = await enforceTenantMatch(req as any, user);
     if (!enforced.ok) {
       return NextResponse.json(enforced.body, { status: enforced.status });
     }
@@ -37,9 +40,6 @@ export async function GET(req: NextRequest) {
         { status: 403 },
       );
     }
-
-    const { searchParams } = new URL(req.url);
-    const limit = Math.min(parseInt(searchParams.get("limit") || "25", 10), 200);
 
     if (isSales) {
       // Sales can only see their own quotes (AND within their tenant).
