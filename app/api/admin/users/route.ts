@@ -15,6 +15,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -53,6 +54,24 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const ten = await enforceTenantMatch(req, user);
+    if (!ten.ok) {
+      return NextResponse.json(ten.body, { status: ten.status });
+    }
+
+    if (!user || typeof user.tenant_id !== "number") {
+      return bad(
+        {
+          ok: false,
+          error: "tenant_required",
+          message: "Current admin user is missing tenant assignment.",
+        },
+        403,
+      );
+    }
+
+    const tenantId = user.tenant_id;
+
     // Use `one()` only (no assumptions about multi-row helper):
     // Return a JSON array aggregated by Postgres.
     const row = await one<{ users: any }>(
@@ -73,8 +92,9 @@ export async function GET(req: NextRequest) {
         '[]'::json
       ) as users
       from public.users
+      where tenant_id = $1
       `,
-      [],
+      [tenantId],
     );
 
     return ok({ ok: true, users: row?.users ?? [] }, 200);
@@ -106,19 +126,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const ten = await enforceTenantMatch(req, current);
+    if (!ten.ok) {
+      return NextResponse.json(ten.body, { status: ten.status });
+    }
+
     // Enforce tenant_id presence for admin creating users (fail closed).
     if (!current || typeof current.tenant_id !== "number") {
-  return bad(
-    {
-      ok: false,
-      error: "tenant_required",
-      message: "Current admin user is missing tenant assignment.",
-    },
-    403,
-  );
-}
+      return bad(
+        {
+          ok: false,
+          error: "tenant_required",
+          message: "Current admin user is missing tenant assignment.",
+        },
+        403,
+      );
+    }
 
-const tenantId = current.tenant_id;
+    const tenantId = current.tenant_id;
 
     const body = (await req.json().catch(() => null)) as any;
 
@@ -248,6 +273,24 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
+    const ten = await enforceTenantMatch(req, current);
+    if (!ten.ok) {
+      return NextResponse.json(ten.body, { status: ten.status });
+    }
+
+    if (!current || typeof current.tenant_id !== "number") {
+      return bad(
+        {
+          ok: false,
+          error: "tenant_required",
+          message: "Current admin user is missing tenant assignment.",
+        },
+        403,
+      );
+    }
+
+    const tenantId = current.tenant_id;
+
     // Accept id from query string first: /api/admin/users?id=123
     // Fallback: JSON body { id: 123 } (in case the UI sends it that way).
     const url = new URL(req.url);
@@ -284,8 +327,8 @@ export async function DELETE(req: NextRequest) {
 
     // Confirm user exists (so we can return 404 cleanly).
     const exists = await one<{ id: number; email: string }>(
-      `select id, email from public.users where id = $1`,
-      [id],
+      `select id, email from public.users where id = $1 and tenant_id = $2`,
+      [id, tenantId],
     ).catch(() => null);
 
     if (!exists?.id) {
@@ -297,8 +340,8 @@ export async function DELETE(req: NextRequest) {
 
     // Delete
     await one<{ ok: boolean }>(
-      `with d as (delete from public.users where id = $1 returning 1) select true as ok`,
-      [id],
+      `with d as (delete from public.users where id = $1 and tenant_id = $2 returning 1) select true as ok`,
+      [id, tenantId],
     );
 
     return ok({ ok: true }, 200);
