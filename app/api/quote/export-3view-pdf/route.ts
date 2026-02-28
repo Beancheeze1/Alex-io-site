@@ -153,6 +153,7 @@ export async function GET(req: NextRequest) {
 function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]): Drawing3DInput | null {
   try {
     const block = layoutJson?.block || layoutJson?.Block || {};
+    const blockRaw = block;
 
     const lengthIn = Number(block.lengthIn || block.length_in || block.length || 0);
     const widthIn = Number(block.widthIn || block.width_in || block.width || 0);
@@ -199,7 +200,9 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
             widthIn,
             depthIn,
             diameterIn: cav.diameterIn || cav.diameter_in,
+            cornerRadiusIn: cav.cornerRadiusIn ?? cav.corner_radius_in ?? null,
             points: cav.points,
+            nestedCavities: cav.nestedCavities ?? cav.nested_cavities,
             label: cav.label || null,
           });
         }
@@ -210,6 +213,9 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
           thicknessIn,
           materialName,
           cavities,
+          cropCorners: layerData.cropCorners ?? layerData.crop_corners ?? false,
+          roundCorners: layerData.roundCorners ?? layerData.round_corners ?? false,
+          roundRadiusIn: layerData.roundRadiusIn ?? layerData.round_radius_in ?? null,
         });
       }
     } else {
@@ -235,7 +241,9 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
           widthIn,
           depthIn,
           diameterIn: cav.diameterIn || cav.diameter_in,
+          cornerRadiusIn: cav.cornerRadiusIn ?? cav.corner_radius_in ?? null,
           points: cav.points,
+          nestedCavities: cav.nestedCavities ?? cav.nested_cavities,
           label: cav.label || null,
         });
       }
@@ -257,7 +265,13 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
     return {
       quoteNo: quote.quote_no,
       customerName: quote.customer_name,
-      block: { lengthIn, widthIn, heightIn },
+      block: {
+        lengthIn, widthIn, heightIn,
+        cornerStyle: blockRaw.cornerStyle || blockRaw.corner_style || null,
+        chamferIn: blockRaw.chamferIn || blockRaw.chamfer_in || null,
+        roundCorners: blockRaw.roundCorners || blockRaw.round_corners || false,
+        roundRadiusIn: blockRaw.roundRadiusIn || blockRaw.round_radius_in || null,
+      },
       layers,
       revision,
       date,
