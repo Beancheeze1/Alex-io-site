@@ -232,21 +232,27 @@ function drawTopView(
 
     if (cav.shape === "poly") continue; // no auto-dims for poly
 
-    const scaleX = sW / block.lengthIn;
-    const scaleY = sH / block.widthIn;
+    const scaleX = sW / block.lengthIn; // px per inch (L)
+    const scaleY = sH / block.widthIn;  // px per inch (W)
+
+    // cav.x / cav.y are NORMALIZED (0..1). Convert to inches on the block face.
+    const cavLeftIn = cav.x * block.lengthIn;
+    const cavTopIn  = cav.y * block.widthIn;
 
     if (cav.shape === "circle") {
-      const diam = cav.diameterIn || cav.lengthIn;
-      const r    = Math.min(cav.lengthIn, cav.widthIn) / 2 * Math.min(scaleX, scaleY);
-      const ccx  = sx + (cav.x + cav.lengthIn/2) * scaleX * block.lengthIn;
-      const ccy  = sy + sH - (cav.y + cav.widthIn/2) * scaleY * block.widthIn;
-      if (r * 2 > 12) {
+      const diamIn = cav.diameterIn || Math.min(cav.lengthIn, cav.widthIn);
+      const rPx    = (diamIn / 2) * Math.min(scaleX, scaleY);
+
+      const ccx = sx + (cavLeftIn + diamIn / 2) * scaleX;
+      const ccy = sy + sH - (cavTopIn + diamIn / 2) * scaleY;
+
+      if (rPx * 2 > 12) {
         // Dim above circle
-        horizDim(page, ccx-r, ccx+r, ccy+r, ccy+r+DIM_IN, diam, font, 6);
+        horizDim(page, ccx - rPx, ccx + rPx, ccy + rPx, ccy + rPx + DIM_IN, diamIn, font, 6);
       }
     } else {
-      const cavX = sx + cav.x * scaleX * block.lengthIn;
-      const cavY = sy + sH - (cav.y + cav.widthIn) * scaleY * block.widthIn;
+      const cavX = sx + cavLeftIn * scaleX;
+      const cavY = sy + sH - (cavTopIn + cav.widthIn) * scaleY;
       const cavW = cav.lengthIn * scaleX;
       const cavH = cav.widthIn  * scaleY;
 
@@ -373,11 +379,21 @@ function drawBlockOutline(page:PDFPage, x:number, y:number, w:number, h:number, 
     const rPx = Math.min(layer.roundRadiusIn*(w/block.lengthIn), w/2-0.5, h/2-0.5);
     fillPolyWithScanlines(page, roundedRectPts(x,y,w,h,rPx,12), C.foam);
     drawRoundedRectOutline(page, x, y, w, h, rPx, C.black, 1.5);
-  } else if (isPlan && block.cornerStyle==="chamfer" && block.chamferIn && block.chamferIn>0) {
-    const cX = block.chamferIn*(w/block.lengthIn), cY = block.chamferIn*(h/block.widthIn);
-    const pts: Pt[] = [{x:x+cX,y},{x:x+w,y},{x:x+w,y:y+h-cY},{x:x+w-cX,y:y+h},{x,y:y+h},{x,y:y+cY}];
-    fillPolyWithScanlines(page, pts, C.foam);
-    drawPolyLine(page, pts, true, C.black, 1.5);
+  } else if (
+    isPlan &&
+    !layer.roundCorners &&
+    (layer.cropCorners || block.cornerStyle === "chamfer")
+  ) {
+    const chamferIn = (block.chamferIn ?? 1);
+    if (Number.isFinite(chamferIn) && chamferIn > 0) {
+      const cX = chamferIn * (w / block.lengthIn);
+      const cY = chamferIn * (h / block.widthIn);
+      const pts: Pt[] = [{x:x+cX,y},{x:x+w,y},{x:x+w,y:y+h-cY},{x:x+w-cX,y:y+h},{x,y:y+h},{x,y:y+cY}];
+      fillPolyWithScanlines(page, pts, C.foam);
+      drawPolyLine(page, pts, true, C.black, 1.5);
+    } else {
+      page.drawRectangle({ x, y, width:w, height:h, color:C.foam, borderColor:C.black, borderWidth:1.5 });
+    }
   } else {
     page.drawRectangle({ x, y, width:w, height:h, color:C.foam, borderColor:C.black, borderWidth:1.5 });
   }
@@ -389,16 +405,24 @@ function drawCavityTopView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:
   const scX = sW/bL, scY = sH/bW;
 
   if (cav.shape === "circle") {
-    const r  = Math.min(cav.lengthIn/2*scX, cav.widthIn/2*scY);
-    const cx = sx + (cav.x + cav.lengthIn/2)*scX*bL;
+    const diamIn = cav.diameterIn || Math.min(cav.lengthIn, cav.widthIn);
+    const r  = (diamIn / 2) * Math.min(scX, scY);
+
+    const cavLeftIn = cav.x * bL;
+    const cavTopIn  = cav.y * bW;
+
+    const cx = sx + (cavLeftIn + diamIn / 2) * scX;
     // cav.y is 0=top of block → PDF y=sy+sH; increasing y goes downward
-    const cy = sy + sH - (cav.y + cav.widthIn/2)*scY*bW;
+    const cy = sy + sH - (cavTopIn + diamIn / 2) * scY;
     page.drawCircle({ x:cx, y:cy, size:r, borderColor:C.cavityLine, borderWidth:0.9, borderDashArray:[3,2] });
 
   } else if (cav.shape === "roundedRect") {
-    const cx  = sx + cav.x*scX*bL;
-    // cavY: top of cav in PDF coords = sy+sH - cav.y*sH; bottom = sy+sH-(cav.y+cav.widthIn/bW)*sH
-    const cy  = sy + sH - (cav.y + cav.widthIn)*scY*bW;
+    const cavLeftIn = cav.x * bL;
+    const cavTopIn  = cav.y * bW;
+
+    const cx  = sx + cavLeftIn * scX;
+    // cavY computed from top-inches + height-inches (PDF y-up)
+    const cy  = sy + sH - (cavTopIn + cav.widthIn) * scY;
     const cw  = cav.lengthIn*scX;
     const ch  = cav.widthIn*scY;
     const rPx = Math.min((cav.cornerRadiusIn||0)*Math.min(scX,scY), cw/2-0.5, ch/2-0.5);
@@ -420,8 +444,11 @@ function drawCavityTopView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:
 
   } else {
     // Plain rect
-    const cx = sx + cav.x*scX*bL;
-    const cy = sy + sH - (cav.y + cav.widthIn)*scY*bW;
+    const cavLeftIn = cav.x * bL;
+    const cavTopIn  = cav.y * bW;
+
+    const cx = sx + cavLeftIn * scX;
+    const cy = sy + sH - (cavTopIn + cav.widthIn) * scY;
     page.drawRectangle({ x:cx, y:cy, width:cav.lengthIn*scX, height:cav.widthIn*scY,
       borderColor:C.cavityLine, borderWidth:0.9, borderDashArray:[3,2] });
   }
