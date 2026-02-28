@@ -249,7 +249,7 @@ export default function TenantsPage() {
       <div className="space-y-3">
         {tenants.map((t) => {
           const s = edit[t.id];
-          const tenantUrl = `https://${t.slug}.api.alex-io.com`;
+          const tenantUrl = `/t/${encodeURIComponent(t.slug)}`;
           return (
             <div key={t.id} className="border border-neutral-800 p-4 rounded space-y-3">
               <div className="flex items-start justify-between gap-4">
@@ -262,8 +262,6 @@ export default function TenantsPage() {
                 <a
                   className="text-xs text-neutral-300 underline hover:text-neutral-100"
                   href={tenantUrl}
-                  target="_blank"
-                  rel="noreferrer"
                 >
                   Open tenant
                 </a>
