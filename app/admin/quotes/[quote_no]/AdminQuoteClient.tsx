@@ -2419,27 +2419,52 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   {customerQuoteUrl && (
                     <div style={{ marginTop: 4, paddingTop: 6, borderTop: "1px dashed #e5e7eb" }}>
                       <div style={labelStyle}>Customer-facing view</div>
-                      <a
-                        href={customerQuoteUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          marginTop: 2,
-                          padding: "4px 10px",
-                          borderRadius: 999,
-                          border: "1px solid #0ea5e9",
-                          background: "#e0f2fe",
-                          color: "#0369a1",
-                          fontSize: 11,
-                          fontWeight: 500,
-                          textDecoration: "none",
-                        }}
-                      >
-                        View customer quote in new tab <span aria-hidden="true">↗</span>
-                      </a>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+                        <a
+                          href={customerQuoteUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            border: "1px solid #0ea5e9",
+                            background: "#e0f2fe",
+                            color: "#0369a1",
+                            fontSize: 11,
+                            fontWeight: 500,
+                            textDecoration: "none",
+                          }}
+                        >
+                          View customer quote in new tab <span aria-hidden="true">↗</span>
+                        </a>
+
+                        {quoteState?.quote_no && (
+                          <a
+                            href={`/api/quote/export-3view-pdf?quote_no=${encodeURIComponent(quoteState.quote_no)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "4px 10px",
+                              borderRadius: 999,
+                              border: "1px solid #7c3aed",
+                              background: "#ede9fe",
+                              color: "#5b21b6",
+                              fontSize: 11,
+                              fontWeight: 500,
+                              textDecoration: "none",
+                            }}
+                            title="Opens the 3-view technical drawing PDF in a new tab"
+                          >
+                            View quote PDF <span aria-hidden="true">↗</span>
+                          </a>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
