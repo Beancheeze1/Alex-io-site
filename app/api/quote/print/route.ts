@@ -21,6 +21,7 @@ import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
 import { buildLayoutExports, computeGeometryHash } from "@/app/lib/layout/exports";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -211,6 +212,8 @@ export async function GET(req: NextRequest) {
 
   // Tenant guard (single-axis): require auth and scope quote lookup by tenant_id.
   const user = await getCurrentUserFromRequest(req);
+  const enforced = await enforceTenantMatch(req, user);
+  if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
   if (!user) {
     return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
   }

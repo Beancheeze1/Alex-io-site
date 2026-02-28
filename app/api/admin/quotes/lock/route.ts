@@ -10,6 +10,7 @@ import {
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -74,6 +75,8 @@ function json(body: any, status = 200) {
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUserFromRequest(req as any);
+  const enforced = await enforceTenantMatch(req, user);
+  if (!enforced.ok) return json(enforced.body, enforced.status);
   const role = (user?.role || "").toLowerCase();
   const isAdmin = role === "admin";
 
@@ -94,8 +97,9 @@ export async function POST(req: NextRequest) {
     select id, quote_no, locked, geometry_hash
     from quotes
     where quote_no = $1
+      and tenant_id = $2
     `,
-    [quoteNo],
+    [quoteNo, user.tenant_id],
   );
 
   if (!quote) {
@@ -112,8 +116,9 @@ export async function POST(req: NextRequest) {
           locked_at = null,
           geometry_hash = null
       where id = $1
+        and tenant_id = $2
       `,
-      [quote.id],
+      [quote.id, user.tenant_id],
     );
 
     return json({ ok: true, locked: false });

@@ -19,6 +19,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 type InBody = {
   quote_no?: string;
@@ -104,6 +105,10 @@ async function callStepService(layoutJson: any): Promise<{ stepText: string; use
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUserFromRequest(req as any);
+    const enforced = await enforceTenantMatch(req as any, user);
+    if (!enforced.ok) {
+      return NextResponse.json(enforced.body, { status: enforced.status });
+    }
     const role = (user?.role || "").toLowerCase();
     const allowed = role === "admin" || role === "cs";
 

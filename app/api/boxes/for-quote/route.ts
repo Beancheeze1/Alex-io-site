@@ -34,6 +34,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
+import { getCurrentUserFromRequest } from "@/lib/auth";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,6 +79,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(body, { status: 400 });
     }
 
+    const user = await getCurrentUserFromRequest(req as any);
+    const enforced = await enforceTenantMatch(req, user);
+    if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: "UNAUTHORIZED", message: "Login required." },
+        { status: 401 },
+      );
+    }
+
     // Read-only join from quotes -> quote_box_selections -> boxes
     const rows = (await q<Row>(
       `
@@ -100,9 +112,10 @@ export async function GET(req: NextRequest) {
       JOIN public.boxes AS b
         ON b.id = qbs.box_id
       WHERE q.quote_no = $1
+        AND q.tenant_id = $2
       ORDER BY qbs.id ASC
       `,
-      [quoteNo],
+      [quoteNo, user.tenant_id],
     )) as Row[];
 
     const body: Ok = {
