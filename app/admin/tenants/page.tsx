@@ -28,6 +28,30 @@ function getThemeField(theme: any, key: string): string {
   return typeof v === "string" ? v : "";
 }
 
+function tenantHostForSlug(slug: string): string {
+  // Example: current host is api.alex-io.com or default.api.alex-io.com
+  // We want: <slug>.api.alex-io.com (or <slug>.alex-io.com if base changes later)
+  const host =
+    typeof window !== "undefined" && window.location && window.location.host
+      ? window.location.host
+      : "api.alex-io.com";
+
+  const parts = host.split(".");
+  // If host already includes a tenant subdomain, strip it (keep last 3 labels: api.alex-io.com)
+  const base =
+    parts.length >= 3 ? parts.slice(-3).join(".") : host;
+
+  return `${slug}.${base}`;
+}
+
+function tenantAdminUrl(slug: string): string {
+  return `https://${tenantHostForSlug(slug)}/admin`;
+}
+
+function tenantRootUrl(slug: string): string {
+  return `https://${tenantHostForSlug(slug)}`;
+}
+
 function themeOf(t: Tenant) {
   const th = (t?.theme_json || {}) as any;
   return {
@@ -249,22 +273,43 @@ export default function TenantsPage() {
       <div className="space-y-3">
         {tenants.map((t) => {
           const s = edit[t.id];
-          const tenantUrl = `/t/${encodeURIComponent(t.slug)}`;
+          const adminUrl = tenantAdminUrl(t.slug);
+          const rootUrl = tenantRootUrl(t.slug);
           return (
             <div key={t.id} className="border border-neutral-800 p-4 rounded space-y-3">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="text-sm font-semibold">{t.name}</div>
-                  <div className="text-xs text-neutral-400">{t.slug}.api.alex-io.com</div>
+                  <a
+                    className="text-xs text-neutral-300 underline hover:text-neutral-100"
+                    href={adminUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open this tenant's admin in a new tab"
+                  >
+                    {t.slug}.api.alex-io.com
+                  </a>
                   <div className="text-[11px] text-neutral-500">ID: {t.id}</div>
                 </div>
 
-                <a
-                  className="text-xs text-neutral-300 underline hover:text-neutral-100"
-                  href={tenantUrl}
-                >
-                  Open tenant
-                </a>
+                <div className="flex items-center gap-3">
+                  <a
+                    className="text-xs text-neutral-300 underline hover:text-neutral-100"
+                    href={adminUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open admin
+                  </a>
+                  <a
+                    className="text-xs text-neutral-500 underline hover:text-neutral-200"
+                    href={rootUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open site
+                  </a>
+                </div>
               </div>
 
               {!s ? null : (
