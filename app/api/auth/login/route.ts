@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { one } from "@/lib/db";
+import { resolveTenantFromHost } from "@/lib/tenant";
 import {
   createSessionToken,
   SESSION_COOKIE_NAME,
@@ -57,13 +58,24 @@ export async function POST(req: NextRequest) {
   const password = passwordRaw;
 
   try {
+    const host = req.headers.get("host");
+    const tenant = await resolveTenantFromHost(host);
+
+    if (!tenant) {
+      return bad(
+        { error: "tenant_not_found", message: "Tenant not found for this host." },
+        404,
+      );
+    }
+
     const user = await one<UserRow>(
       `
       select id, email, name, role, tenant_id, password_hash
       from users
       where email = $1
+        and tenant_id = $2
       `,
-      [email],
+      [email, tenant.id],
     );
 
     if (!user || !user.password_hash) {
