@@ -135,7 +135,7 @@ res.cookies.set({
   secure: true,
   sameSite: "none",
   path: "/",
-  domain: ".api.alex-io.com", // <-- critical for A2: cookie must be set at parent domain to be sent to all subdomains
+  domain: ".alex-io.com", // <-- critical for A2: cookie must be set at parent domain to be sent to all subdomains
   maxAge: SESSION_MAX_AGE_SEC,
 });
 
