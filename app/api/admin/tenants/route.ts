@@ -31,7 +31,12 @@ const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
 
 function canWriteTenants(user: any): boolean {
   const email = String(user?.email || "").trim().toLowerCase();
-  return TENANT_WRITE_EMAIL_ALLOWLIST.has(email);
+
+  // Allow base gmail OR any +alias of it
+  return (
+    email === "25thhourdesign@gmail.com" ||
+    email.startsWith("25thhourdesign+")
+  );
 }
 
 // Deterministic admin email strategy (global-unique users.email):
