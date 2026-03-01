@@ -21,33 +21,22 @@ function bad(error: string, message?: string, status = 400) {
   return NextResponse.json({ ok: false, error, message }, { status });
 }
 
-// Tenant writes (create/update/disable/theme) are OWNER-ONLY via email allowlist.
-const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
-  "25thhourdesign@gmail.com",
-  "25thhourdesign+default@gmail.com",
-  "25thhourdesign+acme@gmail.com",
-  "25thhourdesign+mline@gmail.com",
-]);
-
 function canWriteTenants(user: any): boolean {
   const email = String(user?.email || "").trim().toLowerCase();
 
   // Allow base gmail OR any +alias of it
-  return (
-    email === "25thhourdesign@gmail.com" ||
-    email.startsWith("25thhourdesign+")
-  );
+  return email === "25thhourdesign@gmail.com" || email.startsWith("25thhourdesign+");
 }
 
-type Ctx = { params: { id: string } };
+type ParamsCtx = { params: { id: string } };
 
-export async function GET(req: NextRequest, ctx: Ctx) {
+export async function GET(req: NextRequest, { params }: ParamsCtx) {
   const user = await getCurrentUserFromRequest(req);
   if (!isRoleAllowed(user, ["admin"])) {
     return bad("forbidden", "Admin role required.", 403);
   }
 
-  const id = Number(ctx?.params?.id);
+  const id = Number(params?.id);
   if (!Number.isFinite(id) || id <= 0) {
     return bad("invalid_id", "Invalid tenant id.", 400);
   }
@@ -69,7 +58,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   return ok({ ok: true, tenant });
 }
 
-export async function PATCH(req: NextRequest, ctx: Ctx) {
+export async function PATCH(req: NextRequest, { params }: ParamsCtx) {
   const user = await getCurrentUserFromRequest(req);
   if (!isRoleAllowed(user, ["admin"])) {
     return bad("forbidden", "Admin role required.", 403);
@@ -80,7 +69,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     return bad("forbidden", "Tenant changes are restricted.", 403);
   }
 
-  const id = Number(ctx?.params?.id);
+  const id = Number(params?.id);
   if (!Number.isFinite(id) || id <= 0) {
     return bad("invalid_id", "Invalid tenant id.", 400);
   }
