@@ -18,6 +18,7 @@ type EditState = {
   primaryColor: string;
   secondaryColor: string;
   logoUrl: string;
+  landingChatEnabled: boolean;
   heroUseLogo: boolean;
   saving: boolean;
   error: string | null;
@@ -168,6 +169,10 @@ export default function TenantsPage() {
               primaryColor: getThemeField(t.theme_json, "primaryColor"),
               secondaryColor: getThemeField(t.theme_json, "secondaryColor"),
               logoUrl: getThemeField(t.theme_json, "logoUrl"),
+              landingChatEnabled: getThemeBool(
+                t.theme_json,
+                "landingChatEnabled",
+              ),
               heroUseLogo: getThemeBool(t.theme_json, "heroUseLogo"),
               saving: false,
               error: null,
@@ -231,6 +236,7 @@ export default function TenantsPage() {
       primaryColor: s.primaryColor,
       secondaryColor: s.secondaryColor,
       logoUrl: s.logoUrl,
+      landingChatEnabled: !!s.landingChatEnabled,
       heroUseLogo: !!s.heroUseLogo,
     };
 
@@ -481,6 +487,19 @@ export default function TenantsPage() {
                       <label className="flex items-center gap-2 text-xs text-neutral-300">
                         <input
                           type="checkbox"
+                          checked={!!s.landingChatEnabled}
+                          onChange={(e) =>
+                            updateEdit(t.id, {
+                              landingChatEnabled: e.target.checked,
+                            })
+                          }
+                        />
+                        Show chat on landing page
+                      </label>
+
+                      <label className="flex items-center gap-2 text-xs text-neutral-300">
+                        <input
+                          type="checkbox"
                           checked={!!s.heroUseLogo}
                           onChange={(e) => updateEdit(t.id, { heroUseLogo: e.target.checked })}
                         />
@@ -510,7 +529,8 @@ export default function TenantsPage() {
                       <span className="font-mono">
                         brandName={th.brandName || "(none)"} · primaryColor={th.primaryColor || "(none)"} ·
                         secondaryColor={th.secondaryColor || "(none)"} · logoUrl={th.logoUrl || "(none)"} ·
-                        heroUseLogo={th.heroUseLogo ? "true" : "false"}
+                        heroUseLogo={th.heroUseLogo ? "true" : "false"} Â· landingChatEnabled=
+                        {t.theme_json?.landingChatEnabled === true ? "true" : "false"}
                       </span>
                     </div>
                   </div>

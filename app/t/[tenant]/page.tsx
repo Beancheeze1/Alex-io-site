@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useParams } from "next/navigation";
+import SplashChatWidget from "@/components/SplashChatWidget";
 
 export default function TenantLanding() {
   const params = useParams();
@@ -82,6 +83,9 @@ export default function TenantLanding() {
 
         {/* Optional: if logo was enabled but failed, we silently fall back to text */}
       </div>
+      {theme?.landingChatEnabled ? (
+        <SplashChatWidget startQuotePath={`/start-quote?tenant=${tenant}`} />
+      ) : null}
     </main>
   );
 }
