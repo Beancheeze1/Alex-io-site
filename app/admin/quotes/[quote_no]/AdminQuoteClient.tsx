@@ -78,6 +78,12 @@ type ApiOk = {
 
   // NEW: /api/quote/print returns facts; we only use facts.revision here.
   facts?: any;
+
+  foamSubtotal?: number;
+  packagingSubtotal?: number;
+  grandSubtotal?: number;
+  printingUpcharge?: number;
+  grandTotal?: number;
 };
 
 type ApiErr = {
@@ -1053,6 +1059,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [quoteState, setQuoteState] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
+  const [printingUpcharge, setPrintingUpcharge] = React.useState<number>(0);
+  const [grandTotal, setGrandTotal] = React.useState<number>(0);
   const [loadingPreviousLayout, setLoadingPreviousLayout] = React.useState(false);
 
   const [refreshTick, setRefreshTick] = React.useState<number>(0);
@@ -1158,6 +1166,16 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             setQuoteState(json.quote);
             setItems(json.items || []);
             setLayoutPkg(json.layoutPkg || null);
+            setPrintingUpcharge(
+              typeof (json as ApiOk).printingUpcharge === "number"
+                ? (json as ApiOk).printingUpcharge
+                : 0,
+            );
+            setGrandTotal(
+              typeof (json as ApiOk).grandTotal === "number"
+                ? (json as ApiOk).grandTotal
+                : 0,
+            );
 
             // REV: /api/quote/print returns facts.revision (authoritative). Fallback "AS".
             const revRaw = (json as any)?.facts?.revision;
@@ -1252,7 +1270,12 @@ const overallQty =
     return sum + lineTotal;
   }, 0);
 
-  const anyPricing = subtotal > 0;
+  const effectivePrintingUpcharge = printingUpcharge > 0 ? printingUpcharge : 0;
+  const effectiveGrandTotal =
+    grandTotal > 0 ? grandTotal : subtotal + effectivePrintingUpcharge;
+
+  const anyPricing =
+    subtotal > 0 || effectivePrintingUpcharge > 0 || effectiveGrandTotal > 0;
 
     // Strip [REV:X] tags from notes for admin display
     const notesPreview = React.useMemo(() => {
@@ -2289,6 +2312,20 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                           <div style={labelStyle}>Estimated subtotal</div>
                           <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(subtotal)}</div>
                         </div>
+                        {effectivePrintingUpcharge > 0 && (
+                          <div>
+                            <div style={labelStyle}>Printing</div>
+                            <div>{formatUsd(effectivePrintingUpcharge)}</div>
+                          </div>
+                        )}
+                        {effectiveGrandTotal > 0 && (
+                          <div>
+                            <div style={labelStyle}>Total (incl. printing)</div>
+                            <div style={{ fontSize: 16, fontWeight: 600 }}>
+                              {formatUsd(effectiveGrandTotal)}
+                            </div>
+                          </div>
+                        )}
                         {primaryItem && (
                           <div>
                             <div style={labelStyle}>Primary unit price</div>
@@ -2964,4 +3001,3 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
     </div>
   );
 }
-

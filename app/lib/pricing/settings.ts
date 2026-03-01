@@ -11,6 +11,7 @@ export type PricingSettings = {
   kerf_pct_default: number;
   min_charge_default: number;
   skive_upcharge_each: number;
+  printing_upcharge_usd: number;
 
   // Machining + markup knobs
   machining_in3_per_min: number;
@@ -31,6 +32,7 @@ function ensureDefaults(): PricingSettings {
       kerf_pct_default: 0,
       min_charge_default: 0,
       skive_upcharge_each: 4.5,
+      printing_upcharge_usd: 0,
 
       // Match your existing hard-coded compute.ts values
       machining_in3_per_min: 3000, // in³ per minute

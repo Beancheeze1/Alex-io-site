@@ -639,6 +639,26 @@ export default function LayoutPage({
     } catch {}
   }, []);
 
+  React.useEffect(() => {
+    const key = quoteNoFromUrl?.trim();
+    if (!key) return;
+    try {
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      const printedParam = url.searchParams.get("printed");
+      const printed = printedParam === "1" || printedParam === "true";
+
+      fetch("/api/admin/mem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key,
+          facts: { printed: printed ? 1 : 0 },
+        }),
+      }).catch(() => null);
+    } catch {}
+  }, [quoteNoFromUrl]);
+
   // --- Tenant theme (public editor only; scoped to this page) ---
   const [tenantTheme, setTenantTheme] = React.useState<TenantTheme>({});
 

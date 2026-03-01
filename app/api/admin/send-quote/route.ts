@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { absoluteUrl } from "@/app/lib/internalFetch";
 import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
+import { getPricingSettings } from "@/app/lib/pricing/settings";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -173,6 +174,11 @@ export async function POST(req: NextRequest) {
     }
 
     const result = (calcJson as CalcOk).result || ({} as any);
+    const settings = getPricingSettings();
+    const printingUpcharge =
+      facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true
+        ? Number(settings.printing_upcharge_usd || 0)
+        : 0;
 
     // 3) Render customer email HTML (server-side)
     const revisionRaw = typeof facts?.revision === "string" ? facts.revision.trim() : "";
@@ -208,7 +214,9 @@ export async function POST(req: NextRequest) {
         min_charge: typeof result.min_charge === "number" ? result.min_charge : null,
       },
       pricing: {
-        total: typeof result.total === "number" ? result.total : 0,
+        total:
+          (typeof result.total === "number" ? result.total : 0) +
+          printingUpcharge,
         used_min_charge: !!result.used_min_charge,
         piece_ci: typeof result.piece_ci === "number" ? result.piece_ci : null,
         order_ci: typeof result.order_ci === "number" ? result.order_ci : null,

@@ -125,6 +125,8 @@ type ApiOk = {
   foamSubtotal: number;
   packagingSubtotal: number;
   grandSubtotal: number;
+  printingUpcharge: number;
+  grandTotal: number;
 };
 
 type ApiErr = {
@@ -669,6 +671,8 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   const [foamSubtotal, setFoamSubtotal] = React.useState<number>(0);
   const [packagingSubtotal, setPackagingSubtotal] = React.useState<number>(0);
   const [grandSubtotal, setGrandSubtotal] = React.useState<number>(0);
+  const [printingUpcharge, setPrintingUpcharge] = React.useState<number>(0);
+  const [grandTotal, setGrandTotal] = React.useState<number>(0);
 
   // Rough shipping % knob from admin (percent of foam + packaging)
   const [roughShipPct, setRoughShipPct] = React.useState<number | null>(null);
@@ -806,6 +810,10 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         setFoamSubtotal(typeof asOk.foamSubtotal === "number" ? asOk.foamSubtotal : 0);
         setPackagingSubtotal(typeof asOk.packagingSubtotal === "number" ? asOk.packagingSubtotal : 0);
         setGrandSubtotal(typeof asOk.grandSubtotal === "number" ? asOk.grandSubtotal : 0);
+        setPrintingUpcharge(
+          typeof asOk.printingUpcharge === "number" ? asOk.printingUpcharge : 0,
+        );
+        setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
       } else {
         setError("Unexpected response from quote API.");
       }
@@ -1110,21 +1118,24 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
   const effectivePackagingSubtotal = packagingSubtotal > 0 ? packagingSubtotal : derivedPackagingSubtotal;
 
   const effectiveGrandSubtotal = grandSubtotal > 0 ? grandSubtotal : foamSubtotal + effectivePackagingSubtotal;
+  const effectivePrintingUpcharge = printingUpcharge > 0 ? printingUpcharge : 0;
+  const effectiveGrandTotal =
+    grandTotal > 0 ? grandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge;
 
   // anyPricing: use effective grandSubtotal (foam + packaging) if available,
   // but still works if only foam is priced.
   const anyPricing =
-    (effectiveGrandSubtotal ?? 0) > 0 || (foamSubtotal ?? 0) > 0 || (breakdownUnitPrice ?? null) != null;
+    (effectiveGrandTotal ?? 0) > 0 || (foamSubtotal ?? 0) > 0 || (breakdownUnitPrice ?? null) != null;
 
   // Rough shipping estimate from admin knob:
-  //   shippingEstimate = (foam+packaging subtotal) * roughShipPct / 100
+  //   shippingEstimate = (foam+packaging+printing subtotal) * roughShipPct / 100
   const shippingEstimate =
-    roughShipPct != null && (effectiveGrandSubtotal ?? 0) > 0
-      ? Math.round(effectiveGrandSubtotal * (roughShipPct / 100) * 100) / 100
+    roughShipPct != null && (effectiveGrandTotal ?? 0) > 0
+      ? Math.round(effectiveGrandTotal * (roughShipPct / 100) * 100) / 100
       : 0;
 
-  // Planning total adds rough shipping to the effective grandSubtotal
-  const planningTotal = (effectiveGrandSubtotal ?? 0) + (shippingEstimate || 0);
+  // Planning total adds rough shipping to the effective grand total
+  const planningTotal = (effectiveGrandTotal ?? 0) + (shippingEstimate || 0);
 
   // ===== Status pill mapping (Path A) =====
   function getStatusPill(statusRaw: any): { label: string; style: React.CSSProperties } {
@@ -1629,10 +1640,17 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         </div>
                       )}
 
-                      {effectiveGrandSubtotal > 0 && (
+                      {effectivePrintingUpcharge > 0 && (
                         <div>
-                          <div style={labelStyle}>Combined estimate (foam + packaging)</div>
-                          <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectiveGrandSubtotal)}</div>
+                          <div style={labelStyle}>Printing</div>
+                          <div style={{ fontSize: 13 }}>{formatUsd(effectivePrintingUpcharge)}</div>
+                        </div>
+                      )}
+
+                      {effectiveGrandTotal > 0 && (
+                        <div>
+                          <div style={labelStyle}>Total estimate (foam + packaging + printing)</div>
+                          <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal)}</div>
                         </div>
                       )}
 
@@ -1648,9 +1666,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                             </div>
                           </div>
 
-                          {effectiveGrandSubtotal > 0 && (
+                          {effectiveGrandTotal > 0 && (
                             <div>
-                              <div style={labelStyle}>Planning total (foam + packaging + shipping)</div>
+                              <div style={labelStyle}>Planning total (foam + packaging + printing + shipping)</div>
                               <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(planningTotal)}</div>
                             </div>
                           )}

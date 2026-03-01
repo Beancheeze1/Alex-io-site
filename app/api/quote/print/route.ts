@@ -22,6 +22,7 @@ import { loadFacts } from "@/app/lib/memory";
 import { buildLayoutExports, computeGeometryHash } from "@/app/lib/layout/exports";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
+import { getPricingSettings } from "@/app/lib/pricing/settings";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -491,6 +492,12 @@ export async function GET(req: NextRequest) {
       0,
     );
 
+    const settings = getPricingSettings();
+    const printingUpcharge =
+      facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true
+        ? Number(settings.printing_upcharge_usd || 0)
+        : 0;
+
     return ok({
       ok: true,
       quote,
@@ -500,6 +507,8 @@ export async function GET(req: NextRequest) {
       foamSubtotal,
       packagingSubtotal,
       grandSubtotal: foamSubtotal + packagingSubtotal,
+      printingUpcharge,
+      grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge,
       facts,
     });
   } catch (err) {
