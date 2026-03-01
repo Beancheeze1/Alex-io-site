@@ -111,6 +111,7 @@ export default function TenantsPage() {
 
   const [name, setName] = React.useState("");
   const [slug, setSlug] = React.useState("");
+  const [domain, setDomain] = React.useState(""); // NEW
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [createdCreds, setCreatedCreds] = React.useState<{
     slug: string;
@@ -170,13 +171,18 @@ export default function TenantsPage() {
     const res = await fetch("/api/admin/tenants", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, slug }),
+      body: JSON.stringify({
+        name,
+        slug,
+        domain: domain.trim(), // NEW (domain-only)
+      }),
     });
 
     const json = await res.json();
     if (json?.ok) {
       setName("");
       setSlug("");
+      setDomain(""); // NEW
       if (json?.admin_email && json?.temp_password) {
         setCreatedCreds({
           slug: String(slug || "").trim().toLowerCase(),
@@ -287,6 +293,18 @@ export default function TenantsPage() {
             onChange={(e) => setSlug(e.target.value)}
             disabled={!canWrite}
           />
+
+          {/* NEW: domain-only brand pull */}
+          <input
+            className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
+            placeholder="Domain for brand pull (acme.com)"
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            disabled={!canWrite}
+          />
+          <div className="text-[11px] text-neutral-500">
+            Optional. If provided, we’ll try to pull theme-color + logo from the homepage.
+          </div>
 
           <div className="flex items-center gap-3">
             <button
