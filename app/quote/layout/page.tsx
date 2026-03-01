@@ -3467,10 +3467,10 @@ const tenantCssVars = React.useMemo(() => {
                 {/* CENTER: stylized title */}
                 <div className="flex-1 text-center">
                   <div className="inline-flex flex-col items-center gap-1">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[color:color-mix(in_srgb,var(--tenant-secondary)_72%,white)]">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-white/70">
                       Foam layout tools
                     </div>
-                    <div className="text-2xl md:text-[26px] font-extrabold leading-snug bg-gradient-to-r from-[color:var(--tenant-primary)] via-[color:var(--tenant-secondary)] to-[color:var(--tenant-primary)] bg-clip-text text-transparent drop-shadow-[0_0_18px_rgba(15,23,42,0.9)]">
+                    <div className="text-2xl md:text-[26px] font-extrabold leading-snug bg-gradient-to-r from-[color:var(--tenant-primary)] via-[color:var(--tenant-secondary)] to-[color:var(--tenant-primary)] bg-clip-text text-white/70">
                       Interactive foam layout editor
                     </div>
                   </div>
@@ -3480,7 +3480,7 @@ const tenantCssVars = React.useMemo(() => {
                 <div className="flex items-center justify-end gap-2">
                   <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--tenant-secondary)_82%,white)]">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
-                    Layout editor · BETA
+                    Layout editor · V2.0
                   </span>
                 </div>
               </div>
