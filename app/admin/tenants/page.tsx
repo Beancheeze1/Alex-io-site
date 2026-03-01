@@ -82,25 +82,29 @@ function themeOf(t: Tenant) {
 }
 
 // Owner-only tenant admin allowlist (UI)
-const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
-  "25thhourdesign@gmail.com",
-]);
+const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>(["25thhourdesign@gmail.com"]);
 
 function canWriteTenantsEmail(email: string | null | undefined): boolean {
-  const e = String(email || "").trim().toLowerCase();
+  const e = String(email || "")
+    .trim()
+    .toLowerCase();
   return TENANT_WRITE_EMAIL_ALLOWLIST.has(e);
 }
 
 export default function TenantsPage() {
   const [tenants, setTenants] = React.useState<Tenant[]>([]);
+  const [edit, setEdit] = React.useState<Record<number, EditState>>({});
+  const [authLoading, setAuthLoading] = React.useState(true);
+  const [authedEmail, setAuthedEmail] = React.useState<string | null>(null);
+
   const [name, setName] = React.useState("");
   const [slug, setSlug] = React.useState("");
   const [createError, setCreateError] = React.useState<string | null>(null);
-
-  const [edit, setEdit] = React.useState<Record<number, EditState>>({});
-
-  const [authLoading, setAuthLoading] = React.useState(true);
-  const [authedEmail, setAuthedEmail] = React.useState<string | null>(null);
+  const [createdCreds, setCreatedCreds] = React.useState<{
+    slug: string;
+    admin_email: string;
+    temp_password: string;
+  } | null>(null);
 
   async function loadWhoAmI() {
     try {
@@ -149,6 +153,7 @@ export default function TenantsPage() {
 
   async function createTenant() {
     setCreateError(null);
+    setCreatedCreds(null);
 
     const res = await fetch("/api/admin/tenants", {
       method: "POST",
@@ -160,6 +165,13 @@ export default function TenantsPage() {
     if (json?.ok) {
       setName("");
       setSlug("");
+      if (json?.admin_email && json?.temp_password) {
+        setCreatedCreds({
+          slug: String(slug || "").trim().toLowerCase(),
+          admin_email: String(json.admin_email),
+          temp_password: String(json.temp_password),
+        });
+      }
       await load();
       return;
     }
@@ -224,61 +236,83 @@ export default function TenantsPage() {
 
   const canWrite = canWriteTenantsEmail(authedEmail);
 
-  if (authLoading) {
-    return (
-      <div className="p-6">
-        <div className="text-sm text-neutral-300">Loading…</div>
-      </div>
-    );
-  }
-
-  if (!canWrite) {
-    return (
-      <div className="p-6 space-y-3">
-        <h1 className="text-lg font-semibold">Tenants</h1>
-        <div className="rounded border border-neutral-800 bg-neutral-950 p-4">
-          <div className="text-sm font-semibold text-neutral-200">Restricted</div>
-          <div className="mt-1 text-sm text-neutral-400">
-            Tenant management is restricted to the owner.
-          </div>
-          <div className="mt-2 text-xs text-neutral-500">
-            Signed in as: <span className="font-mono">{authedEmail || "unknown"}</span>
+  return (
+    <div className="p-6 space-y-6 text-neutral-100">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xl font-semibold">Tenants</div>
+          <div className="text-xs text-neutral-400">
+            Manage tenant records + theme. Default tenant = core host.
           </div>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-lg font-semibold">Tenants</h1>
-        <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={load}>
+        <button
+          className="text-xs px-3 py-2 rounded border border-neutral-700 hover:bg-neutral-900"
+          onClick={load}
+        >
           Refresh
         </button>
       </div>
 
       <div className="border border-neutral-800 p-4 rounded space-y-3">
         <div className="text-sm font-semibold text-neutral-200">Create Tenant</div>
+
+        {!canWrite ? (
+          <div className="text-xs text-amber-300/90">
+            Tenant creation is owner-restricted for now.
+          </div>
+        ) : null}
+
         <div className="space-y-2">
           <input
             className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
             placeholder="Company Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            disabled={!canWrite}
           />
           <input
             className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
             placeholder="Slug (acme)"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
+            disabled={!canWrite}
           />
+
           <div className="flex items-center gap-3">
-            <button className="bg-blue-600 px-3 py-2 rounded text-sm" onClick={createTenant}>
+            <button
+              className="bg-blue-600 px-3 py-2 rounded text-sm disabled:opacity-50"
+              onClick={createTenant}
+              disabled={!canWrite}
+            >
               Create
             </button>
             {createError ? <span className="text-xs text-red-400">{createError}</span> : null}
           </div>
+
+          {createdCreds ? (
+            <div className="w-full rounded border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-200 space-y-1">
+              <div className="font-semibold text-emerald-100">Tenant admin created</div>
+              <div>
+                <span className="text-emerald-200/80">Login URL:</span>{" "}
+                <a
+                  className="underline"
+                  href={`https://${tenantHostForSlug(createdCreds.slug)}/login`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {`https://${tenantHostForSlug(createdCreds.slug)}/login`}
+                </a>
+              </div>
+              <div>
+                <span className="text-emerald-200/80">Email:</span>{" "}
+                <span className="font-mono">{createdCreds.admin_email}</span>
+              </div>
+              <div>
+                <span className="text-emerald-200/80">Temp password (copy now):</span>{" "}
+                <span className="font-mono">{createdCreds.temp_password}</span>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -288,175 +322,104 @@ export default function TenantsPage() {
           const adminUrl = tenantAdminUrl(t.slug);
           const rootUrl = tenantRootUrl(t.slug);
           const displayHost = tenantDisplayHost(t.slug);
+          const th = themeOf(t);
+
           return (
-            <div key={t.id} className="border border-neutral-800 p-4 rounded space-y-3">
+            <div key={t.id} className="border border-neutral-800 rounded p-4 space-y-3">
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-sm font-semibold">{t.name}</div>
-                  <a
-                    className="text-xs text-neutral-300 underline hover:text-neutral-100"
-                    href={adminUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    title="Open this tenant's admin in a new tab"
-                  >
-                    {displayHost}
-                  </a>
-                  <div className="text-[11px] text-neutral-500">ID: {t.id}</div>
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold">
+                    #{t.id} — {t.name}{" "}
+                    <span className="text-xs text-neutral-500">({t.slug})</span>
+                  </div>
+                  <div className="text-xs text-neutral-400">
+                    Host: <span className="font-mono">{displayHost}</span>
+                  </div>
+                  <div className="text-xs text-neutral-400">
+                    <a className="underline" href={rootUrl} target="_blank" rel="noreferrer">
+                      Open Site
+                    </a>{" "}
+                    ·{" "}
+                    <a className="underline" href={adminUrl} target="_blank" rel="noreferrer">
+                      Open Admin
+                    </a>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <a
-                    className="text-xs text-neutral-300 underline hover:text-neutral-100"
-                    href={adminUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open admin
-                  </a>
-                  <a
-                    className="text-xs text-neutral-500 underline hover:text-neutral-200"
-                    href={rootUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open site
-                  </a>
+                <div className="text-right text-xs text-neutral-500">
+                  {t.created_at ? new Date(t.created_at).toLocaleString() : null}
                 </div>
               </div>
 
-              {!s ? null : (
+              {s ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-xs text-neutral-400">Company name</div>
+                  <div className="space-y-2">
+                    <div className="text-xs text-neutral-400">Tenant name</div>
                     <input
                       className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
                       value={s.name}
                       onChange={(e) => updateEdit(t.id, { name: e.target.value })}
                     />
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="text-xs text-neutral-400">Active</div>
-                    <label className="flex items-center gap-2 text-sm">
+                    <label className="flex items-center gap-2 text-xs text-neutral-300">
                       <input
                         type="checkbox"
                         checked={s.active}
                         onChange={(e) => updateEdit(t.id, { active: e.target.checked })}
                       />
-                      <span className="text-neutral-200">{s.active ? "Enabled" : "Disabled"}</span>
+                      Active
                     </label>
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="text-xs text-neutral-400">Brand name (theme)</div>
+                  <div className="space-y-2">
+                    <div className="text-xs text-neutral-400">Theme</div>
                     <input
                       className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
+                      placeholder="brandName"
                       value={s.brandName}
                       onChange={(e) => updateEdit(t.id, { brandName: e.target.value })}
-                      placeholder="Acme Packaging"
                     />
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="text-xs text-neutral-400">Logo URL</div>
                     <input
                       className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
-                      value={s.logoUrl}
-                      onChange={(e) => updateEdit(t.id, { logoUrl: e.target.value })}
-                      placeholder="https://..."
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="text-xs text-neutral-400">Primary color</div>
-                    <input
-                      className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
+                      placeholder="primaryColor (#0ea5e9)"
                       value={s.primaryColor}
                       onChange={(e) => updateEdit(t.id, { primaryColor: e.target.value })}
-                      placeholder="#0A3D62"
                     />
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="text-xs text-neutral-400">Secondary color</div>
                     <input
                       className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
+                      placeholder="secondaryColor (#22c55e)"
                       value={s.secondaryColor}
                       onChange={(e) => updateEdit(t.id, { secondaryColor: e.target.value })}
-                      placeholder="#1E90FF"
+                    />
+                    <input
+                      className="bg-neutral-900 p-2 w-full rounded border border-neutral-800"
+                      placeholder="logoUrl"
+                      value={s.logoUrl}
+                      onChange={(e) => updateEdit(t.id, { logoUrl: e.target.value })}
                     />
                   </div>
 
-                  {(() => {
-                    const th = themeOf(t);
-                    const brand = th.brandName || t.name || t.slug;
-                    const primary = th.primaryColor || "#2563eb";
-                    const secondary = th.secondaryColor || "#0ea5e9";
-
-                    return (
-                      <div className="mt-3 rounded-2xl border border-slate-800/80 bg-slate-950/60 p-3">
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                          Preview
-                        </div>
-
-                        <div
-                          className="mt-2 rounded-xl border border-slate-800/80 px-3 py-2"
-                          style={{
-                            background: `linear-gradient(to right, ${primary}, ${secondary}, #0f172a)`,
-                          }}
-                        >
-                          <div className="flex items-center gap-2">
-                            {th.logoUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={th.logoUrl}
-                                alt="Tenant logo preview"
-                                className="h-7 w-7 rounded bg-white/5 object-contain"
-                              />
-                            ) : (
-                              <div className="h-7 w-7 rounded bg-white/10" />
-                            )}
-
-                            <div className="text-sm font-extrabold text-slate-50">{brand}</div>
-
-                            <div className="ml-auto flex items-center gap-1">
-                              <span
-                                className="h-4 w-4 rounded border border-white/20"
-                                title={`primary: ${primary}`}
-                                style={{ background: primary }}
-                              />
-                              <span
-                                className="h-4 w-4 rounded border border-white/20"
-                                title={`secondary: ${secondary}`}
-                                style={{ background: secondary }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-2 text-[11px] text-slate-400">
-                          Uses tenant theme_json (read-only preview)
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  <div className="md:col-span-2 flex items-center gap-3">
+                  <div className="flex items-center gap-3">
                     <button
-                      className="bg-neutral-200 text-neutral-950 px-3 py-2 rounded text-sm disabled:opacity-60"
-                      disabled={s.saving}
+                      className="bg-emerald-600 px-3 py-2 rounded text-sm disabled:opacity-50"
                       onClick={() => saveTenant(t.id)}
+                      disabled={s.saving}
                     >
                       {s.saving ? "Saving..." : "Save"}
                     </button>
 
-                    {s.ok ? <span className="text-xs text-green-400">Saved.</span> : null}
-
+                    {s.ok ? <span className="text-xs text-emerald-400">Saved.</span> : null}
                     {s.error ? <span className="text-xs text-red-400">{s.error}</span> : null}
                   </div>
+
+                  <div className="text-xs text-neutral-500 md:col-span-2">
+                    Current:{" "}
+                    <span className="font-mono">
+                      brandName={th.brandName || "(none)"} · primaryColor={th.primaryColor || "(none)"} ·
+                      secondaryColor={th.secondaryColor || "(none)"} · logoUrl={th.logoUrl || "(none)"}
+                    </span>
+                  </div>
                 </div>
-              )}
+              ) : null}
             </div>
           );
         })}
