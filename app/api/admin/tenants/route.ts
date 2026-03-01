@@ -51,9 +51,11 @@ export async function GET(req: NextRequest) {
     return bad("forbidden", "Admin role required.", 403);
   }
 
+  // Hide inactive tenants from the list (non-destructive).
   const tenants = await q(`
     select id, name, slug, active, theme_json, created_at
     from tenants
+    where active = true
     order by id asc
   `);
 
@@ -133,7 +135,11 @@ export async function POST(req: NextRequest) {
           409,
         );
       }
-      return bad("conflict", "Conflict creating tenant. Slug or admin email may already exist.", 409);
+      return bad(
+        "conflict",
+        "Conflict creating tenant. Slug or admin email may already exist.",
+        409,
+      );
     }
 
     return bad("create_failed", msg, 500);
