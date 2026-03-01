@@ -28,15 +28,35 @@ function canWriteTenants(user: any): boolean {
   return email === "25thhourdesign@gmail.com" || email.startsWith("25thhourdesign+");
 }
 
-type ParamsCtx = { params: { id: string } };
+type ParamsCtx = { params?: { id?: string } };
 
-export async function GET(req: NextRequest, { params }: ParamsCtx) {
+// Fallback-safe id extraction:
+// - Prefer App Router params.id when available
+// - Fallback to parsing the trailing path segment from /api/admin/tenants/<id>
+function getIdFromRequest(req: NextRequest, params?: { id?: string }): number {
+  const rawFromParams = typeof params?.id === "string" ? params.id : "";
+
+  let raw = rawFromParams.trim();
+
+  if (!raw) {
+    // Example pathname: /api/admin/tenants/7
+    const pathname = req.nextUrl?.pathname || "";
+    const parts = pathname.split("/").filter(Boolean);
+    const last = parts.length ? parts[parts.length - 1] : "";
+    raw = String(last || "").trim();
+  }
+
+  const id = Number(raw);
+  return id;
+}
+
+export async function GET(req: NextRequest, ctx: ParamsCtx) {
   const user = await getCurrentUserFromRequest(req);
   if (!isRoleAllowed(user, ["admin"])) {
     return bad("forbidden", "Admin role required.", 403);
   }
 
-  const id = Number(params?.id);
+  const id = getIdFromRequest(req, ctx?.params);
   if (!Number.isFinite(id) || id <= 0) {
     return bad("invalid_id", "Invalid tenant id.", 400);
   }
@@ -58,7 +78,7 @@ export async function GET(req: NextRequest, { params }: ParamsCtx) {
   return ok({ ok: true, tenant });
 }
 
-export async function PATCH(req: NextRequest, { params }: ParamsCtx) {
+export async function PATCH(req: NextRequest, ctx: ParamsCtx) {
   const user = await getCurrentUserFromRequest(req);
   if (!isRoleAllowed(user, ["admin"])) {
     return bad("forbidden", "Admin role required.", 403);
@@ -69,7 +89,7 @@ export async function PATCH(req: NextRequest, { params }: ParamsCtx) {
     return bad("forbidden", "Tenant changes are restricted.", 403);
   }
 
-  const id = Number(params?.id);
+  const id = getIdFromRequest(req, ctx?.params);
   if (!Number.isFinite(id) || id <= 0) {
     return bad("invalid_id", "Invalid tenant id.", 400);
   }
