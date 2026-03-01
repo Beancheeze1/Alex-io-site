@@ -8,6 +8,9 @@
 // A2 Multi-tenant:
 // - For TENANT.api.alex-io.com, attach request header: x-tenant-slug=TENANT
 // - For api.alex-io.com (core host), no tenant slug header.
+//
+// NEW (Path A): /admin requires a session cookie present.
+// Tenant correctness is enforced server-side by lib/auth.ts (Host->tenant match).
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -34,6 +37,13 @@ function extractTenantSlugFromHost(hostRaw: string | null): string | null {
   return slug;
 }
 
+function redirectToLogin(req: NextRequest) {
+  const url = req.nextUrl.clone();
+  url.pathname = "/login";
+  url.searchParams.set("next", req.nextUrl.pathname);
+  return NextResponse.redirect(url);
+}
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
@@ -47,16 +57,16 @@ export function middleware(req: NextRequest) {
     requestHeaders.delete("x-tenant-slug");
   }
 
-  // Preserve existing /internal gate behavior (unchanged logic)
+  // Gate /internal (existing behavior)
   if (pathname.startsWith("/internal")) {
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value || "";
+    if (!token) return redirectToLogin(req);
+  }
 
-    if (!token) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/login";
-      url.searchParams.set("next", pathname);
-      return NextResponse.redirect(url);
-    }
+  // NEW: Gate /admin pages (cookie presence only; tenant mismatch handled server-side)
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    const token = req.cookies.get(SESSION_COOKIE_NAME)?.value || "";
+    if (!token) return redirectToLogin(req);
   }
 
   return NextResponse.next({

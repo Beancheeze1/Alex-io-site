@@ -5,12 +5,19 @@
 // - Stores a small JSON payload in a cookie: base64(payload).signature
 // - SECRET: AUTH_SECRET env var (must be set in Render).
 //
+// IMPORTANT (Multi-tenant hard gate):
+// - Session payload includes tenant_id.
+// - We also resolve the request tenant from Host (A2 pattern) and REQUIRE:
+//     user.tenant_id === resolvedTenant.id
+//   If mismatch => treat as logged out (returns null).
+//
 // This file is Node runtime only (uses `crypto`).
 
 import crypto from "crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import type { NextRequest } from "next/server";
 import { one } from "@/lib/db";
+import { resolveTenantFromHost } from "@/lib/tenant";
 
 export const SESSION_COOKIE_NAME = "alexio_session";
 export const SESSION_MAX_AGE_SEC = 60 * 60 * 8; // 8 hours
@@ -159,6 +166,12 @@ function getCookieFromHeader(cookieHeader: string | null, name: string): string 
   return null;
 }
 
+async function isTenantMatch(host: string | null, user: CurrentUser): Promise<boolean> {
+  const t = await resolveTenantFromHost(host);
+  if (!t) return false;
+  return t.id === user.tenant_id;
+}
+
 /**
  * For API routes / Node handlers:
  *   const user = await getCurrentUserFromRequest(req);
@@ -174,7 +187,15 @@ export async function getCurrentUserFromRequest(
 
   const payload = verifySessionToken(token);
   if (!payload) return null;
-  return getUserById(payload.userId);
+
+  const user = await getUserById(payload.userId);
+  if (!user) return null;
+
+  // HARD GATE: request host tenant must match user tenant_id
+  const host = req.headers.get("host");
+  if (!(await isTenantMatch(host, user))) return null;
+
+  return user;
 }
 
 /**
@@ -188,7 +209,23 @@ export async function getCurrentUserFromCookies(): Promise<CurrentUser | null> {
   const token = store.get(SESSION_COOKIE_NAME)?.value || null;
   const payload = verifySessionToken(token);
   if (!payload) return null;
-  return getUserById(payload.userId);
+
+  const user = await getUserById(payload.userId);
+  if (!user) return null;
+
+  // HARD GATE: current host tenant must match user tenant_id
+  // Server Components can read host from headers()
+  let host: string | null = null;
+  try {
+    const h = await headers();
+    host = h.get("host");
+  } catch {
+    host = null;
+  }
+
+  if (!(await isTenantMatch(host, user))) return null;
+
+  return user;
 }
 
 // --- RBAC helpers (Path A, additive) ---
