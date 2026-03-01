@@ -56,9 +56,10 @@ function tenantAdminUrl(slug: string): string {
   return `https://${tenantHostForSlug(slug)}/admin`;
 }
 
-// Landing page (explicit trailing slash to avoid odd relative behavior)
+// Tenant splash / landing page (themed + Start Quote button): /t/<tenant_slug>
 function tenantLandingUrl(slug: string): string {
-  return `https://${tenantHostForSlug(slug)}/`;
+  const s = String(slug || "").trim().toLowerCase();
+  return `https://${tenantHostForSlug(s)}/t/${encodeURIComponent(s)}`;
 }
 
 function tenantDisplayHost(slug: string): string {
@@ -338,7 +339,7 @@ export default function TenantsPage() {
 
           return (
             <div key={t.id} className="border border-neutral-800 rounded overflow-hidden">
-              {/* Theme preview band (restored) */}
+              {/* Theme preview band */}
               <div
                 className="px-4 py-3 flex items-center justify-between"
                 style={{
@@ -346,9 +347,7 @@ export default function TenantsPage() {
                 }}
               >
                 <div className="flex items-center gap-2">
-                  <div className="text-xs font-semibold text-white/90">
-                    {th.brandName || t.name}
-                  </div>
+                  <div className="text-xs font-semibold text-white/90">{th.brandName || t.name}</div>
                   <div className="text-[10px] text-white/70 font-mono">
                     {t.slug} · #{t.id}
                   </div>
