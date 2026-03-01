@@ -18,6 +18,7 @@ type EditState = {
   primaryColor: string;
   secondaryColor: string;
   logoUrl: string;
+  heroUseLogo: boolean;
   saving: boolean;
   error: string | null;
   ok: boolean;
@@ -26,6 +27,10 @@ type EditState = {
 function getThemeField(theme: any, key: string): string {
   const v = theme?.[key];
   return typeof v === "string" ? v : "";
+}
+
+function getThemeBool(theme: any, key: string): boolean {
+  return theme?.[key] === true;
 }
 
 function coreHost(): string {
@@ -70,7 +75,9 @@ function themeOf(t: Tenant) {
   const th = (t?.theme_json || {}) as any;
   return {
     brandName:
-      typeof th?.brandName === "string" && th.brandName.trim() ? th.brandName.trim() : "",
+      typeof th?.brandName === "string" && th.brandName.trim()
+        ? th.brandName.trim()
+        : "",
     primaryColor:
       typeof th?.primaryColor === "string" && th.primaryColor.trim()
         ? th.primaryColor.trim()
@@ -79,7 +86,11 @@ function themeOf(t: Tenant) {
       typeof th?.secondaryColor === "string" && th.secondaryColor.trim()
         ? th.secondaryColor.trim()
         : "",
-    logoUrl: typeof th?.logoUrl === "string" && th.logoUrl.trim() ? th.logoUrl.trim() : "",
+    logoUrl:
+      typeof th?.logoUrl === "string" && th.logoUrl.trim()
+        ? th.logoUrl.trim()
+        : "",
+    heroUseLogo: th?.heroUseLogo === true,
   };
 }
 
@@ -121,10 +132,14 @@ export default function TenantsPage() {
 
   async function loadWhoAmI() {
     try {
-      const res = await fetch(`/api/auth/whoami?t=${Math.random()}`, { cache: "no-store" });
+      const res = await fetch(`/api/auth/whoami?t=${Math.random()}`, {
+        cache: "no-store",
+      });
       const json = await res.json().catch(() => null);
       const email =
-        json?.ok && json?.authenticated && json?.user?.email ? String(json.user.email) : null;
+        json?.ok && json?.authenticated && json?.user?.email
+          ? String(json.user.email)
+          : null;
       setAuthedEmail(email);
     } catch {
       setAuthedEmail(null);
@@ -153,6 +168,7 @@ export default function TenantsPage() {
               primaryColor: getThemeField(t.theme_json, "primaryColor"),
               secondaryColor: getThemeField(t.theme_json, "secondaryColor"),
               logoUrl: getThemeField(t.theme_json, "logoUrl"),
+              heroUseLogo: getThemeBool(t.theme_json, "heroUseLogo"),
               saving: false,
               error: null,
               ok: false,
@@ -215,6 +231,7 @@ export default function TenantsPage() {
       primaryColor: s.primaryColor,
       secondaryColor: s.secondaryColor,
       logoUrl: s.logoUrl,
+      heroUseLogo: !!s.heroUseLogo,
     };
 
     const res = await fetch(`/api/admin/tenants/${id}`, {
@@ -275,7 +292,9 @@ export default function TenantsPage() {
         <div className="text-sm font-semibold text-neutral-200">Create Tenant</div>
 
         {!canWrite ? (
-          <div className="text-xs text-amber-300/90">Tenant creation is owner-restricted for now.</div>
+          <div className="text-xs text-amber-300/90">
+            Tenant creation is owner-restricted for now.
+          </div>
         ) : null}
 
         <div className="space-y-2">
@@ -303,7 +322,8 @@ export default function TenantsPage() {
             disabled={!canWrite}
           />
           <div className="text-[11px] text-neutral-500">
-            Optional. If provided, we’ll try to pull theme-color + logo from the homepage.
+            Optional. If provided, we’ll try to pull theme-color + logo from the
+            homepage.
           </div>
 
           <div className="flex items-center gap-3">
@@ -314,12 +334,16 @@ export default function TenantsPage() {
             >
               Create
             </button>
-            {createError ? <span className="text-xs text-red-400">{createError}</span> : null}
+            {createError ? (
+              <span className="text-xs text-red-400">{createError}</span>
+            ) : null}
           </div>
 
           {createdCreds ? (
             <div className="w-full rounded border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-200 space-y-1">
-              <div className="font-semibold text-emerald-100">Tenant admin created</div>
+              <div className="font-semibold text-emerald-100">
+                Tenant admin created
+              </div>
               <div>
                 <span className="text-emerald-200/80">Login URL:</span>{" "}
                 <a
@@ -336,7 +360,9 @@ export default function TenantsPage() {
                 <span className="font-mono">{createdCreds.admin_email}</span>
               </div>
               <div>
-                <span className="text-emerald-200/80">Temp password (copy now):</span>{" "}
+                <span className="text-emerald-200/80">
+                  Temp password (copy now):
+                </span>{" "}
                 <span className="font-mono">{createdCreds.temp_password}</span>
               </div>
             </div>
@@ -365,20 +391,27 @@ export default function TenantsPage() {
                 }}
               >
                 <div className="flex items-center gap-2">
-                  <div className="text-xs font-semibold text-white/90">{th.brandName || t.name}</div>
+                  <div className="text-xs font-semibold text-white/90">
+                    {th.brandName || t.name}
+                  </div>
                   <div className="text-[10px] text-white/70 font-mono">
                     {t.slug} · #{t.id}
                   </div>
                 </div>
 
-                <div className="text-[10px] text-white/75 font-mono">{displayHost}</div>
+                <div className="text-[10px] text-white/75 font-mono">
+                  {displayHost}
+                </div>
               </div>
 
               <div className="p-4 space-y-3">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <div className="text-sm font-semibold">
-                      {t.name} <span className="text-xs text-neutral-500">({t.slug})</span>
+                      {t.name}{" "}
+                      <span className="text-xs text-neutral-500">
+                        ({t.slug})
+                      </span>
                     </div>
                     <div className="text-xs text-neutral-400">
                       Host: <span className="font-mono">{displayHost}</span>
@@ -444,6 +477,19 @@ export default function TenantsPage() {
                         value={s.logoUrl}
                         onChange={(e) => updateEdit(t.id, { logoUrl: e.target.value })}
                       />
+
+                      <label className="flex items-center gap-2 text-xs text-neutral-300">
+                        <input
+                          type="checkbox"
+                          checked={!!s.heroUseLogo}
+                          onChange={(e) => updateEdit(t.id, { heroUseLogo: e.target.checked })}
+                        />
+                        Use logo on landing page (instead of text)
+                      </label>
+
+                      <div className="text-[11px] text-neutral-500">
+                        If enabled, landing page uses logoUrl. If missing/broken, it falls back to text.
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -463,7 +509,8 @@ export default function TenantsPage() {
                       Current:{" "}
                       <span className="font-mono">
                         brandName={th.brandName || "(none)"} · primaryColor={th.primaryColor || "(none)"} ·
-                        secondaryColor={th.secondaryColor || "(none)"} · logoUrl={th.logoUrl || "(none)"}
+                        secondaryColor={th.secondaryColor || "(none)"} · logoUrl={th.logoUrl || "(none)"} ·
+                        heroUseLogo={th.heroUseLogo ? "true" : "false"}
                       </span>
                     </div>
                   </div>

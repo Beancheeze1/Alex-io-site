@@ -8,6 +8,7 @@ export default function TenantLanding() {
   const tenant = (params?.tenant || "").toString();
 
   const [theme, setTheme] = React.useState<any>(null);
+  const [logoFailed, setLogoFailed] = React.useState(false);
 
   React.useEffect(() => {
     if (!tenant) return;
@@ -19,6 +20,7 @@ export default function TenantLanding() {
       .then((data) => {
         if (data?.ok && data?.theme_json) {
           setTheme(data.theme_json);
+          setLogoFailed(false);
 
           document.documentElement.style.setProperty(
             "--tenant-primary",
@@ -34,6 +36,12 @@ export default function TenantLanding() {
 
   if (!tenant) return null;
 
+  const brandName = (theme?.brandName || tenant || "").toString();
+  const logoUrl = typeof theme?.logoUrl === "string" ? theme.logoUrl.trim() : "";
+  const heroUseLogo = theme?.heroUseLogo === true;
+
+  const showLogo = heroUseLogo && !!logoUrl && !logoFailed;
+
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white px-6">
       <div className="text-center max-w-xl">
@@ -41,12 +49,23 @@ export default function TenantLanding() {
           Powered by Alex-IO
         </div>
 
-        <h1
-          className="text-4xl font-bold mb-4"
-          style={{ color: "var(--tenant-primary)" }}
-        >
-          {theme?.brandName || tenant}
-        </h1>
+        {showLogo ? (
+          <div className="mb-4 flex items-center justify-center">
+            <img
+              src={logoUrl}
+              alt={brandName}
+              className="h-16 w-auto max-w-[320px] object-contain"
+              onError={() => setLogoFailed(true)}
+            />
+          </div>
+        ) : (
+          <h1
+            className="text-4xl font-bold mb-4"
+            style={{ color: "var(--tenant-primary)" }}
+          >
+            {brandName}
+          </h1>
+        )}
 
         <p className="mb-8 opacity-80">Start your custom packaging quote.</p>
 
@@ -60,6 +79,8 @@ export default function TenantLanding() {
         >
           Start Quote
         </a>
+
+        {/* Optional: if logo was enabled but failed, we silently fall back to text */}
       </div>
     </main>
   );
