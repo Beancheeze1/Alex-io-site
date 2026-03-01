@@ -24,6 +24,9 @@ function bad(error: string, message?: string, status = 400) {
 // Tenant writes (create/update/disable/theme) are OWNER-ONLY via email allowlist.
 const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
   "25thhourdesign@gmail.com",
+  "25thhourdesign+default@gmail.com",
+  "25thhourdesign+acme@gmail.com",
+  "25thhourdesign+mline@gmail.com",
 ]);
 
 function canWriteTenants(user: any): boolean {
