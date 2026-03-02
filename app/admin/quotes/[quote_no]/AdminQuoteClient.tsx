@@ -1167,13 +1167,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             setItems(json.items || []);
             setLayoutPkg(json.layoutPkg || null);
             setPrintingUpcharge(
-              typeof (json as ApiOk).printingUpcharge === "number"
-                ? (json as ApiOk).printingUpcharge
+              Number.isFinite((json as ApiOk)?.printingUpcharge as any)
+                ? Number((json as ApiOk).printingUpcharge)
                 : 0,
             );
             setGrandTotal(
-              typeof (json as ApiOk).grandTotal === "number"
-                ? (json as ApiOk).grandTotal
+              Number.isFinite((json as ApiOk)?.grandTotal as any)
+                ? Number((json as ApiOk).grandTotal)
                 : 0,
             );
 

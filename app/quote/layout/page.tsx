@@ -628,6 +628,7 @@ export default function LayoutPage({
       ? initialQuoteNoParam[0]?.trim() || ""
       : initialQuoteNoParam?.trim() || "",
   );
+  const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
 
   React.useEffect(() => {
     try {
@@ -647,6 +648,7 @@ export default function LayoutPage({
       const url = new URL(window.location.href);
       const printedParam = url.searchParams.get("printed");
       const printed = printedParam === "1" || printedParam === "true";
+      setIsPrinted(printed);
 
       fetch("/api/admin/mem", {
         method: "POST",
@@ -2203,6 +2205,19 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
 
   const [selectedCartonKind, setSelectedCartonKind] =
     React.useState<"RSC" | "MAILER" | null>(null);
+
+  const persistPrinted = React.useCallback(
+    (next: boolean) => {
+      const key = quoteNoFromUrl?.trim();
+      if (!key) return;
+      fetch("/api/admin/mem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, facts: { printed: next ? 1 : 0 } }),
+      }).catch(() => null);
+    },
+    [quoteNoFromUrl],
+  );
 
   const handlePickCarton = React.useCallback(
     async (kind: "RSC" | "MAILER") => {
@@ -4156,6 +4171,29 @@ const tenantCssVars = React.useMemo(() => {
                       </span>
                     </div>
                   )}
+
+                  <div className="mt-2 flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                    <div className="text-[11px] text-slate-200">
+                      Printed box
+                      <div className="text-[10px] text-slate-400">
+                        Adds printing upcharge to the quote total.
+                      </div>
+                    </div>
+
+                    <label className="inline-flex items-center gap-2 text-[11px] text-slate-200 select-none">
+                      <input
+                        type="checkbox"
+                        checked={isPrinted}
+                        onChange={(e) => {
+                          const next = !!e.target.checked;
+                          setIsPrinted(next);
+                          persistPrinted(next);
+                        }}
+                        className="h-4 w-4 rounded border-slate-600 bg-slate-900 accent-[var(--tenant-secondary)]"
+                      />
+                      <span className="text-[var(--tenant-secondary)] font-medium">Printed</span>
+                    </label>
+                  </div>
 
                   {!suggesterReady ? (
                     <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
