@@ -628,7 +628,6 @@ export default function LayoutPage({
       ? initialQuoteNoParam[0]?.trim() || ""
       : initialQuoteNoParam?.trim() || "",
   );
-  const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
 
   React.useEffect(() => {
     try {
@@ -639,27 +638,6 @@ export default function LayoutPage({
       if (q && q !== quoteNoFromUrl) setQuoteNoFromUrl(q);
     } catch {}
   }, []);
-
-  React.useEffect(() => {
-    const key = quoteNoFromUrl?.trim();
-    if (!key) return;
-    try {
-      if (typeof window === "undefined") return;
-      const url = new URL(window.location.href);
-      const printedParam = url.searchParams.get("printed");
-      const printed = printedParam === "1" || printedParam === "true";
-      setIsPrinted(printed);
-
-      fetch("/api/admin/mem", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          key,
-          facts: { printed: printed ? 1 : 0 },
-        }),
-      }).catch(() => null);
-    } catch {}
-  }, [quoteNoFromUrl]);
 
   // --- Tenant theme (public editor only; scoped to this page) ---
   const [tenantTheme, setTenantTheme] = React.useState<TenantTheme>({});
@@ -1702,6 +1680,41 @@ function LayoutEditorHostReady(props: {
 
   } = props;
 
+  const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
+  const persistPrinted = React.useCallback(
+    (next: boolean) => {
+      const key = hasRealQuoteNo ? quoteNo.trim() : "";
+      if (!key) return;
+      fetch("/api/admin/mem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, facts: { printed: next ? 1 : 0 } }),
+      }).catch(() => null);
+    },
+    [hasRealQuoteNo, quoteNo],
+  );
+
+  React.useEffect(() => {
+    const key = hasRealQuoteNo ? quoteNo.trim() : "";
+    if (!key) return;
+    try {
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      const printedParam = url.searchParams.get("printed");
+      const printed = printedParam === "1" || printedParam === "true";
+      setIsPrinted(printed);
+
+      fetch("/api/admin/mem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key,
+          facts: { printed: printed ? 1 : 0 },
+        }),
+      }).catch(() => null);
+    } catch {}
+  }, [hasRealQuoteNo, quoteNo]);
+
   const router = useRouter();
   
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -2205,19 +2218,6 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
 
   const [selectedCartonKind, setSelectedCartonKind] =
     React.useState<"RSC" | "MAILER" | null>(null);
-
-  const persistPrinted = React.useCallback(
-    (next: boolean) => {
-      const key = quoteNoFromUrl?.trim();
-      if (!key) return;
-      fetch("/api/admin/mem", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, facts: { printed: next ? 1 : 0 } }),
-      }).catch(() => null);
-    },
-    [quoteNoFromUrl],
-  );
 
   const handlePickCarton = React.useCallback(
     async (kind: "RSC" | "MAILER") => {
@@ -4150,7 +4150,7 @@ const tenantCssVars = React.useMemo(() => {
                   <div className="flex items-center justify-between mb-1">
                     <div className="text-xs font-semibold text-slate-100">Closest matching cartons</div>
                     <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
-                      Box suggester · BETA
+                      Box suggester · V2
                     </span>
                   </div>
 
