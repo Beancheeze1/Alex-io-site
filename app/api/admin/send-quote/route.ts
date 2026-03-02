@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
     }
 
     const result = (calcJson as CalcOk).result || ({} as any);
-    const settings = getPricingSettings();
+    const settings = await getPricingSettings();
     const printingUpcharge =
       facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true
         ? Number(settings.printing_upcharge_usd || 0)

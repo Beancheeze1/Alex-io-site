@@ -9,7 +9,7 @@ import {
   getPricingSettings,
   updatePricingSettings,
   PricingSettings,
-} from "../../../lib/pricing/settings";
+} from "@/app/lib/pricing/settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ type SettingsResponse = {
 };
 
 export async function GET() {
-  const settings = getPricingSettings();
+  const settings = await getPricingSettings();
   const payload: SettingsResponse = { ok: true, settings };
   return NextResponse.json(payload, { status: 200 });
 }
@@ -64,7 +64,7 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    const settings = updatePricingSettings(filtered);
+    const settings = await updatePricingSettings(filtered);
     return NextResponse.json(
       { ok: true, settings },
       { status: 200 },

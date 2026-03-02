@@ -74,11 +74,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    // Body supports:
-    // {
-    //   "key": "Q-AI-...",
-    //   "revision": "RevAS"
-    // }
+    // Body supports two forms:
+    //
+    // Legacy (revision only):
+    //   { "key": "Q-AI-...", "revision": "RevAS" }
+    //
+    // General facts merge (preferred):
+    //   { "key": "Q-AI-...", "facts": { "printed": 1, "revision": "RevAS", ... } }
     //
     // Also accepts "quote_no" as key alias.
     const body = await req.json().catch(() => ({} as any));
@@ -95,13 +97,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Currently we only need revision, but this endpoint is a general mem merge tool.
+    // Build the patch to merge.
+    // Support both { facts: { ... } } and legacy top-level { revision: "..." }.
+    const factsPatch: Record<string, any> = {};
+
+    if (body?.facts && typeof body.facts === "object") {
+      Object.assign(factsPatch, body.facts);
+    }
+
+    // Legacy: top-level revision field
     const revisionRaw = body?.revision;
     const revision = asNonEmptyString(revisionRaw);
+    if (revision) {
+      factsPatch.revision = revision;
+      factsPatch.revision_updated_at = new Date().toISOString();
+    }
 
-    if (!revision) {
+    if (Object.keys(factsPatch).length === 0) {
       return NextResponse.json(
-        { ok: false, error: "MISSING_REVISION", message: "Provide body.revision (e.g., RevAS)." },
+        { ok: false, error: "MISSING_FACTS", message: "Provide body.facts or body.revision." },
         { status: 400 }
       );
     }
@@ -110,8 +124,7 @@ export async function POST(req: NextRequest) {
     const existing = (await loadFacts(key)) || {};
     const merged = {
       ...(existing as any),
-      revision, // single source for revision label for now
-      revision_updated_at: new Date().toISOString(),
+      ...factsPatch,
     };
 
     await saveFacts(key, merged);
@@ -121,7 +134,7 @@ export async function POST(req: NextRequest) {
         ok: true,
         mode: "saved",
         key,
-        saved: { revision: merged.revision, revision_updated_at: merged.revision_updated_at },
+        saved: factsPatch,
         lastStore: LAST_STORE,
         redisError: REDIS_LAST_ERROR,
       },
