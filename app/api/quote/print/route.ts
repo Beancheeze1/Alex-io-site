@@ -492,7 +492,7 @@ export async function GET(req: NextRequest) {
       0,
     );
 
-    const settings = getPricingSettings();
+    const settings = await getPricingSettings();
     const printingUpcharge =
       facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true
         ? Number(settings.printing_upcharge_usd || 0)
