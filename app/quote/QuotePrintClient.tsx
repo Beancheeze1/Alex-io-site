@@ -807,7 +807,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
         // Sync isPrinted from facts
         const p = factsPayload?.printed;
-        setIsPrinted(p === 1 || p === "1" || p === true);
+        setIsPrinted(p === 1 || p === true);
 
         // NEW (Path A): layoutMetrics payload (may be null)
         const asOk = json as ApiOk;
