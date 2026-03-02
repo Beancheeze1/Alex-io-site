@@ -104,6 +104,7 @@ type LayoutMetrics = {
 type QuoteFacts = {
   revision?: string | null;
   revision_updated_at?: string | null;
+  printed?: 0 | 1 | boolean | null;
 };
 
 
@@ -673,6 +674,8 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   const [grandSubtotal, setGrandSubtotal] = React.useState<number>(0);
   const [printingUpcharge, setPrintingUpcharge] = React.useState<number>(0);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
+  const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
+  const [printingToggleBusy, setPrintingToggleBusy] = React.useState<boolean>(false);
 
   // Rough shipping % knob from admin (percent of foam + packaging)
   const [roughShipPct, setRoughShipPct] = React.useState<number | null>(null);
@@ -799,8 +802,12 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         setQuote(json.quote);
         setItems(json.items || []);
         setLayoutPkg(json.layoutPkg || null);
-        setFacts((json as ApiOk).facts ?? null);
+        const factsPayload = (json as ApiOk).facts ?? null;
+        setFacts(factsPayload);
 
+        // Sync isPrinted from facts
+        const p = factsPayload?.printed;
+        setIsPrinted(p === 1 || p === "1" || p === true);
 
         // NEW (Path A): layoutMetrics payload (may be null)
         const asOk = json as ApiOk;
@@ -1640,10 +1647,48 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         </div>
                       )}
 
+                      {/* Printed toggle — always visible so admin can enable/disable */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 2 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: printingToggleBusy ? "wait" : "pointer", fontSize: 12, color: "#374151", userSelect: "none" }}>
+                          <input
+                            type="checkbox"
+                            checked={isPrinted}
+                            disabled={printingToggleBusy || !quoteNo}
+                            onChange={async (e) => {
+                              const next = e.target.checked;
+                              setPrintingToggleBusy(true);
+                              setIsPrinted(next);
+                              try {
+                                await fetch("/api/admin/mem", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ key: quoteNo, facts: { printed: next ? 1 : 0 } }),
+                                });
+                                // Reload to get updated printingUpcharge from server
+                                await reloadQuoteData(quoteNo);
+                              } catch {
+                                setIsPrinted(!next); // revert on error
+                              } finally {
+                                setPrintingToggleBusy(false);
+                              }
+                            }}
+                            style={{ width: 14, height: 14 }}
+                          />
+                          <span style={{ fontWeight: 500 }}>Printed</span>
+                          {printingToggleBusy && <span style={{ fontSize: 10, color: "#9ca3af" }}>saving…</span>}
+                        </label>
+                      </div>
+
                       {effectivePrintingUpcharge > 0 && (
                         <div>
-                          <div style={labelStyle}>Printing</div>
+                          <div style={labelStyle}>Printing upcharge</div>
                           <div style={{ fontSize: 13 }}>{formatUsd(effectivePrintingUpcharge)}</div>
+                        </div>
+                      )}
+
+                      {isPrinted && effectivePrintingUpcharge === 0 && (
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic" }}>
+                          Printing marked — upcharge amount set in Admin → Settings
                         </div>
                       )}
 
@@ -2103,6 +2148,51 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                           </tr>
                         );
                       })}
+
+                      {/* Printing upcharge line item */}
+                      {effectivePrintingUpcharge > 0 && (
+                        <>
+                          <tr>
+                            <td
+                              colSpan={5}
+                              style={{
+                                padding: "6px 8px",
+                                borderTop: "1px solid #e5e7eb",
+                                borderBottom: "1px solid #f3f4f6",
+                                background: "#fffbeb",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                letterSpacing: "0.08em",
+                                textTransform: "uppercase",
+                                color: "#92400e",
+                              }}
+                            >
+                              Printing
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.08em",
+                                  color: "#4b5563",
+                                  marginBottom: 2,
+                                }}
+                              >
+                                Printing – Custom print upcharge
+                              </div>
+                              <div style={{ fontWeight: 500 }}>Custom printed mailer / box</div>
+                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>—</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(effectivePrintingUpcharge)}</td>
+                          </tr>
+                        </>
+                      )}
                     </tbody>
                   </table>
 
@@ -2121,11 +2211,24 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                             <>
                               <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>Packaging subtotal</div>
                               <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectivePackagingSubtotal)}</div>
+                            </>
+                          )}
 
+                          {/* Printing upcharge line in summary */}
+                          {effectivePrintingUpcharge > 0 && (
+                            <>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>Printing upcharge</div>
+                              <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectivePrintingUpcharge)}</div>
+                            </>
+                          )}
+
+                          {/* Grand subtotal — show when packaging or printing is present */}
+                          {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0) && (
+                            <>
                               <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
-                                Estimated subtotal (foam + packaging)
+                                Estimated subtotal (foam + packaging{effectivePrintingUpcharge > 0 ? " + printing" : ""})
                               </div>
-                              <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandSubtotal)}</div>
+                              <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge)}</div>
                             </>
                           )}
                         </>
