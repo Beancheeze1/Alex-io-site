@@ -1699,19 +1699,36 @@ function LayoutEditorHostReady(props: {
     if (!key) return;
     try {
       if (typeof window === "undefined") return;
+
       const url = new URL(window.location.href);
       const printedParam = url.searchParams.get("printed");
-      const printed = printedParam === "1" || printedParam === "true";
-      setIsPrinted(printed);
 
-      fetch("/api/admin/mem", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          key,
-          facts: { printed: printed ? 1 : 0 },
-        }),
-      }).catch(() => null);
+      // If URL explicitly provides printed, honor it AND persist it.
+      if (printedParam !== null) {
+        const printed = printedParam === "1" || printedParam === "true";
+        setIsPrinted(printed);
+
+        fetch("/api/admin/mem", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, facts: { printed: printed ? 1 : 0 } }),
+        }).catch(() => null);
+
+        return;
+      }
+
+      // Otherwise, load persisted value from mem (do NOT default-write 0).
+      fetch(`/api/admin/mem?key=${encodeURIComponent(key)}&t=${Math.random()}`, {
+        cache: "no-store",
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          const v = (data?.facts as any)?.printed;
+          if (v === 1 || v === true) setIsPrinted(true);
+          else if (v === 0 || v === false) setIsPrinted(false);
+          // If undefined/null, leave current default (false) without writing.
+        })
+        .catch(() => null);
     } catch {}
   }, [hasRealQuoteNo, quoteNo]);
 
