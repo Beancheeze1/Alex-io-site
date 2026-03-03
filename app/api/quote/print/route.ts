@@ -654,7 +654,7 @@ export async function GET(req: NextRequest) {
               extended_price_usd: matched.extended_price_usd,
               vendor: matched.box.vendor ?? null,
               style: matched.box.style ?? null,
-              description: `${matched.box.description ?? matched.box.sku} · Customer box (inside): ${customerBox.L} × ${customerBox.W} × ${customerBox.H} in`,
+              description: `Custom box`,
               inside_length_in: customerBox.L,
               inside_width_in: customerBox.W,
               inside_height_in: customerBox.H,

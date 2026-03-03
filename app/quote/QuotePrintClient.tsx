@@ -2073,19 +2073,20 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
 
                       {/* Render API packaging lines (includes matched customer box) when no DB-selected carton exists */}
                       {requestedBoxes.length === 0 && apiPackagingLines.map((rb, idx) => {
-                        const isCustomerBoxLine = customerBoxMatch && rb.sku === customerBoxMatch.sku;
-                        const mainLabel = (rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) || "Carton";
+                        const isCustomerBoxLine = !!(customerBoxDims && customerBoxMatch && rb.sku === customerBoxMatch.sku);
+
+                        // For customer box lines, show clean customer-facing label only
+                        const mainLabel = isCustomerBoxLine
+                          ? "Custom box"
+                          : ((rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) || "Carton");
+
+                        // Display dims are always the customer's requested dims for customer box lines
                         const L = Number(rb.inside_length_in);
                         const W = Number(rb.inside_width_in);
                         const H = Number(rb.inside_height_in);
                         const dimsOk = Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H);
                         const dimsText = dimsOk ? `${formatDims(L, W, H)} in` : null;
-                        const notesParts: string[] = [];
-                        if (rb.sku) notesParts.push(`SKU: ${rb.sku}`);
-                        if (isCustomerBoxLine && customerBoxMatch) {
-                          notesParts.push(`Closest stock box: ${customerBoxMatch.inside_length_in} × ${customerBoxMatch.inside_width_in} × ${customerBoxMatch.inside_height_in} in`);
-                        }
-                        const subLabel = notesParts.length > 0 ? notesParts.join(" · ") : null;
+
                         const qty = rb.qty || primaryItem?.qty || 1;
                         const unitPrice = parsePriceField((rb as any).unit_price_usd ?? null);
                         const lineTotal = parsePriceField((rb as any).extended_price_usd ?? null);
@@ -2093,7 +2094,6 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                           <tr key={`api-pkg-${idx}`}>
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
                               <div style={{ fontWeight: 500 }}>{mainLabel}</div>
-                              {subLabel && <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                             </td>
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{dimsText ?? "—"}</td>
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{qty}</td>
@@ -2126,10 +2126,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         const dimsText = dimsOk ? `${formatDims(L, W, H)} in` : null;
 
                         const notesParts: string[] = [];
-                        if (rb.sku) notesParts.push(`SKU: ${rb.sku}`);
                         // Vendor is intentionally NOT shown on client quote
                         if (dimsText) notesParts.push(`Inside ${dimsText}`);
-                        if (customerBoxDims) notesParts.push("(custom size; priced from closest standard box)");
 
                         const subLabel = notesParts.length > 0 ? notesParts.join(" · ") : null;
 
