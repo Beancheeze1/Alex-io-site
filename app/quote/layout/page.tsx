@@ -1694,6 +1694,39 @@ function LayoutEditorHostReady(props: {
     [hasRealQuoteNo, quoteNo],
   );
 
+  // ---------------- Customer-entered box (inside dims) ----------------
+  type BoxDims = { L: number; W: number; H: number };
+
+  const [customerBox, setCustomerBox] = React.useState<BoxDims | null>(null);
+
+  const persistCustomerBox = React.useCallback(
+    (next: BoxDims | null) => {
+      const key = hasRealQuoteNo ? quoteNo.trim() : "";
+      if (!key) return;
+
+      // Store either null (clears) or normalized numeric dims
+      const payload =
+        next && next.L > 0 && next.W > 0 && next.H > 0
+          ? { L: Number(next.L), W: Number(next.W), H: Number(next.H) }
+          : null;
+
+      fetch("/api/admin/mem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, facts: { customer_box_in: payload } }),
+      }).catch(() => null);
+    },
+    [hasRealQuoteNo, quoteNo],
+  );
+
+  function parseBoxNum(v: any): number {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 0;
+    if (n <= 0) return 0;
+    // keep at 2 decimals max for display/edit stability
+    return Math.round(n * 100) / 100;
+  }
+
   React.useEffect(() => {
     const key = hasRealQuoteNo ? quoteNo.trim() : "";
     if (!key) return;
@@ -1702,6 +1735,9 @@ function LayoutEditorHostReady(props: {
 
       const url = new URL(window.location.href);
       const printedParam = url.searchParams.get("printed");
+      const boxLParam = url.searchParams.get("boxL");
+      const boxWParam = url.searchParams.get("boxW");
+      const boxHParam = url.searchParams.get("boxH");
 
       // If URL explicitly provides printed, honor it AND persist it.
       if (printedParam !== null) {
@@ -1714,7 +1750,27 @@ function LayoutEditorHostReady(props: {
           body: JSON.stringify({ key, facts: { printed: printed ? 1 : 0 } }),
         }).catch(() => null);
 
+        // If URL also provides customer box dims, honor + persist them.
+        if (boxLParam !== null || boxWParam !== null || boxHParam !== null) {
+          const L = parseBoxNum(boxLParam);
+          const W = parseBoxNum(boxWParam);
+          const H = parseBoxNum(boxHParam);
+          const nextBox = L > 0 && W > 0 && H > 0 ? { L, W, H } : null;
+          setCustomerBox(nextBox);
+          persistCustomerBox(nextBox);
+        }
+
         return;
+      }
+
+      // If URL provides customer box dims without printed, honor + persist them.
+      if (boxLParam !== null || boxWParam !== null || boxHParam !== null) {
+        const L = parseBoxNum(boxLParam);
+        const W = parseBoxNum(boxWParam);
+        const H = parseBoxNum(boxHParam);
+        const nextBox = L > 0 && W > 0 && H > 0 ? { L, W, H } : null;
+        setCustomerBox(nextBox);
+        persistCustomerBox(nextBox);
       }
 
       // Otherwise, load persisted value from mem (do NOT default-write 0).
@@ -1727,10 +1783,16 @@ function LayoutEditorHostReady(props: {
           if (v === 1 || v === true) setIsPrinted(true);
           else if (v === 0 || v === false) setIsPrinted(false);
           // If undefined/null, leave current default (false) without writing.
+          const cb = (data?.facts as any)?.customer_box_in;
+          const L = parseBoxNum(cb?.L);
+          const W = parseBoxNum(cb?.W);
+          const H = parseBoxNum(cb?.H);
+          if (L > 0 && W > 0 && H > 0) setCustomerBox({ L, W, H });
+          else setCustomerBox(null);
         })
         .catch(() => null);
     } catch {}
-  }, [hasRealQuoteNo, quoteNo]);
+  }, [hasRealQuoteNo, quoteNo, persistCustomerBox]);
 
   const router = useRouter();
   
@@ -4211,6 +4273,82 @@ const tenantCssVars = React.useMemo(() => {
                       />
                       <span className="text-[var(--tenant-secondary)] font-medium">Printed</span>
                     </label>
+                  </div>
+
+                  {/* Customer-entered box size (inside dims)  display-only for now.
+                      Pricing remains based on closest matching standard carton. */}
+                  <div className="mt-2 rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="text-[11px] text-slate-200">
+                        Customer box (inside)
+                        <div className="text-[10px] text-slate-400">
+                          Shown on the quote. Pricing uses the closest matching standard carton for now.
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="text-[10px] text-slate-300 hover:text-slate-100 underline underline-offset-2"
+                        onClick={() => {
+                          setCustomerBox(null);
+                          persistCustomerBox(null);
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {(["L", "W", "H"] as const).map((k) => {
+                        const val = customerBox ? (customerBox as any)[k] : "";
+                        return (
+                          <label key={k} className="block">
+                            <div className="mb-1 text-[10px] text-slate-400">{k} (in)</div>
+                            <input
+                              inputMode="decimal"
+                              className="w-full rounded-lg border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-[var(--tenant-secondary)]"
+                              value={val}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                // allow empty during edit
+                                if (raw.trim() === "") {
+                                  const next = customerBox ? { ...customerBox } : { L: 0, W: 0, H: 0 };
+                                  (next as any)[k] = 0;
+                                  setCustomerBox(next);
+                                  return;
+                                }
+                                const n = parseBoxNum(raw);
+                                const next = customerBox ? { ...customerBox } : { L: 0, W: 0, H: 0 };
+                                (next as any)[k] = n;
+                                setCustomerBox(next);
+                              }}
+                              onBlur={() => {
+                                // Only persist when we have all 3 positive numbers.
+                                if (customerBox && customerBox.L > 0 && customerBox.W > 0 && customerBox.H > 0) {
+                                  persistCustomerBox(customerBox);
+                                } else {
+                                  persistCustomerBox(null);
+                                }
+                              }}
+                              placeholder="0.00"
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {customerBox && customerBox.L > 0 && customerBox.W > 0 && customerBox.H > 0 ? (
+                      <div className="mt-2 text-[10px] text-slate-400">
+                        Saved:{" "}
+                        <span className="font-mono text-[var(--tenant-secondary)]">
+                          {customerBox.L.toFixed(2)}  {customerBox.W.toFixed(2)}  {customerBox.H.toFixed(2)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[10px] text-slate-500">
+                        Enter L/W/H to save.
+                      </div>
+                    )}
                   </div>
 
                   {!suggesterReady ? (

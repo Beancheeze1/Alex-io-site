@@ -484,10 +484,32 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
+    // If customer provided a non-standard box size, display it on the quote,
+    // but keep pricing from the closest matching standard box selection.
+    const customerBox = parseDimsString((facts as any)?.customer_box_in);
+    let packagingLinesForDisplay = packagingLines;
+
+    if (customerBox && packagingLines.length > 0) {
+      packagingLinesForDisplay = packagingLines.map((l) => {
+        const baseDesc = typeof l.description === "string" ? l.description : "";
+        const note = `Customer box (inside): ${customerBox.L}  ${customerBox.W}  ${customerBox.H} in`;
+        const nextDesc = baseDesc ? `${baseDesc}  ${note}` : note;
+
+        return {
+          ...l,
+          // DISPLAY ONLY: override dims/description. Pricing + box_id stay standard.
+          inside_length_in: customerBox.L,
+          inside_width_in: customerBox.W,
+          inside_height_in: customerBox.H,
+          description: nextDesc,
+        };
+      });
+    }
+
     // Only count billable priced items toward foam subtotal.
     const foamSubtotal = items.reduce((s, i) => s + (Number(i.price_total_usd) || 0), 0);
 
-    const packagingSubtotal = packagingLines.reduce(
+    const packagingSubtotal = packagingLinesForDisplay.reduce(
       (s, l) => s + (Number(l.extended_price_usd) || 0),
       0,
     );
@@ -503,7 +525,7 @@ export async function GET(req: NextRequest) {
       quote,
       items,
       layoutPkg,
-      packagingLines,
+      packagingLines: packagingLinesForDisplay,
       foamSubtotal,
       packagingSubtotal,
       grandSubtotal: foamSubtotal + packagingSubtotal,
