@@ -3279,7 +3279,8 @@ const handleGoToFoamAdvisor = () => {
       }
 
       if (typeof window !== "undefined") {
-        window.location.href = "/quote?quote_no=" + encodeURIComponent(quoteNo);
+              const base = "/quote?quote_no=" + encodeURIComponent(quoteNo);
+              window.location.href = isPrinted ? base + "&printed=1" : base;
         return;
       }
 
