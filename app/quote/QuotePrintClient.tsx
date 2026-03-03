@@ -130,6 +130,17 @@ type ApiOk = {
   grandTotal: number;
   isPrinted?: boolean;
   customerBoxDims?: { L: number; W: number; H: number } | null;
+  customerBoxMatch?: {
+    sku: string;
+    description: string | null;
+    style: string | null;
+    inside_length_in: number;
+    inside_width_in: number;
+    inside_height_in: number;
+    unit_price_usd: number | null;
+    extended_price_usd: number | null;
+  } | null;
+  packagingLines?: RequestedBox[];
 };
 
 type ApiErr = {
@@ -673,6 +684,9 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   // Printed flag and customer box dims from API
   const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
   const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number } | null>(null);
+  const [customerBoxMatch, setCustomerBoxMatch] = React.useState<ApiOk["customerBoxMatch"]>(null);
+  // packagingLines from the print API — used when requestedBoxes (for-quote) is empty
+  const [apiPackagingLines, setApiPackagingLines] = React.useState<RequestedBox[]>([]);
 
   // Subtotals from server: foam, packaging, grand (foam + packaging)
   const [foamSubtotal, setFoamSubtotal] = React.useState<number>(0);
@@ -826,6 +840,8 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
         setIsPrinted(!!(asOk.isPrinted));
         setCustomerBoxDims(asOk.customerBoxDims ?? null);
+        setCustomerBoxMatch(asOk.customerBoxMatch ?? null);
+        setApiPackagingLines(Array.isArray(asOk.packagingLines) ? asOk.packagingLines : []);
       } else {
         setError("Unexpected response from quote API.");
       }
@@ -2013,7 +2029,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                       ))}
 
                       {/* Requested cartons appended as additional lines */}
-                      {(requestedBoxes.length > 0 || isPrinted) && (
+                      {(requestedBoxes.length > 0 || apiPackagingLines.length > 0 || isPrinted || !!customerBoxDims) && (
                         <tr>
                           <td
                             colSpan={5}
@@ -2033,6 +2049,63 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                           </td>
                         </tr>
                       )}
+
+                      {/* Customer box with matched pricing — shown when customer entered dims but no carton was explicitly picked */}
+                      {customerBoxDims && requestedBoxes.length === 0 && apiPackagingLines.length === 0 && (
+                        <tr>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#4b5563", marginBottom: 2 }}>
+                              Packaging – Customer box (inside)
+                            </div>
+                            <div style={{ fontWeight: 500 }}>
+                              {customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in
+                            </div>
+                            <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>
+                              No matching stock box found. Pricing TBD.
+                            </div>
+                          </td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>TBD</td>
+                        </tr>
+                      )}
+
+                      {/* Render API packaging lines (includes matched customer box) when no DB-selected carton exists */}
+                      {requestedBoxes.length === 0 && apiPackagingLines.map((rb, idx) => {
+                        const isCustomerBoxLine = customerBoxMatch && rb.sku === customerBoxMatch.sku;
+                        const mainLabel = (rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) || "Carton";
+                        const L = Number(rb.inside_length_in);
+                        const W = Number(rb.inside_width_in);
+                        const H = Number(rb.inside_height_in);
+                        const dimsOk = Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H);
+                        const dimsText = dimsOk ? `${formatDims(L, W, H)} in` : null;
+                        const notesParts: string[] = [];
+                        if (rb.sku) notesParts.push(`SKU: ${rb.sku}`);
+                        if (isCustomerBoxLine && customerBoxMatch) {
+                          notesParts.push(`Closest stock box: ${customerBoxMatch.inside_length_in} × ${customerBoxMatch.inside_width_in} × ${customerBoxMatch.inside_height_in} in`);
+                        }
+                        const subLabel = notesParts.length > 0 ? notesParts.join(" · ") : null;
+                        const qty = rb.qty || primaryItem?.qty || 1;
+                        const unitPrice = parsePriceField((rb as any).unit_price_usd ?? null);
+                        const lineTotal = parsePriceField((rb as any).extended_price_usd ?? null);
+                        return (
+                          <tr key={`api-pkg-${idx}`}>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                              <div style={{ fontWeight: 500 }}>{mainLabel}</div>
+                              {subLabel && <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
+                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{dimsText ?? "—"}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{qty}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                              {unitPrice != null ? formatUsd(unitPrice) : "—"}
+                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                              {lineTotal != null ? formatUsd(lineTotal) : unitPrice != null ? formatUsd(unitPrice * qty) : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
 
                       {requestedBoxes.map((rb) => {
                         const mainLabel =

@@ -162,6 +162,96 @@ function isPackagingItem(it: ItemRow): boolean {
   return notes.includes("Requested shipping carton") || notes.includes("[PACKAGING]");
 }
 
+type BoxMatchRow = {
+  id: number;
+  sku: string;
+  vendor: string | null;
+  style: string | null;
+  description: string | null;
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
+};
+
+type BoxPriceTierRow = {
+  base_unit_price: string | number | null;
+  tier1_min_qty: number | null; tier1_unit_price: string | number | null;
+  tier2_min_qty: number | null; tier2_unit_price: string | number | null;
+  tier3_min_qty: number | null; tier3_unit_price: string | number | null;
+  tier4_min_qty: number | null; tier4_unit_price: string | number | null;
+};
+
+/**
+ * Find the closest matching stock box for given inside dims + qty, and price it.
+ * Tries both orientations (L/W swapped). Returns null if no match found.
+ */
+async function findAndPriceClosestBox(
+  insideL: number,
+  insideW: number,
+  insideH: number,
+  qty: number,
+): Promise<{
+  box: BoxMatchRow;
+  unit_price_usd: number | null;
+  extended_price_usd: number | null;
+} | null> {
+  // Fetch boxes that fit in either orientation, ordered by smallest volume first (tightest fit)
+  const candidates = await q<BoxMatchRow>(
+    `
+    select id, sku, vendor, style, description,
+           inside_length_in, inside_width_in, inside_height_in
+    from public.boxes
+    where (
+      (inside_length_in >= $1 and inside_width_in >= $2 and inside_height_in >= $3)
+      or
+      (inside_length_in >= $2 and inside_width_in >= $1 and inside_height_in >= $3)
+    )
+    order by inside_length_in * inside_width_in * inside_height_in asc
+    limit 5
+    `,
+    [insideL, insideW, insideH],
+  );
+
+  if (!candidates || candidates.length === 0) return null;
+
+  const best = candidates[0];
+
+  // Look up tier pricing for this box
+  const tier = await one<BoxPriceTierRow>(
+    `
+    select base_unit_price,
+           tier1_min_qty, tier1_unit_price,
+           tier2_min_qty, tier2_unit_price,
+           tier3_min_qty, tier3_unit_price,
+           tier4_min_qty, tier4_unit_price
+    from public.box_price_tiers
+    where box_id = $1
+    `,
+    [best.id],
+  );
+
+  const safeN = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+
+  let unitPrice: number | null = tier ? safeN(tier.base_unit_price) : null;
+
+  if (tier) {
+    const tiers = [
+      { min: tier.tier1_min_qty, unit: safeN(tier.tier1_unit_price) },
+      { min: tier.tier2_min_qty, unit: safeN(tier.tier2_unit_price) },
+      { min: tier.tier3_min_qty, unit: safeN(tier.tier3_unit_price) },
+      { min: tier.tier4_min_qty, unit: safeN(tier.tier4_unit_price) },
+    ].filter((t) => t.min != null && (t.min as number) > 0);
+
+    for (const t of tiers) {
+      if (t.unit != null && qty >= (t.min as number)) unitPrice = t.unit;
+    }
+  }
+
+  const extendedPrice = unitPrice != null ? Math.round(unitPrice * qty * 100) / 100 : null;
+
+  return { box: best, unit_price_usd: unitPrice, extended_price_usd: extendedPrice };
+}
+
 /**
  * Authoritative pricing call: POST /api/quotes/calc
  * - MUST match initial email pricing.
@@ -496,26 +586,82 @@ export async function GET(req: NextRequest) {
       [quote.id],
     );
 
-    // If customer provided a non-standard box size, display it on the quote,
-    // but keep pricing from the closest matching standard box selection.
     const customerBox = parseDimsString((facts as any)?.customer_box_in);
     let packagingLinesForDisplay = packagingLines;
 
-    if (customerBox && packagingLines.length > 0) {
-      packagingLinesForDisplay = packagingLines.map((l) => {
-        const baseDesc = typeof l.description === "string" ? l.description : "";
-        const note = `Customer box (inside): ${customerBox.L}  ${customerBox.W}  ${customerBox.H} in`;
-        const nextDesc = baseDesc ? `${baseDesc}  ${note}` : note;
+    // Track the matched stock box so the client can display it
+    let customerBoxMatch: {
+      sku: string;
+      description: string | null;
+      style: string | null;
+      inside_length_in: number;
+      inside_width_in: number;
+      inside_height_in: number;
+      unit_price_usd: number | null;
+      extended_price_usd: number | null;
+    } | null = null;
 
-        return {
-          ...l,
-          // DISPLAY ONLY: override dims/description. Pricing + box_id stay standard.
-          inside_length_in: customerBox.L,
-          inside_width_in: customerBox.W,
-          inside_height_in: customerBox.H,
-          description: nextDesc,
-        };
-      });
+    if (customerBox) {
+      // Derive qty from primary foam item for tier pricing
+      const primaryQty = items.length > 0 ? (Number(items[0].qty) || 1) : 1;
+
+      if (packagingLines.length > 0) {
+        // A carton was already explicitly picked — override display dims only,
+        // keep that carton's own pricing intact.
+        packagingLinesForDisplay = packagingLines.map((l) => {
+          const baseDesc = typeof l.description === "string" ? l.description : "";
+          const note = `Customer box (inside): ${customerBox.L} × ${customerBox.W} × ${customerBox.H} in`;
+          const nextDesc = baseDesc ? `${baseDesc} · ${note}` : note;
+          return {
+            ...l,
+            inside_length_in: customerBox.L,
+            inside_width_in: customerBox.W,
+            inside_height_in: customerBox.H,
+            description: nextDesc,
+          };
+        });
+      } else {
+        // No carton picked yet — find + price the closest matching stock box
+        // and inject it as a synthetic packaging line.
+        const matched = await findAndPriceClosestBox(
+          customerBox.L,
+          customerBox.W,
+          customerBox.H,
+          primaryQty,
+        );
+
+        if (matched) {
+          customerBoxMatch = {
+            sku: matched.box.sku,
+            description: matched.box.description,
+            style: matched.box.style,
+            inside_length_in: matched.box.inside_length_in,
+            inside_width_in: matched.box.inside_width_in,
+            inside_height_in: matched.box.inside_height_in,
+            unit_price_usd: matched.unit_price_usd,
+            extended_price_usd: matched.extended_price_usd,
+          };
+
+          // Synthetic line — id -1 flags it as not yet committed to DB
+          packagingLinesForDisplay = [
+            {
+              id: -1,
+              quote_id: quote.id,
+              box_id: matched.box.id ?? -1,
+              sku: matched.box.sku,
+              qty: primaryQty,
+              unit_price_usd: matched.unit_price_usd,
+              extended_price_usd: matched.extended_price_usd,
+              vendor: matched.box.vendor ?? null,
+              style: matched.box.style ?? null,
+              description: `${matched.box.description ?? matched.box.sku} · Customer box (inside): ${customerBox.L} × ${customerBox.W} × ${customerBox.H} in`,
+              inside_length_in: customerBox.L,
+              inside_width_in: customerBox.W,
+              inside_height_in: customerBox.H,
+            } as PackagingLine,
+          ];
+        }
+      }
     }
 
     // Only count billable priced items toward foam subtotal.
@@ -545,6 +691,7 @@ export async function GET(req: NextRequest) {
       grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge,
       isPrinted: !!(facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true),
       customerBoxDims: customerBox ?? null,
+      customerBoxMatch,
       facts,
     });
   } catch (err) {
