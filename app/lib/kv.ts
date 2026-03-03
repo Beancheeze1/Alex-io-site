@@ -1,39 +1,67 @@
 // app/lib/kv.ts
+//
+// Minimal KV helper used by pricing/settings.ts.
+// Uses Upstash Redis REST endpoints (/get/<key>, /set/<key>/<val>, optional ?EX=ttl).
+// Path A: mechanical fix to ensure persistence works with UPSTASH_REDIS_REST_URL format
+// already used elsewhere in this repo (see app/lib/memory.ts).
+
 export type Kv = {
   get: (key: string) => Promise<string | null>;
   set: (key: string, val: string, ttlSec?: number) => Promise<boolean>;
 };
 
+function trimSlashes(s: string) {
+  return (s || "").trim().replace(/\/+$/, "");
+}
+
 export function makeKv(): Kv {
-  const base = process.env.UPSTASH_REDIS_REST_URL!;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN!;
+  const base = trimSlashes(process.env.UPSTASH_REDIS_REST_URL || "");
+  const token = (process.env.UPSTASH_REDIS_REST_TOKEN || "").trim();
+
   if (!base || !token) {
     // no KV configured — return a no-op shim
     return {
-      async get() { return null; },
-      async set() { return true; },
+      async get() {
+        return null;
+      },
+      async set() {
+        return true;
+      },
     };
   }
-  async function call(cmd: string[], ttlSec?: number) {
-    const body = ttlSec
-      ? JSON.stringify([cmd, ["EX", String(ttlSec)]].flat())
-      : JSON.stringify(cmd);
-    const res = await fetch(base, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body,
+
+  async function get(key: string): Promise<string | null> {
+    const url = `${base}/get/${encodeURIComponent(key)}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
     });
-    if (!res.ok) throw new Error(`KV ${cmd[0]} failed ${res.status}`);
-    const j = await res.json();
-    // Upstash pipeline returns arrays; single command returns {result: ...}
-    const result = "result" in j ? j.result : Array.isArray(j) ? j[0].result : null;
-    return result;
+    if (!res.ok) throw new Error(`KV GET failed ${res.status}`);
+    const j: any = await res.json().catch(() => null);
+    // Upstash REST: { result: "value" | null }
+    const v = j && typeof j === "object" ? j.result : null;
+    return typeof v === "string" ? v : null;
   }
-  return {
-    async get(key) { return await call(["GET", key]); },
-    async set(key, val, ttlSec) {
-      const r = await call(["SET", key, val], ttlSec);
-      return r === "OK" || r === true;
-    },
-  };
+
+  async function set(key: string, val: string, ttlSec?: number): Promise<boolean> {
+    // Upstash REST supports /set/<key>/<val> with optional ?EX=<seconds>
+    const ex =
+      typeof ttlSec === "number" && Number.isFinite(ttlSec) && ttlSec > 0
+        ? `?EX=${encodeURIComponent(String(Math.floor(ttlSec)))}`
+        : "";
+
+    const url = `${base}/set/${encodeURIComponent(key)}/${encodeURIComponent(val)}${ex}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`KV SET failed ${res.status}`);
+    const j: any = await res.json().catch(() => null);
+    const r = j && typeof j === "object" ? j.result : null;
+    return r === "OK" || r === true;
+  }
+
+  return { get, set };
 }
