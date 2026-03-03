@@ -128,6 +128,8 @@ type ApiOk = {
   grandSubtotal: number;
   printingUpcharge: number;
   grandTotal: number;
+  isPrinted?: boolean;
+  customerBoxDims?: { L: number; W: number; H: number } | null;
 };
 
 type ApiErr = {
@@ -668,6 +670,10 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   // Requested cartons stored in DB (from /api/boxes/for-quote)
   const [requestedBoxes, setRequestedBoxes] = React.useState<RequestedBox[]>([]);
 
+  // Printed flag and customer box dims from API
+  const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
+  const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number } | null>(null);
+
   // Subtotals from server: foam, packaging, grand (foam + packaging)
   const [foamSubtotal, setFoamSubtotal] = React.useState<number>(0);
   const [packagingSubtotal, setPackagingSubtotal] = React.useState<number>(0);
@@ -818,6 +824,8 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
           typeof asOk.printingUpcharge === "number" ? asOk.printingUpcharge : 0,
         );
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
+        setIsPrinted(!!(asOk.isPrinted));
+        setCustomerBoxDims(asOk.customerBoxDims ?? null);
       } else {
         setError("Unexpected response from quote API.");
       }
@@ -1644,10 +1652,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         </div>
                       )}
 
-                      {effectivePrintingUpcharge > 0 && (
+                      {(isPrinted || effectivePrintingUpcharge > 0) && (
                         <div>
                           <div style={labelStyle}>Printing upcharge</div>
-                          <div style={{ fontSize: 13 }}>{formatUsd(effectivePrintingUpcharge)}</div>
+                          <div style={{ fontSize: 13 }}>{effectivePrintingUpcharge > 0 ? formatUsd(effectivePrintingUpcharge) : "TBD"}</div>
                         </div>
                       )}
 
@@ -2005,7 +2013,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                       ))}
 
                       {/* Requested cartons appended as additional lines */}
-                      {requestedBoxes.length > 0 && (
+                      {(requestedBoxes.length > 0 || isPrinted) && (
                         <tr>
                           <td
                             colSpan={5}
@@ -2031,9 +2039,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                           (rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) ||
                           "Carton";
 
-                        const L = Number(rb.inside_length_in);
-                        const W = Number(rb.inside_width_in);
-                        const H = Number(rb.inside_height_in);
+                        // If the customer specified a custom box size, display those dims
+                        // but use the standard box pricing underneath.
+                        const displayL = customerBoxDims ? customerBoxDims.L : Number(rb.inside_length_in);
+                        const displayW = customerBoxDims ? customerBoxDims.W : Number(rb.inside_width_in);
+                        const displayH = customerBoxDims ? customerBoxDims.H : Number(rb.inside_height_in);
+
+                        const L = displayL;
+                        const W = displayW;
+                        const H = displayH;
 
                         const dimsOk = Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H);
                         const dimsText = dimsOk ? `${formatDims(L, W, H)} in` : null;
@@ -2042,6 +2056,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         if (rb.sku) notesParts.push(`SKU: ${rb.sku}`);
                         // Vendor is intentionally NOT shown on client quote
                         if (dimsText) notesParts.push(`Inside ${dimsText}`);
+                        if (customerBoxDims) notesParts.push("(custom size; priced from closest standard box)");
 
                         const subLabel = notesParts.length > 0 ? notesParts.join(" · ") : null;
 
@@ -2109,7 +2124,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                       })}
 
                       {/* Printing upcharge — inside the Packaging section */}
-                      {effectivePrintingUpcharge > 0 && (
+                      {(isPrinted || effectivePrintingUpcharge > 0) && (
                         <tr>
                           <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
                             <div
@@ -2129,7 +2144,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                           <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>—</td>
                           <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
                           <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(effectivePrintingUpcharge)}</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                            {effectivePrintingUpcharge > 0 ? formatUsd(effectivePrintingUpcharge) : "TBD"}
+                          </td>
                         </tr>
                       )}
                     </tbody>

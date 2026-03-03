@@ -103,8 +103,20 @@ function bad(body: any, status = 400) {
   return NextResponse.json(body, { status });
 }
 
-function parseDimsString(dims: string | null | undefined) {
+function parseDimsString(dims: string | object | null | undefined) {
   if (!dims) return null;
+
+  // Handle object form: { L, W, H } (stored by persistCustomerBox in layout editor)
+  if (typeof dims === "object") {
+    const obj = dims as any;
+    const L = Number(obj.L);
+    const W = Number(obj.W);
+    const H = Number(obj.H);
+    if ([L, W, H].every((n) => Number.isFinite(n) && n > 0)) return { L, W, H };
+    return null;
+  }
+
+  // Handle string form: "LxWxH"
   const [L, W, H] = String(dims)
     .split("x")
     .map((s) => Number(String(s).trim()));
@@ -531,6 +543,8 @@ export async function GET(req: NextRequest) {
       grandSubtotal: foamSubtotal + packagingSubtotal,
       printingUpcharge,
       grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge,
+      isPrinted: !!(facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true),
+      customerBoxDims: customerBox ?? null,
       facts,
     });
   } catch (err) {
