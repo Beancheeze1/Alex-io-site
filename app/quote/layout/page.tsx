@@ -1791,6 +1791,8 @@ function LayoutEditorHostReady(props: {
       const boxWParam = url.searchParams.get("boxW") ?? url.searchParams.get("box_w");
       const boxHParam = url.searchParams.get("boxH") ?? url.searchParams.get("box_d");
 
+      const hasBoxParams = boxLParam !== null || boxWParam !== null || boxHParam !== null;
+
       // If URL explicitly provides printed, honor it AND persist it.
       if (printedParam !== null) {
         const printed = printedParam === "1" || printedParam === "true";
@@ -1801,40 +1803,41 @@ function LayoutEditorHostReady(props: {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ key, facts: { printed: printed ? 1 : 0 } }),
         }).catch(() => null);
-
-        // If URL also provides customer box dims, honor + persist them.
-        if (boxLParam !== null || boxWParam !== null || boxHParam !== null) {
-          const L = parseBoxNum(boxLParam);
-          const W = parseBoxNum(boxWParam);
-          const H = parseBoxNum(boxHParam);
-          const nextBox = L > 0 && W > 0 && H > 0 ? { L, W, H } : null;
-          setCustomerBox(nextBox);
-          persistCustomerBox(nextBox);
-        }
-
-        return;
       }
 
-      // If URL provides customer box dims without printed, honor + persist them.
-      if (boxLParam !== null || boxWParam !== null || boxHParam !== null) {
+      // If URL provides customer box dims, honor + persist them.
+      if (hasBoxParams) {
         const L = parseBoxNum(boxLParam);
         const W = parseBoxNum(boxWParam);
         const H = parseBoxNum(boxHParam);
         const nextBox = L > 0 && W > 0 && H > 0 ? { L, W, H } : null;
         setCustomerBox(nextBox);
         persistCustomerBox(nextBox);
+        // Still load persisted printed state from mem if not in URL
+        if (printedParam === null) {
+          fetch(`/api/admin/mem?key=${encodeURIComponent(key)}&t=${Math.random()}`, { cache: "no-store" })
+            .then((r) => r.json())
+            .then((data) => {
+              const v = (data?.facts as any)?.printed;
+              if (v === 1 || v === true) setIsPrinted(true);
+              else if (v === 0 || v === false) setIsPrinted(false);
+            })
+            .catch(() => null);
+        }
+        return;
       }
 
-      // Otherwise, load persisted value from mem (do NOT default-write 0).
+      // No box params in URL — load everything from persisted mem (re-entry path).
       fetch(`/api/admin/mem?key=${encodeURIComponent(key)}&t=${Math.random()}`, {
         cache: "no-store",
       })
         .then((r) => r.json())
         .then((data) => {
-          const v = (data?.facts as any)?.printed;
-          if (v === 1 || v === true) setIsPrinted(true);
-          else if (v === 0 || v === false) setIsPrinted(false);
-          // If undefined/null, leave current default (false) without writing.
+          if (printedParam === null) {
+            const v = (data?.facts as any)?.printed;
+            if (v === 1 || v === true) setIsPrinted(true);
+            else if (v === 0 || v === false) setIsPrinted(false);
+          }
           const cb = (data?.facts as any)?.customer_box_in;
           const L = parseBoxNum(cb?.L);
           const W = parseBoxNum(cb?.W);

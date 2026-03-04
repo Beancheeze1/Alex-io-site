@@ -788,6 +788,22 @@ export default function StartQuoteModal() {
       p.set("pack_type", "complete_pack");
       p.set("foam_config", foamConfig);
       p.set("fit_allow_in", String(FIT_ALLOW_IN));
+
+      // Pre-seed customer_box_in and printed into mem so the quote page
+      // can show them immediately without waiting for the editor to open.
+      if (boxLNum && boxWNum && boxDNum) {
+        fetch("/api/admin/mem", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            key: quote_no,
+            facts: {
+              customer_box_in: { L: boxLNum, W: boxWNum, H: boxDNum },
+              printed: printed ? 1 : 0,
+            },
+          }),
+        }).catch(() => null);
+      }
     }
 
     router.push(`/quote/layout?${p.toString()}`);
