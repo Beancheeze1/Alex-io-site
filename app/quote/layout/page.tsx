@@ -3613,17 +3613,17 @@ const tenantCssVars = React.useMemo(() => {
     />
   ) : null}
 
-              <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)]">
+              <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-white/90">
     {typeof tenantTheme?.brandName === "string" && tenantTheme.brandName.trim()
       ? tenantTheme.brandName.trim()
       : "Alex-IO"}
   </div>
 </div>
-                  <div className="mt-1 text-xs text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_88%,white)]">
+                  <div className="mt-1 text-xs text-slate-300">
                     Quote{" "}
                     <span className="font-mono font-semibold text-slate-50">{quoteNo}</span>
                     {hasRealQuoteNo ? (
-                      <span className="ml-1 text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_90%,white)]">· Linked to active quote</span>
+                      <span className="ml-1 text-slate-300">· Linked to active quote</span>
                     ) : (
                       <span className="ml-1 text-amber-50/90">· Demo view (no quote linked)</span>
                     )}
@@ -3644,7 +3644,7 @@ const tenantCssVars = React.useMemo(() => {
 
                 {/* RIGHT: BETA pill */}
                 <div className="flex items-center justify-end gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_82%,white)]">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-slate-200">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
                     Layout editor · V2.0
                   </span>
