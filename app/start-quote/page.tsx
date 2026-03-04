@@ -7,6 +7,7 @@
 "use client";
 
 import * as React from "react";
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import StartQuoteModal from "@/components/start-quote/StartQuoteModal";
 
@@ -53,7 +54,9 @@ export default function StartQuotePage() {
       </div>
 
       {/* Modal mounts immediately (Option B) */}
-      <StartQuoteModal />
+      <Suspense fallback={null}>
+        <StartQuoteModal />
+      </Suspense>
     </div>
   );
 }
