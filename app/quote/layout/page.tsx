@@ -3976,7 +3976,7 @@ const tenantCssVars = React.useMemo(() => {
                       type="button"
                       onClick={handleGoToFoamAdvisor}
                       disabled={missingCustomerInfo}
-                      className="inline-flex flex-1 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_55%,transparent)] bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:border-[color:var(--tenant-secondary)] transition disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="inline-flex flex-1 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_55%,transparent)] bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:border-[color:var(--tenant-secondary)] transition disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Recommend my foam
                     </button>
