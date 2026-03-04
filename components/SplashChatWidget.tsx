@@ -351,7 +351,8 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
 
     const payload = buildPrefillPayload(payloadFacts);
     const prefill = encodeURIComponent(JSON.stringify(payload));
-    router.push(`${startQuotePath}?prefill=${prefill}`);
+    const separator = startQuotePath.includes("?") ? "&" : "?";
+    router.push(`${startQuotePath}${separator}prefill=${prefill}`);
   }
 
   const summaryLines = React.useMemo(() => summarizeFacts(facts), [facts]);
