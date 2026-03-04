@@ -152,9 +152,7 @@ export default function StartQuoteModal() {
   const seededIsCompletePack =
     seededType === "complete_pack" ||
     seededType === "completepack" ||
-    seededType === "pack" ||
-    prefillData?.shipMode === "box" ||
-    prefillData?.shipMode === "mailer";
+    seededType === "pack";
 
   // ---------- State ----------
   const [activeStep, setActiveStep] = React.useState<
@@ -171,7 +169,7 @@ export default function StartQuoteModal() {
 
   // Common - prefer prefill data over URL params
   const [qty, setQty] = React.useState<string>(
-    prefillData?.qty || searchParams.get("qty") || "",
+    searchParams.get("qty") || "",
   );
   const [name, setName] = React.useState<string>(
     searchParams.get("customer_name") || "",
@@ -186,9 +184,8 @@ export default function StartQuoteModal() {
     searchParams.get("customer_phone") || "",
   );
 
-  // Material selection - prefer prefill data
+  // Material selection
   const [materialText, setMaterialText] = React.useState<string>(
-    prefillData?.material?.text ||
     searchParams.get("material_text") ||
     searchParams.get("material") ||
     "",
@@ -197,11 +194,9 @@ export default function StartQuoteModal() {
     searchParams.get("material_id") || "",
   );
 
-  // Cavities seed - prefer prefill data
+  // Cavities seed
   const [cavitySeed, setCavitySeed] = React.useState<string>(
-    prefillData?.firstCavity ||
-    searchParams.get("cavity") ||
-    "",
+    searchParams.get("cavity") || "",
   );
 
   // Foam Insert specs
@@ -209,19 +204,67 @@ export default function StartQuoteModal() {
   const [insertW, setInsertW] = React.useState<string>("");
   const [insertD, setInsertD] = React.useState<string>("");
 
-// Seed insert dims if provided (from URL params OR prefill data)
+  // Complete Pack: Box setup
+  const [boxL, setBoxL] = React.useState<string>(
+    (searchParams.get("box_l") || "").trim(),
+  );
+  const [boxW, setBoxW] = React.useState<string>(
+    (searchParams.get("box_w") || "").trim(),
+  );
+  const [boxD, setBoxD] = React.useState<string>(
+    (searchParams.get("box_d") || "").trim(),
+  );
+  const [boxStyle, setBoxStyle] = React.useState<BoxStyle>(
+    (searchParams.get("box_style") || "").toLowerCase() === "rsc" ? "rsc" : "mailer",
+  );
+  const [printed, setPrinted] = React.useState<boolean>(
+    (searchParams.get("printed") || "").trim() === "1" ||
+      (searchParams.get("box_printed") || "").trim() === "1",
+  );
+
+  // ---------- Seed all state from prefillData once it resolves ----------
+  // prefillData comes from useMemo(searchParams) which may be null on first render
+  // in Next.js App Router. This effect fires as soon as it's available.
+  const prefillSeededRef = React.useRef(false);
   React.useEffect(() => {
-    // Check prefill data first
-    if (prefillData?.outside?.l && prefillData?.outside?.w && prefillData?.outside?.h) {
-      if (!seededIsCompletePack) {
-        setInsertL(String(prefillData.outside.l));
-        setInsertW(String(prefillData.outside.w));
-        setInsertD(String(prefillData.outside.h));
-      }
-      return;
+    if (!prefillData || prefillSeededRef.current) return;
+    prefillSeededRef.current = true;
+
+    // Qty
+    if (prefillData.qty) setQty(String(prefillData.qty));
+
+    // Material
+    if (prefillData.material?.text) setMaterialText(prefillData.material.text);
+
+    // Cavity seed
+    if (prefillData.firstCavity) setCavitySeed(prefillData.firstCavity);
+
+    // Ship mode → quote type + box dims
+    const isCompletePack =
+      prefillData.shipMode === "box" || prefillData.shipMode === "mailer";
+
+    if (isCompletePack) {
+      setQuoteType("complete_pack");
+      setActiveStep("box");
+      setCompletedSteps(new Set(["type"]));
+
+      if (prefillData.outside?.l) setBoxL(String(prefillData.outside.l));
+      if (prefillData.outside?.w) setBoxW(String(prefillData.outside.w));
+      if (prefillData.outside?.h) setBoxD(String(prefillData.outside.h));
+
+      const style = prefillData.shipMode === "box" ? "rsc" : "mailer";
+      setBoxStyle(style);
+    } else {
+      // Foam insert — seed insert dims from outside
+      if (prefillData.outside?.l) setInsertL(String(prefillData.outside.l));
+      if (prefillData.outside?.w) setInsertW(String(prefillData.outside.w));
+      if (prefillData.outside?.h) setInsertD(String(prefillData.outside.h));
     }
-    
-    // Fall back to URL param
+  }, [prefillData]);
+
+// Seed insert dims from URL params (non-prefill path)
+  React.useEffect(() => {
+    if (prefillData) return; // prefill useEffect handles this case
     const dims = (searchParams.get("dims") || "").trim();
     if (!dims) return;
     const m = dims
@@ -237,29 +280,6 @@ export default function StartQuoteModal() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Complete Pack: Box setup — prefer prefill data (chatbot collected outside dims + ship mode)
-  const [boxL, setBoxL] = React.useState<string>(
-    (searchParams.get("box_l") || String(prefillData?.outside?.l || "") || "").trim(),
-  );
-  const [boxW, setBoxW] = React.useState<string>(
-    (searchParams.get("box_w") || String(prefillData?.outside?.w || "") || "").trim(),
-  );
-  const [boxD, setBoxD] = React.useState<string>(
-    (searchParams.get("box_d") || String(prefillData?.outside?.h || "") || "").trim(),
-  );
-  const [boxStyle, setBoxStyle] = React.useState<BoxStyle>(
-    (() => {
-      const fromUrl = (searchParams.get("box_style") || "").toLowerCase();
-      const fromPrefill = (prefillData?.shipMode || "").toLowerCase();
-      const raw = fromUrl || (fromPrefill === "box" ? "rsc" : fromPrefill === "mailer" ? "mailer" : "mailer");
-      return raw === "rsc" ? "rsc" : "mailer";
-    })(),
-  );
-  const [printed, setPrinted] = React.useState<boolean>(
-    (searchParams.get("printed") || "").trim() === "1" ||
-      (searchParams.get("box_printed") || "").trim() === "1",
-  );
 
   // Complete Pack: Foam config
   const [foamConfig, setFoamConfig] = React.useState<FoamConfig>("bottom_top");
