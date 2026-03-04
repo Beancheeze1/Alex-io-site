@@ -1459,26 +1459,44 @@ export async function POST(req: NextRequest) {
     }
 
     // FIX (Path A): After Apply, PRIMARY must reflect FULL STACK DEPTH so /api/quotes/calc prices the full set.
+    // Also sync length_in and width_in from the block footprint so revisions with new foam sizes are reflected.
     try {
       const stackDepthIn = sumLayerThickness(layoutForSave);
-      if (stackDepthIn != null && Number.isFinite(stackDepthIn) && stackDepthIn > 0) {
+      const blockL = Number(layoutForSave?.block?.lengthIn ?? layoutForSave?.block?.length_in);
+      const blockW = Number(layoutForSave?.block?.widthIn ?? layoutForSave?.block?.width_in);
+      const hasL = Number.isFinite(blockL) && blockL > 0;
+      const hasW = Number.isFinite(blockW) && blockW > 0;
+      const hasH = stackDepthIn != null && Number.isFinite(stackDepthIn) && stackDepthIn > 0;
+
+      if (hasL || hasW || hasH) {
+        // Build a dynamic SET clause so we only update what we have
+        const setClauses: string[] = [];
+        const params: any[] = [];
+
+        if (hasL) { params.push(blockL); setClauses.push(`length_in = $${params.length}`); }
+        if (hasW) { params.push(blockW); setClauses.push(`width_in = $${params.length}`); }
+        if (hasH) { params.push(stackDepthIn); setClauses.push(`height_in = $${params.length}`); }
+
+        params.push(quote.id);
+        const quoteIdParam = `$${params.length}`;
+
         await q(
           `
           update quote_items
-          set height_in = $1
+          set ${setClauses.join(", ")}
           where id = (
             select id
             from quote_items
-            where quote_id = $2
+            where quote_id = ${quoteIdParam}
             order by id asc
             limit 1
           )
           `,
-          [stackDepthIn, quote.id],
+          params,
         );
       }
     } catch (e) {
-      console.error("[layout/apply] Failed to set PRIMARY height_in to stack depth for", quoteNo, e);
+      console.error("[layout/apply] Failed to sync PRIMARY block dims for", quoteNo, e);
     }
 
     if (customerName || customerEmail || customerPhone || customerCompany) {
