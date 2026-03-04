@@ -152,15 +152,17 @@ export default function StartQuoteModal() {
   const seededIsCompletePack =
     seededType === "complete_pack" ||
     seededType === "completepack" ||
-    seededType === "pack";
+    seededType === "pack" ||
+    prefillData?.shipMode === "box" ||
+    prefillData?.shipMode === "mailer";
 
   // ---------- State ----------
   const [activeStep, setActiveStep] = React.useState<
     "type" | "box" | "foam" | "specs" | "cav" | "mat" | "rev"
-  >("type");
+  >(seededIsCompletePack ? "box" : "type");
 
   const [completedSteps, setCompletedSteps] = React.useState<Set<string>>(
-    () => new Set<string>(),
+    () => seededIsCompletePack ? new Set<string>(["type"]) : new Set<string>(),
   );
 
   const [quoteType, setQuoteType] = React.useState<QuoteType>(
@@ -236,21 +238,23 @@ export default function StartQuoteModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Complete Pack: Box setup
+  // Complete Pack: Box setup — prefer prefill data (chatbot collected outside dims + ship mode)
   const [boxL, setBoxL] = React.useState<string>(
-    (searchParams.get("box_l") || "").trim(),
+    (searchParams.get("box_l") || String(prefillData?.outside?.l || "") || "").trim(),
   );
   const [boxW, setBoxW] = React.useState<string>(
-    (searchParams.get("box_w") || "").trim(),
+    (searchParams.get("box_w") || String(prefillData?.outside?.w || "") || "").trim(),
   );
   const [boxD, setBoxD] = React.useState<string>(
-    (searchParams.get("box_d") || "").trim(),
+    (searchParams.get("box_d") || String(prefillData?.outside?.h || "") || "").trim(),
   );
   const [boxStyle, setBoxStyle] = React.useState<BoxStyle>(
-    ((searchParams.get("box_style") || "mailer").toLowerCase() as BoxStyle) ===
-      "rsc"
-      ? "rsc"
-      : "mailer",
+    (() => {
+      const fromUrl = (searchParams.get("box_style") || "").toLowerCase();
+      const fromPrefill = (prefillData?.shipMode || "").toLowerCase();
+      const raw = fromUrl || (fromPrefill === "box" ? "rsc" : fromPrefill === "mailer" ? "mailer" : "mailer");
+      return raw === "rsc" ? "rsc" : "mailer";
+    })(),
   );
   const [printed, setPrinted] = React.useState<boolean>(
     (searchParams.get("printed") || "").trim() === "1" ||
