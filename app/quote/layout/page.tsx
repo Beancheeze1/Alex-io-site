@@ -1786,9 +1786,10 @@ function LayoutEditorHostReady(props: {
 
       const url = new URL(window.location.href);
       const printedParam = url.searchParams.get("printed");
-      const boxLParam = url.searchParams.get("boxL");
-      const boxWParam = url.searchParams.get("boxW");
-      const boxHParam = url.searchParams.get("boxH");
+      // Support both camelCase (boxL/boxW/boxH) and modal snake_case (box_l/box_w/box_d)
+      const boxLParam = url.searchParams.get("boxL") ?? url.searchParams.get("box_l");
+      const boxWParam = url.searchParams.get("boxW") ?? url.searchParams.get("box_w");
+      const boxHParam = url.searchParams.get("boxH") ?? url.searchParams.get("box_d");
 
       // If URL explicitly provides printed, honor it AND persist it.
       if (printedParam !== null) {
@@ -3976,7 +3977,7 @@ const tenantCssVars = React.useMemo(() => {
                       type="button"
                       onClick={handleGoToFoamAdvisor}
                       disabled={missingCustomerInfo}
-                      className="inline-flex flex-1 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_55%,transparent)] bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:border-[color:var(--tenant-secondary)] transition disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="inline-flex flex-1 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_55%,transparent)] bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:border-[color:var(--tenant-secondary)] transition disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Recommend my foam
                     </button>
