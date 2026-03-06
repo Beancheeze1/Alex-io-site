@@ -22,7 +22,8 @@ import Link from "next/link";
 
 type PricingSettings = {
   skive_upcharge_each: number;
-  printing_upcharge_usd: number;
+  printing_upcharge_usd: number;   // flat "Art Setup" fee
+  printing_upcharge_pct: number;   // % markup on (foam + packaging) when printed
   ratePerCI_default: number;
   ratePerBF_default: number;
   kerf_pct_default: number;
@@ -52,6 +53,7 @@ export default function AdminSettingsPage() {
   const [settings, setSettings] = React.useState<PricingSettings>({
     skive_upcharge_each: 4.5,
     printing_upcharge_usd: 0,
+    printing_upcharge_pct: 0,
     ratePerCI_default: 0.06,
     ratePerBF_default: 34,
     kerf_pct_default: 0,
@@ -90,6 +92,10 @@ export default function AdminSettingsPage() {
           printing_upcharge_usd: numberOr(
             (s as any).printing_upcharge_usd,
             prev.printing_upcharge_usd,
+          ),
+          printing_upcharge_pct: numberOr(
+            (s as any).printing_upcharge_pct,
+            prev.printing_upcharge_pct,
           ),
           ratePerCI_default: numberOr(
             (s as any).ratePerCI_default,
@@ -308,7 +314,7 @@ export default function AdminSettingsPage() {
 
                   <label className="flex flex-col gap-1 text-xs">
                     <span className="text-slate-300">
-                      Printing upcharge (USD)
+                      Art Setup fee (USD)
                     </span>
                     <input
                       type="number"
@@ -317,6 +323,22 @@ export default function AdminSettingsPage() {
                       value={settings.printing_upcharge_usd}
                       onChange={(e) =>
                         setNum("printing_upcharge_usd")(e.target.value)
+                      }
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1 text-xs">
+                    <span className="text-slate-300">
+                      Printing upcharge (% of foam + boxes)
+                    </span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      value={settings.printing_upcharge_pct}
+                      onChange={(e) =>
+                        setNum("printing_upcharge_pct")(e.target.value)
                       }
                     />
                   </label>

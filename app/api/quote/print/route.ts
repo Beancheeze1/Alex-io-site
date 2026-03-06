@@ -673,10 +673,18 @@ export async function GET(req: NextRequest) {
     );
 
     const settings = await getPricingSettings();
-    const printingUpcharge =
-      facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true
-        ? Number(settings.printing_upcharge_usd || 0)
-        : 0;
+    const isPrinted = !!(facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true);
+
+    // Flat "Art Setup" fee — one-time charge independent of order size
+    const artSetupFee = isPrinted ? Number(settings.printing_upcharge_usd || 0) : 0;
+
+    // Percentage upcharge applied to (foam + packaging) subtotal when printed
+    const printableBasis = foamSubtotal + packagingSubtotal;
+    const printingUpchargePct = isPrinted ? Number(settings.printing_upcharge_pct || 0) : 0;
+    const printingUpchargeAmt = Math.round(printableBasis * (printingUpchargePct / 100) * 100) / 100;
+
+    // Combined printing total (backward-compat field clients already read)
+    const printingUpcharge = artSetupFee + printingUpchargeAmt;
 
     return ok({
       ok: true,
@@ -687,9 +695,12 @@ export async function GET(req: NextRequest) {
       foamSubtotal,
       packagingSubtotal,
       grandSubtotal: foamSubtotal + packagingSubtotal,
+      artSetupFee,
+      printingUpchargePct,
+      printingUpchargeAmt,
       printingUpcharge,
       grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge,
-      isPrinted: !!(facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true),
+      isPrinted,
       customerBoxDims: customerBox ?? null,
       customerBoxMatch,
       facts,

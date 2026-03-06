@@ -14,7 +14,8 @@ export type PricingSettings = {
   kerf_pct_default: number;
   min_charge_default: number;
   skive_upcharge_each: number;
-  printing_upcharge_usd: number;
+  printing_upcharge_usd: number;   // flat "Art Setup" fee
+  printing_upcharge_pct: number;   // % of (foam + packaging) subtotal when printed
 
   // Machining + markup knobs
   machining_in3_per_min: number;
@@ -34,6 +35,7 @@ const DEFAULTS: PricingSettings = {
   min_charge_default: 0,
   skive_upcharge_each: 4.5,
   printing_upcharge_usd: 0,
+  printing_upcharge_pct: 0,
 
   machining_in3_per_min: 3000,
   machine_cost_per_min: 0.65,
