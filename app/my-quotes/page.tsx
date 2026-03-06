@@ -24,6 +24,12 @@ type ApiResponse = {
   ok: boolean;
   quotes?: QuoteRow[];
   error?: string;
+  commission?: {
+    pct: number | null;
+    quotes_total_usd: number;
+    commission_usd: number;
+    quote_count: number;
+  };
 };
 
 function classifyStatus(status: string | null | undefined) {
@@ -59,6 +65,7 @@ export default function MyQuotesPage() {
   const [quotes, setQuotes] = React.useState<QuoteRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [commission, setCommission] = React.useState<ApiResponse["commission"]>(undefined);
 
   React.useEffect(() => {
     let active = true;
@@ -87,6 +94,7 @@ export default function MyQuotesPage() {
         }
 
         setQuotes(json.quotes || []);
+        setCommission(json.commission);
         setError(null);
       } catch (err) {
         console.error("Failed to load my quotes:", err);
@@ -192,6 +200,38 @@ export default function MyQuotesPage() {
             </p>
           </div>
         </section>
+
+        {/* Commission tile — only shown if a commission rate has been set */}
+        {commission && commission.pct != null && (
+          <section className="mb-6 rounded-2xl border border-sky-800/50 bg-sky-950/40 px-5 py-4">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-sky-400">
+              Your commission
+            </p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <p className="text-[11px] text-neutral-400">Rate</p>
+                <p className="mt-1 text-2xl font-semibold text-sky-300">
+                  {commission.pct}%
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-neutral-400">Quotes total</p>
+                <p className="mt-1 text-2xl font-semibold text-neutral-100">
+                  ${commission.quotes_total_usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="mt-0.5 text-[10px] text-neutral-500">
+                  Across {commission.quote_count} quote{commission.quote_count !== 1 ? "s" : ""}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-neutral-400">Commission earned</p>
+                <p className="mt-1 text-2xl font-semibold text-emerald-300">
+                  ${commission.commission_usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Table / body */}
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4 shadow-md">

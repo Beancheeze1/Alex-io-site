@@ -84,6 +84,7 @@ export async function GET(req: NextRequest) {
             'name', name,
             'role', role,
             'sales_slug', sales_slug,
+            'commission_pct', commission_pct,
             'created_at', created_at,
             'updated_at', updated_at
           )
@@ -351,5 +352,56 @@ export async function DELETE(req: NextRequest) {
       { ok: false, error: "server_error", message: "Unexpected error deleting user. Check logs." },
       500,
     );
+  }
+}
+
+// ---------- PATCH: update commission_pct for a user ----------
+export async function PATCH(req: NextRequest) {
+  try {
+    const current = await getCurrentUserFromRequest(req);
+    if (!requireAdmin(current)) {
+      return bad({ ok: false, error: "forbidden", message: "Admin role required." }, 403);
+    }
+
+    const ten = await enforceTenantMatch(req, current);
+    if (!ten.ok) return NextResponse.json(ten.body, { status: ten.status });
+
+    if (!current || typeof current.tenant_id !== "number") {
+      return bad({ ok: false, error: "tenant_required", message: "Missing tenant." }, 403);
+    }
+
+    const body = (await req.json().catch(() => null)) as any;
+    const id = Number(body?.id);
+    const pct = body?.commission_pct === null ? null : Number(body?.commission_pct);
+
+    if (!Number.isFinite(id) || id <= 0) {
+      return bad({ ok: false, error: "invalid_payload", message: "Expected { id, commission_pct }." }, 400);
+    }
+    if (pct !== null && (!Number.isFinite(pct) || pct < 0 || pct > 100)) {
+      return bad({ ok: false, error: "invalid_pct", message: "commission_pct must be 0–100 or null." }, 400);
+    }
+
+    // Ensure column exists (safe to run every time — IF NOT EXISTS)
+    await one(
+      `ALTER TABLE public.users ADD COLUMN IF NOT EXISTS commission_pct numeric(5,2) DEFAULT NULL`,
+      [],
+    ).catch(() => null);
+
+    const updated = await one<{ id: number; commission_pct: number | null }>(
+      `UPDATE public.users
+       SET commission_pct = $1, updated_at = NOW()
+       WHERE id = $2 AND tenant_id = $3
+       RETURNING id, commission_pct`,
+      [pct ?? null, id, current.tenant_id],
+    );
+
+    if (!updated?.id) {
+      return bad({ ok: false, error: "not_found", message: "User not found." }, 404);
+    }
+
+    return ok({ ok: true, id: updated.id, commission_pct: updated.commission_pct });
+  } catch (err: any) {
+    console.error("Error in PATCH /api/admin/users:", err);
+    return bad({ ok: false, error: "server_error", message: String(err?.message ?? err) }, 500);
   }
 }

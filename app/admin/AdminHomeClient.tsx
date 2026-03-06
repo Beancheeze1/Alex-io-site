@@ -45,6 +45,7 @@ type AdminUsersListResponse =
         name: string;
         role: string;
         sales_slug: string | null;
+        commission_pct: number | null;
         created_at: string;
         updated_at: string;
       }>;
@@ -231,6 +232,12 @@ export default function AdminHomeClient({ dashboardTitle }: AdminHomeClientProps
               href="/admin/quotes"
               title="Quotes & layouts"
               description="Engineering view of quotes, layouts, and CAD exports for internal review."
+            />
+
+            <NavCard
+              href="/admin/commissions"
+              title="Commissions"
+              description="Sales rep commission rates, quote totals, and earned commission amounts."
             />
 
             {/* Logs */}
@@ -622,6 +629,39 @@ function UsersAndRolesCard() {
   const [resetForEmail, setResetForEmail] = React.useState<string | null>(null);
   const [tempPassword, setTempPassword] = React.useState<string | null>(null);
 
+  // Commission % — local edits per user id before saving
+  const [commissionEdits, setCommissionEdits] = React.useState<Record<number, string>>({});
+  const [savingCommissionId, setSavingCommissionId] = React.useState<number | null>(null);
+
+  async function saveCommission(userId: number) {
+    const raw = commissionEdits[userId];
+    const pct = raw === "" || raw === null || raw === undefined ? null : Number(raw);
+    if (pct !== null && (!Number.isFinite(pct) || pct < 0 || pct > 100)) {
+      setError("Commission % must be between 0 and 100.");
+      return;
+    }
+    setSavingCommissionId(userId);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: userId, commission_pct: pct }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.message || json.error || "Save failed");
+      setOkMsg("Commission rate saved.");
+      // Update local users list so UI reflects saved value
+      setUsers((prev: any[]) =>
+        prev.map((u: any) => u.id === userId ? { ...u, commission_pct: pct } : u)
+      );
+    } catch (err: any) {
+      setError(err.message || "Failed to save commission rate.");
+    } finally {
+      setSavingCommissionId(null);
+    }
+  }
+
 
   const [email, setEmail] = React.useState("");
   const [name, setName] = React.useState("");
@@ -963,11 +1003,12 @@ function UsersAndRolesCard() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[11px]">
               <thead>
-                               <tr className="text-slate-400">
+                <tr className="text-slate-400">
                   <th className="py-1 pr-3">Email</th>
                   <th className="py-1 pr-3">Name</th>
                   <th className="py-1 pr-3">Role</th>
                   <th className="py-1 pr-3">Sales slug</th>
+                  <th className="py-1 pr-3">Commission %</th>
                   <th className="py-1 pr-3">Link</th>
                   <th className="py-1 pr-3">Created</th>
                   <th className="py-1 pr-3">Password</th>
@@ -983,6 +1024,35 @@ function UsersAndRolesCard() {
                     <td className="py-1 pr-3 text-slate-200">{u.role}</td>
                     <td className="py-1 pr-3 text-slate-300">
                       {u.sales_slug || "—"}
+                    </td>
+                    <td className="py-1 pr-3">
+                      {u.sales_slug ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            placeholder={u.commission_pct != null ? String(u.commission_pct) : "0"}
+                            value={commissionEdits[u.id] !== undefined ? commissionEdits[u.id] : (u.commission_pct != null ? String(u.commission_pct) : "")}
+                            onChange={(e) =>
+                              setCommissionEdits((prev) => ({ ...prev, [u.id]: e.target.value }))
+                            }
+                            className="w-16 rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                          />
+                          <span className="text-[10px] text-slate-500">%</span>
+                          <button
+                            type="button"
+                            onClick={() => saveCommission(u.id)}
+                            disabled={savingCommissionId === u.id}
+                            className="rounded bg-sky-700/40 px-1.5 py-0.5 text-[10px] text-sky-200 hover:bg-sky-700/60 disabled:opacity-50"
+                          >
+                            {savingCommissionId === u.id ? "…" : "Save"}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-slate-600 text-[11px]">—</span>
+                      )}
                     </td>
                     <td className="py-1 pr-3">
                       {u.sales_slug ? (
