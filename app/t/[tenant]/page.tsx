@@ -1,12 +1,21 @@
 "use client";
 
 import * as React from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import SplashChatWidget from "@/components/SplashChatWidget";
 
 export default function TenantLanding() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const tenant = (params?.tenant || "").toString();
+
+  const salesRepSlug = searchParams?.get("sales_rep_slug")?.trim() || "";
+
+  // Build the path the chatbot will push to when the customer completes intake.
+  // Include sales_rep_slug if present so the quote gets attributed to the rep.
+  const startQuotePath = salesRepSlug
+    ? `/start-quote?tenant=${tenant}&sales_rep_slug=${encodeURIComponent(salesRepSlug)}`
+    : `/start-quote?tenant=${tenant}`;
 
   const [theme, setTheme] = React.useState<any>(null);
   const [logoFailed, setLogoFailed] = React.useState(false);
@@ -71,7 +80,7 @@ export default function TenantLanding() {
         <p className="mb-8 opacity-80">Start your custom packaging quote.</p>
 
         <a
-          href={`/start-quote?tenant=${tenant}`}
+          href={startQuotePath}
           className="inline-block px-6 py-3 rounded-full font-semibold transition"
           style={{
             background: "var(--tenant-primary)",
@@ -84,7 +93,7 @@ export default function TenantLanding() {
         {/* Optional: if logo was enabled but failed, we silently fall back to text */}
       </div>
       {theme?.landingChatEnabled ? (
-        <SplashChatWidget startQuotePath={`/start-quote?tenant=${tenant}`} />
+        <SplashChatWidget startQuotePath={startQuotePath} />
       ) : null}
     </main>
   );
