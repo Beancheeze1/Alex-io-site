@@ -59,8 +59,8 @@ export async function GET(req: NextRequest) {
       [user.id, limit],
     );
 
-    // Commission summary — compute via calc API (price_total_usd is NULL for
-    // most items since pricing is on-the-fly; mirrors /api/quote/print logic)
+    // Commission summary — mirrors print route pricing exactly.
+    // Pre-apply quotes have no quote_items; price from Redis facts instead.
     const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
     const repUser = await one<{ commission_pct: number | null }>(
@@ -68,58 +68,90 @@ export async function GET(req: NextRequest) {
       [user.id],
     );
 
-    const myQuotes = await q<{ id: number }>(
-      `SELECT id FROM public.quotes WHERE sales_rep_id = $1`,
+    const myQuotes = await q<{ id: number; quote_no: string }>(
+      `SELECT id, quote_no FROM public.quotes WHERE sales_rep_id = $1`,
       [user.id],
     );
 
     const quoteIds = myQuotes.map((r) => r.id);
     let quotesTotalUsd = 0;
 
-    if (quoteIds.length > 0) {
-      const items = await q<{
-        length_in: string; width_in: string; height_in: string;
-        qty: number; material_id: number;
-        price_total_usd: string | null; notes: string | null;
-      }>(
-        `SELECT length_in, width_in, height_in, qty, material_id, price_total_usd, notes
-         FROM public.quote_items WHERE quote_id = ANY($1::int[])`,
-        [quoteIds],
-      );
+    if (myQuotes.length > 0) {
+      const { loadFacts } = await import("@/app/lib/memory");
 
-      const boxes = await q<{ extended_price_usd: string | null }>(
-        `SELECT extended_price_usd FROM public.quote_box_selections WHERE quote_id = ANY($1::int[])`,
-        [quoteIds],
-      );
+      function parseDims(dims: any): { L: number; W: number; H: number } | null {
+        if (!dims) return null;
+        if (typeof dims === "object") {
+          const L = Number(dims.L), W = Number(dims.W), H = Number(dims.H);
+          return [L, W, H].every((n) => Number.isFinite(n) && n > 0) ? { L, W, H } : null;
+        }
+        const [L, W, H] = String(dims).split("x").map((s) => Number(s.trim()));
+        return [L, W, H].every((n) => Number.isFinite(n) && n > 0) ? { L, W, H } : null;
+      }
 
-      const boxTotal = boxes.reduce((s, b) => s + (Number(b.extended_price_usd) || 0), 0);
+      async function calcTotal(L: number, W: number, H: number, qty: number, material_id: number): Promise<number> {
+        try {
+          const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ length_in: L, width_in: W, height_in: H, material_id, qty, cavities: [], round_to_bf: false }),
+          });
+          const j = await r.json().catch(() => ({}));
+          return Number(j?.result?.total) || Number(j?.result?.price_total) || Number(j?.total) || 0;
+        } catch { return 0; }
+      }
 
-      const foamPrices = await Promise.all(
-        items
-          .filter((it) => {
-            const n = String(it.notes || "").toUpperCase();
-            return !n.includes("[LAYOUT-LAYER]") && !n.includes("[PACKAGING]") && !n.includes("REQUESTED SHIPPING CARTON");
-          })
-          .map(async (it) => {
-            if (it.price_total_usd !== null && Number(it.price_total_usd) > 0) {
-              return Number(it.price_total_usd);
+      const quoteTotals = await Promise.all(
+        myQuotes.map(async ({ id: quoteId, quote_no }) => {
+          const items = await q<{
+            length_in: string; width_in: string; height_in: string;
+            qty: number; material_id: number; price_total_usd: string | null; notes: string | null;
+          }>(
+            `SELECT length_in, width_in, height_in, qty, material_id, price_total_usd, notes
+             FROM public.quote_items WHERE quote_id = $1`,
+            [quoteId],
+          );
+
+          const boxes = await q<{ extended_price_usd: string | null }>(
+            `SELECT extended_price_usd FROM public.quote_box_selections WHERE quote_id = $1`,
+            [quoteId],
+          );
+          const boxTotal = boxes.reduce((s, b) => s + (Number(b.extended_price_usd) || 0), 0);
+
+          let foamTotal = 0;
+
+          if (items.length === 0) {
+            // Pre-apply: use Redis facts
+            const facts = (await loadFacts(quote_no)) || {};
+            const dims = parseDims((facts as any).dims);
+            const qty = Number((facts as any).qty);
+            const materialId = Number((facts as any).material_id);
+            if (dims && qty > 0 && materialId > 0) {
+              foamTotal = await calcTotal(dims.L, dims.W, dims.H, qty, materialId);
             }
-            const L = Number(it.length_in), W = Number(it.width_in), H = Number(it.height_in);
-            const qty = Number(it.qty), materialId = Number(it.material_id);
-            if (![L, W, H].every((n) => Number.isFinite(n) && n > 0) || !(qty > 0) || !(materialId > 0)) return 0;
-            try {
-              const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ length_in: L, width_in: W, height_in: H, material_id: materialId, qty, cavities: [], round_to_bf: false }),
-              });
-              const j = await r.json().catch(() => ({}));
-              return Number(j?.result?.total) || Number(j?.result?.price_total) || Number(j?.total) || 0;
-            } catch { return 0; }
-          }),
+          } else {
+            const prices = await Promise.all(
+              items
+                .filter((it) => {
+                  const n = String(it.notes || "").toUpperCase();
+                  return !n.includes("[LAYOUT-LAYER]") && !n.includes("[PACKAGING]") && !n.includes("REQUESTED SHIPPING CARTON");
+                })
+                .map(async (it) => {
+                  if (it.price_total_usd !== null && Number(it.price_total_usd) > 0) return Number(it.price_total_usd);
+                  const L = Number(it.length_in), W = Number(it.width_in), H = Number(it.height_in);
+                  const qty = Number(it.qty), materialId = Number(it.material_id);
+                  if (![L, W, H].every((n) => Number.isFinite(n) && n > 0) || !(qty > 0) || !(materialId > 0)) return 0;
+                  return calcTotal(L, W, H, qty, materialId);
+                }),
+            );
+            foamTotal = prices.reduce((s, p) => s + p, 0);
+          }
+
+          return Math.round((foamTotal + boxTotal) * 100) / 100;
+        }),
       );
 
-      quotesTotalUsd = Math.round((foamPrices.reduce((s, p) => s + p, 0) + boxTotal) * 100) / 100;
+      quotesTotalUsd = Math.round(quoteTotals.reduce((s, t) => s + t, 0) * 100) / 100;
     }
 
     const commPct = Number(repUser?.commission_pct ?? 0);
@@ -132,7 +164,7 @@ export async function GET(req: NextRequest) {
         pct: repUser?.commission_pct ?? null,
         quotes_total_usd: quotesTotalUsd,
         commission_usd: commissionUsd,
-        quote_count: quoteIds.length,
+        quote_count: myQuotes.length,
       },
     });
   } catch (err: any) {
