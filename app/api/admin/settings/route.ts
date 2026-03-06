@@ -51,6 +51,7 @@ export async function PATCH(req: NextRequest) {
       "kerf_pct_default",
       "min_charge_default",
       "printing_upcharge_usd",
+      "printing_upcharge_pct",
       "machining_in3_per_min",
       "machine_cost_per_min",
       "markup_factor_default",
