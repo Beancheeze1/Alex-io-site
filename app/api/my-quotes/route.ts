@@ -59,60 +59,80 @@ export async function GET(req: NextRequest) {
       [user.id, limit],
     );
 
-    // Commission summary for this rep
-    const commissionRow = await one<{
-      commission_pct: number | null;
-      quotes_total_usd: number;
-      commission_usd: number;
-      quote_count: number;
-    }>(
-      `
-      SELECT
-        u.commission_pct,
-        COALESCE(
-          SUM(COALESCE(qi_totals.foam_total, 0))
-          + SUM(COALESCE(box_totals.box_total, 0)),
-          0
-        )::numeric(10,2)  AS quotes_total_usd,
-        ROUND(
-          COALESCE(
-            SUM(COALESCE(qi_totals.foam_total, 0))
-            + SUM(COALESCE(box_totals.box_total, 0)),
-            0
-          ) * COALESCE(u.commission_pct, 0) / 100,
-          2
-        )                 AS commission_usd,
-        COUNT(DISTINCT q.id)::int AS quote_count
-      FROM public.users u
-      LEFT JOIN public.quotes q ON q.sales_rep_id = u.id
-      LEFT JOIN LATERAL (
-        SELECT qi.quote_id,
-               COALESCE(SUM(qi.price_total_usd), 0) AS foam_total
-        FROM public.quote_items qi
-        WHERE qi.quote_id = q.id
-        GROUP BY qi.quote_id
-      ) qi_totals ON true
-      LEFT JOIN LATERAL (
-        SELECT qbs.quote_id,
-               COALESCE(SUM(qbs.extended_price_usd), 0) AS box_total
-        FROM public.quote_box_selections qbs
-        WHERE qbs.quote_id = q.id
-        GROUP BY qbs.quote_id
-      ) box_totals ON true
-      WHERE u.id = $1
-      GROUP BY u.id, u.commission_pct
-      `,
+    // Commission summary — compute via calc API (price_total_usd is NULL for
+    // most items since pricing is on-the-fly; mirrors /api/quote/print logic)
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+
+    const repUser = await one<{ commission_pct: number | null }>(
+      `SELECT commission_pct FROM public.users WHERE id = $1`,
       [user.id],
     );
+
+    const myQuotes = await q<{ id: number }>(
+      `SELECT id FROM public.quotes WHERE sales_rep_id = $1`,
+      [user.id],
+    );
+
+    const quoteIds = myQuotes.map((r) => r.id);
+    let quotesTotalUsd = 0;
+
+    if (quoteIds.length > 0) {
+      const items = await q<{
+        length_in: string; width_in: string; height_in: string;
+        qty: number; material_id: number;
+        price_total_usd: string | null; notes: string | null;
+      }>(
+        `SELECT length_in, width_in, height_in, qty, material_id, price_total_usd, notes
+         FROM public.quote_items WHERE quote_id = ANY($1::int[])`,
+        [quoteIds],
+      );
+
+      const boxes = await q<{ extended_price_usd: string | null }>(
+        `SELECT extended_price_usd FROM public.quote_box_selections WHERE quote_id = ANY($1::int[])`,
+        [quoteIds],
+      );
+
+      const boxTotal = boxes.reduce((s, b) => s + (Number(b.extended_price_usd) || 0), 0);
+
+      const foamPrices = await Promise.all(
+        items
+          .filter((it) => {
+            const n = String(it.notes || "").toUpperCase();
+            return !n.includes("[LAYOUT-LAYER]") && !n.includes("[PACKAGING]") && !n.includes("REQUESTED SHIPPING CARTON");
+          })
+          .map(async (it) => {
+            if (it.price_total_usd !== null && Number(it.price_total_usd) > 0) {
+              return Number(it.price_total_usd);
+            }
+            const L = Number(it.length_in), W = Number(it.width_in), H = Number(it.height_in);
+            const qty = Number(it.qty), materialId = Number(it.material_id);
+            if (![L, W, H].every((n) => Number.isFinite(n) && n > 0) || !(qty > 0) || !(materialId > 0)) return 0;
+            try {
+              const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ length_in: L, width_in: W, height_in: H, material_id: materialId, qty, cavities: [], round_to_bf: false }),
+              });
+              const j = await r.json().catch(() => ({}));
+              return Number(j?.result?.total) || Number(j?.result?.price_total) || Number(j?.total) || 0;
+            } catch { return 0; }
+          }),
+      );
+
+      quotesTotalUsd = Math.round((foamPrices.reduce((s, p) => s + p, 0) + boxTotal) * 100) / 100;
+    }
+
+    const commPct = Number(repUser?.commission_pct ?? 0);
+    const commissionUsd = Math.round(quotesTotalUsd * (commPct / 100) * 100) / 100;
 
     return NextResponse.json({
       ok: true,
       quotes: rows,
       commission: {
-        pct: commissionRow?.commission_pct ?? null,
-        quotes_total_usd: Number(commissionRow?.quotes_total_usd ?? 0),
-        commission_usd: Number(commissionRow?.commission_usd ?? 0),
-        quote_count: commissionRow?.quote_count ?? 0,
+        pct: repUser?.commission_pct ?? null,
+        quotes_total_usd: quotesTotalUsd,
+        commission_usd: commissionUsd,
+        quote_count: quoteIds.length,
       },
     });
   } catch (err: any) {
@@ -123,4 +143,3 @@ export async function GET(req: NextRequest) {
     );
   }
 }
-
