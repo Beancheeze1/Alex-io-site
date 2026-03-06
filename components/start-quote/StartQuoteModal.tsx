@@ -733,7 +733,7 @@ export default function StartQuoteModal() {
     const quote_no = buildQuoteNo();
     const p = new URLSearchParams();
 
-    const salesSlugFromUrl = (searchParams.get("sales") || searchParams.get("rep") || "").trim();
+    const salesSlugFromUrl = (searchParams.get("sales_rep_slug") || searchParams.get("sales") || searchParams.get("rep") || "").trim();
     if (salesSlugFromUrl) p.set("sales_rep_slug", salesSlugFromUrl);
 
     const tenantFromUrl = (searchParams.get("tenant") || searchParams.get("t") || "").trim();
