@@ -151,7 +151,17 @@ function OverlapSnips() {
 
 // Splash CTAs (locked): demo + start-quote (no mailto)
 
-export default function Page() {
+export default function Page({
+  searchParams,
+}: {
+  searchParams?: { sales_rep_slug?: string };
+}) {
+  // If a salesperson link was used, thread the slug through to the editor
+  // so the quote gets attributed to the right rep.
+  const salesSlug = searchParams?.sales_rep_slug?.trim() || "";
+  const startQuotePath = salesSlug
+    ? `/start-quote?sales_rep_slug=${encodeURIComponent(salesSlug)}`
+    : START_QUOTE_PATH;
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-50">
       {/* Editor-style grid background */}
@@ -380,7 +390,7 @@ export default function Page() {
       </section>
 
       {/* ADDITIVE: Splash chat widget (UI + guided intake). No existing workflows touched. */}
-      <SplashChatWidget startQuotePath={START_QUOTE_PATH} />
+      <SplashChatWidget startQuotePath={startQuotePath} />
     </main>
   );
 }
