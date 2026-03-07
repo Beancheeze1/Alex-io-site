@@ -1983,18 +1983,10 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
           throw new Error(json.error || "Invalid package data");
         }
 
-        // Open layout editor in new tab with the loaded package
-        const packageData = encodeURIComponent(
-          JSON.stringify(json.package.layout)
-        );
-        
-        // Also pass notes if available
-        const notesParam = json.package.notes 
-          ? `&notes=${encodeURIComponent(json.package.notes)}`
-          : '';
-        
+        // Open layout editor in new tab, passing the package ID so the editor
+        // fetches and seeds from that specific package (not just the latest).
         window.open(
-          `/quote/layout?quote_no=${encodeURIComponent(quoteNoValue)}&seed_layout=${packageData}${notesParam}`,
+          `/quote/layout?quote_no=${encodeURIComponent(quoteNoValue)}&layout_pkg_id=${packageId}`,
           "_blank"
         );
 

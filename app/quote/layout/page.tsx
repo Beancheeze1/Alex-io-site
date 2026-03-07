@@ -1281,6 +1281,39 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         }
 
 
+        // Check if a specific layout package was requested (e.g. from admin "Load Previous Layout")
+        const url0 = new URL(window.location.href);
+        const requestedPkgId = url0.searchParams.get("layout_pkg_id");
+        if (requestedPkgId && Number.isFinite(Number(requestedPkgId)) && Number(requestedPkgId) > 0) {
+          try {
+            const pkgRes = await fetch(
+              `/api/quote/layout/packages/${requestedPkgId}?quote_no=${encodeURIComponent(quoteNoFromUrl.trim())}`,
+              { cache: "no-store" },
+            );
+            if (pkgRes.ok) {
+              const pkgJson = await pkgRes.json();
+              if (pkgJson.ok && pkgJson.package?.layout) {
+                const pkgLayout = pkgJson.package.layout as LayoutModel;
+                const pkgNotes = (pkgJson.package.notes as string | null) ?? "";
+                if (!cancelled) {
+                  setInitialLayout(pkgLayout);
+                  setInitialNotes(pkgNotes);
+                  setInitialQty(qtySeedLocal ?? null);
+                  setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUrl ?? null);
+                  setInitialCustomerName(customerSeed.name || "");
+                  setInitialCustomerEmail(customerSeed.email || "");
+                  setInitialCustomerCompany(customerSeed.company || "");
+                  setInitialCustomerPhone(customerSeed.phone || "");
+                  setLoadingLayout(false);
+                }
+                return;
+              }
+            }
+          } catch (e) {
+            console.warn("layout_pkg_id fetch failed, falling back to latest:", e);
+          }
+        }
+
         // Try to fetch the latest layout package via /api/quote/print
         const res = await fetch(
           "/api/quote/print?quote_no=" + encodeURIComponent(quoteNoFromUrl.trim()),
