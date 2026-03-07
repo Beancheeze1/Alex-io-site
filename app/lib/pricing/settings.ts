@@ -1,10 +1,8 @@
 // app/lib/pricing/settings.ts
 //
-// Shared pricing settings helper.
-// - Single source of truth for defaults.
-// - In-memory cache backed by KV (Upstash/Redis) so settings survive
-//   server restarts and serverless cold-starts.
-// - Falls back to in-memory only when KV is not configured.
+// Tenant-scoped pricing settings.
+// Each tenant's settings are stored under separate KV and memory-cache keys.
+// Changing Tenant A's settings has zero effect on Tenant B.
 
 import { makeKv } from "@/app/lib/kv";
 
@@ -25,9 +23,6 @@ export type PricingSettings = {
   cushion_family_order: string[];
 };
 
-const SETTINGS_KEY = "__ALEXIO_PRICING_SETTINGS__";
-const KV_KEY = "alexio:pricing_settings";
-
 const DEFAULTS: PricingSettings = {
   ratePerCI_default: 0.06,
   ratePerBF_default: 34,
@@ -44,33 +39,38 @@ const DEFAULTS: PricingSettings = {
   cushion_family_order: ["EPE", "PU", "PE", "EVA"],
 };
 
-function getMemCache(): PricingSettings | null {
-  const g = globalThis as any;
-  return g[SETTINGS_KEY] ?? null;
+// Keys are scoped per tenant
+function memKey(tenantId: number | string): string {
+  return `__ALEXIO_PRICING_SETTINGS_${tenantId}__`;
+}
+function kvKey(tenantId: number | string): string {
+  return `alexio:pricing_settings:${tenantId}`;
 }
 
-function setMemCache(s: PricingSettings): void {
-  (globalThis as any)[SETTINGS_KEY] = s;
+function getMemCache(tenantId: number | string): PricingSettings | null {
+  return (globalThis as any)[memKey(tenantId)] ?? null;
 }
-
+function setMemCache(tenantId: number | string, s: PricingSettings): void {
+  (globalThis as any)[memKey(tenantId)] = s;
+}
 function mergeWithDefaults(raw: Partial<PricingSettings>): PricingSettings {
   return { ...DEFAULTS, ...raw };
 }
 
 /**
- * Async version — loads from KV on first call, caches in memory.
- * Used in route handlers where await is available.
+ * Async — loads from KV on first call per tenant, then caches in memory.
+ * Pass tenantId (number or string) from the authenticated user.
  */
-export async function getPricingSettings(): Promise<PricingSettings> {
-  const cached = getMemCache();
+export async function getPricingSettings(tenantId: number | string = "default"): Promise<PricingSettings> {
+  const cached = getMemCache(tenantId);
   if (cached) return cached;
 
   try {
     const kv = makeKv();
-    const raw = await kv.get(KV_KEY);
+    const raw = await kv.get(kvKey(tenantId));
     if (raw) {
       const parsed = mergeWithDefaults(JSON.parse(raw) as Partial<PricingSettings>);
-      setMemCache(parsed);
+      setMemCache(tenantId, parsed);
       return parsed;
     }
   } catch {
@@ -78,37 +78,37 @@ export async function getPricingSettings(): Promise<PricingSettings> {
   }
 
   const defaults = mergeWithDefaults({});
-  setMemCache(defaults);
+  setMemCache(tenantId, defaults);
   return defaults;
 }
 
 /**
- * Sync version for code paths that can't await (e.g. compute.ts).
- * Returns the in-memory cache if warm, otherwise returns defaults.
- * For fresh serverless instances, call getPricingSettings() (async) first.
+ * Sync — returns in-memory cache for this tenant if warm, else defaults.
+ * For fresh serverless instances call getPricingSettings() (async) first.
  */
-export function getPricingSettingsSync(): PricingSettings {
-  return getMemCache() ?? mergeWithDefaults({});
+export function getPricingSettingsSync(tenantId: number | string = "default"): PricingSettings {
+  return getMemCache(tenantId) ?? mergeWithDefaults({});
 }
 
 /**
- * Update settings in both memory cache and KV.
+ * Update settings in both memory cache and KV for the given tenant.
  */
 export async function updatePricingSettings(
   partial: Partial<PricingSettings>,
+  tenantId: number | string = "default",
 ): Promise<PricingSettings> {
-  const current = await getPricingSettings();
+  const current = await getPricingSettings(tenantId);
   const next: PricingSettings = { ...current };
 
   for (const key of Object.keys(partial) as (keyof PricingSettings)[]) {
     (next as any)[key] = (partial as any)[key];
   }
 
-  setMemCache(next);
+  setMemCache(tenantId, next);
 
   try {
     const kv = makeKv();
-    await kv.set(KV_KEY, JSON.stringify(next));
+    await kv.set(kvKey(tenantId), JSON.stringify(next));
   } catch {
     // KV unavailable — settings saved in-memory only for this instance
   }

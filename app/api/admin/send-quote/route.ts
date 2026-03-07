@@ -174,7 +174,16 @@ export async function POST(req: NextRequest) {
     }
 
     const result = (calcJson as CalcOk).result || ({} as any);
-    const settings = await getPricingSettings();
+    // Derive tenant from hostname for scoped settings
+    const hostname = req.headers.get("host") || "";
+    const subdomain = hostname.split(".")[0];
+    const { one: dbOne } = await import("@/lib/db");
+    const tenantRow = await dbOne<{ id: number }>(
+      `SELECT id FROM public.tenants WHERE slug = $1`,
+      [subdomain],
+    ).catch(() => null);
+    const tenantId = tenantRow?.id ?? "default";
+    const settings = await getPricingSettings(tenantId);
     const printingUpcharge =
       facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true
         ? Number(settings.printing_upcharge_usd || 0)

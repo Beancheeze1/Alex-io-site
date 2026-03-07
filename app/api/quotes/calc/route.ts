@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
+import { getPricingSettings } from "@/app/lib/pricing/settings";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,39 +35,7 @@ type CushionRow = {
   source: string | null;
 };
 
-/* ---------- Shared pricing settings (matches /api/admin/settings) ---------- */
 
-const SETTINGS_KEY = "__ALEXIO_PRICING_SETTINGS__";
-
-type PricingSettings = {
-  ratePerCI_default: number;
-  ratePerBF_default: number;
-  kerf_pct_default: number;
-  min_charge_default: number;
-  skive_upcharge_each: number;
-  cushion_family_order?: string[];
-  machining_in3_per_min?: number;
-  machine_cost_per_min?: number;
-  markup_factor_default?: number;
-};
-
-function getPricingSettings(): PricingSettings {
-  const g = globalThis as any;
-  if (!g[SETTINGS_KEY]) {
-    g[SETTINGS_KEY] = {
-      ratePerCI_default: 0.06,
-      ratePerBF_default: 34,
-      kerf_pct_default: 0,
-      min_charge_default: 0,
-      skive_upcharge_each: 4.5,
-      cushion_family_order: ["EPE", "PU", "PE", "EVA"],
-      machining_in3_per_min: 3000,
-      machine_cost_per_min: 0.65,
-      markup_factor_default: 1,
-    } as PricingSettings;
-  }
-  return g[SETTINGS_KEY] as PricingSettings;
-}
 
 /* -------------------------------------------------------------------------- */
 
@@ -230,8 +199,15 @@ export async function POST(req: NextRequest) {
       return bad("material_not_found", { material_id });
     }
 
-    // Load global pricing settings (in-memory, shared with /admin/settings)
-    const settings = getPricingSettings();
+    // Load tenant-scoped pricing settings
+    const hostname = req.headers.get("host") || "";
+    const subdomain = hostname.split(".")[0];
+    const tenantRow = await one<{ id: number }>(
+      `SELECT id FROM public.tenants WHERE slug = $1`,
+      [subdomain],
+    ).catch(() => null);
+    const tenantId = tenantRow?.id ?? "default";
+    const settings = await getPricingSettings(tenantId);
 
     // --- Volumes (cubic inches) ---
     const piece_ci_raw = length_in * width_in * height_in;

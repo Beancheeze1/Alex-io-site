@@ -672,7 +672,7 @@ export async function GET(req: NextRequest) {
       0,
     );
 
-    const settings = await getPricingSettings();
+    const settings = await getPricingSettings(user.tenant_id);
     const isPrinted = !!(facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true);
 
     // Flat "Art Setup" fee — one-time charge independent of order size
