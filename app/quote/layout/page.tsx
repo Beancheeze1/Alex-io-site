@@ -1281,9 +1281,13 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         }
 
 
-        // Check if a specific layout package was requested (e.g. from admin "Load Previous Layout")
+        // Check if a specific layout package was requested (e.g. from admin "Load Previous Layout").
+        // We still fetch /api/quote/print to get qty, material, and customer info — but substitute
+        // the selected package's layout JSON in place of the latest layoutPkg.
         const url0 = new URL(window.location.href);
         const requestedPkgId = url0.searchParams.get("layout_pkg_id");
+        let overrideLayoutJson: LayoutModel | null = null;
+        let overrideLayoutNotes: string | null = null;
         if (requestedPkgId && Number.isFinite(Number(requestedPkgId)) && Number(requestedPkgId) > 0) {
           try {
             const pkgRes = await fetch(
@@ -1293,24 +1297,12 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
             if (pkgRes.ok) {
               const pkgJson = await pkgRes.json();
               if (pkgJson.ok && pkgJson.package?.layout) {
-                const pkgLayout = pkgJson.package.layout as LayoutModel;
-                const pkgNotes = (pkgJson.package.notes as string | null) ?? "";
-                if (!cancelled) {
-                  setInitialLayout(pkgLayout);
-                  setInitialNotes(pkgNotes);
-                  setInitialQty(qtySeedLocal ?? null);
-                  setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUrl ?? null);
-                  setInitialCustomerName(customerSeed.name || "");
-                  setInitialCustomerEmail(customerSeed.email || "");
-                  setInitialCustomerCompany(customerSeed.company || "");
-                  setInitialCustomerPhone(customerSeed.phone || "");
-                  setLoadingLayout(false);
-                }
-                return;
+                overrideLayoutJson = pkgJson.package.layout as LayoutModel;
+                overrideLayoutNotes = (pkgJson.package.notes as string | null) ?? null;
               }
             }
           } catch (e) {
-            console.warn("layout_pkg_id fetch failed, falling back to latest:", e);
+            console.warn("layout_pkg_id fetch failed, will use latest:", e);
           }
         }
 
@@ -1394,7 +1386,13 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
 
         // Prefer DB layout when it contains a real multi-layer stack,
         // even if URL dims/cavities are present (those are often legacy links).
-        const dbLayout = json?.layoutPkg?.layout_json as LayoutModel | undefined;
+        // If a specific package was requested (layout_pkg_id), use that layout
+        // instead of the latest one — but all other metadata (qty, customer etc.)
+        // still comes from the quote/print response above.
+        const dbLayout = (overrideLayoutJson ?? json?.layoutPkg?.layout_json) as LayoutModel | undefined;
+        const dbLayoutNotes = overrideLayoutJson
+          ? (overrideLayoutNotes ?? "")
+          : ((json?.layoutPkg?.notes as string | null) ?? "");
         const dbHasStack =
           !!dbLayout &&
           Array.isArray((dbLayout as any).stack) &&
@@ -1478,7 +1476,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         }
 
         if (json && json.ok && dbLayout && dbHasStack) {
-          const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
+          const notesFromDb = dbLayoutNotes;
 
           // IMPORTANT:
           // If the URL explicitly provides layer thicknesses (email deep-link),
@@ -1569,7 +1567,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
           !hasCavitiesFromUrl
         ) {
           const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
-          const notesFromDb = (json.layoutPkg.notes as string | null) ?? "";
+          const notesFromDb = dbLayoutNotes;
 
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
