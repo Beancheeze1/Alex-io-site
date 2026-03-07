@@ -2976,10 +2976,25 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       const label = item.material_name || "Material #" + item.material_id;
                       const unit = parsePriceField(item.price_unit_usd ?? null);
                       const total = parsePriceField(item.price_total_usd ?? null);
+                      const needsSkive = Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01;
                       return (
                         <tr key={item.id}>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{idx + 1}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{label}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>
+                            <span>{label}</span>
+                            {needsSkive && (
+                              <span style={{
+                                marginLeft: 6,
+                                padding: "2px 7px",
+                                borderRadius: 999,
+                                border: "1px solid #fed7aa",
+                                background: "#fff7ed",
+                                color: "#c2410c",
+                                fontSize: 10,
+                                fontWeight: 600,
+                              }}>✂ Skived</span>
+                            )}
+                          </td>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{item.qty}</td>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(unit)}</td>

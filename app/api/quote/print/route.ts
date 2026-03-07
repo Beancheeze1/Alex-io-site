@@ -284,6 +284,7 @@ async function priceViaCalcRoute(params: {
   qty: number;
   material_id: number;
   force_skived?: boolean;
+  tenant_id?: number | string | null;
 }): Promise<{ unit: number; total: number; raw: any | null }> {
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
   const url = `${base}/api/quotes/calc?t=${Date.now()}`;
@@ -297,6 +298,7 @@ async function priceViaCalcRoute(params: {
     cavities: [], // match email (no cavity subtraction)
     round_to_bf: false,
     force_skived: params.force_skived === true,
+    tenant_id: params.tenant_id ?? null,
   };
 
   const r = await fetch(url, {
@@ -424,6 +426,7 @@ export async function GET(req: NextRequest) {
           H: dimsParsed.H,
           qty,
           material_id: materialId,
+          tenant_id: user.tenant_id,
         });
 
         items.push({
@@ -513,6 +516,7 @@ export async function GET(req: NextRequest) {
             qty,
             material_id: materialId,
             force_skived: forceLayeredSkive,
+            tenant_id: user.tenant_id,
           });
 
           if (forceLayeredSkive) {

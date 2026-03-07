@@ -2201,12 +2201,38 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
   ]);
 
   // Handle edits to the active layer's thickness
-  const handleActiveLayerThicknessChange = (value: string) => {
-    if (!activeLayer) return;
-    const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return;
-    setLayerThicknessIn(activeLayer.id, num);
-  };
+  // --- Layer thickness input (type freely, commit on Enter/Blur; same pattern as blockInputs) ---
+  const [layerThicknessInput, setLayerThicknessInput] = React.useState<string>(() => {
+    return String(blockThicknessIn || "");
+  });
+
+  // Keep in sync when active layer changes or thickness changes from outside
+  React.useEffect(() => {
+    if (activeLayer) {
+      setLayerThicknessInput(String(getLayerThickness(activeLayer.id)));
+    } else {
+      setLayerThicknessInput(String(blockThicknessIn || ""));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLayerId, blockThicknessIn]);
+
+  const commitLayerThickness = React.useCallback(() => {
+    const raw = layerThicknessInput.trim();
+    const revert = () => {
+      setLayerThicknessInput(
+        activeLayer ? String(getLayerThickness(activeLayer.id)) : String(blockThicknessIn || "")
+      );
+    };
+    if (!raw) { revert(); return; }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) { revert(); return; }
+    const snapped = snapInches(parsed);
+    if (!Number.isFinite(snapped) || snapped <= 0) { revert(); return; }
+    if (activeLayer) {
+      setLayerThicknessIn(activeLayer.id, snapped);
+      setLayerThicknessInput(String(snapped));
+    }
+  }, [layerThicknessInput, activeLayer, blockThicknessIn, getLayerThickness, setLayerThicknessIn]);
 
   const [zoom, setZoom] = React.useState(1);
 
@@ -3771,8 +3797,16 @@ const tenantCssVars = React.useMemo(() => {
                       <input
                         type="number"
                         step={0.125}
-                        value={activeLayer ? getLayerThickness(activeLayer.id) : blockThicknessIn}
-                        onChange={(e) => handleActiveLayerThicknessChange(e.target.value)}
+                        value={layerThicknessInput}
+                        onChange={(e) => setLayerThicknessInput(e.target.value)}
+                        onBlur={commitLayerThickness}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            commitLayerThickness();
+                            (e.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
                         className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                       />
                     </label>

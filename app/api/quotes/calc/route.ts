@@ -14,6 +14,7 @@ type In = {
   cavities?: string[] | null; // e.g., ["3x3x1", "Ø6x1"]
   round_to_bf?: boolean;
   force_skived?: boolean;
+  tenant_id?: number | string | null; // optional: skip host-based lookup when called server-to-server
 };
 
 type MaterialRow = {
@@ -202,13 +203,20 @@ export async function POST(req: NextRequest) {
     }
 
     // Load tenant-scoped pricing settings
-    const hostname = req.headers.get("host") || "";
-    const subdomain = hostname.split(".")[0];
-    const tenantRow = await one<{ id: number }>(
-      `SELECT id FROM public.tenants WHERE slug = $1`,
-      [subdomain],
-    ).catch(() => null);
-    const tenantId = tenantRow?.id ?? "default";
+    // Prefer explicit tenant_id from payload (server-to-server calls pass this directly).
+    // Fall back to host-based subdomain lookup for direct browser/external calls.
+    let tenantId: number | string = "default";
+    if (body.tenant_id != null && body.tenant_id !== "") {
+      tenantId = body.tenant_id;
+    } else {
+      const hostname = req.headers.get("host") || "";
+      const subdomain = hostname.split(".")[0];
+      const tenantRow = await one<{ id: number }>(
+        `SELECT id FROM public.tenants WHERE slug = $1`,
+        [subdomain],
+      ).catch(() => null);
+      tenantId = tenantRow?.id ?? "default";
+    }
     const settings = await getPricingSettings(tenantId);
 
     // --- Volumes (cubic inches) ---

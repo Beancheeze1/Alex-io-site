@@ -1957,7 +1957,22 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
                               {isPrimary ? (
                                 <>
-                                  <div style={{ fontWeight: 600 }}>Foam set — layered construction</div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                    <div style={{ fontWeight: 600 }}>Foam set — layered construction</div>
+                                    {Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01 && (
+                                      <span style={{
+                                        padding: "3px 8px",
+                                        borderRadius: 999,
+                                        border: "1px solid #fed7aa",
+                                        background: "#fff7ed",
+                                        color: "#c2410c",
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                      }}>
+                                        ✂ Skived
+                                      </span>
+                                    )}
+                                  </div>
                                   <div style={{ color: "#6b7280" }}>
                                     {baseLabel}
                                     {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
@@ -1973,26 +1988,40 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                                     {baseLabel}
                                     {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                   </div>
-                                  {isIncludedLayer && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRemoveIncludedLayer(item.id)}
-                                      disabled={isRemovingLayer}
-                                      style={{
-                                        marginTop: 6,
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                                    {isIncludedLayer && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveIncludedLayer(item.id)}
+                                        disabled={isRemovingLayer}
+                                        style={{
+                                          padding: "3px 8px",
+                                          borderRadius: 999,
+                                          border: "1px solid #fecaca",
+                                          background: isRemovingLayer ? "#fee2e2" : "#fef2f2",
+                                          color: "#b91c1c",
+                                          fontSize: 11,
+                                          fontWeight: 600,
+                                          cursor: isRemovingLayer ? "default" : "pointer",
+                                        }}
+                                      >
+                                        {isRemovingLayer ? "Removing..." : "Remove"}
+                                      </button>
+                                    )}
+                                    {Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01 && (
+                                      <span style={{
                                         padding: "3px 8px",
                                         borderRadius: 999,
-                                        border: "1px solid #fecaca",
-                                        background: isRemovingLayer ? "#fee2e2" : "#fef2f2",
-                                        color: "#b91c1c",
+                                        border: "1px solid #fed7aa",
+                                        background: "#fff7ed",
+                                        color: "#c2410c",
                                         fontSize: 11,
                                         fontWeight: 600,
-                                        cursor: isRemovingLayer ? "default" : "pointer",
-                                      }}
-                                    >
-                                      {isRemovingLayer ? "Removing..." : "Remove"}
-                                    </button>
-                                  )}
+                                      }}>
+                                        ✂ Skived
+                                      </span>
+                                    )}
+                                  </div>
                                 </>
                               )}
                             </td>
