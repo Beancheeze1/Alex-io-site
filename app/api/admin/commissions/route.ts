@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
     const rows: CommissionRow[] = await Promise.all(
       reps.map(async (rep) => {
         const quotes = await q<{ id: number; quote_no: string }>(
-          `SELECT id, quote_no FROM public.quotes WHERE sales_rep_id = $1 AND tenant_id = $2`,
+          `SELECT id, quote_no FROM public.quotes WHERE sales_rep_id = $1 AND tenant_id = $2 AND locked = true`,
           [rep.user_id, tenantId],
         );
 
