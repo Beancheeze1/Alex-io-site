@@ -1957,22 +1957,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                             <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
                               {isPrimary ? (
                                 <>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                    <div style={{ fontWeight: 600 }}>Foam set — layered construction</div>
-                                    {Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01 && (
-                                      <span style={{
-                                        padding: "3px 8px",
-                                        borderRadius: 999,
-                                        border: "1px solid #fed7aa",
-                                        background: "#fff7ed",
-                                        color: "#c2410c",
-                                        fontSize: 11,
-                                        fontWeight: 600,
-                                      }}>
-                                        ✂ Skived
-                                      </span>
-                                    )}
-                                  </div>
+                                  <div style={{ fontWeight: 600 }}>Foam set — layered construction</div>
                                   <div style={{ color: "#6b7280" }}>
                                     {baseLabel}
                                     {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
@@ -2018,7 +2003,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                                         fontSize: 11,
                                         fontWeight: 600,
                                       }}>
-                                        ✂ Skived
+                                        Skived
                                       </span>
                                     )}
                                   </div>

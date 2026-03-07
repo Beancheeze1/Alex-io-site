@@ -2992,7 +2992,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                 color: "#c2410c",
                                 fontSize: 10,
                                 fontWeight: 600,
-                              }}>✂ Skived</span>
+                              }}>Skived</span>
                             )}
                           </td>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
