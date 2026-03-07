@@ -1,38 +1,11 @@
 // app/api/ai/price/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { getPricingSettings } from "@/app/lib/pricing/settings";
+import { one } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type PricingSettings = {
-  ratePerCI_default: number;   // $/cubic inch
-  ratePerBF_default: number;   // $/board-foot; when >0 we derive CI = BF / 1728
-  kerf_pct_default: number;    // +% waste
-  min_charge_default: number;  // minimum extended price
-  skive_upcharge_each: number; // $ per piece when thickness not on 1" increments
-  cushion_family_order?: string[]; // optional, kept in sync with admin route
-};
-
-function settings(): PricingSettings {
-  const key = "__ALEXIO_PRICING_SETTINGS__";
-  const g = globalThis as any;
-  if (!g[key]) {
-    g[key] = {
-      ratePerCI_default: 0.06,
-      ratePerBF_default: 34,
-      kerf_pct_default: 0,
-      min_charge_default: 0,
-      skive_upcharge_each: 4.5,
-      cushion_family_order: ["EPE", "PU", "PE", "EVA"],
-    } satisfies PricingSettings;
-  }
-  const s = g[key] as PricingSettings;
-  // If BF is defined, derive CI for runtime use
-  if (s.ratePerBF_default && s.ratePerBF_default > 0) {
-    s.ratePerCI_default = s.ratePerBF_default / 1728;
-  }
-  return s;
-}
 
 type Units = "in" | "mm";
 const MM_PER_IN = 25.4;
@@ -51,7 +24,15 @@ function nearlyInteger(n: number, tol = 1e-6) {
 
 export async function POST(req: NextRequest) {
   try {
-    const s = settings();
+    // Resolve tenant from host header, then load tenant-scoped settings
+    const hostname = req.headers.get("host") || "";
+    const subdomain = hostname.split(".")[0];
+    const tenantRow = await one<{ id: number }>(
+      `SELECT id FROM public.tenants WHERE slug = $1`,
+      [subdomain],
+    ).catch(() => null);
+    const tenantId = tenantRow?.id ?? "default";
+    const s = await getPricingSettings(tenantId);
 
     type Dim = { L: number; W: number; H: number; units?: Units };
     type Cavity = { L: number; W: number; H: number; count?: number; units?: Units };
