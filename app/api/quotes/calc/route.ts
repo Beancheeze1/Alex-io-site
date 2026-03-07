@@ -257,12 +257,20 @@ export async function POST(req: NextRequest) {
     // Skiving upcharge: if height is NOT within 0.01 of a whole inch,
     // or if caller explicitly forces skiving (used for layered sets where
     // individual layers may require skiving even when total stack depth is whole-inch).
+    //
+    // Two mechanisms (material-level % takes priority):
+    //   1. skiving_upcharge_pct on the material row  → % multiplier on raw total
+    //   2. skive_upcharge_each from admin settings    → flat $ per piece (fallback)
     const skive_pct =
       mat.skiving_upcharge_pct != null
         ? Number(mat.skiving_upcharge_pct)
         : 0;
+    const skive_each_fallback =
+      mat.skiving_upcharge_pct == null
+        ? safeNum(settings.skive_upcharge_each, 0)
+        : 0;
     const heightTriggersSkive = Math.abs(height_in - Math.round(height_in)) > 0.01;
-    const is_skived = (force_skived || heightTriggersSkive) && skive_pct > 0;
+    const is_skived = force_skived || heightTriggersSkive;
 
     const setup_fee =
       mat.cutting_setup_fee_usd != null
@@ -271,8 +279,12 @@ export async function POST(req: NextRequest) {
 
     // Raw total (before global markup & min charge)
     let raw_total = order_ci_with_waste * price_per_ci;
-    if (is_skived) {
+    if (is_skived && skive_pct > 0) {
+      // Material-level percentage upcharge
       raw_total *= 1 + skive_pct / 100;
+    } else if (is_skived && skive_each_fallback > 0) {
+      // Settings-level flat per-piece upcharge
+      raw_total += skive_each_fallback * qty;
     }
     raw_total += setup_fee;
 
@@ -370,6 +382,7 @@ export async function POST(req: NextRequest) {
       kerf_pct,
       is_skived,
       skive_pct,
+      skive_each_fallback: round2(skive_each_fallback),
       setup_fee: round2(setup_fee),
       cavities_ci: round4(cavities_ci),
       piece_ci_raw: round4(piece_ci_raw),
