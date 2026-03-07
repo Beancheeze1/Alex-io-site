@@ -206,12 +206,12 @@ export default function AdminHomeClient({ dashboardTitle }: AdminHomeClientProps
               description="Review and maintain cushion curve data that powers the foam advisor and recommendations."
             />
 
-            {/* Pricing / price books */}
-            <NavCard
+            {/* Pricing / price books — hidden */}
+            {/* <NavCard
               href="/admin/pricing"
               title="Pricing & price books"
               description="View price books and run pricing sandbox tests without affecting real quotes."
-            />
+            /> */}
 
             {/* Carton pricing */}
             <NavCard
@@ -240,12 +240,12 @@ export default function AdminHomeClient({ dashboardTitle }: AdminHomeClientProps
               description="Sales rep commission rates, quote totals, and earned commission amounts."
             />
 
-            {/* Logs */}
-            <NavCard
+            {/* Logs — hidden */}
+            {/* <NavCard
               href="/admin/logs"
               title="Logs & events"
               description="Inspect webhook events, error logs, and other system diagnostics."
-            />
+            /> */}
           </div>
         </section>
 
