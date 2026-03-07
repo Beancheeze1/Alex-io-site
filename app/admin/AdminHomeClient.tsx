@@ -561,9 +561,7 @@ function ShippingSettingsCard() {
       <p className="text-xs text-slate-200">
         Controls the <span className="font-semibold">rough shipping estimate</span>{" "}
         as a percentage of the combined{" "}
-        <span className="font-mono">foam + packaging</span> subtotal. This is a
-        quick, adjustable placeholder for freight until we wire in a full
-        shipping engine.
+        <span className="font-mono">foam + packaging</span> subtotal. 
       </p>
 
       {loading && (
