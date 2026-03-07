@@ -13,6 +13,7 @@ type In = {
   qty: number | string;
   cavities?: string[] | null; // e.g., ["3x3x1", "Ø6x1"]
   round_to_bf?: boolean;
+  force_skived?: boolean;
 };
 
 type MaterialRow = {
@@ -34,8 +35,6 @@ type CushionRow = {
   g_level: any;
   source: string | null;
 };
-
-
 
 /* -------------------------------------------------------------------------- */
 
@@ -117,6 +116,7 @@ export async function GET(req: NextRequest) {
       qty: "integer",
       cavities: "string[] (optional) e.g. ['2x3x0.5','Ø6x1']",
       round_to_bf: "boolean (optional)",
+      force_skived: "boolean (optional)",
     },
     example: {
       length_in: 12,
@@ -126,6 +126,7 @@ export async function GET(req: NextRequest) {
       qty: 250,
       cavities: ["Ø6x1"],
       round_to_bf: false,
+      force_skived: false,
     },
   });
 }
@@ -162,6 +163,7 @@ export async function POST(req: NextRequest) {
     const qty = toNum(body.qty, "qty");
     const material_id = toNum(body.material_id, "material_id");
     const round_to_bf = !!body.round_to_bf;
+    const force_skived = body.force_skived === true;
 
     if (length_in <= 0 || width_in <= 0 || height_in <= 0) {
       return bad("dims_must_be_positive", { length_in, width_in, height_in });
@@ -252,13 +254,15 @@ export async function POST(req: NextRequest) {
     const price_per_bf =
       (mat.price_per_bf as number | null) ?? round2(price_per_ci * 144);
 
-    // Skiving upcharge: if height is NOT within 0.01 of a whole inch
+    // Skiving upcharge: if height is NOT within 0.01 of a whole inch,
+    // or if caller explicitly forces skiving (used for layered sets where
+    // individual layers may require skiving even when total stack depth is whole-inch).
     const skive_pct =
       mat.skiving_upcharge_pct != null
         ? Number(mat.skiving_upcharge_pct)
         : 0;
-    const is_skived =
-      Math.abs(height_in - Math.round(height_in)) > 0.01 && skive_pct > 0;
+    const heightTriggersSkive = Math.abs(height_in - Math.round(height_in)) > 0.01;
+    const is_skived = (force_skived || heightTriggersSkive) && skive_pct > 0;
 
     const setup_fee =
       mat.cutting_setup_fee_usd != null
@@ -385,6 +389,7 @@ export async function POST(req: NextRequest) {
         qty,
         cavities: cavitiesArr,
         round_to_bf,
+        force_skived,
       },
       variant_used: "ts_volumetric_v1",
       result,

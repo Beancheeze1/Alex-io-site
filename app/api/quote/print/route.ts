@@ -162,6 +162,11 @@ function isPackagingItem(it: ItemRow): boolean {
   return notes.includes("Requested shipping carton") || notes.includes("[PACKAGING]");
 }
 
+function isNonWholeInchThickness(v: any): boolean {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  return Math.abs(n - Math.round(n)) > 0.01;
+}
 
 function primaryDisplayRank(it: ItemRow): number {
   if (isPackagingItem(it)) return 2;
@@ -278,6 +283,7 @@ async function priceViaCalcRoute(params: {
   H: number;
   qty: number;
   material_id: number;
+  force_skived?: boolean;
 }): Promise<{ unit: number; total: number; raw: any | null }> {
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
   const url = `${base}/api/quotes/calc?t=${Date.now()}`;
@@ -290,6 +296,7 @@ async function priceViaCalcRoute(params: {
     qty: params.qty,
     cavities: [], // match email (no cavity subtraction)
     round_to_bf: false,
+    force_skived: params.force_skived === true,
   };
 
   const r = await fetch(url, {
@@ -444,6 +451,12 @@ export async function GET(req: NextRequest) {
     if (itemsRaw.length > 0) {
       const itemsForDisplay = sortItemsForQuoteDisplay(itemsRaw);
 
+      const hasLayoutLayerRows = itemsRaw.some((it) => isLayoutLayerRow(it));
+      const layeredSkiveRequired = itemsRaw.some(
+        (it) => isLayoutLayerRow(it) && isNonWholeInchThickness(it.height_in),
+      );
+      let forcedLayeredSkiveConsumed = false;
+
       for (const it of itemsForDisplay) {
         try {
           const L = Number(it.length_in);
@@ -485,16 +498,13 @@ export async function GET(req: NextRequest) {
             continue;
           }
 
-          // FIX: Do not price layout-generated layer rows.
-          // These are reference-only and already included in the PRIMARY foam set.
-          if (isLayoutLayerRow(it)) {
-            items.push({
-              ...it,
-              price_unit_usd: null,
-              price_total_usd: null,
-            });
-            continue;
-          }
+          // FIX: For layered construction, skiving should apply to the primary
+          // billable foam set if ANY included [LAYOUT-LAYER] thickness is not
+          // a whole-inch increment, even when the combined stack height is whole.
+          const forceLayeredSkive =
+            !forcedLayeredSkiveConsumed &&
+            hasLayoutLayerRows &&
+            layeredSkiveRequired;
 
           const priced = await priceViaCalcRoute({
             L,
@@ -502,7 +512,12 @@ export async function GET(req: NextRequest) {
             H,
             qty,
             material_id: materialId,
+            force_skived: forceLayeredSkive,
           });
+
+          if (forceLayeredSkive) {
+            forcedLayeredSkiveConsumed = true;
+          }
 
           items.push({
             ...it,
