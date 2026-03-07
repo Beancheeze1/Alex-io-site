@@ -162,6 +162,21 @@ function isPackagingItem(it: ItemRow): boolean {
   return notes.includes("Requested shipping carton") || notes.includes("[PACKAGING]");
 }
 
+
+function primaryDisplayRank(it: ItemRow): number {
+  if (isPackagingItem(it)) return 2;
+  if (isLayoutLayerRow(it)) return 1;
+  return 0;
+}
+
+function sortItemsForQuoteDisplay(items: ItemRow[]): ItemRow[] {
+  return [...items].sort((a, b) => {
+    const rankDiff = primaryDisplayRank(a) - primaryDisplayRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return Number(a.id) - Number(b.id);
+  });
+}
+
 type BoxMatchRow = {
   id: number;
   sku: string;
@@ -427,7 +442,9 @@ export async function GET(req: NextRequest) {
        ============================================================ */
 
     if (itemsRaw.length > 0) {
-      for (const it of itemsRaw) {
+      const itemsForDisplay = sortItemsForQuoteDisplay(itemsRaw);
+
+      for (const it of itemsForDisplay) {
         try {
           const L = Number(it.length_in);
           const W = Number(it.width_in);

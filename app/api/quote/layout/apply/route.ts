@@ -446,6 +446,16 @@ function sumLayerThickness(layout: any): number | null {
   return any && sum > 0 ? sum : null;
 }
 
+
+function primaryBillableQuoteItemWhere(quoteIdSql: string): string {
+  return `
+            quote_id = ${quoteIdSql}
+            and coalesce(notes, '') not like '[LAYOUT-LAYER]%'
+            and coalesce(notes, '') not ilike 'Requested shipping carton:%'
+            and coalesce(notes, '') not like '[PACKAGING]%'
+          `;
+}
+
 async function ensurePrimaryQuoteItem(args: {
   quoteId: number;
   layoutForSave: any;
@@ -1487,7 +1497,7 @@ export async function POST(req: NextRequest) {
           where id = (
             select id
             from quote_items
-            where quote_id = ${quoteIdParam}
+            where ${primaryBillableQuoteItemWhere(quoteIdParam)}
             order by id asc
             limit 1
           )
@@ -1528,7 +1538,7 @@ export async function POST(req: NextRequest) {
           where id = (
             select id
             from quote_items
-            where quote_id = $2
+            where ${primaryBillableQuoteItemWhere("$2")}
             order by id asc
             limit 1
           )
@@ -1661,7 +1671,7 @@ export async function POST(req: NextRequest) {
           where id = (
             select id
             from quote_items
-            where quote_id = $2
+            where ${primaryBillableQuoteItemWhere("$2")}
             order by id asc
             limit 1
           )
@@ -1684,7 +1694,7 @@ export async function POST(req: NextRequest) {
         `
         select id, length_in, width_in, height_in, material_id, qty
         from quote_items
-        where quote_id = $1
+        where ${primaryBillableQuoteItemWhere("$1")}
         order by id asc
         limit 1
         `,
