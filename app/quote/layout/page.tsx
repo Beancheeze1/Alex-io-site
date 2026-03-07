@@ -2205,18 +2205,22 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
   const [layerThicknessInput, setLayerThicknessInput] = React.useState<string>(() => {
     return String(blockThicknessIn || "");
   });
+  // Track whether the user is actively editing so external re-syncs don't clobber mid-type input
+  const layerThicknessEditing = React.useRef(false);
 
-  // Keep in sync when active layer changes or thickness changes from outside
+  // Only re-sync when the active layer *switches* — never while the user is typing
   React.useEffect(() => {
+    if (layerThicknessEditing.current) return;
     if (activeLayer) {
       setLayerThicknessInput(String(getLayerThickness(activeLayer.id)));
     } else {
       setLayerThicknessInput(String(blockThicknessIn || ""));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLayerId, blockThicknessIn]);
+  }, [activeLayerId]); // intentionally omit blockThicknessIn — it changes on every keystroke
 
   const commitLayerThickness = React.useCallback(() => {
+    layerThicknessEditing.current = false;
     const raw = layerThicknessInput.trim();
     const revert = () => {
       setLayerThicknessInput(
@@ -3798,7 +3802,10 @@ const tenantCssVars = React.useMemo(() => {
                         type="number"
                         step={0.125}
                         value={layerThicknessInput}
-                        onChange={(e) => setLayerThicknessInput(e.target.value)}
+                        onChange={(e) => {
+                          layerThicknessEditing.current = true;
+                          setLayerThicknessInput(e.target.value);
+                        }}
                         onBlur={commitLayerThickness}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {

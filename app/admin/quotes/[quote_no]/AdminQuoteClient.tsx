@@ -2978,7 +2978,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       const total = parsePriceField(item.price_total_usd ?? null);
                       const needsSkive = Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01;
                       return (
-                        <tr key={item.id}>
+                        <tr key={item.id} style={{ color: "#0f172a" }}>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{idx + 1}</td>
                           <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>
                             <span>{label}</span>
