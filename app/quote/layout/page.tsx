@@ -1341,6 +1341,13 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         // Pull qty + material from primary line item (if present)
         let qtyFromItems: number | null = null;
         let materialIdFromItems: number | null = null;
+
+        // Pull notes from facts (used as fallback when notesSeedLocal and layout notes are both empty)
+        const notesFromFacts: string =
+          typeof (json as any)?.facts?.notes === "string"
+            ? ((json as any).facts.notes as string).trim()
+            : "";
+
         if (Array.isArray(json.items) && json.items.length > 0) {
           const first = json.items[0];
           const rawQty = Number(first?.qty);
@@ -1537,7 +1544,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
 
           if (!cancelled) {
             setInitialLayout(repairNullCavityXY(mergedLayout));
-            setInitialNotes(notesSeedLocal || notesFromDb || "");
+            setInitialNotes(notesSeedLocal || notesFromDb || notesFromFacts || "");
 
                         // Prefer DB items; fall back to URL seeds (locals) to avoid stale React state.
             setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
@@ -1571,7 +1578,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
 
           if (!cancelled) {
             setInitialLayout(layoutFromDb);
-            setInitialNotes(notesFromDb);
+            setInitialNotes(notesSeedLocal || notesFromDb || notesFromFacts || "");
             // Qty/material: prefer DB items; fall back to URL-seeded state if DB is missing
             setInitialQty(qtyFromItems ?? qtySeedLocal ?? null);
             setInitialMaterialId(
@@ -1595,7 +1602,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         );
         if (!cancelled) {
           setInitialLayout(fallback);
-          setInitialNotes(notesSeedLocal || "");
+          setInitialNotes(notesSeedLocal || notesFromFacts || "");
 
 
           // Prefer DB items; else URL seeds (locals)

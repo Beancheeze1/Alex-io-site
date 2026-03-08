@@ -254,6 +254,13 @@ export default function StartQuoteModal() {
 
       const style = prefillData.shipMode === "box" ? "rsc" : "mailer";
       setBoxStyle(style);
+
+      // Seed foam config from insertType: "set" → bottom_top, "single" → bottom_only
+      if (prefillData.insertType === "set") {
+        setFoamConfig("bottom_top");
+      } else if (prefillData.insertType === "single") {
+        setFoamConfig("bottom_only");
+      }
     } else {
       // Foam insert — seed insert dims from outside
       if (prefillData.outside?.l) setInsertL(String(prefillData.outside.l));
@@ -828,6 +835,12 @@ export default function StartQuoteModal() {
           }),
         }).catch(() => null);
       }
+    }
+
+    // Pass chat-widget notes (fit hints, insert type, etc.) into the editor
+    const notesFromPrefill = prefillData?.notes;
+    if (notesFromPrefill && notesFromPrefill.trim()) {
+      p.set("notes", notesFromPrefill.trim());
     }
 
     router.push(`/quote/layout?${p.toString()}`);

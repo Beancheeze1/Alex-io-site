@@ -1925,6 +1925,10 @@ export async function POST(req: NextRequest) {
       if (customerPhone) nextFacts.customer_phone = customerPhone;
       if (customerCompany) nextFacts.customer_company = customerCompany;
 
+      // Persist notes to facts so they survive revision re-opens
+      // (strip the [REV:X] prefix that was added for package tracking)
+      if (cleanedNotes) nextFacts.notes = cleanedNotes;
+
       if (Object.keys(nextFacts).length > 0) {
         await saveFacts(factsKey, nextFacts);
       }
