@@ -141,6 +141,7 @@ type ApiOk = {
     extended_price_usd: number | null;
   } | null;
   packagingLines?: RequestedBox[];
+  salesRepEmail?: string | null;
 };
 
 type ApiErr = {
