@@ -309,37 +309,37 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
   const bestMailer = resp.bestMailer ?? null;
 
   if (f.shipMode === "box" && bestRsc?.sku) {
-    const noteLine = `Suggested box (stock): ${bestRsc.sku} — ${bestRsc.description} (inside ${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in})`;
+    const hintLine = `Suggested box (stock): ${bestRsc.sku} — ${bestRsc.description} (inside ${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in})`;
     return {
       packagingSku: bestRsc.sku,
-      notes: appendNote(f.notes, noteLine),
+      internalHints: appendNote((f as any).internalHints, hintLine),
       messageAddon: `Stock box suggestion: **${bestRsc.sku}** (${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in} inside). You can change it in the editor.`,
     };
   }
 
   if (f.shipMode === "mailer" && bestMailer?.sku) {
-    const noteLine = `Suggested mailer (stock): ${bestMailer.sku} — ${bestMailer.description} (inside ${bestMailer.inside_length_in}×${bestMailer.inside_width_in}×${bestMailer.inside_height_in})`;
+    const hintLine = `Suggested mailer (stock): ${bestMailer.sku} — ${bestMailer.description} (inside ${bestMailer.inside_length_in}×${bestMailer.inside_width_in}×${bestMailer.inside_height_in})`;
     return {
       packagingSku: bestMailer.sku,
-      notes: appendNote(f.notes, noteLine),
+      internalHints: appendNote((f as any).internalHints, hintLine),
       messageAddon: `Stock mailer suggestion: **${bestMailer.sku}** (${bestMailer.inside_length_in}×${bestMailer.inside_width_in}×${bestMailer.inside_height_in} inside). You can change it in the editor.`,
     };
   }
 
-  let notes = f.notes;
+  let internalHints = (f as any).internalHints as string | undefined;
   if (bestRsc?.sku) {
-    notes = appendNote(
-      notes,
+    internalHints = appendNote(
+      internalHints,
       `Suggested box (stock): ${bestRsc.sku} — ${bestRsc.description} (inside ${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in})`,
     );
   }
   if (bestMailer?.sku) {
-    notes = appendNote(
-      notes,
+    internalHints = appendNote(
+      internalHints,
       `Suggested mailer (stock): ${bestMailer.sku} — ${bestMailer.description} (inside ${bestMailer.inside_length_in}×${bestMailer.inside_width_in}×${bestMailer.inside_height_in})`,
     );
   }
-  return notes !== f.notes ? { notes } : {};
+  return internalHints !== (f as any).internalHints ? { internalHints } : {};
 }
 
 /* =========================

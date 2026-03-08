@@ -837,11 +837,9 @@ export default function StartQuoteModal() {
       }
     }
 
-    // Pass chat-widget notes (fit hints, insert type, etc.) into the editor
-    const notesFromPrefill = prefillData?.notes;
-    if (notesFromPrefill && notesFromPrefill.trim()) {
-      p.set("notes", notesFromPrefill.trim());
-    }
+    // Notes are intentionally not passed to the editor URL —
+    // the customer-facing notes field should start blank for the client to fill in.
+    // Internal hints (fit tips, box suggestions) are stored in internalHints, not notes.
 
     router.push(`/quote/layout?${p.toString()}`);
   };

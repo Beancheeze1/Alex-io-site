@@ -331,8 +331,7 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
     // Prefer latest persisted facts if present; otherwise fall back to current state.
     const payloadFacts: WidgetFacts = latestFacts ? { ...latestFacts } : { ...facts };
 
-    // Add a little “shipping fit” note automatically when box/mailer selected
-    // (This is just notes text; /start-quote already displays the fit hint.)
+    // Build internal-only hints (never shown in the customer-facing notes textarea)
     const noteBits: string[] = [];
 
     if (payloadFacts.shipMode === "box" || payloadFacts.shipMode === "mailer") {
@@ -344,10 +343,14 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
         noteBits.push(`Pockets on: ${payloadFacts.pocketsOn}.`);
       }
     }
+    // Merge any chat-route-generated hints (box suggestions etc.) with local hints
+    const existingHints = ((payloadFacts as any).internalHints ?? "").trim();
     if (noteBits.length) {
-      const existing = (payloadFacts.notes ?? "").trim();
-      payloadFacts.notes = existing ? `${existing}\n${noteBits.join("\n")}` : noteBits.join("\n");
+      (payloadFacts as any).internalHints = existingHints
+        ? `${existingHints}\n${noteBits.join("\n")}`
+        : noteBits.join("\n");
     }
+    // Keep notes clean — never auto-populate it (customer fills this in themselves)
 
     const payload = buildPrefillPayload(payloadFacts);
     const prefill = encodeURIComponent(JSON.stringify(payload));
