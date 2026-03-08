@@ -360,7 +360,8 @@ export async function GET(req: NextRequest) {
         status,
         created_at,
         locked,
-        geometry_hash
+        geometry_hash,
+        sales_rep_id
       from quotes
       where quote_no = $1
         and tenant_id = $2
@@ -370,6 +371,17 @@ export async function GET(req: NextRequest) {
 
     if (!quote) {
       return bad({ ok: false, error: "NOT_FOUND" }, 404);
+    }
+
+    /* ---------------- Sales rep email (for forward-to-sales) ---------------- */
+    let salesRepEmail: string | null = null;
+    const repId = (quote as any)?.sales_rep_id;
+    if (repId) {
+      const repRow = await one<{ email: string }>(
+        `SELECT email FROM public.users WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        [repId, user.tenant_id],
+      );
+      salesRepEmail = repRow?.email ?? null;
     }
 
     /* ---------------- Load facts (authoritative pre-Apply) ---------------- */
@@ -740,6 +752,7 @@ export async function GET(req: NextRequest) {
       customerBoxDims: customerBox ?? null,
       customerBoxMatch,
       facts,
+      salesRepEmail,
     });
   } catch (err) {
     console.error(err);

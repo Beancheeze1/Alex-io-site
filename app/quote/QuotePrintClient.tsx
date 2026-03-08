@@ -694,6 +694,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   const [grandSubtotal, setGrandSubtotal] = React.useState<number>(0);
   const [printingUpcharge, setPrintingUpcharge] = React.useState<number>(0);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
+  const [salesRepEmail, setSalesRepEmail] = React.useState<string | null>(null);
 
 
   // Rough shipping % knob from admin (percent of foam + packaging)
@@ -740,7 +741,10 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
     const effectiveQuoteNo = quote?.quote_no || quoteNo;
     if (!effectiveQuoteNo) return;
 
-    const salesEmail = (process.env.NEXT_PUBLIC_SALES_FORWARD_TO as string | undefined) || "sales@example.com";
+    const salesEmail =
+      salesRepEmail ||
+      (process.env.NEXT_PUBLIC_SALES_FORWARD_TO as string | undefined) ||
+      "sales@example.com";
 
     const subject = "Quote " + effectiveQuoteNo;
 
@@ -787,7 +791,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
       "mailto:" + encodeURIComponent(salesEmail) + "?subject=" + encodeURIComponent(subject) + "&body=" + body;
 
     window.location.href = mailto;
-  }, [quoteNo, quote, items, requestedBoxes]);
+  }, [quoteNo, quote, items, requestedBoxes, salesRepEmail]);
 
   // Schedule call handler (Calendly or Google Calendar URL)
   const handleScheduleCall = React.useCallback(() => {
@@ -842,6 +846,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         setCustomerBoxDims(asOk.customerBoxDims ?? null);
         setCustomerBoxMatch(asOk.customerBoxMatch ?? null);
         setApiPackagingLines(Array.isArray(asOk.packagingLines) ? asOk.packagingLines : []);
+        setSalesRepEmail(typeof asOk.salesRepEmail === "string" ? asOk.salesRepEmail : null);
       } else {
         setError("Unexpected response from quote API.");
       }
