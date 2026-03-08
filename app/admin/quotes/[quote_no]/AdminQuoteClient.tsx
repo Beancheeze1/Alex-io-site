@@ -2584,7 +2584,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
                         )}
 
-                        {/* Admin-only: rebuild STEP */}
+                        {/* Admin-only: rebuild STEP — hidden from view */}
+                        {false && (
                         <div style={{ marginTop: 10 }}>
                           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280", marginBottom: 4 }}>
                             STEP maintenance
@@ -2614,6 +2615,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             {rebuildError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>}
                           </div>
                         </div>
+                        )}
                       </div>
 
                      {/*} <div style={{ textAlign: "right", fontSize: 12, minWidth: 320 }}>
@@ -2995,7 +2997,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       );
                     })}
                     {effectivePrintingUpcharge > 0 && (
-                      <tr>
+                      <tr style={{ color: "#0f172a" }}>
                         <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>
                           <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#4b5563", marginBottom: 2 }}>
                             Packaging – Print upcharge
