@@ -2536,19 +2536,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   <div style={{ fontSize: 13, color: "#111827", fontWeight: 500 }}>
                     Inside: {customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in
                   </div>
-                  {customerBoxMatch ? (
-                    <div style={{ marginTop: 4, fontSize: 12, color: "#4b5563" }}>
-                      <span style={{ fontWeight: 500 }}>Matched stock box: </span>
-                      {customerBoxMatch.description || customerBoxMatch.sku}
-                      {customerBoxMatch.style ? ` · ${customerBoxMatch.style}` : ""}
-                      {" · "}{customerBoxMatch.sku}
-                      {customerBoxMatch.unit_price_usd != null && (
-                        <span> · ${Number(customerBoxMatch.unit_price_usd).toFixed(2)}/ea</span>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ marginTop: 4, fontSize: 12, color: "#9ca3af" }}>No stock box match found for these dimensions.</div>
-                  )}
+                  
                 </div>
               )}
               {!boxSelectionsLoading && !boxSelectionsError && boxSelections && boxSelections.length > 0 && (
