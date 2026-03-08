@@ -1249,7 +1249,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [quoteNoValue]);
+  }, [quoteNoValue, refreshTick]);
 
 // NOTE: Admin "Total quantity" should represent the customer's quoted qty,
 // not a sum of all stored quote_items (which includes "Included layer" rows).
@@ -2953,7 +2953,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   }}
                 >
                   <thead>
-                    <tr style={{ background: "#eef2ff" }}>
+                    <tr style={{ background: "#eef2ff", color: "#0f172a" }}>
                       <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Line</th>
                       <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Material</th>
                       <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Dims (L × W × H)</th>
@@ -2994,6 +2994,21 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         </tr>
                       );
                     })}
+                    {effectivePrintingUpcharge > 0 && (
+                      <tr>
+                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#4b5563", marginBottom: 2 }}>
+                            Packaging – Print upcharge
+                          </div>
+                          <div style={{ fontWeight: 500 }}>Custom printed mailer / box</div>
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(effectivePrintingUpcharge)}</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               )}
