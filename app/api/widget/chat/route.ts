@@ -264,6 +264,7 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
 }): Promise<{
   packagingSku?: string;
   notes?: string;
+  internalHints?: string;
   messageAddon?: string;
 }> {
   const f = args.mergedFacts;
