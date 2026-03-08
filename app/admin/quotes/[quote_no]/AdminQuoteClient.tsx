@@ -84,6 +84,17 @@ type ApiOk = {
   grandSubtotal?: number;
   printingUpcharge?: number;
   grandTotal?: number;
+  customerBoxDims?: { L: number; W: number; H: number } | null;
+  customerBoxMatch?: {
+    sku: string;
+    description: string | null;
+    style: string | null;
+    inside_length_in: number;
+    inside_width_in: number;
+    inside_height_in: number;
+    unit_price_usd: number | null;
+    extended_price_usd: number | null;
+  } | null;
 };
 
 type ApiErr = {
@@ -1060,6 +1071,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
   const [printingUpcharge, setPrintingUpcharge] = React.useState<number>(0);
+  const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number } | null>(null);
+  const [customerBoxMatch, setCustomerBoxMatch] = React.useState<ApiOk["customerBoxMatch"]>(null);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
   const [loadingPreviousLayout, setLoadingPreviousLayout] = React.useState(false);
 
@@ -1176,6 +1189,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 ? Number((json as ApiOk).grandTotal)
                 : 0,
             );
+            setCustomerBoxDims((json as ApiOk)?.customerBoxDims ?? null);
+            setCustomerBoxMatch((json as ApiOk)?.customerBoxMatch ?? null);
 
             // REV: /api/quote/print returns facts.revision (authoritative). Fallback "AS".
             const revRaw = (json as any)?.facts?.revision;
@@ -2509,8 +2524,32 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 </p>
               )}
               {!boxSelectionsLoading && boxSelectionsError && <p style={{ fontSize: 12, color: "#b91c1c" }}>{boxSelectionsError}</p>}
-              {!boxSelectionsLoading && !boxSelectionsError && (!boxSelections || boxSelections.length === 0) && (
+              {!boxSelectionsLoading && !boxSelectionsError && (!boxSelections || boxSelections.length === 0) && !customerBoxDims && (
                 <p style={{ fontSize: 12, color: "#6b7280" }}>No cartons have been requested on this quote yet from the customer-facing /quote page.</p>
+              )}
+              {/* Customer-entered custom box size (from facts.customer_box_in) */}
+              {customerBoxDims && (
+                <div style={{ marginBottom: boxSelections && boxSelections.length > 0 ? 10 : 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280", marginBottom: 4 }}>
+                    Customer-entered box size
+                  </div>
+                  <div style={{ fontSize: 13, color: "#111827", fontWeight: 500 }}>
+                    Inside: {customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in
+                  </div>
+                  {customerBoxMatch ? (
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#4b5563" }}>
+                      <span style={{ fontWeight: 500 }}>Matched stock box: </span>
+                      {customerBoxMatch.description || customerBoxMatch.sku}
+                      {customerBoxMatch.style ? ` · ${customerBoxMatch.style}` : ""}
+                      {" · "}{customerBoxMatch.sku}
+                      {customerBoxMatch.unit_price_usd != null && (
+                        <span> · ${Number(customerBoxMatch.unit_price_usd).toFixed(2)}/ea</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#9ca3af" }}>No stock box match found for these dimensions.</div>
+                  )}
+                </div>
               )}
               {!boxSelectionsLoading && !boxSelectionsError && boxSelections && boxSelections.length > 0 && (
                 <>
