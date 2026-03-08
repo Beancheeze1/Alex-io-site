@@ -27,6 +27,11 @@ function prevPeriod() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function currentPeriod() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function formatPeriod(p: string) {
   const [y, m] = p.split("-");
   return new Date(Number(y), Number(m) - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
@@ -42,7 +47,7 @@ export default function AdminCommissionsPage() {
   const [closingMonth, setClosingMonth] = React.useState(false);
   const [markingPaidId, setMarkingPaidId] = React.useState<number | null>(null);
   const [showPaid, setShowPaid] = React.useState(false);
-  const [selectedPeriod, setSelectedPeriod] = React.useState(prevPeriod());
+  const [selectedPeriod, setSelectedPeriod] = React.useState(currentPeriod());
 
   async function loadLive() {
     setLiveLoading(true);
