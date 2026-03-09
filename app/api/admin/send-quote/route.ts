@@ -13,6 +13,9 @@
 // - This route only orchestrates existing pieces.
 
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
+
 import { absoluteUrl } from "@/app/lib/internalFetch";
 import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
@@ -82,6 +85,12 @@ type In = {
 };
 
 export async function POST(req: NextRequest) {
+  const user = await getCurrentUserFromRequest(req);
+  const enforced = await enforceTenantMatch(req, user);
+  if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
+  if (!user) return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+  if (!isRoleAllowed(user, ["admin", "cs"])) return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+
   let body: In;
   try {
     body = (await req.json()) as In;

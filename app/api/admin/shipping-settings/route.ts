@@ -8,6 +8,9 @@
 // Does NOT touch foam pricing, carton logic, or quote_items directly.
 
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
+
 import { q, one } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -119,6 +122,12 @@ export async function GET() {
 
 // ---------- POST: update rough_ship_pct ----------
 export async function POST(req: NextRequest) {
+  const user = await getCurrentUserFromRequest(req);
+  const enforced = await enforceTenantMatch(req, user);
+  if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
+  if (!user) return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+  if (!isRoleAllowed(user, ["admin"])) return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+
   try {
     const body = (await req.json().catch(() => null)) as
       | { rough_ship_pct?: any }

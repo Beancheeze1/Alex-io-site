@@ -7,7 +7,7 @@
 // NEW (internal):
 // - POST /api/admin/mem         -> merge + save facts for a key (e.g., set revision)
 //
-// USE ONLY FOR INTERNAL DEBUG (no auth yet).
+// Admin + CS only.
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -17,6 +17,8 @@ import {
   LAST_STORE,
   REDIS_LAST_ERROR,
 } from "@/app/lib/memory";
+import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,6 +29,12 @@ function asNonEmptyString(v: any): string | null {
 }
 
 export async function GET(req: NextRequest) {
+  const user = await getCurrentUserFromRequest(req);
+  const enforced = await enforceTenantMatch(req, user);
+  if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
+  if (!user) return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+  if (!isRoleAllowed(user, ["admin", "cs"])) return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+
   try {
     const url = new URL(req.url);
     const key = url.searchParams.get("key") || url.searchParams.get("id") || null;
@@ -73,6 +81,12 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const user = await getCurrentUserFromRequest(req);
+  const enforced = await enforceTenantMatch(req, user);
+  if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
+  if (!user) return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+  if (!isRoleAllowed(user, ["admin", "cs"])) return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+
   try {
     // Body supports two forms:
     //

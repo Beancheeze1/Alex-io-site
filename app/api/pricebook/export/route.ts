@@ -1,5 +1,7 @@
 // app/api/pricebook/export/route.ts
 import { NextResponse } from "next/server";
+import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { getPool } from "@/lib/db";
 import { PriceBook } from "@/lib/pricebook/schema";
 import crypto from "crypto";
@@ -57,7 +59,13 @@ const APPLIES_ALLOWED = new Set(["material", "product", "cavity"]);
 const METRIC_ALLOWED  = new Set(["per_cu_in", "flat", "tiered"]);
 
 // ---------- route ----------
-export async function GET() {
+export async function GET(req: Request) {
+  const user = await getCurrentUserFromRequest(req as any);
+  const enforced = await enforceTenantMatch(req as any, user);
+  if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
+  if (!user) return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
+  if (!isRoleAllowed(user, ["admin"])) return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+
   try {
     const pool = getPool();
 
