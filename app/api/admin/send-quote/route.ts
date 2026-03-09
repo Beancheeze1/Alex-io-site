@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
   const enforced = await enforceTenantMatch(req, user);
   if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
   if (!user) return NextResponse.json({ ok: false, error: "UNAUTHENTICATED" }, { status: 401 });
-  if (!isRoleAllowed(user, ["admin", "cs"])) return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
+  if (!isRoleAllowed(user, ["admin", "cs", "sales"])) return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
 
   let body: In;
   try {
