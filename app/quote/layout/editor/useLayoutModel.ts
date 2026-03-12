@@ -60,6 +60,7 @@ export type UseLayoutModelResult = {
   setLayerCropCorners: (layerId: string, cropCorners: boolean) => void;
   setLayerRoundCorners: (layerId: string, roundCorners: boolean) => void;
   setLayerRoundRadiusIn: (layerId: string, roundRadiusIn: number) => void;
+  setLayerMaterialId: (layerId: string, materialId: number | null) => void;
 
   updateCavityPosition: (id: string, x: number, y: number) => void;
   updateBlockDims: (patch: Partial<BlockDims>) => void;
@@ -298,6 +299,23 @@ const didInitActiveLayerRef = useRef(false);
           stack: prev.layout.stack.map((l) =>
             l.id === layerId
               ? { ...l, roundRadiusIn: roundRadiusIn }
+              : l,
+          ),
+        },
+      }));
+    },
+    [],
+  );
+
+  const setLayerMaterialId = useCallback(
+    (layerId: string, materialId: number | null) => {
+      setState((prev) => ({
+        ...prev,
+        layout: {
+          ...prev.layout,
+          stack: prev.layout.stack.map((l) =>
+            l.id === layerId
+              ? { ...l, materialId: materialId ?? undefined }
               : l,
           ),
         },
@@ -691,6 +709,7 @@ const didInitActiveLayerRef = useRef(false);
     deleteLayer,
     setLayerRoundCorners,
     setLayerRoundRadiusIn,
+    setLayerMaterialId,
     importLayerFromSeed,
   };
 }

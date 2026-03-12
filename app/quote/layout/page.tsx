@@ -1907,6 +1907,7 @@ function LayoutEditorHostReady(props: {
     setLayerCropCorners,
     setLayerRoundCorners,
     setLayerRoundRadiusIn,
+    setLayerMaterialId,
     updateCavityPosition,
     updateBlockDims,
     updateCavityDims,
@@ -3431,6 +3432,7 @@ const handleGoToFoamAdvisor = () => {
           id: layer.id,
           label: layer.label,
           thicknessIn: getLayerThickness(layer.id),
+          materialId: (layer as any).materialId ?? null,
         }));
       }
 
@@ -4226,6 +4228,41 @@ const tenantCssVars = React.useMemo(() => {
                                     className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100 disabled:opacity-60"
                                   />
                                 </label>
+                              </div>
+                              {/* Per-layer material override */}
+                              <div className="flex items-center gap-1.5 mt-1">
+                                <span className="text-[10px] text-slate-400 shrink-0">Material:</span>
+                                <select
+                                  value={(layer as any).materialId ?? ""}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    if (!v) {
+                                      setLayerMaterialId(layer.id, null);
+                                    } else {
+                                      const parsed = Number(v);
+                                      if (Number.isFinite(parsed) && parsed > 0) {
+                                        setLayerMaterialId(layer.id, parsed);
+                                      }
+                                    }
+                                  }}
+                                  className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[10px] text-slate-100"
+                                >
+                                  <option value="">
+                                    {(layer as any).materialId == null
+                                      ? "Same as quote"
+                                      : "— use quote default —"}
+                                  </option>
+                                  {materialsByFamily.map(([family, list]) => (
+                                    <optgroup key={family} label={family}>
+                                      {list.map((m) => (
+                                        <option key={m.id} value={m.id}>
+                                          {m.name}
+                                          {m.density_lb_ft3 != null ? ` · ${m.density_lb_ft3.toFixed(1)} lb/ft³` : ""}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  ))}
+                                </select>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">

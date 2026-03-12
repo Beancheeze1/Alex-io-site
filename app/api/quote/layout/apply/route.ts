@@ -1818,6 +1818,17 @@ export async function POST(req: NextRequest) {
 
           const notesForRow = `[LAYOUT-LAYER] ${label}`;
 
+          // Per-layer material override: prefer layer.materialId, then foamLayers[i].materialId, then baseMaterialId
+          const rawLayerMid =
+            (rawLayer as any).materialId ??
+            (useFoamLayers && Array.isArray(foamLayers) && foamLayers[i]
+              ? (foamLayers[i] as any).materialId
+              : null) ??
+            null;
+          const layerMidNum = rawLayerMid != null ? Number(rawLayerMid) : NaN;
+          const layerMaterialId =
+            Number.isFinite(layerMidNum) && layerMidNum > 0 ? layerMidNum : baseMaterialId;
+
           await q(
             `
             insert into quote_items (
@@ -1832,7 +1843,7 @@ export async function POST(req: NextRequest) {
             )
             values ($1, null, $2, $3, $4, $5, $6, $7)
             `,
-            [quote.id, blockL, blockW, thickness, baseMaterialId, baseQty, notesForRow],
+            [quote.id, blockL, blockW, thickness, layerMaterialId, baseQty, notesForRow],
           );
         }
 

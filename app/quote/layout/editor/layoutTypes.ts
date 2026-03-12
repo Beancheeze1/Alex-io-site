@@ -83,6 +83,11 @@ export type LayoutLayer = {
   // - When true, use roundRadiusIn (fallback to default in UI/renderers).
   roundCorners?: boolean;
   roundRadiusIn?: number;
+
+  // NEW: Per-layer material override.
+  // - If omitted, the quote-level material (selectedMaterialId) is used.
+  // - When set, this layer's quote_item row will use this material_id for pricing.
+  materialId?: number;
 };
 
 export type LayoutModel = {
