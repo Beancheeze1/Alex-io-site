@@ -2410,6 +2410,15 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
   const [selectedMaterialId, setSelectedMaterialId] =
   React.useState<number | null>(initialMaterialId);
 
+  // When true, the quote-level material is "Per layer" — each layer has its own material selector.
+  // selectedMaterialId is null in this mode; per-layer materialId fields are the authority.
+  // Auto-detect: if the loaded layout already has per-layer materialIds, enable this mode.
+  const [perLayerMaterialMode, setPerLayerMaterialMode] = React.useState<boolean>(() => {
+    const stack = (layoutModel as any)?.stack;
+    if (!Array.isArray(stack) || stack.length < 2) return false;
+    return stack.some((l: any) => l?.materialId != null && Number.isFinite(Number(l.materialId)) && Number(l.materialId) > 0);
+  });
+
 
   // Box suggester state (RSC + mailer suggestions)
   const [boxSuggest, setBoxSuggest] = React.useState<BoxSuggestState>({
@@ -3440,7 +3449,11 @@ const handleGoToFoamAdvisor = () => {
       if (Number.isFinite(nQty) && nQty > 0) {
         payload.qty = nQty;
       }
-      if (selectedMaterialId != null) {
+
+      // In per-layer mode, each layer carries its own materialId — do NOT send a quote-level
+      // materialId override that would overwrite the primary item's material on the server.
+      // In normal mode, send the single selected material as before.
+      if (!perLayerMaterialMode && selectedMaterialId != null) {
         payload.materialId = selectedMaterialId;
       }
 
@@ -4364,14 +4377,21 @@ const tenantCssVars = React.useMemo(() => {
                     Choose the foam family and grade used for this layout.
                   </div>
                   <select
-                    value={selectedMaterialId ?? ""}
+                    value={perLayerMaterialMode ? "per-layer" : (selectedMaterialId ?? "")}
                     onChange={(e) => {
                       const v = e.target.value;
                       if (!v) {
+                        setPerLayerMaterialMode(false);
+                        setSelectedMaterialId(null);
+                      } else if (v === "per-layer") {
+                        setPerLayerMaterialMode(true);
                         setSelectedMaterialId(null);
                       } else {
                         const parsed = Number(v);
-                        if (Number.isFinite(parsed)) setSelectedMaterialId(parsed);
+                        if (Number.isFinite(parsed)) {
+                          setPerLayerMaterialMode(false);
+                          setSelectedMaterialId(parsed);
+                        }
                       }
                     }}
                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
@@ -4379,6 +4399,7 @@ const tenantCssVars = React.useMemo(() => {
                     <option value="">
                       {materialsLoading ? "Loading materials…" : "Select material (optional)"}
                     </option>
+                    <option value="per-layer">⚡ Per layer (set per layer below)</option>
                     {materialsByFamily.map(([family, list]) => (
                       <optgroup key={family} label={family}>
                         {list.map((m) => (
@@ -4390,6 +4411,11 @@ const tenantCssVars = React.useMemo(() => {
                       </optgroup>
                     ))}
                   </select>
+                  {perLayerMaterialMode && (
+                    <div className="mt-1.5 rounded-md border border-sky-700 bg-sky-950/60 px-2 py-1.5 text-[11px] text-sky-300">
+                      Per-layer mode active — set each layer's material in the Layer details panel above.
+                    </div>
+                  )}
                   {materialsError && <div className="mt-1 text-[11px] text-amber-300">{materialsError}</div>}
                 </div>
 

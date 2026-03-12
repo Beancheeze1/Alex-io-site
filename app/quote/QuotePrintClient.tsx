@@ -1964,10 +1964,6 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                               {isPrimary ? (
                                 <>
                                   <div style={{ fontWeight: 600 }}>Foam set — layered construction</div>
-                                  <div style={{ color: "#6b7280" }}>
-                                    {baseLabel}
-                                    {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
-                                  </div>
                                   <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, lineHeight: 1.35 }}>
                                     Includes all bonded layers shown below (for reference).
                                   </div>

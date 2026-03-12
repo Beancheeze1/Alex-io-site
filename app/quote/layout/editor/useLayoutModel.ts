@@ -914,6 +914,8 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         cropCorners: !!(l as any).cropCorners,
         roundCorners: !!((l as any).roundCorners ?? (l as any).round_corners),
         roundRadiusIn,
+        // Preserve per-layer material override (may be undefined for layers using quote-level material)
+        ...((l as any).materialId != null ? { materialId: Number((l as any).materialId) } : {}),
       };
     }) as LayoutLayer[];
 
