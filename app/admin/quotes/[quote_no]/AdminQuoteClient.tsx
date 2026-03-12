@@ -2487,9 +2487,12 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
                         {quoteState?.quote_no && (
                           <a
-                            href={`/api/quote/export-3view-pdf?quote_no=${encodeURIComponent(quoteState.quote_no)}`}
-                            target="_blank"
-                            rel="noreferrer"
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              const url = `/api/quote/export-3view-pdf?quote_no=${encodeURIComponent(quoteState.quote_no)}&t=${Date.now()}`;
+                              window.open(url, "_blank", "noreferrer");
+                            }}
                             style={{
                               display: "inline-flex",
                               alignItems: "center",
