@@ -1061,6 +1061,34 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
     }
   }
 
+  // Build a deduplicated list of materials across all [LAYOUT-LAYER] items.
+  // Used in the Specs card to list materials when layers use different foams.
+  const layerMaterials: { name: string; subline: string | null; layerLabel: string }[] = [];
+  {
+    const layerItems = items.filter((it) =>
+      String(it?.notes || "").toUpperCase().includes("[LAYOUT-LAYER]")
+    );
+    // Track seen material_ids to deduplicate
+    const seenIds = new Set<string | number>();
+    for (const it of layerItems) {
+      const mid = it.material_id ?? "unknown";
+      if (seenIds.has(mid)) continue;
+      seenIds.add(mid);
+      const name = it.material_name || `Material #${mid}`;
+      const sub: string[] = [];
+      if ((it as any).material_family) sub.push((it as any).material_family);
+      const dr = (it as any).density_lb_ft3;
+      const dn = typeof dr === "number" ? dr : dr != null ? Number(dr) : NaN;
+      if (Number.isFinite(dn) && dn > 0) sub.push(`${dn.toFixed(1)} lb/ft³`);
+      // Derive a short label from the notes field: "[LAYOUT-LAYER] Bottom pad" → "Bottom pad"
+      const rawNotes = String(it.notes || "");
+      const layerLabel = rawNotes.replace(/\[LAYOUT-LAYER\]\s*/i, "").trim() || name;
+      layerMaterials.push({ name, subline: sub.length ? sub.join(" · ") : null, layerLabel });
+    }
+  }
+  // If every layer uses the same material (or there's only one), fall back to the single display
+  const hasMixedMaterials = layerMaterials.length > 1;
+
   // breakdown from server, if available
   const primaryBreakdown = primaryItem?.pricing_breakdown || null;
 
@@ -1635,9 +1663,27 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                     </div>
                     <div>
                       <div style={labelStyle}>Material</div>
-                      <div style={{ fontSize: 13, color: "#111827" }}>{primaryMaterialName}</div>
-                      {primaryMaterialSubline && (
-                        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{primaryMaterialSubline}</div>
+                      {hasMixedMaterials ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2 }}>
+                          {layerMaterials.map((lm, i) => (
+                            <div key={i}>
+                              <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 1 }}>
+                                {lm.layerLabel}
+                              </div>
+                              <div style={{ fontSize: 13, color: "#111827" }}>{lm.name}</div>
+                              {lm.subline && (
+                                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1 }}>{lm.subline}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 13, color: "#111827" }}>{primaryMaterialName}</div>
+                          {primaryMaterialSubline && (
+                            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{primaryMaterialSubline}</div>
+                          )}
+                        </>
                       )}
                     </div>
 
