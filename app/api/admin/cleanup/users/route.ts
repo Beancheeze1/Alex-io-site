@@ -151,29 +151,34 @@ export async function DELETE(req: NextRequest) {
 
       const idList = ids.join(",");
 
+      async function safeDelete(sql: string) {
+        await tx.query(`SAVEPOINT before_optional`);
+        try {
+          await tx.query(sql);
+          await tx.query(`RELEASE SAVEPOINT before_optional`);
+        } catch {
+          await tx.query(`ROLLBACK TO SAVEPOINT before_optional`);
+          await tx.query(`RELEASE SAVEPOINT before_optional`);
+        }
+      }
+
       // Null-out sales_rep_id on quotes (don't delete the quotes themselves)
       await tx.query(
         `UPDATE public.quotes SET sales_rep_id = NULL WHERE sales_rep_id = ANY(ARRAY[${idList}]::int[])`
       );
 
-      // Delete commission payouts
-      await tx.query(
-        `DELETE FROM public.commission_payouts WHERE user_id = ANY(ARRAY[${idList}]::int[])`
-      ).catch(() => null);
+      // Delete commission payouts (optional table)
+      await safeDelete(`DELETE FROM public.commission_payouts WHERE user_id = ANY(ARRAY[${idList}]::int[])`);
 
       await tx.query(`DELETE FROM public.users WHERE id = ANY(ARRAY[${idList}]::int[])`);
 
-      // Audit log
-      await tx.query(
+      // Audit log (optional table)
+      const detail = JSON.stringify({ filters, deleted: ids.length }).replace(/'/g, "''");
+      const actorEmail = String(user.email || "").replace(/'/g, "''");
+      await safeDelete(
         `INSERT INTO public.admin_audit_log (actor_user_id, actor_email, action, detail, created_at)
-         VALUES ($1, $2, 'cleanup_users', $3, NOW())
-         ON CONFLICT DO NOTHING`,
-        [
-          user.id,
-          user.email,
-          JSON.stringify({ filters, deleted: ids.length }),
-        ]
-      ).catch(() => null);
+         VALUES (${Number(user.id)}, '${actorEmail}', 'cleanup_users', '${detail}'::jsonb, NOW())`
+      );
 
       return ids.length;
     });

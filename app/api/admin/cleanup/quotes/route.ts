@@ -11,11 +11,13 @@
 //   status    — "draft" | "sent" | "rfm" | etc.
 //   before    — ISO date string, delete quotes created before this date
 //   after     — ISO date string, delete quotes created after this date
+//
+// Safety: locked (RFM) quotes are ALWAYS excluded.
+// Safety: uses SAVEPOINTs for optional-table deletes to avoid transaction abort.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one, withTxn } from "@/lib/db";
 import { getCurrentUserFromRequest } from "@/lib/auth";
-import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,7 +63,7 @@ function buildWhere(filters: CleanupFilters, startIdx = 1) {
     values.push(new Date(filters.after));
   }
 
-  // Never delete locked (RFM) quotes — safety guard
+  // Always exclude locked (RFM) quotes
   conditions.push(`(q.locked IS NULL OR q.locked = false)`);
 
   return {
@@ -84,7 +86,6 @@ export async function POST(req: NextRequest) {
       after: body.after || undefined,
     };
 
-    // Non-super-owners can only query their own tenant
     if (!isSuperOwner(user)) {
       filters.tenantId = user.tenant_id;
     }
@@ -128,7 +129,7 @@ export async function DELETE(req: NextRequest) {
     const { where, values } = buildWhere(filters);
 
     const deleted = await withTxn(async (tx) => {
-      // Collect IDs first
+      // Collect matching quote IDs first
       const rows = await tx.query<{ id: number }>(
         `SELECT q.id FROM public.quotes q ${where}`,
         values
@@ -138,23 +139,35 @@ export async function DELETE(req: NextRequest) {
 
       const idList = ids.join(",");
 
-      // Delete children in dependency order
-      await tx.query(`DELETE FROM public.quote_layout_packages WHERE quote_id = ANY(ARRAY[${idList}]::int[])`);
-      await tx.query(`DELETE FROM public.quote_line_items WHERE quote_id = ANY(ARRAY[${idList}]::int[])`)
-        .catch(() => null); // table may not exist in all versions
+      // Use SAVEPOINTs for optional-table deletes.
+      // A plain .catch() on tx.query() swallows the JS error but leaves the
+      // Postgres transaction in an aborted state — all subsequent queries fail.
+      // SAVEPOINT lets us roll back just that statement cleanly.
+      async function safeDelete(tableSql: string) {
+        await tx.query(`SAVEPOINT before_optional`);
+        try {
+          await tx.query(tableSql);
+          await tx.query(`RELEASE SAVEPOINT before_optional`);
+        } catch {
+          await tx.query(`ROLLBACK TO SAVEPOINT before_optional`);
+          await tx.query(`RELEASE SAVEPOINT before_optional`);
+        }
+      }
+
+      // Delete child rows (optional tables — use safeDelete)
+      await safeDelete(`DELETE FROM public.quote_layout_packages WHERE quote_id = ANY(ARRAY[${idList}]::int[])`);
+      await safeDelete(`DELETE FROM public.quote_line_items WHERE quote_id = ANY(ARRAY[${idList}]::int[])`);
+
+      // Core delete — must succeed
       await tx.query(`DELETE FROM public.quotes WHERE id = ANY(ARRAY[${idList}]::int[])`);
 
-      // Write audit log
-      await tx.query(
+      // Audit log (optional table)
+      const detail = JSON.stringify({ filters, deleted: ids.length }).replace(/'/g, "''");
+      const actorEmail = String(user.email || "").replace(/'/g, "''");
+      await safeDelete(
         `INSERT INTO public.admin_audit_log (actor_user_id, actor_email, action, detail, created_at)
-         VALUES ($1, $2, 'cleanup_quotes', $3, NOW())
-         ON CONFLICT DO NOTHING`,
-        [
-          user.id,
-          user.email,
-          JSON.stringify({ filters, deleted: ids.length, ids: ids.slice(0, 50) }),
-        ]
-      ).catch(() => null); // table may not exist yet — non-fatal
+         VALUES (${Number(user.id)}, '${actorEmail}', 'cleanup_quotes', '${detail}'::jsonb, NOW())`
+      );
 
       return ids.length;
     });

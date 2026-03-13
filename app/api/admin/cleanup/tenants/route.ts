@@ -3,17 +3,11 @@
 // Data cleanup for tenant records.
 // SUPER-OWNER ONLY (25thhourdesign@gmail.com).
 //
-// POST   /api/admin/cleanup/tenants  — dry-run: returns count of matching tenants
-// DELETE /api/admin/cleanup/tenants  — execute: deletes tenant + all its data
+// POST   /api/admin/cleanup/tenants  — dry-run: count + data volume preview
+// DELETE /api/admin/cleanup/tenants  — cascade-delete tenant + all its data
 //
-// Filters (all optional, at least one required for DELETE):
-//   slug     — exact slug match
-//   active   — boolean (filter by active state)
-//   before   — ISO date string, created before
-//   after    — ISO date string, created after
-//
-// Safety: will never delete the "default" tenant.
-// Safety: will cascade-delete users, quotes, layout packages for the tenant.
+// Safety: "default" tenant is always excluded.
+// Safety: uses SAVEPOINTs for optional-table deletes.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one, withTxn } from "@/lib/db";
@@ -42,7 +36,7 @@ function buildWhere(filters: TenantFilters, startIdx = 1) {
   const values: any[] = [];
   let idx = startIdx;
 
-  // Never delete the default tenant
+  // Always protect the default tenant
   conditions.push(`t.slug <> 'default'`);
 
   if (filters.slug) {
@@ -63,7 +57,7 @@ function buildWhere(filters: TenantFilters, startIdx = 1) {
   }
 
   return {
-    where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "WHERE t.slug <> 'default'",
+    where: `WHERE ${conditions.join(" AND ")}`,
     values,
   };
 }
@@ -84,17 +78,16 @@ export async function POST(req: NextRequest) {
 
     const { where, values } = buildWhere(filters);
 
-    // Preview: count tenants + their data volume
     const tenantCount = await one<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM public.tenants t ${where}`,
       values
     );
 
-    const tenantIds = await q<{ id: number }>(
+    const tenantRows = await q<{ id: number }>(
       `SELECT t.id FROM public.tenants t ${where}`,
       values
     );
-    const ids = tenantIds.map((r) => r.id);
+    const ids = tenantRows.map((r) => r.id);
 
     let quoteCount = 0;
     let userCount = 0;
@@ -156,6 +149,17 @@ export async function DELETE(req: NextRequest) {
       const slugs = tenants.map((r) => r.slug);
       const idList = ids.join(",");
 
+      async function safeDelete(sql: string) {
+        await tx.query(`SAVEPOINT before_optional`);
+        try {
+          await tx.query(sql);
+          await tx.query(`RELEASE SAVEPOINT before_optional`);
+        } catch {
+          await tx.query(`ROLLBACK TO SAVEPOINT before_optional`);
+          await tx.query(`RELEASE SAVEPOINT before_optional`);
+        }
+      }
+
       // Get quote IDs to cascade children
       const quoteRows = await tx.query<{ id: number }>(
         `SELECT id FROM public.quotes WHERE tenant_id = ANY(ARRAY[${idList}]::int[])`
@@ -164,26 +168,22 @@ export async function DELETE(req: NextRequest) {
 
       if (quoteIds.length > 0) {
         const qidList = quoteIds.join(",");
-        await tx.query(`DELETE FROM public.quote_layout_packages WHERE quote_id = ANY(ARRAY[${qidList}]::int[])`);
-        await tx.query(`DELETE FROM public.quote_line_items WHERE quote_id = ANY(ARRAY[${qidList}]::int[])`).catch(() => null);
+        await safeDelete(`DELETE FROM public.quote_layout_packages WHERE quote_id = ANY(ARRAY[${qidList}]::int[])`);
+        await safeDelete(`DELETE FROM public.quote_line_items WHERE quote_id = ANY(ARRAY[${qidList}]::int[])`);
         await tx.query(`DELETE FROM public.quotes WHERE id = ANY(ARRAY[${qidList}]::int[])`);
       }
 
-      await tx.query(`DELETE FROM public.commission_payouts WHERE tenant_id = ANY(ARRAY[${idList}]::int[])`).catch(() => null);
+      await safeDelete(`DELETE FROM public.commission_payouts WHERE tenant_id = ANY(ARRAY[${idList}]::int[])`);
       await tx.query(`DELETE FROM public.users WHERE tenant_id = ANY(ARRAY[${idList}]::int[])`);
       await tx.query(`DELETE FROM public.tenants WHERE id = ANY(ARRAY[${idList}]::int[])`);
 
       // Audit log
-      await tx.query(
+      const detail = JSON.stringify({ filters, deleted: ids.length, slugs }).replace(/'/g, "''");
+      const actorEmail = String(user.email || "").replace(/'/g, "''");
+      await safeDelete(
         `INSERT INTO public.admin_audit_log (actor_user_id, actor_email, action, detail, created_at)
-         VALUES ($1, $2, 'cleanup_tenants', $3, NOW())
-         ON CONFLICT DO NOTHING`,
-        [
-          user.id,
-          user.email,
-          JSON.stringify({ filters, deleted: ids.length, slugs }),
-        ]
-      ).catch(() => null);
+         VALUES (${Number(user.id)}, '${actorEmail}', 'cleanup_tenants', '${detail}'::jsonb, NOW())`
+      );
 
       return { count: ids.length, slugs };
     });
