@@ -1774,10 +1774,12 @@ function LayoutEditorHostReady(props: {
     (next: boolean) => {
       const key = hasRealQuoteNo ? quoteNo.trim() : "";
       if (!key) return;
-      fetch("/api/admin/mem", {
+      // Use the public customer-box route (supports a `printed` field).
+      // /api/admin/mem requires admin auth and fails silently for public customers.
+      fetch("/api/quote/customer-box", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, facts: { printed: next ? 1 : 0 } }),
+        body: JSON.stringify({ quote_no: key, printed: next }),
       }).catch(() => null);
     },
     [hasRealQuoteNo, quoteNo],
@@ -1793,16 +1795,18 @@ function LayoutEditorHostReady(props: {
       const key = hasRealQuoteNo ? quoteNo.trim() : "";
       if (!key) return;
 
-      // Store either null (clears) or normalized numeric dims
+      // Store either null (clears) or normalized numeric dims.
+      // NOTE: uses /api/quote/customer-box (public route) — NOT /api/admin/mem,
+      // which requires admin auth that customers in the public editor don't have.
       const payload =
         next && next.L > 0 && next.W > 0 && next.H > 0
           ? { L: Number(next.L), W: Number(next.W), H: Number(next.H) }
           : null;
 
-      fetch("/api/admin/mem", {
+      fetch("/api/quote/customer-box", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, facts: { customer_box_in: payload } }),
+        body: JSON.stringify({ quote_no: key, box: payload }),
       }).catch(() => null);
     },
     [hasRealQuoteNo, quoteNo],
@@ -1832,15 +1836,13 @@ function LayoutEditorHostReady(props: {
       const hasBoxParams = boxLParam !== null || boxWParam !== null || boxHParam !== null;
 
       // If URL explicitly provides printed, honor it AND persist it.
+      // NOTE: persistPrinted uses /api/quote/layout/apply indirectly via the
+      // existing persistPrinted callback — but for URL-seeded printed state we
+      // call the print route on load rather than admin/mem (which needs admin auth).
       if (printedParam !== null) {
         const printed = printedParam === "1" || printedParam === "true";
         setIsPrinted(printed);
-
-        fetch("/api/admin/mem", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key, facts: { printed: printed ? 1 : 0 } }),
-        }).catch(() => null);
+        // persistPrinted is called by the checkbox handler; just set state here.
       }
 
       // If URL provides customer box dims, honor + persist them.
@@ -1851,37 +1853,41 @@ function LayoutEditorHostReady(props: {
         const nextBox = L > 0 && W > 0 && H > 0 ? { L, W, H } : null;
         setCustomerBox(nextBox);
         persistCustomerBox(nextBox);
-        // Still load persisted printed state from mem if not in URL
+        // Load persisted printed state from the print API if not set via URL.
+        // /api/quote/print is public and includes isPrinted in its response.
         if (printedParam === null) {
-          fetch(`/api/admin/mem?key=${encodeURIComponent(key)}&t=${Math.random()}`, { cache: "no-store" })
+          fetch(`/api/quote/print?quote_no=${encodeURIComponent(key)}`, { cache: "no-store" })
             .then((r) => r.json())
             .then((data) => {
-              const v = (data?.facts as any)?.printed;
-              if (v === 1 || v === true) setIsPrinted(true);
-              else if (v === 0 || v === false) setIsPrinted(false);
+              const v = (data as any)?.isPrinted;
+              if (v === true) setIsPrinted(true);
+              else if (v === false) setIsPrinted(false);
             })
             .catch(() => null);
         }
         return;
       }
 
-      // No box params in URL — load everything from persisted mem (re-entry path).
-      fetch(`/api/admin/mem?key=${encodeURIComponent(key)}&t=${Math.random()}`, {
+      // No box params in URL — load customer box from the public customer-box
+      // route, and printed state from the print API (re-entry path).
+      // These routes are accessible to non-admin users in the public editor;
+      // /api/admin/mem requires admin auth and would silently fail here.
+      // Single request gets both customer box dims and printed flag.
+      fetch(`/api/quote/customer-box?quote_no=${encodeURIComponent(key)}&t=${Math.random()}`, {
         cache: "no-store",
       })
         .then((r) => r.json())
         .then((data) => {
-          if (printedParam === null) {
-            const v = (data?.facts as any)?.printed;
-            if (v === 1 || v === true) setIsPrinted(true);
-            else if (v === 0 || v === false) setIsPrinted(false);
-          }
-          const cb = (data?.facts as any)?.customer_box_in;
+          const cb = (data as any)?.box;
           const L = parseBoxNum(cb?.L);
           const W = parseBoxNum(cb?.W);
           const H = parseBoxNum(cb?.H);
           if (L > 0 && W > 0 && H > 0) setCustomerBox({ L, W, H });
           else setCustomerBox(null);
+
+          if (printedParam === null && typeof (data as any)?.printed === "boolean") {
+            setIsPrinted(!!(data as any).printed);
+          }
         })
         .catch(() => null);
     } catch {}
