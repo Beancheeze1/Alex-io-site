@@ -820,18 +820,18 @@ export default function StartQuoteModal() {
       p.set("foam_config", foamConfig);
       p.set("fit_allow_in", String(FIT_ALLOW_IN));
 
-      // Pre-seed customer_box_in and printed into mem so the quote page
+      // Pre-seed customer_box_in and printed into facts so the quote page
       // can show them immediately without waiting for the editor to open.
+      // NOTE: uses /api/quote/customer-box (public route) — /api/admin/mem
+      // requires admin auth and would silently fail for public customers here.
       if (boxLNum && boxWNum && boxDNum) {
-        fetch("/api/admin/mem", {
+        fetch("/api/quote/customer-box", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            key: quote_no,
-            facts: {
-              customer_box_in: { L: boxLNum, W: boxWNum, H: boxDNum },
-              printed: printed ? 1 : 0,
-            },
+            quote_no,
+            box: { L: boxLNum, W: boxWNum, H: boxDNum },
+            printed: printed ? 1 : 0,
           }),
         }).catch(() => null);
       }
