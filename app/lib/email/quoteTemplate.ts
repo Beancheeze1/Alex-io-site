@@ -45,6 +45,26 @@ export type TemplatePricing = {
   price_breaks?: PriceBreak[] | null;
 };
 
+export type TemplateLineItem = {
+  id: number;
+  label: string;           // e.g. "Foam set — layered construction" or material name
+  sublabel?: string | null; // e.g. material/family line
+  dims: string;            // "L × W × H in"
+  qty: number;
+  unitPrice: number | null;
+  lineTotal: number | null;
+  isIncluded?: boolean;    // layout-layer reference rows
+  isPackaging?: boolean;
+};
+
+export type TemplateLayoutLayer = {
+  index: number;           // 1-based
+  total: number;           // total layer count
+  thickness_in: number | null;
+  pocket_depth_in?: number | null;
+  materialName?: string | null;
+};
+
 export type TemplateInput = {
   customerLine?: string | null;
   quoteNumber?: string | null;
@@ -54,6 +74,15 @@ export type TemplateInput = {
   pricing: TemplatePricing;
   missing: string[];
   facts?: Record<string, any>;
+  // Rich quote-page data (optional — email degrades gracefully when absent)
+  lineItems?: TemplateLineItem[] | null;
+  foamSubtotal?: number | null;
+  packagingSubtotal?: number | null;
+  printingUpcharge?: number | null;
+  grandTotal?: number | null;
+  layers?: TemplateLayoutLayer[] | null;
+  layoutNotes?: string | null;
+  quotePageUrl?: string | null;
 };
 
 function fmtInchesTriple(L: number, W: number, H: number): string {
@@ -542,6 +571,23 @@ export function renderQuoteEmail(input: TemplateInput): string {
     facts.layoutEditorLink ||
     buildLayoutUrl({ ...input, specs } as any);
 
+  // Quote page URL (interactive viewer)
+  const _base2 = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  const quotePageUrl =
+    input.quotePageUrl ||
+    (quoteNumber ? `${_base2}/quote/${encodeURIComponent(quoteNumber)}` : null);
+
+  // Rich line items / totals (from print route)
+  const lineItems = Array.isArray(input.lineItems) ? input.lineItems : [];
+  const hasLineItems = lineItems.length > 0;
+  const foamSubtotalAmt = input.foamSubtotal ?? null;
+  const packagingSubtotalAmt = input.packagingSubtotal ?? null;
+  const printingUpchargeAmt = input.printingUpcharge ?? null;
+  const grandTotalAmt = input.grandTotal ?? null;
+  const layers = Array.isArray(input.layers) ? input.layers : [];
+  const hasLayers = layers.length > 0;
+  const layoutNotes = input.layoutNotes || null;
+
   const showMissing = Array.isArray(missing) && missing.length > 0;
   const statusLabel = status || "draft";
 
@@ -864,24 +910,210 @@ export function renderQuoteEmail(input: TemplateInput): string {
                 : ""
             }
 
-            <!-- Next steps (kept when no layoutUrl) -->
-            ${
-              layoutUrl
-                ? ""
-                : `<tr>
+            <!-- ══════════════════════════════════════════════ -->
+            <!-- PRICING SUMMARY (unit price + subtotals)       -->
+            <!-- ══════════════════════════════════════════════ -->
+            ${(() => {
+              const unitPrice = pricing.total && specs.qty ? pricing.total / Number(specs.qty) : null;
+              const showGrand = grandTotalAmt != null && grandTotalAmt > 0;
+              const showPkgLine = packagingSubtotalAmt != null && packagingSubtotalAmt > 0;
+              const showPrintLine = printingUpchargeAmt != null && printingUpchargeAmt > 0;
+              const showFoamLine = foamSubtotalAmt != null;
+              if (!unitPrice && !showGrand) return "";
+              return `<tr>
               <td style="padding:0 26px 18px 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
                   <tr>
-                    <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.7;">
-                      <p style="margin:0;">
-                        Once we finalize the details, I'll send over a formal quote and lead time.
-                      </p>
+                    <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
+                      Pricing summary
+                    </td>
+                  </tr>
+                  ${unitPrice != null ? `<tr>
+                    <td style="padding:5px 12px;font-size:12px;font-weight:600;color:#e5e7eb;width:60%;">Primary unit price</td>
+                    <td style="padding:5px 12px;font-size:13px;font-weight:700;color:#f9fafb;text-align:right;">${fmtMoney(unitPrice)}</td>
+                  </tr>` : ""}
+                  ${showFoamLine ? `<tr>
+                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Estimated foam subtotal</td>
+                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(foamSubtotalAmt)}</td>
+                  </tr>` : ""}
+                  ${showPkgLine ? `<tr>
+                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Packaging subtotal</td>
+                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(packagingSubtotalAmt)}</td>
+                  </tr>` : ""}
+                  ${showPrintLine ? `<tr>
+                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Printing &amp; setup</td>
+                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(printingUpchargeAmt)}</td>
+                  </tr>` : ""}
+                  ${showGrand ? `<tr style="border-top:1px solid #1f2937;">
+                    <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#e5e7eb;">Total estimate (foam + packaging${showPrintLine ? " + printing" : ""})</td>
+                    <td style="padding:8px 12px;font-size:15px;font-weight:800;color:#f97316;text-align:right;">${fmtMoney(grandTotalAmt)}</td>
+                  </tr>` : `<tr style="border-top:1px solid #1f2937;">
+                    <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#e5e7eb;">Estimated foam subtotal</td>
+                    <td style="padding:8px 12px;font-size:15px;font-weight:800;color:#f97316;text-align:right;">${fmtMoney(pricing.total)}</td>
+                  </tr>`}
+                  <tr>
+                    <td colspan="2" style="padding:4px 12px 10px 12px;font-size:11px;color:#6b7280;line-height:1.5;">
+                      Rough shipping estimate: ${fmtMoney((grandTotalAmt ?? pricing.total ?? 0) * 0.1)} (10% of foam + packaging; for planning only). Final billing may adjust if specs, quantities, or services change.
                     </td>
                   </tr>
                 </table>
               </td>
-            </tr>`
-            }
+            </tr>`;
+            })()}
+
+            <!-- ══════════════════════════════════════════════ -->
+            <!-- LINE ITEMS TABLE                               -->
+            <!-- ══════════════════════════════════════════════ -->
+            ${hasLineItems ? `<tr>
+              <td style="padding:0 26px 18px 26px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
+                  <tr>
+                    <td colspan="5" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
+                      Line items
+                    </td>
+                  </tr>
+                  <!-- Column headers -->
+                  <tr style="background:rgba(15,23,42,0.5);">
+                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Item</td>
+                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Dimensions (L×W×H in)</td>
+                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;text-align:center;">Qty</td>
+                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;text-align:right;">Unit price</td>
+                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;text-align:right;">Line total</td>
+                  </tr>
+                  <!-- Section label: Foam materials -->
+                  ${lineItems.some(i => !i.isPackaging) ? `<tr>
+                    <td colspan="5" style="padding:6px 10px 3px 10px;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#38bdf8;border-bottom:1px solid #0f172a;">FOAM MATERIALS</td>
+                  </tr>` : ""}
+                  ${lineItems.filter(i => !i.isPackaging).map((item, idx) => `
+                  <tr style="${idx % 2 === 1 ? "background:rgba(15,23,42,0.5);" : ""}">
+                    <td style="padding:6px 10px;font-size:12px;color:#e5e7eb;border-bottom:1px solid #111827;">
+                      <div style="font-weight:${item.isIncluded ? "400" : "600"};">${item.label}</div>
+                      ${item.sublabel ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${item.sublabel}</div>` : ""}
+                    </td>
+                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;border-bottom:1px solid #111827;">${item.dims}</td>
+                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;text-align:center;border-bottom:1px solid #111827;">${item.qty}</td>
+                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;text-align:right;border-bottom:1px solid #111827;">${item.isIncluded ? "Included" : (item.unitPrice != null ? fmtMoney(item.unitPrice) : "—")}</td>
+                    <td style="padding:6px 10px;font-size:12px;font-weight:${item.isIncluded ? "400" : "600"};color:${item.isIncluded ? "#9ca3af" : "#e5e7eb"};text-align:right;border-bottom:1px solid #111827;">${item.isIncluded ? "Included" : (item.lineTotal != null ? fmtMoney(item.lineTotal) : "—")}</td>
+                  </tr>`).join("")}
+                  <!-- Section label: Packaging (if any) -->
+                  ${lineItems.some(i => i.isPackaging) ? `<tr>
+                    <td colspan="5" style="padding:6px 10px 3px 10px;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#a78bfa;border-bottom:1px solid #0f172a;border-top:1px solid #1f2937;">PACKAGING</td>
+                  </tr>
+                  ${lineItems.filter(i => i.isPackaging).map((item, idx) => `
+                  <tr style="${idx % 2 === 1 ? "background:rgba(15,23,42,0.5);" : ""}">
+                    <td style="padding:6px 10px;font-size:12px;color:#e5e7eb;border-bottom:1px solid #111827;">
+                      <div style="font-weight:600;">${item.label}</div>
+                      ${item.sublabel ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${item.sublabel}</div>` : ""}
+                    </td>
+                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;border-bottom:1px solid #111827;">${item.dims}</td>
+                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;text-align:center;border-bottom:1px solid #111827;">${item.qty}</td>
+                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;text-align:right;border-bottom:1px solid #111827;">${item.unitPrice != null ? fmtMoney(item.unitPrice) : "—"}</td>
+                    <td style="padding:6px 10px;font-size:12px;font-weight:600;color:#e5e7eb;text-align:right;border-bottom:1px solid #111827;">${item.lineTotal != null ? fmtMoney(item.lineTotal) : "—"}</td>
+                  </tr>`).join("")}` : ""}
+                  <!-- Totals row -->
+                  <tr>
+                    <td colspan="4" style="padding:8px 10px;font-size:12px;font-weight:700;color:#e5e7eb;text-align:right;border-top:1px solid #1f2937;">Total quantity</td>
+                    <td style="padding:8px 10px;font-size:13px;font-weight:700;color:#f9fafb;text-align:right;border-top:1px solid #1f2937;">${specs.qty || "—"}</td>
+                  </tr>
+                  ${foamSubtotalAmt != null ? `<tr>
+                    <td colspan="4" style="padding:3px 10px;font-size:12px;color:#9ca3af;text-align:right;">Foam subtotal</td>
+                    <td style="padding:3px 10px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(foamSubtotalAmt)}</td>
+                  </tr>` : ""}
+                  ${packagingSubtotalAmt != null && packagingSubtotalAmt > 0 ? `<tr>
+                    <td colspan="4" style="padding:3px 10px;font-size:12px;color:#9ca3af;text-align:right;">Packaging subtotal</td>
+                    <td style="padding:3px 10px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(packagingSubtotalAmt)}</td>
+                  </tr>` : ""}
+                  ${grandTotalAmt != null && grandTotalAmt > 0 ? `<tr>
+                    <td colspan="4" style="padding:6px 10px 8px 10px;font-size:13px;font-weight:700;color:#e5e7eb;text-align:right;">Estimated subtotal (foam + packaging)</td>
+                    <td style="padding:6px 10px 8px 10px;font-size:14px;font-weight:800;color:#f97316;text-align:right;">${fmtMoney(grandTotalAmt)}</td>
+                  </tr>` : ""}
+                </table>
+              </td>
+            </tr>` : ""}
+
+            <!-- ══════════════════════════════════════════════ -->
+            <!-- LAYER TEXT SUMMARY (no SVG/DXF downloads)     -->
+            <!-- ══════════════════════════════════════════════ -->
+            ${hasLayers ? `<tr>
+              <td style="padding:0 26px 18px 26px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
+                  <tr>
+                    <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
+                      Foam layout package
+                    </td>
+                  </tr>
+                  ${layoutNotes ? `<tr>
+                    <td style="padding:8px 12px 4px 12px;font-size:12px;color:#cbd5f5;line-height:1.5;">
+                      <span style="font-weight:600;color:#e5e7eb;">Notes:</span> ${layoutNotes}
+                    </td>
+                  </tr>` : ""}
+                  <tr>
+                    <td style="padding:8px 12px;">
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                        <tr>
+                          <td style="padding:4px 0;font-size:11px;font-weight:600;color:#9ca3af;width:30%;">Layer</td>
+                          <td style="padding:4px 0;font-size:11px;font-weight:600;color:#9ca3af;width:25%;">Thickness</td>
+                          <td style="padding:4px 0;font-size:11px;font-weight:600;color:#9ca3af;width:25%;">Pocket depth</td>
+                          <td style="padding:4px 0;font-size:11px;font-weight:600;color:#9ca3af;">Material</td>
+                        </tr>
+                        ${layers.map(layer => `<tr>
+                          <td style="padding:4px 0;font-size:12px;color:#e5e7eb;border-top:1px solid #111827;">Layer ${layer.index}/${layer.total}</td>
+                          <td style="padding:4px 0;font-size:12px;color:#cbd5f5;border-top:1px solid #111827;">${layer.thickness_in != null ? `${layer.thickness_in} in` : "—"}</td>
+                          <td style="padding:4px 0;font-size:12px;color:#cbd5f5;border-top:1px solid #111827;">${layer.pocket_depth_in != null ? `${layer.pocket_depth_in} in` : "—"}</td>
+                          <td style="padding:4px 0;font-size:12px;color:#cbd5f5;border-top:1px solid #111827;">${layer.materialName || "—"}</td>
+                        </tr>`).join("")}
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>` : ""}
+
+            <!-- ══════════════════════════════════════════════ -->
+            <!-- DUAL CTA: View Quote Page + Open Layout Editor -->
+            <!-- ══════════════════════════════════════════════ -->
+            ${(quotePageUrl || layoutUrl) ? `<tr>
+              <td style="padding:0 26px 18px 26px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
+                  <tr>
+                    <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
+                      Next steps
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:10px 12px 14px 12px;font-size:12px;color:#e5e7eb;line-height:1.6;">
+                      ${quotePageUrl && layoutUrl
+                        ? `<p style="margin:0 0 10px 0;">View your full interactive quote, or open the layout editor to place cavity locations, sizes, and orientation.</p>
+                           <table role="presentation" cellspacing="0" cellpadding="0">
+                             <tr>
+                               <td style="padding-right:10px;">
+                                 <a href="${quotePageUrl}" style="display:inline-block;padding:9px 18px;border-radius:999px;border:1px solid #4b5563;background:#1f2937;color:#e5e7eb;font-size:12px;font-weight:600;text-decoration:none;">View quote</a>
+                               </td>
+                               <td>
+                                 <a href="${layoutUrl}" style="display:inline-block;padding:9px 18px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">Open layout editor</a>
+                               </td>
+                             </tr>
+                           </table>`
+                        : quotePageUrl
+                          ? `<p style="margin:0 0 10px 0;">View your full interactive quote below.</p>
+                             <a href="${quotePageUrl}" style="display:inline-block;padding:9px 18px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">View quote</a>`
+                          : `<p style="margin:0 0 10px 0;">Open the layout editor to place the cavities (size, location, and orientation).</p>
+                             <a href="${layoutUrl}" style="display:inline-block;padding:9px 18px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">Open layout editor</a>`}
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>` : !layoutUrl ? `<tr>
+              <td style="padding:0 26px 18px 26px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
+                  <tr>
+                    <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.7;">
+                      <p style="margin:0;">Once we finalize the details, I'll send over a formal quote and lead time.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>` : ""}
 
             <!-- Bug / feedback card -->
             <tr>
@@ -908,7 +1140,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
           <!-- Footer / disclaimer -->
           <div style="max-width:680px;margin-top:10px;padding:0 26px;font-size:11px;color:#9ca3af;">
             <p style="margin:0;">
-              This first pass was generated by Alex-IO (AI assistant) from the information you provided. A human will review and confirm the quote before anything is cut.
+              This print view mirrors the core specs of your emailed quote. Actual charges may differ if specs or quantities change or if additional services are requested.
             </p>
           </div>
         </td>

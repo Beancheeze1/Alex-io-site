@@ -17,7 +17,7 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 import { absoluteUrl } from "@/app/lib/internalFetch";
-import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
+import { renderQuoteEmail, type TemplateLineItem, type TemplateLayoutLayer } from "@/app/lib/email/quoteTemplate";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +49,32 @@ type PrintOk = {
     material_name: string | null;
     material_family?: string | null;
     density_lb_ft3?: number | null;
+    notes?: string | null;
+    price_unit_usd?: number | null;
+    price_total_usd?: number | null;
   }>;
+  packagingLines?: Array<{
+    id: number;
+    sku: string;
+    qty: number;
+    unit_price_usd: number | null;
+    extended_price_usd: number | null;
+    vendor: string | null;
+    style: string | null;
+    description: string | null;
+    inside_length_in: number | null;
+    inside_width_in: number | null;
+    inside_height_in: number | null;
+  }>;
+  foamSubtotal?: number | null;
+  packagingSubtotal?: number | null;
+  printingUpcharge?: number | null;
+  grandTotal?: number | null;
+  layoutPkg?: {
+    id: number;
+    layout_json: any;
+    notes: string | null;
+  } | null;
   facts?: any;
 };
 
@@ -210,6 +235,121 @@ export async function POST(req: NextRequest) {
     const density = primary.density_lb_ft3 != null ? Number(primary.density_lb_ft3) : null;
     const density_pcf = density != null && Number.isFinite(density) ? density : null;
 
+    // ── Build rich line items for the email ──────────────────────────────
+    const LAYOUT_LAYER_TAG = "[LAYOUT-LAYER]";
+    const PACKAGING_TAG = "[PACKAGING]";
+
+    // Helper: is this a layout reference-only row?
+    const isLayerRow = (it: typeof items[0]) =>
+      String(it.notes || "").toUpperCase().includes(LAYOUT_LAYER_TAG);
+    const isPackagingRow = (it: typeof items[0]) =>
+      String(it.notes || "").includes("Requested shipping carton") ||
+      String(it.notes || "").includes(PACKAGING_TAG);
+
+    const primaryItem = items[0];
+    const hasLayerRows = items.some(isLayerRow);
+
+    // Build the primary "Foam set" line first
+    const emailLineItems: TemplateLineItem[] = [];
+
+    if (primaryItem && !isLayerRow(primaryItem) && !isPackagingRow(primaryItem)) {
+      const unitPx = primaryItem.price_unit_usd != null ? Number(primaryItem.price_unit_usd) : null;
+      const totalPx = primaryItem.price_total_usd != null ? Number(primaryItem.price_total_usd) : null;
+
+      emailLineItems.push({
+        id: primaryItem.id,
+        label: hasLayerRows
+          ? "Foam set — layered construction"
+          : (primaryItem.material_name || `Material #${primaryItem.material_id}`),
+        sublabel: hasLayerRows
+          ? "Includes all bonded layers shown below (for reference)."
+          : primaryItem.material_family || null,
+        dims: `${Number(primaryItem.length_in)} × ${Number(primaryItem.width_in)} × ${Number(primaryItem.height_in)} in`,
+        qty: Number(primaryItem.qty),
+        unitPrice: unitPx ?? (typeof result.total === "number" && qty > 0 ? result.total / qty : null),
+        lineTotal: totalPx ?? (typeof result.total === "number" ? result.total : null),
+        isIncluded: false,
+        isPackaging: false,
+      });
+    }
+
+    // Add layout-layer reference rows
+    for (const it of items) {
+      if (!isLayerRow(it)) continue;
+      emailLineItems.push({
+        id: it.id,
+        label: "Included layer",
+        sublabel: [it.material_name, it.material_family ? `${it.material_family}` : null]
+          .filter(Boolean)
+          .join(" · ") || null,
+        dims: `${Number(it.length_in)} × ${Number(it.width_in)} × ${Number(it.height_in)} in`,
+        qty: Number(it.qty),
+        unitPrice: null,
+        lineTotal: null,
+        isIncluded: true,
+        isPackaging: false,
+      });
+    }
+
+    // Add packaging lines from print route
+    const printPackaging = Array.isArray(printJson.packagingLines) ? printJson.packagingLines : [];
+    for (const pkg of printPackaging) {
+      const iL = pkg.inside_length_in;
+      const iW = pkg.inside_width_in;
+      const iH = pkg.inside_height_in;
+      const dimStr = (iL && iW && iH) ? `${iL} × ${iW} × ${iH} in` : "—";
+      const label = pkg.description
+        ? `${pkg.description}${pkg.sku ? ` ${pkg.sku}` : ""}`
+        : (pkg.sku || "Carton");
+      emailLineItems.push({
+        id: pkg.id,
+        label: label.trim(),
+        sublabel: pkg.style || pkg.vendor || null,
+        dims: dimStr,
+        qty: Number(pkg.qty) || 1,
+        unitPrice: pkg.unit_price_usd != null ? Number(pkg.unit_price_usd) : null,
+        lineTotal: pkg.extended_price_usd != null ? Number(pkg.extended_price_usd) : null,
+        isIncluded: false,
+        isPackaging: true,
+      });
+    }
+
+    // ── Build layer text summary from layoutPkg ───────────────────────────
+    const emailLayers: TemplateLayoutLayer[] = [];
+    const layoutPkg = (printJson as any).layoutPkg ?? null;
+    if (layoutPkg?.layout_json) {
+      try {
+        const ljRaw = typeof layoutPkg.layout_json === "string"
+          ? JSON.parse(layoutPkg.layout_json)
+          : layoutPkg.layout_json;
+        const layerArr: any[] = Array.isArray(ljRaw?.layers) ? ljRaw.layers : [];
+        for (let i = 0; i < layerArr.length; i++) {
+          const lyr = layerArr[i];
+          emailLayers.push({
+            index: i + 1,
+            total: layerArr.length,
+            thickness_in: lyr?.thickness_in != null ? Number(lyr.thickness_in) : null,
+            pocket_depth_in: lyr?.pocket_depth_in != null ? Number(lyr.pocket_depth_in) : null,
+            materialName: lyr?.material_name || lyr?.material_family || null,
+          });
+        }
+      } catch {
+        // layout_json parse error — skip layers
+      }
+    }
+
+    // ── Quote page URL ────────────────────────────────────────────────────
+    const _baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const quotePageUrl = `${_baseUrl}/quote/${encodeURIComponent(quoteNo)}`;
+
+    // ── Totals from print route ───────────────────────────────────────────
+    const printFoamSubtotal = typeof (printJson as any).foamSubtotal === "number"
+      ? (printJson as any).foamSubtotal : null;
+    const printPackagingSubtotal = typeof (printJson as any).packagingSubtotal === "number"
+      ? (printJson as any).packagingSubtotal : null;
+    const printGrandTotal = typeof (printJson as any).grandTotal === "number"
+      ? (printJson as any).grandTotal : null;
+
     const html = renderQuoteEmail({
       customerLine: quote.customer_name ? `${quote.customer_name}${quote.email ? ` • ${quote.email}` : ""}` : (quote.email || ""),
       quoteNumber: quote.quote_no,
@@ -251,6 +391,15 @@ export async function POST(req: NextRequest) {
       },
       missing: [],
       facts,
+      // Rich data for the new sections
+      lineItems: emailLineItems,
+      foamSubtotal: printFoamSubtotal,
+      packagingSubtotal: printPackagingSubtotal,
+      printingUpcharge: printingUpcharge > 0 ? printingUpcharge : null,
+      grandTotal: printGrandTotal,
+      layers: emailLayers.length > 0 ? emailLayers : null,
+      layoutNotes: layoutPkg?.notes || null,
+      quotePageUrl,
     });
 
     // 4) Send via Graph (existing route flips quotes.status -> 'sent')
