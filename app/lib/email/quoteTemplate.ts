@@ -78,7 +78,10 @@ export type TemplateInput = {
   lineItems?: TemplateLineItem[] | null;
   foamSubtotal?: number | null;
   packagingSubtotal?: number | null;
-  printingUpcharge?: number | null;
+  artSetupFee?: number | null;
+  printingUpchargePct?: number | null;
+  printingUpchargeAmt?: number | null;
+  printingUpcharge?: number | null;       // combined total (artSetupFee + printingUpchargeAmt)
   grandTotal?: number | null;
   layers?: TemplateLayoutLayer[] | null;
   layoutNotes?: string | null;
@@ -582,7 +585,10 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const hasLineItems = lineItems.length > 0;
   const foamSubtotalAmt = input.foamSubtotal ?? null;
   const packagingSubtotalAmt = input.packagingSubtotal ?? null;
-  const printingUpchargeAmt = input.printingUpcharge ?? null;
+  const artSetupFeeAmt = input.artSetupFee ?? null;
+  const printingUpchargePctVal = input.printingUpchargePct ?? null;
+  const printingUpchargeAmtVal = input.printingUpchargeAmt ?? null;
+  const printingUpchargeAmt = input.printingUpcharge ?? null;   // combined
   const grandTotalAmt = input.grandTotal ?? null;
   const layers = Array.isArray(input.layers) ? input.layers : [];
   const hasLayers = layers.length > 0;
@@ -758,9 +764,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
             ${(() => {
               const unitPrice = pricing.total && specs.qty ? pricing.total / Number(specs.qty) : null;
               const showGrand = grandTotalAmt != null && grandTotalAmt > 0;
-              const showPkgLine = packagingSubtotalAmt != null && packagingSubtotalAmt > 0;
-              const showPrintLine = printingUpchargeAmt != null && printingUpchargeAmt > 0;
-              const showFoamLine = foamSubtotalAmt != null;
+              const hasPrintingLines = (artSetupFeeAmt != null && artSetupFeeAmt > 0) || (printingUpchargeAmtVal != null && printingUpchargeAmtVal > 0);
               if (!unitPrice && !showGrand) return "";
               return `<tr>
               <td style="padding:16px 26px 0 26px;">
@@ -774,20 +778,24 @@ export function renderQuoteEmail(input: TemplateInput): string {
                     <td style="padding:5px 12px;font-size:12px;font-weight:600;color:#e5e7eb;width:60%;">Primary unit price</td>
                     <td style="padding:5px 12px;font-size:13px;font-weight:700;color:#f9fafb;text-align:right;">${fmtMoney(unitPrice)}</td>
                   </tr>` : ""}
-                  ${showFoamLine ? `<tr>
-                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Estimated foam subtotal</td>
+                  ${foamSubtotalAmt != null ? `<tr>
+                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Foam subtotal</td>
                     <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(foamSubtotalAmt)}</td>
                   </tr>` : ""}
-                  ${showPkgLine ? `<tr>
+                  ${packagingSubtotalAmt != null && packagingSubtotalAmt > 0 ? `<tr>
                     <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Packaging subtotal</td>
                     <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(packagingSubtotalAmt)}</td>
                   </tr>` : ""}
-                  ${showPrintLine ? `<tr>
-                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Printing &amp; setup</td>
-                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(printingUpchargeAmt)}</td>
+                  ${artSetupFeeAmt != null && artSetupFeeAmt > 0 ? `<tr>
+                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Art setup fee</td>
+                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(artSetupFeeAmt)}</td>
+                  </tr>` : ""}
+                  ${printingUpchargeAmtVal != null && printingUpchargeAmtVal > 0 ? `<tr>
+                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Printing upcharge${printingUpchargePctVal != null && printingUpchargePctVal > 0 ? ` (${printingUpchargePctVal}%)` : ""}</td>
+                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(printingUpchargeAmtVal)}</td>
                   </tr>` : ""}
                   ${showGrand ? `<tr style="border-top:1px solid #1f2937;">
-                    <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#e5e7eb;">Total estimate (foam + packaging${showPrintLine ? " + printing" : ""})</td>
+                    <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#e5e7eb;">Total estimate (foam${packagingSubtotalAmt != null && packagingSubtotalAmt > 0 ? " + packaging" : ""}${hasPrintingLines ? " + printing" : ""})</td>
                     <td style="padding:8px 12px;font-size:15px;font-weight:800;color:#f97316;text-align:right;">${fmtMoney(grandTotalAmt)}</td>
                   </tr>` : `<tr style="border-top:1px solid #1f2937;">
                     <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#e5e7eb;">Estimated foam subtotal</td>
@@ -795,7 +803,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                   </tr>`}
                   <tr>
                     <td colspan="2" style="padding:4px 12px 10px 12px;font-size:11px;color:#6b7280;line-height:1.5;">
-                      Rough shipping estimate: ${fmtMoney((grandTotalAmt ?? pricing.total ?? 0) * 0.1)} (10% of foam + packaging; for planning only). Final billing may adjust if specs, quantities, or services change.
+                      Rough shipping estimate: ${fmtMoney((grandTotalAmt ?? foamSubtotalAmt ?? pricing.total ?? 0) * 0.1)} (10% of order; for planning only). Final billing may adjust if specs, quantities, or services change.
                     </td>
                   </tr>
                 </table>

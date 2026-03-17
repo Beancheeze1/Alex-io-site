@@ -18,7 +18,6 @@ import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 import { absoluteUrl } from "@/app/lib/internalFetch";
 import { renderQuoteEmail, type TemplateLineItem, type TemplateLayoutLayer } from "@/app/lib/email/quoteTemplate";
-import { getPricingSettings } from "@/app/lib/pricing/settings";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -208,20 +207,6 @@ export async function POST(req: NextRequest) {
     }
 
     const result = (calcJson as CalcOk).result || ({} as any);
-    // Derive tenant from hostname for scoped settings
-    const hostname = req.headers.get("host") || "";
-    const subdomain = hostname.split(".")[0];
-    const { one: dbOne } = await import("@/lib/db");
-    const tenantRow = await dbOne<{ id: number }>(
-      `SELECT id FROM public.tenants WHERE slug = $1`,
-      [subdomain],
-    ).catch(() => null);
-    const tenantId = tenantRow?.id ?? "default";
-    const settings = await getPricingSettings(tenantId);
-    const printingUpcharge =
-      facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true
-        ? Number(settings.printing_upcharge_usd || 0)
-        : 0;
 
     // 3) Render customer email HTML (server-side)
     const revisionRaw = typeof facts?.revision === "string" ? facts.revision.trim() : "";
@@ -342,11 +327,19 @@ export async function POST(req: NextRequest) {
     const _baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
     const quotePageUrl = `${_baseUrl}/quote/${encodeURIComponent(quoteNo)}`;
 
-    // ── Totals from print route ───────────────────────────────────────────
+    // ── Totals from print route (authoritative — don't recalculate) ──────
     const printFoamSubtotal = typeof (printJson as any).foamSubtotal === "number"
       ? (printJson as any).foamSubtotal : null;
     const printPackagingSubtotal = typeof (printJson as any).packagingSubtotal === "number"
       ? (printJson as any).packagingSubtotal : null;
+    const printArtSetupFee = typeof (printJson as any).artSetupFee === "number"
+      ? (printJson as any).artSetupFee : null;
+    const printUpchargePct = typeof (printJson as any).printingUpchargePct === "number"
+      ? (printJson as any).printingUpchargePct : null;
+    const printUpchargeAmt = typeof (printJson as any).printingUpchargeAmt === "number"
+      ? (printJson as any).printingUpchargeAmt : null;
+    const printUpchargeTotal = typeof (printJson as any).printingUpcharge === "number"
+      ? (printJson as any).printingUpcharge : 0;
     const printGrandTotal = typeof (printJson as any).grandTotal === "number"
       ? (printJson as any).grandTotal : null;
 
@@ -372,21 +365,15 @@ export async function POST(req: NextRequest) {
         min_charge: typeof result.min_charge === "number" ? result.min_charge : null,
       },
       pricing: {
-        total:
-          (typeof result.total === "number" ? result.total : 0) +
-          printingUpcharge,
+        total: printGrandTotal ?? ((typeof result.total === "number" ? result.total : 0) + printUpchargeTotal),
         used_min_charge: !!result.used_min_charge,
         piece_ci: typeof result.piece_ci === "number" ? result.piece_ci : null,
         order_ci: typeof result.order_ci === "number" ? result.order_ci : null,
         order_ci_with_waste: typeof result.order_ci_with_waste === "number" ? result.order_ci_with_waste : null,
-
-        // Raw is used by the template for some display helpers (and for material_family alignment).
         raw: {
           ...result,
           material_family: primary.material_family ?? null,
         },
-
-        // If you already store price breaks in facts, the template will use them.
         price_breaks: Array.isArray(facts?.price_breaks) ? facts.price_breaks : null,
       },
       missing: [],
@@ -395,7 +382,10 @@ export async function POST(req: NextRequest) {
       lineItems: emailLineItems,
       foamSubtotal: printFoamSubtotal,
       packagingSubtotal: printPackagingSubtotal,
-      printingUpcharge: printingUpcharge > 0 ? printingUpcharge : null,
+      artSetupFee: printArtSetupFee,
+      printingUpchargePct: printUpchargePct,
+      printingUpchargeAmt: printUpchargeAmt,
+      printingUpcharge: printUpchargeTotal > 0 ? printUpchargeTotal : null,
       grandTotal: printGrandTotal,
       layers: emailLayers.length > 0 ? emailLayers : null,
       layoutNotes: layoutPkg?.notes || null,
