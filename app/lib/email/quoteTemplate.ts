@@ -707,208 +707,50 @@ export function renderQuoteEmail(input: TemplateInput): string {
               </td>
             </tr>
 
-            <!-- Specs + Pricing -->
+            <!-- ══════════════════════════════════════════════ -->
+            <!-- SPECS SNAPSHOT (single-column, compact)        -->
+            <!-- ══════════════════════════════════════════════ -->
             <tr>
-              <td style="padding:10px 26px 18px 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+              <td style="padding:16px 26px 0 26px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
                   <tr>
-                    <!-- Specs card + Next step card (left column) -->
-                    <td style="vertical-align:top;width:52%;padding-right:8px;">
-                      <!-- Specs card -->
-                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
-                        <tr>
-                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
-                            Specs
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style="width:42%;padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Outside size</td>
-                          <td style="width:58%;padding:4px 10px;font-size:12px;color:#cbd5f5;">${outsideSize}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Quantity</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${qty}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Density</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${densityLabel}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Min thickness under cavities</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${minThicknessUnder}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Material</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${specsMaterialLabel}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Color</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${specs.color || "—"}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Skiving</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${skivingNote}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Cavities</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${cavityLabel}</td>
-                        </tr>
-                      </table>
-
-                      ${
-                        layoutUrl
-                          ? `<!-- Next step card -->
-                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:12px;border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
-                        <tr>
-                          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
-                            Next step
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.6;">
-                            Open the layout editor and place the cavities (size, location, and orientation).
-                            <div style="margin-top:10px;text-align:center;">
-                              <a href="${layoutUrl}" style="display:inline-block;padding:8px 16px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">
-                                Open layout editor
-                              </a>
-                            </div>
-                          </td>
-                        </tr>
-                      </table>`
-                          : ""
-                      }
-                    </td>
-
-                    <!-- Pricing card (right column) -->
-                    <td style="vertical-align:top;width:48%;padding-left:8px;">
-                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:linear-gradient(145deg,#020617,#020617 40%,#020617 100%);">
-                        <tr>
-                          <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
-                            Pricing
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style="width:48%;padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Material</td>
-                          <td style="width:52%;padding:4px 10px;font-size:12px;color:#cbd5f5;">${matName}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Density</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${matDensity}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Kerf allowance</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${matKerf}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Piece volume</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${
-                            pieceCi !== "—" ? `${pieceCi} in³` : "—"
-                          }</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Order volume</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${
-                            orderCi !== "—" ? `${orderCi} in³` : "—"
-                          }</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">With waste</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${
-                            orderCiWithWaste !== "—" ? `${orderCiWithWaste} in³` : "—"
-                          }</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Min charge</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${minCharge}${
-                            pricingPending
-                              ? ""
-                              : usedMinCharge
-                                ? " (applied)"
-                                : " (not applied on this run)"
-                          }</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Order total</td>
-                          <td style="padding:4px 10px;font-size:13px;font-weight:700;color:#f97316;">${orderTotal}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">Applied</td>
-                          <td style="padding:4px 10px;font-size:12px;color:#cbd5f5;">${appliedLabel}</td>
-                        </tr>
-                        ${
-                          showHowBuilt
-                            ? `<!-- How this price is built -->
-                        <tr>
-                          <td style="padding:4px 10px;font-weight:600;font-size:12px;color:#e5e7eb;">How this price is built</td>
-                          <td style="padding:4px 10px;font-size:11px;color:#cbd5f5;line-height:1.5;">
-                            Behind the scenes, this estimate is based on the block volume (piece size × quantity), a kerf/waste allowance, and any minimum charge shown above.
-                          </td>
-                        </tr>`
-                            : ""
-                        }
-                      </table>
+                    <td colspan="4" style="padding:8px 14px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));">
+                      Specs
                     </td>
                   </tr>
+                  <tr>
+                    <td style="padding:8px 14px 8px 14px;width:25%;vertical-align:top;">
+                      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:3px;">Dimensions</div>
+                      <div style="font-size:13px;font-weight:600;color:#f9fafb;">${outsideSize}</div>
+                    </td>
+                    <td style="padding:8px 14px 8px 14px;width:15%;vertical-align:top;">
+                      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:3px;">Qty</div>
+                      <div style="font-size:13px;font-weight:600;color:#f9fafb;">${qty}</div>
+                    </td>
+                    <td style="padding:8px 14px 8px 14px;width:30%;vertical-align:top;">
+                      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:3px;">Material</div>
+                      <div style="font-size:13px;font-weight:600;color:#f9fafb;">${specsMaterialLabel}</div>
+                      ${matDensity !== "—" ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${matDensity}</div>` : ""}
+                    </td>
+                    <td style="padding:8px 14px 8px 14px;width:30%;vertical-align:top;">
+                      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:3px;">Construction</div>
+                      <div style="font-size:12px;color:#cbd5f5;line-height:1.5;">
+                        ${hasLayers
+                          ? `Layered (${layers.length} layers)`
+                          : "Single layer"}${skivingNote !== "Not specified" ? ` · Skiving: ${skivingNote}` : ""}
+                      </div>
+                    </td>
+                  </tr>
+                  ${cavityLabel !== "—" ? `<tr>
+                    <td colspan="4" style="padding:0 14px 8px 14px;border-top:1px solid #111827;">
+                      <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;">Cavities:&nbsp;</span>
+                      <span style="font-size:12px;color:#cbd5f5;">${cavityLabel}</span>
+                    </td>
+                  </tr>` : ""}
                 </table>
               </td>
             </tr>
 
-            ${
-              priceBreaks.length > 1
-                ? `<tr>
-              <td style="padding:0 26px 18px 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
-                  <tr>
-                    <td colspan="4" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.2),rgba(15,23,42,1));border-radius:14px 14px 0 0;">
-                      Price breaks
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Qty</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Unit</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Extended</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Notes</td>
-                  </tr>
-                  ${priceBreaks
-                    .map(
-                      (br, idx) => `
-                        <tr style="${idx % 2 === 1 ? "background:rgba(15,23,42,0.85);" : ""}">
-                          <td style="padding:4px 10px;font-size:11px;color:#e5e7eb;">${br.qty}</td>
-                          <td style="padding:4px 10px;font-size:11px;color:#e5e7eb;">${priceBreakUnit(br)}</td>
-                          <td style="padding:4px 10px;font-size:11px;color:#e5e7eb;">${fmtMoney(br.total)}</td>
-                          <td style="padding:4px 10px;font-size:11px;color:#9ca3af;">${br.note || ""}</td>
-                        </tr>
-                      `,
-                    )
-                    .join("")}
-                </table>
-              </td>
-            </tr>`
-                : ""
-            }
-
-            ${
-              showMissing
-                ? `<tr>
-              <td style="padding:0 26px 18px 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #7f1d1d;background:#450a0a;">
-                  <tr>
-                    <td style="padding:8px 12px;border-bottom:1px solid #7f1d1d;font-size:12px;font-weight:600;color:#fee2e2;background:linear-gradient(90deg,#b91c1c,#450a0a);border-radius:14px 14px 0 0;">
-                      Items we still need to finalize
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:8px 12px;font-size:12px;color:#fee2e2;line-height:1.6;">
-                      <ul style="margin:0;padding-left:18px;">
-                        ${missing.map((m) => `<li style="margin-bottom:2px;">${m}</li>`).join("")}
-                      </ul>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>`
-                : ""
-            }
 
             <!-- ══════════════════════════════════════════════ -->
             <!-- PRICING SUMMARY (unit price + subtotals)       -->
@@ -921,7 +763,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
               const showFoamLine = foamSubtotalAmt != null;
               if (!unitPrice && !showGrand) return "";
               return `<tr>
-              <td style="padding:0 26px 18px 26px;">
+              <td style="padding:16px 26px 0 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
                   <tr>
                     <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
@@ -965,7 +807,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
             <!-- LINE ITEMS TABLE                               -->
             <!-- ══════════════════════════════════════════════ -->
             ${hasLineItems ? `<tr>
-              <td style="padding:0 26px 18px 26px;">
+              <td style="padding:16px 26px 0 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
                   <tr>
                     <td colspan="5" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
@@ -1035,7 +877,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
             <!-- LAYER TEXT SUMMARY (no SVG/DXF downloads)     -->
             <!-- ══════════════════════════════════════════════ -->
             ${hasLayers ? `<tr>
-              <td style="padding:0 26px 18px 26px;">
+              <td style="padding:16px 26px 0 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
                   <tr>
                     <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
@@ -1073,7 +915,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
             <!-- DUAL CTA: View Quote Page + Open Layout Editor -->
             <!-- ══════════════════════════════════════════════ -->
             ${(quotePageUrl || layoutUrl) ? `<tr>
-              <td style="padding:0 26px 18px 26px;">
+              <td style="padding:16px 26px 0 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
                   <tr>
                     <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
@@ -1117,7 +959,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
             <!-- Bug / feedback card -->
             <tr>
-              <td style="padding:0 26px 22px 26px;">
+              <td style="padding:16px 26px 24px 26px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
                   <tr>
                     <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.7;">
