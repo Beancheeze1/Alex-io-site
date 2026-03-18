@@ -666,332 +666,151 @@ export function renderQuoteEmail(input: TemplateInput): string {
   // Hide the “How this price is built” row entirely when pending (so we don’t imply it was computed).
   const showHowBuilt = !pricingPending;
 
+
+  // ── Key facts for the summary card ──────────────────────────────────
+  const displayTotal = grandTotalAmt ?? (pricingPending ? null : pricing.total ?? null);
+  const hasPackaging = packagingSubtotalAmt != null && packagingSubtotalAmt > 0;
+  const hasPrinting  = printingUpchargeAmt != null && printingUpchargeAmt > 0;
+  void showHowBuilt; // retained for potential future use
+
   return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Foam quote${quoteNumber ? " " + quoteNumber : ""}</title>
+    <title>Your quote is ready${quoteNumber ? " — " + quoteNumber : ""}</title>
   </head>
   <body style="margin:0;padding:0;background:#111827;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#111827;padding:24px 0;">
       <tr>
         <td align="center">
-          <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="background:#0f172a;border-radius:18px;border:1px solid #1f2937;overflow:hidden;box-shadow:0 22px 45px rgba(15,23,42,0.55);">
-            
+          <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#0f172a;border-radius:18px;border:1px solid #1f2937;overflow:hidden;box-shadow:0 22px 45px rgba(15,23,42,0.55);">
+
             <!-- Header -->
             <tr>
-              <td style="padding:18px 24px 14px 24px;border-bottom:1px solid #1f2937;background:linear-gradient(135deg,#0ea5e9 0%,#0ea5e9 45%,#0f172a 100%);">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                  <tr>
-                    <td style="vertical-align:middle;">
-                      <!-- Stylized Powered by Alex-IO text -->
-                      <div style="font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#e0f2fe;opacity:0.9;">
-                        Powered by
-                      </div>
-                      <div style="font-size:20px;font-weight:800;color:#f9fafb;line-height:1.2;text-shadow:0 0 8px rgba(15,23,42,0.55);">
-                        Alex-IO
-                      </div>
-                      <div style="margin-top:4px;font-size:12px;color:#e0f2fe;opacity:0.95;">
-                        Quote${
-                          quoteNumber
-                            ? ` · <span style="font-weight:600;color:#f9fafb;">${quoteNumber}</span>`
-                            : ""
-                        } 
-                        &nbsp;·&nbsp;
-                        <span style="text-transform:capitalize;">Status: ${statusLabel}</span>
-                      </div>
-                      <!-- Hidden logo URL so the variable is still "used" in TS -->
-                      <div style="display:none;font-size:0;line-height:0;">${logoUrl}</div>
-                    </td>
-                    <td style="vertical-align:middle;text-align:right;">
-                      <span style="display:inline-block;font-size:11px;font-weight:500;color:#e0f2fe;padding:5px 10px;border-radius:999px;border:1px solid rgba(226,232,240,0.7);background:rgba(15,23,42,0.5);backdrop-filter:blur(8px);">
-                        Automated first response
-                      </span>
-                    </td>
-                  </tr>
-                </table>
+              <td style="padding:20px 28px 16px 28px;background:linear-gradient(135deg,#0ea5e9 0%,#0ea5e9 40%,#0f172a 100%);">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#e0f2fe;opacity:0.9;">Powered by</div>
+                <div style="font-size:22px;font-weight:800;color:#f9fafb;line-height:1.2;margin-top:2px;">Alex-IO</div>
+                <div style="margin-top:5px;font-size:12px;color:#e0f2fe;">
+                  Quote${quoteNumber ? ` &middot; <strong style="color:#f9fafb;">${quoteNumber}</strong>` : ""}
+                  &nbsp;&middot;&nbsp;
+                  <span style="text-transform:capitalize;">${statusLabel}</span>
+                </div>
+                <div style="display:none;">${logoUrl}</div>
               </td>
             </tr>
 
-            <!-- ══════════════════════════════════════════════ -->
-            <!-- SPECS SNAPSHOT (single-column, compact)        -->
-            <!-- ══════════════════════════════════════════════ -->
+            <!-- Intro copy -->
             <tr>
-              <td style="padding:16px 26px 0 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
-                  <tr>
-                    <td colspan="4" style="padding:8px 14px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));">
-                      Specs
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:8px 14px 8px 14px;width:25%;vertical-align:top;">
-                      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:3px;">Dimensions</div>
-                      <div style="font-size:13px;font-weight:600;color:#f9fafb;">${outsideSize}</div>
-                    </td>
-                    <td style="padding:8px 14px 8px 14px;width:15%;vertical-align:top;">
-                      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:3px;">Qty</div>
-                      <div style="font-size:13px;font-weight:600;color:#f9fafb;">${qty}</div>
-                    </td>
-                    <td style="padding:8px 14px 8px 14px;width:30%;vertical-align:top;">
-                      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:3px;">Material</div>
-                      <div style="font-size:13px;font-weight:600;color:#f9fafb;">${specsMaterialLabel}</div>
-                      ${matDensity !== "—" ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${matDensity}</div>` : ""}
-                    </td>
-                    <td style="padding:8px 14px 8px 14px;width:30%;vertical-align:top;">
-                      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:3px;">Construction</div>
-                      <div style="font-size:12px;color:#cbd5f5;line-height:1.5;">
-                        ${hasLayers
-                          ? `Layered (${layers.length} layers)`
-                          : "Single layer"}${skivingNote !== "Not specified" ? ` · Skiving: ${skivingNote}` : ""}
-                      </div>
-                    </td>
-                  </tr>
-                  ${cavityLabel !== "—" ? `<tr>
-                    <td colspan="4" style="padding:0 14px 8px 14px;border-top:1px solid #111827;">
-                      <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;">Cavities:&nbsp;</span>
-                      <span style="font-size:12px;color:#cbd5f5;">${cavityLabel}</span>
-                    </td>
-                  </tr>` : ""}
-                </table>
+              <td style="padding:24px 28px 0 28px;">
+                <p style="margin:0;font-size:15px;font-weight:600;color:#f9fafb;line-height:1.4;">Your foam packaging quote is ready.</p>
+                <p style="margin:10px 0 0 0;font-size:13px;color:#9ca3af;line-height:1.6;">
+                  Click below to view your full interactive quote — including specs, pricing, line items, and the layout editor where you can place cavity locations and sizes.
+                </p>
               </td>
             </tr>
 
-
-            <!-- ══════════════════════════════════════════════ -->
-            <!-- PRICING SUMMARY (unit price + subtotals)       -->
-            <!-- ══════════════════════════════════════════════ -->
-            ${(() => {
-              const unitPrice = pricing.total && specs.qty ? pricing.total / Number(specs.qty) : null;
-              const showGrand = grandTotalAmt != null && grandTotalAmt > 0;
-              const hasPrintingLines = (artSetupFeeAmt != null && artSetupFeeAmt > 0) || (printingUpchargeAmtVal != null && printingUpchargeAmtVal > 0);
-              if (!unitPrice && !showGrand) return "";
-              return `<tr>
-              <td style="padding:16px 26px 0 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
+            <!-- Key facts card -->
+            <tr>
+              <td style="padding:20px 28px 0 28px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:12px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
                   <tr>
-                    <td colspan="2" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
-                      Pricing summary
+                    <td style="padding:10px 16px;border-bottom:1px solid #1f2937;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;background:rgba(56,189,248,0.06);">
+                      Quote summary
                     </td>
                   </tr>
-                  ${unitPrice != null ? `<tr>
-                    <td style="padding:5px 12px;font-size:12px;font-weight:600;color:#e5e7eb;width:60%;">Primary unit price</td>
-                    <td style="padding:5px 12px;font-size:13px;font-weight:700;color:#f9fafb;text-align:right;">${fmtMoney(unitPrice)}</td>
-                  </tr>` : ""}
-                  ${foamSubtotalAmt != null ? `<tr>
-                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Foam subtotal</td>
-                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(foamSubtotalAmt)}</td>
-                  </tr>` : ""}
-                  ${packagingSubtotalAmt != null && packagingSubtotalAmt > 0 ? `<tr>
-                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Packaging subtotal</td>
-                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(packagingSubtotalAmt)}</td>
-                  </tr>` : ""}
-                  ${artSetupFeeAmt != null && artSetupFeeAmt > 0 ? `<tr>
-                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Art setup fee</td>
-                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(artSetupFeeAmt)}</td>
-                  </tr>` : ""}
-                  ${printingUpchargeAmtVal != null && printingUpchargeAmtVal > 0 ? `<tr>
-                    <td style="padding:5px 12px;font-size:12px;color:#9ca3af;">Printing upcharge${printingUpchargePctVal != null && printingUpchargePctVal > 0 ? ` (${printingUpchargePctVal}%)` : ""}</td>
-                    <td style="padding:5px 12px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(printingUpchargeAmtVal)}</td>
-                  </tr>` : ""}
-                  ${showGrand ? `<tr style="border-top:1px solid #1f2937;">
-                    <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#e5e7eb;">Total estimate (foam${packagingSubtotalAmt != null && packagingSubtotalAmt > 0 ? " + packaging" : ""}${hasPrintingLines ? " + printing" : ""})</td>
-                    <td style="padding:8px 12px;font-size:15px;font-weight:800;color:#f97316;text-align:right;">${fmtMoney(grandTotalAmt)}</td>
-                  </tr>` : `<tr style="border-top:1px solid #1f2937;">
-                    <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#e5e7eb;">Estimated foam subtotal</td>
-                    <td style="padding:8px 12px;font-size:15px;font-weight:800;color:#f97316;text-align:right;">${fmtMoney(pricing.total)}</td>
-                  </tr>`}
                   <tr>
-                    <td colspan="2" style="padding:4px 12px 10px 12px;font-size:11px;color:#6b7280;line-height:1.5;">
-                      Rough shipping estimate: ${fmtMoney((grandTotalAmt ?? foamSubtotalAmt ?? pricing.total ?? 0) * 0.1)} (10% of order; for planning only). Final billing may adjust if specs, quantities, or services change.
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>`;
-            })()}
-
-            <!-- ══════════════════════════════════════════════ -->
-            <!-- LINE ITEMS TABLE                               -->
-            <!-- ══════════════════════════════════════════════ -->
-            ${hasLineItems ? `<tr>
-              <td style="padding:16px 26px 0 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
-                  <tr>
-                    <td colspan="5" style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
-                      Line items
-                    </td>
-                  </tr>
-                  <!-- Column headers -->
-                  <tr style="background:rgba(15,23,42,0.5);">
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Item</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;">Dimensions (L×W×H in)</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;text-align:center;">Qty</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;text-align:right;">Unit price</td>
-                    <td style="padding:6px 10px;font-size:11px;font-weight:600;color:#9ca3af;border-bottom:1px solid #1f2937;text-align:right;">Line total</td>
-                  </tr>
-                  <!-- Section label: Foam materials -->
-                  ${lineItems.some(i => !i.isPackaging) ? `<tr>
-                    <td colspan="5" style="padding:6px 10px 3px 10px;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#38bdf8;border-bottom:1px solid #0f172a;">FOAM MATERIALS</td>
-                  </tr>` : ""}
-                  ${lineItems.filter(i => !i.isPackaging).map((item, idx) => `
-                  <tr style="${idx % 2 === 1 ? "background:rgba(15,23,42,0.5);" : ""}">
-                    <td style="padding:6px 10px;font-size:12px;color:#e5e7eb;border-bottom:1px solid #111827;">
-                      <div style="font-weight:${item.isIncluded ? "400" : "600"};">${item.label}</div>
-                      ${item.sublabel ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${item.sublabel}</div>` : ""}
-                    </td>
-                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;border-bottom:1px solid #111827;">${item.dims}</td>
-                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;text-align:center;border-bottom:1px solid #111827;">${item.qty}</td>
-                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;text-align:right;border-bottom:1px solid #111827;">${item.isIncluded ? "Included" : (item.unitPrice != null ? fmtMoney(item.unitPrice) : "—")}</td>
-                    <td style="padding:6px 10px;font-size:12px;font-weight:${item.isIncluded ? "400" : "600"};color:${item.isIncluded ? "#9ca3af" : "#e5e7eb"};text-align:right;border-bottom:1px solid #111827;">${item.isIncluded ? "Included" : (item.lineTotal != null ? fmtMoney(item.lineTotal) : "—")}</td>
-                  </tr>`).join("")}
-                  <!-- Section label: Packaging (if any) -->
-                  ${lineItems.some(i => i.isPackaging) ? `<tr>
-                    <td colspan="5" style="padding:6px 10px 3px 10px;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#a78bfa;border-bottom:1px solid #0f172a;border-top:1px solid #1f2937;">PACKAGING</td>
-                  </tr>
-                  ${lineItems.filter(i => i.isPackaging).map((item, idx) => `
-                  <tr style="${idx % 2 === 1 ? "background:rgba(15,23,42,0.5);" : ""}">
-                    <td style="padding:6px 10px;font-size:12px;color:#e5e7eb;border-bottom:1px solid #111827;">
-                      <div style="font-weight:600;">${item.label}</div>
-                      ${item.sublabel ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${item.sublabel}</div>` : ""}
-                    </td>
-                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;border-bottom:1px solid #111827;">${item.dims}</td>
-                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;text-align:center;border-bottom:1px solid #111827;">${item.qty}</td>
-                    <td style="padding:6px 10px;font-size:12px;color:#cbd5f5;text-align:right;border-bottom:1px solid #111827;">${item.unitPrice != null ? fmtMoney(item.unitPrice) : "—"}</td>
-                    <td style="padding:6px 10px;font-size:12px;font-weight:600;color:#e5e7eb;text-align:right;border-bottom:1px solid #111827;">${item.lineTotal != null ? fmtMoney(item.lineTotal) : "—"}</td>
-                  </tr>`).join("")}` : ""}
-                  <!-- Totals row -->
-                  <tr>
-                    <td colspan="4" style="padding:8px 10px;font-size:12px;font-weight:700;color:#e5e7eb;text-align:right;border-top:1px solid #1f2937;">Total quantity</td>
-                    <td style="padding:8px 10px;font-size:13px;font-weight:700;color:#f9fafb;text-align:right;border-top:1px solid #1f2937;">${specs.qty || "—"}</td>
-                  </tr>
-                  ${foamSubtotalAmt != null ? `<tr>
-                    <td colspan="4" style="padding:3px 10px;font-size:12px;color:#9ca3af;text-align:right;">Foam subtotal</td>
-                    <td style="padding:3px 10px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(foamSubtotalAmt)}</td>
-                  </tr>` : ""}
-                  ${packagingSubtotalAmt != null && packagingSubtotalAmt > 0 ? `<tr>
-                    <td colspan="4" style="padding:3px 10px;font-size:12px;color:#9ca3af;text-align:right;">Packaging subtotal</td>
-                    <td style="padding:3px 10px;font-size:12px;color:#cbd5f5;text-align:right;">${fmtMoney(packagingSubtotalAmt)}</td>
-                  </tr>` : ""}
-                  ${grandTotalAmt != null && grandTotalAmt > 0 ? `<tr>
-                    <td colspan="4" style="padding:6px 10px 8px 10px;font-size:13px;font-weight:700;color:#e5e7eb;text-align:right;">Estimated subtotal (foam + packaging)</td>
-                    <td style="padding:6px 10px 8px 10px;font-size:14px;font-weight:800;color:#f97316;text-align:right;">${fmtMoney(grandTotalAmt)}</td>
-                  </tr>` : ""}
-                </table>
-              </td>
-            </tr>` : ""}
-
-            <!-- ══════════════════════════════════════════════ -->
-            <!-- LAYER TEXT SUMMARY (no SVG/DXF downloads)     -->
-            <!-- ══════════════════════════════════════════════ -->
-            ${hasLayers ? `<tr>
-              <td style="padding:16px 26px 0 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
-                  <tr>
-                    <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
-                      Foam layout package
-                    </td>
-                  </tr>
-                  ${layoutNotes ? `<tr>
-                    <td style="padding:8px 12px 4px 12px;font-size:12px;color:#cbd5f5;line-height:1.5;">
-                      <span style="font-weight:600;color:#e5e7eb;">Notes:</span> ${layoutNotes}
-                    </td>
-                  </tr>` : ""}
-                  <tr>
-                    <td style="padding:8px 12px;">
+                    <td style="padding:14px 16px;">
                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                         <tr>
-                          <td style="padding:4px 0;font-size:11px;font-weight:600;color:#9ca3af;width:30%;">Layer</td>
-                          <td style="padding:4px 0;font-size:11px;font-weight:600;color:#9ca3af;width:25%;">Thickness</td>
-                          <td style="padding:4px 0;font-size:11px;font-weight:600;color:#9ca3af;width:25%;">Pocket depth</td>
-                          <td style="padding:4px 0;font-size:11px;font-weight:600;color:#9ca3af;">Material</td>
+                          <td style="width:33%;vertical-align:top;padding-right:12px;">
+                            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Dimensions</div>
+                            <div style="font-size:14px;font-weight:700;color:#f9fafb;">${outsideSize}</div>
+                          </td>
+                          <td style="width:14%;vertical-align:top;padding-right:12px;">
+                            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Qty</div>
+                            <div style="font-size:14px;font-weight:700;color:#f9fafb;">${qty}</div>
+                          </td>
+                          <td style="width:30%;vertical-align:top;padding-right:12px;">
+                            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Material</div>
+                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${specsMaterialLabel}</div>
+                            ${matDensity !== "—" ? `<div style="font-size:11px;color:#6b7280;margin-top:2px;">${matDensity}</div>` : ""}
+                          </td>
+                          <td style="width:23%;vertical-align:top;text-align:right;">
+                            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Est. total</div>
+                            <div style="font-size:16px;font-weight:800;color:#f97316;">${displayTotal != null ? fmtMoney(displayTotal) : "Pending"}</div>
+                            ${hasPackaging || hasPrinting ? `<div style="font-size:10px;color:#6b7280;margin-top:2px;">foam${hasPackaging ? " + pkg" : ""}${hasPrinting ? " + print" : ""}</div>` : ""}
+                          </td>
                         </tr>
-                        ${layers.map(layer => `<tr>
-                          <td style="padding:4px 0;font-size:12px;color:#e5e7eb;border-top:1px solid #111827;">Layer ${layer.index}/${layer.total}</td>
-                          <td style="padding:4px 0;font-size:12px;color:#cbd5f5;border-top:1px solid #111827;">${layer.thickness_in != null ? `${layer.thickness_in} in` : "—"}</td>
-                          <td style="padding:4px 0;font-size:12px;color:#cbd5f5;border-top:1px solid #111827;">${layer.pocket_depth_in != null ? `${layer.pocket_depth_in} in` : "—"}</td>
-                          <td style="padding:4px 0;font-size:12px;color:#cbd5f5;border-top:1px solid #111827;">${layer.materialName || "—"}</td>
-                        </tr>`).join("")}
                       </table>
                     </td>
                   </tr>
                 </table>
               </td>
-            </tr>` : ""}
+            </tr>
 
-            <!-- ══════════════════════════════════════════════ -->
-            <!-- DUAL CTA: View Quote Page + Open Layout Editor -->
-            <!-- ══════════════════════════════════════════════ -->
-            ${(quotePageUrl || layoutUrl) ? `<tr>
-              <td style="padding:16px 26px 0 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
-                  <tr>
-                    <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:12px;font-weight:600;color:#e5e7eb;background:linear-gradient(90deg,rgba(56,189,248,0.18),rgba(15,23,42,0.85));border-radius:14px 14px 0 0;">
-                      Next steps
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:10px 12px 14px 12px;font-size:12px;color:#e5e7eb;line-height:1.6;">
-                      ${quotePageUrl && layoutUrl
-                        ? `<p style="margin:0 0 10px 0;">View your full interactive quote, or open the layout editor to place cavity locations, sizes, and orientation.</p>
-                           <table role="presentation" cellspacing="0" cellpadding="0">
-                             <tr>
-                               <td style="padding-right:10px;">
-                                 <a href="${quotePageUrl}" style="display:inline-block;padding:9px 18px;border-radius:999px;border:1px solid #4b5563;background:#1f2937;color:#e5e7eb;font-size:12px;font-weight:600;text-decoration:none;">View quote</a>
-                               </td>
-                               <td>
-                                 <a href="${layoutUrl}" style="display:inline-block;padding:9px 18px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">Open layout editor</a>
-                               </td>
-                             </tr>
-                           </table>`
-                        : quotePageUrl
-                          ? `<p style="margin:0 0 10px 0;">View your full interactive quote below.</p>
-                             <a href="${quotePageUrl}" style="display:inline-block;padding:9px 18px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">View quote</a>`
-                          : `<p style="margin:0 0 10px 0;">Open the layout editor to place the cavities (size, location, and orientation).</p>
-                             <a href="${layoutUrl}" style="display:inline-block;padding:9px 18px;border-radius:999px;border:1px solid #0ea5e9;background:#0ea5e9;color:#0f172a;font-size:12px;font-weight:600;text-decoration:none;">Open layout editor</a>`}
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>` : !layoutUrl ? `<tr>
-              <td style="padding:0 26px 18px 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
-                  <tr>
-                    <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.7;">
-                      <p style="margin:0;">Once we finalize the details, I'll send over a formal quote and lead time.</p>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>` : ""}
-
-            <!-- Bug / feedback card -->
+            <!-- Primary CTA -->
             <tr>
-              <td style="padding:16px 26px 24px 26px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:14px;border:1px solid #1f2937;background:#020617;">
+              <td style="padding:28px 28px 0 28px;text-align:center;">
+                ${quotePageUrl
+                  ? `<a href="${quotePageUrl}" style="display:inline-block;padding:15px 40px;border-radius:999px;background:#0ea5e9;color:#0f172a;font-size:15px;font-weight:700;text-decoration:none;letter-spacing:0.01em;">View your full quote &rarr;</a>`
+                  : ""}
+              </td>
+            </tr>
+
+            <!-- Secondary: layout editor -->
+            ${layoutUrl ? `<tr>
+              <td style="padding:14px 28px 0 28px;text-align:center;">
+                <p style="margin:0;font-size:12px;color:#6b7280;">
+                  Ready to place cavity locations?&nbsp;
+                  <a href="${layoutUrl}" style="color:#38bdf8;text-decoration:none;font-weight:600;">Open the layout editor &rarr;</a>
+                </p>
+              </td>
+            </tr>` : ""}
+
+            <!-- Divider -->
+            <tr><td style="padding:24px 28px 0 28px;"><div style="border-top:1px solid #1f2937;"></div></td></tr>
+
+            <!-- What's on the quote page -->
+            <tr>
+              <td style="padding:20px 28px 0 28px;">
+                <p style="margin:0 0 10px 0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;">Your interactive quote includes</p>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                   <tr>
-                    <td style="padding:10px 12px;font-size:12px;color:#e5e7eb;line-height:1.7;">
-                      <p style="margin:0 0 6px 0;">
-                        See anything that looks off? Please help us improve your experience with Alex-IO.
-                      </p>
-                      <p style="margin:0;">
-                        <a href="mailto:sales@alex-io.com?subject=Alex-IO%20quote%20bug%20or%20feedback" style="display:inline-block;margin-top:8px;padding:6px 14px;border-radius:999px;border:1px solid #4b5563;background:#111827;color:#e5e7eb;font-size:11px;font-weight:500;text-decoration:none;">
-                          Report a bug or glitch
-                        </a>
-                      </p>
+                    <td style="width:50%;vertical-align:top;padding-right:12px;padding-bottom:8px;">
+                      <div style="font-size:12px;color:#cbd5f5;">&#10003;&nbsp; Full specs &amp; construction details</div>
+                    </td>
+                    <td style="width:50%;vertical-align:top;padding-bottom:8px;">
+                      <div style="font-size:12px;color:#cbd5f5;">&#10003;&nbsp; Itemized line items with pricing</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="vertical-align:top;padding-right:12px;padding-bottom:8px;">
+                      <div style="font-size:12px;color:#cbd5f5;">&#10003;&nbsp; Packaging &amp; printing breakdown</div>
+                    </td>
+                    <td style="vertical-align:top;padding-bottom:8px;">
+                      <div style="font-size:12px;color:#cbd5f5;">&#10003;&nbsp; Interactive foam layout editor</div>
                     </td>
                   </tr>
                 </table>
               </td>
             </tr>
 
+            <!-- Feedback -->
+            <tr>
+              <td style="padding:20px 28px 28px 28px;">
+                <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.6;">
+                  See anything that looks off?&nbsp;
+                  <a href="mailto:sales@alex-io.com?subject=Alex-IO%20quote%20question" style="color:#38bdf8;text-decoration:none;">Reply to this email</a>
+                  &nbsp;and we'll get it sorted.
+                </p>
+              </td>
+            </tr>
+
           </table>
 
-          <!-- Footer / disclaimer -->
-          <div style="max-width:680px;margin-top:10px;padding:0 26px;font-size:11px;color:#9ca3af;">
-            <p style="margin:0;">
-              This print view mirrors the core specs of your emailed quote. Actual charges may differ if specs or quantities change or if additional services are requested.
-            </p>
+          <!-- Footer -->
+          <div style="max-width:600px;margin-top:12px;padding:0 28px;font-size:11px;color:#4b5563;text-align:center;">
+            <p style="margin:0;">This quote was generated by Alex-IO. A human will review and confirm before anything is cut. Prices are estimates and may change if specs or quantities are adjusted.</p>
           </div>
         </td>
       </tr>
