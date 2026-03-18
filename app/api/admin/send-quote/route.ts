@@ -127,8 +127,13 @@ export async function POST(req: NextRequest) {
 
   try {
     // 1) Load quote + items + facts (single source of truth)
+    // IMPORTANT: forward the session cookie so the print route can authenticate.
+    const cookieHeader = req.headers.get("cookie") || "";
     const printUrl = absoluteUrl(req, `/api/quote/print?quote_no=${encodeURIComponent(quoteNo)}`);
-    const printRes = await fetch(printUrl, { cache: "no-store" });
+    const printRes = await fetch(printUrl, {
+      cache: "no-store",
+      headers: cookieHeader ? { cookie: cookieHeader } : {},
+    });
     const printJson = (await printRes.json()) as PrintResp;
 
     if (!printRes.ok || !printJson.ok) {
@@ -180,7 +185,10 @@ export async function POST(req: NextRequest) {
     const calcUrl = absoluteUrl(req, "/api/quotes/calc");
     const calcRes = await fetch(calcUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(cookieHeader ? { cookie: cookieHeader } : {}),
+      },
       cache: "no-store",
       body: JSON.stringify({
         length_in: L,
@@ -323,9 +331,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Quote page URL ────────────────────────────────────────────────────
+    // ── Quote page URL — uses search param format (/quote?quote_no=...)  ──
     const _baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
-    const quotePageUrl = `${_baseUrl}/quote/${encodeURIComponent(quoteNo)}`;
+    const quotePageUrl = `${_baseUrl}/quote?quote_no=${encodeURIComponent(quoteNo)}`;
 
     // ── Totals from print route (authoritative — don't recalculate) ──────
     const printFoamSubtotal = typeof (printJson as any).foamSubtotal === "number"

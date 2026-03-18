@@ -578,7 +578,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const _base2 = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
   const quotePageUrl =
     input.quotePageUrl ||
-    (quoteNumber ? `${_base2}/quote/${encodeURIComponent(quoteNumber)}` : null);
+    (quoteNumber ? `${_base2}/quote?quote_no=${encodeURIComponent(quoteNumber)}` : null);
 
   // Rich line items / totals (from print route)
   const lineItems = Array.isArray(input.lineItems) ? input.lineItems : [];
