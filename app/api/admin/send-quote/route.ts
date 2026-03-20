@@ -12,7 +12,6 @@ import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
-import { absoluteUrl } from "@/app/lib/internalFetch";
 import { renderQuoteEmail, type TemplateLineItem, type TemplateLayoutLayer } from "@/app/lib/email/quoteTemplate";
 import { computePricing } from "@/app/lib/pricing/compute";
 
@@ -392,29 +391,73 @@ export async function POST(req: NextRequest) {
       quotePageUrl,
     });
 
-    // 13) Send via MS Graph
-    const sendUrl = absoluteUrl(req, "/api/ms/send");
-    const sendRes = await fetch(sendUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        to, subject, html,
-        replyTo: [process.env.MS_MAILBOX_FROM || ""].filter(Boolean),
-        quoteNo,
-      }),
-    });
+    // 13) Send directly via MS Graph (no internal HTTP fetch)
+    const TENANT = process.env.MS_TENANT_ID!;
+    const CLIENT_ID = process.env.MS_CLIENT_ID!;
+    const CLIENT_SECRET = process.env.MS_CLIENT_SECRET!;
+    const FROM = process.env.MS_MAILBOX_FROM!;
 
-    const sendCt = sendRes.headers.get("content-type") || "";
-    const sendJson = sendCt.includes("application/json")
-      ? await sendRes.json()
-      : { ok: sendRes.ok, raw: await sendRes.text() };
+    // Get OAuth token
+    const tokenRes = await fetch(
+      `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          grant_type: "client_credentials",
+          scope: "https://graph.microsoft.com/.default",
+        }),
+      }
+    );
+    if (!tokenRes.ok) {
+      const t = await tokenRes.text().catch(() => "");
+      return json({ ok: false, error: "ms_token_failed", detail: `${tokenRes.status} ${t}` }, 500);
+    }
+    const accessToken = (await tokenRes.json()).access_token as string;
 
-    if (!sendRes.ok || !sendJson?.ok) {
-      return json({ ok: false, error: "ms_send_failed", status: sendRes.status, detail: sendJson }, 500);
+    // Send via Graph
+    const graphRes = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(FROM)}/sendMail`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: {
+            subject,
+            toRecipients: [{ emailAddress: { address: to } }],
+            from: { emailAddress: { address: FROM } },
+            replyTo: [process.env.MS_MAILBOX_FROM || ""].filter(Boolean)
+              .map(a => ({ emailAddress: { address: a } })),
+            body: { contentType: "HTML", content: html },
+          },
+          saveToSentItems: true,
+        }),
+      }
+    );
+
+    const graphText = await graphRes.text().catch(() => "");
+    console.log(`[send-quote] graph status=${graphRes.status} to=${to}`);
+
+    if (graphRes.status === 202 || graphRes.ok) {
+      // Flip quote status -> sent
+      try {
+        await q(
+          `UPDATE quotes SET status = 'sent'
+           WHERE quote_no = $1 AND status IN ('draft', 'applied', 'revised')`,
+          [quoteNo],
+        );
+      } catch (e) {
+        console.error(`[send-quote] markSent failed: ${e}`);
+      }
+      return json({ ok: true, quoteNo, to, subject, revision: rev });
     }
 
-    return json({ ok: true, sent: sendJson.sent || null, quoteNo, to, subject, revision: rev });
+    return json({ ok: false, error: "graph_send_failed", status: graphRes.status, detail: graphText }, 500);
 
   } catch (e: any) {
     console.error(`[send-quote] fatal quoteNo=${quoteNo}`, e);
