@@ -14,6 +14,7 @@ import { loadFacts } from "@/app/lib/memory";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
 import { absoluteUrl } from "@/app/lib/internalFetch";
 import { renderQuoteEmail, type TemplateLineItem, type TemplateLayoutLayer } from "@/app/lib/email/quoteTemplate";
+import { computePricing } from "@/app/lib/pricing/compute";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -85,37 +86,6 @@ function isPackagingRow(notes: string | null): boolean {
 function isNonWholeInch(v: any): boolean {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 && Math.abs(n - Math.round(n)) > 0.01;
-}
-
-async function priceViaCalc(
-  req: NextRequest,
-  params: { L: number; W: number; H: number; qty: number; material_id: number; force_skived?: boolean; tenant_id?: any }
-): Promise<{ unit: number; total: number; raw: any }> {
-  const url = absoluteUrl(req, `/api/quotes/calc`);
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-    body: JSON.stringify({
-      length_in: params.L,
-      width_in: params.W,
-      height_in: params.H,
-      material_id: params.material_id,
-      qty: params.qty,
-      cavities: [],
-      round_to_bf: false,
-      force_skived: params.force_skived === true,
-      tenant_id: params.tenant_id ?? null,
-    }),
-  });
-  const j = await r.json().catch(() => ({} as any));
-  const total = Number(j?.result?.total ?? j?.result?.price_total ?? j?.total ?? 0);
-  const unit = params.qty > 0 ? total / params.qty : 0;
-  return {
-    unit: Number.isFinite(unit) ? unit : 0,
-    total: Number.isFinite(total) ? total : 0,
-    raw: j?.result ?? {},
-  };
 }
 
 export async function POST(req: NextRequest) {
@@ -213,7 +183,22 @@ export async function POST(req: NextRequest) {
       }
 
       const forceSkive = !skiveConsumed && hasLayerRows && layeredSkiveRequired;
-      const priced = await priceViaCalc(req, { L, W, H, qty, material_id: mid, force_skived: forceSkive, tenant_id: user.tenant_id });
+      let priced: { unit: number; total: number; raw: any };
+      try {
+        const result = await computePricing({
+          L, W, H, qty, material_id: mid,
+          force_skived: forceSkive,
+          tenant_id: user.tenant_id,
+        });
+        priced = {
+          unit: result.total / qty,
+          total: result.total,
+          raw: result,
+        };
+      } catch (e: any) {
+        console.error(`[send-quote] computePricing failed for item ${it.id}: ${e?.message}`);
+        priced = { unit: 0, total: 0, raw: {} };
+      }
       if (forceSkive) skiveConsumed = true;
       if (!primaryCalcCaptured) { primaryCalcRaw = priced.raw; primaryCalcCaptured = true; }
 
