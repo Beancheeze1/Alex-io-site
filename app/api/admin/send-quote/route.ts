@@ -152,6 +152,11 @@ export async function POST(req: NextRequest) {
     const items = Array.isArray(printJson.items) ? printJson.items : [];
     const facts = (printJson as any).facts || {};
 
+    // DEBUG: log what the print route actually returned so we can diagnose pricing gaps
+    console.log(`[send-quote] printJson keys:`, Object.keys(printJson as any));
+    console.log(`[send-quote] foamSubtotal=${(printJson as any).foamSubtotal} packagingSubtotal=${(printJson as any).packagingSubtotal} grandTotal=${(printJson as any).grandTotal} printingUpcharge=${(printJson as any).printingUpcharge} artSetupFee=${(printJson as any).artSetupFee} packagingLines=${JSON.stringify((printJson as any).packagingLines)}`);
+    console.log(`[send-quote] printRes.status=${printRes.status} cookieHeader.length=${cookieHeader.length}`);
+
     const primary = items[0] || null;
     if (!primary) {
       return json({ ok: false, error: "no_items_on_quote" }, 400);
