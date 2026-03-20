@@ -18,7 +18,6 @@
 "use client";
 
 import * as React from "react";
-import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 import { buildOuterOutlinePolyline } from "@/app/lib/layout/outline";
 import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
 
@@ -1809,7 +1808,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
     }
   }, [quoteNoValue, revisionBusy]);
 
-    // NEW: Admin-only send to customer (Graph -> /api/ms/send)
+  // Delegates to /api/admin/send-quote which pulls all data directly from DB
+  // (items, packaging lines, printing upcharge) — no client-side rendering.
   const handleSendToCustomer = React.useCallback(async () => {
     if (!quoteNoValue) return;
     if (sendBusy) return;
@@ -1820,148 +1820,35 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
       return;
     }
 
-    if (!primaryItem) {
-      setSendError("No primary line item found for this quote.");
-      return;
-    }
-
-       // Build a clean subject line (include revision)
-    const rev = (revisionValue || "").trim();
-    const subj = `Quote ${quoteNoValue}${rev ? " " + rev : ""}`;
-
-    // NEW: Confirm before sending (prevents accidental double-send)
-    // If already sent, require an explicit re-send confirm.
     const statusRaw = (quoteState?.status || "").toString().trim().toLowerCase();
     const alreadySent = statusRaw === "sent" || statusRaw.includes("sent");
-
     const confirmMsg = alreadySent
       ? `This quote is already marked SENT.\n\nRe-send the quote email to:\n${to}\n\nPress OK to re-send, or Cancel to abort.`
       : `Send this quote email to:\n${to}\n\nPress OK to send, or Cancel to abort.`;
 
     const ok = typeof window !== "undefined" ? window.confirm(confirmMsg) : true;
-    if (!ok) {
-      // Do nothing (no send)
-      return;
-    }
+    if (!ok) return;
 
     setSendBusy(true);
     setSendError(null);
     setSendOkAt(null);
 
-
     try {
-      // 1) Get authoritative pricing snapshot from /api/quotes/calc (same shape used by orchestrate)
-      const L = Number(primaryItem.length_in);
-      const W = Number(primaryItem.width_in);
-      const H = Number(primaryItem.height_in);
-      const qty = Number(primaryItem.qty);
-      const material_id = Number(primaryItem.material_id);
-
-      let calcResult: any = null;
-
-      if (Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H) && Number.isFinite(qty) && Number.isFinite(material_id)) {
-        const r = await fetch(`/api/quotes/calc?t=${Date.now()}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({
-            length_in: L,
-            width_in: W,
-            height_in: H,
-            material_id,
-            qty,
-            cavities: [],
-            round_to_bf: false,
-          }),
-        });
-
-        const j = await r.json().catch(() => ({} as any));
-        if (r.ok && j?.ok && j?.result) {
-          calcResult = j.result;
-        }
-      }
-
-      // 2) Build email HTML (template expects TemplateInput)
-      const density = primaryItem.density_lb_ft3 != null ? Number(primaryItem.density_lb_ft3) : null;
-      const density_pcf = density != null && Number.isFinite(density) ? density : null;
-
-      const totalFromStored = (() => {
-        // fallback to stored subtotal for safety
-        const n = Number(subtotal);
-        return Number.isFinite(n) ? n : 0;
-      })();
-
-      const total =
-        calcResult && typeof calcResult.total === "number" && Number.isFinite(calcResult.total) ? calcResult.total : totalFromStored;
-
-      const used_min_charge =
-        calcResult && typeof calcResult.used_min_charge === "boolean" ? calcResult.used_min_charge : null;
-
-      const html = renderQuoteEmail({
-        customerLine: `${quoteState?.customer_name || "Customer"}${quoteState?.email ? " • " + quoteState.email : ""}`,
-        quoteNumber: quoteNoValue,
-        status: quoteState?.status || "Draft",
-        specs: {
-          L_in: Number(primaryItem.length_in),
-          W_in: Number(primaryItem.width_in),
-          H_in: Number(primaryItem.height_in),
-          qty: primaryItem.qty ?? null,
-          density_pcf,
-          foam_family: primaryItem.material_family ?? null,
-          thickness_under_in: null,
-          color: null,
-          cavityCount: null,
-          cavityDims: [],
-        },
-        material: {
-          name: primaryItem.material_name || `Material #${primaryItem.material_id}`,
-          density_lbft3: density_pcf,
-          kerf_pct: calcResult?.kerf_pct ?? primaryItem?.pricing_meta?.kerf_pct ?? null,
-          min_charge: calcResult?.min_charge ?? primaryItem?.pricing_meta?.min_charge ?? null,
-        },
-        pricing: {
-          total,
-          piece_ci: calcResult?.piece_ci ?? null,
-          order_ci: calcResult?.order_ci ?? null,
-          order_ci_with_waste: calcResult?.order_ci_with_waste ?? null,
-          used_min_charge,
-          raw: calcResult ?? null,
-          price_breaks: null,
-        },
-        missing: [],
-        facts: {
-          revision: rev || null,
-        },
-      });
-
-      // 3) Send via Graph wrapper route (already flips quotes.status='sent' server-side when quoteNo is provided)
-      const res = await fetch(`/api/ms/send?t=${Date.now()}`, {
+      const res = await fetch(`/api/admin/send-quote?t=${Date.now()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({
-          to,
-          subject: subj,
-          html,
-          quoteNo: quoteNoValue,
-        }),
+        body: JSON.stringify({ quoteNo: quoteNoValue }),
       });
 
-      const ct = res.headers.get("content-type") || "";
-      const j = ct.includes("application/json") ? await res.json().catch(() => ({} as any)) : await res.text();
+      const j = await res.json().catch(() => ({} as any));
 
-      if (!res.ok || !j || (typeof j === "object" && j.ok === false)) {
-        const msg =
-          typeof j === "string"
-            ? j
-            : j?.message || j?.error || `Send failed (HTTP ${res.status})`;
-        setSendError(msg);
+      if (!res.ok || j?.ok === false) {
+        setSendError(j?.error || j?.detail || `Send failed (HTTP ${res.status})`);
         return;
       }
 
       setSendOkAt(new Date().toLocaleString());
-
-      // Refresh quote status pill
       setRefreshTick((x) => x + 1);
     } catch (e: any) {
       console.error("Admin: send-to-customer failed:", e);
@@ -1969,7 +1856,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
     } finally {
       setSendBusy(false);
     }
-  }, [quoteNoValue, sendBusy, quoteState, primaryItem, subtotal, revisionValue]);
+  }, [quoteNoValue, sendBusy, quoteState]);
 
   // NEW: Admin-only handler to load previous layout packages
   const handleLoadPreviousLayout = React.useCallback(
