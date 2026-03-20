@@ -135,13 +135,18 @@ export async function POST(req: NextRequest) {
 
   try {
     // 1) Load quote header directly from DB
-    const quote = await one<QuoteRow>(
-      `SELECT id, quote_no, customer_name, email, phone, status, created_at
-       FROM quotes
-       WHERE quote_no = $1 AND tenant_id = $2
-       LIMIT 1`,
-      [quoteNo, user.tenant_id],
-    );
+    let quote: QuoteRow | null;
+    try {
+      quote = await one<QuoteRow>(
+        `SELECT id, quote_no, customer_name, email, phone, status, created_at
+         FROM quotes
+         WHERE quote_no = $1 AND tenant_id = $2
+         LIMIT 1`,
+        [quoteNo, user.tenant_id],
+      );
+    } catch (e: any) {
+      return json({ ok: false, error: "db_quote_lookup_failed", detail: String(e?.message || e) }, 500);
+    }
     if (!quote) return json({ ok: false, error: "quote_not_found" }, 404);
 
     const to = (typeof body.to === "string" && body.to.trim())
@@ -150,23 +155,34 @@ export async function POST(req: NextRequest) {
     if (!to) return json({ ok: false, error: "missing_customer_email" }, 400);
 
     // 2) Load facts from KV
-    const facts: any = (await loadFacts(quoteNo)) || {};
+    let facts: any = {};
+    try {
+      facts = (await loadFacts(quoteNo)) || {};
+    } catch (e: any) {
+      // Non-fatal — facts just won't be available
+      console.error(`[send-quote] loadFacts failed: ${e?.message || e}`);
+    }
 
     // 3) Load quote items from DB
-    const itemsRaw = await q<ItemRow>(
-      `SELECT qi.id, qi.quote_id,
-              qi.length_in, qi.width_in, qi.height_in,
-              qi.qty, qi.material_id,
-              m.name as material_name,
-              m.material_family,
-              m.density_lb_ft3,
-              qi.notes
-       FROM quote_items qi
-       LEFT JOIN materials m ON m.id = qi.material_id
-       WHERE qi.quote_id = $1
-       ORDER BY qi.id ASC`,
-      [quote.id],
-    );
+    let itemsRaw: ItemRow[] = [];
+    try {
+      itemsRaw = await q<ItemRow>(
+        `SELECT qi.id, qi.quote_id,
+                qi.length_in, qi.width_in, qi.height_in,
+                qi.qty, qi.material_id,
+                m.name as material_name,
+                m.material_family,
+                m.density_lb_ft3,
+                qi.notes
+         FROM quote_items qi
+         LEFT JOIN materials m ON m.id = qi.material_id
+         WHERE qi.quote_id = $1
+         ORDER BY qi.id ASC`,
+        [quote.id],
+      );
+    } catch (e: any) {
+      return json({ ok: false, error: "db_items_failed", detail: String(e?.message || e) }, 500);
+    }
 
     // 4) Price each billable foam item
     type PricedItem = ItemRow & { price_unit_usd: number | null; price_total_usd: number | null };
@@ -205,16 +221,21 @@ export async function POST(req: NextRequest) {
     }
 
     // 5) Load packaging lines directly from DB
-    const packagingLines = await q<PkgRow>(
-      `SELECT qbs.id, qbs.sku, qbs.qty,
-              qbs.unit_price_usd, qbs.extended_price_usd,
-              b.vendor, b.style, b.description,
-              b.inside_length_in, b.inside_width_in, b.inside_height_in
-       FROM quote_box_selections qbs
-       JOIN boxes b ON b.id = qbs.box_id
-       WHERE qbs.quote_id = $1`,
-      [quote.id],
-    );
+    let packagingLines: PkgRow[] = [];
+    try {
+      packagingLines = await q<PkgRow>(
+        `SELECT qbs.id, qbs.sku, qbs.qty,
+                qbs.unit_price_usd, qbs.extended_price_usd,
+                b.vendor, b.style, b.description,
+                b.inside_length_in, b.inside_width_in, b.inside_height_in
+         FROM quote_box_selections qbs
+         JOIN boxes b ON b.id = qbs.box_id
+         WHERE qbs.quote_id = $1`,
+        [quote.id],
+      );
+    } catch (e: any) {
+      return json({ ok: false, error: "db_packaging_failed", detail: String(e?.message || e) }, 500);
+    }
 
     console.log(`[send-quote] quoteNo=${quoteNo} items=${items.length} packagingLines=${packagingLines.length}`);
 
@@ -228,7 +249,12 @@ export async function POST(req: NextRequest) {
       (s, l) => s + (Number(l.extended_price_usd) || 0), 0
     );
 
-    const settings = await getPricingSettings(user.tenant_id);
+    let settings: any;
+    try {
+      settings = await getPricingSettings(user.tenant_id);
+    } catch (e: any) {
+      return json({ ok: false, error: "settings_failed", detail: String(e?.message || e) }, 500);
+    }
     const isPrinted = !!(facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true);
     const artSetupFee = isPrinted ? Number(settings.printing_upcharge_usd || 0) : 0;
     const printingUpchargePct = isPrinted ? Number(settings.printing_upcharge_pct || 0) : 0;

@@ -1844,7 +1844,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
       const j = await res.json().catch(() => ({} as any));
 
       if (!res.ok || j?.ok === false) {
-        setSendError(j?.error || j?.detail || `Send failed (HTTP ${res.status})`);
+        const detail = j?.detail ? ` (${j.detail})` : "";
+        setSendError((j?.error || `Send failed (HTTP ${res.status})`) + detail);
         return;
       }
 
