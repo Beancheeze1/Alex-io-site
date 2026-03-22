@@ -384,9 +384,8 @@ function drawBlockOutline(page:PDFPage, x:number, y:number, w:number, h:number, 
     !layer.roundCorners &&
     layer.cropCorners                        // BUG FIX: only chamfer this layer if it explicitly sets cropCorners
   ) {
-    // Chamfer size: use block.chamferIn, doubled to match visual scale of the UI preview.
-    // (The PDF scale factor compresses the chamfer visually, so we compensate with 2×.)
-    const chamferIn = (block.chamferIn ?? 1) * 2;
+    // Chamfer size: use block.chamferIn directly (in inches); 1 = 1" chamfer.
+    const chamferIn = (block.chamferIn ?? 1);
     if (Number.isFinite(chamferIn) && chamferIn > 0) {
       // Use a single uniform scale (minimum of X and Y) so chamfer is always 45°.
       const scale = Math.min(w / block.lengthIn, h / block.widthIn);

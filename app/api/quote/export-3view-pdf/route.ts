@@ -192,7 +192,11 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
         const cavs = layerData?.cavities || [];
 
         for (const cav of cavs) {
-          const shape = (cav.shape || "rect").toLowerCase();
+          // Normalize shape to canonical camelCase — toLowerCase alone breaks "roundedRect"
+          const shapeLower = (cav.shape || "rect").toLowerCase();
+          const shape = shapeLower === "roundedrect" ? "roundedRect"
+                      : shapeLower === "roundrect"   ? "roundedRect"
+                      : shapeLower;
           const x = Number(cav.x || 0);
           const y = Number(cav.y || 0);
           const lengthIn = Number(cav.lengthIn || cav.length_in || 0);
@@ -239,7 +243,11 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
 
       for (let i = 0; i < cavs.length; i++) {
         const cav = cavs[i];
-        const shape = (cav.shape || "rect").toLowerCase();
+        // Normalize shape to canonical camelCase — toLowerCase alone breaks "roundedRect"
+        const shapeLower = (cav.shape || "rect").toLowerCase();
+        const shape = shapeLower === "roundedrect" ? "roundedRect"
+                    : shapeLower === "roundrect"   ? "roundedRect"
+                    : shapeLower;
         const x = Number(cav.x || 0);
         const y = Number(cav.y || 0);
         const lengthIn = Number(cav.lengthIn || cav.length_in || 0);
