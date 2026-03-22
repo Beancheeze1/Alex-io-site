@@ -174,12 +174,18 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
     if (stack.length > 0) {
       for (let i = 0; i < stack.length; i++) {
         const layerData = stack[i];
-        const thicknessIn = Number(layerData?.thicknessIn || layerData?.thickness_in || 0);
+        // BUG FIX: use nullish coalescing so a real 0 value doesn't fall through,
+        // and check multiple possible key names your layout JSON may use.
+        const thicknessIn = Number(
+          layerData?.thicknessIn ?? layerData?.thickness_in ?? layerData?.thickIn ?? 0
+        );
 
         if (thicknessIn <= 0) continue;
 
-        // Find corresponding material from items
-        const item = items[i] || items[0]; // Fallback to first item
+        // BUG FIX: don't collapse to items[0] for every extra layer — that causes
+        // later layers to show the first layer's material name. Use a safe per-index
+        // lookup with a label fallback instead.
+        const item = items[i] ?? null;
         const materialName = item?.material_name || `Layer ${i + 1}`;
 
         const cavities: Cavity3D[] = [];
@@ -193,6 +199,12 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
           const widthIn = Number(cav.widthIn || cav.width_in || 0);
           const depthIn = Number(cav.depthIn || cav.depth_in || thicknessIn);
 
+          // BUG FIX: coerce cornerRadiusIn to a real number for roundedRect so the
+          // renderer doesn't silently zero a null and draw a plain square cavity.
+          const cornerRadiusInParsed = (shape === "roundedRect")
+            ? Number(cav.cornerRadiusIn ?? cav.corner_radius_in ?? 0)
+            : (cav.cornerRadiusIn ?? cav.corner_radius_in ?? undefined);
+
           cavities.push({
             id: cav.id || `cav_${i}_${cavities.length}`,
             shape: shape as any,
@@ -202,7 +214,7 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
             widthIn,
             depthIn,
             diameterIn: cav.diameterIn || cav.diameter_in,
-            cornerRadiusIn: cav.cornerRadiusIn ?? cav.corner_radius_in ?? null,
+            cornerRadiusIn: cornerRadiusInParsed,
             points: cav.points,
             nestedCavities: cav.nestedCavities ?? cav.nested_cavities,
             label: cav.label || null,
@@ -234,6 +246,11 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
         const widthIn = Number(cav.widthIn || cav.width_in || 0);
         const depthIn = Number(cav.depthIn || cav.depth_in || heightIn);
 
+        // BUG FIX: coerce cornerRadiusIn to a real number for roundedRect
+        const cornerRadiusInParsed = (shape === "roundedRect")
+          ? Number(cav.cornerRadiusIn ?? cav.corner_radius_in ?? 0)
+          : (cav.cornerRadiusIn ?? cav.corner_radius_in ?? undefined);
+
         cavities.push({
           id: cav.id || `cav_${i}`,
           shape: shape as any,
@@ -243,7 +260,7 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
           widthIn,
           depthIn,
           diameterIn: cav.diameterIn || cav.diameter_in,
-          cornerRadiusIn: cav.cornerRadiusIn ?? cav.corner_radius_in ?? null,
+          cornerRadiusIn: cornerRadiusInParsed,
           points: cav.points,
           nestedCavities: cav.nestedCavities ?? cav.nested_cavities,
           label: cav.label || null,

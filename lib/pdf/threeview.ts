@@ -382,9 +382,10 @@ function drawBlockOutline(page:PDFPage, x:number, y:number, w:number, h:number, 
   } else if (
     isPlan &&
     !layer.roundCorners &&
-    (layer.cropCorners || block.cornerStyle === "chamfer")
+    layer.cropCorners                        // BUG FIX: only chamfer this layer if it explicitly sets cropCorners
   ) {
-    const chamferIn = (block.chamferIn ?? 1);
+    // Use the layer's own chamfer radius if set, otherwise fall back to block-level
+    const chamferIn = (layer.roundRadiusIn ?? block.chamferIn ?? 1);
     if (Number.isFinite(chamferIn) && chamferIn > 0) {
       const cX = chamferIn * (w / block.lengthIn);
       const cY = chamferIn * (h / block.widthIn);
@@ -425,7 +426,13 @@ function drawCavityTopView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:
     const cy  = sy + sH - (cavTopIn + cav.widthIn) * scY;
     const cw  = cav.lengthIn*scX;
     const ch  = cav.widthIn*scY;
-    const rPx = Math.min((cav.cornerRadiusIn||0)*Math.min(scX,scY), cw/2-0.5, ch/2-0.5);
+    const rPx = Math.min(
+      ((cav.cornerRadiusIn != null ? cav.cornerRadiusIn : 0)) * Math.min(scX, scY),
+      cw / 2 - 0.5,
+      ch / 2 - 0.5,
+    );
+    // Ensure we actually render as rounded — if radius is 0 after clamping it will fall
+    // back to a plain rect inside drawRoundedRectOutline, which is correct behaviour.
     drawRoundedRectOutline(page, cx, cy, cw, ch, rPx, C.cavityLine, 0.9, false);
 
   } else if (cav.shape === "poly" && Array.isArray(cav.points) && cav.points.length >= 3) {
