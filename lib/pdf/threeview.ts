@@ -389,7 +389,18 @@ function drawBlockOutline(page:PDFPage, x:number, y:number, w:number, h:number, 
     if (Number.isFinite(chamferIn) && chamferIn > 0) {
       const cX = chamferIn * (w / block.lengthIn);
       const cY = chamferIn * (h / block.widthIn);
-      const pts: Pt[] = [{x:x+cX,y},{x:x+w,y},{x:x+w,y:y+h-cY},{x:x+w-cX,y:y+h},{x,y:y+h},{x,y:y+cY}];
+      // BUG FIX: was 6-point polygon (only chamfered 2 diagonal corners).
+      // All 4 corners need chamfering — requires 8 points going clockwise:
+      const pts: Pt[] = [
+        {x: x+cX,   y: y      },  // bottom-left chamfer start
+        {x: x+w-cX, y: y      },  // bottom-right chamfer start
+        {x: x+w,    y: y+cY   },  // bottom-right chamfer end
+        {x: x+w,    y: y+h-cY },  // top-right chamfer start
+        {x: x+w-cX, y: y+h    },  // top-right chamfer end
+        {x: x+cX,   y: y+h    },  // top-left chamfer start
+        {x: x,      y: y+h-cY },  // top-left chamfer end
+        {x: x,      y: y+cY   },  // bottom-left chamfer end
+      ];
       fillPolyWithScanlines(page, pts, C.foam);
       drawPolyLine(page, pts, true, C.black, 1.5);
     } else {
@@ -426,13 +437,14 @@ function drawCavityTopView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:
     const cy  = sy + sH - (cavTopIn + cav.widthIn) * scY;
     const cw  = cav.lengthIn*scX;
     const ch  = cav.widthIn*scY;
-    const rPx = Math.min(
-      ((cav.cornerRadiusIn != null ? cav.cornerRadiusIn : 0)) * Math.min(scX, scY),
-      cw / 2 - 0.5,
-      ch / 2 - 0.5,
-    );
-    // Ensure we actually render as rounded — if radius is 0 after clamping it will fall
-    // back to a plain rect inside drawRoundedRectOutline, which is correct behaviour.
+    // BUG FIX: if cornerRadiusIn is missing or 0 for a roundedRect, apply a
+    // proportional default (10% of the shorter pixel dimension) so it actually
+    // looks rounded rather than falling through to a plain square cavity.
+    const rawRadius = cav.cornerRadiusIn != null ? cav.cornerRadiusIn : 0;
+    const pxRadius  = rawRadius > 0
+      ? rawRadius * Math.min(scX, scY)
+      : Math.min(cw, ch) * 0.15;   // 15% default when no explicit radius
+    const rPx = Math.min(pxRadius, cw / 2 - 0.5, ch / 2 - 0.5);
     drawRoundedRectOutline(page, cx, cy, cw, ch, rPx, C.cavityLine, 0.9, false);
 
   } else if (cav.shape === "poly" && Array.isArray(cav.points) && cav.points.length >= 3) {
