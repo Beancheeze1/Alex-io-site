@@ -384,22 +384,22 @@ function drawBlockOutline(page:PDFPage, x:number, y:number, w:number, h:number, 
     !layer.roundCorners &&
     layer.cropCorners                        // BUG FIX: only chamfer this layer if it explicitly sets cropCorners
   ) {
-    // Use the layer's own chamfer radius if set, otherwise fall back to block-level
-    const chamferIn = (layer.roundRadiusIn ?? block.chamferIn ?? 1);
+    // Chamfer size: use block.chamferIn, doubled to match visual scale of the UI preview.
+    // (The PDF scale factor compresses the chamfer visually, so we compensate with 2×.)
+    const chamferIn = (block.chamferIn ?? 1) * 2;
     if (Number.isFinite(chamferIn) && chamferIn > 0) {
-      const cX = chamferIn * (w / block.lengthIn);
-      const cY = chamferIn * (h / block.widthIn);
-      // BUG FIX: was 6-point polygon (only chamfered 2 diagonal corners).
-      // All 4 corners need chamfering — requires 8 points going clockwise:
+      // Use a single uniform scale (minimum of X and Y) so chamfer is always 45°.
+      const scale = Math.min(w / block.lengthIn, h / block.widthIn);
+      const c = Math.min(chamferIn * scale, w / 2 - 0.5, h / 2 - 0.5);
+      // 2-corner chamfer matching the SVG UI renderer: top-LEFT and bottom-RIGHT only.
+      // PDF y-up coords: y = bottom edge, y+h = top edge.
       const pts: Pt[] = [
-        {x: x+cX,   y: y      },  // bottom-left chamfer start
-        {x: x+w-cX, y: y      },  // bottom-right chamfer start
-        {x: x+w,    y: y+cY   },  // bottom-right chamfer end
-        {x: x+w,    y: y+h-cY },  // top-right chamfer start
-        {x: x+w-cX, y: y+h    },  // top-right chamfer end
-        {x: x+cX,   y: y+h    },  // top-left chamfer start
-        {x: x,      y: y+h-cY },  // top-left chamfer end
-        {x: x,      y: y+cY   },  // bottom-left chamfer end
+        {x: x+c,   y: y+h  },  // start: right of top-left chamfer
+        {x: x+w,   y: y+h  },  // top-right corner (square)
+        {x: x+w,   y: y+c  },  // above bottom-right chamfer
+        {x: x+w-c, y: y    },  // bottom-right chamfer end
+        {x: x,     y: y    },  // bottom-left corner (square)
+        {x: x,     y: y+h-c},  // below top-left chamfer
       ];
       fillPolyWithScanlines(page, pts, C.foam);
       drawPolyLine(page, pts, true, C.black, 1.5);
@@ -621,8 +621,12 @@ function notesPanel(
         cav.shape==="roundedRect" ? "RND RECT"
         : cav.shape==="poly"      ? "POLYGON"
         : cav.shape.toUpperCase();
-      const rLabel = cav.shape==="roundedRect" && cav.cornerRadiusIn
-        ? cav.cornerRadiusIn.toFixed(3) : "\u2014";
+      // Show actual stored radius, or "AUTO" if shape is roundedRect but radius is 0/missing
+      const rLabel = cav.shape === "roundedRect"
+        ? (cav.cornerRadiusIn && cav.cornerRadiusIn > 0
+            ? cav.cornerRadiusIn.toFixed(3)
+            : "AUTO")
+        : "\u2014";
 
       const row = [String(ci+1), shapeLabel, cav.lengthIn.toFixed(3), cav.widthIn.toFixed(3), cav.depthIn.toFixed(3), rLabel];
       for (let ri = 0; ri < cols.length; ri++) {
