@@ -1853,14 +1853,6 @@ function LayoutEditorHostReady(props: {
         const nextBox = L > 0 && W > 0 && H > 0 ? { L, W, H } : null;
         setCustomerBox(nextBox);
         persistCustomerBox(nextBox);
-
-const boxStyleParam = url.searchParams.get("box_style")?.toLowerCase();
-  const packTypeParam = url.searchParams.get("pack_type");
-  if (packTypeParam === "complete_pack" && boxStyleParam) {
-    if (boxStyleParam === "rsc") setSelectedCartonKind("RSC");
-    else if (boxStyleParam === "mailer") setSelectedCartonKind("MAILER");
-  }
-
         // Load persisted printed state from the print API if not set via URL.
         // /api/quote/print is public and includes isPrinted in its response.
         if (printedParam === null) {
@@ -1904,6 +1896,10 @@ const boxStyleParam = url.searchParams.get("box_style")?.toLowerCase();
   const router = useRouter();
   
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  // Tracks whether we have already auto-picked a carton on this page load
+  // (from a complete_pack Start-Quote URL). Prevents repeated calls when
+  // boxSuggest re-runs due to dimension changes.
+  const autoPickedCartonRef = React.useRef(false);
   const [uploadStatus, setUploadStatus] = React.useState<
     "idle" | "uploading" | "done" | "error"
   >("idle");
@@ -3603,6 +3599,36 @@ const handleGoToFoamAdvisor = () => {
     totalStackThicknessIn,
     effectiveQty,
   ]);
+
+  // Auto-pick carton when arriving from the Start Quote modal with pack_type=complete_pack.
+  // The modal sets box_style=rsc or box_style=mailer in the URL. Once boxSuggest resolves,
+  // we call handlePickCarton once — which immediately POSTs to /api/boxes/add-to-quote and
+  // inserts the quote_box_selections row so Apply can price it correctly.
+  // We use a ref so this only fires once per page load even if boxSuggest re-runs.
+  React.useEffect(() => {
+    if (autoPickedCartonRef.current) return; // already fired
+    if (boxSuggest.loading) return;          // wait for results
+
+    try {
+      const url = new URL(window.location.href);
+      const packType = url.searchParams.get("pack_type");
+      const boxStyle = (url.searchParams.get("box_style") || "").toLowerCase();
+
+      if (packType !== "complete_pack") return;
+      if (!boxStyle) return;
+
+      const kind: "RSC" | "MAILER" = boxStyle === "mailer" ? "MAILER" : "RSC";
+      const candidate = kind === "RSC" ? boxSuggest.bestRsc : boxSuggest.bestMailer;
+
+      if (!candidate) return; // suggest hasn't returned a result yet — wait
+
+      autoPickedCartonRef.current = true; // mark before async call to prevent double-fire
+      setSelectedCartonKind(kind);
+      handlePickCarton(kind);
+    } catch {
+      // ignore URL parse errors
+    }
+  }, [boxSuggest.loading, boxSuggest.bestRsc, boxSuggest.bestMailer, handlePickCarton]);
 
   // Derived labels used in multiple spots
   const footprintLabel =
