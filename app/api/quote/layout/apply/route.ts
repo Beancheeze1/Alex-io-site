@@ -1982,6 +1982,126 @@ export async function POST(req: NextRequest) {
     }
     // =================== END NEW status transitions ===================
 
+    // ---- selectedCarton: upsert quote_box_selections + quote_items ----
+    // The layout editor sends body.selectedCarton when a carton has been chosen
+    // (auto-picked from a complete_pack Start Quote URL, or manually picked by
+    // the user). We handle it here — server-side — because the quote header is
+    // guaranteed to exist at this point (auto-created above if needed), whereas
+    // the client-side handlePickCarton call fires before Apply and hits a 404
+    // when the quote row doesn't exist yet.
+    const sc = (body as any).selectedCarton;
+    if (sc && typeof sc.sku === "string" && sc.sku.trim()) {
+      try {
+        const sku = sc.sku.trim();
+        const qtyForCarton =
+          qtyMaybe != null && qtyMaybe > 0 ? qtyMaybe : 1;
+
+        // Look up box by SKU
+        const boxRow = (await one<{
+          id: number;
+          inside_length_in: number;
+          inside_width_in: number;
+          inside_height_in: number;
+          style: string | null;
+        }>(
+          `SELECT id, inside_length_in, inside_width_in, inside_height_in, style
+           FROM public.boxes
+           WHERE sku = $1
+           LIMIT 1`,
+          [sku],
+        )) as any;
+
+        if (boxRow) {
+          // Check for existing selection row
+          const existingSel = (await one<{ id: number }>(
+            `SELECT id FROM public.quote_box_selections
+             WHERE quote_id = $1 AND box_id = $2
+             LIMIT 1`,
+            [quote.id, boxRow.id],
+          )) as any;
+
+          if (existingSel) {
+            // Already exists — just sync qty
+            await q(
+              `UPDATE public.quote_box_selections SET qty = $1 WHERE id = $2`,
+              [qtyForCarton, existingSel.id],
+            );
+          } else {
+            // Insert new selection row
+            await q(
+              `INSERT INTO public.quote_box_selections
+                 (quote_id, quote_no, box_id, sku, qty)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [quote.id, quoteNo, boxRow.id, sku, qtyForCarton],
+            );
+
+            // Insert matching quote_items carton line
+            const L = Number(sc.inside_length_in ?? boxRow.inside_length_in);
+            const W = Number(sc.inside_width_in ?? boxRow.inside_width_in);
+            const H = Number(sc.inside_height_in ?? boxRow.inside_height_in);
+            const styleStr = (sc.style || boxRow.style || "").trim();
+            const cartonNotes =
+              `Requested shipping carton: ${L} x ${W} x ${H} in ${sku}` +
+              (styleStr ? ` (${styleStr})` : "");
+
+            const cartonMaterialId =
+              materialId != null && Number.isFinite(materialId) && materialId > 0
+                ? materialId
+                : null;
+
+            await q(
+              `INSERT INTO public.quote_items
+                 (quote_id, product_id, length_in, width_in, height_in,
+                  material_id, qty, notes,
+                  price_unit_usd, price_total_usd, calc_snapshot)
+               VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL)`,
+              [quote.id, L, W, H, cartonMaterialId, qtyForCarton, cartonNotes],
+            );
+          }
+
+          // Reprice quote_box_selections using box_price_tiers (same logic as
+          // /api/boxes/add-to-quote so unit/extended prices are always current)
+          await q(
+            `UPDATE public.quote_box_selections qbs
+             SET
+               unit_price_usd = CASE
+                 WHEN bpt.tier4_min_qty IS NOT NULL AND qbs.qty >= bpt.tier4_min_qty AND bpt.tier4_unit_price IS NOT NULL THEN bpt.tier4_unit_price
+                 WHEN bpt.tier3_min_qty IS NOT NULL AND qbs.qty >= bpt.tier3_min_qty AND bpt.tier3_unit_price IS NOT NULL THEN bpt.tier3_unit_price
+                 WHEN bpt.tier2_min_qty IS NOT NULL AND qbs.qty >= bpt.tier2_min_qty AND bpt.tier2_unit_price IS NOT NULL THEN bpt.tier2_unit_price
+                 WHEN bpt.tier1_min_qty IS NOT NULL AND qbs.qty >= bpt.tier1_min_qty AND bpt.tier1_unit_price IS NOT NULL THEN bpt.tier1_unit_price
+                 ELSE bpt.base_unit_price
+               END,
+               extended_price_usd = ROUND(
+                 (CASE
+                   WHEN bpt.tier4_min_qty IS NOT NULL AND qbs.qty >= bpt.tier4_min_qty AND bpt.tier4_unit_price IS NOT NULL THEN bpt.tier4_unit_price
+                   WHEN bpt.tier3_min_qty IS NOT NULL AND qbs.qty >= bpt.tier3_min_qty AND bpt.tier3_unit_price IS NOT NULL THEN bpt.tier3_unit_price
+                   WHEN bpt.tier2_min_qty IS NOT NULL AND qbs.qty >= bpt.tier2_min_qty AND bpt.tier2_unit_price IS NOT NULL THEN bpt.tier2_unit_price
+                   WHEN bpt.tier1_min_qty IS NOT NULL AND qbs.qty >= bpt.tier1_min_qty AND bpt.tier1_unit_price IS NOT NULL THEN bpt.tier1_unit_price
+                   ELSE bpt.base_unit_price
+                 END) * qbs.qty
+               , 2)
+             FROM public.box_price_tiers bpt
+             WHERE qbs.quote_id = $1
+               AND bpt.box_id = qbs.box_id`,
+            [quote.id],
+          );
+
+          console.log(
+            "[layout/apply] selectedCarton upserted",
+            { quoteNo, sku, qtyForCarton, isNew: !existingSel },
+          );
+        } else {
+          console.warn(
+            "[layout/apply] selectedCarton SKU not found in boxes table",
+            { sku },
+          );
+        }
+      } catch (cartonErr) {
+        console.error("[layout/apply] selectedCarton upsert failed", cartonErr);
+      }
+    }
+    // ---- END selectedCarton ----
+
     return ok(
       {
         ok: true,
