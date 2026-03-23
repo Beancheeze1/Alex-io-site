@@ -1853,6 +1853,14 @@ function LayoutEditorHostReady(props: {
         const nextBox = L > 0 && W > 0 && H > 0 ? { L, W, H } : null;
         setCustomerBox(nextBox);
         persistCustomerBox(nextBox);
+
+const boxStyleParam = url.searchParams.get("box_style")?.toLowerCase();
+  const packTypeParam = url.searchParams.get("pack_type");
+  if (packTypeParam === "complete_pack" && boxStyleParam) {
+    if (boxStyleParam === "rsc") setSelectedCartonKind("RSC");
+    else if (boxStyleParam === "mailer") setSelectedCartonKind("MAILER");
+  }
+
         // Load persisted printed state from the print API if not set via URL.
         // /api/quote/print is public and includes isPrinted in its response.
         if (printedParam === null) {
