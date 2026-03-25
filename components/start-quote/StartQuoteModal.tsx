@@ -72,16 +72,76 @@ function familyLabel(fam: string | null) {
 }
 
 /**
- * Parse a single cavity seed.
+ * Parse a single cavity token.
  *
  * Supports:
  *  - Rect:   3x2x1
- *  - Circle: 2.5x1    (DIAMETER x DEPTH)  -> will be normalized to "Ø2.5x1"
+ *  - Circle: Ø3x1 or Ø3x1 (DIAMETER x DEPTH) — already normalized by the AI
+ *  - Circle shorthand: 2 numbers only => treated as DIA x DEPTH => "Ø2.5x1"
  *
- * Returns:
- *  - normalized string for URL param + review display
- *  - or null if invalid
+ * Returns normalized string or null if invalid.
  */
+function parseSingleCavity(raw: string): string | null {
+  const s = String(raw || "")
+    .replace(/[×\*]/g, "x")
+    .replace(/\s+/g, "")
+    .trim();
+  if (!s) return null;
+
+  // Circle prefix: Ø, ø, @, or text "dia"/"diam"/"diameter"
+  const circlePrefixRe = /^(?:[Øø@]|dia(?:m(?:eter)?)?)(.+)/i;
+  const circleMatch = s.match(circlePrefixRe);
+  if (circleMatch) {
+    const rest = circleMatch[1];
+    const nums = rest.match(/(\d+(?:\.\d+)?|\.\d+)/g);
+    if (!nums || nums.length < 2) return null;
+    const dia = Number(nums[0]);
+    const depth = Number(nums[1]);
+    if (!dia || !depth) return null;
+    return `Ø${dia}x${depth}`;
+  }
+
+  // numbers-only extraction
+  const nums = s.match(/(\d+(?:\.\d+)?|\.\d+)/g);
+  if (!nums) return null;
+
+  // Rect: 3 numbers => LxWxD
+  if (nums.length >= 3) {
+    const L = Number(nums[0]);
+    const W = Number(nums[1]);
+    const D = Number(nums[2]);
+    if (![L, W, D].every((n) => Number.isFinite(n) && n > 0)) return null;
+    return `${L}x${W}x${D}`;
+  }
+
+  // Circle shorthand: 2 numbers => DIA x DEPTH
+  if (nums.length === 2) {
+    const dia = Number(nums[0]);
+    const depth = Number(nums[1]);
+    if (![dia, depth].every((n) => Number.isFinite(n) && n > 0)) return null;
+    return `Ø${dia}x${depth}`;
+  }
+
+  return null;
+}
+
+/**
+ * Parse a semicolon-delimited multi-cavity seed string.
+ * Returns { normalized, isValid } where normalized is the semicolon-joined
+ * string ready to pass as the `cavities=` URL param.
+ */
+function parseSeedCavities(raw: string): { normalized: string; isValid: boolean } {
+  if (!raw || !raw.trim()) return { normalized: "", isValid: true };
+  const tokens = raw.split(/[;,]/).map((t) => t.trim()).filter(Boolean);
+  const parsed = tokens.map(parseSingleCavity);
+  const valid = parsed.filter((p): p is string => p !== null);
+  return {
+    normalized: valid.join(";"),
+    isValid: valid.length === tokens.length && tokens.length > 0,
+  };
+}
+
+// Legacy single-cavity wrapper used by display/validation
 function parseSeedCavity(raw: string): { normalized: string; kind: "rect" | "circle" } | null {
   const s = String(raw || "")
     .replace(/[×\*]/g, "x")
@@ -235,9 +295,14 @@ export default function StartQuoteModal() {
 
     // Material
     if (prefillData.material?.text) setMaterialText(prefillData.material.text);
+    if (prefillData.material?.id != null) setMaterialId(String(prefillData.material.id));
 
-    // Cavity seed
-    if (prefillData.firstCavity) setCavitySeed(prefillData.firstCavity);
+    // Cavity seed (multi-cavity string)
+    if (prefillData.cavities) setCavitySeed(prefillData.cavities);
+
+    // Customer contact
+    if (prefillData.customerName) setName(prefillData.customerName);
+    if (prefillData.customerEmail) setEmail(prefillData.customerEmail);
 
     // Ship mode → quote type + box dims
     const isCompletePack =
@@ -720,12 +785,11 @@ export default function StartQuoteModal() {
   })();
 
   const normalizedSeed = React.useMemo(() => {
-    const p = parseSeedCavity(cavitySeed);
-    return p?.normalized || "";
+    return parseSeedCavities(cavitySeed).normalized;
   }, [cavitySeed]);
 
   const cavitySeedInvalid =
-    cavitySeed.trim().length > 0 && !parseSeedCavity(cavitySeed);
+    cavitySeed.trim().length > 0 && !parseSeedCavities(cavitySeed).isValid;
 
   // ---------- Launch (seed editor URL) ----------
   const onLaunchEditor = () => {
@@ -763,7 +827,7 @@ export default function StartQuoteModal() {
     }
     if (materialText.trim()) p.set("material_text", materialText.trim());
 
-    const seedCav = parseSeedCavity(cavitySeed)?.normalized || "";
+    const seedCav = parseSeedCavities(cavitySeed).normalized;
 
     if (quoteType === "foam_insert") {
       const L = toNumOrNull(insertL);
@@ -779,7 +843,7 @@ export default function StartQuoteModal() {
       p.set("activeLayer", "1");
       p.set("active_layer", "1");
 
-      if (seedCav) p.set("cavity", seedCav);
+      if (seedCav) p.set("cavities", seedCav);
     } else {
       // Bottom insert dims always based on FOAM FIT (L/W) and bottom thickness (D)
       const L = foamFitLenIn;
@@ -809,7 +873,7 @@ export default function StartQuoteModal() {
         p.set("active_layer", "1");
       }
 
-      if (seedCav) p.set("cavity", seedCav);
+      if (seedCav) p.set("cavities", seedCav);
 
       if (boxLNum) p.set("box_l", String(boxLNum));
       if (boxWNum) p.set("box_w", String(boxWNum));
@@ -986,12 +1050,12 @@ export default function StartQuoteModal() {
                         ) : null}
                       </MiniField>
 
-                      <MiniField label="Cavity seed (LxWxD or DiaxDepth)">
+                      <MiniField label="Cavity seed (e.g. 3x2x1 or Ø2.5x1; separate multiple with ;)">
                         <input
                           value={cavitySeed}
                           onChange={(e) => setCavitySeed(e.target.value)}
                           className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                          placeholder='e.g. 3x2x1 or 2.5x1'
+                          placeholder='e.g. 3x2x1   or   Ø2.5x1   or   3x2x1;Ø2x1'
                         />
                         {cavitySeed.trim() ? (
                           <div className="mt-1 text-xs text-slate-400">
@@ -1316,14 +1380,14 @@ export default function StartQuoteModal() {
                           SEED (OPTIONAL)
                         </div>
                         <div className="mt-2 text-sm text-slate-300">
-                          Seed one cavity into the editor as a starting point.
+                          Seed one or more cavities into the editor as a starting point. Separate multiple with semicolons.
                         </div>
                         <div className="mt-3">
                           <input
                             value={cavitySeed}
                             onChange={(e) => setCavitySeed(e.target.value)}
                             className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
-                            placeholder='Rect: 3x2x1   |   Round: 2.5x1 (dia x depth)'
+                            placeholder='Rect: 3x2x1   |   Round: Ø2.5x1   |   Multi: 3x2x1;Ø2x1'
                           />
                         </div>
 
@@ -1338,7 +1402,7 @@ export default function StartQuoteModal() {
 
                         {cavitySeedInvalid ? (
                           <div className="mt-3 text-sm text-amber-200/90">
-                            Format must be <b>LxWxD</b> (rect) or <b>DiaxDepth</b> (round). Examples: <b>3x2x1</b>, <b>2.5x1</b>.
+                            Format must be <b>LxWxD</b> (rect) or <b>ØDiaxDepth</b> (round). Separate multiple with semicolons. Examples: <b>3x2x1</b>, <b>Ø2.5x1</b>, <b>3x2x1;Ø2x1</b>.
                           </div>
                         ) : null}
                       </div>
@@ -1634,7 +1698,7 @@ export default function StartQuoteModal() {
 
                 {cavitySeedInvalid ? (
                   <div className="mt-2 text-sm text-amber-200/90">
-                    Cavity seed format invalid. Use <b>3x2x1</b> or <b>2.5x1</b>.
+                    Cavity seed format invalid. Use <b>3x2x1</b> (rect) or <b>Ø2.5x1</b> (round). Separate multiple with semicolons.
                   </div>
                 ) : null}
               </div>

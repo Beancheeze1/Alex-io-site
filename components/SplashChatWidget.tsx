@@ -25,13 +25,18 @@ type WidgetFacts = {
   // material
   materialMode?: "recommend" | "known";
   materialText?: string;
+  materialId?: number | null;
 
   // NEW: layers (structured)
   layerCount?: "1" | "2" | "3" | "4";
   layerThicknesses?: string[];
 
-  // NEW: cavity seed (rect only, LxWxD)
-  firstCavity?: string;
+  /** Semicolon-delimited cavity list. Each token: LxWxD (rect) or ØDIAxDEPTH (circle). */
+  cavities?: string | null;
+
+  // customer contact
+  customerName?: string | null;
+  customerEmail?: string | null;
 
   // notes (freeform)
   notes?: string;
@@ -80,12 +85,17 @@ function buildPrefillPayload(facts: WidgetFacts) {
     material: {
       mode: facts.materialMode ?? "",
       text: facts.materialText ?? "",
+      id: facts.materialId ?? null,
     },
 
-    // NEW: layers + cavity seed
+    // layers + cavities
     layerCount: facts.layerCount ?? "",
     layerThicknesses: Array.isArray(facts.layerThicknesses) ? facts.layerThicknesses : [],
-    firstCavity: facts.firstCavity ?? "",
+    cavities: facts.cavities ?? "",
+
+    // customer contact
+    customerName: facts.customerName ?? "",
+    customerEmail: facts.customerEmail ?? "",
 
     notes: facts.notes ?? "",
   };
@@ -133,7 +143,7 @@ function summarizeFacts(facts: WidgetFacts) {
         ? "Recommended"
         : "(material not set)";
 
-  const pocket = facts.firstCavity?.trim() ? `Pocket size: ${facts.firstCavity.trim()} in` : null;
+  const pocket = facts.cavities?.trim() ? `Pockets: ${facts.cavities.trim()} in` : null;
 
   return [
     `Outside size: ${dims}`,
@@ -322,7 +332,7 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
 
   function openStartQuote() {
     // IMPORTANT: Use the most recent persisted facts at click time.
-    // This prevents a “one-render-behind” state from dropping firstCavity (and other fields)
+    // This prevents a “one-render-behind” state from dropping cavities (and other fields)
     // when the user clicks immediately after the last assistant response.
     const saved = safeJsonParse<{ facts: WidgetFacts }>(localStorage.getItem(LS_KEY));
     const latestFacts: WidgetFacts | null =

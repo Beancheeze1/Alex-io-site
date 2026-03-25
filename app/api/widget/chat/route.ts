@@ -35,7 +35,11 @@ type WidgetFacts = {
   layerCount?: "1" | "2" | "3" | "4";
   layerThicknesses?: string[];
 
-  firstCavity?: string;
+  /** Semicolon-delimited cavity list. Each token: LxWxD (rect) or ØDIAxDEPTH (circle). */
+  cavities?: string | null;
+
+  customerName?: string | null;
+  customerEmail?: string | null;
 
   notes?: string;
   createdAtIso?: string;
@@ -383,6 +387,8 @@ async function callOpenAI(params: {
             "Fields you care about:\n" +
             "- outside size L×W×H (in)\n" +
             "- qty\n" +
+            "- customerName: customer's full name — ask for this early (after dims + qty)\n" +
+            "- customerEmail: customer's email address — ask right after name\n" +
             "- shipping: box vs mailer vs unsure (fit matters)\n" +
             "- insert type: single vs set (base + top pad/lid)\n" +
             "- holding: cut-out pockets vs loose vs unsure\n" +
@@ -394,7 +400,11 @@ async function callOpenAI(params: {
             "   - If user selects from DB options below: set materialMode='known', materialText, AND materialId\n" +
             "- layers: layerCount (1–4) and layerThicknesses array\n" +
             "  Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).\n" +
-            "- firstCavity: first rectangular pocket size as LxWxD (in), if user provides it\n" +
+            "- cavities: ALL pocket sizes as a semicolon-delimited string.\n" +
+            "   - Rectangular pocket: LxWxD  (e.g. '3x2x1')\n" +
+            "   - Round/circular pocket: ØDIAxDEPTH  (e.g. 'Ø3x1' for a 3\" diameter, 1\" deep hole)\n" +
+            "   - NEVER convert a circle to a rect. If user says 'diameter', 'round', or 'circular', use the Ø prefix.\n" +
+            "   - Multiple pockets: join with semicolons  (e.g. '3x2x1;Ø2x1.5')\n" +
             "- notes\n\n" +
             'When shipping is box or mailer, mention briefly we typically undersize foam L/W by 0.125" for drop-in fit.\n' +
             "When you have enough info, done=true and invite them to open layout & pricing.\n\n" +
@@ -467,7 +477,9 @@ async function callOpenAI(params: {
                 "packagingSku",
                 "layerCount",
                 "layerThicknesses",
-                "firstCavity",
+                "cavities",
+                "customerName",
+                "customerEmail",
                 "notes",
                 "createdAtIso",
               ],
@@ -487,7 +499,9 @@ async function callOpenAI(params: {
                 packagingSku: { type: ["string", "null"] },
                 layerCount: { anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }] },
                 layerThicknesses: { anyOf: [{ type: "array", items: { type: "string" }, maxItems: 4 }, { type: "null" }] },
-                firstCavity: { type: ["string", "null"] },
+                cavities: { type: ["string", "null"] },
+                customerName: { type: ["string", "null"] },
+                customerEmail: { type: ["string", "null"] },
                 notes: { type: ["string", "null"] },
                 createdAtIso: { type: ["string", "null"] },
               },
