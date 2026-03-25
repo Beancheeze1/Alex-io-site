@@ -318,6 +318,20 @@ export default function StartQuoteModal() {
       prefillData.shipMode === "box" || prefillData.shipMode === "mailer";
 
     if (isCompletePack) {
+      // Seed layer thicknesses BEFORE calling setQuoteType so the quoteType-change
+      // effect (which resets topThk to the default) sees prefillSeededRef.current = true
+      // and skips the reset. Convention: thks[0] = bottom, thks[last] = top pad.
+      const thks = Array.isArray(prefillData.layerThicknesses) ? prefillData.layerThicknesses : [];
+      if (thks.length >= 2) {
+        const bottomVal = String(thks[0] ?? "").trim();
+        const topVal = String(thks[thks.length - 1] ?? "").trim();
+        if (bottomVal && Number(bottomVal) > 0) setBottomThk(bottomVal);
+        if (topVal && Number(topVal) > 0) setTopThk(topVal);
+      } else if (thks.length === 1) {
+        const bottomVal = String(thks[0] ?? "").trim();
+        if (bottomVal && Number(bottomVal) > 0) setBottomThk(bottomVal);
+      }
+
       setQuoteType("complete_pack");
       setActiveStep("box");
       setCompletedSteps(new Set(["type"]));
@@ -334,19 +348,6 @@ export default function StartQuoteModal() {
         setFoamConfig("bottom_top");
       } else if (prefillData.insertType === "single") {
         setFoamConfig("bottom_only");
-      }
-
-      // Seed layer thicknesses if the chat captured them.
-      // Convention from route.ts: Layer 1 = base/bottom, last layer = top pad.
-      const thks = Array.isArray(prefillData.layerThicknesses) ? prefillData.layerThicknesses : [];
-      if (thks.length >= 2) {
-        const bottomVal = String(thks[0] ?? "").trim();
-        const topVal = String(thks[thks.length - 1] ?? "").trim();
-        if (bottomVal && Number(bottomVal) > 0) setBottomThk(bottomVal);
-        if (topVal && Number(topVal) > 0) setTopThk(topVal);
-      } else if (thks.length === 1) {
-        const bottomVal = String(thks[0] ?? "").trim();
-        if (bottomVal && Number(bottomVal) > 0) setBottomThk(bottomVal);
       }
     } else {
       // Foam insert — seed insert dims from outside
@@ -508,7 +509,10 @@ export default function StartQuoteModal() {
       setFoamFitWidIn(null);
       setThicknessMode("auto");
       setBottomThk("");
-      setTopThk(String(DEFAULT_TOP_PAD_IN));
+      // Don't reset topThk if prefill already seeded it from the widget
+      if (!prefillSeededRef.current) {
+        setTopThk(String(DEFAULT_TOP_PAD_IN));
+      }
       setFoamConfig("bottom_top");
     }
   }, [quoteType]);

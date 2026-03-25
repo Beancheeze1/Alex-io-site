@@ -692,6 +692,14 @@ export async function POST(req: NextRequest) {
           nextFacts.materialMode = "known";
           if (!nextFacts.materialText) nextFacts.materialText = found.name ?? formatMaterialOption(found);
         }
+      } else if (shouldLookupMaterial && materialOptions.length > 0 && nextFacts.materialId == null) {
+        // Lookup ran but neither client-text match nor AI-set ID succeeded.
+        // Auto-select the top result (already sorted by density match) so the ID
+        // always gets committed when we have a confident family + density signal.
+        const best = materialOptions[0];
+        nextFacts.materialMode = "known";
+        nextFacts.materialId = best.id;
+        nextFacts.materialText = best.name ?? formatMaterialOption(best);
       }
     }
 
