@@ -711,14 +711,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // IMPORTANT: The AI schema requires materialId in every response, so GPT emits
-    // materialId: null on turns where material wasn't the topic. Preserve any
-    // previously-resolved ID/text/mode from the incoming facts rather than letting
-    // a null wipe it out.
-    if (nextFacts.materialId == null && facts.materialId != null) {
-      nextFacts.materialId = facts.materialId;
-      if (!nextFacts.materialText && facts.materialText) nextFacts.materialText = facts.materialText;
-      if (!nextFacts.materialMode && facts.materialMode) nextFacts.materialMode = facts.materialMode;
+    // COMPREHENSIVE FACT PRESERVATION
+    // The AI schema requires every field in every response, so GPT emits null for
+    // fields that weren't the topic of this turn. Prevent any previously-resolved
+    // value in the incoming `facts` from being overwritten by a null in nextFacts.
+    // This is the core reason facts disappear from the widget summary between turns.
+    const preserveKeys: (keyof WidgetFacts)[] = [
+      "outsideL", "outsideW", "outsideH", "qty",
+      "shipMode", "insertType", "pocketsOn", "holding", "pocketCount",
+      "materialMode", "materialText", "materialId",
+      "packagingSku", "packagingChoice", "printed",
+      "layerCount", "layerThicknesses", "cavities",
+      "customerName", "customerEmail", "notes",
+    ];
+    for (const key of preserveKeys) {
+      if ((nextFacts[key] == null) && (facts[key] != null)) {
+        (nextFacts as any)[key] = facts[key];
+      }
     }
 
     const mergedFacts: WidgetFacts = { ...facts, ...nextFacts };
