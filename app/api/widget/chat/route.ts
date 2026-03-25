@@ -343,6 +343,10 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
 
   if (!hasCoreDims(f)) return {};
 
+  // Only run when the customer has indicated a shipping mode — no point suggesting
+  // a box when they haven't said whether they want a box or mailer yet.
+  if (f.shipMode !== "box" && f.shipMode !== "mailer") return {};
+
   const L = toFiniteNumber(f.outsideL);
   const W = toFiniteNumber(f.outsideW);
   const H = toFiniteNumber(f.outsideH);
@@ -369,12 +373,16 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
   let resp: BoxSuggestResp | null = null;
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000); // 4 s hard cap
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(payload),
       cache: "no-store",
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
     if (!r.ok) return {};
     resp = (await r.json().catch(() => null)) as BoxSuggestResp | null;
   } catch {
