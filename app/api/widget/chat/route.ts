@@ -695,6 +695,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // IMPORTANT: The AI schema requires materialId in every response, so GPT emits
+    // materialId: null on turns where material wasn't the topic. Preserve any
+    // previously-resolved ID/text/mode from the incoming facts rather than letting
+    // a null wipe it out.
+    if (nextFacts.materialId == null && facts.materialId != null) {
+      nextFacts.materialId = facts.materialId;
+      if (!nextFacts.materialText && facts.materialText) nextFacts.materialText = facts.materialText;
+      if (!nextFacts.materialMode && facts.materialMode) nextFacts.materialMode = facts.materialMode;
+    }
+
     const mergedFacts: WidgetFacts = { ...facts, ...nextFacts };
 
     // Only commit packagingSku once the customer explicitly chooses "stock".

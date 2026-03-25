@@ -2442,7 +2442,7 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
     React.useState<"RSC" | "MAILER" | null>(null);
 
   const handlePickCarton = React.useCallback(
-    async (kind: "RSC" | "MAILER") => {
+    async (kind: "RSC" | "MAILER", opts?: { skipDimResize?: boolean }) => {
       // Update the visual selection immediately
       setSelectedCartonKind(kind);
 
@@ -2451,7 +2451,7 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
 
       const insideL = Number(chosen?.inside_length_in);
       const insideW = Number(chosen?.inside_width_in);
-      if (Number.isFinite(insideL) && Number.isFinite(insideW) && insideL > 0 && insideW > 0) {
+      if (!opts?.skipDimResize && Number.isFinite(insideL) && Number.isFinite(insideW) && insideL > 0 && insideW > 0) {
         const clearance = 0.125;
         const cand1 = { L: insideL - clearance, W: insideW - clearance };
         const cand2 = { L: insideW - clearance, W: insideL - clearance };
@@ -3622,9 +3622,15 @@ const handleGoToFoamAdvisor = () => {
 
       if (!candidate) return; // suggest hasn't returned a result yet — wait
 
+      // Only resize the foam block to match stock inside dims when the customer
+      // explicitly chose a stock SKU from the chat widget (box_sku param present).
+      // For custom-sized boxes the dims= param already carries the correct foam
+      // footprint — don't let the stock suggestion stomp it.
+      const hasStockSku = !!url.searchParams.get("box_sku");
+
       autoPickedCartonRef.current = true; // mark before async call to prevent double-fire
       setSelectedCartonKind(kind);
-      handlePickCarton(kind);
+      handlePickCarton(kind, { skipDimResize: !hasStockSku });
     } catch {
       // ignore URL parse errors
     }
