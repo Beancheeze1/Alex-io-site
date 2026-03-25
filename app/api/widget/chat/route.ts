@@ -32,6 +32,12 @@ type WidgetFacts = {
 
   packagingSku?: string;
 
+  /** "stock" = customer chose the suggested stock box; "custom" = keep their original size */
+  packagingChoice?: "stock" | "custom" | null;
+
+  /** true if the customer wants the box/mailer printed */
+  printed?: boolean | null;
+
   layerCount?: "1" | "2" | "3" | "4";
   layerThicknesses?: string[];
 
@@ -266,10 +272,13 @@ function appendNote(existing: string | undefined, line: string) {
 async function maybeSeedPackagingFromBoxesSuggest(args: {
   mergedFacts: WidgetFacts;
 }): Promise<{
+  /** Only set when customer has already chosen "stock" */
   packagingSku?: string;
-  notes?: string;
   internalHints?: string;
-  messageAddon?: string;
+  /** Injected into the AI context so it can present the choice */
+  suggestionContext?: string;
+  /** Quick replies to surface alongside the AI message */
+  suggestionQuickReplies?: string[];
 }> {
   const f = args.mergedFacts;
 
@@ -280,9 +289,15 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
   const H = toFiniteNumber(f.outsideH);
   if (!(L && W && H && L > 0 && W > 0 && H > 0)) return {};
 
+  // If the customer has already made a packaging choice, just honour it
+  if (f.packagingChoice === "custom") return {};
+  if (f.packagingChoice === "stock" && f.packagingSku) {
+    return { packagingSku: f.packagingSku };
+  }
+
+  // Don't re-query once we already have a SKU committed
   if (f.packagingSku && String(f.packagingSku).trim().length > 0) return {};
 
-  // 🔒 FIX: use the known-good API domain (avoid proxy/origin ambiguity)
   const url = `https://api.alex-io.com/api/boxes/suggest`;
 
   const payload: BoxSuggestReq = {
@@ -301,7 +316,6 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
       body: JSON.stringify(payload),
       cache: "no-store",
     });
-
     if (!r.ok) return {};
     resp = (await r.json().catch(() => null)) as BoxSuggestResp | null;
   } catch {
@@ -313,38 +327,30 @@ async function maybeSeedPackagingFromBoxesSuggest(args: {
   const bestRsc = resp.bestRsc ?? null;
   const bestMailer = resp.bestMailer ?? null;
 
-  if (f.shipMode === "box" && bestRsc?.sku) {
-    const hintLine = `Suggested box (stock): ${bestRsc.sku} — ${bestRsc.description} (inside ${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in})`;
-    return {
-      packagingSku: bestRsc.sku,
-      internalHints: appendNote((f as any).internalHints, hintLine),
-      messageAddon: `Stock box suggestion: **${bestRsc.sku}** (${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in} inside). You can change it in the editor.`,
-    };
-  }
+  const relevant =
+    f.shipMode === "box" ? bestRsc :
+    f.shipMode === "mailer" ? bestMailer :
+    bestRsc ?? bestMailer;
 
-  if (f.shipMode === "mailer" && bestMailer?.sku) {
-    const hintLine = `Suggested mailer (stock): ${bestMailer.sku} — ${bestMailer.description} (inside ${bestMailer.inside_length_in}×${bestMailer.inside_width_in}×${bestMailer.inside_height_in})`;
-    return {
-      packagingSku: bestMailer.sku,
-      internalHints: appendNote((f as any).internalHints, hintLine),
-      messageAddon: `Stock mailer suggestion: **${bestMailer.sku}** (${bestMailer.inside_length_in}×${bestMailer.inside_width_in}×${bestMailer.inside_height_in} inside). You can change it in the editor.`,
-    };
-  }
+  if (!relevant?.sku) return {};
 
-  let internalHints = (f as any).internalHints as string | undefined;
-  if (bestRsc?.sku) {
-    internalHints = appendNote(
-      internalHints,
-      `Suggested box (stock): ${bestRsc.sku} — ${bestRsc.description} (inside ${bestRsc.inside_length_in}×${bestRsc.inside_width_in}×${bestRsc.inside_height_in})`,
-    );
-  }
-  if (bestMailer?.sku) {
-    internalHints = appendNote(
-      internalHints,
-      `Suggested mailer (stock): ${bestMailer.sku} — ${bestMailer.description} (inside ${bestMailer.inside_length_in}×${bestMailer.inside_width_in}×${bestMailer.inside_height_in})`,
-    );
-  }
-  return internalHints !== (f as any).internalHints ? { internalHints } : {};
+  const kind = relevant.style === "MAILER" ? "mailer" : "box";
+  const dims = `${relevant.inside_length_in}×${relevant.inside_width_in}×${relevant.inside_height_in} in (inside)`;
+  const hintLine = `Suggested stock ${kind}: ${relevant.sku} — ${relevant.description} (${dims})`;
+
+  return {
+    internalHints: appendNote((f as any).internalHints, hintLine),
+    suggestionContext:
+      `SYSTEM NOTE: A stock ${kind} was found for the customer's size: **${relevant.sku}** — ${relevant.description}, inside ${dims}. ` +
+      `Their requested outside size was ${f.outsideL}×${f.outsideW}×${f.outsideH} in. ` +
+      `Ask the customer whether they want the stock ${kind} (${relevant.sku}) or a custom-sized ${kind} built to their exact dimensions. ` +
+      `Set packagingChoice='stock' and packagingSku='${relevant.sku}' if they pick stock, or packagingChoice='custom' if they want custom. ` +
+      `Do NOT pre-select for them.`,
+    suggestionQuickReplies: [
+      `Use stock ${kind}: ${relevant.sku}`,
+      `Custom size: ${f.outsideL}×${f.outsideW}×${f.outsideH}`,
+    ],
+  };
 }
 
 /* =========================
@@ -356,6 +362,7 @@ async function callOpenAI(params: {
   userText: string;
   facts: WidgetFacts;
   materialOptions: DbMaterial[];
+  suggestionContext?: string;
 }) {
   const apiKey = requireEnv("OPENAI_API_KEY");
 
@@ -390,6 +397,11 @@ async function callOpenAI(params: {
             "- customerName: customer's full name — ask for this early (after dims + qty)\n" +
             "- customerEmail: customer's email address — ask right after name\n" +
             "- shipping: box vs mailer vs unsure (fit matters)\n" +
+            "- printed: does the customer want the box/mailer printed? (true/false) — ask this when shipMode is box or mailer\n" +
+            "- packagingChoice: ONLY set this when a SYSTEM NOTE below presents a stock box/mailer option AND the customer has responded.\n" +
+            "   - 'stock' if they choose the suggested stock size (also set packagingSku to the SKU shown)\n" +
+            "   - 'custom' if they want a custom-built box to their exact dimensions\n" +
+            "   - Leave null until they explicitly choose — never pre-select for them.\n" +
             "- insert type: single vs set (base + top pad/lid)\n" +
             "- holding: cut-out pockets vs loose vs unsure\n" +
             "- pocketsOn: base/top/both if set\n" +
@@ -435,6 +447,7 @@ async function callOpenAI(params: {
                 .join("\n"),
               4000,
             ) +
+            (params.suggestionContext ? `\n\n${params.suggestionContext}` : "") +
             "\n\nNewest user message:\n" +
             clip(params.userText, 800),
         },
@@ -475,6 +488,8 @@ async function callOpenAI(params: {
                 "materialText",
                 "materialId",
                 "packagingSku",
+                "packagingChoice",
+                "printed",
                 "layerCount",
                 "layerThicknesses",
                 "cavities",
@@ -497,6 +512,8 @@ async function callOpenAI(params: {
                 materialText: { type: ["string", "null"] },
                 materialId: { type: ["number", "null"] },
                 packagingSku: { type: ["string", "null"] },
+                packagingChoice: { anyOf: [{ type: "string", enum: ["stock", "custom"] }, { type: "null" }] },
+                printed: { type: ["boolean", "null"] },
                 layerCount: { anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }] },
                 layerThicknesses: { anyOf: [{ type: "array", items: { type: "string" }, maxItems: 4 }, { type: "null" }] },
                 cavities: { type: ["string", "null"] },
@@ -574,13 +591,22 @@ export async function POST(req: NextRequest) {
 
     const pickedFromText = materialOptions.length ? pickMaterialFromUserText(userText, materialOptions) : null;
 
-    const rawObj = await callOpenAI({ messages, userText, facts, materialOptions });
+    // Run box suggester BEFORE AI call so we can inject the stock suggestion as context.
+    const pack = await maybeSeedPackagingFromBoxesSuggest({ mergedFacts: facts });
+
+    const rawObj = await callOpenAI({
+      messages,
+      userText,
+      facts,
+      materialOptions,
+      suggestionContext: pack.suggestionContext,
+    });
     const parsed = normalizeBrainObj(rawObj);
 
     if (!parsed) {
       return NextResponse.json(
         {
-          assistantMessage: "Got it. Real quick — what’s the outside foam size (L×W×H, inches) and the quantity?",
+          assistantMessage: "Got it. Real quick — what's the outside foam size (L×W×H, inches) and the quantity?",
           facts: {},
           done: false,
           quickReplies: ["18x12x3", "Qty 250", "Not sure yet"],
@@ -608,21 +634,20 @@ export async function POST(req: NextRequest) {
 
     const mergedFacts: WidgetFacts = { ...facts, ...nextFacts };
 
-    let assistantMessage = parsed.assistantMessage;
-
-    const pack = await maybeSeedPackagingFromBoxesSuggest({ mergedFacts });
-
-    if (pack.packagingSku) {
+    // Only commit packagingSku once the customer explicitly chooses "stock".
+    if (pack.packagingSku && nextFacts.packagingChoice === "stock") {
       nextFacts.packagingSku = pack.packagingSku;
       mergedFacts.packagingSku = pack.packagingSku;
     }
-    if (pack.notes) {
-      nextFacts.notes = pack.notes;
-      mergedFacts.notes = pack.notes;
-    }
-    if (pack.messageAddon) {
-      assistantMessage = `${assistantMessage}\n\n${pack.messageAddon}`;
-    }
+
+    const assistantMessage = parsed.assistantMessage;
+
+    // AI quick replies take priority; pad with suggestion choices if fewer than 2.
+    const aiReplies = (parsed.quickReplies ?? []).slice(0, 6);
+    const finalReplies =
+      aiReplies.length >= 2
+        ? aiReplies
+        : [...aiReplies, ...(pack.suggestionQuickReplies ?? [])].slice(0, 6);
 
     const done = parsed.done && isReady(mergedFacts);
 
@@ -631,7 +656,7 @@ export async function POST(req: NextRequest) {
         assistantMessage,
         facts: nextFacts,
         done,
-        quickReplies: (parsed.quickReplies ?? []).slice(0, 6),
+        quickReplies: finalReplies,
       },
       { status: 200 },
     );

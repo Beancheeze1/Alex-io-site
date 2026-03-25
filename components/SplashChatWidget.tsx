@@ -27,6 +27,11 @@ type WidgetFacts = {
   materialText?: string;
   materialId?: number | null;
 
+  // packaging
+  packagingSku?: string | null;
+  packagingChoice?: "stock" | "custom" | null;
+  printed?: boolean | null;
+
   // NEW: layers (structured)
   layerCount?: "1" | "2" | "3" | "4";
   layerThicknesses?: string[];
@@ -88,6 +93,11 @@ function buildPrefillPayload(facts: WidgetFacts) {
       id: facts.materialId ?? null,
     },
 
+    // packaging
+    packagingSku: facts.packagingSku ?? "",
+    packagingChoice: facts.packagingChoice ?? null,
+    printed: facts.printed ?? false,
+
     // layers + cavities
     layerCount: facts.layerCount ?? "",
     layerThicknesses: Array.isArray(facts.layerThicknesses) ? facts.layerThicknesses : [],
@@ -145,6 +155,12 @@ function summarizeFacts(facts: WidgetFacts) {
 
   const pocket = facts.cavities?.trim() ? `Pockets: ${facts.cavities.trim()} in` : null;
 
+  const packaging = facts.packagingSku
+    ? `Box/Mailer: ${facts.packagingSku}${facts.printed ? " (printed)" : ""}`
+    : facts.printed
+    ? "Printed: Yes"
+    : null;
+
   return [
     `Outside size: ${dims}`,
     `Quantity: ${qty}`,
@@ -152,6 +168,7 @@ function summarizeFacts(facts: WidgetFacts) {
     `Insert: ${insert}`,
     `Holding: ${holding}`,
     pocket,
+    packaging,
     `Material: ${material}`,
     facts.notes?.trim() ? `Notes: ${facts.notes.trim()}` : null,
   ].filter(Boolean) as string[];

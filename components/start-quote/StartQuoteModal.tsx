@@ -281,6 +281,9 @@ export default function StartQuoteModal() {
     (searchParams.get("printed") || "").trim() === "1" ||
       (searchParams.get("box_printed") || "").trim() === "1",
   );
+  const [prefillPackagingSku, setPrefillPackagingSku] = React.useState<string>(
+    searchParams.get("box_sku") || "",
+  );
 
   // ---------- Seed all state from prefillData once it resolves ----------
   // prefillData comes from useMemo(searchParams) which may be null on first render
@@ -303,6 +306,12 @@ export default function StartQuoteModal() {
     // Customer contact
     if (prefillData.customerName) setName(prefillData.customerName);
     if (prefillData.customerEmail) setEmail(prefillData.customerEmail);
+
+    // Printing preference
+    if (prefillData.printed === true) setPrinted(true);
+
+    // Stock box SKU (only present if customer chose it in the widget)
+    if (prefillData.packagingSku) setPrefillPackagingSku(prefillData.packagingSku);
 
     // Ship mode → quote type + box dims
     const isCompletePack =
@@ -879,6 +888,7 @@ export default function StartQuoteModal() {
       if (boxWNum) p.set("box_w", String(boxWNum));
       if (boxDNum) p.set("box_d", String(boxDNum));
       p.set("box_style", boxStyle);
+      if (prefillPackagingSku.trim()) p.set("box_sku", prefillPackagingSku.trim());
       p.set("printed", printed ? "1" : "0");
       p.set("pack_type", "complete_pack");
       p.set("foam_config", foamConfig);
