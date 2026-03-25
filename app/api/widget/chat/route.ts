@@ -479,6 +479,12 @@ async function callOpenAI(params: {
             "   - If user selects from DB options below: set materialMode='known', materialText, AND materialId\n" +
             "- layers: layerCount (1–4) and layerThicknesses array\n" +
             "  Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).\n" +
+            "  IMPORTANT: Always populate layerThicknesses when the user mentions any thickness.\n" +
+            "  Examples:\n" +
+            "    - '2 inch insert' → layerCount='1', layerThicknesses=['2']\n" +
+            "    - '2 inch bottom, 0.5 inch top pad' → layerCount='2', layerThicknesses=['2','0.5']\n" +
+            "    - 'set with base and lid' (no thickness given) → layerCount='2', layerThicknesses=['1','1'] as default guess\n" +
+            "  If the user mentions a top pad thickness, ALWAYS put it as the last element of layerThicknesses.\n" +
             "- cavities: ALL pocket sizes as a semicolon-delimited string.\n" +
             "   - Rectangular pocket: LxWxD  (e.g. '3x2x1')\n" +
             "   - Round/circular pocket: ØDIAxDEPTH  (e.g. 'Ø3x1' for a 3\" diameter, 1\" deep hole)\n" +
@@ -712,10 +718,13 @@ export async function POST(req: NextRequest) {
     }
 
     // COMPREHENSIVE FACT PRESERVATION
-    // The AI schema requires every field in every response, so GPT emits null for
-    // fields that weren't the topic of this turn. Prevent any previously-resolved
-    // value in the incoming `facts` from being overwritten by a null in nextFacts.
+    // The AI schema requires every field in every response, so GPT emits null (or
+    // empty arrays) for fields that weren't the topic of this turn. Prevent any
+    // previously-resolved value from being overwritten by a null/empty from the AI.
     // This is the core reason facts disappear from the widget summary between turns.
+    const isBlank = (v: any) =>
+      v == null || (Array.isArray(v) && v.length === 0) || v === "";
+
     const preserveKeys: (keyof WidgetFacts)[] = [
       "outsideL", "outsideW", "outsideH", "qty",
       "shipMode", "insertType", "pocketsOn", "holding", "pocketCount",
@@ -725,12 +734,27 @@ export async function POST(req: NextRequest) {
       "customerName", "customerEmail", "notes",
     ];
     for (const key of preserveKeys) {
-      if ((nextFacts[key] == null) && (facts[key] != null)) {
+      if (isBlank(nextFacts[key]) && !isBlank(facts[key])) {
         (nextFacts as any)[key] = facts[key];
       }
     }
 
     const mergedFacts: WidgetFacts = { ...facts, ...nextFacts };
+
+    // Layer safety net: if insertType is "set" (base + top pad) but layerThicknesses
+    // is still blank after the preserve loop, default to 2 layers. This ensures the
+    // form always receives a meaningful layer count even when the AI didn't explicitly
+    // populate the array (e.g. the customer only said "I need a set insert").
+    if (
+      mergedFacts.insertType === "set" &&
+      isBlank(nextFacts.layerThicknesses) &&
+      isBlank(mergedFacts.layerThicknesses)
+    ) {
+      nextFacts.layerCount = "2";
+      nextFacts.layerThicknesses = ["1", "1"]; // form can adjust; at least opens as 2-layer
+      mergedFacts.layerCount = "2";
+      mergedFacts.layerThicknesses = ["1", "1"];
+    }
 
     // Only commit packagingSku once the customer explicitly chooses "stock".
     if (pack.packagingSku && nextFacts.packagingChoice === "stock") {

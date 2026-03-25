@@ -508,9 +508,9 @@ export default function StartQuoteModal() {
       setFoamFitLenIn(null);
       setFoamFitWidIn(null);
       setThicknessMode("auto");
-      setBottomThk("");
-      // Don't reset topThk if prefill already seeded it from the widget
+      // Don't reset thicknesses if prefill already seeded them from the widget
       if (!prefillSeededRef.current) {
+        setBottomThk("");
         setTopThk(String(DEFAULT_TOP_PAD_IN));
       }
       setFoamConfig("bottom_top");
