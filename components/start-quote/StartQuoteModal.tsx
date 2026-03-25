@@ -335,6 +335,19 @@ export default function StartQuoteModal() {
       } else if (prefillData.insertType === "single") {
         setFoamConfig("bottom_only");
       }
+
+      // Seed layer thicknesses if the chat captured them.
+      // Convention from route.ts: Layer 1 = base/bottom, last layer = top pad.
+      const thks = Array.isArray(prefillData.layerThicknesses) ? prefillData.layerThicknesses : [];
+      if (thks.length >= 2) {
+        const bottomVal = String(thks[0] ?? "").trim();
+        const topVal = String(thks[thks.length - 1] ?? "").trim();
+        if (bottomVal && Number(bottomVal) > 0) setBottomThk(bottomVal);
+        if (topVal && Number(topVal) > 0) setTopThk(topVal);
+      } else if (thks.length === 1) {
+        const bottomVal = String(thks[0] ?? "").trim();
+        if (bottomVal && Number(bottomVal) > 0) setBottomThk(bottomVal);
+      }
     } else {
       // Foam insert — seed insert dims from outside
       if (prefillData.outside?.l) setInsertL(String(prefillData.outside.l));

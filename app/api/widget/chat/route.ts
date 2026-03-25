@@ -113,6 +113,32 @@ function wantsFoamRecommendation(userText: string, facts: WidgetFacts) {
   return false;
 }
 
+/**
+ * Returns true when the user is *stating* a specific material they already know
+ * (density, family name, colour cues) rather than asking for a recommendation.
+ * In this case we still want to fetch DB options so we can resolve the materialId.
+ */
+function wantsMaterialLookup(userText: string, facts: WidgetFacts): boolean {
+  // Already have an ID — nothing to look up
+  if (facts.materialId != null) return false;
+
+  const t = (userText || "").toLowerCase();
+
+  // Density patterns: "1.7#", "1.7 lb", "2 lb/ft", "2#", etc.
+  const hasDensity = /\d+(\.\d+)?\s*(#|lb|pound|pcf|lb\/ft)/.test(t);
+
+  // Family keywords stated as a declaration
+  const familyKeywords = [
+    "polyethylene", " pe ", "pe foam",
+    "polyurethane", " pu ", "pu foam", "urethane",
+    "expanded polyethylene", " epe ", "epe foam",
+    "charcoal", "black", "anti-static", "conductive",
+  ];
+  const hasFamilyKeyword = familyKeywords.some((kw) => t.includes(kw.trim()));
+
+  return hasDensity || hasFamilyKeyword;
+}
+
 function inferFamilyHint(userText: string, facts: WidgetFacts): string | null {
   const t = `${facts.materialText ?? ""} ${userText ?? ""}`.toLowerCase();
 
@@ -120,24 +146,41 @@ function inferFamilyHint(userText: string, facts: WidgetFacts): string | null {
   if (t.includes("expanded polyethylene") || t.includes(" epe") || t.includes("epe "))
     return "Expanded Polyethylene";
 
-  if (t.includes("polyethylene") || t.includes(" pe") || t.includes("pe "))
+  // Colour/grade cues that are unique to PE in packaging context
+  if (t.includes("charcoal") || t.includes("black") || t.includes("anti-static") || t.includes("conductive"))
     return "Polyethylene";
 
-  if (t.includes("polyurethane") || t.includes("urethane") || t.includes("pu "))
+  if (t.includes("polyethylene") || / pe[\s,#.]/.test(t) || t.includes("pe foam"))
+    return "Polyethylene";
+
+  if (t.includes("polyurethane") || t.includes("urethane") || / pu[\s,#.]/.test(t) || t.includes("pu foam"))
     return "Polyurethane Foam";
 
   return null;
 }
 
+/**
+ * Given the user's text, try to extract a density in lb/ft³.
+ * Handles: "1.7#", "1.7 lb", "2.0 pcf", "1.7lb/ft3"
+ */
+function extractDensityHint(userText: string): number | null {
+  const m = (userText || "").match(/(\d+(?:\.\d+)?)\s*(?:#|lb|pcf|pound|lb\/ft)/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 async function getTopMaterialsForWidget(args: {
   familyHint: string | null;
+  densityHint: number | null;
   limit: number;
 }): Promise<DbMaterial[]> {
   const limit = Math.max(1, Math.min(args.limit || 3, 6));
 
-  // Preference ordering:
-  // - Polyurethane Foam: prefer 1560, then 1780 (by name contains)
-  // - Polyethylene: prefer density 1.7, then 2.0 (by density_lb_ft3)
+  // When we have a density hint, bump the matching density to the top of the list.
+  // Allow ±0.2 lb/ft³ tolerance so "1.7#" matches 1.7 exactly but also catches nearby grades.
+  const densityTolerance = 0.2;
+
   if (args.familyHint) {
     const rows = await q<DbMaterial>(
       `
@@ -146,10 +189,11 @@ async function getTopMaterialsForWidget(args: {
       where material_family = $1
       order by
         case
-          when $1 = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1560%' then 0
-          when $1 = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1780%' then 1
-          when $1 = 'Polyethylene' and density_lb_ft3 = 1.7 then 0
-          when $1 = 'Polyethylene' and density_lb_ft3 = 2.0 then 1
+          when $3 is not null and abs(coalesce(density_lb_ft3, -999) - $3) <= $4 then 0
+          when $1 = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1560%' then 1
+          when $1 = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1780%' then 2
+          when $1 = 'Polyethylene' and density_lb_ft3 = 1.7 then 1
+          when $1 = 'Polyethylene' and density_lb_ft3 = 2.0 then 2
           else 9
         end asc,
         case when density_lb_ft3 is null then 1 else 0 end asc,
@@ -157,7 +201,7 @@ async function getTopMaterialsForWidget(args: {
         id asc
       limit $2
       `,
-      [args.familyHint, limit],
+      [args.familyHint, limit, args.densityHint, densityTolerance],
     );
     return Array.isArray(rows) ? rows : [];
   }
@@ -170,11 +214,11 @@ async function getTopMaterialsForWidget(args: {
     order by
       case when material_family is null then 1 else 0 end asc,
       case
-        -- Prioritize house foams across all families
-        when material_family = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1560%' then 0
-        when material_family = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1780%' then 1
-        when material_family = 'Polyethylene' and density_lb_ft3 = 1.7 then 0
-        when material_family = 'Polyethylene' and density_lb_ft3 = 2.0 then 1
+        when $2 is not null and abs(coalesce(density_lb_ft3, -999) - $2) <= $3 then 0
+        when material_family = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1560%' then 1
+        when material_family = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1780%' then 2
+        when material_family = 'Polyethylene' and density_lb_ft3 = 1.7 then 1
+        when material_family = 'Polyethylene' and density_lb_ft3 = 2.0 then 2
         else 9
       end asc,
       material_family asc,
@@ -183,7 +227,7 @@ async function getTopMaterialsForWidget(args: {
       id asc
     limit $1
     `,
-    [limit],
+    [limit, args.densityHint, densityTolerance],
   );
 
   return Array.isArray(rows) ? rows : [];
@@ -199,26 +243,41 @@ function formatMaterialOption(m: DbMaterial) {
   return parts.filter(Boolean).join(" · ");
 }
 
-function pickMaterialFromUserText(userText: string, options: DbMaterial[]): DbMaterial | null {
+function pickMaterialFromUserText(
+  userText: string,
+  options: DbMaterial[],
+  densityHint: number | null,
+): DbMaterial | null {
   const t = (userText || "").trim().toLowerCase();
   if (!t) return null;
 
+  // Numeric shortcut: "1", "2", "3"
   if (t === "1" || t === "2" || t === "3") {
     const idx = Number(t) - 1;
     return options[idx] ?? null;
   }
 
+  // ID shortcut: "id:42" or bare integer
   const idMatch = t.match(/\bid\s*[:#]?\s*(\d+)\b/i) || t.match(/^\s*(\d+)\s*$/);
   if (idMatch) {
     const id = Number(idMatch[1]);
-    if (Number.isFinite(id)) {
-      return options.find((o) => o.id === id) ?? null;
-    }
+    if (Number.isFinite(id)) return options.find((o) => o.id === id) ?? null;
   }
 
+  // Exact/substring name match
   for (const o of options) {
     const nm = (o.name ?? "").toLowerCase().trim();
     if (nm && (t.includes(nm) || nm.includes(t))) return o;
+  }
+
+  // Density match: if we extracted a density hint, pick the option whose
+  // density_lb_ft3 is within ±0.15 and is the closest overall.
+  if (densityHint != null) {
+    const tolerance = 0.15;
+    const candidates = options
+      .filter((o) => o.density_lb_ft3 != null && Math.abs(Number(o.density_lb_ft3) - densityHint) <= tolerance)
+      .sort((a, b) => Math.abs(Number(a.density_lb_ft3) - densityHint) - Math.abs(Number(b.density_lb_ft3) - densityHint));
+    if (candidates.length > 0) return candidates[0];
   }
 
   return null;
@@ -582,14 +641,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const densityHint = extractDensityHint(`${userText} ${facts.materialText ?? ""}`);
+
     let materialOptions: DbMaterial[] = [];
     const shouldOfferFoam = wantsFoamRecommendation(userText, facts);
-    if (shouldOfferFoam) {
+    const shouldLookupMaterial = !shouldOfferFoam && wantsMaterialLookup(userText, facts);
+
+    if (shouldOfferFoam || shouldLookupMaterial) {
       const familyHint = inferFamilyHint(userText, facts);
-      materialOptions = await getTopMaterialsForWidget({ familyHint, limit: 3 });
+      materialOptions = await getTopMaterialsForWidget({ familyHint, densityHint, limit: shouldLookupMaterial ? 6 : 3 });
     }
 
-    const pickedFromText = materialOptions.length ? pickMaterialFromUserText(userText, materialOptions) : null;
+    const pickedFromText = materialOptions.length ? pickMaterialFromUserText(userText, materialOptions, densityHint) : null;
 
     // Run box suggester BEFORE AI call so we can inject the stock suggestion as context.
     const pack = await maybeSeedPackagingFromBoxesSuggest({ mergedFacts: facts });
