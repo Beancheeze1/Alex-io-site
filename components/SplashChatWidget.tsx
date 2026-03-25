@@ -155,6 +155,13 @@ function summarizeFacts(facts: WidgetFacts) {
 
   const pocket = facts.cavities?.trim() ? `Pockets: ${facts.cavities.trim()} in` : null;
 
+  const layers =
+    Array.isArray(facts.layerThicknesses) && facts.layerThicknesses.length > 0
+      ? `Layers: ${facts.layerThicknesses.join(" / ")} in`
+      : facts.layerCount && facts.layerCount !== "1"
+      ? `Layers: ${facts.layerCount} (thicknesses not set)`
+      : null;
+
   const packaging = facts.packagingSku
     ? `Box/Mailer: ${facts.packagingSku}${facts.printed ? " (printed)" : ""}`
     : facts.printed
@@ -167,6 +174,7 @@ function summarizeFacts(facts: WidgetFacts) {
     `Shipping: ${ship}`,
     `Insert: ${insert}`,
     `Holding: ${holding}`,
+    layers,
     pocket,
     packaging,
     `Material: ${material}`,

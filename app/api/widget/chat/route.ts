@@ -122,6 +122,10 @@ function wantsMaterialLookup(userText: string, facts: WidgetFacts): boolean {
   // Already have an ID — nothing to look up
   if (facts.materialId != null) return false;
 
+  // If we already have materialText captured but no ID yet, always retry lookup
+  // so the ID gets resolved even if the material wasn't mentioned this turn.
+  if (facts.materialText && facts.materialText.trim().length > 0) return true;
+
   const t = (userText || "").toLowerCase();
 
   // Density patterns: "1.7#", "1.7 lb", "2 lb/ft", "2#", etc.
@@ -485,6 +489,7 @@ async function callOpenAI(params: {
             "    - '2 inch bottom, 0.5 inch top pad' → layerCount='2', layerThicknesses=['2','0.5']\n" +
             "    - 'set with base and lid' (no thickness given) → layerCount='2', layerThicknesses=['1','1'] as default guess\n" +
             "  If the user mentions a top pad thickness, ALWAYS put it as the last element of layerThicknesses.\n" +
+            "  If insertType is 'set' and layerThicknesses is still empty, ASK the customer for the bottom and top pad thickness.\n" +
             "- cavities: ALL pocket sizes as a semicolon-delimited string.\n" +
             "   - Rectangular pocket: LxWxD  (e.g. '3x2x1')\n" +
             "   - Round/circular pocket: ØDIAxDEPTH  (e.g. 'Ø3x1' for a 3\" diameter, 1\" deep hole)\n" +
