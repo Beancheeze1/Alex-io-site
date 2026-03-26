@@ -122,8 +122,8 @@ function wantsMaterialLookup(userText: string, facts: WidgetFacts): boolean {
   // Already have an ID — nothing to look up
   if (facts.materialId != null) return false;
 
-  // Scan both current user text AND previously captured materialText so that
-  // the lookup re-runs on subsequent turns when we have a description but no ID yet.
+  // Scan both the current user message AND any previously captured materialText
+  // so the lookup re-runs on subsequent turns when we have a description but no ID yet.
   const combined = `${facts.materialText ?? ""} ${userText ?? ""}`.toLowerCase();
 
   // Density patterns: "1.7#", "1.7 lb", "2 lb/ft", "2#", etc.
@@ -588,7 +588,7 @@ async function callOpenAI(params: {
                 materialId: { type: ["number", "null"] },
                 packagingSku: { type: ["string", "null"] },
                 packagingChoice: { anyOf: [{ type: "string", enum: ["stock", "custom"] }, { type: "null" }] },
-                printed: { type: ["boolean", "null"] },
+                printed: { anyOf: [{ type: "boolean" }, { type: "null" }] },
                 layerCount: { anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }] },
                 layerThicknesses: { anyOf: [{ type: "array", items: { type: "string" }, maxItems: 4 }, { type: "null" }] },
                 cavities: { type: ["string", "null"] },
