@@ -2420,6 +2420,17 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
   const [selectedMaterialId, setSelectedMaterialId] =
   React.useState<number | null>(initialMaterialId);
 
+  // Sync: initialMaterialId arrives late (set inside an async useEffect after the
+  // /api/quote/print fetch resolves). React.useState only captures the initial value
+  // at mount — without this effect, selectedMaterialId stays null even when the URL
+  // contained material_id=N, causing Apply to fire with no material and 500.
+  React.useEffect(() => {
+    if (initialMaterialId != null && selectedMaterialId == null) {
+      setSelectedMaterialId(initialMaterialId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMaterialId]);
+
   // When true, the quote-level material is "Per layer" — each layer has its own material selector.
   // selectedMaterialId is null in this mode; per-layer materialId fields are the authority.
   // Auto-detect: if the loaded layout already has per-layer materialIds, enable this mode.
@@ -3463,8 +3474,11 @@ const handleGoToFoamAdvisor = () => {
       // In per-layer mode, each layer carries its own materialId — do NOT send a quote-level
       // materialId override that would overwrite the primary item's material on the server.
       // In normal mode, send the single selected material as before.
-      if (!perLayerMaterialMode && selectedMaterialId != null) {
-        payload.materialId = selectedMaterialId;
+      // Fallback: if selectedMaterialId hasn't been synced yet (async load race), use
+      // initialMaterialId directly so Apply never fires without a material.
+      const effectiveMaterialId = selectedMaterialId ?? initialMaterialId ?? null;
+      if (!perLayerMaterialMode && effectiveMaterialId != null) {
+        payload.materialId = effectiveMaterialId;
       }
 
       const res = await fetch("/api/quote/layout/apply", {

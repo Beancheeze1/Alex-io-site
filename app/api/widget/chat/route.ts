@@ -749,6 +749,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // RECOMMEND MODE AUTO-COMMIT:
+    // When the AI finishes (done=true) in "recommend" mode but never explicitly set
+    // materialId (e.g. user said "you pick" and then "sounds good"), auto-commit
+    // the top DB material option so materialId is always populated before the editor
+    // opens. Without this, ensurePrimaryQuoteItem bails with a null materialId and
+    // Apply throws a 500.
+    if (
+      parsed.done &&
+      nextFacts.materialMode === "recommend" &&
+      isBlank(nextFacts.materialId) &&
+      materialOptions.length > 0
+    ) {
+      const best = materialOptions[0];
+      nextFacts.materialId = best.id;
+      nextFacts.materialMode = "known";
+      nextFacts.materialText = best.name ?? formatMaterialOption(best);
+    }
+
     const mergedFacts: WidgetFacts = { ...facts, ...nextFacts };
 
     // Layer safety net: if insertType is "set" (base + top pad) but layerThicknesses

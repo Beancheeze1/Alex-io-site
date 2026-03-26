@@ -496,9 +496,12 @@ async function ensurePrimaryQuoteItem(args: {
       ? args.materialIdMaybe
       : null;
 
+  // NOTE: we proceed even when materialId is null (DB column is nullable).
+  // Previously we bailed here, which caused the primary quote_item to never be
+  // created when materialId wasn't resolved yet, causing every subsequent UPDATE
+  // targeting "the primary item" to silently touch zero rows and Apply to 500.
   if (!materialId) {
-    console.warn("[layout/apply] Cannot create primary quote_item (missing materialId)", { quoteId: args.quoteId });
-    return;
+    console.warn("[layout/apply] Creating primary quote_item with null material_id — user can set material in editor", { quoteId: args.quoteId });
   }
 
   await q(
