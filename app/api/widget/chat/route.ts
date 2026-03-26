@@ -122,14 +122,12 @@ function wantsMaterialLookup(userText: string, facts: WidgetFacts): boolean {
   // Already have an ID — nothing to look up
   if (facts.materialId != null) return false;
 
-  // If we already have materialText captured but no ID yet, always retry lookup
-  // so the ID gets resolved even if the material wasn't mentioned this turn.
-  if (facts.materialText && facts.materialText.trim().length > 0) return true;
-
-  const t = (userText || "").toLowerCase();
+  // Scan both current user text AND previously captured materialText so that
+  // the lookup re-runs on subsequent turns when we have a description but no ID yet.
+  const combined = `${facts.materialText ?? ""} ${userText ?? ""}`.toLowerCase();
 
   // Density patterns: "1.7#", "1.7 lb", "2 lb/ft", "2#", etc.
-  const hasDensity = /\d+(\.\d+)?\s*(#|lb|pound|pcf|lb\/ft)/.test(t);
+  const hasDensity = /\d+(\.\d+)?\s*(#|lb|pound|pcf|lb\/ft)/.test(combined);
 
   // Family keywords stated as a declaration
   const familyKeywords = [
@@ -138,7 +136,7 @@ function wantsMaterialLookup(userText: string, facts: WidgetFacts): boolean {
     "expanded polyethylene", " epe ", "epe foam",
     "charcoal", "black", "anti-static", "conductive",
   ];
-  const hasFamilyKeyword = familyKeywords.some((kw) => t.includes(kw.trim()));
+  const hasFamilyKeyword = familyKeywords.some((kw) => combined.includes(kw.trim()));
 
   return hasDensity || hasFamilyKeyword;
 }
@@ -489,7 +487,6 @@ async function callOpenAI(params: {
             "    - '2 inch bottom, 0.5 inch top pad' → layerCount='2', layerThicknesses=['2','0.5']\n" +
             "    - 'set with base and lid' (no thickness given) → layerCount='2', layerThicknesses=['1','1'] as default guess\n" +
             "  If the user mentions a top pad thickness, ALWAYS put it as the last element of layerThicknesses.\n" +
-            "  If insertType is 'set' and layerThicknesses is still empty, ASK the customer for the bottom and top pad thickness.\n" +
             "- cavities: ALL pocket sizes as a semicolon-delimited string.\n" +
             "   - Rectangular pocket: LxWxD  (e.g. '3x2x1')\n" +
             "   - Round/circular pocket: ØDIAxDEPTH  (e.g. 'Ø3x1' for a 3\" diameter, 1\" deep hole)\n" +
@@ -607,11 +604,19 @@ async function callOpenAI(params: {
     },
   };
 
-  const res = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const openaiController = new AbortController();
+  const openaiTimeout = setTimeout(() => openaiController.abort(), 25000); // 25 s hard cap
+  let res: Response;
+  try {
+    res = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: openaiController.signal,
+    });
+  } finally {
+    clearTimeout(openaiTimeout);
+  }
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
