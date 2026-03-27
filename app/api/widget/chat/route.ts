@@ -692,10 +692,10 @@ export async function POST(req: NextRequest) {
     });
     const parsed = normalizeBrainObj(rawObj);
 
-    if (!parsed) {
-      return NextResponse.json(
-        {
-          assistantMessage: "Got it. Real quick — what's the outside foam size (L×W×H, inches) and the quantity?",
+   if (!parsed) {
+  return NextResponse.json(
+    {
+      assistantMessage: "Got it — let’s fill in a couple details. What’s the quantity?",
           facts: {},
           done: false,
           quickReplies: ["18x12x3", "Qty 250", "Not sure yet"],
@@ -803,6 +803,8 @@ export async function POST(req: NextRequest) {
 
     const done = parsed.done && isReady(mergedFacts);
 
+// If AI responded normally, NEVER treat "not ready" as an error
+
     return NextResponse.json(
       {
         assistantMessage,
@@ -816,7 +818,7 @@ export async function POST(req: NextRequest) {
     console.error("widget_chat_route_error", String(e?.message ?? e));
     return NextResponse.json(
       {
-        assistantMessage: "I’m here — quick hiccup on my side. Try again with outside size (L×W×H) and qty.",
+        assistantMessage: "Got it — I just need a couple details to finish this. What’s the quantity?",
         facts: {},
         done: false,
         quickReplies: ["18x12x3", "Qty 250", "Shipping: box", "Shipping: mailer"],
