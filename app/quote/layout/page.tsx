@@ -3438,21 +3438,50 @@ const handleGoToFoamAdvisor = () => {
         payload.sales_rep_slug = salesRepSlugForApply;
       }
 
-      // Attach chosen carton (if any) so the backend can add a box line item
+      // Attach chosen carton (if any) so the backend can add a box line item.
+      //
+      // BUG FIX: previously this always grabbed boxSuggest.bestRsc/bestMailer —
+      // the live suggester result — regardless of what the customer actually chose
+      // in the chat or Start Quote modal. This caused the quote to list the
+      // suggester's recommended box instead of the customer's actual box.
+      //
+      // Correct logic:
+      //   1. If box_sku is in the URL (customer picked a stock SKU from the chat),
+      //      only include selectedCarton if the chosen suggester entry matches that
+      //      exact SKU. If it doesn't match (suggester re-ran against different dims),
+      //      omit it — handlePickCarton already called /api/boxes/add-to-quote with
+      //      the correct SKU on page load.
+      //   2. If there is no box_sku (custom-sized box or no carton), also omit it —
+      //      handlePickCarton already handled the DB insert on page load.
+      //   3. Only send selectedCarton for fresh manual picks from the suggester UI
+      //      (when the user clicks "Pick this box" during the session), identified by
+      //      selectedCartonKind being set but no box_sku URL param.
       if (selectedCartonKind && (boxSuggest.bestRsc || boxSuggest.bestMailer)) {
         const chosen = selectedCartonKind === "RSC" ? boxSuggest.bestRsc : boxSuggest.bestMailer;
 
         if (chosen) {
-          payload.selectedCarton = {
-            style: chosen.style,
-            sku: chosen.sku,
-            description: chosen.description,
-            inside_length_in: chosen.inside_length_in,
-            inside_width_in: chosen.inside_width_in,
-            inside_height_in: chosen.inside_height_in,
-            fit_score: chosen.fit_score,
-            notes: chosen.notes ?? null,
-          };
+          let urlBoxSku: string | null = null;
+          try {
+            urlBoxSku = new URL(window.location.href).searchParams.get("box_sku");
+          } catch { /* ignore */ }
+
+          // Only include selectedCarton in Apply if:
+          // - No box_sku in URL (user picked from suggester UI during this session), OR
+          // - box_sku matches the chosen SKU exactly (confirming it's the right box)
+          const skuMatches = !urlBoxSku || urlBoxSku === chosen.sku;
+
+          if (skuMatches) {
+            payload.selectedCarton = {
+              style: chosen.style,
+              sku: chosen.sku,
+              description: chosen.description,
+              inside_length_in: chosen.inside_length_in,
+              inside_width_in: chosen.inside_width_in,
+              inside_height_in: chosen.inside_height_in,
+              fit_score: chosen.fit_score,
+              notes: chosen.notes ?? null,
+            };
+          }
         }
       }
 
