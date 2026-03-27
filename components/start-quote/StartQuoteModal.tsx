@@ -327,9 +327,16 @@ export default function StartQuoteModal() {
         const topVal = String(thks[thks.length - 1] ?? "").trim();
         if (bottomVal && Number(bottomVal) > 0) setBottomThk(bottomVal);
         if (topVal && Number(topVal) > 0) setTopThk(topVal);
+        // Mark as manual so freezeFoamFitFromCurrentBox doesn't overwrite
+        // these widget-seeded values with auto-calculated round numbers when
+        // the user clicks Next on the box step.
+        setThicknessMode("manual");
       } else if (thks.length === 1) {
         const bottomVal = String(thks[0] ?? "").trim();
-        if (bottomVal && Number(bottomVal) > 0) setBottomThk(bottomVal);
+        if (bottomVal && Number(bottomVal) > 0) {
+          setBottomThk(bottomVal);
+          setThicknessMode("manual");
+        }
       }
 
       setQuoteType("complete_pack");
@@ -507,9 +514,11 @@ export default function StartQuoteModal() {
       setFoamFitDirty(false);
       setFoamFitLenIn(null);
       setFoamFitWidIn(null);
-      setThicknessMode("auto");
-      // Don't reset thicknesses if prefill already seeded them from the widget
+      // Don't reset thicknesses or thicknessMode if prefill already seeded them.
+      // If we reset thicknessMode to 'auto' here, freezeFoamFitFromCurrentBox will
+      // overwrite the widget values with rounded auto-calculated numbers on Next.
       if (!prefillSeededRef.current) {
+        setThicknessMode("auto");
         setBottomThk("");
         setTopThk(String(DEFAULT_TOP_PAD_IN));
       }
