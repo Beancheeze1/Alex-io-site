@@ -196,7 +196,7 @@ async function getTopMaterialsForWidget(args: {
       where material_family = $1
       order by
         case
-          when $3 is not null and abs(coalesce(density_lb_ft3, -999) - $3) <= $4 then 0
+          when $3::numeric is not null and abs(coalesce(density_lb_ft3, -999) - $3::numeric) <= $4::numeric then 0
           when $1 = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1560%' then 1
           when $1 = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1780%' then 2
           when $1 = 'Polyethylene' and density_lb_ft3 = 1.7 then 1
@@ -221,7 +221,7 @@ async function getTopMaterialsForWidget(args: {
     order by
       case when material_family is null then 1 else 0 end asc,
       case
-        when $2 is not null and abs(coalesce(density_lb_ft3, -999) - $2) <= $3 then 0
+        when $2::numeric is not null and abs(coalesce(density_lb_ft3, -999) - $2::numeric) <= $3::numeric then 0
         when material_family = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1560%' then 1
         when material_family = 'Polyurethane Foam' and lower(coalesce(name,'')) like '%1780%' then 2
         when material_family = 'Polyethylene' and density_lb_ft3 = 1.7 then 1
