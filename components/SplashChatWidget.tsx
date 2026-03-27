@@ -356,42 +356,59 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
   }
 
   function openStartQuote() {
-    // IMPORTANT: Use the most recent persisted facts at click time.
-    // This prevents a “one-render-behind” state from dropping cavities (and other fields)
-    // when the user clicks immediately after the last assistant response.
-    const saved = safeJsonParse<{ facts: WidgetFacts }>(localStorage.getItem(LS_KEY));
-    const latestFacts: WidgetFacts | null =
-      saved?.facts && typeof saved.facts === "object" ? saved.facts : null;
+  // Use both persisted facts and live state at click time.
+  // Persisted facts protect against one-render-behind issues for fields like cavities,
+  // but live state must win for any non-blank value because it can be newer than
+  // localStorage (especially right after the last assistant response).
+  const saved = safeJsonParse<{ facts: WidgetFacts }>(localStorage.getItem(LS_KEY));
+  const latestFacts: WidgetFacts | null =
+    saved?.facts && typeof saved.facts === "object" ? saved.facts : null;
 
-    // Prefer latest persisted facts if present; otherwise fall back to current state.
-    const payloadFacts: WidgetFacts = latestFacts ? { ...latestFacts } : { ...facts };
+  const isBlank = (v: any) =>
+    v == null || v === "" || (Array.isArray(v) && v.length === 0);
 
-    // Build internal-only hints (never shown in the customer-facing notes textarea)
-    const noteBits: string[] = [];
+  const payloadFacts: WidgetFacts = {
+    ...(latestFacts ?? {}),
+  };
 
-    if (payloadFacts.shipMode === "box" || payloadFacts.shipMode === "mailer") {
-      noteBits.push('Fit: For box/mailer, undersize foam L/W by 0.125" for drop-in fit.');
+  for (const [key, value] of Object.entries(facts)) {
+    if (!isBlank(value)) {
+      (payloadFacts as any)[key] = value;
     }
-    if (payloadFacts.insertType === "set") {
-      noteBits.push("Insert: Set (base + top pad/lid).");
-      if (payloadFacts.pocketsOn && payloadFacts.pocketsOn !== "unsure") {
-        noteBits.push(`Pockets on: ${payloadFacts.pocketsOn}.`);
-      }
-    }
-    // Merge any chat-route-generated hints (box suggestions etc.) with local hints
-    const existingHints = ((payloadFacts as any).internalHints ?? "").trim();
-    if (noteBits.length) {
-      (payloadFacts as any).internalHints = existingHints
-        ? `${existingHints}\n${noteBits.join("\n")}`
-        : noteBits.join("\n");
-    }
-    // Keep notes clean — never auto-populate it (customer fills this in themselves)
-
-    const payload = buildPrefillPayload(payloadFacts);
-    const prefill = encodeURIComponent(JSON.stringify(payload));
-    const separator = startQuotePath.includes("?") ? "&" : "?";
-    router.push(`${startQuotePath}${separator}prefill=${prefill}`);
   }
+
+  if (!payloadFacts.createdAtIso) {
+    payloadFacts.createdAtIso =
+      facts.createdAtIso ??
+      latestFacts?.createdAtIso ??
+      new Date().toISOString();
+  }
+
+  // Build internal-only hints (never shown in the customer-facing notes textarea)
+  const noteBits: string[] = [];
+
+  if (payloadFacts.shipMode === "box" || payloadFacts.shipMode === "mailer") {
+    noteBits.push('Fit: For box/mailer, undersize foam L/W by 0.125" for drop-in fit.');
+  }
+  if (payloadFacts.insertType === "set") {
+    noteBits.push("Insert: Set (base + top pad/lid).");
+    if (payloadFacts.pocketsOn && payloadFacts.pocketsOn !== "unsure") {
+      noteBits.push(`Pockets on: ${payloadFacts.pocketsOn}.`);
+    }
+  }
+
+  const existingHints = ((payloadFacts as any).internalHints ?? "").trim();
+  if (noteBits.length) {
+    (payloadFacts as any).internalHints = existingHints
+      ? `${existingHints}\n${noteBits.join("\n")}`
+      : noteBits.join("\n");
+  }
+
+  const payload = buildPrefillPayload(payloadFacts);
+  const prefill = encodeURIComponent(JSON.stringify(payload));
+  const separator = startQuotePath.includes("?") ? "&" : "?";
+  router.push(`${startQuotePath}${separator}prefill=${prefill}`);
+}
 
   const summaryLines = React.useMemo(() => summarizeFacts(facts), [facts]);
 
