@@ -301,15 +301,19 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
     }
   }
 
-  async function callBrain(userText: string) {
+  async function callBrain(args: {
+    userText: string;
+    messagesSnapshot: Msg[];
+    factsSnapshot: WidgetFacts;
+  }) {
     const res = await fetch(`/api/widget/chat?t=${Date.now()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
       body: JSON.stringify({
-        messages: msgs.map((m) => ({ role: m.role, text: m.text })),
-        userText,
-        facts,
+        messages: args.messagesSnapshot.map((m) => ({ role: m.role, text: m.text })),
+        userText: args.userText,
+        facts: args.factsSnapshot,
       }),
     });
 
@@ -328,19 +332,29 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
     const t = text.trim();
     if (!t) return;
 
+    const userMsg: Msg = { id: uid("m"), role: "user", text: t };
+    const messagesSnapshot: Msg[] = [...msgs, userMsg];
+    const factsSnapshot: WidgetFacts = { ...facts };
+
     setBusy(true);
-    pushUser(t);
+    setMsgs(messagesSnapshot);
 
     try {
-      const data = await callBrain(t);
+      const data = await callBrain({
+        userText: t,
+        messagesSnapshot,
+        factsSnapshot,
+      });
 
       // Apply fact updates (additive)
-      if (data.facts && typeof data.facts === "object") {
-        setFacts((prev) => ({ ...prev, ...data.facts }));
-      }
+      const mergedFacts: WidgetFacts =
+        data.facts && typeof data.facts === "object"
+          ? { ...factsSnapshot, ...data.facts }
+          : factsSnapshot;
+      setFacts(mergedFacts);
 
       // Bot message
-      pushBot(data.assistantMessage);
+      setMsgs((prev) => [...prev, { id: uid("m"), role: "bot", text: data.assistantMessage }]);
 
       // done + quick replies
       setDone(Boolean(data.done));
