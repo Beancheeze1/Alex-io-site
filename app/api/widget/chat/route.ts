@@ -77,8 +77,10 @@ function isReady(f: WidgetFacts) {
   const qtyOk = Boolean(f.qty && String(f.qty).trim().length > 0);
   const shipOk = Boolean(f.shipMode && f.shipMode !== ("" as any));
   const insertOk = Boolean(f.insertType && f.insertType !== ("" as any));
-  const holdingOk = Boolean(f.holding && f.holding !== ("" as any));
-  return hasCoreDims(f) && qtyOk && shipOk && insertOk && holdingOk;
+  // NOTE: holding is intentionally NOT required here — the editor can open without it,
+  // and requiring it caused done=true to be silently swallowed when the AI skipped the
+  // holding question (e.g. user provided a lot of data upfront).
+  return hasCoreDims(f) && qtyOk && shipOk && insertOk;
 }
 
 function wantsFoamRecommendation(userText: string, facts: WidgetFacts) {
@@ -873,7 +875,7 @@ export async function POST(req: NextRequest) {
    if (!parsed) {
   return NextResponse.json(
     {
-      assistantMessage: "Got it â€” letâ€™s fill in a couple details. Whatâ€™s the quantity?",
+      assistantMessage: "Got it — let’s fill in a couple details. What’s the quantity?",
           facts: {},
           done: false,
           quickReplies: ["18x12x3", "Qty 250", "Not sure yet"],
@@ -896,10 +898,11 @@ export async function POST(req: NextRequest) {
           nextFacts.materialMode = "known";
           if (!nextFacts.materialText) nextFacts.materialText = found.name ?? formatMaterialOption(found);
         }
-      } else if (shouldLookupMaterial && materialOptions.length > 0 && nextFacts.materialId == null) {
+      } else if (parsed.done && shouldLookupMaterial && materialOptions.length > 0 && nextFacts.materialId == null) {
         // Lookup ran but neither client-text match nor AI-set ID succeeded.
-        // Auto-select the top result (already sorted by density match) so the ID
-        // always gets committed when we have a confident family + density signal.
+        // Only auto-commit on the FINAL turn (done=true) so we don't silently lock in
+        // a material early in the conversation before the user has confirmed anything.
+        // Earlier turns leave materialId null so the user can still correct it.
         const best = materialOptions[0];
         nextFacts.materialMode = "known";
         nextFacts.materialId = best.id;
@@ -1008,4 +1011,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

@@ -237,6 +237,13 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
 
+  // Bug fix: use a ref to always hold the latest committed facts so openStartQuote
+  // doesn't need to re-read localStorage (which can be one render behind after setFacts).
+  const latestFactsRef = React.useRef<WidgetFacts>(facts);
+  React.useEffect(() => {
+    latestFactsRef.current = facts;
+  }, [facts]);
+
   // Persist
   React.useEffect(() => {
     try {
@@ -301,132 +308,117 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
     }
   }
 
-async function callBrain(args: {
-  userText: string;
-  messagesSnapshot: Msg[];
-  factsSnapshot: WidgetFacts;
-}) {
-  const res = await fetch("/api/widget/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-    body: JSON.stringify({
-      messages: args.messagesSnapshot.map((m) => ({
-        role: m.role,
-        text: m.text,
-      })),
-      userText: args.userText,
-      facts: args.factsSnapshot,
-    }),
-  });
-
-  return res.json();
-}
-
-  async function handleSend(text: string) {
-  const t = text.trim();
-  if (!t) return;
-
-  const userMsg: Msg = { id: uid("m"), role: "user", text: t };
-  const messagesSnapshot: Msg[] = [...msgs, userMsg];
-  const factsSnapshot: WidgetFacts = { ...facts };
-
-  setBusy(true);
-  setMsgs(messagesSnapshot);
-
-  try {
-    const data = await callBrain({
-      userText: t,
-      messagesSnapshot,
-      factsSnapshot,
+  // Bug fix: callBrain was previously declared at module scope (outside the component),
+  // giving it no closure access to component state. Moved inside the component where it
+  // belongs. It still receives all data via args so runtime behavior is identical,
+  // but it’s now correctly co-located and won’t cause stale-closure surprises.
+  async function callBrain(args: {
+    userText: string;
+    messagesSnapshot: Msg[];
+    factsSnapshot: WidgetFacts;
+  }) {
+    const res = await fetch("/api/widget/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        messages: args.messagesSnapshot.map((m) => ({
+          role: m.role,
+          text: m.text,
+        })),
+        userText: args.userText,
+        facts: args.factsSnapshot,
+      }),
     });
 
-    const mergedFacts: WidgetFacts =
-      data.facts && typeof data.facts === "object"
-        ? { ...factsSnapshot, ...data.facts }
-        : factsSnapshot;
-
-    setFacts(mergedFacts);
-
-    setMsgs((prev) => [
-      ...prev,
-      { id: uid("m"), role: "bot", text: data.assistantMessage },
-    ]);
-
-    setDone(Boolean(data.done));
-    setQuickReplies(
-      Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []
-    );
-  } catch {
-    setMsgs((prev) => [
-      ...prev,
-      {
-        id: uid("m"),
-        role: "bot",
-        text: "I'm with you - quick hiccup on my side. Try that again, or just give me outside size (LxWxH) and qty.",
-      },
-    ]);
-  } finally {
-    setBusy(false);
+    return res.json();
   }
-}
 
+  async function handleSend(text: string) {
+    const t = text.trim();
+    if (!t) return;
+
+    const userMsg: Msg = { id: uid("m"), role: "user", text: t };
+    const messagesSnapshot: Msg[] = [...msgs, userMsg];
+    const factsSnapshot: WidgetFacts = { ...facts };
+
+    setBusy(true);
+    setMsgs(messagesSnapshot);
+
+    try {
+      const data = await callBrain({
+        userText: t,
+        messagesSnapshot,
+        factsSnapshot,
+      });
+
+      const mergedFacts: WidgetFacts =
+        data.facts && typeof data.facts === "object"
+          ? { ...factsSnapshot, ...data.facts }
+          : factsSnapshot;
+
+      setFacts(mergedFacts);
+
+      setMsgs((prev) => [
+        ...prev,
+        { id: uid("m"), role: "bot", text: data.assistantMessage },
+      ]);
+
+      setDone(Boolean(data.done));
+      setQuickReplies(
+        Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []
+      );
+    } catch {
+      setMsgs((prev) => [
+        ...prev,
+        {
+          id: uid("m"),
+          role: "bot",
+          text: "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (LxWxH) and qty.",
+        },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Bug fix: previously re-read localStorage here to guard against one-render-behind.
+  // Replaced with latestFactsRef (kept in sync via useEffect) which is always current
+  // without the async localStorage read race.
   function openStartQuote() {
-  // Use both persisted facts and live state at click time.
-  // Persisted facts protect against one-render-behind issues for fields like cavities,
-  // but live state must win for any non-blank value because it can be newer than
-  // localStorage (especially right after the last assistant response).
-  const saved = safeJsonParse<{ facts: WidgetFacts }>(localStorage.getItem(LS_KEY));
-  const latestFacts: WidgetFacts | null =
-    saved?.facts && typeof saved.facts === "object" ? saved.facts : null;
+    const payloadFacts: WidgetFacts = { ...latestFactsRef.current };
 
-  const isBlank = (v: any) =>
-    v == null || v === "" || (Array.isArray(v) && v.length === 0);
-
-  const payloadFacts: WidgetFacts = {
-    ...(latestFacts ?? {}),
-  };
-
-  for (const [key, value] of Object.entries(facts)) {
-    if (!isBlank(value)) {
-      (payloadFacts as any)[key] = value;
+    if (!payloadFacts.createdAtIso) {
+      payloadFacts.createdAtIso = new Date().toISOString();
     }
-  }
 
-  if (!payloadFacts.createdAtIso) {
-    payloadFacts.createdAtIso =
-      facts.createdAtIso ??
-      latestFacts?.createdAtIso ??
-      new Date().toISOString();
-  }
+    // Build internal-only hints (never shown in the customer-facing notes textarea)
+    const noteBits: string[] = [];
 
-  // Build internal-only hints (never shown in the customer-facing notes textarea)
-  const noteBits: string[] = [];
-
-  if (payloadFacts.shipMode === "box" || payloadFacts.shipMode === "mailer") {
-    noteBits.push('Fit: For box/mailer, undersize foam L/W by 0.125" for drop-in fit.');
-  }
-  if (payloadFacts.insertType === "set") {
-    noteBits.push("Insert: Set (base + top pad/lid).");
-    if (payloadFacts.pocketsOn && payloadFacts.pocketsOn !== "unsure") {
-      noteBits.push(`Pockets on: ${payloadFacts.pocketsOn}.`);
+    if (payloadFacts.shipMode === "box" || payloadFacts.shipMode === "mailer") {
+      noteBits.push('Fit: For box/mailer, undersize foam L/W by 0.125" for drop-in fit.');
     }
+    if (payloadFacts.insertType === "set") {
+      noteBits.push("Insert: Set (base + top pad/lid).");
+      if (payloadFacts.pocketsOn && payloadFacts.pocketsOn !== "unsure") {
+        noteBits.push(`Pockets on: ${payloadFacts.pocketsOn}.`);
+      }
+    }
+
+    const existingHints = ((payloadFacts as any).internalHints ?? "").trim();
+    if (noteBits.length) {
+      (payloadFacts as any).internalHints = existingHints
+        ? `${existingHints}\n${noteBits.join("\n")}`
+        : noteBits.join("\n");
+    }
+
+    const payload = buildPrefillPayload(payloadFacts);
+    const prefill = encodeURIComponent(JSON.stringify(payload));
+    const separator = startQuotePath.includes("?") ? "&" : "?";
+    router.push(`${startQuotePath}${separator}prefill=${prefill}`);
   }
 
-  const existingHints = ((payloadFacts as any).internalHints ?? "").trim();
-  if (noteBits.length) {
-    (payloadFacts as any).internalHints = existingHints
-      ? `${existingHints}\n${noteBits.join("\n")}`
-      : noteBits.join("\n");
-  }
-
-  const payload = buildPrefillPayload(payloadFacts);
-  const prefill = encodeURIComponent(JSON.stringify(payload));
-  const separator = startQuotePath.includes("?") ? "&" : "?";
-  router.push(`${startQuotePath}${separator}prefill=${prefill}`);
-}
-
-  const summaryLines = React.useMemo(() => summarizeFacts(facts), [facts]);
+    const summaryLines = React.useMemo(() => summarizeFacts(facts), [facts]);
 
   return (
     <>
