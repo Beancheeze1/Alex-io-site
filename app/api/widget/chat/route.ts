@@ -165,9 +165,12 @@ function inferFamilyHint(userText: string, facts: WidgetFacts): string | null {
  * Given the user's text, try to extract a density in lb/ft³.
  * Handles: "1.7#", "1.7 lb", "2.0 pcf", "1.7lb/ft3"
  */
-function extractDensityHint(userText: string): number | null {
-  const m = (userText || "").match(/(\d+(?:\.\d+)?)\s*(?:#|lb|pcf|pound|lb\/ft)/i);
+function extractDensityHint(userText: string, facts: WidgetFacts): number | null {
+  const combined = `${facts.materialText ?? ""} ${userText ?? ""}`;
+
+  const m = combined.match(/(\d+(?:\.\d+)?)\s*(?:#|lb|pcf|pound|lb\/ft)/i);
   if (!m) return null;
+
   const n = Number(m[1]);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
@@ -665,8 +668,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const densityHint = extractDensityHint(`${userText} ${facts.materialText ?? ""}`);
-
+    const densityHint = extractDensityHint(userText, facts); 
     let materialOptions: DbMaterial[] = [];
     const shouldOfferFoam = wantsFoamRecommendation(userText, facts);
     const shouldLookupMaterial = !shouldOfferFoam && wantsMaterialLookup(userText, facts);
