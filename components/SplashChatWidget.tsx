@@ -301,73 +301,75 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
     }
   }
 
-  async function callBrain(args: {
-    userText: string;
-    messagesSnapshot: Msg[];
-    factsSnapshot: WidgetFacts;
-  }) {
-    const res = await fetch(`/api/widget/chat?t=${Date.now()}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        messages: args.messagesSnapshot.map((m) => ({ role: m.role, text: m.text })),
-        userText: args.userText,
-        facts: args.factsSnapshot,
-      }),
-    });
+async function callBrain(args: {
+  userText: string;
+  messagesSnapshot: Msg[];
+  factsSnapshot: WidgetFacts;
+}) {
+  const res = await fetch("/api/widget/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({
+      messages: args.messagesSnapshot.map((m) => ({
+        role: m.role,
+        text: m.text,
+      })),
+      userText: args.userText,
+      facts: args.factsSnapshot,
+    }),
+  });
 
-    if (!res.ok) {
-      throw new Error(`brain_http_${res.status}`);
-    }
-
-    const data = (await res.json()) as ChatResponse;
-    if (!data || typeof data.assistantMessage !== "string") {
-      throw new Error("brain_bad_payload");
-    }
-    return data;
-  }
+  return res.json();
+}
 
   async function handleSend(text: string) {
-    const t = text.trim();
-    if (!t) return;
+  const t = text.trim();
+  if (!t) return;
 
-    const userMsg: Msg = { id: uid("m"), role: "user", text: t };
-    const messagesSnapshot: Msg[] = [...msgs, userMsg];
-    const factsSnapshot: WidgetFacts = { ...facts };
+  const userMsg: Msg = { id: uid("m"), role: "user", text: t };
+  const messagesSnapshot: Msg[] = [...msgs, userMsg];
+  const factsSnapshot: WidgetFacts = { ...facts };
 
-    setBusy(true);
-    setMsgs(messagesSnapshot);
+  setBusy(true);
+  setMsgs(messagesSnapshot);
 
-    try {
-      const data = await callBrain({
-        userText: t,
-        messagesSnapshot,
-        factsSnapshot,
-      });
+  try {
+    const data = await callBrain({
+      userText: t,
+      messagesSnapshot,
+      factsSnapshot,
+    });
 
-      // Apply fact updates (additive)
-      const mergedFacts: WidgetFacts =
-        data.facts && typeof data.facts === "object"
-          ? { ...factsSnapshot, ...data.facts }
-          : factsSnapshot;
-      setFacts(mergedFacts);
+    const mergedFacts: WidgetFacts =
+      data.facts && typeof data.facts === "object"
+        ? { ...factsSnapshot, ...data.facts }
+        : factsSnapshot;
 
-      // Bot message
-      setMsgs((prev) => [...prev, { id: uid("m"), role: "bot", text: data.assistantMessage }]);
+    setFacts(mergedFacts);
 
-      // done + quick replies
-      setDone(Boolean(data.done));
-      setQuickReplies(Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []);
-    } catch {
-      // Fallback (still conversational)
-      pushBot(
-        "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (L×W×H) and qty."
-      );
-    } finally {
-      setBusy(false);
-    }
+    setMsgs((prev) => [
+      ...prev,
+      { id: uid("m"), role: "bot", text: data.assistantMessage },
+    ]);
+
+    setDone(Boolean(data.done));
+    setQuickReplies(
+      Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []
+    );
+  } catch {
+    setMsgs((prev) => [
+      ...prev,
+      {
+        id: uid("m"),
+        role: "bot",
+        text: "I'm with you - quick hiccup on my side. Try that again, or just give me outside size (LxWxH) and qty.",
+      },
+    ]);
+  } finally {
+    setBusy(false);
   }
+}
 
   function openStartQuote() {
   // Use both persisted facts and live state at click time.
