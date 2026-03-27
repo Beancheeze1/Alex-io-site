@@ -993,20 +993,14 @@ export async function POST(req: NextRequest) {
       { status: 200 },
     );
   } catch (e: any) {
-    console.error("widget_chat_route_error", String(e?.message ?? e));
-    const payload = await req.clone().json().catch(() => null as Incoming | null);
-    const userText = String(payload?.userText ?? "").trim();
-    const priorFacts = ((payload?.facts ?? {}) as WidgetFacts) || {};
-    const simpleFacts = extractSimpleFacts(userText, priorFacts);
-    const fallbackFacts: WidgetFacts = { ...priorFacts, ...simpleFacts };
+    console.error("widget_chat_route_error", e);
 
-    const next = nextQuestionFromFacts(fallbackFacts);
     return NextResponse.json(
       {
-        assistantMessage: next.assistantMessage,
-        facts: fallbackFacts,
-        done: next.done,
-        quickReplies: next.quickReplies,
+        assistantMessage: "DEBUG ERROR: " + (e?.message || "unknown"),
+        facts: payload?.facts ?? {},
+        done: false,
+        quickReplies: [],
       },
       { status: 200 },
     );
