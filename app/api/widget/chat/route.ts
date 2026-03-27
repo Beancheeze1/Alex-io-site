@@ -448,172 +448,149 @@ async function callOpenAI(params: {
           .join("\n")
       : "(none found)";
 
-  const inputMessages = [
-    {
-      role: "developer",
-      content: [
-        {
-          type: "input_text",
-          text:
-            "You are Alex-IO’s website chat widget. Your job is to have a natural, confident conversation " +
-            "and extract quoting facts for a foam packaging insert quote.\n\n" +
-            "IMPORTANT RULES:\n" +
-            "- Be chatty like a helpful expert, not a form.\n" +
-            "- Ask ONE question at a time.\n" +
-            "- Never invent facts. If unsure, ask.\n" +
-            "- Keep answers short (1–3 short paragraphs).\n" +
-            "- When user gives multiple facts at once, acknowledge + move on.\n" +
-            "- Update a structured facts object.\n" +
-            "- Propose up to 6 quick replies when useful.\n\n" +
-            "Fields you care about:\n" +
-            "- outside size L×W×H (in)\n" +
-            "- qty\n" +
-            "- customerName: customer's full name — ask for this early (after dims + qty)\n" +
-            "- customerEmail: customer's email address — ask right after name\n" +
-            "- shipping: box vs mailer vs unsure (fit matters)\n" +
-            "- printed: does the customer want the box/mailer printed? (true/false) — ask this when shipMode is box or mailer\n" +
-            "- packagingChoice: ONLY set this when a SYSTEM NOTE below presents a stock box/mailer option AND the customer has responded.\n" +
-            "   - 'stock' if they choose the suggested stock size (also set packagingSku to the SKU shown)\n" +
-            "   - 'custom' if they want a custom-built box to their exact dimensions\n" +
-            "   - Leave null until they explicitly choose — never pre-select for them.\n" +
-            "- insert type: single vs set (base + top pad/lid)\n" +
-            "- holding: cut-out pockets vs loose vs unsure\n" +
-            "- pocketsOn: base/top/both if set\n" +
-            "- pocketCount: 1/2/3+/unsure if pockets\n" +
-            "- material:\n" +
-            "   - If user knows it: materialMode='known' + materialText\n" +
-            "   - If user wants us to pick: materialMode='recommend'\n" +
-            "   - If user selects from DB options below: set materialMode='known', materialText, AND materialId\n" +
-            "- layers: layerCount (1–4) and layerThicknesses array\n" +
-            "  Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).\n" +
-            "  IMPORTANT: Always populate layerThicknesses when the user mentions any thickness.\n" +
-            "  Examples:\n" +
-            "    - '2 inch insert' → layerCount='1', layerThicknesses=['2']\n" +
-            "    - '2 inch bottom, 0.5 inch top pad' → layerCount='2', layerThicknesses=['2','0.5']\n" +
-            "    - 'set with base and lid' (no thickness given) → layerCount='2', layerThicknesses=['1','1'] as default guess\n" +
-            "  If the user mentions a top pad thickness, ALWAYS put it as the last element of layerThicknesses.\n" +
-            "- cavities: ALL pocket sizes as a semicolon-delimited string.\n" +
-            "   - Rectangular pocket: LxWxD  (e.g. '3x2x1')\n" +
-            "   - Round/circular pocket: ØDIAxDEPTH  (e.g. 'Ø3x1' for a 3\" diameter, 1\" deep hole)\n" +
-            "   - NEVER convert a circle to a rect. If user says 'diameter', 'round', or 'circular', use the Ø prefix.\n" +
-            "   - Multiple pockets: join with semicolons  (e.g. '3x2x1;Ø2x1.5')\n" +
-            "- notes\n\n" +
-            'When shipping is box or mailer, mention briefly we typically undersize foam L/W by 0.125" for drop-in fit.\n' +
-            "When you have enough info, done=true and invite them to open layout & pricing.\n\n" +
-            "DB MATERIAL OPTIONS (use these when the user asks you to recommend foam):\n" +
-            materialOptionsText +
-            "\n\n" +
-            "When recommending foam:\n" +
-            "- Recommend ONE best choice and optionally mention 1 alternative.\n" +
-            "- Then ask: 'Pick 1/2/3' (or type the material name).\n" +
-            "- Do NOT invent material IDs; only use ids shown above.\n" +
-            "- Do NOT recommend a generic foam description if DB options are available; use the options list.",
-        },
-      ],
-    },
-    {
-      role: "developer",
-      content: [
-        {
-          type: "input_text",
-          text:
-            "Current known facts JSON:\n" +
-            clip(JSON.stringify(params.facts ?? {}), 2000) +
-            "\n\nConversation so far (most recent last):\n" +
-            clip(
-              (params.messages ?? [])
-                .slice(-12)
-                .map((m) => `${m.role === "user" ? "User" : "Bot"}: ${m.text}`)
-                .join("\n"),
-              4000,
-            ) +
-            (params.suggestionContext ? `\n\n${params.suggestionContext}` : "") +
-            "\n\nNewest user message:\n" +
-            clip(params.userText, 800),
-        },
-      ],
-    },
-  ];
+  const systemPrompt =
+    "You are Alex-IO\u2019s website chat widget. Your job is to have a natural, confident conversation " +
+    "and extract quoting facts for a foam packaging insert quote.\n\n" +
+    "IMPORTANT RULES:\n" +
+    "- Be chatty like a helpful expert, not a form.\n" +
+    "- Ask ONE question at a time.\n" +
+    "- Never invent facts. If unsure, ask.\n" +
+    "- Keep answers short (1\u20133 short paragraphs).\n" +
+    "- When user gives multiple facts at once, acknowledge + move on.\n" +
+    "- Update a structured facts object.\n" +
+    "- Propose up to 6 quick replies when useful.\n\n" +
+    "Fields you care about:\n" +
+    "- outside size L\u00d7W\u00d7H (in)\n" +
+    "- qty\n" +
+    "- customerName: customer\u2019s full name \u2014 ask for this early (after dims + qty)\n" +
+    "- customerEmail: customer\u2019s email address \u2014 ask right after name\n" +
+    "- shipping: box vs mailer vs unsure (fit matters)\n" +
+    "- printed: does the customer want the box/mailer printed? (true/false) \u2014 ask this when shipMode is box or mailer\n" +
+    "- packagingChoice: ONLY set this when a SYSTEM NOTE below presents a stock box/mailer option AND the customer has responded.\n" +
+    "   - 'stock' if they choose the suggested stock size (also set packagingSku to the SKU shown)\n" +
+    "   - 'custom' if they want a custom-built box to their exact dimensions\n" +
+    "   - Leave null until they explicitly choose \u2014 never pre-select for them.\n" +
+    "- insert type: single vs set (base + top pad/lid)\n" +
+    "- holding: cut-out pockets vs loose vs unsure\n" +
+    "- pocketsOn: base/top/both if set\n" +
+    "- pocketCount: 1/2/3+/unsure if pockets\n" +
+    "- material:\n" +
+    "   - If user knows it: materialMode='known' + materialText\n" +
+    "   - If user wants us to pick: materialMode='recommend'\n" +
+    "   - If user selects from DB options below: set materialMode='known', materialText, AND materialId\n" +
+    "- layers: layerCount (1\u20134) and layerThicknesses array\n" +
+    "  Convention: Layer 1 = base/body, higher layers stack upward (top pad/lid is last layer).\n" +
+    "  IMPORTANT: Always populate layerThicknesses when the user mentions any thickness.\n" +
+    "  Examples:\n" +
+    "    - '2 inch insert' \u2192 layerCount='1', layerThicknesses=['2']\n" +
+    "    - '2 inch bottom, 0.5 inch top pad' \u2192 layerCount='2', layerThicknesses=['2','0.5']\n" +
+    "    - 'set with base and lid' (no thickness given) \u2192 layerCount='2', layerThicknesses=['1','1'] as default guess\n" +
+    "  If the user mentions a top pad thickness, ALWAYS put it as the last element of layerThicknesses.\n" +
+    "- cavities: ALL pocket sizes as a semicolon-delimited string.\n" +
+    "   - Rectangular pocket: LxWxD  (e.g. '3x2x1')\n" +
+    "   - Round/circular pocket: \u00d8DIAxDEPTH  (e.g. '\u00d83x1' for a 3\" diameter, 1\" deep hole)\n" +
+    "   - NEVER convert a circle to a rect. If user says 'diameter', 'round', or 'circular', use the \u00d8 prefix.\n" +
+    "   - Multiple pockets: join with semicolons  (e.g. '3x2x1;\u00d82x1.5')\n" +
+    "- notes\n\n" +
+    'When shipping is box or mailer, mention briefly we typically undersize foam L/W by 0.125" for drop-in fit.\n' +
+    "When you have enough info, done=true and invite them to open layout & pricing.\n\n" +
+    "DB MATERIAL OPTIONS (use these when the user asks you to recommend foam):\n" +
+    materialOptionsText +
+    "\n\n" +
+    "When recommending foam:\n" +
+    "- Recommend ONE best choice and optionally mention 1 alternative.\n" +
+    "- Then ask: 'Pick 1/2/3' (or type the material name).\n" +
+    "- Do NOT invent material IDs; only use ids shown above.\n" +
+    "- Do NOT recommend a generic foam description if DB options are available; use the options list.";
 
-  const body = {
-    model: "gpt-4o-2024-08-06",
-    input: inputMessages,
-    text: {
-      format: {
-        type: "json_schema",
-        name: "widget_chat_schema",
-        strict: true,
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          required: ["assistantMessage", "facts", "done", "quickReplies"],
-          properties: {
-            assistantMessage: { type: "string" },
-            done: { type: "boolean" },
-            quickReplies: { type: "array", items: { type: "string" }, maxItems: 6 },
-            facts: {
-              type: "object",
-              additionalProperties: false,
-              required: [
-                "outsideL",
-                "outsideW",
-                "outsideH",
-                "qty",
-                "shipMode",
-                "insertType",
-                "pocketsOn",
-                "holding",
-                "pocketCount",
-                "materialMode",
-                "materialText",
-                "materialId",
-                "packagingSku",
-                "packagingChoice",
-                "printed",
-                "layerCount",
-                "layerThicknesses",
-                "cavities",
-                "customerName",
-                "customerEmail",
-                "notes",
-                "createdAtIso",
-              ],
-              properties: {
-                outsideL: { type: ["string", "null"] },
-                outsideW: { type: ["string", "null"] },
-                outsideH: { type: ["string", "null"] },
-                qty: { type: ["string", "null"] },
-                shipMode: { anyOf: [{ type: "string", enum: ["box", "mailer", "unsure"] }, { type: "null" }] },
-                insertType: { anyOf: [{ type: "string", enum: ["single", "set", "unsure"] }, { type: "null" }] },
-                pocketsOn: { anyOf: [{ type: "string", enum: ["base", "top", "both", "unsure"] }, { type: "null" }] },
-                holding: { anyOf: [{ type: "string", enum: ["pockets", "loose", "unsure"] }, { type: "null" }] },
-                pocketCount: { anyOf: [{ type: "string", enum: ["1", "2", "3+", "unsure"] }, { type: "null" }] },
-                materialMode: { anyOf: [{ type: "string", enum: ["recommend", "known"] }, { type: "null" }] },
-                materialText: { type: ["string", "null"] },
-                materialId: { type: ["number", "null"] },
-                packagingSku: { type: ["string", "null"] },
-                packagingChoice: { anyOf: [{ type: "string", enum: ["stock", "custom"] }, { type: "null" }] },
-                printed: { anyOf: [{ type: "boolean" }, { type: "null" }] },
-                layerCount: { anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }] },
-                layerThicknesses: { anyOf: [{ type: "array", items: { type: "string" }, maxItems: 4 }, { type: "null" }] },
-                cavities: { type: ["string", "null"] },
-                customerName: { type: ["string", "null"] },
-                customerEmail: { type: ["string", "null"] },
-                notes: { type: ["string", "null"] },
-                createdAtIso: { type: ["string", "null"] },
-              },
-            },
-          },
+  const contextMessage =
+    "Current known facts JSON:\n" +
+    clip(JSON.stringify(params.facts ?? {}), 2000) +
+    "\n\nConversation so far (most recent last):\n" +
+    clip(
+      (params.messages ?? [])
+        .slice(-12)
+        .map((m) => `${m.role === "user" ? "User" : "Bot"}: ${m.text}`)
+        .join("\n"),
+      4000,
+    ) +
+    (params.suggestionContext ? `\n\n${params.suggestionContext}` : "") +
+    "\n\nNewest user message:\n" +
+    clip(params.userText, 800);
+
+  // Structured output schema (Chat Completions API format — stable, well-supported).
+  // NOTE: Previously used /v1/responses (Responses API) which has a different request
+  // shape (input:/text.format:) and response shape (output_json/output_text). Reverted
+  // to /v1/chat/completions with response_format.json_schema which is supported on all
+  // gpt-4o models and returns choices[0].message.content as normal JSON text.
+  const responseSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["assistantMessage", "facts", "done", "quickReplies"],
+    properties: {
+      assistantMessage: { type: "string" },
+      done: { type: "boolean" },
+      quickReplies: { type: "array", items: { type: "string" }, maxItems: 6 },
+      facts: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "outsideL", "outsideW", "outsideH", "qty",
+          "shipMode", "insertType", "pocketsOn", "holding", "pocketCount",
+          "materialMode", "materialText", "materialId",
+          "packagingSku", "packagingChoice", "printed",
+          "layerCount", "layerThicknesses", "cavities",
+          "customerName", "customerEmail", "notes", "createdAtIso",
+        ],
+        properties: {
+          outsideL: { type: ["string", "null"] },
+          outsideW: { type: ["string", "null"] },
+          outsideH: { type: ["string", "null"] },
+          qty: { type: ["string", "null"] },
+          shipMode: { anyOf: [{ type: "string", enum: ["box", "mailer", "unsure"] }, { type: "null" }] },
+          insertType: { anyOf: [{ type: "string", enum: ["single", "set", "unsure"] }, { type: "null" }] },
+          pocketsOn: { anyOf: [{ type: "string", enum: ["base", "top", "both", "unsure"] }, { type: "null" }] },
+          holding: { anyOf: [{ type: "string", enum: ["pockets", "loose", "unsure"] }, { type: "null" }] },
+          pocketCount: { anyOf: [{ type: "string", enum: ["1", "2", "3+", "unsure"] }, { type: "null" }] },
+          materialMode: { anyOf: [{ type: "string", enum: ["recommend", "known"] }, { type: "null" }] },
+          materialText: { type: ["string", "null"] },
+          materialId: { type: ["number", "null"] },
+          packagingSku: { type: ["string", "null"] },
+          packagingChoice: { anyOf: [{ type: "string", enum: ["stock", "custom"] }, { type: "null" }] },
+          printed: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+          layerCount: { anyOf: [{ type: "string", enum: ["1", "2", "3", "4"] }, { type: "null" }] },
+          layerThicknesses: { anyOf: [{ type: "array", items: { type: "string" }, maxItems: 4 }, { type: "null" }] },
+          cavities: { type: ["string", "null"] },
+          customerName: { type: ["string", "null"] },
+          customerEmail: { type: ["string", "null"] },
+          notes: { type: ["string", "null"] },
+          createdAtIso: { type: ["string", "null"] },
         },
       },
     },
   };
 
+  const body = {
+    model: "gpt-4o-2024-08-06",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: contextMessage },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "widget_chat_schema",
+        strict: true,
+        schema: responseSchema,
+      },
+    },
+  };
+
   const openaiController = new AbortController();
-  const openaiTimeout = setTimeout(() => openaiController.abort(), 25000); // 25 s hard cap
+  const openaiTimeout = setTimeout(() => openaiController.abort(), 25000);
   let res: Response;
   try {
-    res = await fetch("https://api.openai.com/v1/responses", {
+    res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -625,20 +602,14 @@ async function callOpenAI(params: {
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`openai_http_${res.status}_${txt.slice(0, 220)}`);
+    throw new Error(`openai_http_${res.status}: ${txt.slice(0, 300)}`);
   }
 
   const json = (await res.json()) as any;
+  const messageContent = json?.choices?.[0]?.message?.content;
+  if (!messageContent) throw new Error("openai_empty_response");
 
-  const outputObj = json?.output_json && typeof json.output_json === "object" ? json.output_json : null;
-  if (outputObj) return outputObj;
-
-  const outputText: string =
-    typeof json?.output_text === "string"
-      ? json.output_text
-      : (json?.output?.[0]?.content?.find?.((c: any) => c?.type === "output_text")?.text ?? "");
-
-  return JSON.parse(String(outputText || "").trim());
+  return JSON.parse(String(messageContent).trim());
 }
 
 function normalizeBrainObj(obj: any) {
@@ -826,12 +797,16 @@ function nextQuestionFromFacts(f: WidgetFacts): {
 }
 
 export async function POST(req: NextRequest) {
+  // Stash parsed facts outside the try so the catch block can return them
+  // without calling req.clone().json() on an already-consumed body stream.
+  let _parsedFacts: WidgetFacts = {};
   try {
     const payload = (await req.json()) as Incoming;
 
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
     const userText = String(payload.userText ?? "").trim();
     const facts = (payload.facts ?? {}) as WidgetFacts;
+    _parsedFacts = facts; // stash for catch block
 
     const simpleFacts = extractSimpleFacts(userText, facts);
     const seededFacts: WidgetFacts = { ...facts, ...simpleFacts };
@@ -997,13 +972,13 @@ export async function POST(req: NextRequest) {
     );
   } catch (e: any) {
     console.error("widget_chat_route_error", e);
-
-    const payload = await req.clone().json().catch(() => null as Incoming | null);
-
+    // NOTE: do NOT call req.clone().json() here — req.json() already consumed the body
+    // stream earlier in this handler. Cloning after consumption throws in Node.js runtime.
+    // Instead we use _parsedFacts which was stashed from the parsed payload above.
     return NextResponse.json(
       {
         assistantMessage: "DEBUG ERROR: " + (e?.message || "unknown"),
-        facts: payload?.facts ?? {},
+        facts: _parsedFacts,
         done: false,
         quickReplies: [],
       },
