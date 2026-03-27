@@ -808,7 +808,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         assistantMessage,
-        facts: nextFacts,
+        facts: mergedFacts,
         done,
         quickReplies: finalReplies,
       },
