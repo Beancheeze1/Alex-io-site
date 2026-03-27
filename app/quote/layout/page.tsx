@@ -3450,36 +3450,84 @@ const handleGoToFoamAdvisor = () => {
         payload.sales_rep_slug = salesRepSlugForApply;
       }
 
-      // Attach chosen carton (if any) so the backend can add a box line item.
+      // Attach chosen carton so the backend can upsert the box line item.
       //
-      // IMPORTANT: When the editor was opened from the Start Quote modal
-      // (pack_type=complete_pack in URL), the auto-pick effect already called
-      // handlePickCarton → /api/boxes/add-to-quote on page load with the correct
-      // box. If we ALSO send selectedCarton here on first Apply, the apply route
-      // inserts a second carton row for the WRONG box (the live suggester result)
-      // before /api/boxes/add-to-quote has had a chance to complete. That wrong
-      // row is what shows in the quote on first Apply; on re-Apply the correct
-      // row already exists so it wins.
+      // Priority order:
+      //   1. pack_type=complete_pack in URL (came from Start Quote modal):
+      //      Build selectedCarton from the URL params directly so Apply always
+      //      sends the exact box the customer chose — not whatever the live
+      //      suggester happens to think is best-fit right now.
+      //        a. box_sku present → find matching entry in boxSuggest for full
+      //           dims, or fall back to box_l/w/d if the SKU isn't in results.
+      //        b. No box_sku (custom-sized box) → build from box_l/w/d params.
+      //   2. Manual session pick (user clicked "Pick this box" in the suggester
+      //      UI): use boxSuggest.bestRsc/bestMailer as before.
       //
-      // Fix: only include selectedCarton in Apply when the pick was made
-      // manually via the suggester UI during this session (NOT auto-picked on
-      // load from a complete_pack URL). We detect the auto-pick case by checking
-      // pack_type=complete_pack in the URL — if it's present, skip selectedCarton
-      // here entirely and let /api/boxes/add-to-quote own the insert.
-      if (selectedCartonKind && (boxSuggest.bestRsc || boxSuggest.bestMailer)) {
-        const chosen = selectedCartonKind === "RSC" ? boxSuggest.bestRsc : boxSuggest.bestMailer;
+      // This replaces the previous approach of relying on /api/boxes/add-to-quote
+      // (handlePickCarton) to commit the row before Apply runs — that caused a
+      // race condition where Apply could fire before add-to-quote finished,
+      // resulting in no carton on first Apply and the correct one only on re-Apply.
+      try {
+        const urlParams = new URL(window.location.href).searchParams;
+        const isModalPack = urlParams.get("pack_type") === "complete_pack";
 
-        if (chosen) {
-          let isAutoPickedFromModal = false;
-          try {
-            const urlParams = new URL(window.location.href).searchParams;
-            isAutoPickedFromModal = urlParams.get("pack_type") === "complete_pack";
-          } catch { /* ignore */ }
+        if (isModalPack) {
+          const urlSku = (urlParams.get("box_sku") || "").trim();
+          const urlL = parseFloat(urlParams.get("box_l") || "");
+          const urlW = parseFloat(urlParams.get("box_w") || "");
+          const urlD = parseFloat(urlParams.get("box_d") || "");
+          const urlStyle = (urlParams.get("box_style") || "rsc").toLowerCase() === "mailer" ? "MAILER" : "RSC";
 
-          // Skip selectedCarton when the carton was auto-picked on load from the
-          // Start Quote modal — /api/boxes/add-to-quote already owns that insert.
-          // Only include it for manual session picks from the suggester UI.
-          if (!isAutoPickedFromModal) {
+          if (urlSku) {
+            // Stock SKU chosen in chat — find it in suggester results for full dims
+            const suggesterMatch =
+              urlStyle === "MAILER"
+                ? (boxSuggest.bestMailer?.sku === urlSku ? boxSuggest.bestMailer : null)
+                : (boxSuggest.bestRsc?.sku === urlSku ? boxSuggest.bestRsc : null);
+
+            if (suggesterMatch) {
+              payload.selectedCarton = {
+                style: suggesterMatch.style,
+                sku: suggesterMatch.sku,
+                description: suggesterMatch.description,
+                inside_length_in: suggesterMatch.inside_length_in,
+                inside_width_in: suggesterMatch.inside_width_in,
+                inside_height_in: suggesterMatch.inside_height_in,
+                fit_score: suggesterMatch.fit_score,
+                notes: suggesterMatch.notes ?? null,
+              };
+            } else if (Number.isFinite(urlL) && Number.isFinite(urlW) && Number.isFinite(urlD)) {
+              // SKU not in current suggester results — build from URL dims
+              payload.selectedCarton = {
+                style: urlStyle,
+                sku: urlSku,
+                description: urlSku,
+                inside_length_in: urlL,
+                inside_width_in: urlW,
+                inside_height_in: urlD,
+                fit_score: 0,
+                notes: null,
+              };
+            }
+          } else if (Number.isFinite(urlL) && Number.isFinite(urlW) && Number.isFinite(urlD)) {
+            // Custom-sized box — no SKU, build from box_l/w/d dims with a
+            // synthetic SKU so the apply route can look it up or create a row.
+            const syntheticSku = `CUSTOM-${urlL}x${urlW}x${urlD}`;
+            payload.selectedCarton = {
+              style: urlStyle,
+              sku: syntheticSku,
+              description: `Custom ${urlL}×${urlW}×${urlD} in`,
+              inside_length_in: urlL,
+              inside_width_in: urlW,
+              inside_height_in: urlD,
+              fit_score: 0,
+              notes: null,
+            };
+          }
+        } else if (selectedCartonKind && (boxSuggest.bestRsc || boxSuggest.bestMailer)) {
+          // Manual session pick from the suggester UI
+          const chosen = selectedCartonKind === "RSC" ? boxSuggest.bestRsc : boxSuggest.bestMailer;
+          if (chosen) {
             payload.selectedCarton = {
               style: chosen.style,
               sku: chosen.sku,
@@ -3492,7 +3540,7 @@ const handleGoToFoamAdvisor = () => {
             };
           }
         }
-      }
+      } catch { /* ignore URL parse errors */ }
 
       // Attach foam layers summary so the backend can add each pad as a line item
       if (layers && layers.length > 0) {

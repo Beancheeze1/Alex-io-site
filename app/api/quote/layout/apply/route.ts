@@ -1999,7 +1999,7 @@ export async function POST(req: NextRequest) {
         const qtyForCarton =
           qtyMaybe != null && qtyMaybe > 0 ? qtyMaybe : 1;
 
-        // Look up box by SKU
+        // Look up box by SKU in the boxes catalogue
         const boxRow = (await one<{
           id: number;
           inside_length_in: number;
@@ -2015,7 +2015,7 @@ export async function POST(req: NextRequest) {
         )) as any;
 
         if (boxRow) {
-          // Check for existing selection row
+          // ---- Stock box: upsert quote_box_selections + quote_items ----
           const existingSel = (await one<{ id: number }>(
             `SELECT id FROM public.quote_box_selections
              WHERE quote_id = $1 AND box_id = $2
@@ -2062,8 +2062,7 @@ export async function POST(req: NextRequest) {
             );
           }
 
-          // Reprice quote_box_selections using box_price_tiers (same logic as
-          // /api/boxes/add-to-quote so unit/extended prices are always current)
+          // Reprice quote_box_selections using box_price_tiers
           await q(
             `UPDATE public.quote_box_selections qbs
              SET
@@ -2093,11 +2092,53 @@ export async function POST(req: NextRequest) {
             "[layout/apply] selectedCarton upserted",
             { quoteNo, sku, qtyForCarton, isNew: !existingSel },
           );
+
         } else {
-          console.warn(
-            "[layout/apply] selectedCarton SKU not found in boxes table",
-            { sku },
-          );
+          // ---- Custom box: SKU not in boxes table, use dims from sc directly ----
+          const L = Number(sc.inside_length_in);
+          const W = Number(sc.inside_width_in);
+          const H = Number(sc.inside_height_in);
+          const styleStr = (String(sc.style || "")).trim();
+
+          if (Number.isFinite(L) && L > 0 && Number.isFinite(W) && W > 0 && Number.isFinite(H) && H > 0) {
+            const cartonNotes =
+              `Requested shipping carton: ${L} x ${W} x ${H} in ${sku}` +
+              (styleStr ? ` (${styleStr})` : "");
+
+            const cartonMaterialId =
+              materialId != null && Number.isFinite(materialId) && materialId > 0
+                ? materialId
+                : null;
+
+            // Delete any stale custom carton lines before re-inserting so
+            // repeated Apply calls don't stack duplicate rows.
+            await q(
+              `DELETE FROM public.quote_items
+               WHERE quote_id = $1
+                 AND product_id IS NULL
+                 AND notes ILIKE 'Requested shipping carton:%'`,
+              [quote.id],
+            );
+
+            await q(
+              `INSERT INTO public.quote_items
+                 (quote_id, product_id, length_in, width_in, height_in,
+                  material_id, qty, notes,
+                  price_unit_usd, price_total_usd, calc_snapshot)
+               VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL)`,
+              [quote.id, L, W, H, cartonMaterialId, qtyForCarton, cartonNotes],
+            );
+
+            console.log(
+              "[layout/apply] custom carton inserted (no boxes row)",
+              { quoteNo, sku, L, W, H, qtyForCarton },
+            );
+          } else {
+            console.warn(
+              "[layout/apply] selectedCarton SKU not found and dims invalid — skipping",
+              { sku, sc },
+            );
+          }
         }
       } catch (cartonErr) {
         console.error("[layout/apply] selectedCarton upsert failed", cartonErr);
