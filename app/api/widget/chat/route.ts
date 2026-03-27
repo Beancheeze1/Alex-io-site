@@ -648,6 +648,181 @@ function normalizeBrainObj(obj: any) {
   return obj as { assistantMessage: string; facts: Partial<WidgetFacts>; done: boolean; quickReplies: string[] };
 }
 
+function normalizeLooseName(raw: string): string | null {
+  const cleaned = String(raw || "")
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/[.,!?]+$/g, "")
+    .trim();
+
+  if (!cleaned) return null;
+
+  const parts = cleaned
+    .split(/\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) return null;
+
+  const looksNamey = parts.every((p) => /^[A-Za-z][A-Za-z'’-]*$/.test(p));
+  if (!looksNamey) return null;
+
+  return parts.join(" ");
+}
+
+function extractSimpleFacts(userText: string, facts: WidgetFacts): Partial<WidgetFacts> {
+  const text = String(userText || "").trim();
+  const next: Partial<WidgetFacts> = {};
+
+  const dimMatch = text.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
+  if (dimMatch) {
+    next.outsideL = dimMatch[1];
+    next.outsideW = dimMatch[2];
+    next.outsideH = dimMatch[3];
+  }
+
+  const qtyMatch =
+    text.match(/\bqty\b\s*[:#-]?\s*(\d+)\b/i) ||
+    text.match(/\bquantity\b\s*[:#-]?\s*(\d+)\b/i);
+  if (qtyMatch) {
+    next.qty = qtyMatch[1];
+  } else if (!facts.qty && /^\d+$/.test(text)) {
+    next.qty = text;
+  }
+
+  if (/\bmailer\b/i.test(text)) next.shipMode = "mailer";
+  else if (/\bbox\b/i.test(text)) next.shipMode = "box";
+
+  if (/\bprinted\b/i.test(text)) next.printed = true;
+  if (/\bnot printed\b/i.test(text) || /\bunprinted\b/i.test(text)) next.printed = false;
+
+  if (
+    /\bset\b/i.test(text) ||
+    /\btop pad\b/i.test(text) ||
+    /\blid\b/i.test(text) ||
+    /\b2 pieces?\b/i.test(text) ||
+    /\bbase\b/i.test(text)
+  ) {
+    next.insertType = "set";
+  } else if (/\bsingle\b/i.test(text) || /\b1 piece\b/i.test(text)) {
+    next.insertType = "single";
+  }
+
+  if (/\bpockets?\b/i.test(text) || /\bcut-?out\b/i.test(text) || /\bcavit(?:y|ies)\b/i.test(text)) {
+    next.holding = "pockets";
+  } else if (/\bloose\b/i.test(text) || /\bno pockets?\b/i.test(text)) {
+    next.holding = "loose";
+  }
+
+  const nameMatch =
+    text.match(/\bmy name is\s+(.+)$/i) ||
+    text.match(/\bit'?s\s+(.+)$/i) ||
+    text.match(/\bi am\s+(.+)$/i) ||
+    text.match(/\bthis is\s+(.+)$/i);
+
+  if (!facts.customerName) {
+    const explicitName = normalizeLooseName(nameMatch?.[1] ?? "");
+    if (explicitName) {
+      next.customerName = explicitName;
+    } else {
+      const looseName = normalizeLooseName(text);
+      if (
+        looseName &&
+        !/\bqty\b/i.test(text) &&
+        !/\bquantity\b/i.test(text) &&
+        !/\bbox\b/i.test(text) &&
+        !/\bmailer\b/i.test(text) &&
+        !/[x×]/i.test(text)
+      ) {
+        next.customerName = looseName;
+      }
+    }
+  }
+
+  if (!facts.materialText && wantsMaterialLookup(text, facts)) {
+    next.materialMode = "known";
+    next.materialText = text;
+  }
+
+  return next;
+}
+
+function nextQuestionFromFacts(f: WidgetFacts): {
+  assistantMessage: string;
+  quickReplies: string[];
+  done: boolean;
+} {
+  if (!hasCoreDims(f)) {
+    return {
+      assistantMessage: "Got it — what's the outside foam size (LxWxH, inches)?",
+      quickReplies: ["18x12x3", "12x10x2", "Not sure yet"],
+      done: false,
+    };
+  }
+
+  if (!f.qty || !String(f.qty).trim()) {
+    return {
+      assistantMessage: "Got it — what's the quantity?",
+      quickReplies: ["Qty 25", "Qty 100", "Qty 250"],
+      done: false,
+    };
+  }
+
+  if (!f.shipMode) {
+    return {
+      assistantMessage: "Do you want this in a box or a mailer?",
+      quickReplies: ["Shipping: box", "Shipping: mailer", "Not sure yet"],
+      done: false,
+    };
+  }
+
+  if (f.printed == null && (f.shipMode === "box" || f.shipMode === "mailer")) {
+    return {
+      assistantMessage: `Do you want the ${f.shipMode} printed?`,
+      quickReplies: ["Printed", "Not printed"],
+      done: false,
+    };
+  }
+
+  if (!f.insertType) {
+    return {
+      assistantMessage: "Is this a single insert or a set with a base and top pad/lid?",
+      quickReplies: ["Single insert", "Set insert", "Not sure yet"],
+      done: false,
+    };
+  }
+
+  if (!f.holding) {
+    return {
+      assistantMessage: "Will the product sit loose, or do you need cut-out pockets?",
+      quickReplies: ["Loose / no pockets", "Cut-out pockets", "Not sure yet"],
+      done: false,
+    };
+  }
+
+  if (!f.customerName || !String(f.customerName).trim()) {
+    return {
+      assistantMessage: "Great, we're moving along. What's your full name?",
+      quickReplies: [],
+      done: false,
+    };
+  }
+
+  if (!f.customerEmail || !String(f.customerEmail).trim()) {
+    return {
+      assistantMessage: "Perfect. What's the best email for the quote?",
+      quickReplies: [],
+      done: false,
+    };
+  }
+
+  return {
+    assistantMessage: "Perfect — I've got enough to open layout and pricing.",
+    quickReplies: [],
+    done: true,
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const payload = (await req.json()) as Incoming;
@@ -655,6 +830,9 @@ export async function POST(req: NextRequest) {
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
     const userText = String(payload.userText ?? "").trim();
     const facts = (payload.facts ?? {}) as WidgetFacts;
+
+    const simpleFacts = extractSimpleFacts(userText, facts);
+    const seededFacts: WidgetFacts = { ...facts, ...simpleFacts };
 
     if (!userText) {
       return NextResponse.json(
@@ -668,25 +846,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const densityHint = extractDensityHint(userText, facts); 
+    const densityHint = extractDensityHint(userText, seededFacts);
     let materialOptions: DbMaterial[] = [];
-    const shouldOfferFoam = wantsFoamRecommendation(userText, facts);
-    const shouldLookupMaterial = !shouldOfferFoam && wantsMaterialLookup(userText, facts);
+    const shouldOfferFoam = wantsFoamRecommendation(userText, seededFacts);
+    const shouldLookupMaterial = !shouldOfferFoam && wantsMaterialLookup(userText, seededFacts);
 
     if (shouldOfferFoam || shouldLookupMaterial) {
-      const familyHint = inferFamilyHint(userText, facts);
+      const familyHint = inferFamilyHint(userText, seededFacts);
       materialOptions = await getTopMaterialsForWidget({ familyHint, densityHint, limit: shouldLookupMaterial ? 6 : 3 });
     }
 
     const pickedFromText = materialOptions.length ? pickMaterialFromUserText(userText, materialOptions, densityHint) : null;
 
     // Run box suggester BEFORE AI call so we can inject the stock suggestion as context.
-    const pack = await maybeSeedPackagingFromBoxesSuggest({ mergedFacts: facts });
+    const pack = await maybeSeedPackagingFromBoxesSuggest({ mergedFacts: seededFacts });
 
     const rawObj = await callOpenAI({
       messages,
       userText,
-      facts,
+      facts: seededFacts,
       materialOptions,
       suggestionContext: pack.suggestionContext,
     });
@@ -695,7 +873,7 @@ export async function POST(req: NextRequest) {
    if (!parsed) {
   return NextResponse.json(
     {
-      assistantMessage: "Got it — let’s fill in a couple details. What’s the quantity?",
+      assistantMessage: "Got it â€” letâ€™s fill in a couple details. Whatâ€™s the quantity?",
           facts: {},
           done: false,
           quickReplies: ["18x12x3", "Qty 250", "Not sure yet"],
@@ -769,7 +947,7 @@ export async function POST(req: NextRequest) {
       nextFacts.materialText = best.name ?? formatMaterialOption(best);
     }
 
-    const mergedFacts: WidgetFacts = { ...facts, ...nextFacts };
+    const mergedFacts: WidgetFacts = { ...seededFacts, ...nextFacts };
 
     // Layer safety net: if insertType is "set" (base + top pad) but layerThicknesses
     // is still blank after the preserve loop, default to 2 layers. This ensures the
@@ -816,14 +994,22 @@ export async function POST(req: NextRequest) {
     );
   } catch (e: any) {
     console.error("widget_chat_route_error", String(e?.message ?? e));
+    const payload = await req.clone().json().catch(() => null as Incoming | null);
+    const userText = String(payload?.userText ?? "").trim();
+    const priorFacts = ((payload?.facts ?? {}) as WidgetFacts) || {};
+    const simpleFacts = extractSimpleFacts(userText, priorFacts);
+    const fallbackFacts: WidgetFacts = { ...priorFacts, ...simpleFacts };
+
+    const next = nextQuestionFromFacts(fallbackFacts);
     return NextResponse.json(
       {
-        assistantMessage: "Got it — I just need a couple details to finish this. What’s the quantity?",
-        facts: {},
-        done: false,
-        quickReplies: ["18x12x3", "Qty 250", "Shipping: box", "Shipping: mailer"],
+        assistantMessage: next.assistantMessage,
+        facts: fallbackFacts,
+        done: next.done,
+        quickReplies: next.quickReplies,
       },
       { status: 200 },
     );
   }
 }
+
