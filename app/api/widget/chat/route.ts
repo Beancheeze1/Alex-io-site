@@ -995,6 +995,8 @@ export async function POST(req: NextRequest) {
   } catch (e: any) {
     console.error("widget_chat_route_error", e);
 
+    const payload = await req.clone().json().catch(() => null as Incoming | null);
+
     return NextResponse.json(
       {
         assistantMessage: "DEBUG ERROR: " + (e?.message || "unknown"),
