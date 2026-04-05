@@ -259,10 +259,109 @@ export async function POST(req: NextRequest) {
 
     await saveFacts(quoteNo, facts);
 
-    // ── Respond with redirect info ──────────────────────────────────────────
-    // Client navigates to the layout editor with the real quote_no.
-    // The editor reads facts + quote_items and opens in the seeded state.
-    const redirectPath = `/quote/layout?quote_no=${encodeURIComponent(quoteNo)}&demo=1`;
+    // ── Build editor URL — mirrors StartQuoteModal.onLaunchEditor() exactly ──
+    //
+    // The layout editor (app/quote/layout/page.tsx) seeds itself from URL params:
+    // dims=, layer_thicknesses=, layer_label=, cavities=, qty=, customer_name=, etc.
+    // A bare quote_no= alone opens a blank 10x10x2 layout — we must pass the same
+    // params StartQuoteModal builds so the editor opens correctly seeded.
+
+    const FIT_ALLOW_IN = 0.125;
+    const DEFAULT_TOP_PAD_IN = 1.0;
+
+    const shipMode = String(body.shipMode ?? "unsure");
+    const insertType = String(body.insertType ?? "single");
+    const isCompletePack = shipMode === "box" || shipMode === "mailer";
+
+    const p = new URLSearchParams();
+    p.set("quote_no", quoteNo);
+    p.set("demo", "1");
+    p.set("qty", String(qty));
+
+    // Customer info
+    const customerName = String(body.customerName ?? "").trim();
+    const customerEmail = String(body.customerEmail ?? "").trim();
+    const company = String(body.company ?? "").trim();
+    if (customerName) p.set("customer_name", customerName);
+    if (customerEmail) p.set("customer_email", customerEmail);
+    if (company) p.set("customer_company", company);
+
+    // Material
+    if (typeof body.materialId === "number" && body.materialId > 0) {
+      p.set("material_id", String(body.materialId));
+      p.set("material_mode", "known");
+    }
+    if (String(body.materialText ?? "").trim()) {
+      p.set("material_text", String(body.materialText).trim());
+    }
+
+    // Cavities seed
+    const cavities = String(body.cavities ?? "").trim();
+    if (cavities) p.set("cavities", cavities);
+
+    if (isCompletePack) {
+      // Complete pack: foam fits inside box with FIT_ALLOW_IN undersize
+      const foamL = Math.max(0, L - FIT_ALLOW_IN);
+      const foamW = Math.max(0, W - FIT_ALLOW_IN);
+      const thks = Array.isArray(body.layerThicknesses) ? body.layerThicknesses : [];
+
+      let bottomD: number;
+      let topD: number | null = null;
+
+      if (insertType === "set") {
+        bottomD = thks.length >= 1 && Number(thks[0]) > 0
+          ? Number(thks[0])
+          : Math.max(0, H - DEFAULT_TOP_PAD_IN);
+        topD = thks.length >= 2 && Number(thks[thks.length - 1]) > 0
+          ? Number(thks[thks.length - 1])
+          : DEFAULT_TOP_PAD_IN;
+      } else {
+        bottomD = thks.length >= 1 && Number(thks[0]) > 0 ? Number(thks[0]) : H;
+      }
+
+      p.set("dims", `${foamL}x${foamW}x${bottomD}`);
+
+      if (topD !== null) {
+        p.set("layer_count", "2");
+        p.append("layer_thicknesses", String(bottomD));
+        p.append("layer_label", "Bottom Insert");
+        p.append("layer_thicknesses", String(topD));
+        p.append("layer_label", "Top Pad");
+        p.set("layer_cavity_layer_index", "1");
+        p.set("activeLayer", "1");
+        p.set("active_layer", "1");
+        p.set("top_pad_in", String(topD));
+        p.set("foam_config", "bottom_top");
+      } else {
+        p.set("layer_count", "1");
+        p.append("layer_thicknesses", String(bottomD));
+        p.append("layer_label", "Layer 1");
+        p.set("layer_cavity_layer_index", "1");
+        p.set("activeLayer", "1");
+        p.set("active_layer", "1");
+        p.set("foam_config", "bottom_only");
+      }
+
+      p.set("box_l", String(L));
+      p.set("box_w", String(W));
+      p.set("box_d", String(H));
+      p.set("box_style", shipMode === "box" ? "rsc" : "mailer");
+      p.set("pack_type", "complete_pack");
+      p.set("fit_allow_in", String(FIT_ALLOW_IN));
+      p.set("printed", body.printed ? "1" : "0");
+
+    } else {
+      // Foam insert: dims straight from form
+      p.set("dims", `${L}x${W}x${H}`);
+      p.set("layer_count", "1");
+      p.append("layer_thicknesses", String(H));
+      p.append("layer_label", "Layer 1");
+      p.set("layer_cavity_layer_index", "1");
+      p.set("activeLayer", "1");
+      p.set("active_layer", "1");
+    }
+
+    const redirectPath = `/quote/layout?${p.toString()}`;
 
     return NextResponse.json(
       {
