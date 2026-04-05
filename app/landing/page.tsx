@@ -246,29 +246,77 @@ export default function LandingPage() {
     setSeedError(false);
     setSubmitting(true);
 
-    const ok = await seedDemoAndRedirect(router, {
-      outsideL: form.outsideL.trim(),
-      outsideW: form.outsideW.trim(),
-      outsideH: form.outsideH.trim(),
+    // Step 1: Create the demo quote in DB and get back a Q-DEMO- quote number
+    let quoteNo: string;
+    try {
+      const res = await fetch("/api/demo/seed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          outsideL: form.outsideL.trim(),
+          outsideW: form.outsideW.trim(),
+          outsideH: form.outsideH.trim(),
+          qty: form.qty.trim(),
+          customerName: form.customerName.trim(),
+          customerEmail: form.customerEmail.trim(),
+          company: form.company.trim(),
+          shipMode: form.shipMode,
+          insertType: form.insertType,
+          layerCount: form.insertType === "set" ? "2" : "1",
+          holding: "pockets",
+          pocketCount: "1",
+          materialMode: "recommend",
+          notes: form.notes.trim(),
+          source: "landing-form",
+        }),
+      });
+      const data = await res.json().catch(() => ({ ok: false }));
+      if (!data?.ok || !data?.quoteNo) {
+        setSeedError(true);
+        setSubmitting(false);
+        return;
+      }
+      quoteNo = data.quoteNo;
+    } catch {
+      setSeedError(true);
+      setSubmitting(false);
+      return;
+    }
+
+    // Step 2: Build a prefill payload with the real Q-DEMO- quote number baked in.
+    // This goes to /start-quote which opens StartQuoteModal — the prospect goes through
+    // all the steps (type → specs → cavities → material → review) exactly like the real flow.
+    // StartQuoteModal reads prefill.quoteNo and uses it instead of generating Q-AI-...
+    const prefill = {
+      quoteNo,                          // Q-DEMO-... — StartQuoteModal uses this
+      source: "landing-demo",
+      createdAtIso: new Date().toISOString(),
+      outside: {
+        l: form.outsideL.trim(),
+        w: form.outsideW.trim(),
+        h: form.outsideH.trim(),
+        units: "in",
+      },
       qty: form.qty.trim(),
+      shipMode: form.shipMode,
+      insertType: form.insertType,
+      pocketsOn: form.insertType === "set" ? "base" : "",
+      holding: "pockets",
+      pocketCount: "1",
+      material: { mode: "recommend", text: "", id: null },
+      packagingSku: "",
+      packagingChoice: null,
+      printed: false,
+      layerCount: form.insertType === "set" ? "2" : "1",
+      layerThicknesses: [],
+      cavities: "",
       customerName: form.customerName.trim(),
       customerEmail: form.customerEmail.trim(),
       company: form.company.trim(),
-      shipMode: form.shipMode,
-      insertType: form.insertType,
-      layerCount: form.insertType === "set" ? "2" : "1",
-      holding: "pockets",
-      pocketCount: "1",
-      materialMode: "recommend",
       notes: form.notes.trim(),
-      source: "landing-form",
-    });
+    };
 
-    if (!ok) {
-      setSeedError(true);
-      setSubmitting(false);
-    }
-    // On success, router.push fires and component unmounts — no need to reset
+    router.push(`/start-quote?prefill=${encodeURIComponent(JSON.stringify(prefill))}&demo=1`);
   }
 
   return (

@@ -836,7 +836,15 @@ export default function StartQuoteModal() {
       if (!boxOk || !foamFitOk || !thicknessOk) return;
     }
 
-    const quote_no = buildQuoteNo();
+    // If prefill supplied a Q-DEMO- quote_no (from the landing page demo flow),
+    // use it so the Apply route can find the already-created DB row.
+    // Otherwise generate a fresh Q-AI- number as normal.
+    const prefillQuoteNo =
+      typeof prefillData?.quoteNo === "string" && prefillData.quoteNo.startsWith("Q-DEMO-")
+        ? prefillData.quoteNo.trim()
+        : null;
+    const quote_no = prefillQuoteNo ?? buildQuoteNo();
+
     const p = new URLSearchParams();
 
     const salesSlugFromUrl = (searchParams.get("sales_rep_slug") || searchParams.get("sales") || searchParams.get("rep") || "").trim();
@@ -844,6 +852,11 @@ export default function StartQuoteModal() {
 
     const tenantFromUrl = (searchParams.get("tenant") || searchParams.get("t") || "").trim();
     if (tenantFromUrl) p.set("tenant", tenantFromUrl);
+
+    // Thread demo flag through to the editor URL so the editor knows to use
+    // /api/quote/layout/apply without auth.
+    const demoFromUrl = (searchParams.get("demo") || "").trim();
+    if (demoFromUrl === "1" || prefillQuoteNo) p.set("demo", "1");
 
     p.set("quote_no", quote_no);
 

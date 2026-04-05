@@ -323,9 +323,10 @@ async function ensureQuoteHeader(args: {
         locked,
         geometry_hash,
         locked_at,
-        updated_by_user_id
+        updated_by_user_id,
+        is_demo
       )
-      values ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10)
+      values ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10, $11)
       returning id, quote_no, status
       `,
       [
@@ -339,6 +340,7 @@ async function ensureQuoteHeader(args: {
         null,
         null,
         args.currentUserId,
+        args.quoteNo.startsWith("Q-DEMO-"),
       ],
     );
 
@@ -1182,12 +1184,39 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const user = await getCurrentUserFromRequest(req);
-  if (!user) {
-    return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+  // ── Demo bypass ─────────────────────────────────────────────────────────
+  // Q-DEMO- quotes are created by the public landing page demo flow.
+  // They are real DB rows (is_demo=true) but were created without a session.
+  // We allow Apply for these quote numbers without auth, using the default tenant.
+  // This is safe because:
+  //   - Q-DEMO- quotes have no pricing data a bad actor could extract
+  //   - The quote already exists in DB (seeded before editor opened)
+  //   - Only Q-DEMO- prefix is allowed — real Q-AI- quotes still require auth
+  const isDemoQuote = quoteNo.startsWith("Q-DEMO-");
+
+  let currentUserId: number | null = null;
+  let tenantId: number;
+
+  if (isDemoQuote) {
+    // Use default tenant (first active) — same logic as demo/seed route
+    const tenantRow = await one<{ id: number }>(
+      `SELECT id FROM public.tenants WHERE active = true ORDER BY id ASC LIMIT 1`,
+      [],
+    );
+    if (!tenantRow) {
+      return bad({ ok: false, error: "NO_TENANT", message: "No active tenant found." }, 500);
+    }
+    tenantId = tenantRow.id;
+    currentUserId = null; // demo quotes have no owning user
+  } else {
+    const user = await getCurrentUserFromRequest(req);
+    if (!user) {
+      return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+    }
+    currentUserId = user.id;
+    tenantId = user.tenant_id;
   }
-  const currentUserId: number | null = user.id;
-  const tenantId: number = user.tenant_id;
+  // ── End demo bypass ───────────────────────────────────────────────────
 
   const rawCustomer = body.customer && typeof body.customer === "object" ? body.customer : null;
 
