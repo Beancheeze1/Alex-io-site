@@ -9,6 +9,7 @@ type QuoteRow = {
   phone: string | null;
   status: string;
   created_at: string;
+  is_demo: boolean | null;
 };
 
 type ItemRow = {
@@ -58,7 +59,7 @@ export default async function QuotePrintPage(props: { params: { quote_no: string
 
   const quote = await one<QuoteRow>(
     `
-    select id, quote_no, customer_name, email, phone, status, created_at
+    select id, quote_no, customer_name, email, phone, status, created_at, is_demo
     from quotes
     where quote_no = $1
     limit 1;
@@ -195,6 +196,67 @@ export default async function QuotePrintPage(props: { params: { quote_no: string
           boxShadow: "0 10px 30px rgba(15,23,42,0.08)",
         }}
       >
+        {/* Demo watermark — only shown for is_demo=true quotes */}
+        {quote.is_demo && (
+          <div
+            style={{
+              marginBottom: "20px",
+              padding: "12px 16px",
+              borderRadius: "12px",
+              background: "rgba(245, 158, 11, 0.08)",
+              border: "1px solid rgba(245, 158, 11, 0.30)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div
+                style={{
+                  flexShrink: 0,
+                  width: "28px",
+                  height: "28px",
+                  borderRadius: "50%",
+                  background: "rgba(245, 158, 11, 0.15)",
+                  border: "1px solid rgba(245, 158, 11, 0.30)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  color: "#b45309",
+                }}
+              >
+                D
+              </div>
+              <div>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "#92400e", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  Demo Quote
+                </div>
+                <div style={{ fontSize: "12px", color: "#b45309", marginTop: "2px" }}>
+                  This is a sample quote generated from the Alex-IO landing page. Pricing is live and accurate — this quote is for evaluation purposes only.
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                flexShrink: 0,
+                fontSize: "10px",
+                fontWeight: 600,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: "#b45309",
+                background: "rgba(245, 158, 11, 0.12)",
+                border: "1px solid rgba(245, 158, 11, 0.25)",
+                borderRadius: "999px",
+                padding: "3px 10px",
+              }}
+            >
+              DEMO
+            </div>
+          </div>
+        )}
         <div
           style={{
             display: "flex",
