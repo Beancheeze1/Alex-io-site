@@ -240,9 +240,15 @@ export default function LandingChatWidget() {
     }
   }
 
-  // ── Demo seed — THE key difference from SplashChatWidget ──────────────────
-  // Instead of building a prefill URL and going to /start-quote,
-  // we POST to /api/demo/seed and navigate to the returned redirectPath.
+  // ── Demo seed ─────────────────────────────────────────────────────────────
+  // Step 1: POST to /api/demo/seed to create the Q-DEMO- quote in DB.
+  // Step 2: Navigate to /start-quote?prefill=... with the Q-DEMO- quote number
+  //         baked into the prefill so StartQuoteModal uses it.
+  //
+  // This mirrors the landing form flow exactly — the prospect goes through
+  // all StartQuoteModal steps (type → specs → cavities → material → review)
+  // before hitting the editor. The Q-DEMO- quote_no threads through so the
+  // apply route can find the existing DB row without auth.
 
   async function openDemo() {
     const f = latestFactsRef.current;
@@ -251,6 +257,7 @@ export default function LandingChatWidget() {
     setSeeding(true);
 
     try {
+      // Step 1: seed the demo quote in DB
       const res = await fetch("/api/demo/seed", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -281,14 +288,50 @@ export default function LandingChatWidget() {
 
       const data = await res.json().catch(() => ({ ok: false }));
 
-      if (!data?.ok || !data?.redirectPath) {
+      if (!data?.ok || !data?.quoteNo) {
         setSeedError(true);
         setSeeding(false);
         return;
       }
 
-      router.push(data.redirectPath);
-      // Component will unmount on navigation — no need to reset seeding state
+      // Step 2: build prefill payload with the Q-DEMO- quote number baked in,
+      // mirroring exactly what the landing form does. StartQuoteModal reads
+      // prefill.quoteNo and uses it instead of generating a fresh Q-AI- number.
+      const prefill = {
+        quoteNo: data.quoteNo,               // Q-DEMO-... — StartQuoteModal uses this
+        source: "landing-widget",
+        createdAtIso: f.createdAtIso ?? new Date().toISOString(),
+        outside: {
+          l: f.outsideL ?? "",
+          w: f.outsideW ?? "",
+          h: f.outsideH ?? "",
+          units: "in",
+        },
+        qty: f.qty ?? "",
+        shipMode: f.shipMode ?? "unsure",
+        insertType: f.insertType ?? "single",
+        pocketsOn: f.pocketsOn ?? "",
+        holding: f.holding ?? "pockets",
+        pocketCount: f.pocketCount ?? "1",
+        material: {
+          mode: f.materialMode ?? "recommend",
+          text: f.materialText ?? "",
+          id: f.materialId ?? null,
+        },
+        packagingSku: f.packagingSku ?? "",
+        packagingChoice: f.packagingChoice ?? null,
+        printed: f.printed ?? false,
+        layerCount: f.layerCount ?? "1",
+        layerThicknesses: Array.isArray(f.layerThicknesses) ? f.layerThicknesses : [],
+        cavities: f.cavities ?? "",
+        customerName: f.customerName ?? "",
+        customerEmail: f.customerEmail ?? "",
+        notes: f.notes ?? "",
+      };
+
+      router.push(
+        `/start-quote?prefill=${encodeURIComponent(JSON.stringify(prefill))}&demo=1`,
+      );
     } catch {
       setSeedError(true);
       setSeeding(false);
@@ -416,12 +459,12 @@ export default function LandingChatWidget() {
                     disabled={seeding}
                     className="w-full rounded-full bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    {seeding ? "Opening editor…" : "Open layout & pricing →"}
+                    {seeding ? "Setting up your quote…" : "Continue to quote setup →"}
                   </button>
                 </div>
 
                 <div className="mt-2 text-[11px] text-slate-400">
-                  You can keep chatting to adjust anything before opening.
+                  You can keep chatting to refine anything. When ready, we'll open the quote wizard with your info pre-filled.
                 </div>
               </div>
             )}
