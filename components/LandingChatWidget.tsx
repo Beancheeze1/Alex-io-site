@@ -365,6 +365,108 @@ export default function LandingChatWidget() {
 
   return (
     <div className="fixed bottom-4 right-3 sm:bottom-5 sm:right-5 z-[80]">
+      <style>{`
+        @keyframes fadeInAnnotation {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes wiggle {
+          0%, 100% { transform: rotate(-2deg); }
+          50%       { transform: rotate(2deg); }
+        }
+        .chat-annotation {
+          animation: fadeInAnnotation 0.6s ease 1.2s both;
+        }
+        .chat-annotation-text {
+          animation: wiggle 3s ease-in-out 2s infinite;
+          transform-origin: right center;
+        }
+      `}</style>
+
+      {/* Hand-drawn annotation — visible until widget is opened */}
+      {!open && (
+        <div
+          className="chat-annotation hidden sm:flex"
+          style={{
+            position: "absolute",
+            bottom: "100%",
+            right: 0,
+            marginBottom: 12,
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 4,
+            pointerEvents: "none",
+            userSelect: "none",
+          }}
+        >
+          {/* Label */}
+          <div
+            className="chat-annotation-text"
+            style={{
+              fontFamily: "'Segoe UI', system-ui, sans-serif",
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#38bdf8",
+              textShadow: "0 0 20px rgba(56,189,248,0.4)",
+              whiteSpace: "nowrap",
+              letterSpacing: "0.01em",
+              lineHeight: 1.3,
+              textAlign: "right",
+              maxWidth: 200,
+            }}
+          >
+            Chat with Alex-IO —<br />get a quote in minutes
+          </div>
+
+          {/* Hand-drawn SVG arrow pointing down-right toward the bubble */}
+          <svg
+            width="64"
+            height="48"
+            viewBox="0 0 64 48"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            style={{ filter: "drop-shadow(0 0 6px rgba(56,189,248,0.35))" }}
+          >
+            {/* Sketchy curved arrow shaft */}
+            <path
+              d="M 8 4 C 12 8, 18 14, 22 22 C 26 30, 30 36, 36 42"
+              stroke="#38bdf8"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              fill="none"
+              opacity="0.9"
+            />
+            {/* Second pass — slight offset for hand-drawn feel */}
+            <path
+              d="M 9 5 C 13 9, 19 15, 23 23 C 27 31, 31 37, 37 43"
+              stroke="#38bdf8"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              fill="none"
+              opacity="0.4"
+            />
+            {/* Arrowhead — hand-drawn, slightly off-angle */}
+            <path
+              d="M 36 42 L 28 38 M 36 42 L 40 34"
+              stroke="#38bdf8"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              fill="none"
+              opacity="0.9"
+            />
+            {/* Arrowhead second pass */}
+            <path
+              d="M 37 43 L 29 39 M 37 43 L 41 35"
+              stroke="#38bdf8"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              fill="none"
+              opacity="0.4"
+            />
+          </svg>
+        </div>
+      )}
+
       {/* Bubble button */}
       {!open && (
         <button
