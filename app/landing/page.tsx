@@ -14,7 +14,13 @@
 import * as React from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import LandingChatWidget from "@/components/LandingChatWidget";
+import dynamic from "next/dynamic";
+
+// ssr:false prevents localStorage crashing on the server during SSR.
+const LandingChatWidget = dynamic(
+  () => import("@/components/LandingChatWidget"),
+  { ssr: false },
+);
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
