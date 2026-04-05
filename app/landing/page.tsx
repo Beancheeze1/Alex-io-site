@@ -109,6 +109,7 @@ function Field({
   onChange,
   placeholder,
   type = "text",
+  inputMode,
   required = false,
   disabled = false,
 }: {
@@ -117,6 +118,7 @@ function Field({
   onChange: (next: string) => void;
   placeholder?: string;
   type?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   required?: boolean;
   disabled?: boolean;
 }) {
@@ -128,6 +130,7 @@ function Field({
       </div>
       <input
         type={type}
+        inputMode={inputMode}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -345,9 +348,9 @@ export default function LandingPage() {
           </div>
           <a
             href="#sample-quote"
-            className="rounded-full border border-sky-400/30 bg-sky-400/10 px-4 py-2 text-sm font-medium text-sky-100 transition hover:bg-sky-400/15"
+            className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs sm:px-4 sm:text-sm font-medium text-sky-100 transition hover:bg-sky-400/15 whitespace-nowrap"
           >
-            Get a Sample Quote
+            <span className="hidden sm:inline">Get a </span>Sample Quote
           </a>
         </div>
       </section>
@@ -361,7 +364,7 @@ export default function LandingPage() {
                 Built for real packaging workflows
               </div>
 
-              <h1 className="mt-4 max-w-3xl text-4xl font-extrabold leading-tight text-white sm:text-5xl">
+              <h1 className="mt-4 max-w-3xl text-3xl font-extrabold leading-tight text-white sm:text-4xl lg:text-5xl">
                 Generate foam packaging quotes without the usual back-and-forth.
               </h1>
 
@@ -403,8 +406,8 @@ export default function LandingPage() {
               </div>
 
               <div className="mt-8 text-sm text-slate-400">
-                Starts around{" "}
-                <span className="font-semibold text-slate-200">$799/month</span> for
+                Starts at{" "}
+                <span className="font-semibold text-slate-200">$599/month</span> for
                 small teams.
               </div>
             </div>
@@ -432,8 +435,8 @@ export default function LandingPage() {
       <section id="sample-quote" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 pb-8 sm:pb-12">
           <div className="grid gap-8 lg:grid-cols-12">
-            {/* Left: explainer */}
-            <div className="lg:col-span-5">
+            {/* Left: explainer — hidden on mobile to surface the form immediately */}
+            <div className="lg:col-span-5 hidden lg:block">
               <div className="rounded-3xl border border-sky-400/20 bg-sky-400/[0.05] p-6">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
                   Try a real quote
@@ -465,6 +468,18 @@ export default function LandingPage() {
 
             {/* Right: form */}
             <div className="lg:col-span-7">
+              {/* Mobile-only heading — shown instead of the explainer card */}
+              <div className="lg:hidden mb-5">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+                  Try a real quote
+                </div>
+                <h2 className="mt-2 text-xl font-bold text-white">
+                  See the full flow — live
+                </h2>
+                <p className="mt-2 text-sm text-slate-300">
+                  Enter your specs and go straight into the layout editor with real pricing.
+                </p>
+              </div>
               <form
                 onSubmit={handleSubmit}
                 className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.35)]"
@@ -498,6 +513,7 @@ export default function LandingPage() {
                     value={form.qty}
                     onChange={(v) => set("qty", v)}
                     placeholder="100"
+                    inputMode="numeric"
                     required
                     disabled={submitting}
                   />
@@ -506,6 +522,7 @@ export default function LandingPage() {
                     value={form.outsideL}
                     onChange={(v) => set("outsideL", v)}
                     placeholder="12"
+                    inputMode="decimal"
                     required
                     disabled={submitting}
                   />
@@ -514,6 +531,7 @@ export default function LandingPage() {
                     value={form.outsideW}
                     onChange={(v) => set("outsideW", v)}
                     placeholder="8"
+                    inputMode="decimal"
                     required
                     disabled={submitting}
                   />
@@ -522,6 +540,7 @@ export default function LandingPage() {
                     value={form.outsideH}
                     onChange={(v) => set("outsideH", v)}
                     placeholder="3"
+                    inputMode="decimal"
                     required
                     disabled={submitting}
                   />
@@ -608,7 +627,7 @@ export default function LandingPage() {
             />
           </div>
 
-          <div className="mt-8 grid gap-6 lg:grid-cols-2">
+          <div className="mt-8 grid gap-6 sm:grid-cols-2">
             <Shot src="/splash/layout-editor.png" alt="Alex-IO layout editor screenshot" />
             <Shot src="/splash/admin-health.png" alt="Alex-IO admin and workflow screenshot" />
           </div>
@@ -618,7 +637,7 @@ export default function LandingPage() {
       {/* Final CTA */}
       <section className="relative z-10 border-t border-white/10">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8 text-center">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 text-center">
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
               Ready to try it?
             </div>

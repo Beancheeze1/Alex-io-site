@@ -343,13 +343,13 @@ export default function LandingChatWidget() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed bottom-5 right-5 z-[80]">
+    <div className="fixed bottom-4 right-3 sm:bottom-5 sm:right-5 z-[80]">
       {/* Bubble button */}
       {!open && (
         <button
           type="button"
           onClick={() => { setOpen(true); setMinimizedHint(true); }}
-          className="group flex items-center gap-3 rounded-full border border-white/15 bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur hover:bg-slate-950/90"
+          className="group flex items-center gap-2 sm:gap-3 rounded-full border border-white/15 bg-slate-950/80 px-3 sm:px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur hover:bg-slate-950/90"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-500/20 ring-1 ring-sky-300/20">
             <span className="h-2.5 w-2.5 rounded-full bg-sky-400" />
@@ -368,7 +368,7 @@ export default function LandingChatWidget() {
 
       {/* Chat panel */}
       {open && (
-        <div className="w-[360px] overflow-hidden rounded-2xl border border-white/12 bg-slate-950/85 shadow-[0_18px_70px_rgba(0,0,0,0.65)] backdrop-blur">
+        <div className="w-[calc(100vw-24px)] max-w-[360px] overflow-hidden rounded-2xl border border-white/12 bg-slate-950/85 shadow-[0_18px_70px_rgba(0,0,0,0.65)] backdrop-blur">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <div>
