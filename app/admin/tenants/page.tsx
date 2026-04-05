@@ -8,12 +8,14 @@ type Tenant = {
   slug: string;
   active: boolean;
   theme_json: any;
+  plan?: string | null;
   created_at?: string;
 };
 
 type EditState = {
   name: string;
   active: boolean;
+  plan: string;
   brandName: string;
   primaryColor: string;
   secondaryColor: string;
@@ -165,6 +167,7 @@ export default function TenantsPage() {
             next[t.id] = {
               name: t.name || "",
               active: !!t.active,
+              plan: t.plan || "pro",
               brandName: getThemeField(t.theme_json, "brandName"),
               primaryColor: getThemeField(t.theme_json, "primaryColor"),
               secondaryColor: getThemeField(t.theme_json, "secondaryColor"),
@@ -455,6 +458,25 @@ export default function TenantsPage() {
                         />
                         Active
                       </label>
+
+                      {/* Plan tier selector */}
+                      <div className="space-y-1 pt-1">
+                        <div className="text-xs text-neutral-400">Subscription plan</div>
+                        <select
+                          className="bg-neutral-900 p-2 w-full rounded border border-neutral-800 text-sm text-white"
+                          value={s.plan}
+                          onChange={(e) => updateEdit(t.id, { plan: e.target.value })}
+                        >
+                          <option value="starter">Starter — $599/mo · 2 seats · PDF only</option>
+                          <option value="pro">Pro — $1,199/mo · 10 seats · CAD + HubSpot</option>
+                          <option value="shop">Shop — $1,999/mo · Unlimited · Multi-location</option>
+                        </select>
+                        <div className="text-[10px] text-neutral-500">
+                          {s.plan === "starter" && "No CAD exports · No HubSpot sync · No commissions · 2 seat max"}
+                          {s.plan === "pro" && "CAD/DXF/STEP exports · HubSpot sync · Commission tracking · 10 seat max"}
+                          {s.plan === "shop" && "All Pro features · Multi-location · White-label · API · Unlimited seats"}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="space-y-2">

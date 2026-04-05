@@ -63,7 +63,7 @@ export async function GET(req: NextRequest, ctx: ParamsCtx) {
 
   const tenant = await one(
     `
-    select id, name, slug, active, theme_json, created_at
+    select id, name, slug, active, theme_json, plan, created_at
     from tenants
     where id = $1
     limit 1
@@ -103,29 +103,39 @@ export async function PATCH(req: NextRequest, ctx: ParamsCtx) {
   const nameRaw = body?.name;
   const activeRaw = body?.active;
   const themeRaw = body?.theme_json;
+  const planRaw = body?.plan;
 
   const name = typeof nameRaw === "string" ? nameRaw.trim() : undefined;
   const active = typeof activeRaw === "boolean" ? activeRaw : undefined;
-  const theme_json = themeRaw !== undefined ? themeRaw : undefined; // explicit set
+  const theme_json = themeRaw !== undefined ? themeRaw : undefined;
 
-  if (name === undefined && active === undefined && theme_json === undefined) {
+  // Validate plan if provided
+  const VALID_PLANS = ["starter", "pro", "shop"] as const;
+  const plan =
+    typeof planRaw === "string" && VALID_PLANS.includes(planRaw as any)
+      ? planRaw
+      : undefined;
+
+  if (name === undefined && active === undefined && theme_json === undefined && plan === undefined) {
     return bad("no_changes", "Provide at least one field to update.", 400);
   }
 
   const updated = await one(
     `
     update tenants
-       set name = coalesce($2, name),
-           active = coalesce($3, active),
-           theme_json = coalesce($4::jsonb, theme_json)
+       set name       = coalesce($2, name),
+           active     = coalesce($3, active),
+           theme_json = coalesce($4::jsonb, theme_json),
+           plan       = coalesce($5, plan)
      where id = $1
-     returning id, name, slug, active, theme_json, created_at
+     returning id, name, slug, active, theme_json, plan, created_at
     `,
     [
       id,
       name ?? null,
       active ?? null,
       theme_json !== undefined ? JSON.stringify(theme_json) : null,
+      plan ?? null,
     ],
   );
 

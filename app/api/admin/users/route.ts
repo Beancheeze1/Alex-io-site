@@ -16,6 +16,7 @@ import crypto from "crypto";
 import { one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
+import { checkSeatLimit, PLAN_LIMITS } from "@/lib/plan";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -145,6 +146,27 @@ export async function POST(req: NextRequest) {
     }
 
     const tenantId = current.tenant_id;
+
+    // ── Seat limit gate ────────────────────────────────────────────────────
+    const seatCheck = await checkSeatLimit(tenantId);
+    if (!seatCheck.allowed) {
+      const limitLabel = seatCheck.limit === Infinity ? "unlimited" : String(seatCheck.limit);
+      return bad(
+        {
+          ok: false,
+          error: "SEAT_LIMIT_REACHED",
+          plan: seatCheck.plan,
+          current: seatCheck.current,
+          limit: seatCheck.limit,
+          message:
+            `Your ${seatCheck.plan} plan allows up to ${limitLabel} users. ` +
+            `You currently have ${seatCheck.current}. ` +
+            `Upgrade your plan to add more users.`,
+        },
+        402,
+      );
+    }
+    // ── End seat limit gate ────────────────────────────────────────────────
 
     const body = (await req.json().catch(() => null)) as any;
 

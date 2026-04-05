@@ -11,6 +11,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { q, withTxn } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { getPlanForTenant, planMeets } from "@/lib/plan";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -189,7 +190,7 @@ export async function GET(req: NextRequest) {
 
   // Hide inactive tenants from the list (non-destructive).
   const tenants = await q(`
-    select id, name, slug, active, theme_json, created_at
+    select id, name, slug, active, theme_json, plan, created_at
     from tenants
     where active = true
     order by id asc
@@ -208,6 +209,28 @@ export async function POST(req: NextRequest) {
   if (!canWriteTenants(user)) {
     return bad("forbidden", "Tenant changes are restricted.", 403);
   }
+
+  // ── Plan gate: creating additional tenants requires Shop plan ──────────
+  // (The owner's own tenant is already created — this gates adding more.)
+  if (user?.tenant_id) {
+    const currentPlan = await getPlanForTenant(user.tenant_id);
+    if (!planMeets(currentPlan, "shop")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "PLAN_GATE",
+          currentPlan,
+          requiredPlan: "shop",
+          feature: "Multi-location / additional tenants",
+          message:
+            `Creating additional tenants requires the Shop plan. ` +
+            `Your current plan is ${currentPlan}. Contact us to upgrade.`,
+        },
+        402,
+      );
+    }
+  }
+  // ── End plan gate ──────────────────────────────────────────────────────
 
   const body = await req.json().catch(() => null);
   const name = body?.name?.trim();

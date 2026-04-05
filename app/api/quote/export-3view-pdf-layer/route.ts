@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { generate3ViewPDF, type Drawing3DInput, type Layer3D, type Cavity3D } from "@/lib/pdf/threeview";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { requirePlan, planGateResponse, PlanGateError } from "@/lib/plan";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -68,6 +69,20 @@ export async function GET(req: NextRequest) {
 
     if (!cadAllowed) {
       return err("PERMISSION_DENIED", "CAD exports require admin/sales/cs role", 403);
+    }
+
+    // ── Plan gate: CAD exports require Pro or Shop ─────────────────────────
+    try {
+      await requirePlan(user.tenant_id, "pro", "CAD / per-layer PDF exports");
+    } catch (e) {
+      if (e instanceof PlanGateError) {
+        return NextResponse.json(planGateResponse(e), { status: 402 });
+      }
+      throw e;
+    }
+    // ── End plan gate ──────────────────────────────────────────────────────
+
+    // Intentional fall-through — original cadAllowed check already passed
     }
 
     // Fetch quote (tenant-scoped)
