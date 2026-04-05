@@ -685,6 +685,9 @@ export default function QuotePrintClient() {
   const [leadSubmitted, setLeadSubmitted] = React.useState(false);
   const [leadError, setLeadError] = React.useState<string | null>(null);
 
+  // Pricing toggle — monthly vs annual (annual = 20% off)
+  const [annualMode, setAnnualMode] = React.useState(false);
+
   async function handleLeadSubmit() {
     if (!leadForm.name.trim() || !leadForm.email.trim()) return;
     setLeadSubmitting(true);
@@ -1552,13 +1555,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                     <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.7, maxWidth: 480 }}>
                       Alex-IO turns your RFQ emails into priced foam inserts with layout, cavities,
                       and CAD-ready outputs — without the usual back-and-forth.
-                      Starts at <span style={{ color: "#e2e8f0", fontWeight: 600 }}>$799/month</span> for your whole team.
                     </div>
 
                     {/* Feature pills */}
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-                      {["Email → quote in minutes", "Layout editor + cavities", "Live pricing engine", "CAD / DXF export", "Multi-user · Multi-tenant"].map((f) => (
-                        <span key={f} style={{
+                      {["Email → quote in minutes", "Layout editor + cavities", "Live pricing engine", "CAD / DXF export", "Multi-user · Multi-tenant"].map((pill) => (
+                        <span key={pill} style={{
                           fontSize: 11,
                           fontWeight: 500,
                           color: "#cbd5e1",
@@ -1567,10 +1569,217 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                           borderRadius: 999,
                           padding: "4px 10px",
                         }}>
-                          {f}
+                          {pill}
                         </span>
                       ))}
                     </div>
+
+                    {/* ── Pricing grid ─────────────────────────────────────── */}
+                    <div style={{ marginTop: 24 }}>
+
+                      {/* Monthly / Annual toggle */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                        <span style={{ fontSize: 12, color: annualMode ? "#64748b" : "#e2e8f0", fontWeight: annualMode ? 400 : 600 }}>
+                          Monthly
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setAnnualMode((v) => !v)}
+                          style={{
+                            position: "relative",
+                            width: 40,
+                            height: 22,
+                            borderRadius: 999,
+                            border: "none",
+                            background: annualMode ? "#0ea5e9" : "rgba(255,255,255,0.15)",
+                            cursor: "pointer",
+                            transition: "background 0.2s",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <div style={{
+                            position: "absolute",
+                            top: 3,
+                            left: annualMode ? 21 : 3,
+                            width: 16,
+                            height: 16,
+                            borderRadius: "50%",
+                            background: "#fff",
+                            transition: "left 0.2s",
+                          }} />
+                        </button>
+                        <span style={{ fontSize: 12, color: annualMode ? "#e2e8f0" : "#64748b", fontWeight: annualMode ? 600 : 400 }}>
+                          Annual
+                        </span>
+                        {annualMode && (
+                          <span style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: "#4ade80",
+                            background: "rgba(74,222,128,0.12)",
+                            border: "1px solid rgba(74,222,128,0.25)",
+                            borderRadius: 999,
+                            padding: "2px 8px",
+                            letterSpacing: "0.06em",
+                          }}>
+                            SAVE 20%
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Three-column tier grid */}
+                      {(() => {
+                        const tiers = [
+                          {
+                            name: "Starter",
+                            monthlyPrice: 599,
+                            highlight: false,
+                            badge: null,
+                            users: "2 users",
+                            features: [
+                              "Layout editor",
+                              "Email parsing + AI quote",
+                              "PDF quotes",
+                              "Live pricing engine",
+                            ],
+                            notIncluded: ["CAD / DXF / STEP exports", "HubSpot sync", "Commission tracking"],
+                          },
+                          {
+                            name: "Pro",
+                            monthlyPrice: 1199,
+                            highlight: true,
+                            badge: "Most popular",
+                            users: "10 users",
+                            features: [
+                              "Everything in Starter",
+                              "CAD / DXF / STEP exports",
+                              "HubSpot CRM sync",
+                              "Commission tracking",
+                            ],
+                            notIncluded: ["Multi-location", "White-label", "API access"],
+                          },
+                          {
+                            name: "Shop",
+                            monthlyPrice: 1999,
+                            highlight: false,
+                            badge: null,
+                            users: "Unlimited users",
+                            features: [
+                              "Everything in Pro",
+                              "Multi-location tenants",
+                              "White-label branding",
+                              "API access",
+                            ],
+                            notIncluded: [],
+                          },
+                        ];
+
+                        return (
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+                            {tiers.map((tier) => {
+                              const displayPrice = annualMode
+                                ? Math.round(tier.monthlyPrice * 0.8)
+                                : tier.monthlyPrice;
+
+                              return (
+                                <div
+                                  key={tier.name}
+                                  style={{
+                                    borderRadius: 16,
+                                    padding: "16px 14px",
+                                    background: tier.highlight
+                                      ? "rgba(14,165,233,0.12)"
+                                      : "rgba(255,255,255,0.04)",
+                                    border: tier.highlight
+                                      ? "1px solid rgba(14,165,233,0.40)"
+                                      : "1px solid rgba(255,255,255,0.08)",
+                                    position: "relative",
+                                  }}
+                                >
+                                  {/* Badge */}
+                                  {tier.badge && (
+                                    <div style={{
+                                      position: "absolute",
+                                      top: -10,
+                                      left: "50%",
+                                      transform: "translateX(-50%)",
+                                      fontSize: 9,
+                                      fontWeight: 800,
+                                      letterSpacing: "0.10em",
+                                      textTransform: "uppercase",
+                                      color: "#0f172a",
+                                      background: "linear-gradient(135deg,#0ea5e9,#38bdf8)",
+                                      borderRadius: 999,
+                                      padding: "3px 10px",
+                                      whiteSpace: "nowrap",
+                                    }}>
+                                      {tier.badge}
+                                    </div>
+                                  )}
+
+                                  {/* Tier name */}
+                                  <div style={{ fontSize: 11, fontWeight: 700, color: tier.highlight ? "#38bdf8" : "#94a3b8", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 6 }}>
+                                    {tier.name}
+                                  </div>
+
+                                  {/* Price */}
+                                  <div style={{ display: "flex", alignItems: "baseline", gap: 3, marginBottom: 2 }}>
+                                    <span style={{ fontSize: 26, fontWeight: 800, color: "#f9fafb", letterSpacing: "-0.02em" }}>
+                                      ${displayPrice.toLocaleString()}
+                                    </span>
+                                    <span style={{ fontSize: 11, color: "#64748b" }}>/mo</span>
+                                  </div>
+
+                                  {/* Annual note */}
+                                  {annualMode && (
+                                    <div style={{ fontSize: 10, color: "#4ade80", marginBottom: 6 }}>
+                                      Billed ${(displayPrice * 12).toLocaleString()}/yr
+                                    </div>
+                                  )}
+
+                                  {/* Users */}
+                                  <div style={{
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    color: "#cbd5e1",
+                                    background: "rgba(255,255,255,0.06)",
+                                    borderRadius: 999,
+                                    padding: "3px 8px",
+                                    display: "inline-block",
+                                    marginBottom: 10,
+                                  }}>
+                                    {tier.users}
+                                  </div>
+
+                                  {/* Features */}
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                    {tier.features.map((feat) => (
+                                      <div key={feat} style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                                        <span style={{ color: "#4ade80", fontSize: 11, flexShrink: 0, marginTop: 1 }}>✓</span>
+                                        <span style={{ fontSize: 11, color: "#cbd5e1", lineHeight: 1.4 }}>{feat}</span>
+                                      </div>
+                                    ))}
+                                    {tier.notIncluded.map((feat) => (
+                                      <div key={feat} style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                                        <span style={{ color: "#334155", fontSize: 11, flexShrink: 0, marginTop: 1 }}>✕</span>
+                                        <span style={{ fontSize: 11, color: "#334155", lineHeight: 1.4 }}>{feat}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Fine print */}
+                      <div style={{ marginTop: 12, fontSize: 11, color: "#475569" }}>
+                        All plans include a 30-day onboarding period · No long-term contract required · Cancel anytime
+                      </div>
+                    </div>
+                    {/* ── End pricing grid ─────────────────────────────────── */}
+
                   </div>
 
                   {/* Right: CTA card */}
@@ -1611,10 +1820,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         marginBottom: 10,
                       }}
                     >
-                      Get Alex-IO for my shop →
+                      Start with Pro →
                     </button>
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+                      {annualMode
+                        ? "Pro at $959/mo billed annually"
+                        : "Pro at $1,199/mo · switch to annual to save 20%"}
+                    </div>
                     <div style={{ fontSize: 11, color: "#475569" }}>
-                      No commitment · We'll reach out within 1 business day
+                      No commitment · Response within 1 business day
                     </div>
                   </div>
                 </div>
