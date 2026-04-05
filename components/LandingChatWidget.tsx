@@ -233,8 +233,14 @@ export default function LandingChatWidget() {
 
       setFacts(mergedFacts);
       setMsgs((prev) => [...prev, { id: uid(), role: "bot", text: data.assistantMessage }]);
+
+      // Mirror SplashChatWidget exactly: set done directly from data.done
+      // Do NOT gate on isReady() here — the API already checks that server-side.
+      // Extra client-side gating was causing done to silently stay false.
       setDone(Boolean(data.done));
-      setQuickReplies(Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []);
+      setQuickReplies(
+        Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []
+      );
     } catch {
       setMsgs((prev) => [
         ...prev,
@@ -349,6 +355,12 @@ export default function LandingChatWidget() {
 
   const summaryLines = React.useMemo(() => summarizeFacts(facts), [facts]);
 
+  // Show summary card as soon as we have dims + qty — don't wait for done=true.
+  // This matches user expectation: they gave the key info, they want to see it confirmed.
+  const hasEnoughForSummary = Boolean(
+    facts.outsideL && facts.outsideW && facts.outsideH && facts.qty
+  );
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -426,39 +438,25 @@ export default function LandingChatWidget() {
               ))}
             </div>
 
-            {/* Quick replies — hidden when done, and filter out any launch CTAs */}
+            {/* Quick replies — only shown when not done, mirrors SplashChatWidget */}
             {!done && quickReplies.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
-                {quickReplies
-                  .filter((q) => {
-                    // Suppress any quick reply that sounds like a launch CTA —
-                    // those should only appear as the done card button, not a chip
-                    const lower = q.toLowerCase();
-                    return !(
-                      lower.includes("open layout") ||
-                      lower.includes("open pricing") ||
-                      lower.includes("launch editor") ||
-                      lower.includes("open editor") ||
-                      lower.includes("get a quote") ||
-                      lower.includes("continue to quote")
-                    );
-                  })
-                  .map((q) => (
-                    <button
-                      key={q}
-                      type="button"
-                      onClick={() => void handleSend(q)}
-                      disabled={busy}
-                      className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[12px] text-slate-100 hover:bg-white/[0.08] disabled:opacity-50"
-                    >
-                      {q}
-                    </button>
-                  ))}
+                {quickReplies.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => void handleSend(q)}
+                    disabled={busy}
+                    className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[12px] text-slate-100 hover:bg-white/[0.08] disabled:opacity-50"
+                  >
+                    {q}
+                  </button>
+                ))}
               </div>
             )}
 
-            {/* Done card — Open layout button seeds demo */}
-            {done && (
+            {/* Done card — show as soon as we have dims + qty, button appears when done=true */}
+            {hasEnoughForSummary && (
               <div ref={doneCardRef} className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                 <div className="text-xs font-semibold tracking-widest text-sky-300/80">
                   QUICK SUMMARY
@@ -475,19 +473,26 @@ export default function LandingChatWidget() {
                   </div>
                 )}
 
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => void openDemo()}
-                    disabled={seeding}
-                    className="w-full rounded-full bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {seeding ? "Setting up your quote…" : "Continue to quote setup →"}
-                  </button>
+                <div className="mt-3 grid gap-2">
+                  {done ? (
+                    <button
+                      type="button"
+                      onClick={() => void openDemo()}
+                      disabled={seeding}
+                      className="w-full rounded-full bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {seeding ? "Setting up your quote…" : "Open layout & pricing"}
+                    </button>
+                  ) : (
+                    <div className="text-[11px] text-slate-400 text-center py-1">
+                      Almost there — a couple more details and we'll be ready to launch.
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-2 text-[11px] text-slate-400">
-                  You can keep chatting to refine anything. When ready, we'll open the quote wizard with your info pre-filled.
+                  You can keep chatting to add or correct anything — I'll update the
+                  summary. Open the layout when you're ready.
                 </div>
               </div>
             )}
