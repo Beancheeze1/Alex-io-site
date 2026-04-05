@@ -390,42 +390,44 @@ export default function LandingChatWidget() {
           style={{
             position: "absolute",
             bottom: "100%",
-            right: 0,
-            marginBottom: 12,
+            // Center over the bubble: bubble is ~220px wide, annotation ~400px wide
+            // so shift left by about half the difference (~90px) to center it
+            right: -90,
+            marginBottom: 16,
             flexDirection: "column",
-            alignItems: "flex-end",
-            gap: 4,
+            alignItems: "center",
+            gap: 6,
             pointerEvents: "none",
             userSelect: "none",
+            width: 320,
           }}
         >
-          {/* Label */}
+          {/* Label — 2x size */}
           <div
             className="chat-annotation-text"
             style={{
               fontFamily: "'Segoe UI', system-ui, sans-serif",
-              fontSize: 13,
-              fontWeight: 600,
+              fontSize: 22,
+              fontWeight: 700,
               color: "#38bdf8",
-              textShadow: "0 0 20px rgba(56,189,248,0.4)",
+              textShadow: "0 0 28px rgba(56,189,248,0.5)",
               whiteSpace: "nowrap",
               letterSpacing: "0.01em",
-              lineHeight: 1.3,
-              textAlign: "right",
-              maxWidth: 200,
+              lineHeight: 1.35,
+              textAlign: "center",
             }}
           >
             Chat with Alex-IO —<br />get a quote in minutes
           </div>
 
-          {/* Hand-drawn SVG arrow pointing down-right toward the bubble */}
+          {/* Hand-drawn SVG arrow — 2x size, pointing down toward bubble center */}
           <svg
-            width="64"
-            height="48"
+            width="128"
+            height="96"
             viewBox="0 0 64 48"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
-            style={{ filter: "drop-shadow(0 0 6px rgba(56,189,248,0.35))" }}
+            style={{ filter: "drop-shadow(0 0 10px rgba(56,189,248,0.45))" }}
           >
             {/* Sketchy curved arrow shaft */}
             <path
