@@ -665,6 +665,10 @@ export default function QuotePrintClient() {
   const initialQuoteNo = searchParams?.get("quote_no") || "";
   const [quoteNo, setQuoteNo] = React.useState<string>(initialQuoteNo);
 
+  // Demo quotes are identified by Q-DEMO- prefix — no extra API call needed.
+  // This drives: watermark banner, button swap → CTA.
+  const isDemo = quoteNo.startsWith("Q-DEMO-");
+
   const [loading, setLoading] = React.useState<boolean>(!!(initialQuoteNo || quoteNo));
   const [error, setError] = React.useState<string | null>(null);
   const [notFound, setNotFound] = React.useState<string | null>(null);
@@ -1544,63 +1548,171 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                     gap: 8,
                     marginTop: 8,
                     justifyContent: "flex-end",
+                    flexWrap: "wrap",
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (typeof window !== "undefined") window.print();
-                    }}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      border: "1px solid rgba(15,23,42,0.15)",
-                      background: "rgba(15,23,42,0.12)",
-                      color: "#e5e7eb",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      backdropFilter: "blur(4px)",
-                    }}
-                  >
-                    Print this quote
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleForwardToSales}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      border: "1px solid rgba(15,23,42,0.15)",
-                      background: "rgba(15,23,42,0.12)",
-                      color: "#e5e7eb",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      backdropFilter: "blur(4px)",
-                    }}
-                  >
-                    Forward to sales
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleScheduleCall}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      border: "1px solid #0f172a",
-                      background: "#0f172a",
-                      color: "#f9fafb",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Schedule a call
-                  </button>
+                  {isDemo ? (
+                    /* ── Demo CTA — replaces all three real buttons ── */
+                    <a
+                      href="/landing"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "10px 20px",
+                        borderRadius: 999,
+                        background: "linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)",
+                        color: "#0f172a",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        textDecoration: "none",
+                        boxShadow: "0 4px 14px rgba(14,165,233,0.35)",
+                        letterSpacing: "0.01em",
+                      }}
+                    >
+                      <span style={{ fontSize: 15 }}>→</span>
+                      Get a real quote from our team
+                    </a>
+                  ) : (
+                    /* ── Real quote buttons ── */
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof window !== "undefined") window.print();
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 999,
+                          border: "1px solid rgba(15,23,42,0.15)",
+                          background: "rgba(15,23,42,0.12)",
+                          color: "#e5e7eb",
+                          fontSize: 12,
+                          fontWeight: 500,
+                          cursor: "pointer",
+                          backdropFilter: "blur(4px)",
+                        }}
+                      >
+                        Print this quote
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleForwardToSales}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 999,
+                          border: "1px solid rgba(15,23,42,0.15)",
+                          background: "rgba(15,23,42,0.12)",
+                          color: "#e5e7eb",
+                          fontSize: 12,
+                          fontWeight: 500,
+                          cursor: "pointer",
+                          backdropFilter: "blur(4px)",
+                        }}
+                      >
+                        Forward to sales
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleScheduleCall}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 999,
+                          border: "1px solid #0f172a",
+                          background: "#0f172a",
+                          color: "#f9fafb",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Schedule a call
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
+
+            {/* Demo watermark banner — only shown for Q-DEMO- quotes */}
+            {isDemo && (
+              <div
+                style={{
+                  margin: "0 0 20px 0",
+                  padding: "14px 20px",
+                  borderRadius: 16,
+                  background: "rgba(245,158,11,0.08)",
+                  border: "1px solid rgba(245,158,11,0.30)",
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 16,
+                }}
+              >
+                {/* Left: icon + message */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+                  {/* Circle icon */}
+                  <div
+                    style={{
+                      flexShrink: 0,
+                      width: 36,
+                      height: 36,
+                      borderRadius: "50%",
+                      background: "rgba(245,158,11,0.15)",
+                      border: "1px solid rgba(245,158,11,0.35)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 16,
+                      fontWeight: 800,
+                      color: "#b45309",
+                      letterSpacing: "-0.02em",
+                    }}
+                  >
+                    D
+                  </div>
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#92400e",
+                        letterSpacing: "0.10em",
+                        textTransform: "uppercase",
+                        marginBottom: 4,
+                      }}
+                    >
+                      Demo Quote — Pricing is real, this document is for evaluation only
+                    </div>
+                    <div style={{ fontSize: 12, color: "#b45309", lineHeight: 1.6 }}>
+                      This quote was generated from the Alex-IO landing page demo flow.
+                      All dimensions, material selection, and pricing reflect your actual inputs.
+                      To receive an official quote you can share with your team, click the button above.
+                    </div>
+                  </div>
+                </div>
+                {/* Right: DEMO pill */}
+                <div
+                  style={{
+                    flexShrink: 0,
+                    alignSelf: "center",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: "#b45309",
+                    background: "rgba(245,158,11,0.12)",
+                    border: "1px solid rgba(245,158,11,0.28)",
+                    borderRadius: 999,
+                    padding: "4px 12px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  DEMO
+                </div>
+              </div>
+            )}
 
             {/* TOP ROW: Specs / Pricing / Layout */}
             {primaryItem && (
