@@ -143,6 +143,7 @@ export default function LandingChatWidget() {
   });
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
+  const doneCardRef = React.useRef<HTMLDivElement | null>(null);
 
   // Keep latest facts in a ref so openDemo() never reads stale state
   const latestFactsRef = React.useRef<WidgetFacts>(facts);
@@ -155,11 +156,19 @@ export default function LandingChatWidget() {
     } catch { /* ignore */ }
   }, [facts, msgs, done, quickReplies]);
 
-  // Auto-scroll
+  // Auto-scroll messages
   React.useEffect(() => {
     if (!open) return;
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [open, msgs.length]);
+
+  // Scroll done card into view when done flips
+  React.useEffect(() => {
+    if (!done || !open) return;
+    setTimeout(() => {
+      doneCardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 100);
+  }, [done, open]);
 
   // Escape to close
   React.useEffect(() => {
@@ -417,26 +426,40 @@ export default function LandingChatWidget() {
               ))}
             </div>
 
-            {/* Quick replies */}
+            {/* Quick replies — hidden when done, and filter out any launch CTAs */}
             {!done && quickReplies.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
-                {quickReplies.map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => void handleSend(q)}
-                    disabled={busy}
-                    className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[12px] text-slate-100 hover:bg-white/[0.08] disabled:opacity-50"
-                  >
-                    {q}
-                  </button>
-                ))}
+                {quickReplies
+                  .filter((q) => {
+                    // Suppress any quick reply that sounds like a launch CTA —
+                    // those should only appear as the done card button, not a chip
+                    const lower = q.toLowerCase();
+                    return !(
+                      lower.includes("open layout") ||
+                      lower.includes("open pricing") ||
+                      lower.includes("launch editor") ||
+                      lower.includes("open editor") ||
+                      lower.includes("get a quote") ||
+                      lower.includes("continue to quote")
+                    );
+                  })
+                  .map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => void handleSend(q)}
+                      disabled={busy}
+                      className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[12px] text-slate-100 hover:bg-white/[0.08] disabled:opacity-50"
+                    >
+                      {q}
+                    </button>
+                  ))}
               </div>
             )}
 
             {/* Done card — Open layout button seeds demo */}
             {done && (
-              <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+              <div ref={doneCardRef} className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                 <div className="text-xs font-semibold tracking-widest text-sky-300/80">
                   QUICK SUMMARY
                 </div>
