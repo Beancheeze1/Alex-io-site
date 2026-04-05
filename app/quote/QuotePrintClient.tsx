@@ -1499,197 +1499,210 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
         {/* Happy path */}
         {!loading && quote && (
           <>
-            {/* Gradient header */}
-            <div
-              style={{
-                margin: "-24px -24px 20px -24px",
-                padding: "16px 24px",
-                borderRadius: "24px 24px 0 0",
-                background: "linear-gradient(90deg,#0ea5e9 0%,#22d3ee 35%,#6366f1 100%)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 16,
-                color: "#e5e7eb",
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    letterSpacing: "0.18em",
-                    textTransform: "uppercase",
-                    opacity: 0.9,
-                    marginBottom: 4,
-                  }}
-                >
-                  Powered by Alex-IO
-                </div>
-                <div
-                  style={{
-                    margin: 0,
-                    fontSize: 20,
-                    fontWeight: 600,
-                    letterSpacing: "0.02em",
-                  }}
-                >
-                  Interactive quote viewer
-                </div>
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 12,
-                    opacity: 0.94,
-                  }}
-                >
-                    Quote {quote.quote_no}
-  {facts?.revision ? (
-    <span
-      title={facts.revision_updated_at ? new Date(facts.revision_updated_at).toLocaleString() : undefined}
-      style={{
-        marginLeft: 8,
-        padding: "2px 8px",
-        borderRadius: 999,
-        background: "rgba(15,23,42,0.25)",
-        border: "1px solid rgba(15,23,42,0.35)",
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: "0.06em",
-      }}
-    >
-      {facts.revision}
-    </span>
-  ) : null}
-
-                </div>
-                <p
-                  style={{
-                    margin: "2px 0 0 0",
-                    fontSize: 12,
-                    opacity: 0.9,
-                  }}
-                >
-                  {quote.customer_name}
-                  {quote.company ? <> • {quote.company}</> : null}
-                  {quote.email ? <> • {quote.email}</> : null}
-                  {quote.phone ? <> • {quote.phone}</> : null}
-                </p>
-              </div>
-
+            {/* Gradient header — demo and real quote variants */}
+            {isDemo ? (
+              /* ── Demo header: sells Alex-IO the software ── */
               <div
                 style={{
-                  textAlign: "right",
-                  fontSize: 12,
-                  color: "#e5e7eb",
+                  margin: "-24px -24px 20px -24px",
+                  padding: "28px 28px 24px",
+                  borderRadius: "24px 24px 0 0",
+                  background: "linear-gradient(135deg,#0f172a 0%,#0c1a35 40%,#0d1f3c 100%)",
+                  borderBottom: "1px solid rgba(14,165,233,0.2)",
+                  position: "relative",
+                  overflow: "hidden",
                 }}
               >
-                {(() => {
-  const pill = getStatusPill(quote.status);
-  return <div style={pill.style}>{pill.label}</div>;
-})()}
+                {/* Subtle glow blobs */}
+                <div style={{ position: "absolute", top: -60, left: -60, width: 240, height: 240, borderRadius: "50%", background: "rgba(14,165,233,0.12)", filter: "blur(60px)", pointerEvents: "none" }} />
+                <div style={{ position: "absolute", top: -40, right: 80, width: 200, height: 200, borderRadius: "50%", background: "rgba(99,102,241,0.10)", filter: "blur(50px)", pointerEvents: "none" }} />
 
-                <p
-                  style={{
-                    margin: "4px 0 0 0",
-                    fontSize: 11,
-                    opacity: 0.9,
-                  }}
-                >
-                  Created: {new Date(quote.created_at).toLocaleString()}
-                </p>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    marginTop: 8,
-                    justifyContent: "flex-end",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  {isDemo ? (
-                    /* ── Demo CTA — replaces all three real buttons ── */
+                <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
+                  {/* Left: software pitch */}
+                  <div style={{ flex: 1, minWidth: 260 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                      <div style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: "0.18em",
+                        textTransform: "uppercase",
+                        color: "#38bdf8",
+                      }}>
+                        Alex-IO · Foam Quoting Software
+                      </div>
+                      <div style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: "0.12em",
+                        textTransform: "uppercase",
+                        color: "#f59e0b",
+                        background: "rgba(245,158,11,0.12)",
+                        border: "1px solid rgba(245,158,11,0.28)",
+                        borderRadius: 999,
+                        padding: "2px 8px",
+                      }}>
+                        Demo
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: 22, fontWeight: 800, color: "#f9fafb", letterSpacing: "-0.01em", lineHeight: 1.25, marginBottom: 8 }}>
+                      Your shop just quoted this in minutes.
+                    </div>
+
+                    <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.7, maxWidth: 480 }}>
+                      Alex-IO turns your RFQ emails into priced foam inserts with layout, cavities,
+                      and CAD-ready outputs — without the usual back-and-forth.
+                      Starts at <span style={{ color: "#e2e8f0", fontWeight: 600 }}>$799/month</span> for your whole team.
+                    </div>
+
+                    {/* Feature pills */}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+                      {["Email → quote in minutes", "Layout editor + cavities", "Live pricing engine", "CAD / DXF export", "Multi-user · Multi-tenant"].map((f) => (
+                        <span key={f} style={{
+                          fontSize: 11,
+                          fontWeight: 500,
+                          color: "#cbd5e1",
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.10)",
+                          borderRadius: 999,
+                          padding: "4px 10px",
+                        }}>
+                          {f}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Right: CTA card */}
+                  <div style={{
+                    flexShrink: 0,
+                    background: "rgba(14,165,233,0.08)",
+                    border: "1px solid rgba(14,165,233,0.22)",
+                    borderRadius: 20,
+                    padding: "20px 24px",
+                    textAlign: "center",
+                    minWidth: 220,
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 4 }}>
+                      Ready to bring this to your shop?
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
+                      {quote.customer_name ? `${quote.customer_name} · ` : ""}{quote.quote_no}
+                    </div>
                     <button
                       type="button"
                       onClick={() => setShowLeadModal(true)}
                       style={{
+                        width: "100%",
                         display: "inline-flex",
                         alignItems: "center",
+                        justifyContent: "center",
                         gap: 8,
-                        padding: "10px 20px",
+                        padding: "12px 20px",
                         borderRadius: 999,
                         background: "linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)",
                         color: "#0f172a",
-                        fontSize: 13,
-                        fontWeight: 700,
+                        fontSize: 14,
+                        fontWeight: 800,
                         cursor: "pointer",
                         border: "none",
-                        boxShadow: "0 4px 14px rgba(14,165,233,0.35)",
+                        boxShadow: "0 4px 20px rgba(14,165,233,0.40)",
                         letterSpacing: "0.01em",
+                        marginBottom: 10,
                       }}
                     >
-                      <span style={{ fontSize: 15 }}>→</span>
-                      Get a real quote from our team
+                      Get Alex-IO for my shop →
                     </button>
-                  ) : (
-                    /* ── Real quote buttons ── */
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (typeof window !== "undefined") window.print();
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 999,
-                          border: "1px solid rgba(15,23,42,0.15)",
-                          background: "rgba(15,23,42,0.12)",
-                          color: "#e5e7eb",
-                          fontSize: 12,
-                          fontWeight: 500,
-                          cursor: "pointer",
-                          backdropFilter: "blur(4px)",
-                        }}
-                      >
-                        Print this quote
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleForwardToSales}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 999,
-                          border: "1px solid rgba(15,23,42,0.15)",
-                          background: "rgba(15,23,42,0.12)",
-                          color: "#e5e7eb",
-                          fontSize: 12,
-                          fontWeight: 500,
-                          cursor: "pointer",
-                          backdropFilter: "blur(4px)",
-                        }}
-                      >
-                        Forward to sales
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleScheduleCall}
-                        style={{
-                          padding: "6px 12px",
-                          borderRadius: 999,
-                          border: "1px solid #0f172a",
-                          background: "#0f172a",
-                          color: "#f9fafb",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Schedule a call
-                      </button>
-                    </>
-                  )}
+                    <div style={{ fontSize: 11, color: "#475569" }}>
+                      No commitment · We'll reach out within 1 business day
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              /* ── Real quote header (unchanged) ── */
+              <div
+                style={{
+                  margin: "-24px -24px 20px -24px",
+                  padding: "16px 24px",
+                  borderRadius: "24px 24px 0 0",
+                  background: "linear-gradient(90deg,#0ea5e9 0%,#22d3ee 35%,#6366f1 100%)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 16,
+                  color: "#e5e7eb",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.9, marginBottom: 4 }}>
+                    Powered by Alex-IO
+                  </div>
+                  <div style={{ margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: "0.02em" }}>
+                    Interactive quote viewer
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 12, opacity: 0.94 }}>
+                    Quote {quote.quote_no}
+                    {facts?.revision ? (
+                      <span
+                        title={facts.revision_updated_at ? new Date(facts.revision_updated_at).toLocaleString() : undefined}
+                        style={{
+                          marginLeft: 8,
+                          padding: "2px 8px",
+                          borderRadius: 999,
+                          background: "rgba(15,23,42,0.25)",
+                          border: "1px solid rgba(15,23,42,0.35)",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: "0.06em",
+                        }}
+                      >
+                        {facts.revision}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p style={{ margin: "2px 0 0 0", fontSize: 12, opacity: 0.9 }}>
+                    {quote.customer_name}
+                    {quote.company ? <> • {quote.company}</> : null}
+                    {quote.email ? <> • {quote.email}</> : null}
+                    {quote.phone ? <> • {quote.phone}</> : null}
+                  </p>
+                </div>
+
+                <div style={{ textAlign: "right", fontSize: 12, color: "#e5e7eb" }}>
+                  {(() => {
+                    const pill = getStatusPill(quote.status);
+                    return <div style={pill.style}>{pill.label}</div>;
+                  })()}
+                  <p style={{ margin: "4px 0 0 0", fontSize: 11, opacity: 0.9 }}>
+                    Created: {new Date(quote.created_at).toLocaleString()}
+                  </p>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => { if (typeof window !== "undefined") window.print(); }}
+                      style={{ padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(15,23,42,0.15)", background: "rgba(15,23,42,0.12)", color: "#e5e7eb", fontSize: 12, fontWeight: 500, cursor: "pointer", backdropFilter: "blur(4px)" }}
+                    >
+                      Print this quote
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleForwardToSales}
+                      style={{ padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(15,23,42,0.15)", background: "rgba(15,23,42,0.12)", color: "#e5e7eb", fontSize: 12, fontWeight: 500, cursor: "pointer", backdropFilter: "blur(4px)" }}
+                    >
+                      Forward to sales
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleScheduleCall}
+                      style={{ padding: "6px 12px", borderRadius: 999, border: "1px solid #0f172a", background: "#0f172a", color: "#f9fafb", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Schedule a call
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Demo watermark banner — only shown for Q-DEMO- quotes */}
             {isDemo && (
@@ -1739,12 +1752,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         marginBottom: 4,
                       }}
                     >
-                      Demo Quote — Pricing is real, this document is for evaluation only
+                      Demo — Pricing is live, this document is a sample
                     </div>
                     <div style={{ fontSize: 12, color: "#b45309", lineHeight: 1.6 }}>
-                      This quote was generated from the Alex-IO landing page demo flow.
-                      All dimensions, material selection, and pricing reflect your actual inputs.
-                      To receive an official quote you can share with your team, click the button above.
+                      This is what Alex-IO produces for every RFQ your team receives — layout, cavities,
+                      material selection, and a priced quote, all without the usual back-and-forth.
+                      Use the button above to get Alex-IO running in your shop.
                     </div>
                   </div>
                 </div>
@@ -2829,13 +2842,13 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
             >
               <div>
                 <div style={{ fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase", color: "rgba(14,165,233,0.9)", marginBottom: 4 }}>
-                  Alex-IO · Get a real quote
+                  Alex-IO · Foam Quoting Software
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: "#f9fafb" }}>
-                  Tell us a bit more
+                  Get Alex-IO for your shop
                 </div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
-                  We'll follow up with a real quote tailored to your operation.
+                  Tell us about your operation and we'll follow up within one business day with pricing and a live walkthrough.
                 </div>
               </div>
               <button
@@ -2883,11 +2896,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                     ✓
                   </div>
                   <div style={{ fontSize: 17, fontWeight: 700, color: "#f9fafb", marginBottom: 8 }}>
-                    You're all set — we'll be in touch.
+                    You're on the list — we'll be in touch soon.
                   </div>
                   <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>
-                    Our team has your quote details and will reach out shortly. Keep an eye on{" "}
-                    <span style={{ color: "#38bdf8" }}>{leadForm.email}</span>.
+                    Our team will reach out to <span style={{ color: "#38bdf8" }}>{leadForm.email}</span> within
+                    one business day to walk you through Alex-IO and discuss pricing for your operation.
                   </div>
                   <button
                     type="button"
@@ -3113,11 +3126,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                       marginTop: 4,
                     }}
                   >
-                    {leadSubmitting ? "Sending…" : "Request a real quote →"}
+                    {leadSubmitting ? "Sending…" : "Get Alex-IO for my shop →"}
                   </button>
 
                   <div style={{ fontSize: 11, color: "#475569", textAlign: "center" }}>
-                    Name and email required. We'll follow up within one business day.
+                    Name and email required · Response within 1 business day · No commitment
                   </div>
                 </div>
               )}
