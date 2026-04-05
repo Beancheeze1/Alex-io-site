@@ -226,7 +226,7 @@ export async function POST(req: NextRequest) {
             `Creating additional tenants requires the Shop plan. ` +
             `Your current plan is ${currentPlan}. Contact us to upgrade.`,
         },
-        402,
+        { status: 402 },
       );
     }
   }

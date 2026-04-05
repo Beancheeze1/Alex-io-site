@@ -82,9 +82,6 @@ export async function GET(req: NextRequest) {
     }
     // ── End plan gate ──────────────────────────────────────────────────────
 
-    // Intentional fall-through — original cadAllowed check already passed
-    }
-
     // Fetch quote (tenant-scoped)
     const quote = await one<QuoteRow>(
       `

@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
     const seatCheck = await checkSeatLimit(tenantId);
     if (!seatCheck.allowed) {
       const limitLabel = seatCheck.limit === Infinity ? "unlimited" : String(seatCheck.limit);
-      return bad(
+      return NextResponse.json(
         {
           ok: false,
           error: "SEAT_LIMIT_REACHED",
@@ -163,7 +163,7 @@ export async function POST(req: NextRequest) {
             `You currently have ${seatCheck.current}. ` +
             `Upgrade your plan to add more users.`,
         },
-        402,
+        { status: 402 },
       );
     }
     // ── End seat limit gate ────────────────────────────────────────────────
