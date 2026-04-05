@@ -669,11 +669,66 @@ export default function QuotePrintClient() {
   // This drives: watermark banner, button swap → CTA.
   const isDemo = quoteNo.startsWith("Q-DEMO-");
 
+  // Demo lead capture modal
+  const [showLeadModal, setShowLeadModal] = React.useState(false);
+  const [leadForm, setLeadForm] = React.useState({
+    name: "",
+    email: "",
+    phone: "",
+    company: "",
+    userCount: "",
+    productDescription: "",
+    currentProcess: "",
+    notes: "",
+  });
+  const [leadSubmitting, setLeadSubmitting] = React.useState(false);
+  const [leadSubmitted, setLeadSubmitted] = React.useState(false);
+  const [leadError, setLeadError] = React.useState<string | null>(null);
+
+  async function handleLeadSubmit() {
+    if (!leadForm.name.trim() || !leadForm.email.trim()) return;
+    setLeadSubmitting(true);
+    setLeadError(null);
+    try {
+      const res = await fetch("/api/demo/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quoteNo, ...leadForm }),
+      });
+      const data = await res.json().catch(() => ({ ok: false }));
+      if (!data?.ok) {
+        setLeadError("Something went wrong. Please try again.");
+        setLeadSubmitting(false);
+        return;
+      }
+      setLeadSubmitted(true);
+    } catch {
+      setLeadError("Something went wrong. Please try again.");
+    } finally {
+      setLeadSubmitting(false);
+    }
+  }
+
+  function setLeadField(key: keyof typeof leadForm, value: string) {
+    setLeadForm((prev) => ({ ...prev, [key]: value }));
+  }
+
   const [loading, setLoading] = React.useState<boolean>(!!(initialQuoteNo || quoteNo));
   const [error, setError] = React.useState<string | null>(null);
   const [notFound, setNotFound] = React.useState<string | null>(null);
   const [quote, setQuote] = React.useState<QuoteRow | null>(null);
   const [items, setItems] = React.useState<ItemRow[]>([]);
+
+  // Pre-fill lead form name/email/company once quote data loads
+  React.useEffect(() => {
+    if (!quote) return;
+    setLeadForm((prev) => ({
+      ...prev,
+      name: prev.name || quote.customer_name || "",
+      email: prev.email || quote.email || "",
+      company: prev.company || (quote as any).company || "",
+    }));
+  }, [quote]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
@@ -1553,8 +1608,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                 >
                   {isDemo ? (
                     /* ── Demo CTA — replaces all three real buttons ── */
-                    <a
-                      href="/landing"
+                    <button
+                      type="button"
+                      onClick={() => setShowLeadModal(true)}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -1566,14 +1622,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         fontSize: 13,
                         fontWeight: 700,
                         cursor: "pointer",
-                        textDecoration: "none",
+                        border: "none",
                         boxShadow: "0 4px 14px rgba(14,165,233,0.35)",
                         letterSpacing: "0.01em",
                       }}
                     >
                       <span style={{ fontSize: 15 }}>→</span>
                       Get a real quote from our team
-                    </a>
+                    </button>
                   ) : (
                     /* ── Real quote buttons ── */
                     <>
@@ -2729,6 +2785,346 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
           </>
         )}
       </div>
+
+      {/* ── Demo Lead Capture Modal ─────────────────────────────────────── */}
+      {isDemo && showLeadModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+            background: "rgba(2,6,23,0.75)",
+            backdropFilter: "blur(6px)",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowLeadModal(false); }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              maxHeight: "90vh",
+              overflowY: "auto",
+              background: "#0f172a",
+              borderRadius: 24,
+              border: "1px solid rgba(255,255,255,0.1)",
+              boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+            }}
+          >
+            {/* Modal header */}
+            <div
+              style={{
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid rgba(255,255,255,0.08)",
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: 16,
+                background: "linear-gradient(90deg,rgba(14,165,233,0.18) 0%,rgba(99,102,241,0.12) 100%)",
+                borderRadius: "24px 24px 0 0",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase", color: "rgba(14,165,233,0.9)", marginBottom: 4 }}>
+                  Alex-IO · Get a real quote
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#f9fafb" }}>
+                  Tell us a bit more
+                </div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
+                  We'll follow up with a real quote tailored to your operation.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLeadModal(false)}
+                style={{
+                  flexShrink: 0,
+                  width: 28,
+                  height: 28,
+                  borderRadius: "50%",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "#94a3b8",
+                  fontSize: 14,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div style={{ padding: "20px 24px 24px" }}>
+              {leadSubmitted ? (
+                /* ── Thank you state ── */
+                <div style={{ textAlign: "center", padding: "24px 0" }}>
+                  <div
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: "50%",
+                      background: "rgba(14,165,233,0.12)",
+                      border: "1px solid rgba(14,165,233,0.3)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 22,
+                      margin: "0 auto 16px",
+                      color: "#38bdf8",
+                    }}
+                  >
+                    ✓
+                  </div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "#f9fafb", marginBottom: 8 }}>
+                    You're all set — we'll be in touch.
+                  </div>
+                  <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>
+                    Our team has your quote details and will reach out shortly. Keep an eye on{" "}
+                    <span style={{ color: "#38bdf8" }}>{leadForm.email}</span>.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowLeadModal(false)}
+                    style={{
+                      marginTop: 20,
+                      padding: "8px 20px",
+                      borderRadius: 999,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#e2e8f0",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              ) : (
+                /* ── Form ── */
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+                  {/* Row: name + email */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    {[
+                      { key: "name" as const, label: "Name", placeholder: "Chuck Johnson", required: true },
+                      { key: "email" as const, label: "Email", placeholder: "you@company.com", required: true },
+                    ].map(({ key, label, placeholder, required }) => (
+                      <label key={key} style={{ display: "block" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                          {label}{required && <span style={{ color: "#38bdf8" }}> *</span>}
+                        </div>
+                        <input
+                          type={key === "email" ? "email" : "text"}
+                          value={leadForm[key]}
+                          onChange={(e) => setLeadField(key, e.target.value)}
+                          placeholder={placeholder}
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            borderRadius: 12,
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            background: "rgba(255,255,255,0.04)",
+                            color: "#f9fafb",
+                            fontSize: 13,
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Row: phone + company */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    {[
+                      { key: "phone" as const, label: "Phone", placeholder: "555-123-4567" },
+                      { key: "company" as const, label: "Company", placeholder: "Acme Packaging" },
+                    ].map(({ key, label, placeholder }) => (
+                      <label key={key} style={{ display: "block" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                          {label}
+                        </div>
+                        <input
+                          type="text"
+                          value={leadForm[key]}
+                          onChange={(e) => setLeadField(key, e.target.value)}
+                          placeholder={placeholder}
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            borderRadius: 12,
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            background: "rgba(255,255,255,0.04)",
+                            color: "#f9fafb",
+                            fontSize: 13,
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Number of users — full width, prominent */}
+                  <label style={{ display: "block" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                      How many users / seats will you need?
+                    </div>
+                    <select
+                      value={leadForm.userCount}
+                      onChange={(e) => setLeadField("userCount", e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        background: "#1e293b",
+                        color: leadForm.userCount ? "#f9fafb" : "#64748b",
+                        fontSize: 13,
+                        outline: "none",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <option value="" disabled>Select…</option>
+                      <option value="1">1 — just me</option>
+                      <option value="2–3">2–3 users</option>
+                      <option value="4–10">4–10 users</option>
+                      <option value="11–25">11–25 users</option>
+                      <option value="25+">25+ users</option>
+                      <option value="Not sure yet">Not sure yet</option>
+                    </select>
+                  </label>
+
+                  {/* What are you packaging */}
+                  <label style={{ display: "block" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                      What are you packaging?
+                    </div>
+                    <input
+                      type="text"
+                      value={leadForm.productDescription}
+                      onChange={(e) => setLeadField("productDescription", e.target.value)}
+                      placeholder="e.g. medical devices, electronics, industrial parts"
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        background: "rgba(255,255,255,0.04)",
+                        color: "#f9fafb",
+                        fontSize: 13,
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </label>
+
+                  {/* Current quoting process */}
+                  <label style={{ display: "block" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                      How do you quote today?
+                    </div>
+                    <input
+                      type="text"
+                      value={leadForm.currentProcess}
+                      onChange={(e) => setLeadField("currentProcess", e.target.value)}
+                      placeholder="e.g. Excel, paper, competitor tool, manual"
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        background: "rgba(255,255,255,0.04)",
+                        color: "#f9fafb",
+                        fontSize: 13,
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </label>
+
+                  {/* Notes */}
+                  <label style={{ display: "block" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                      Anything else?
+                    </div>
+                    <textarea
+                      value={leadForm.notes}
+                      onChange={(e) => setLeadField("notes", e.target.value)}
+                      placeholder="Timeline, volume, specific requirements…"
+                      rows={3}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        background: "rgba(255,255,255,0.04)",
+                        color: "#f9fafb",
+                        fontSize: 13,
+                        outline: "none",
+                        resize: "vertical",
+                        boxSizing: "border-box",
+                        fontFamily: "inherit",
+                      }}
+                    />
+                  </label>
+
+                  {leadError && (
+                    <div style={{
+                      padding: "10px 14px",
+                      borderRadius: 12,
+                      background: "rgba(239,68,68,0.1)",
+                      border: "1px solid rgba(239,68,68,0.25)",
+                      fontSize: 12,
+                      color: "#fca5a5",
+                    }}>
+                      {leadError}
+                    </div>
+                  )}
+
+                  {/* Submit */}
+                  <button
+                    type="button"
+                    onClick={handleLeadSubmit}
+                    disabled={leadSubmitting || !leadForm.name.trim() || !leadForm.email.trim()}
+                    style={{
+                      width: "100%",
+                      padding: "12px 24px",
+                      borderRadius: 999,
+                      border: "none",
+                      background: leadSubmitting || !leadForm.name.trim() || !leadForm.email.trim()
+                        ? "rgba(14,165,233,0.3)"
+                        : "linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)",
+                      color: leadSubmitting || !leadForm.name.trim() || !leadForm.email.trim()
+                        ? "rgba(255,255,255,0.4)"
+                        : "#0f172a",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      cursor: leadSubmitting || !leadForm.name.trim() || !leadForm.email.trim()
+                        ? "not-allowed"
+                        : "pointer",
+                      marginTop: 4,
+                    }}
+                  >
+                    {leadSubmitting ? "Sending…" : "Request a real quote →"}
+                  </button>
+
+                  <div style={{ fontSize: 11, color: "#475569", textAlign: "center" }}>
+                    Name and email required. We'll follow up within one business day.
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
