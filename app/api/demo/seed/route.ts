@@ -5,7 +5,7 @@
 // prospect wants to try the full quoting flow.
 //
 // What it does:
-//   1. Generates a Q-DEMO-YYYYMMDD-xxxxxx quot e number
+//   1. Generates a Q-DEMO-YYYYMMDD-xxxxxx quote number
 //   2. Inserts a quotes row with is_demo=true scoped to the default tenant
 //   3. Inserts a primary quote_items row from the form dimensions
 //   4. Seeds the facts store (memory) so the layout editor and print view
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
     // ── Resolve default tenant ──────────────────────────────────────────────
     // Demo quotes always go to the default tenant (the first active one).
     const tenantRow = await one<{ id: number; slug: string }>(
-      `SELECT id, slug FROM public.tenants WHERE is_active = true ORDER BY id ASC LIMIT 1`,
+      `SELECT id, slug FROM public.tenants WHERE active = true ORDER BY id ASC LIMIT 1`,
       [],
     );
 
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
     // We pick the first active material as a sensible default. The layout editor
     // lets the prospect change material before Apply so this is just a placeholder.
     const materialRow = await one<{ id: number; name: string }>(
-      `SELECT id, name FROM public.materials WHERE is_active = true ORDER BY id ASC LIMIT 1`,
+      `SELECT id, name FROM public.materials WHERE active = true ORDER BY id ASC LIMIT 1`,
       [],
     );
 
