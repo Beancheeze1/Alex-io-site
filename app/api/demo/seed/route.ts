@@ -5,7 +5,7 @@
 // prospect wants to try the full quoting flow.
 //
 // What it does:
-//   1. Generates a Q-DEMO-YYYYMMDD-xxxxxx quote number
+//   1. Generates a Q-DEMO-YYYYMMDD-xxxxxx quot e number
 //   2. Inserts a quotes row with is_demo=true scoped to the default tenant
 //   3. Inserts a primary quote_items row from the form dimensions
 //   4. Seeds the facts store (memory) so the layout editor and print view
