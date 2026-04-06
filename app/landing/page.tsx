@@ -489,7 +489,7 @@ export default function LandingPage() {
                     label="Name"
                     value={form.customerName}
                     onChange={(v) => set("customerName", v)}
-                    placeholder="Chuck Johnson"
+                    placeholder="Your name"
                     disabled={submitting}
                   />
                   <Field
