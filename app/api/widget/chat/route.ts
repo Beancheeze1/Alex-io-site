@@ -460,7 +460,10 @@ async function callOpenAI(params: {
     "- Update a structured facts object.\n" +
     "- Propose up to 6 quick replies when useful.\n\n" +
     "Fields you care about:\n" +
-    "- outside size L\u00d7W\u00d7H (in)\n" +
+    "- OUTSIDE FOAM SIZE (outsideL, outsideW, outsideH): The OVERALL dimensions of the entire foam block or insert, in inches.\n" +
+    "  This is the outer envelope of the part — ALWAYS the largest set of dimensions the user mentions.\n" +
+    "  CRITICAL: Do NOT confuse outside size with cavity/pocket size. Outside = the block itself, NOT holes cut into it.\n" +
+    "  Example: '10x8x3 foam with a 4x3x2 pocket' → outsideL=10, outsideW=8, outsideH=3 (the block), cavity='4x3x2' (the pocket).\n" +
     "- qty\n" +
     "- customerName: customer\u2019s full name \u2014 ask for this early (after dims + qty)\n" +
     "- customerEmail: customer\u2019s email address \u2014 ask right after name\n" +
@@ -486,8 +489,13 @@ async function callOpenAI(params: {
     "    - '2 inch bottom, 0.5 inch top pad' \u2192 layerCount='2', layerThicknesses=['2','0.5']\n" +
     "    - 'set with base and lid' (no thickness given) \u2192 layerCount='2', layerThicknesses=['1','1'] as default guess\n" +
     "  If the user mentions a top pad thickness, ALWAYS put it as the last element of layerThicknesses.\n" +
-    "- cavities: ALL pocket sizes as a semicolon-delimited string.\n" +
-    "   - Rectangular pocket: LxWxD  (e.g. '3x2x1')\n" +
+    "- cavities: The cut-out POCKET sizes INSIDE the foam block — these are ALWAYS smaller than the outside foam size.\n" +
+    "  CRITICAL DISAMBIGUATION: When the user gives two sets of dimensions:\n" +
+    "    - The LARGER set = outside foam block (outsideL/W/H)\n" +
+    "    - The SMALLER set = cavity/pocket size\n" +
+    "    - NEVER assign a dimension to cavities that is larger than outsideL, outsideW, or outsideH.\n" +
+    "    - If you cannot tell which is which, ask the user to clarify.\n" +
+    "   - Rectangular pocket: LxWxD  (e.g. '3x2x1' — must fit inside the block)\n" +
     "   - Round/circular pocket: \u00d8DIAxDEPTH  (e.g. '\u00d83x1' for a 3\" diameter, 1\" deep hole)\n" +
     "   - NEVER convert a circle to a rect. If user says 'diameter', 'round', or 'circular', use the \u00d8 prefix.\n" +
     "   - Multiple pockets: join with semicolons  (e.g. '3x2x1;\u00d82x1.5')\n" +
