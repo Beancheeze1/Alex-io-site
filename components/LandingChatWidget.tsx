@@ -55,7 +55,7 @@ type Msg = {
   text: string;
 };
 
-const LS_KEY = "alexio_landing_widget_v1"; // separate from splash widget key
+const LS_KEY = "alexio_landing_widget_v3"; // bumped to clear stale broken state
 
 function uid() {
   return `m-${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
@@ -390,16 +390,13 @@ export default function LandingChatWidget() {
           style={{
             position: "absolute",
             bottom: "100%",
-            // Center over the bubble: bubble is ~220px wide, annotation ~400px wide
-            // so shift left by about half the difference (~90px) to center it
             right: 0,
             marginBottom: 16,
             flexDirection: "column",
-            alignItems: "center",
+            alignItems: "flex-end",
             gap: 6,
             pointerEvents: "none",
             userSelect: "none",
-            width: 320,
           }}
         >
           {/* Label — 2x size */}
@@ -414,13 +411,13 @@ export default function LandingChatWidget() {
               whiteSpace: "nowrap",
               letterSpacing: "0.01em",
               lineHeight: 1.35,
-              textAlign: "center",
+              textAlign: "right",
             }}
           >
             Chat with Alex-IO —<br />get a quote in minutes
           </div>
 
-          {/* Hand-drawn SVG arrow — 2x size, pointing down toward bubble center */}
+          {/* Hand-drawn SVG arrow — 2x size */}
           <svg
             width="128"
             height="96"
