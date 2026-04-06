@@ -392,7 +392,7 @@ export default function LandingChatWidget() {
             bottom: "100%",
             // Center over the bubble: bubble is ~220px wide, annotation ~400px wide
             // so shift left by about half the difference (~90px) to center it
-            right: -180,
+            right: 0,
             marginBottom: 16,
             flexDirection: "column",
             alignItems: "center",
