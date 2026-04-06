@@ -55,7 +55,7 @@ type Msg = {
   text: string;
 };
 
-const LS_KEY = "alexio_landing_widget_v3"; // bumped to clear stale broken state
+const LS_KEY = "alexio_landing_widget_v4"; // bumped to clear stale broken state
 
 function uid() {
   return `m-${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
@@ -355,12 +355,6 @@ export default function LandingChatWidget() {
 
   const summaryLines = React.useMemo(() => summarizeFacts(facts), [facts]);
 
-  // Show summary card as soon as we have dims + qty — don't wait for done=true.
-  // This matches user expectation: they gave the key info, they want to see it confirmed.
-  const hasEnoughForSummary = Boolean(
-    facts.outsideL && facts.outsideW && facts.outsideH && facts.qty
-  );
-
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -390,7 +384,7 @@ export default function LandingChatWidget() {
           style={{
             position: "absolute",
             bottom: "100%",
-            right: 0,
+            right: 90,
             marginBottom: 16,
             flexDirection: "column",
             alignItems: "flex-end",
@@ -556,8 +550,8 @@ export default function LandingChatWidget() {
               </div>
             )}
 
-            {/* Done card — show as soon as we have dims + qty, button appears when done=true */}
-            {hasEnoughForSummary && (
+            {/* Done card — only shown when AI confirms done=true (mirrors SplashChatWidget) */}
+            {done && (
               <div ref={doneCardRef} className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                 <div className="text-xs font-semibold tracking-widest text-sky-300/80">
                   QUICK SUMMARY
@@ -575,20 +569,14 @@ export default function LandingChatWidget() {
                 )}
 
                 <div className="mt-3 grid gap-2">
-                  {done ? (
-                    <button
-                      type="button"
-                      onClick={() => void openDemo()}
-                      disabled={seeding}
-                      className="w-full rounded-full bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {seeding ? "Setting up your quote…" : "Open layout & pricing"}
-                    </button>
-                  ) : (
-                    <div className="text-[11px] text-slate-400 text-center py-1">
-                      Almost there — a couple more details and we'll be ready to launch.
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => void openDemo()}
+                    disabled={seeding}
+                    className="w-full rounded-full bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {seeding ? "Setting up your quote…" : "Open layout & pricing"}
+                  </button>
                 </div>
 
                 <div className="mt-2 text-[11px] text-slate-400">
