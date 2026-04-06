@@ -655,11 +655,18 @@ function extractSimpleFacts(userText: string, facts: WidgetFacts): Partial<Widge
   const text = String(userText || "").trim();
   const next: Partial<WidgetFacts> = {};
 
-  const dimMatch = text.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
-  if (dimMatch) {
-    next.outsideL = dimMatch[1];
-    next.outsideW = dimMatch[2];
-    next.outsideH = dimMatch[3];
+  // Only extract outside dims if not already confirmed.
+  // This prevents cavity dimensions mentioned later in the conversation
+  // from overwriting a previously confirmed block size.
+  const alreadyHasDims = Boolean(facts.outsideL && facts.outsideW && facts.outsideH);
+
+  if (!alreadyHasDims) {
+    const dimMatch = text.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
+    if (dimMatch) {
+      next.outsideL = dimMatch[1];
+      next.outsideW = dimMatch[2];
+      next.outsideH = dimMatch[3];
+    }
   }
 
   const qtyMatch =
@@ -912,6 +919,37 @@ export async function POST(req: NextRequest) {
     for (const key of preserveKeys) {
       if (isBlank(nextFacts[key]) && !isBlank(facts[key])) {
         (nextFacts as any)[key] = facts[key];
+      }
+    }
+
+    // BLOCK SIZE PROTECTION: If the AI tries to overwrite already-confirmed outside
+    // dims with smaller values (i.e. cavity-sized numbers), reject the overwrite.
+    // This catches the case where the AI confuses a cavity dimension for the block size.
+    const prevL = Number(facts.outsideL);
+    const prevW = Number(facts.outsideW);
+    const prevH = Number(facts.outsideH);
+    const hasPrevDims = Number.isFinite(prevL) && prevL > 0 &&
+                        Number.isFinite(prevW) && prevW > 0 &&
+                        Number.isFinite(prevH) && prevH > 0;
+
+    if (hasPrevDims) {
+      const newL = Number(nextFacts.outsideL);
+      const newW = Number(nextFacts.outsideW);
+      const newH = Number(nextFacts.outsideH);
+      const newDimsLookLikeCavity =
+        Number.isFinite(newL) && Number.isFinite(newW) && Number.isFinite(newH) &&
+        (newL < prevL || newW < prevW); // strictly smaller in L or W = suspicious
+
+      if (newDimsLookLikeCavity) {
+        // Reject the AI's outside dim update — keep the previously confirmed values.
+        // The new dims are likely a cavity — let the AI assign them to cavities instead.
+        nextFacts.outsideL = facts.outsideL;
+        nextFacts.outsideW = facts.outsideW;
+        nextFacts.outsideH = facts.outsideH;
+        console.warn("[widget/chat] Rejected suspicious outside dim overwrite — looks like cavity dims", {
+          prev: `${prevL}x${prevW}x${prevH}`,
+          rejected: `${newL}x${newW}x${newH}`,
+        });
       }
     }
 
