@@ -1201,37 +1201,19 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 // hide it from the Foam materials section.
 const BOX_DIM_TOL = 0.02;
 
-const dimKey = (L: number, W: number, H: number) =>
-  `${Math.round(L * 100)}|${Math.round(W * 100)}|${Math.round(H * 100)}`;
 
-const requestedBoxDimKeys = React.useMemo(() => {
-  const keys = new Set<string>();
+const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
+  // Match on footprint (L × W) only — the foam height is always shorter than the
+  // carton's inside height on a complete-pack quote, so including H would cause
+  // the filter to miss box-outer-dim helper rows and show them as foam layers.
   for (const rb of requestedBoxes) {
     const L = Number(rb.inside_length_in);
     const W = Number(rb.inside_width_in);
-    const H = Number(rb.inside_height_in);
-    if (Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H)) {
-      keys.add(dimKey(L, W, H));
-    }
-  }
-  return keys;
-}, [requestedBoxes]);
-
-const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
-  // Exact key match (fast path)
-  if (requestedBoxDimKeys.size > 0 && requestedBoxDimKeys.has(dimKey(itemL, itemW, itemH))) return true;
-
-  // Tolerant match (handles float noise)
-  for (const rb of requestedBoxes) {
-    const L = Number(rb.inside_length_in);
-    const W = Number(rb.inside_width_in);
-    const H = Number(rb.inside_height_in);
-    if (!Number.isFinite(L) || !Number.isFinite(W) || !Number.isFinite(H)) continue;
+    if (!Number.isFinite(L) || !Number.isFinite(W)) continue;
 
     if (
-      Math.abs(itemL - L) < BOX_DIM_TOL &&
-      Math.abs(itemW - W) < BOX_DIM_TOL &&
-      Math.abs(itemH - H) < BOX_DIM_TOL
+      (Math.abs(itemL - L) < BOX_DIM_TOL && Math.abs(itemW - W) < BOX_DIM_TOL) ||
+      (Math.abs(itemL - W) < BOX_DIM_TOL && Math.abs(itemW - L) < BOX_DIM_TOL)
     ) {
       return true;
     }
@@ -1520,7 +1502,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                 <div style={{ position: "absolute", top: -60, left: -60, width: 240, height: 240, borderRadius: "50%", background: "rgba(14,165,233,0.12)", filter: "blur(60px)", pointerEvents: "none" }} />
                 <div style={{ position: "absolute", top: -40, right: 80, width: 200, height: 200, borderRadius: "50%", background: "rgba(99,102,241,0.10)", filter: "blur(50px)", pointerEvents: "none" }} />
 
-                <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
+                <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
                   {/* Left: software pitch */}
                   <div style={{ flex: 1, minWidth: 260 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
