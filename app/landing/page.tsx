@@ -3,7 +3,7 @@
 //
 // Public Google Ads landing page.
 //
-// ALL "Get a Sample Quote" / "Generate Sample Quote" CTAs now seed a real
+// ALL "Try a Live Quote" / "Generate Sample Quote" CTAs now seed a real
 // demo quote via POST /api/demo/seed and redirect to the layout editor.
 // The layout editor, apply flow, and print view are 100% unmodified.
 // Demo quotes are flagged is_demo=true in the DB for easy cleanup.
@@ -350,7 +350,7 @@ export default function LandingPage() {
             href="#sample-quote"
             className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs sm:px-4 sm:text-sm font-medium text-sky-100 transition hover:bg-sky-400/15 whitespace-nowrap"
           >
-            <span className="hidden sm:inline">Get a </span>Sample Quote
+            <span className="hidden sm:inline">Try a Live </span>Quote
           </a>
         </div>
       </section>
@@ -365,21 +365,21 @@ export default function LandingPage() {
               </div>
 
               <h1 className="mt-4 max-w-3xl text-3xl font-extrabold leading-tight text-white sm:text-4xl lg:text-5xl">
-                Generate foam packaging quotes without the usual back-and-forth.
+                Let your customers generate foam quotes instantly — without the usual back-and-forth.
               </h1>
 
               <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
                 Alex-IO combines layout, material selection, and pricing into one guided
-                workflow. Cold traffic should not have to figure your system out. This
-                page gets them into a real quote session fast.
+                workflow. Your team can move faster, and your customers can reach a
+                real quote experience without the usual email loop.
               </p>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
                 {[
-                  "Import-ready workflow for drawings and layouts",
+                  "Customer-facing quote flow from your website",
                   "Real material and density selection",
                   "Layered inserts and production-ready outputs",
-                  "Guided quote flow instead of a blank tool",
+                  "Guided quote workflow instead of a blank tool",
                 ].map((t) => (
                   <div
                     key={t}
@@ -395,13 +395,13 @@ export default function LandingPage() {
                   href="#sample-quote"
                   className="rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
                 >
-                  Get a Sample Quote
+                  Try a Live Quote
                 </a>
                 <a
                   href="#proof"
                   className="rounded-xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.06]"
                 >
-                  See the workflow
+                  See the live workflow
                 </a>
               </div>
 
@@ -439,14 +439,15 @@ export default function LandingPage() {
             <div className="lg:col-span-5 hidden lg:block">
               <div className="rounded-3xl border border-sky-400/20 bg-sky-400/[0.05] p-6">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
-                  Try a real quote
+                  Try the real system
                 </div>
                 <h2 className="mt-3 text-2xl font-bold text-white">
-                  See the full flow — live
+                  Run the full quote flow — live
                 </h2>
                 <p className="mt-3 text-sm leading-7 text-slate-300">
                   Enter your dimensions below and we'll drop you straight into the
-                  layout editor with real pricing. No sign-up. No sales call.
+                  layout editor with real pricing. This is the same quote flow your
+                  customer would experience. No sign-up. No sales call.
                 </p>
 
                 <div className="mt-6 space-y-3">
@@ -471,19 +472,23 @@ export default function LandingPage() {
               {/* Mobile-only heading — shown instead of the explainer card */}
               <div className="lg:hidden mb-5">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
-                  Try a real quote
+                  Try the real system
                 </div>
                 <h2 className="mt-2 text-xl font-bold text-white">
-                  See the full flow — live
+                  Run the full quote flow — live
                 </h2>
                 <p className="mt-2 text-sm text-slate-300">
-                  Enter your specs and go straight into the layout editor with real pricing.
+                  Enter your specs and go straight into the layout editor with real pricing. This is the real system, not a canned demo.
                 </p>
               </div>
               <form
                 onSubmit={handleSubmit}
                 className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.35)]"
               >
+                <div className="mb-5 rounded-2xl border border-sky-400/20 bg-sky-400/[0.05] px-4 py-3 text-sm leading-6 text-slate-300">
+                  This is the real Alex-IO quote flow. The quote generated from this form
+                  mirrors what your customer would experience on your site.
+                </div>
                 <div className="grid gap-5 md:grid-cols-2">
                   <Field
                     label="Name"
@@ -589,7 +594,7 @@ export default function LandingPage() {
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-xs leading-6 text-slate-400">
-                    Required: dimensions, quantity, and a valid email.
+                    Required: dimensions, quantity, and a valid email. Built for packaging teams and foam fabricators.
                   </div>
 
                   <button
@@ -597,7 +602,7 @@ export default function LandingPage() {
                     disabled={!canSubmit}
                     className="rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {submitting ? "Opening editor…" : "Get a Sample Quote →"}
+                    {submitting ? "Opening live quote…" : "Run a Live Quote →"}
                   </button>
                 </div>
               </form>
@@ -610,7 +615,7 @@ export default function LandingPage() {
       <section id="proof" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
           <div className="mb-6 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
-            The full workflow
+            What your team and customers see
           </div>
           <div className="grid gap-6 lg:grid-cols-3">
             <MiniCard
@@ -623,7 +628,7 @@ export default function LandingPage() {
             />
             <MiniCard
               title="Printable quote"
-              body="One click to a clean, customer-ready quote summary with full line items and totals."
+              body="One click to a clean, customer-ready quote summary with full line items, totals, and a clear next step."
             />
           </div>
 
@@ -639,21 +644,22 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 text-center">
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
-              Ready to try it?
+              Ready to see it in action?
             </div>
             <h2 className="mt-3 text-3xl font-bold text-white">
-              Your foam quote in under 5 minutes.
+              See how fast a real customer quote can move.
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-slate-300">
               Enter dimensions above and go straight into the real layout editor — no
-              demo mode, no fake data. The pricing is live.
+              fake handoff, no canned output. The pricing is live and the workflow is
+              the same one your customer would follow.
             </p>
             <div className="mt-6">
               <a
                 href="#sample-quote"
                 className="inline-flex rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
               >
-                Get a Sample Quote
+                Try a Live Quote
               </a>
             </div>
           </div>

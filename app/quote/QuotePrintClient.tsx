@@ -1793,7 +1793,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                     minWidth: 220,
                   }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 4 }}>
-                      Ready to bring this to your shop?
+                      This is exactly what your customer would receive
                     </div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
                       {quote.customer_name ? `${quote.customer_name} · ` : ""}{quote.quote_no}
@@ -1820,7 +1820,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         marginBottom: 10,
                       }}
                     >
-                      Start with Pro →
+                      Get This Running in Your Shop →
                     </button>
                     <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
                       {annualMode
@@ -1828,7 +1828,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                         : "Pro at $1,199/mo · switch to annual to save 20%"}
                     </div>
                     <div style={{ fontSize: 11, color: "#475569" }}>
-                      No commitment · Response within 1 business day
+                      Fully branded quote flow · Response within 1 business day
                     </div>
                   </div>
                 </div>
