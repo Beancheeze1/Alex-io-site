@@ -1793,7 +1793,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, itemH: number) => {
                     minWidth: 220,
                   }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 4 }}>
-                      This is exactly what your customer would receive
+                      This is exactly what your customer would receive—fully branded and ready to send.
                     </div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
                       {quote.customer_name ? `${quote.customer_name} · ` : ""}{quote.quote_no}

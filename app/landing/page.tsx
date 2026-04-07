@@ -370,8 +370,7 @@ export default function LandingPage() {
 
               <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
                 Alex-IO combines layout, material selection, and pricing into one guided
-                workflow. Your team can move faster, and your customers can reach a
-                real quote experience without the usual email loop.
+                workflow. Your team can move faster—and your customers can get real pricing in minutes.
               </p>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -442,7 +441,7 @@ export default function LandingPage() {
                   Try the real system
                 </div>
                 <h2 className="mt-3 text-2xl font-bold text-white">
-                  Run the full quote flow — live
+                  Run a real customer quote — live
                 </h2>
                 <p className="mt-3 text-sm leading-7 text-slate-300">
                   Enter your dimensions below and we'll drop you straight into the
@@ -602,7 +601,7 @@ export default function LandingPage() {
                     disabled={!canSubmit}
                     className="rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {submitting ? "Opening live quote…" : "Run a Live Quote →"}
+                    {submitting ? "Opening live quote…" : "Get Instant Quote →"}
                   </button>
                 </div>
               </form>
