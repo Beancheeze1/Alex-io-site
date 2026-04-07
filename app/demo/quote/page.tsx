@@ -414,7 +414,7 @@ export default function DemoQuotePage() {
       {/* TIGHTENED: reduce overall width just enough to align right column with action bar edge */}
       <div className="relative z-10 mx-auto w-full max-w-[1480px] px-4 py-8">
         {/* Top header row */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="text-xs font-semibold tracking-widest text-sky-300/80">
               DEMO QUOTE

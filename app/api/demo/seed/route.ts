@@ -179,6 +179,18 @@ export async function POST(req: NextRequest) {
 
     const quoteId: number = quoteRow.id;
 
+    // ── Compute foam dims for quote_items ───────────────────────────────────
+    // For complete-pack quotes (box/mailer) the foam insert is undersized by
+    // FIT_ALLOW_IN on each side so it slides into the carton cleanly. Using
+    // the raw box dims here would create a phantom "box-sized" item that
+    // conflicts with the foam-fit dimensions the layout editor uses, showing
+    // up as an extra layer in the pre-Apply print view.
+    const FIT_ALLOW_IN = 0.125;
+    const shipMode = String(body.shipMode ?? "unsure");
+    const isCompletePack = shipMode === "box" || shipMode === "mailer";
+    const itemL = isCompletePack ? Math.max(0, L - FIT_ALLOW_IN) : L;
+    const itemW = isCompletePack ? Math.max(0, W - FIT_ALLOW_IN) : W;
+
     // ── Insert primary quote_items row ──────────────────────────────────────
     // Height_in = full stack depth. Material = first active material as placeholder.
     await q(
@@ -196,8 +208,8 @@ export async function POST(req: NextRequest) {
       `,
       [
         quoteId,
-        L,
-        W,
+        itemL,
+        itemW,
         H,
         qty,
         materialId,
@@ -266,12 +278,10 @@ export async function POST(req: NextRequest) {
     // A bare quote_no= alone opens a blank 10x10x2 layout — we must pass the same
     // params StartQuoteModal builds so the editor opens correctly seeded.
 
-    const FIT_ALLOW_IN = 0.125;
     const DEFAULT_TOP_PAD_IN = 1.0;
 
-    const shipMode = String(body.shipMode ?? "unsure");
+    // shipMode / isCompletePack / FIT_ALLOW_IN already computed above.
     const insertType = String(body.insertType ?? "single");
-    const isCompletePack = shipMode === "box" || shipMode === "mailer";
 
     const p = new URLSearchParams();
     p.set("quote_no", quoteNo);
