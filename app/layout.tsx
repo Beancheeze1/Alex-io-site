@@ -18,6 +18,19 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
+      <head>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18060048309"></script>
+  <script
+    dangerouslySetInnerHTML={{
+      __html: `
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'AW-18060048309');
+      `,
+    }}
+  />
+</head>
       <body className="min-h-screen bg-neutral-50 text-neutral-800">
         <main className="relative w-full px-4 py-6">
           
