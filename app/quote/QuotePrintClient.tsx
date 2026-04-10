@@ -1560,7 +1560,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     <div style={{ marginTop: 24 }}>
 
                       {/* Monthly / Annual toggle */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 16 }}>
                         <span style={{ fontSize: 12, color: annualMode ? "#64748b" : "#e2e8f0", fontWeight: annualMode ? 400 : 600 }}>
                           Monthly
                         </span>
@@ -1657,7 +1657,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         ];
 
                         return (
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 180px))", gap: 10, justifyContent: "center" }}>
                             {tiers.map((tier) => {
                               const displayPrice = annualMode
                                 ? Math.round(tier.monthlyPrice * 0.8)
@@ -1756,7 +1756,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       })()}
 
                       {/* Fine print */}
-                      <div style={{ marginTop: 12, fontSize: 11, color: "#475569" }}>
+                      <div style={{ marginTop: 12, fontSize: 11, color: "#475569", textAlign: "center" }}>
                         All plans include a 30-day onboarding period · No long-term contract required · Cancel anytime
                       </div>
                     </div>
