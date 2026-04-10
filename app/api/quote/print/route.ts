@@ -15,6 +15,12 @@
 // - We pass cavities: [] and round_to_bf: false to match email behavior.
 // - POST-APPLY: do NOT price "included" layer rows (reference-only).
 //   Only the primary/billable foam set should be priced.
+//
+// DEMO BYPASS (2026-04):
+// - Q-DEMO- quotes are created by the public landing page demo flow.
+// - They are real DB rows (is_demo=true) but were created without a session.
+// - We allow GET for these quote numbers without auth, using the default tenant.
+// - CAD exports are always redacted for demo quotes.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
@@ -337,13 +343,39 @@ export async function GET(req: NextRequest) {
     return bad({ ok: false, error: "MISSING_QUOTE_NO" }, 400);
   }
 
-  // Tenant guard (single-axis): require auth and scope quote lookup by tenant_id.
-  const user = await getCurrentUserFromRequest(req);
-  const enforced = await enforceTenantMatch(req, user);
-  if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
-  if (!user) {
-    return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+  // ── Demo bypass ──────────────────────────────────────────────────────────
+  // Q-DEMO- quotes are created by the public landing page demo flow.
+  // They are real DB rows (is_demo=true) but were created without a session.
+  // We allow GET for these quote numbers without auth, using the default tenant.
+  // This is safe because:
+  //   - Q-DEMO- quotes carry no customer PII or real pricing commitments
+  //   - CAD exports are always redacted for demo quotes (see cadAllowed below)
+  //   - Only Q-DEMO- prefix is allowed — real Q-AI- quotes still require auth
+  const isDemoQuote = quoteNo.startsWith("Q-DEMO-");
+  let tenantId: number;
+  let user: Awaited<ReturnType<typeof getCurrentUserFromRequest>> | null = null;
+
+  if (isDemoQuote) {
+    const tenantRow = await one<{ id: number }>(
+      `SELECT id FROM public.tenants WHERE active = true ORDER BY id ASC LIMIT 1`,
+      [],
+    );
+    if (!tenantRow) {
+      return bad({ ok: false, error: "NO_TENANT", message: "No active tenant found." }, 500);
+    }
+    tenantId = tenantRow.id;
+    // user remains null — demo quotes have no owning user
+  } else {
+    // Tenant guard (single-axis): require auth and scope quote lookup by tenant_id.
+    user = await getCurrentUserFromRequest(req);
+    const enforced = await enforceTenantMatch(req, user);
+    if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
+    if (!user) {
+      return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+    }
+    tenantId = user.tenant_id;
   }
+  // ── End demo bypass ───────────────────────────────────────────────────────
 
   try {
     /* ---------------- Quote header ---------------- */
@@ -366,7 +398,7 @@ export async function GET(req: NextRequest) {
       where quote_no = $1
         and tenant_id = $2
       `,
-      [quoteNo, user.tenant_id],
+      [quoteNo, tenantId],
     );
 
     if (!quote) {
@@ -379,7 +411,7 @@ export async function GET(req: NextRequest) {
     if (repId) {
       const repRow = await one<{ email: string }>(
         `SELECT email FROM public.users WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
-        [repId, user.tenant_id],
+        [repId, tenantId],
       );
       salesRepEmail = repRow?.email ?? null;
     }
@@ -438,7 +470,7 @@ export async function GET(req: NextRequest) {
           H: dimsParsed.H,
           qty,
           material_id: materialId,
-          tenant_id: user.tenant_id,
+          tenant_id: tenantId,
         });
 
         items.push({
@@ -528,7 +560,7 @@ export async function GET(req: NextRequest) {
             qty,
             material_id: materialId,
             force_skived: forceLayeredSkive,
-            tenant_id: user.tenant_id,
+            tenant_id: tenantId,
           });
 
           if (forceLayeredSkive) {
@@ -596,9 +628,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // --- CAD RBAC (A): redact CAD exports unless admin/sales/cs ---
+    // --- CAD RBAC: redact CAD exports for demo quotes and non-staff users ---
+    // Demo quotes never have real CAD exports anyway, but we always redact
+    // to be safe and consistent with the non-demo staff-only rule.
     const role = (user?.role || "").toLowerCase();
-    const cadAllowed = role === "admin" || role === "sales" || role === "cs";
+    const cadAllowed = !isDemoQuote && (role === "admin" || role === "sales" || role === "cs");
 
     if (layoutPkg && !cadAllowed) {
       layoutPkg = {
@@ -720,7 +754,7 @@ export async function GET(req: NextRequest) {
       0,
     );
 
-    const settings = await getPricingSettings(user.tenant_id);
+    const settings = await getPricingSettings(tenantId);
     const isPrinted = !!(facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true);
 
     // Flat "Art Setup" fee — one-time charge independent of order size

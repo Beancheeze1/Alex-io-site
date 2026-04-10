@@ -5,6 +5,10 @@
 // RFM/LOCK RULE (Phase 1):
 //   - Only enforce geometry_hash match when locked.
 //   - When unlocked, allow export (no hash gate).
+//
+// DEMO BYPASS (2026-04):
+//   - Q-DEMO- quotes are allowed without auth (default tenant).
+//   - Demo quotes have no STEP data so this returns 404 gracefully.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,12 +97,6 @@ function coerceLayerCropToBlockCorners(slicedLayout: any) {
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUserFromRequest(req as any);
-    const role = (user?.role || "").toLowerCase();
-    if (!user) {
-      return new Response(JSON.stringify({ ok: false, error: "UNAUTHENTICATED" }), { status: 401 });
-    }
-
     const { searchParams } = new URL(req.url);
     const quote_no = String(searchParams.get("quote_no") || "").trim();
     const layerIndexRaw = String(searchParams.get("layer_index") || "").trim();
@@ -106,6 +104,28 @@ export async function GET(req: Request) {
 
     if (!quote_no) return jsonErr(400, "BAD_REQUEST", "Missing quote_no.");
     if (!Number.isInteger(layer_index) || layer_index < 0) return jsonErr(400, "BAD_REQUEST", "Invalid layer_index.");
+
+    // ── Demo bypass ────────────────────────────────────────────────────────
+    const isDemoQuote = quote_no.startsWith("Q-DEMO-");
+    let tenantId: number;
+    let userRole = "";
+
+    if (isDemoQuote) {
+      const tenantRow = await one<{ id: number }>(
+        `SELECT id FROM public.tenants WHERE active = true ORDER BY id ASC LIMIT 1`,
+        [],
+      );
+      if (!tenantRow) return jsonErr(500, "NO_TENANT", "No active tenant found.");
+      tenantId = tenantRow.id;
+    } else {
+      const user = await getCurrentUserFromRequest(req as any);
+      if (!user) {
+        return new Response(JSON.stringify({ ok: false, error: "UNAUTHENTICATED" }), { status: 401 });
+      }
+      userRole = (user.role || "").toLowerCase();
+      tenantId = user.tenant_id;
+    }
+    // ── End demo bypass ─────────────────────────────────────────────────────
 
     const pkg = await one<{
       quote_no: string;
@@ -122,18 +142,21 @@ export async function GET(req: Request) {
       ORDER BY lp.created_at DESC, lp.id DESC
       LIMIT 1
       `,
-      [quote_no, user.tenant_id],
+      [quote_no, tenantId],
     );
 
     if (!pkg) return jsonErr(404, "NOT_FOUND", "No layout package found for this quote.");
 
-    const isAdmin = role === "admin";
-    const isStaff = isAdmin || role === "sales" || role === "cs";
+    // Staff/admin gate — only applied for non-demo quotes
+    if (!isDemoQuote) {
+      const isAdmin = userRole === "admin";
+      const isStaff = isAdmin || userRole === "sales" || userRole === "cs";
 
-    if (pkg.locked) {
-      if (!isAdmin) return jsonErr(403, "FORBIDDEN", "Locked exports are admin-only.");
-    } else {
-      if (!isStaff) return jsonErr(403, "FORBIDDEN", "Export access denied.");
+      if (pkg.locked) {
+        if (!isAdmin) return jsonErr(403, "FORBIDDEN", "Locked exports are admin-only.");
+      } else {
+        if (!isStaff) return jsonErr(403, "FORBIDDEN", "Export access denied.");
+      }
     }
 
     const storedHash = typeof pkg.geometry_hash === "string" ? pkg.geometry_hash : "";

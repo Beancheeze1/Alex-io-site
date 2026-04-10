@@ -5,6 +5,10 @@
 // RFM/LOCK RULE (Phase 1):
 //   - Only enforce geometry_hash match when quote.locked === true.
 //   - When unlocked, allow export (no hash gate).
+//
+// DEMO BYPASS (2026-04):
+//   - Q-DEMO- quotes are allowed without auth (default tenant).
+//   - Demo quotes have no STEP data so this returns 404 gracefully.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
@@ -37,11 +41,6 @@ function bad(body: any, status = 400) {
 }
 
 export async function GET(req: NextRequest) {
-  const user = await getCurrentUserFromRequest(req);
-  const role = (user?.role || "").toLowerCase();
-
-  if (!user) return bad({ ok: false, error: "UNAUTHENTICATED" }, 401);
-
   const url = req.nextUrl;
   const quoteNo = url.searchParams.get("quote_no") || "";
   if (!quoteNo) {
@@ -51,6 +50,28 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // ── Demo bypass ──────────────────────────────────────────────────────────
+  const isDemoQuote = quoteNo.startsWith("Q-DEMO-");
+  let tenantId: number;
+  let userRole = "";
+
+  if (isDemoQuote) {
+    const tenantRow = await one<{ id: number }>(
+      `SELECT id FROM public.tenants WHERE active = true ORDER BY id ASC LIMIT 1`,
+      [],
+    );
+    if (!tenantRow) {
+      return bad({ ok: false, error: "NO_TENANT", message: "No active tenant found." }, 500);
+    }
+    tenantId = tenantRow.id;
+  } else {
+    const user = await getCurrentUserFromRequest(req);
+    if (!user) return bad({ ok: false, error: "UNAUTHENTICATED" }, 401);
+    userRole = (user.role || "").toLowerCase();
+    tenantId = user.tenant_id;
+  }
+  // ── End demo bypass ───────────────────────────────────────────────────────
+
   try {
     const quote = await one<QuoteRow>(
       `
@@ -59,7 +80,7 @@ export async function GET(req: NextRequest) {
       where quote_no = $1
         and tenant_id = $2
       `,
-      [quoteNo, user.tenant_id],
+      [quoteNo, tenantId],
     );
 
     if (!quote) {
@@ -88,13 +109,16 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const isAdmin = role === "admin";
-    const isStaff = isAdmin || role === "sales" || role === "cs";
+    // Staff/admin gate — only applied for non-demo quotes
+    if (!isDemoQuote) {
+      const isAdmin = userRole === "admin";
+      const isStaff = isAdmin || userRole === "sales" || userRole === "cs";
 
-    if (quote.locked) {
-      if (!isAdmin) return bad({ ok: false, error: "FORBIDDEN", message: "Locked exports are admin-only." }, 403);
-    } else {
-      if (!isStaff) return bad({ ok: false, error: "FORBIDDEN", message: "Export access denied." }, 403);
+      if (quote.locked) {
+        if (!isAdmin) return bad({ ok: false, error: "FORBIDDEN", message: "Locked exports are admin-only." }, 403);
+      } else {
+        if (!isStaff) return bad({ ok: false, error: "FORBIDDEN", message: "Export access denied." }, 403);
+      }
     }
 
     const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";
