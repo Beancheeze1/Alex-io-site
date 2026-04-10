@@ -1556,6 +1556,44 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       ))}
                     </div>
 
+                    {/* ── Customer-facing widget callout ───────────────────── */}
+                    <div style={{
+                      marginTop: 20,
+                      borderRadius: 16,
+                      border: "1px solid rgba(99,102,241,0.25)",
+                      background: "rgba(99,102,241,0.07)",
+                      padding: "14px 16px",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 12,
+                    }}>
+                      <div style={{
+                        flexShrink: 0,
+                        width: 32,
+                        height: 32,
+                        borderRadius: 8,
+                        background: "rgba(99,102,241,0.20)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 16,
+                      }}>
+                        💬
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#a5b4fc", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>
+                          Your customers quote themselves
+                        </div>
+                        <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.65 }}>
+                          Alex-IO embeds directly on your website with two ways for customers to request a quote —
+                          an <span style={{ color: "#c7d2fe" }}>AI chat widget</span> for those who want to describe
+                          what they need conversationally, and a <span style={{ color: "#c7d2fe" }}>structured quote form</span> for
+                          those who prefer to type in their specs directly. Either way, the request lands in your
+                          backend as a fully priced, layout-ready quote — no phone tag, no email chains.
+                        </div>
+                      </div>
+                    </div>
+
                     {/* ── Pricing grid ─────────────────────────────────────── */}
                     <div style={{ marginTop: 24 }}>
 
