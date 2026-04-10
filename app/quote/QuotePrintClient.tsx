@@ -1657,7 +1657,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         ];
 
                         return (
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 180px))", gap: 10, justifyContent: "center" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                             {tiers.map((tier) => {
                               const displayPrice = annualMode
                                 ? Math.round(tier.monthlyPrice * 0.8)
