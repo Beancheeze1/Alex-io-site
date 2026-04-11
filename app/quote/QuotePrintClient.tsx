@@ -1502,7 +1502,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 <div style={{ position: "absolute", top: -60, left: -60, width: 240, height: 240, borderRadius: "50%", background: "rgba(14,165,233,0.12)", filter: "blur(60px)", pointerEvents: "none" }} />
                 <div style={{ position: "absolute", top: -40, right: 80, width: 200, height: 200, borderRadius: "50%", background: "rgba(99,102,241,0.10)", filter: "blur(50px)", pointerEvents: "none" }} />
 
-                <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
+                <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 20 }}>
+
+                  {/* ── Top row: pitch (left) + CTA card (right) ── */}
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
                   {/* Left: software pitch */}
                   <div style={{ flex: 1, minWidth: 260 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -1556,9 +1559,90 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       ))}
                     </div>
 
-                    {/* ── Pricing grid ─────────────────────────────────────── */}
-                    <div style={{ marginTop: 24 }}>
+                  </div>
 
+                  {/* Right: CTA card */}
+                  <div style={{
+                    flexShrink: 0,
+                    background: "rgba(14,165,233,0.08)",
+                    border: "1px solid rgba(14,165,233,0.22)",
+                    borderRadius: 20,
+                    padding: "20px 24px",
+                    textAlign: "center",
+                    minWidth: 260,
+                    maxWidth: 340,
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 4 }}>
+                      This is exactly what your customer would receive—fully branded and ready to send.
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
+                      {quote.customer_name ? `${quote.customer_name} · ` : ""}{quote.quote_no}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowLeadModal(true)}
+                      style={{
+                        width: "100%",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        padding: "12px 20px",
+                        borderRadius: 999,
+                        background: "linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)",
+                        color: "#0f172a",
+                        fontSize: 14,
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        border: "none",
+                        boxShadow: "0 4px 20px rgba(14,165,233,0.40)",
+                        letterSpacing: "0.01em",
+                        marginBottom: 10,
+                      }}
+                    >
+                      Get This Running in Your Shop →
+                    </button>
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+                      {annualMode
+                        ? "Pro at $959/mo billed annually"
+                        : "Pro at $1,199/mo · switch to annual to save 20%"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#475569", marginBottom: 16 }}>
+                      Fully branded quote flow · Response within 1 business day
+                    </div>
+
+                    {/* ── Customer-facing input callout ─────────────────────── */}
+                    <div style={{
+                      borderTop: "1px solid rgba(255,255,255,0.07)",
+                      paddingTop: 14,
+                      textAlign: "left",
+                    }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#a5b4fc", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
+                        Customer-facing tools included
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                          <span style={{ fontSize: 13, lineHeight: 1 }}>💬</span>
+                          <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.55 }}>
+                            <span style={{ color: "#c7d2fe", fontWeight: 600 }}>AI chat widget</span> — customers describe what they need in plain language and get an instant quote
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                          <span style={{ fontSize: 13, lineHeight: 1 }}>📋</span>
+                          <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.55 }}>
+                            <span style={{ color: "#c7d2fe", fontWeight: 600 }}>Structured quote form</span> — for customers who prefer to type in specs directly, no chat required
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 8, fontSize: 10, color: "#475569", lineHeight: 1.5 }}>
+                        Both embed on your website. Every submission lands in your backend as a fully priced, layout-ready quote.
+                      </div>
+                    </div>
+                  </div>
+                  </div>
+
+                  {/* ── Full-width pricing grid ───────────────────────────── */}
+                  <div>
                       {/* Monthly / Annual toggle */}
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 16 }}>
                         <span style={{ fontSize: 12, color: annualMode ? "#64748b" : "#e2e8f0", fontWeight: annualMode ? 400 : 600 }}>
@@ -1657,7 +1741,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         ];
 
                         return (
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
                             {tiers.map((tier) => {
                               const displayPrice = annualMode
                                 ? Math.round(tier.monthlyPrice * 0.8)
@@ -1759,88 +1843,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       <div style={{ marginTop: 12, fontSize: 11, color: "#475569", textAlign: "center" }}>
                         All plans include a 30-day onboarding period · No long-term contract required · Cancel anytime
                       </div>
-                    </div>
                     {/* ── End pricing grid ─────────────────────────────────── */}
-
-                  </div>
-
-                  {/* Right: CTA card */}
-                  <div style={{
-                    flexShrink: 0,
-                    background: "rgba(14,165,233,0.08)",
-                    border: "1px solid rgba(14,165,233,0.22)",
-                    borderRadius: 20,
-                    padding: "20px 24px",
-                    textAlign: "center",
-                    minWidth: 220,
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 4 }}>
-                      This is exactly what your customer would receive—fully branded and ready to send.
-                    </div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
-                      {quote.customer_name ? `${quote.customer_name} · ` : ""}{quote.quote_no}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowLeadModal(true)}
-                      style={{
-                        width: "100%",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 8,
-                        padding: "12px 20px",
-                        borderRadius: 999,
-                        background: "linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)",
-                        color: "#0f172a",
-                        fontSize: 14,
-                        fontWeight: 800,
-                        cursor: "pointer",
-                        border: "none",
-                        boxShadow: "0 4px 20px rgba(14,165,233,0.40)",
-                        letterSpacing: "0.01em",
-                        marginBottom: 10,
-                      }}
-                    >
-                      Get This Running in Your Shop →
-                    </button>
-                    <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
-                      {annualMode
-                        ? "Pro at $959/mo billed annually"
-                        : "Pro at $1,199/mo · switch to annual to save 20%"}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#475569" }}>
-                      Fully branded quote flow · Response within 1 business day
-                    </div>
-
-                    {/* ── Customer-facing input callout ─────────────────────── */}
-                    <div style={{
-                      marginTop: 16,
-                      borderTop: "1px solid rgba(255,255,255,0.07)",
-                      paddingTop: 14,
-                      textAlign: "left",
-                    }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#a5b4fc", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
-                        Customer-facing tools included
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                          <span style={{ fontSize: 13, lineHeight: 1 }}>💬</span>
-                          <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.55 }}>
-                            <span style={{ color: "#c7d2fe", fontWeight: 600 }}>AI chat widget</span> — customers describe what they need in plain language and get an instant quote
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                          <span style={{ fontSize: 13, lineHeight: 1 }}>📋</span>
-                          <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.55 }}>
-                            <span style={{ color: "#c7d2fe", fontWeight: 600 }}>Structured quote form</span> — for customers who prefer to type in specs directly, no chat required
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ marginTop: 8, fontSize: 10, color: "#475569", lineHeight: 1.5 }}>
-                        Both embed on your website. Every submission lands in your backend as a fully priced, layout-ready quote.
-                      </div>
-                    </div>
                   </div>
                 </div>
               </div>
