@@ -205,6 +205,80 @@ function MiniCard({ title, body }: { title: string; body: string }) {
   );
 }
 
+// ── FAQ ───────────────────────────────────────────────────────────────────────
+
+const FAQ_ITEMS = [
+  {
+    q: "Do I need to know how to code to set this up?",
+    a: "No. Alex-IO is a hosted platform. You configure your materials, pricing, and branding through an admin dashboard — no development required.",
+  },
+  {
+    q: "How long does it take to get up and running?",
+    a: "Most shops are generating live quotes within a day. You set your material costs and pricing rules, and the system handles the rest.",
+  },
+  {
+    q: "Can I use my own pricing and materials?",
+    a: "Yes. Alex-IO is built around your shop's actual foam types, densities, and cost structure — not generic placeholder pricing.",
+  },
+  {
+    q: "What does my customer actually see?",
+    a: "They get a guided quote flow that collects their dimensions and requirements, then drops directly into a layout editor with live pricing. They can see a printable quote summary without ever talking to a salesperson.",
+  },
+  {
+    q: "Is this only for foam inserts and packaging?",
+    a: "Currently yes — Alex-IO is purpose-built for custom foam packaging quoting, including mailers and RSCs. That focus is what makes the pricing and layout output accurate, where generic CPQ tools fall short.",
+  },
+  {
+    q: "What's included in the $599/month plan?",
+    a: "The Starter plan includes your full quoting workflow, customer-facing quote widget, layout editor, printable quote output, and admin dashboard. Higher tiers unlock CAD exports, multiple seats, and multi-location support.",
+  },
+  {
+    q: "Do I have to sign a long-term contract?",
+    a: "No. Plans are month-to-month. Cancel anytime.",
+  },
+  {
+    q: "How is this different from a generic CPQ tool like Salesforce or Conga?",
+    a: "Those tools are built for selling software licenses and services — not for quoting physical foam parts with cavity layouts and material density pricing. Alex-IO understands the geometry of what you're making, not just the line items.",
+  },
+];
+
+function FaqSection() {
+  const [open, setOpen] = React.useState<number | null>(null);
+
+  return (
+    <section className="relative z-10">
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+          Common questions
+        </div>
+        <h2 className="mb-8 text-2xl font-bold text-white">
+          Everything you need to know
+        </h2>
+        <div className="mx-auto max-w-3xl divide-y divide-white/10 rounded-3xl border border-white/10 bg-white/[0.03] overflow-hidden">
+          {FAQ_ITEMS.map((item, i) => (
+            <div key={i}>
+              <button
+                onClick={() => setOpen(open === i ? null : i)}
+                className="flex w-full items-center justify-between px-6 py-5 text-left text-sm font-semibold text-white hover:bg-white/[0.03] transition"
+              >
+                <span>{item.q}</span>
+                <span className="ml-4 shrink-0 text-sky-400 text-lg leading-none">
+                  {open === i ? "−" : "+"}
+                </span>
+              </button>
+              {open === i && (
+                <div className="px-6 pb-5 text-sm leading-7 text-slate-300">
+                  {item.a}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
@@ -287,11 +361,8 @@ export default function LandingPage() {
     }
 
     // Step 2: Build a prefill payload with the real Q-DEMO- quote number baked in.
-    // This goes to /start-quote which opens StartQuoteModal — the prospect goes through
-    // all the steps (type → specs → cavities → material → review) exactly like the real flow.
-    // StartQuoteModal reads prefill.quoteNo and uses it instead of generating Q-AI-...
     const prefill = {
-      quoteNo,                          // Q-DEMO-... — StartQuoteModal uses this
+      quoteNo,
       source: "landing-demo",
       createdAtIso: new Date().toISOString(),
       outside: {
@@ -360,25 +431,28 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-14 lg:py-16">
           <div className="grid gap-10 lg:grid-cols-12 lg:items-start">
             <div className="lg:col-span-6">
+              {/* EDIT 1 & 2: Eyebrow text updated */}
               <div className="text-xs font-semibold uppercase tracking-[0.20em] text-sky-300/80">
-                Built for real packaging workflows
+                Quoting Software for Foam Fabricators
               </div>
 
+              {/* EDIT 3: Hero headline updated */}
               <h1 className="mt-4 max-w-3xl text-3xl font-extrabold leading-tight text-white sm:text-4xl lg:text-5xl">
-                Let your customers generate foam quotes instantly — without the usual back-and-forth.
+                Stop quoting foam by hand.
               </h1>
 
+              {/* EDIT 4: Hero subheadline updated */}
               <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-                Alex-IO combines layout, material selection, and pricing into one guided
-                workflow. Your team can move faster—and your customers can get real pricing in minutes.
+                Alex-IO is quoting software built specifically for foam fabricators and packaging shops. Real material pricing, layered cavity layouts, and printable customer-ready quotes — generated in minutes, not days.
               </p>
 
+              {/* EDIT 6: Feature grid copy updated */}
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
                 {[
-                  "Customer-facing quote flow from your website",
-                  "Real material and density selection",
-                  "Layered inserts and production-ready outputs",
-                  "Guided quote workflow instead of a blank tool",
+                  "Customer-facing quote flow embedded in your site",
+                  "Accurate pricing based on your real material and density costs",
+                  "Layered foam insert layouts with production-ready outputs",
+                  "Your customer answers questions — not a blank form",
                 ].map((t) => (
                   <div
                     key={t}
@@ -404,10 +478,11 @@ export default function LandingPage() {
                 </a>
               </div>
 
+              {/* EDIT 5: Price anchor updated */}
               <div className="mt-8 text-sm text-slate-400">
                 Starts at{" "}
-                <span className="font-semibold text-slate-200">$599/month</span> for
-                small teams.
+                <span className="font-semibold text-slate-200">$599/month</span>.{" "}
+                No long-term contract.
               </div>
             </div>
 
@@ -437,16 +512,16 @@ export default function LandingPage() {
             {/* Left: explainer — hidden on mobile to surface the form immediately */}
             <div className="lg:col-span-5 hidden lg:block">
               <div className="rounded-3xl border border-sky-400/20 bg-sky-400/[0.05] p-6">
+                {/* EDIT 7: Demo section label updated */}
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
-                  Try the real system
+                  See It Live — No Signup Required
                 </div>
                 <h2 className="mt-3 text-2xl font-bold text-white">
                   Run a real customer quote — live
                 </h2>
+                {/* EDIT 8: Added "exact flow" line */}
                 <p className="mt-3 text-sm leading-7 text-slate-300">
-                  Enter your dimensions below and we'll drop you straight into the
-                  layout editor with real pricing. This is the same quote flow your
-                  customer would experience. No sign-up. No sales call.
+                  This is the exact flow your customers would see on your site. Enter your dimensions and we'll drop you straight into the layout editor with real pricing. No sign-up. No sales call.
                 </p>
 
                 <div className="mt-6 space-y-3">
@@ -468,16 +543,16 @@ export default function LandingPage() {
 
             {/* Right: form */}
             <div className="lg:col-span-7">
-              {/* Mobile-only heading — shown instead of the explainer card */}
+              {/* Mobile-only heading */}
               <div className="lg:hidden mb-5">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
-                  Try the real system
+                  See It Live — No Signup Required
                 </div>
                 <h2 className="mt-2 text-xl font-bold text-white">
                   Run the full quote flow — live
                 </h2>
                 <p className="mt-2 text-sm text-slate-300">
-                  Enter your specs and go straight into the layout editor with real pricing. This is the real system, not a canned demo.
+                  This is the exact flow your customers would see on your site. Enter your specs and go straight into the layout editor with real pricing.
                 </p>
               </div>
               <form
@@ -638,7 +713,10 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Final CTA */}
+      {/* EDIT 10: FAQ section — added above final CTA */}
+      <FaqSection />
+
+      {/* EDIT 9: Final CTA section updated */}
       <section className="relative z-10 border-t border-white/10">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
           <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 text-center">
@@ -646,12 +724,12 @@ export default function LandingPage() {
               Ready to see it in action?
             </div>
             <h2 className="mt-3 text-3xl font-bold text-white">
-              See how fast a real customer quote can move.
+              See a real foam quote generated in under 2 minutes.
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-              Enter dimensions above and go straight into the real layout editor — no
-              fake handoff, no canned output. The pricing is live and the workflow is
-              the same one your customer would follow.
+              Enter your dimensions and go straight into the layout editor. No fake
+              handoff, no canned output. The pricing is live and the workflow is the
+              same one your customer would follow.
             </p>
             <div className="mt-6">
               <a
