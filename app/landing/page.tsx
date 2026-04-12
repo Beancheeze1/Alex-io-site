@@ -42,6 +42,26 @@ type FormState = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Declare gtag for TypeScript — installed globally via layout.tsx
+declare function gtag(...args: unknown[]): void;
+
+/**
+ * Fire a Google Ads conversion event.
+ * Safe to call even if gtag hasn't loaded yet — it will no-op silently.
+ */
+function fireConversion(conversionLabel: string) {
+  try {
+    if (typeof gtag !== "undefined") {
+      gtag("event", "conversion", {
+        send_to: `AW-18060048309/${conversionLabel}`,
+      });
+    }
+  } catch (e) {
+    // Never block the user flow if tracking fails
+    console.warn("[gtag] conversion fire failed:", e);
+  }
+}
+
 function isPositive(raw: string) {
   const n = Number(String(raw || "").trim());
   return Number.isFinite(n) && n > 0;
@@ -225,8 +245,8 @@ const FAQ_ITEMS = [
     a: "They get a guided quote flow that collects their dimensions and requirements, then drops directly into a layout editor with live pricing. They can see a printable quote summary without ever talking to a salesperson.",
   },
   {
-    q: "Is this only for foam inserts and packaging?",
-    a: "Currently yes — Alex-IO is purpose-built for custom foam packaging quoting, including mailers and RSCs. That focus is what makes the pricing and layout output accurate, where generic CPQ tools fall short.",
+    q: "Is this only for foam inserts?",
+    a: "Currently yes — Alex-IO is purpose-built for custom foam insert quoting. That focus is what makes the pricing and layout output accurate, where generic CPQ tools fall short.",
   },
   {
     q: "What's included in the $599/month plan?",
@@ -359,6 +379,10 @@ export default function LandingPage() {
       setSubmitting(false);
       return;
     }
+
+    // Fire Google Ads conversion — "Demo Quote Started"
+    // Replace XXXXXXXXXX below with your conversion label from Google Ads
+    fireConversion("XXXXXXXXXX");
 
     // Step 2: Build a prefill payload with the real Q-DEMO- quote number baked in.
     const prefill = {
