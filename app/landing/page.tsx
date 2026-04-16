@@ -38,7 +38,7 @@ function fireConversion() {
     if (typeof gtag !== "undefined") {
       // Conversion label from Google Ads → Tools → Conversions → "Demo Quote Started"
       gtag("event", "conversion", {
-        send_to: "AW-18060048309",
+        send_to: "AW-18060048309/8Pa3CJbBmJ0cELXv2aND",
       });
     }
   } catch (e) {
@@ -163,7 +163,7 @@ function FaqSection() {
         <h2 className="mb-8 text-2xl font-bold text-white">
           Everything you need to know
         </h2>
-        <div className="mx-auto max-w-3xl divide-y divide-white/10 rounded-3xl border border-white/10 bg-white/[0.03] overflow-hidden">
+        <div className="divide-y divide-white/10 rounded-3xl border border-white/10 bg-white/[0.03] overflow-hidden">
           {FAQ_ITEMS.map((item, i) => (
             <div key={i}>
               <button
@@ -223,6 +223,8 @@ export default function LandingPage() {
     setSubmitting(true);
 
     let quoteNo: string;
+    let seedMaterialId: number | null = null;
+    let seedMaterialName: string = "";
     try {
       const res = await fetch("/api/demo/seed", {
         method: "POST",
@@ -248,6 +250,8 @@ export default function LandingPage() {
         return;
       }
       quoteNo = data.quoteNo;
+      seedMaterialId = typeof data.materialId === "number" ? data.materialId : null;
+      seedMaterialName = typeof data.materialName === "string" ? data.materialName : "";
     } catch {
       setSeedError(true);
       setSubmitting(false);
@@ -257,7 +261,7 @@ export default function LandingPage() {
     // Fire Google Ads conversion
     fireConversion();
 
-    // Build prefill — dims pre-populated so StartQuoteModal steps are ready to click Next
+    // Build prefill — dims + material pre-populated so StartQuoteModal steps are ready to click Next
     const prefill = {
       quoteNo,
       source: "landing-demo",
@@ -274,7 +278,11 @@ export default function LandingPage() {
       pocketsOn: "",
       holding: "pockets",
       pocketCount: "1",
-      material: { mode: "recommend", text: "", id: null },
+      material: {
+        mode: seedMaterialId ? "known" : "recommend",
+        text: seedMaterialName,
+        id: seedMaterialId,
+      },
       packagingSku: "",
       packagingChoice: null,
       printed: false,

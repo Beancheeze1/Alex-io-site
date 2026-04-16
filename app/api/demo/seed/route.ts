@@ -379,6 +379,8 @@ export async function POST(req: NextRequest) {
         quoteNo,
         redirectPath,
         tenantId,
+        materialId,
+        materialName,
       },
       { status: 201 },
     );
