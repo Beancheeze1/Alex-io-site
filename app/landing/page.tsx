@@ -439,9 +439,17 @@ export default function LandingPage() {
                   Enter your insert dimensions and go straight into the layout editor with real pricing.
                 </p>
               </div>
+
+              {/* Glow wrapper */}
+              <div className="relative">
+                {/* Outer glow layers */}
+                <div className="pointer-events-none absolute -inset-[3px] rounded-[28px] bg-gradient-to-br from-sky-400/40 via-cyan-400/25 to-sky-500/40 blur-[2px]" />
+                <div className="pointer-events-none absolute -inset-[8px] rounded-[32px] bg-sky-400/10 blur-[12px]" />
+                <div className="pointer-events-none absolute -inset-[16px] rounded-[40px] bg-sky-500/8 blur-[28px]" />
+
               <form
                 onSubmit={handleSubmit}
-                className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.35)]"
+                className="relative rounded-3xl border border-sky-400/40 bg-[rgba(2,12,30,0.85)] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(148,220,255,0.08)]"
               >
                 <div className="mb-5 rounded-2xl border border-sky-400/20 bg-sky-400/[0.05] px-4 py-3 text-sm leading-6 text-slate-300">
                   Enter your insert dimensions and quantity — we'll open the live editor with real pricing. No account needed.
@@ -498,6 +506,7 @@ export default function LandingPage() {
                   </button>
                 </div>
               </form>
+              </div>{/* end glow wrapper */}
             </div>
           </div>
         </div>
