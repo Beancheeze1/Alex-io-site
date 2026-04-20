@@ -545,7 +545,7 @@ export default function LandingPage() {
                 Quoting Software for Foam Fabricators
               </div>
               <h1 className="mt-4 max-w-3xl text-3xl font-extrabold leading-tight text-white sm:text-4xl lg:text-5xl">
-                Stop quoting foam by hand.
+                Stop quoting foam packaging by hand.
               </h1>
               <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
                 Alex-IO is quoting software built specifically for foam fabricators and packaging shops. Real material pricing, layered cavity layouts, and printable customer-ready quotes — generated in minutes, not days.
