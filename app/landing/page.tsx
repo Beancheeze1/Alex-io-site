@@ -595,9 +595,52 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Quote form — minimal: L × W × D + Qty only */}
+
+      {/* Pilot banner — slim, early visibility */}
+      <section className="relative z-10">
+        <div className="mx-auto max-w-7xl px-4 pt-2 pb-6">
+          <div className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.05] px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-amber-400 text-lg shrink-0">🚀</span>
+              <div>
+                <span className="text-sm font-semibold text-white">90-Day Pilot — $399/month. </span>
+                <span className="text-sm text-slate-300">Full access, no contract. Cancel anytime. Converts to standard pricing at day 91.</span>
+              </div>
+            </div>
+            <a
+              href="#pricing"
+              className="shrink-0 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-400/20 whitespace-nowrap text-center"
+            >
+              See Details →
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Capabilities — before the demo form so prospect is convinced first */}
+      <CapabilitiesSection />
+
+      {/* Screenshots — moved up, after capabilities */}
+      <section id="proof" className="relative z-10">
+        <div className="mx-auto max-w-7xl px-4 pb-10 sm:pb-12">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+            See it in action
+          </div>
+          <h2 className="mb-6 text-2xl font-bold text-white">What your team actually sees</h2>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <Shot src="/splash/layout-editor.png" alt="Alex-IO layout editor screenshot" />
+            <Shot src="/splash/admin-health.png" alt="Alex-IO admin and workflow screenshot" />
+          </div>
+        </div>
+      </section>
+
+      {/* Quote form — after capabilities so prospect is already convinced */}
       <section id="sample-quote" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 pb-8 sm:pb-12">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+            Try it yourself
+          </div>
+          <h2 className="mb-8 text-2xl font-bold text-white">Run a real quote — live, no signup</h2>
           <div className="grid gap-8 lg:grid-cols-12">
             {/* Left: explainer */}
             <div className="lg:col-span-5 hidden lg:block">
@@ -714,14 +757,11 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Capabilities */}
-      <CapabilitiesSection />
-
-      {/* Pilot offer + Pricing */}
+      {/* Pricing */}
       <section id="pricing" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
 
-          {/* Pilot callout banner */}
+          {/* Pilot callout — full detail */}
           <div className="mb-10 rounded-3xl border border-amber-400/30 bg-amber-400/[0.06] p-6 sm:p-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -841,35 +881,8 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* FAQ — moved up, before screenshots */}
+      {/* FAQ */}
       <FaqSection />
-
-      {/* Proof / screenshots */}
-      <section id="proof" className="relative z-10">
-        <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
-          <div className="mb-6 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
-            What your team and customers see
-          </div>
-          <div className="grid gap-6 lg:grid-cols-3">
-            <MiniCard
-              title="Layout editor"
-              body="Design cavity profiles, set layer thicknesses, and see the foam set rendered in real time."
-            />
-            <MiniCard
-              title="Live pricing"
-              body="Every change in the editor reprices automatically. No hidden steps, no waiting."
-            />
-            <MiniCard
-              title="Printable quote"
-              body="One click to a clean, customer-ready quote summary with full line items, totals, and a clear next step."
-            />
-          </div>
-          <div className="mt-8 grid gap-6 sm:grid-cols-2">
-            <Shot src="/splash/layout-editor.png" alt="Alex-IO layout editor screenshot" />
-            <Shot src="/splash/admin-health.png" alt="Alex-IO admin and workflow screenshot" />
-          </div>
-        </div>
-      </section>
 
       {/* Final CTA */}
       <section className="relative z-10 border-t border-white/10">
