@@ -151,6 +151,212 @@ const FAQ_ITEMS = [
   },
 ];
 
+
+// ── Capabilities ──────────────────────────────────────────────────────────────
+
+function CapabilityCard({
+  icon,
+  title,
+  body,
+  accent = false,
+}: {
+  icon: string;
+  title: string;
+  body: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className={`rounded-2xl border p-5 flex flex-col gap-3 ${
+      accent
+        ? "border-sky-400/25 bg-sky-400/[0.05]"
+        : "border-white/10 bg-white/[0.03]"
+    }`}>
+      <div className="text-2xl leading-none">{icon}</div>
+      <div className="text-sm font-semibold text-white leading-snug">{title}</div>
+      <div className="text-sm leading-relaxed text-slate-400">{body}</div>
+    </div>
+  );
+}
+
+function CapabilitiesSection() {
+  return (
+    <section className="relative z-10">
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:py-14">
+
+        {/* Section header */}
+        <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+          Everything Alex-IO does
+        </div>
+        <h2 className="mb-3 text-2xl font-bold text-white sm:text-3xl">
+          This isn't just a quoting form.
+        </h2>
+        <p className="mb-10 max-w-2xl text-sm leading-7 text-slate-300">
+          Alex-IO is a full quoting and estimating platform built specifically for foam fabricators.
+          From the moment an RFQ hits your inbox to the moment a production-ready CAD file leaves your shop — it's handled.
+        </p>
+
+        {/* ── Row 1: Getting the quote in ──────────────────────────────────── */}
+        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          Getting the RFQ in
+        </div>
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <CapabilityCard
+            icon="📧"
+            accent
+            title="Email RFQ parsing"
+            body="Forward or paste a customer email and Alex-IO extracts dimensions, quantity, cavity count, and material spec — then opens a live, priced quote. No re-keying."
+          />
+          <CapabilityCard
+            icon="🖼️"
+            accent
+            title="Sketch & drawing upload"
+            body="Upload a hand sketch, napkin drawing, or PDF spec sheet. The AI reads the geometry and populates the quote. Your customer doesn't need to know what polyethylene is."
+          />
+          <CapabilityCard
+            icon="💬"
+            accent
+            title="AI chat widget"
+            body="Embed a chat widget on your website. Customers describe what they need in plain language — 'a 12×8 case insert for a rifle scope' — and get a priced quote without calling anyone."
+          />
+          <CapabilityCard
+            icon="📋"
+            accent
+            title="Guided quote form"
+            body="A structured step-by-step form for customers who prefer to enter specs directly. Ship mode, insert type, cavity count, material preference — it walks them through everything."
+          />
+        </div>
+
+        {/* ── Row 2: Building the quote ────────────────────────────────────── */}
+        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          Building the quote
+        </div>
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <CapabilityCard
+            icon="🧩"
+            title="Layered cavity layout editor"
+            body="Design multi-layer foam sets with individual cavity profiles per layer. Rectangles, circles, custom shapes. The layout renders in real time as you build it."
+          />
+          <CapabilityCard
+            icon="⚡"
+            title="Live pricing engine"
+            body="Every change in the editor — layer count, cavity size, material, quantity — reprices instantly against your actual material costs and density-based markups. No formulas to maintain."
+          />
+          <CapabilityCard
+            icon="🧠"
+            title="AI material recommendation"
+            body="Enter the product weight, drop height, and fragility rating. Alex-IO recommends the right foam type and density for the application — not just the cheapest option."
+          />
+          <CapabilityCard
+            icon="📐"
+            title="Cushion curve analysis"
+            body="Engineering-grade G-factor cushion curve calculations for customers who spec fragility limits. Tells you exactly which foam provides the right shock attenuation for their product."
+          />
+        </div>
+
+        {/* ── Row 3: Getting the quote out ─────────────────────────────────── */}
+        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          Getting the quote out
+        </div>
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <CapabilityCard
+            icon="🖨️"
+            title="Branded customer quote PDF"
+            body="One click generates a clean, customer-ready quote with your branding, full line items, layer breakdown, cavity counts, material specs, and a clear next step."
+          />
+          <CapabilityCard
+            icon="📐"
+            title="3-view technical drawing PDF"
+            body="A dimensioned top/front/side engineering drawing — the kind your shop floor or production team expects. Generated from the same layout, no separate drafting required."
+          />
+          <CapabilityCard
+            icon="⚙️"
+            title="DXF / STEP CAD exports"
+            body="Production-ready CAD files come straight out of the quote. Hand them to your CNC operator or send them to the customer without any re-drawing in a separate tool."
+          />
+          <CapabilityCard
+            icon="📦"
+            title="Box & carton pairing"
+            body="Alex-IO suggests the right corrugated shipping carton to pair with the foam insert, factoring in wall clearance and insert thickness. Quote the full package in one step."
+          />
+        </div>
+
+        {/* ── Row 4: Running your shop ─────────────────────────────────────── */}
+        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          Running your shop
+        </div>
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <CapabilityCard
+            icon="📊"
+            title="Commission tracking"
+            body="Set commission percentages per sales rep. Alex-IO tracks which quotes each rep owns, calculates commissions on locked quotes, and generates payout reports. No spreadsheets."
+          />
+          <CapabilityCard
+            icon="🔗"
+            title="HubSpot CRM sync"
+            body="Quotes sync to HubSpot automatically as deals. Contacts are matched or created. Your CRM stays current without anyone manually updating it after every customer conversation."
+          />
+          <CapabilityCard
+            icon="✉️"
+            title="Send quotes from Outlook"
+            body="Send branded quote emails directly through your existing Microsoft 365 / Outlook account. Quotes land in the customer's inbox from your address, not a generic noreply."
+          />
+          <CapabilityCard
+            icon="🔒"
+            title="Quote locking & revision history"
+            body="Lock quotes for production so nothing changes accidentally. Need to revise a locked quote? Full revision history tracks every version. Nothing gets lost."
+          />
+          <CapabilityCard
+            icon="📚"
+            title="Price book management"
+            body="Import and manage your full material catalog — foam types, densities, costs, markups. Update once and every future quote reflects the change automatically."
+          />
+          <CapabilityCard
+            icon="👥"
+            title="Multi-rep, multi-seat"
+            body="Multiple salespeople, individual quote ownership, role-based access. Admins see everything. Reps see their own queue. Everyone works from the same system."
+          />
+        </div>
+
+        {/* ── Bottom wow-moment callout ─────────────────────────────────────── */}
+        <div className="rounded-3xl border border-sky-400/20 bg-gradient-to-br from-sky-400/[0.07] via-transparent to-cyan-400/[0.04] p-6 sm:p-8">
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80 mb-2">
+                The bottom line
+              </div>
+              <h3 className="text-xl font-bold text-white sm:text-2xl leading-snug">
+                A customer emails you at 9pm.<br />
+                They have a quote in their inbox by 9:05.
+              </h3>
+              <p className="mt-4 text-sm leading-7 text-slate-300">
+                That's not a future state — that's Alex-IO today. The email arrives,
+                the AI parses it, a cavity layout is built, your pricing runs against
+                it, and a branded PDF is generated. Your team wakes up to a done deal,
+                not a pile of RFQs to work through.
+              </p>
+            </div>
+            <div className="flex flex-col justify-center gap-3">
+              {[
+                "No more quoting from memory",
+                "No more spreadsheet pricing",
+                "No more re-keying RFQ emails",
+                "No more chasing CAD files",
+                "No more manual commission math",
+              ].map((t) => (
+                <div key={t} className="flex items-center gap-3 text-sm text-slate-300">
+                  <span className="shrink-0 text-sky-400">✓</span>
+                  {t}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  );
+}
+
 function FaqSection() {
   const [open, setOpen] = React.useState<number | null>(null);
 
@@ -511,6 +717,9 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* Capabilities */}
+      <CapabilitiesSection />
 
       {/* Pilot offer + Pricing */}
       <section id="pricing" className="relative z-10">
