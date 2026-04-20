@@ -467,8 +467,8 @@ export default function TenantsPage() {
                           value={s.plan}
                           onChange={(e) => updateEdit(t.id, { plan: e.target.value })}
                         >
-                          <option value="starter">Starter — $599/mo · 2 seats · PDF only</option>
-                          <option value="pro">Pro — $1,199/mo · 10 seats · CAD + HubSpot</option>
+                          <option value="starter">Starter — $799/mo · 2 seats · PDF only</option>
+                          <option value="pro">Pro — $1,299/mo · 10 seats · CAD + HubSpot</option>
                           <option value="shop">Shop — $1,999/mo · Unlimited · Multi-location</option>
                         </select>
                         <div className="text-[10px] text-neutral-500">

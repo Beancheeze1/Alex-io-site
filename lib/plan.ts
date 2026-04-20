@@ -3,9 +3,11 @@
 // Single source of truth for Alex-IO subscription tier gating.
 //
 // Plans:
-//   starter  $599/mo   2 seats   PDF only · layout editor · email parsing
-//   pro      $1199/mo  10 seats  + CAD/DXF/STEP · HubSpot · commissions
+//   starter  $799/mo   2 seats   PDF only · layout editor · email parsing
+//   pro      $1299/mo  10 seats  + CAD/DXF/STEP · HubSpot · commissions
 //   shop     $1999/mo  unlimited + Multi-location · white-label · API
+//
+// Pilot program: $399/mo for 90 days (Starter features), converts to $799 at day 91
 //
 // Usage:
 //   const plan = await getPlanForTenant(tenantId);

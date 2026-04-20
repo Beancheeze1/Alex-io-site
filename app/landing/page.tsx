@@ -138,7 +138,7 @@ const FAQ_ITEMS = [
     a: "Currently yes — Alex-IO is purpose-built for custom foam insert quoting. That focus is what makes the pricing and layout output accurate, where generic CPQ tools fall short.",
   },
   {
-    q: "What's included in the $599/month plan?",
+    q: "What's included in the $799/month plan?",
     a: "The Starter plan includes your full quoting workflow, customer-facing quote widget, layout editor, printable quote output, and admin dashboard. Higher tiers unlock CAD exports, multiple seats, and multi-location support.",
   },
   {
@@ -369,8 +369,11 @@ export default function LandingPage() {
 
               <div className="mt-6 text-sm text-slate-400">
                 Starts at{" "}
-                <span className="font-semibold text-slate-200">$599/month</span>.{" "}
-                No long-term contract.
+                <span className="font-semibold text-slate-200">$799/month</span>.{" "}
+                No long-term contract.{" "}
+                <a href="#pricing" className="text-sky-400 hover:text-sky-300 underline underline-offset-2">
+                  90-day pilot at $399/mo →
+                </a>
               </div>
             </div>
 
@@ -496,6 +499,130 @@ export default function LandingPage() {
                 </div>
               </form>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Pilot offer + Pricing */}
+      <section id="pricing" className="relative z-10">
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
+
+          {/* Pilot callout banner */}
+          <div className="mb-10 rounded-3xl border border-amber-400/30 bg-amber-400/[0.06] p-6 sm:p-8">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-300/80">
+                  Limited Time · New Customers Only
+                </div>
+                <h2 className="mt-2 text-xl font-bold text-white">
+                  90-Day Pilot Program — $399/month
+                </h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
+                  Full access to everything in the Starter plan. No contract — cancel anytime during the pilot.
+                  At day 91, your account automatically continues at standard Starter pricing ($799/mo) unless you cancel.
+                  Credit card required to start.
+                </p>
+                <ul className="mt-3 space-y-1 text-sm text-slate-300">
+                  <li className="flex items-center gap-2"><span className="text-amber-400">✓</span> Full quoting workflow, layout editor, printable quotes</li>
+                  <li className="flex items-center gap-2"><span className="text-amber-400">✓</span> Customer-facing quote widget for your website</li>
+                  <li className="flex items-center gap-2"><span className="text-amber-400">✓</span> Admin dashboard and material/pricing configuration</li>
+                  <li className="flex items-center gap-2"><span className="text-amber-400">✓</span> 2 user seats included</li>
+                </ul>
+              </div>
+              <div className="shrink-0 text-center">
+                <div className="text-4xl font-extrabold text-white">$399</div>
+                <div className="text-sm text-slate-400">/ month for 90 days</div>
+                <a
+                  href="mailto:chuck@alex-io.com?subject=90-Day Pilot — Alex-IO&body=Hi Chuck, I'd like to get started with the 90-day pilot program."
+                  className="mt-4 inline-flex rounded-xl bg-amber-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300"
+                >
+                  Start Pilot →
+                </a>
+                <div className="mt-2 text-xs text-slate-500">or email chuck@alex-io.com</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Pricing tiers */}
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+            Pricing
+          </div>
+          <h2 className="mb-8 text-2xl font-bold text-white">Simple, transparent plans</h2>
+          <div className="grid gap-6 lg:grid-cols-3">
+
+            {/* Starter */}
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 flex flex-col">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-300/80">Starter</div>
+              <div className="mt-3 flex items-end gap-1">
+                <span className="text-4xl font-extrabold text-white">$799</span>
+                <span className="mb-1 text-sm text-slate-400">/ month</span>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">2 seats · month-to-month</div>
+              <ul className="mt-5 space-y-2 text-sm text-slate-300 flex-1">
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Full quoting workflow</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Customer-facing quote widget</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Layout editor with live pricing</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Printable customer-ready quotes</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Admin dashboard</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Email RFQ parsing</li>
+              </ul>
+              <a
+                href="mailto:chuck@alex-io.com?subject=Alex-IO Starter Plan"
+                className="mt-6 inline-flex justify-center rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20"
+              >
+                Get Started
+              </a>
+            </div>
+
+            {/* Pro */}
+            <div className="rounded-3xl border border-sky-400/30 bg-sky-400/[0.05] p-6 flex flex-col relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-sky-400 px-3 py-0.5 text-xs font-semibold text-slate-950">
+                Most Popular
+              </div>
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-300/80">Pro</div>
+              <div className="mt-3 flex items-end gap-1">
+                <span className="text-4xl font-extrabold text-white">$1,299</span>
+                <span className="mb-1 text-sm text-slate-400">/ month</span>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">10 seats · month-to-month</div>
+              <ul className="mt-5 space-y-2 text-sm text-slate-300 flex-1">
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Everything in Starter</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>CAD exports (DXF / STEP)</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>HubSpot CRM sync</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Commission tracking</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>10 user seats</li>
+              </ul>
+              <a
+                href="mailto:chuck@alex-io.com?subject=Alex-IO Pro Plan"
+                className="mt-6 inline-flex justify-center rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
+              >
+                Get Started
+              </a>
+            </div>
+
+            {/* Shop */}
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 flex flex-col">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-300/80">Shop</div>
+              <div className="mt-3 flex items-end gap-1">
+                <span className="text-4xl font-extrabold text-white">$1,999</span>
+                <span className="mb-1 text-sm text-slate-400">/ month</span>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">Unlimited seats · month-to-month</div>
+              <ul className="mt-5 space-y-2 text-sm text-slate-300 flex-1">
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Everything in Pro</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Unlimited user seats</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>White-label / custom branding</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Multi-location support</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>API access</li>
+              </ul>
+              <a
+                href="mailto:chuck@alex-io.com?subject=Alex-IO Shop Plan"
+                className="mt-6 inline-flex justify-center rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20"
+              >
+                Get Started
+              </a>
+            </div>
+
           </div>
         </div>
       </section>

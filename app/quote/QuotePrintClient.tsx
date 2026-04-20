@@ -1605,7 +1605,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
                       {annualMode
                         ? "Pro at $959/mo billed annually"
-                        : "Pro at $1,199/mo · switch to annual to save 20%"}
+                        : "Pro at $1,299/mo · switch to annual to save 20%"}
                     </div>
                     <div style={{ fontSize: 11, color: "#475569", marginBottom: 16 }}>
                       Fully branded quote flow · Response within 1 business day
@@ -1698,7 +1698,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         const tiers = [
                           {
                             name: "Starter",
-                            monthlyPrice: 599,
+                            monthlyPrice: 799,
                             highlight: false,
                             badge: null,
                             users: "2 users",
@@ -1712,7 +1712,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           },
                           {
                             name: "Pro",
-                            monthlyPrice: 1199,
+                            monthlyPrice: 1299,
                             highlight: true,
                             badge: "Most popular",
                             users: "10 users",
