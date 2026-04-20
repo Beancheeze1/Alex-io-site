@@ -312,6 +312,13 @@ function CapabilitiesSection() {
         </div>
 
         {/* ── Bottom wow-moment callout ─────────────────────────────────────── */}
+
+        {/* Admin dashboard trust screenshot */}
+        <div className="mb-8">
+          <div className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wider">Admin dashboard — system health, integrations, everything wired up</div>
+          <Shot src="/splash/admin-dashboard.png" alt="Alex-IO admin dashboard showing system health, HubSpot and email configured" />
+        </div>
+
         <div className="rounded-3xl border border-sky-400/20 bg-gradient-to-br from-sky-400/[0.07] via-transparent to-cyan-400/[0.04] p-6 sm:p-8">
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="lg:col-span-2">
@@ -583,10 +590,10 @@ export default function LandingPage() {
               <div className="relative mx-auto max-w-2xl">
                 <Shot src="/splash/hero-quote.png" alt="Alex-IO quote summary" priority />
                 <div className="absolute -right-2 top-6 hidden w-[52%] rotate-[1.5deg] lg:block">
-                  <Shot src="/splash/layout-editor.png" alt="Alex-IO layout editor" />
+                  <Shot src="/splash/layout-editor-live.png" alt="Alex-IO layout editor" />
                 </div>
                 <div className="absolute -left-2 bottom-[-26px] hidden w-[48%] -rotate-[1.5deg] lg:block">
-                  <Shot src="/splash/layer-previews.png" alt="Alex-IO layer previews" />
+                  <Shot src="/splash/quote-line-items.png" alt="Alex-IO quote line items" />
                 </div>
                 <div className="pointer-events-none mt-8 h-12 lg:h-24" />
               </div>
@@ -626,10 +633,27 @@ export default function LandingPage() {
           <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
             See it in action
           </div>
-          <h2 className="mb-6 text-2xl font-bold text-white">What your team actually sees</h2>
-          <div className="grid gap-6 sm:grid-cols-2">
-            <Shot src="/splash/layout-editor.png" alt="Alex-IO layout editor screenshot" />
-            <Shot src="/splash/admin-health.png" alt="Alex-IO admin and workflow screenshot" />
+          <h2 className="mb-2 text-2xl font-bold text-white">What your team actually sees</h2>
+          <p className="mb-8 text-sm leading-7 text-slate-400">
+            Real screens. Real data. No mockups.
+          </p>
+
+          {/* Hero screenshot — layout editor full width */}
+          <div className="mb-3">
+            <div className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wider">Layout editor — build cavities, set layers, price live</div>
+            <Shot src="/splash/layout-editor-live.png" alt="Alex-IO layout editor with live cavities and pricing" priority={false} />
+          </div>
+
+          {/* Two supporting screenshots side by side */}
+          <div className="mt-6 grid gap-6 sm:grid-cols-2">
+            <div>
+              <div className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wider">Quote line items — every cost broken out</div>
+              <Shot src="/splash/quote-line-items.png" alt="Alex-IO quote line items with foam, packaging and print costs" />
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wider">Quote management — status, revisions, send to customer</div>
+              <Shot src="/splash/quotes-list.png" alt="Alex-IO quotes list with status badges and management tools" />
+            </div>
           </div>
         </div>
       </section>
