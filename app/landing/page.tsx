@@ -192,37 +192,31 @@ function CapabilitiesSection() {
         </h2>
         <p className="mb-10 max-w-2xl text-sm leading-7 text-slate-300">
           Alex-IO is a full quoting and estimating platform built specifically for foam fabricators.
-          From the moment an RFQ hits your inbox to the moment a production-ready CAD file leaves your shop — it's handled.
+          Whether a customer fills out a form on your site, chats with your AI widget, or a salesperson is sitting across from them in a meeting — from first dimension to production-ready CAD file, it's all handled.
         </p>
 
-        {/* ── Row 1: Getting the quote in ──────────────────────────────────── */}
+        {/* ── Row 1: Getting the quote started ──────────────────────────────────── */}
         <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-          Getting the RFQ in
+          Getting the quote started
         </div>
-        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <CapabilityCard
-            icon="📧"
-            accent
-            title="Email RFQ parsing"
-            body="Forward or paste a customer email and Alex-IO extracts dimensions, quantity, cavity count, and material spec — then opens a live, priced quote. No re-keying."
-          />
-          <CapabilityCard
-            icon="🖼️"
-            accent
-            title="Sketch & drawing upload"
-            body="Upload a hand sketch, napkin drawing, or PDF spec sheet. The AI reads the geometry and populates the quote. Your customer doesn't need to know what polyethylene is."
-          />
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <CapabilityCard
             icon="💬"
             accent
-            title="AI chat widget"
-            body="Embed a chat widget on your website. Customers describe what they need in plain language — 'a 12×8 case insert for a rifle scope' — and get a priced quote without calling anyone."
+            title="AI chat widget — on your website"
+            body="Embed a chat widget on your site. Customers describe what they need in plain language — 'a 12×8 case insert for a rifle scope' — and get a priced quote without calling anyone. Works 24/7, no staff required."
           />
           <CapabilityCard
             icon="📋"
             accent
-            title="Guided quote form"
-            body="A structured step-by-step form for customers who prefer to enter specs directly. Ship mode, insert type, cavity count, material preference — it walks them through everything."
+            title="Guided quote form — self-serve"
+            body="A structured step-by-step form for customers who prefer to enter specs directly. Ship mode, insert type, cavity count, material preference — it walks them through everything and produces a live priced quote."
+          />
+          <CapabilityCard
+            icon="🤝"
+            accent
+            title="Built for your sales team too"
+            body="Salespeople use Alex-IO live in front of customers — in a meeting, on a plant tour, over the phone. Enter dimensions as the conversation happens and hand the customer a priced quote before you leave the room. No 'I'll get back to you.'"
           />
         </div>
 
@@ -325,21 +319,23 @@ function CapabilitiesSection() {
                 The bottom line
               </div>
               <h3 className="text-xl font-bold text-white sm:text-2xl leading-snug">
-                A customer emails you at 9pm.<br />
-                They have a quote in their inbox by 9:05.
+                Your rep is still in the parking lot.<br />
+                The customer already has a quote.
               </h3>
               <p className="mt-4 text-sm leading-7 text-slate-300">
-                That's not a future state — that's Alex-IO today. The email arrives,
-                the AI parses it, a cavity layout is built, your pricing runs against
-                it, and a branded PDF is generated. Your team wakes up to a done deal,
-                not a pile of RFQs to work through.
+                That's not a future state — that's Alex-IO today. A salesperson enters
+                dimensions during the meeting, the pricing engine runs against your real
+                material costs, and a branded PDF is ready before they shake hands at
+                the door. Or a customer fills out your website widget at 9pm and has
+                a quote waiting when they wake up. Either way, nobody is re-keying
+                anything into a spreadsheet.
               </p>
             </div>
             <div className="flex flex-col justify-center gap-3">
               {[
                 "No more quoting from memory",
                 "No more spreadsheet pricing",
-                "No more re-keying RFQ emails",
+                "No more 'I'll get back to you' on a sales call",
                 "No more chasing CAD files",
                 "No more manual commission math",
               ].map((t) => (
@@ -782,7 +778,7 @@ export default function LandingPage() {
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Layout editor with live pricing</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Printable customer-ready quotes</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Admin dashboard</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Email RFQ parsing</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>AI chat widget &amp; guided quote form</li>
               </ul>
               <a
                 href="mailto:chuck@alex-io.com?subject=Alex-IO Starter Plan"
