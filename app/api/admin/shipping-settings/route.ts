@@ -12,6 +12,7 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 import { q, one } from "@/lib/db";
+import { adminOnly } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -56,7 +57,7 @@ function normalizePct(raw: any): number | null {
 }
 
 // ---------- GET: read current rough_ship_pct ----------
-export async function GET() {
+export const GET = adminOnly(async (req: NextRequest) => {
   try {
     try {
       const row = (await one<SettingsRow>(
@@ -118,10 +119,10 @@ export async function GET() {
         "Unexpected error loading shipping settings. Check logs or DB schema.",
     } satisfies Err, 500);
   }
-}
+});
 
 // ---------- POST: update rough_ship_pct ----------
-export async function POST(req: NextRequest) {
+export const POST = adminOnly(async (req: NextRequest) => {
   const user = await getCurrentUserFromRequest(req);
   const enforced = await enforceTenantMatch(req, user);
   if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
@@ -193,4 +194,4 @@ export async function POST(req: NextRequest) {
         "Unexpected error saving shipping settings. Check logs or DB schema.",
     } satisfies Err, 500);
   }
-}
+});

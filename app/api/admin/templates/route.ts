@@ -5,6 +5,7 @@ import { pickTemplateWithKey } from "@/app/lib/templates";
 import { pickSignature } from "@/app/lib/signature";
 import { renderTemplate } from "@/app/lib/tpl";
 import { shouldWrap, wrapHtml } from "@/app/lib/layout";
+import { adminOnly } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ function pickSignatureSafe(inboxEmail: string) {
   }
 }
 
-export async function GET(_req: NextRequest) {
+export const GET = adminOnly(async (_req: NextRequest) => {
   const inboxEmail = String(process.env.MS_MAILBOX_FROM || "sales@alex-io.com").toLowerCase();
   const templ = pickTemplateSafe(inboxEmail);
   const sig = pickSignatureSafe(inboxEmail);
@@ -61,4 +62,4 @@ export async function GET(_req: NextRequest) {
     signature: { key: sig?.key ?? "(fallback)", html: mustStr(sig?.html, "") },
     preview: { subject, html: wrapped },
   });
-}
+});

@@ -53,6 +53,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { one } from "@/lib/db";
 import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
+import logger from "@/lib/logger";
+import { handleApiError } from "@/lib/api-error";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -2195,6 +2198,14 @@ ${lastInbound}
 
 export async function POST(req: NextRequest) {
   try {
+    // Rate limiting: 15 requests per minute per IP
+    const rate = await rateLimit(req, 15, "orchestrate");
+    if (!rate.success) {
+      return rateLimitResponse(rate.reset);
+    }
+
+    logger.info("AI Orchestrate request received", { dryRun: !!req.headers.get("x-dryrun") });
+
     const p = (await req.json().catch(() => ({}))) as In;
     const mode = String(p.mode || "ai");
 
@@ -2919,8 +2930,7 @@ if (merged.dims) {
       calc,
       facts: merged,
     });
-  } catch (e: any) {
-    return err("orchestrate_exception", String(e?.message || e));
+} catch (e: any) {
+    return handleApiError(e, "ai/orchestrate");
   }
-  
 }

@@ -1,5 +1,6 @@
 // app/api/admin/whoami/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { adminOnly } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,7 +13,7 @@ function truthy(v?: string | null) {
   return true;
 }
 
-export async function GET() {
+export const GET = adminOnly(async (req: NextRequest) => {
   const env = {
     NEXT_PUBLIC_BASE_URL: truthy(process.env.NEXT_PUBLIC_BASE_URL) ? "True" : "missing",
     HUBSPOT_ACCESS_TOKEN: truthy(process.env.HUBSPOT_ACCESS_TOKEN) ? "True" : "missing",
@@ -33,4 +34,4 @@ export async function GET() {
   };
 
   return NextResponse.json({ ok: true, now: new Date().toISOString(), env }, { status: 200 });
-}
+});

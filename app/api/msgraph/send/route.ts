@@ -1,5 +1,8 @@
 // app/api/msgraph/send/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import logger from "@/lib/logger";
+import { handleApiError } from "@/lib/api-error";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -186,6 +189,14 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    // Rate limiting: 20 requests per minute per IP (internal send endpoint)
+    const rate = await rateLimit(req, 20, "msgraph-send");
+    if (!rate.success) {
+      return rateLimitResponse(rate.reset);
+    }
+
+    const body = await req.json().catch(() => ({}));
+
     const {
       toEmail,
       subject,
@@ -200,7 +211,13 @@ export async function POST(req: NextRequest) {
       html?: string;
       inReplyTo?: string | null;
       dryRun?: boolean;
-    } = await req.json();
+    } = body;
+
+    logger.info("Microsoft Graph send request received", {
+      toEmail: toEmail || "(missing)",
+      dryRun: !!dryRun,
+      hasSubject: !!subject,
+    });
 
     if (!toEmail || !subject) {
       return NextResponse.json({ ok: false, error: "missing_to_or_subject" }, { status: 400 });
@@ -238,8 +255,7 @@ export async function POST(req: NextRequest) {
       messageId: id,
       internetMessageId,
     });
-  } catch (err: any) {
-    const msg = err?.message || String(err);
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+} catch (err: any) {
+    return handleApiError(err, "msgraph/send");
   }
 }

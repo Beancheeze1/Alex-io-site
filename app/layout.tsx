@@ -2,6 +2,9 @@
 import "../styles/globals.css";
 import type { Metadata } from "next";
 import { getCurrentUserFromCookies } from "@/lib/auth";
+import { initializeApp } from "@/lib/startup";
+
+// initializeApp();   // ← COMMENTED OUT for build (we'll fix this cleanly next)
 
 export const metadata: Metadata = {
   title: "Foam Insert Quoting Software | RFQ to Priced Quote in Minutes | Alex-IO",
@@ -45,6 +48,10 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Safe initialization — now runs inside the layout function
+  // (skipped automatically during Next.js build phase)
+  initializeApp();
+
   const currentUser = await getCurrentUserFromCookies();
 
   return (

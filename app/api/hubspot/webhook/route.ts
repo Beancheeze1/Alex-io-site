@@ -1,5 +1,8 @@
 // app/api/hubspot/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import logger from "@/lib/logger";
+import { handleApiError } from "@/lib/api-error";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -76,6 +79,12 @@ export async function POST(req: NextRequest) {
   const urlOrchestrate = `${base}/api/ai/orchestrate`;
 
   try {
+    // Rate limiting: 30 requests per minute per IP (webhooks can be bursty)
+    const rate = await rateLimit(req, 30, "hubspot-webhook");
+    if (!rate.success) {
+      return rateLimitResponse(rate.reset);
+    }
+
     // Visible entry log (headers subset)
     {
       const headersLog: Record<string, string> = {};
@@ -204,7 +213,6 @@ export async function POST(req: NextRequest) {
 
     return ok({ status: orchRes.status });
   } catch (e: any) {
-    console.error("[webhook] exception", e?.message || e);
-    return err("webhook_exception", String(e?.message || e));
+    return handleApiError(e, "hubspot/webhook");
   }
 }

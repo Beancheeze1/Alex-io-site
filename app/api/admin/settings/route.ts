@@ -6,18 +6,19 @@ import {
   PricingSettings,
 } from "@/app/lib/pricing/settings";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { adminOnly } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+export const GET = adminOnly(async (req: NextRequest) => {
   const user = await getCurrentUserFromRequest(req);
   const tenantId = user?.tenant_id ?? "default";
   const settings = await getPricingSettings(tenantId);
   return NextResponse.json({ ok: true, settings }, { status: 200 });
-}
+});
 
-export async function PATCH(req: NextRequest) {
+export const PATCH = adminOnly(async (req: NextRequest) => {
   try {
     const user = await getCurrentUserFromRequest(req);
     if (!user || user.role !== "admin") {
@@ -51,4 +52,4 @@ export async function PATCH(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: String(err?.message ?? err) }, { status: 500 });
   }
-}
+});

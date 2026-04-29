@@ -17,6 +17,7 @@ import { one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { checkSeatLimit, PLAN_LIMITS } from "@/lib/plan";
+import { adminOnly } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -41,7 +42,7 @@ function makeTempPassword(): string {
 }
 
 // ---------- GET: list users ----------
-export async function GET(req: NextRequest) {
+export const GET = adminOnly(async (req: NextRequest) => {
   try {
     const user = await getCurrentUserFromRequest(req);
     if (!requireAdmin(user)) {
@@ -111,10 +112,10 @@ export async function GET(req: NextRequest) {
       500,
     );
   }
-}
+});
 
 // ---------- POST: create user ----------
-export async function POST(req: NextRequest) {
+export const POST = adminOnly(async (req: NextRequest) => {
   try {
     const current = await getCurrentUserFromRequest(req);
     if (!requireAdmin(current)) {
@@ -283,10 +284,10 @@ export async function POST(req: NextRequest) {
       500,
     );
   }
-}
+});
 
 // ---------- DELETE: delete user ----------
-export async function DELETE(req: NextRequest) {
+export const DELETE = adminOnly(async (req: NextRequest) => {
   try {
     const current = await getCurrentUserFromRequest(req);
     if (!requireAdmin(current)) {
@@ -375,10 +376,10 @@ export async function DELETE(req: NextRequest) {
       500,
     );
   }
-}
+});
 
 // ---------- PATCH: update commission_pct for a user ----------
-export async function PATCH(req: NextRequest) {
+export const PATCH = adminOnly(async (req: NextRequest) => {
   try {
     const current = await getCurrentUserFromRequest(req);
     if (!requireAdmin(current)) {
@@ -426,4 +427,4 @@ export async function PATCH(req: NextRequest) {
     console.error("Error in PATCH /api/admin/users:", err);
     return bad({ ok: false, error: "server_error", message: String(err?.message ?? err) }, 500);
   }
-}
+});

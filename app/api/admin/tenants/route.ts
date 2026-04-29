@@ -12,6 +12,7 @@ import crypto from "crypto";
 import { q, withTxn } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { getPlanForTenant, planMeets } from "@/lib/plan";
+import { adminOnly } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -182,7 +183,7 @@ async function pullBrandFromDomain(domainRaw: any): Promise<{
   }
 }
 
-export async function GET(req: NextRequest) {
+export const GET = adminOnly(async (req: NextRequest) => {
   const user = await getCurrentUserFromRequest(req);
   if (!isRoleAllowed(user, ["admin"])) {
     return bad("forbidden", "Admin role required.", 403);
@@ -197,9 +198,9 @@ export async function GET(req: NextRequest) {
   `);
 
   return ok({ ok: true, tenants });
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = adminOnly(async (req: NextRequest) => {
   const user = await getCurrentUserFromRequest(req);
   if (!isRoleAllowed(user, ["admin"])) {
     return bad("forbidden", "Admin role required.", 403);
@@ -317,4 +318,4 @@ export async function POST(req: NextRequest) {
 
     return bad("create_failed", msg, 500);
   }
-}
+});
