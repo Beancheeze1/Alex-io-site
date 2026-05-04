@@ -1219,13 +1219,31 @@ export async function POST(req: NextRequest) {
     tenantId = user.tenant_id;
   } else {
     // Public tenant widget flow: no session (customer-facing form/chat on a tenant page).
-    // Resolve tenant from the request host — this scopes the quote to the correct tenant
-    // without requiring the customer to log in.
-    const hostTenant = await resolveTenantFromHost(req.headers.get("host"));
-    if (!hostTenant) {
-      return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+    // Resolution priority:
+    //   1. Look up the quote's own tenant_id from the DB — most reliable since the
+    //      orchestrate/chat flow already created the row with the correct tenant.
+    //   2. Fall back to x-tenant-slug header (injected by middleware from subdomain).
+    //   3. Fall back to host-based resolution (*.api.alex-io.com pattern).
+    const existingQuote = await one<{ tenant_id: number }>(
+      `SELECT tenant_id FROM public.quotes WHERE quote_no = $1 LIMIT 1`,
+      [quoteNo],
+    );
+    if (existingQuote) {
+      tenantId = existingQuote.tenant_id;
+    } else {
+      // Quote not yet in DB — resolve tenant from middleware header or host
+      const slugFromHeader = req.headers.get("x-tenant-slug");
+      const tenantRow = slugFromHeader
+        ? await one<{ id: number }>(
+            `SELECT id FROM public.tenants WHERE slug = $1 AND active = true LIMIT 1`,
+            [slugFromHeader],
+          )
+        : await resolveTenantFromHost(req.headers.get("host"));
+      if (!tenantRow) {
+        return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+      }
+      tenantId = tenantRow.id;
     }
-    tenantId = hostTenant.id;
     currentUserId = null;
   }
   // ── End auth gate ─────────────────────────────────────────────────────
