@@ -149,10 +149,10 @@ export async function DELETE(req: NextRequest) {
       const slugs = tenants.map((r) => r.slug);
       const idList = ids.join(",");
 
-      async function safeDelete(sql: string) {
+      async function safeDelete(sql: string, params: any[] = []) {
         await tx.query(`SAVEPOINT before_optional`);
         try {
-          await tx.query(sql);
+          await tx.query(sql, params);
           await tx.query(`RELEASE SAVEPOINT before_optional`);
         } catch {
           await tx.query(`ROLLBACK TO SAVEPOINT before_optional`);
@@ -177,12 +177,11 @@ export async function DELETE(req: NextRequest) {
       await tx.query(`DELETE FROM public.users WHERE tenant_id = ANY(ARRAY[${idList}]::int[])`);
       await tx.query(`DELETE FROM public.tenants WHERE id = ANY(ARRAY[${idList}]::int[])`);
 
-      // Audit log
-      const detail = JSON.stringify({ filters, deleted: ids.length, slugs }).replace(/'/g, "''");
-      const actorEmail = String(user.email || "").replace(/'/g, "''");
+      // Audit log — parameterized to prevent injection
       await safeDelete(
         `INSERT INTO public.admin_audit_log (actor_user_id, actor_email, action, detail, created_at)
-         VALUES (${Number(user.id)}, '${actorEmail}', 'cleanup_tenants', '${detail}'::jsonb, NOW())`
+         VALUES ($1, $2, 'cleanup_tenants', $3::jsonb, NOW())`,
+        [user.id, user.email, JSON.stringify({ filters, deleted: ids.length, slugs })]
       );
 
       return { count: ids.length, slugs };

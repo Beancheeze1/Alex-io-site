@@ -10,15 +10,19 @@ const EnvSchema = z
   .object({
     // === REQUIRED for production ===
     DATABASE_URL: z.string().url("DATABASE_URL must be a valid PostgreSQL URL"),
-    NEXTAUTH_SECRET: z
+
+    // AUTH_SECRET is the actual HMAC signing key used by lib/auth.ts
+    AUTH_SECRET: z
       .string()
-      .min(32, "NEXTAUTH_SECRET must be at least 32 characters (use: openssl rand -hex 32)")
+      .min(32, "AUTH_SECRET must be at least 32 characters (use: openssl rand -hex 32)")
       .optional()
       .refine((val) => {
-        // During build we allow missing, but in real runtime we require it
         if (process.env.NEXT_PHASE === "phase-production-build") return true;
         return val && val.length >= 32;
-      }, "NEXTAUTH_SECRET is required in production"),
+      }, "AUTH_SECRET is required in production (min 32 chars)"),
+
+    // NEXTAUTH_SECRET kept as optional for any legacy references
+    NEXTAUTH_SECRET: z.string().optional(),
 
     ADMIN_KEY: z.string().min(1, "ADMIN_KEY is required"),
 
