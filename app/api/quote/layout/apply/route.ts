@@ -47,7 +47,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
-import { getCurrentUserFromRequest } from "@/lib/auth";
+import { getCurrentUserFromRequest, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { resolveTenantFromHost } from "@/lib/tenant";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import {
   buildLayoutExports,
@@ -1198,7 +1199,7 @@ export async function POST(req: NextRequest) {
   let tenantId: number;
 
   if (isDemoQuote) {
-    // Use default tenant (first active) — same logic as demo/seed route
+    // Demo flow: no auth, use default tenant
     const tenantRow = await one<{ id: number }>(
       `SELECT id FROM public.tenants WHERE active = true ORDER BY id ASC LIMIT 1`,
       [],
@@ -1207,16 +1208,27 @@ export async function POST(req: NextRequest) {
       return bad({ ok: false, error: "NO_TENANT", message: "No active tenant found." }, 500);
     }
     tenantId = tenantRow.id;
-    currentUserId = null; // demo quotes have no owning user
-  } else {
+    currentUserId = null;
+  } else if (req.cookies.get(SESSION_COOKIE_NAME)?.value) {
+    // Authenticated flow: session cookie present — enforce full auth + tenant gate
     const user = await getCurrentUserFromRequest(req);
     if (!user) {
       return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
     }
     currentUserId = user.id;
     tenantId = user.tenant_id;
+  } else {
+    // Public tenant widget flow: no session (customer-facing form/chat on a tenant page).
+    // Resolve tenant from the request host — this scopes the quote to the correct tenant
+    // without requiring the customer to log in.
+    const hostTenant = await resolveTenantFromHost(req.headers.get("host"));
+    if (!hostTenant) {
+      return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+    }
+    tenantId = hostTenant.id;
+    currentUserId = null;
   }
-  // ── End demo bypass ───────────────────────────────────────────────────
+  // ── End auth gate ─────────────────────────────────────────────────────
 
   const rawCustomer = body.customer && typeof body.customer === "object" ? body.customer : null;
 
