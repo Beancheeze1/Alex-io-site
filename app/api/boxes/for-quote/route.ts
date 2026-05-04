@@ -79,15 +79,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(body, { status: 400 });
     }
 
+    // Public widget flows (customer-facing form/chat) have no session.
+    // allowPublic resolves the tenant from the host so unauthenticated
+    // customers can load their carton selections in the layout editor.
     const user = await getCurrentUserFromRequest(req as any);
-    const enforced = await enforceTenantMatch(req, user);
+    const enforced = await enforceTenantMatch(req, user, { allowPublic: true });
     if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: "UNAUTHORIZED", message: "Login required." },
-        { status: 401 },
-      );
-    }
+
+    const tenantId = user?.tenant_id ?? enforced.tenant_id;
 
     // Read-only join from quotes -> quote_box_selections -> boxes
     const rows = (await q<Row>(
@@ -115,7 +114,7 @@ export async function GET(req: NextRequest) {
         AND q.tenant_id = $2
       ORDER BY qbs.id ASC
       `,
-      [quoteNo, user.tenant_id],
+      [quoteNo, tenantId],
     )) as Row[];
 
     const body: Ok = {

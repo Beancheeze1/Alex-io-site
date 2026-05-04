@@ -366,16 +366,32 @@ export async function GET(req: NextRequest) {
     tenantId = tenantRow.id;
     // user remains null — demo quotes have no owning user
   } else {
-    // Tenant guard (single-axis): require auth and scope quote lookup by tenant_id.
+    // Try authenticated path first.
     user = await getCurrentUserFromRequest(req);
-    const enforced = await enforceTenantMatch(req, user);
+    const enforced = await enforceTenantMatch(req, user, { allowPublic: true });
     if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
-    if (!user) {
-      return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+
+    if (user) {
+      // Authenticated: tenant comes from the verified session.
+      tenantId = user.tenant_id;
+    } else {
+      // Public widget flow: no valid session.
+      // Resolve tenant from the quote's own DB row (most reliable — the
+      // orchestrate/chat flow seeds it), then fall back to host resolution.
+      const existingQuote = await one<{ tenant_id: number }>(
+        `SELECT tenant_id FROM public.quotes WHERE quote_no = $1 LIMIT 1`,
+        [quoteNo],
+      );
+      if (existingQuote) {
+        tenantId = existingQuote.tenant_id;
+      } else if (enforced.tenant_id) {
+        tenantId = enforced.tenant_id;
+      } else {
+        return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
+      }
     }
-    tenantId = user.tenant_id;
   }
-  // ── End demo bypass ───────────────────────────────────────────────────────
+  // ── End auth gate ─────────────────────────────────────────────────────────
 
   try {
     /* ---------------- Quote header ---------------- */
