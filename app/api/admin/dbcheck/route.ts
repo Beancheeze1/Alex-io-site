@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,13 +13,15 @@ function getPool() {
     _pool = new Pool({
       connectionString: url,
       max: 2,
-      ssl: { rejectUnauthorized: false },
+      ssl: { rejectUnauthorized: true },
     });
   }
   return _pool;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
   try {
     const pool = getPool();
     const ping = await pool.query("SELECT 1 AS ok, current_user, version()");

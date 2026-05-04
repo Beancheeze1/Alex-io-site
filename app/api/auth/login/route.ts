@@ -16,6 +16,7 @@ import {
   SESSION_MAX_AGE_SEC,
   type CurrentUser,
 } from "@/lib/auth";
+import { rateLimitCheck } from "@/lib/kv";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -54,8 +55,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const email = emailRaw.trim();
+  const email = emailRaw.trim().toLowerCase();
   const password = passwordRaw;
+
+  // Rate limit: 20 attempts/min per IP, 10 attempts/5min per email
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const [rlIp, rlEmail] = await Promise.all([
+    rateLimitCheck(`login:ip:${ip}`, 20, 60),
+    rateLimitCheck(`login:email:${email}`, 10, 300),
+  ]);
+  if (!rlIp.allowed || !rlEmail.allowed) {
+    return bad({ error: "rate_limited", message: "Too many attempts. Try again later." }, 429);
+  }
 
   try {
     const host = req.headers.get("host");

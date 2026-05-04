@@ -17,15 +17,18 @@ export function db(): Pool {
     const connectionString = requireEnv("DATABASE_URL");
 
     // Many managed Postgres providers (incl. Render) require SSL.
-    // If the URL doesn’t include ssl params, add a safe default.
-    const needsLooseSSL =
+    // If the URL doesn’t include ssl params, add SSL with cert verification.
+    // Set DATABASE_SSL_REJECT_UNAUTHORIZED=false only for local dev with self-signed certs.
+    const needsSsl =
       !/(\?|&)sslmode=/i.test(connectionString) && !/(\?|&)ssl=/i.test(connectionString);
+    const rejectUnauthorized =
+      process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false";
 
     globalThis.__pgPool__ = new Pool({
       connectionString,
       max: 3,
       idleTimeoutMillis: 10_000,
-      ssl: needsLooseSSL ? { rejectUnauthorized: false } : undefined,
+      ssl: needsSsl ? { rejectUnauthorized } : undefined,
     });
   }
   return globalThis.__pgPool__!;

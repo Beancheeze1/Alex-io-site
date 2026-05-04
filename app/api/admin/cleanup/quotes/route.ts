@@ -143,10 +143,10 @@ export async function DELETE(req: NextRequest) {
       // A plain .catch() on tx.query() swallows the JS error but leaves the
       // Postgres transaction in an aborted state — all subsequent queries fail.
       // SAVEPOINT lets us roll back just that statement cleanly.
-      async function safeDelete(tableSql: string) {
+      async function safeDelete(tableSql: string, params: any[] = []) {
         await tx.query(`SAVEPOINT before_optional`);
         try {
-          await tx.query(tableSql);
+          await tx.query(tableSql, params);
           await tx.query(`RELEASE SAVEPOINT before_optional`);
         } catch {
           await tx.query(`ROLLBACK TO SAVEPOINT before_optional`);
@@ -161,12 +161,11 @@ export async function DELETE(req: NextRequest) {
       // Core delete — must succeed
       await tx.query(`DELETE FROM public.quotes WHERE id = ANY(ARRAY[${idList}]::int[])`);
 
-      // Audit log (optional table)
-      const detail = JSON.stringify({ filters, deleted: ids.length }).replace(/'/g, "''");
-      const actorEmail = String(user.email || "").replace(/'/g, "''");
+      // Audit log (optional table) — parameterized to prevent injection
       await safeDelete(
         `INSERT INTO public.admin_audit_log (actor_user_id, actor_email, action, detail, created_at)
-         VALUES (${Number(user.id)}, '${actorEmail}', 'cleanup_quotes', '${detail}'::jsonb, NOW())`
+         VALUES ($1, $2, 'cleanup_quotes', $3::jsonb, NOW())`,
+        [user.id, user.email, JSON.stringify({ filters, deleted: ids.length })]
       );
 
       return ids.length;

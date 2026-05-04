@@ -8,12 +8,13 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
-  // Image optimization (allow all external images for now)
+  // Image optimization — restrict to known trusted domains only.
+  // Add specific hostnames here rather than using a wildcard (SSRF risk).
   images: {
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "**",
+        hostname: "alex-io.com",
       },
     ],
   },
@@ -30,7 +31,7 @@ const nextConfig: NextConfig = {
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
           {
             key: "Content-Security-Policy",
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:;",
+            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:;",
           },
         ],
       },
