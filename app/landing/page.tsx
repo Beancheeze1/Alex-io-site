@@ -135,10 +135,6 @@ const FAQ_ITEMS = [
     a: "They get a guided quote flow that collects their dimensions and requirements, then drops directly into a layout editor with live pricing. They can see a printable quote summary without ever talking to a salesperson.",
   },
   {
-    q: "Is this only for foam inserts?",
-    a: "Currently yes — Alex-IO is purpose-built for custom foam insert quoting. That focus is what makes the pricing and layout output accurate, where generic CPQ tools fall short.",
-  },
-  {
     q: "What's included in the $799/month plan?",
     a: "The Starter plan includes your full quoting workflow, customer-facing quote widget, layout editor, printable quote output, and admin dashboard. Higher tiers unlock CAD exports, multiple seats, and multi-location support.",
   },
