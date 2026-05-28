@@ -109,6 +109,9 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/cleanup" className="hover:text-neutral-200">
                   Cleanup
                 </Link>
+                <Link href="/admin/traffic" className="hover:text-neutral-200">
+                  Traffic
+                </Link>
               </>
             ) : (
               <>

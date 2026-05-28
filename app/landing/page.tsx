@@ -14,6 +14,7 @@ import * as React from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
+import { usePageTracker } from "@/hooks/usePageTracker";
 
 const LandingChatWidget = dynamic(
   () => import("@/components/LandingChatWidget"),
@@ -401,6 +402,7 @@ function FaqSection() {
 
 export default function LandingPage() {
   const router = useRouter();
+  const { trackEvent } = usePageTracker("/landing");
 
   const [form, setForm] = React.useState<FormState>({
     outsideL: "",
@@ -411,6 +413,7 @@ export default function LandingPage() {
 
   const [submitting, setSubmitting] = React.useState(false);
   const [seedError, setSeedError] = React.useState(false);
+  const formStartedRef = React.useRef(false);
 
   const dimsOk =
     isPositive(form.outsideL) &&
@@ -422,6 +425,7 @@ export default function LandingPage() {
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+    if (!formStartedRef.current && value) { formStartedRef.current = true; trackEvent("form_start"); }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -500,6 +504,7 @@ export default function LandingPage() {
       cavities: "",
     };
 
+    trackEvent("form_submit");
     router.push(`/start-quote?prefill=${encodeURIComponent(JSON.stringify(prefill))}&demo=1`);
   }
 
@@ -529,6 +534,7 @@ export default function LandingPage() {
           </div>
           <a
             href="#sample-quote"
+            onClick={() => trackEvent("cta_click")}
             className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs sm:px-4 sm:text-sm font-medium text-sky-100 transition hover:bg-sky-400/15 whitespace-nowrap"
           >
             <span className="hidden sm:inline">Try a Live </span>Quote
@@ -570,6 +576,7 @@ export default function LandingPage() {
               <div className="mt-8">
                 <a
                   href="#sample-quote"
+                  onClick={() => trackEvent("cta_click")}
                   className="inline-flex rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
                 >
                   Try a Live Quote
@@ -926,6 +933,7 @@ export default function LandingPage() {
             <div className="mt-6">
               <a
                 href="#sample-quote"
+                onClick={() => trackEvent("cta_click")}
                 className="inline-flex rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
               >
                 Try a Live Quote
