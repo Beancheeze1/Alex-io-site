@@ -9,10 +9,36 @@ const ALLOWED_EVENTS = new Set([
   "form_submit",
 ]);
 
+const BOT_PATTERNS = [
+  // Search engine crawlers
+  "googlebot", "bingbot", "slurp", "duckduckbot", "baiduspider",
+  "yandexbot", "sogou", "exabot", "facebot", "ia_archiver",
+  // Headless browsers and automation
+  "headlesschrome", "phantomjs", "selenium", "puppeteer", "playwright",
+  "chromium", "lighthouse",
+  // Generic bot/crawler signals
+  "bot", "crawl", "spider", "scraper", "fetch", "curl", "wget",
+  "python-requests", "axios", "node-fetch", "go-http",
+  // Monitoring and SEO tools
+  "ahrefsbot", "semrushbot", "dotbot", "rogerbot", "mj12bot",
+  "uptimerobot", "pingdom", "gtmetrix", "pagespeed",
+];
+
+function isBot(userAgent: string): boolean {
+  if (!userAgent) return false;
+  const ua = userAgent.toLowerCase();
+  return BOT_PATTERNS.some(pattern => ua.includes(pattern));
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { session_id, event_type, page, referrer, utm_source, utm_medium, utm_campaign, device } = body;
+
+    const userAgent = req.headers.get("user-agent") || "";
+    if (isBot(userAgent)) {
+      return NextResponse.json({ ok: true }); // silently ignore, don't error
+    }
 
     if (!session_id || !event_type || !ALLOWED_EVENTS.has(event_type)) {
       return NextResponse.json({ ok: false });
