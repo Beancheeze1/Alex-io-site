@@ -75,12 +75,13 @@ function KpiCard({
   );
 }
 
-type SortKey = "first_seen" | "last_seen" | "device" | "utm_source" | "events" | "converted";
+type SortKey = "first_seen" | "last_seen" | "device" | "utm_source" | "events" | "converted" | "city";
 
 const SESSION_COLS: { key: SortKey; label: string }[] = [
   { key: "first_seen",  label: "First Seen" },
   { key: "last_seen",   label: "Last Active" },
   { key: "device",      label: "Device" },
+  { key: "city",        label: "Location" },
   { key: "utm_source",  label: "Source" },
   { key: "events",      label: "Events" },
   { key: "converted",   label: "Converted" },
@@ -334,6 +335,11 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
                     {new Date(s.last_seen).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-neutral-300">{s.device ?? "—"}</td>
+                  <td className="px-4 py-3 text-neutral-300 whitespace-nowrap">
+                    {s.city && s.region
+                      ? `${s.city}, ${s.region}`
+                      : s.city ?? s.region ?? "—"}
+                  </td>
                   <td className="px-4 py-3 text-neutral-300">
                     {s.utm_source ?? s.referrer ?? "direct"}
                   </td>
@@ -362,7 +368,7 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
               ))}
               {filteredSessions.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-neutral-600">
+                  <td colSpan={7} className="px-4 py-8 text-center text-neutral-600">
                     No sessions
                   </td>
                 </tr>

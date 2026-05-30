@@ -34,6 +34,8 @@ export type SessionRow = {
   referrer: string | null;
   events: string;
   converted: boolean;
+  city: string | null;
+  region: string | null;
 };
 
 export type TrafficData = {
@@ -100,6 +102,8 @@ export default async function TrafficPage({ searchParams }: Props) {
               MAX(device)                                                             AS device,
               MAX(utm_source)                                                         AS utm_source,
               MAX(referrer)                                                           AS referrer,
+              MAX(city)                                                               AS city,
+              MAX(region)                                                             AS region,
               STRING_AGG(DISTINCT event_type, ',' ORDER BY event_type)               AS events,
               BOOL_OR(event_type = 'form_submit')                                    AS converted
        FROM page_events
