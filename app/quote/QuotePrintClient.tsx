@@ -671,7 +671,7 @@ export default function QuotePrintClient() {
 
   // Demo lead capture modal
   const [showLeadModal, setShowLeadModal] = React.useState(false);
-  const [leadForm, setLeadForm] = React.useState({
+  const [modalLeadForm, setModalLeadForm] = React.useState({
     name: "",
     email: "",
     phone: "",
@@ -681,39 +681,45 @@ export default function QuotePrintClient() {
     currentProcess: "",
     notes: "",
   });
-  const [leadSubmitting, setLeadSubmitting] = React.useState(false);
-  const [leadSubmitted, setLeadSubmitted] = React.useState(false);
-  const [leadError, setLeadError] = React.useState<string | null>(null);
+  const [modalLeadSubmitting, setModalLeadSubmitting] = React.useState(false);
+  const [modalLeadSubmitted, setModalLeadSubmitted] = React.useState(false);
+  const [modalLeadError, setModalLeadError] = React.useState<string | null>(null);
 
   // Pricing toggle — monthly vs annual (annual = 20% off)
   const [annualMode, setAnnualMode] = React.useState(false);
 
+  // Tier card inline contact form
+  const [selectedTier, setSelectedTier] = React.useState<string | null>(null);
+  const [leadForm, setLeadForm] = React.useState({ name: "", email: "", company: "", phone: "" });
+  const [leadSubmitting, setLeadSubmitting] = React.useState(false);
+  const [leadSubmitted, setLeadSubmitted] = React.useState<string | null>(null);
+
   async function handleLeadSubmit() {
-    if (!leadForm.name.trim() || !leadForm.email.trim()) return;
-    setLeadSubmitting(true);
-    setLeadError(null);
+    if (!modalLeadForm.name.trim() || !modalLeadForm.email.trim()) return;
+    setModalLeadSubmitting(true);
+    setModalLeadError(null);
     try {
       const res = await fetch("/api/demo/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quoteNo, ...leadForm }),
+        body: JSON.stringify({ quoteNo, ...modalLeadForm }),
       });
       const data = await res.json().catch(() => ({ ok: false }));
       if (!data?.ok) {
-        setLeadError("Something went wrong. Please try again.");
-        setLeadSubmitting(false);
+        setModalLeadError("Something went wrong. Please try again.");
+        setModalLeadSubmitting(false);
         return;
       }
-      setLeadSubmitted(true);
+      setModalLeadSubmitted(true);
     } catch {
-      setLeadError("Something went wrong. Please try again.");
+      setModalLeadError("Something went wrong. Please try again.");
     } finally {
-      setLeadSubmitting(false);
+      setModalLeadSubmitting(false);
     }
   }
 
-  function setLeadField(key: keyof typeof leadForm, value: string) {
-    setLeadForm((prev) => ({ ...prev, [key]: value }));
+  function setLeadField(key: keyof typeof modalLeadForm, value: string) {
+    setModalLeadForm((prev) => ({ ...prev, [key]: value }));
   }
 
   const [loading, setLoading] = React.useState<boolean>(!!(initialQuoteNo || quoteNo));
@@ -725,7 +731,7 @@ export default function QuotePrintClient() {
   // Pre-fill lead form name/email/company once quote data loads
   React.useEffect(() => {
     if (!quote) return;
-    setLeadForm((prev) => ({
+    setModalLeadForm((prev) => ({
       ...prev,
       name: prev.name || quote.customer_name || "",
       email: prev.email || quote.email || "",
@@ -1832,12 +1838,141 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       </div>
                                     ))}
                                   </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedTier(selectedTier === tier.name ? null : tier.name)}
+                                    style={{
+                                      marginTop: 14,
+                                      width: "100%",
+                                      padding: "9px 0",
+                                      borderRadius: 10,
+                                      border: tier.highlight ? "none" : "1px solid rgba(255,255,255,0.12)",
+                                      background: tier.highlight
+                                        ? "linear-gradient(135deg,#0ea5e9,#38bdf8)"
+                                        : "rgba(255,255,255,0.06)",
+                                      color: "#ffffff",
+                                      fontSize: 12,
+                                      fontWeight: 700,
+                                      letterSpacing: "0.06em",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    {leadSubmitted === tier.name ? "✓ Sent!" : selectedTier === tier.name ? "Cancel" : "Get Started →"}
+                                  </button>
                                 </div>
                               );
                             })}
                           </div>
                         );
                       })()}
+
+                      {selectedTier && leadSubmitted !== selectedTier && (
+                        <div style={{
+                          marginTop: 16,
+                          padding: "20px 18px",
+                          borderRadius: 14,
+                          background: "rgba(14,165,233,0.08)",
+                          border: "1px solid rgba(14,165,233,0.25)",
+                        }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 4 }}>
+                            Get started with {selectedTier}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 14 }}>
+                            We'll reach out within one business day to get you set up.
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                            <div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Name *</div>
+                              <input
+                                type="text"
+                                value={leadForm.name}
+                                onChange={e => setLeadForm(f => ({ ...f, name: e.target.value }))}
+                                placeholder="Your name"
+                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#f1f5f9", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                              />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Email *</div>
+                              <input
+                                type="email"
+                                value={leadForm.email}
+                                onChange={e => setLeadForm(f => ({ ...f, email: e.target.value }))}
+                                placeholder="you@company.com"
+                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#f1f5f9", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                              />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Company</div>
+                              <input
+                                type="text"
+                                value={leadForm.company}
+                                onChange={e => setLeadForm(f => ({ ...f, company: e.target.value }))}
+                                placeholder="Your shop name"
+                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#f1f5f9", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                              />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Phone</div>
+                              <input
+                                type="tel"
+                                value={leadForm.phone}
+                                onChange={e => setLeadForm(f => ({ ...f, phone: e.target.value }))}
+                                placeholder="Optional"
+                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#f1f5f9", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                              />
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={leadSubmitting || !leadForm.name.trim() || !leadForm.email.trim()}
+                            onClick={async () => {
+                              if (!leadForm.name.trim() || !leadForm.email.trim()) return;
+                              setLeadSubmitting(true);
+                              try {
+                                const quoteNo = new URLSearchParams(window.location.search).get("quote_no") || "";
+                                await fetch("/api/demo-lead", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    tier: selectedTier,
+                                    name: leadForm.name.trim(),
+                                    email: leadForm.email.trim(),
+                                    company: leadForm.company.trim() || null,
+                                    phone: leadForm.phone.trim() || null,
+                                    quote_no: quoteNo || null,
+                                    annual_mode: annualMode,
+                                  }),
+                                });
+                                setLeadSubmitted(selectedTier);
+                                setSelectedTier(null);
+                              } catch {
+                                // fail silently — don't block the user
+                              } finally {
+                                setLeadSubmitting(false);
+                              }
+                            }}
+                            style={{
+                              width: "100%",
+                              padding: "10px 0",
+                              borderRadius: 10,
+                              border: "none",
+                              background: (!leadForm.name.trim() || !leadForm.email.trim() || leadSubmitting)
+                                ? "rgba(14,165,233,0.25)"
+                                : "linear-gradient(135deg,#0ea5e9,#38bdf8)",
+                              color: "#ffffff",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              letterSpacing: "0.06em",
+                              cursor: (!leadForm.name.trim() || !leadForm.email.trim() || leadSubmitting) ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            {leadSubmitting ? "Sending…" : `Request ${selectedTier} Access →`}
+                          </button>
+                        </div>
+                      )}
 
                       {/* Fine print */}
                       <div style={{ marginTop: 12, fontSize: 11, color: "#475569", textAlign: "center" }}>
@@ -3103,7 +3238,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
             {/* Modal body */}
             <div style={{ padding: "20px 24px 24px" }}>
-              {leadSubmitted ? (
+              {modalLeadSubmitted ? (
                 /* ── Thank you state ── */
                 <div style={{ textAlign: "center", padding: "24px 0" }}>
                   <div
@@ -3127,7 +3262,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     You're on the list — we'll be in touch soon.
                   </div>
                   <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>
-                    Our team will reach out to <span style={{ color: "#38bdf8" }}>{leadForm.email}</span> within
+                    Our team will reach out to <span style={{ color: "#38bdf8" }}>{modalLeadForm.email}</span> within
                     one business day to walk you through Alex-IO and discuss pricing for your operation.
                   </div>
                   <button
@@ -3163,7 +3298,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </div>
                         <input
                           type={key === "email" ? "email" : "text"}
-                          value={leadForm[key]}
+                          value={modalLeadForm[key]}
                           onChange={(e) => setLeadField(key, e.target.value)}
                           placeholder={placeholder}
                           style={{
@@ -3194,7 +3329,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </div>
                         <input
                           type="text"
-                          value={leadForm[key]}
+                          value={modalLeadForm[key]}
                           onChange={(e) => setLeadField(key, e.target.value)}
                           placeholder={placeholder}
                           style={{
@@ -3219,7 +3354,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       How many users / seats will you need?
                     </div>
                     <select
-                      value={leadForm.userCount}
+                      value={modalLeadForm.userCount}
                       onChange={(e) => setLeadField("userCount", e.target.value)}
                       style={{
                         width: "100%",
@@ -3227,7 +3362,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         borderRadius: 12,
                         border: "1px solid rgba(255,255,255,0.1)",
                         background: "#1e293b",
-                        color: leadForm.userCount ? "#f9fafb" : "#64748b",
+                        color: modalLeadForm.userCount ? "#f9fafb" : "#64748b",
                         fontSize: 13,
                         outline: "none",
                         cursor: "pointer",
@@ -3250,7 +3385,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </div>
                     <input
                       type="text"
-                      value={leadForm.productDescription}
+                      value={modalLeadForm.productDescription}
                       onChange={(e) => setLeadField("productDescription", e.target.value)}
                       placeholder="e.g. medical devices, electronics, industrial parts"
                       style={{
@@ -3274,7 +3409,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </div>
                     <input
                       type="text"
-                      value={leadForm.currentProcess}
+                      value={modalLeadForm.currentProcess}
                       onChange={(e) => setLeadField("currentProcess", e.target.value)}
                       placeholder="e.g. Excel, paper, competitor tool, manual"
                       style={{
@@ -3297,7 +3432,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       Anything else?
                     </div>
                     <textarea
-                      value={leadForm.notes}
+                      value={modalLeadForm.notes}
                       onChange={(e) => setLeadField("notes", e.target.value)}
                       placeholder="Timeline, volume, specific requirements…"
                       rows={3}
@@ -3317,7 +3452,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     />
                   </label>
 
-                  {leadError && (
+                  {modalLeadError && (
                     <div style={{
                       padding: "10px 14px",
                       borderRadius: 12,
@@ -3326,7 +3461,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       fontSize: 12,
                       color: "#fca5a5",
                     }}>
-                      {leadError}
+                      {modalLeadError}
                     </div>
                   )}
 
@@ -3334,27 +3469,27 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   <button
                     type="button"
                     onClick={handleLeadSubmit}
-                    disabled={leadSubmitting || !leadForm.name.trim() || !leadForm.email.trim()}
+                    disabled={modalLeadSubmitting || !modalLeadForm.name.trim() || !modalLeadForm.email.trim()}
                     style={{
                       width: "100%",
                       padding: "12px 24px",
                       borderRadius: 999,
                       border: "none",
-                      background: leadSubmitting || !leadForm.name.trim() || !leadForm.email.trim()
+                      background: modalLeadSubmitting || !modalLeadForm.name.trim() || !modalLeadForm.email.trim()
                         ? "rgba(14,165,233,0.3)"
                         : "linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)",
-                      color: leadSubmitting || !leadForm.name.trim() || !leadForm.email.trim()
+                      color: modalLeadSubmitting || !modalLeadForm.name.trim() || !modalLeadForm.email.trim()
                         ? "rgba(255,255,255,0.4)"
                         : "#0f172a",
                       fontSize: 14,
                       fontWeight: 700,
-                      cursor: leadSubmitting || !leadForm.name.trim() || !leadForm.email.trim()
+                      cursor: modalLeadSubmitting || !modalLeadForm.name.trim() || !modalLeadForm.email.trim()
                         ? "not-allowed"
                         : "pointer",
                       marginTop: 4,
                     }}
                   >
-                    {leadSubmitting ? "Sending…" : "Get Alex-IO for my shop →"}
+                    {modalLeadSubmitting ? "Sending…" : "Get Alex-IO for my shop →"}
                   </button>
 
                   <div style={{ fontSize: 11, color: "#475569", textAlign: "center" }}>
