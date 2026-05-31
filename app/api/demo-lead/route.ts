@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
       [cleanTier, cleanName, cleanEmail, cleanCompany, cleanPhone, cleanQuoteNo, isAnnual],
     );
 
-    const salesEmail = process.env.MS_MAILBOX_FROM || "";
+    const salesEmail = "chuck@alex-io.com";
     if (salesEmail) {
       try {
         const html = `<!DOCTYPE html>
