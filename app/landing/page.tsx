@@ -15,6 +15,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { usePageTracker } from "@/hooks/usePageTracker";
+import GetStartedModal from "@/components/GetStartedModal";
 
 const LandingChatWidget = dynamic(
   () => import("@/components/LandingChatWidget"),
@@ -400,10 +401,7 @@ export default function LandingPage() {
   const router = useRouter();
   const { trackEvent } = usePageTracker("/landing");
 
-  const [contactTier, setContactTier] = React.useState<string | null>(null)
-  const [contactForm, setContactForm] = React.useState({ name: '', email: '', company: '', phone: '' })
-  const [contactSubmitting, setContactSubmitting] = React.useState(false)
-  const [contactSubmitted, setContactSubmitted] = React.useState<string | null>(null)
+  const [activeTier, setActiveTier] = React.useState<"Pilot" | "Starter" | "Pro" | "Shop" | null>(null);
 
   const [form, setForm] = React.useState<FormState>({
     outsideL: "",
@@ -507,103 +505,6 @@ export default function LandingPage() {
 
     trackEvent("form_submit");
     router.push(`/start-quote?prefill=${encodeURIComponent(JSON.stringify(prefill))}&demo=1`);
-  }
-
-  async function submitContactForm(tier: string) {
-    if (!contactForm.name.trim() || !contactForm.email.trim()) return
-    setContactSubmitting(true)
-    try {
-      await fetch('/api/demo-lead', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tier,
-          name: contactForm.name.trim(),
-          email: contactForm.email.trim(),
-          company: contactForm.company.trim() || null,
-          phone: contactForm.phone.trim() || null,
-          quote_no: null,
-          annual_mode: false,
-        }),
-      })
-      setContactSubmitted(tier)
-      setContactTier(null)
-      trackEvent('form_submit')
-    } catch {
-      // fail silently
-    } finally {
-      setContactSubmitting(false)
-    }
-  }
-
-  function InlineContactForm({ tier, label }: { tier: string; label: string }) {
-    if (contactSubmitted === tier) {
-      return (
-        <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-4 text-center">
-          <div className="text-sm font-semibold text-emerald-300">✓ Got it — we'll be in touch within one business day.</div>
-        </div>
-      )
-    }
-
-    if (contactTier !== tier) {
-      return (
-        <button
-          type="button"
-          onClick={() => { setContactTier(tier); trackEvent('cta_click') }}
-          className={label}
-        >
-          Get Started →
-        </button>
-      )
-    }
-
-    return (
-      <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
-        <p className="text-xs text-slate-400 text-center">
-          We'll reach out within one business day to get you set up.
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <input
-            type="text"
-            placeholder="Your name *"
-            value={contactForm.name}
-            onChange={e => setContactForm(f => ({ ...f, name: e.target.value }))}
-            className="col-span-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 outline-none focus:border-sky-400/50"
-          />
-          <input
-            type="email"
-            placeholder="Email *"
-            value={contactForm.email}
-            onChange={e => setContactForm(f => ({ ...f, email: e.target.value }))}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 outline-none focus:border-sky-400/50"
-          />
-          <input
-            type="text"
-            placeholder="Company"
-            value={contactForm.company}
-            onChange={e => setContactForm(f => ({ ...f, company: e.target.value }))}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 outline-none focus:border-sky-400/50"
-          />
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setContactTier(null)}
-            className="flex-1 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-400 hover:text-slate-200 transition"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={contactSubmitting || !contactForm.name.trim() || !contactForm.email.trim()}
-            onClick={() => submitContactForm(tier)}
-            className="flex-1 rounded-lg bg-sky-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {contactSubmitting ? 'Sending…' : `Request ${tier} Access →`}
-          </button>
-        </div>
-      </div>
-    )
   }
 
   return (
@@ -934,7 +835,13 @@ export default function LandingPage() {
               <div className="shrink-0 text-center">
                 <div className="text-4xl font-extrabold text-white">$399</div>
                 <div className="text-sm text-slate-400">/ month for 90 days</div>
-                <InlineContactForm tier="Pilot" label="mt-4 inline-flex rounded-xl bg-amber-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300" />
+                <button
+                  type="button"
+                  onClick={() => { setActiveTier("Pilot"); trackEvent("cta_click"); }}
+                  className="mt-4 inline-flex rounded-xl bg-amber-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300"
+                >
+                  Start Pilot →
+                </button>
               </div>
             </div>
           </div>
@@ -962,7 +869,13 @@ export default function LandingPage() {
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Admin dashboard</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>AI chat widget &amp; guided quote form</li>
               </ul>
-              <InlineContactForm tier="Starter" label="mt-6 inline-flex justify-center rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20" />
+              <button
+                type="button"
+                onClick={() => { setActiveTier("Starter"); trackEvent("cta_click"); }}
+                className="mt-6 inline-flex justify-center rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20"
+              >
+                Get Started →
+              </button>
             </div>
 
             {/* Pro */}
@@ -983,7 +896,13 @@ export default function LandingPage() {
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Commission tracking</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>10 user seats</li>
               </ul>
-              <InlineContactForm tier="Pro" label="mt-6 inline-flex justify-center rounded-xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-400" />
+              <button
+                type="button"
+                onClick={() => { setActiveTier("Pro"); trackEvent("cta_click"); }}
+                className="mt-6 inline-flex justify-center rounded-xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-400"
+              >
+                Get Started →
+              </button>
             </div>
 
             {/* Shop */}
@@ -1001,7 +920,13 @@ export default function LandingPage() {
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Multi-location support</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>API access</li>
               </ul>
-              <InlineContactForm tier="Shop" label="mt-6 inline-flex justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10" />
+              <button
+                type="button"
+                onClick={() => { setActiveTier("Shop"); trackEvent("cta_click"); }}
+                className="mt-6 inline-flex justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10"
+              >
+                Get Started →
+              </button>
             </div>
 
           </div>
@@ -1040,6 +965,13 @@ export default function LandingPage() {
       </section>
 
       <LandingChatWidget />
+
+      {activeTier && (
+        <GetStartedModal
+          tier={activeTier}
+          onClose={() => setActiveTier(null)}
+        />
+      )}
     </main>
   );
 }

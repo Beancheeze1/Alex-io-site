@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
 
-const TIERS = new Set(["Starter", "Pro", "Shop"]);
+const TIERS = new Set(["Starter", "Pro", "Shop", "Pilot", "General inquiry"]);
 
 function truncate(val: unknown, max: number): string | null {
   if (val == null || val === "") return null;
@@ -93,7 +93,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") return fail("Invalid request body");
 
-    const { tier, name, email, company, phone, quote_no, annual_mode } = body as Record<string, unknown>;
+    const { tier, name, email, company, phone, quote_no, annual_mode,
+            userCount, productDescription, currentProcess, notes } = body as Record<string, unknown>;
 
     if (!tier || !TIERS.has(String(tier))) return fail("Invalid tier");
 
@@ -102,11 +103,15 @@ export async function POST(req: NextRequest) {
     if (!cleanName)  return fail("name is required");
     if (!cleanEmail) return fail("email is required");
 
-    const cleanCompany = truncate(company, 200);
-    const cleanPhone   = truncate(phone, 200);
-    const cleanQuoteNo = truncate(quote_no, 50);
-    const isAnnual     = Boolean(annual_mode);
-    const cleanTier    = String(tier);
+    const cleanCompany          = truncate(company, 200);
+    const cleanPhone            = truncate(phone, 200);
+    const cleanQuoteNo          = truncate(quote_no, 50);
+    const isAnnual              = Boolean(annual_mode);
+    const cleanTier             = String(tier);
+    const cleanUserCount        = truncate(userCount, 100);
+    const cleanProductDesc      = truncate(productDescription, 1000);
+    const cleanCurrentProcess   = truncate(currentProcess, 1000);
+    const cleanNotes            = truncate(notes, 2000);
 
     await q(
       `INSERT INTO demo_leads
@@ -137,6 +142,10 @@ export async function POST(req: NextRequest) {
           <tr><td style="padding:8px 12px;font-size:13px;color:#6b7280">Phone</td><td style="padding:8px 12px;font-size:13px;font-weight:500;color:#111827">${cleanPhone || "—"}</td></tr>
           <tr><td style="padding:8px 12px;font-size:13px;color:#6b7280">Plan</td><td style="padding:8px 12px;font-size:13px;font-weight:500;color:#111827">${cleanTier} — ${isAnnual ? "Annual" : "Monthly"}</td></tr>
           <tr><td style="padding:8px 12px;font-size:13px;color:#6b7280">Quote No</td><td style="padding:8px 12px;font-size:13px;font-weight:500;color:#111827">${cleanQuoteNo || "—"}</td></tr>
+          ${cleanUserCount ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280">Seats needed</td><td style="padding:8px 12px;font-size:13px;font-weight:500;color:#111827">${cleanUserCount}</td></tr>` : ""}
+          ${cleanProductDesc ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;vertical-align:top">What they're packaging</td><td style="padding:8px 12px;font-size:13px;font-weight:500;color:#111827">${cleanProductDesc}</td></tr>` : ""}
+          ${cleanCurrentProcess ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;vertical-align:top">Current quoting process</td><td style="padding:8px 12px;font-size:13px;font-weight:500;color:#111827">${cleanCurrentProcess}</td></tr>` : ""}
+          ${cleanNotes ? `<tr><td style="padding:8px 12px;font-size:13px;color:#6b7280;vertical-align:top">Notes</td><td style="padding:8px 12px;font-size:13px;font-weight:500;color:#111827">${cleanNotes}</td></tr>` : ""}
         </tbody>
       </table>
     </div>
@@ -150,7 +159,9 @@ export async function POST(req: NextRequest) {
 
         await sendGraphEmail({
           to: salesEmail,
-          subject: `New demo lead: ${cleanName}${cleanCompany ? ` · ${cleanCompany}` : ""} — ${cleanTier} plan`,
+          subject: cleanTier !== "General inquiry"
+            ? `New Alex-IO lead — ${cleanTier} plan — ${cleanName}${cleanCompany ? ` @ ${cleanCompany}` : ""}`
+            : `New Alex-IO lead — ${cleanName}${cleanCompany ? ` @ ${cleanCompany}` : ""}`,
           html,
         });
       } catch (err: any) {
