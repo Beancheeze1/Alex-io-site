@@ -400,6 +400,11 @@ export default function LandingPage() {
   const router = useRouter();
   const { trackEvent } = usePageTracker("/landing");
 
+  const [contactTier, setContactTier] = React.useState<string | null>(null)
+  const [contactForm, setContactForm] = React.useState({ name: '', email: '', company: '', phone: '' })
+  const [contactSubmitting, setContactSubmitting] = React.useState(false)
+  const [contactSubmitted, setContactSubmitted] = React.useState<string | null>(null)
+
   const [form, setForm] = React.useState<FormState>({
     outsideL: "",
     outsideW: "",
@@ -502,6 +507,103 @@ export default function LandingPage() {
 
     trackEvent("form_submit");
     router.push(`/start-quote?prefill=${encodeURIComponent(JSON.stringify(prefill))}&demo=1`);
+  }
+
+  async function submitContactForm(tier: string) {
+    if (!contactForm.name.trim() || !contactForm.email.trim()) return
+    setContactSubmitting(true)
+    try {
+      await fetch('/api/demo-lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tier,
+          name: contactForm.name.trim(),
+          email: contactForm.email.trim(),
+          company: contactForm.company.trim() || null,
+          phone: contactForm.phone.trim() || null,
+          quote_no: null,
+          annual_mode: false,
+        }),
+      })
+      setContactSubmitted(tier)
+      setContactTier(null)
+      trackEvent('form_submit')
+    } catch {
+      // fail silently
+    } finally {
+      setContactSubmitting(false)
+    }
+  }
+
+  function InlineContactForm({ tier, label }: { tier: string; label: string }) {
+    if (contactSubmitted === tier) {
+      return (
+        <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-4 text-center">
+          <div className="text-sm font-semibold text-emerald-300">✓ Got it — we'll be in touch within one business day.</div>
+        </div>
+      )
+    }
+
+    if (contactTier !== tier) {
+      return (
+        <button
+          type="button"
+          onClick={() => { setContactTier(tier); trackEvent('cta_click') }}
+          className={label}
+        >
+          Get Started →
+        </button>
+      )
+    }
+
+    return (
+      <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+        <p className="text-xs text-slate-400 text-center">
+          We'll reach out within one business day to get you set up.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            type="text"
+            placeholder="Your name *"
+            value={contactForm.name}
+            onChange={e => setContactForm(f => ({ ...f, name: e.target.value }))}
+            className="col-span-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 outline-none focus:border-sky-400/50"
+          />
+          <input
+            type="email"
+            placeholder="Email *"
+            value={contactForm.email}
+            onChange={e => setContactForm(f => ({ ...f, email: e.target.value }))}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 outline-none focus:border-sky-400/50"
+          />
+          <input
+            type="text"
+            placeholder="Company"
+            value={contactForm.company}
+            onChange={e => setContactForm(f => ({ ...f, company: e.target.value }))}
+            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 outline-none focus:border-sky-400/50"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setContactTier(null)}
+            className="flex-1 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-400 hover:text-slate-200 transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={contactSubmitting || !contactForm.name.trim() || !contactForm.email.trim()}
+            onClick={() => submitContactForm(tier)}
+            className="flex-1 rounded-lg bg-sky-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {contactSubmitting ? 'Sending…' : `Request ${tier} Access →`}
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -724,7 +826,7 @@ export default function LandingPage() {
                 className="relative rounded-3xl border border-sky-400/40 bg-[rgba(2,12,30,0.85)] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(148,220,255,0.08)]"
               >
                 <div className="mb-5 rounded-2xl border border-sky-400/20 bg-sky-400/[0.05] px-4 py-3 text-sm leading-6 text-slate-300">
-                  Enter your insert dimensions and quantity — we'll open the live editor with real pricing. No account needed.
+                  Enter your insert dimensions below — or use the example dims to see a live quote in under 60 seconds. No account, no sign-up, no sales call.
                 </div>
 
                 {/* 3 dim fields + qty in a tight 2-col grid */}
@@ -765,17 +867,36 @@ export default function LandingPage() {
                   </div>
                 )}
 
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="mt-5 text-xs text-center text-slate-500">
+                  Not sure of your dimensions?{' '}
+                  <button
+                    type="button"
+                    className="text-sky-400 hover:text-sky-300 underline underline-offset-2"
+                    onClick={() => {
+                      setForm({ outsideL: '12', outsideW: '8', outsideH: '4', qty: '50' })
+                      trackEvent('form_start')
+                    }}
+                  >
+                    Try these example dims →
+                  </button>
+                  {' '}(12 × 8 × 4 in, qty 50)
+                </p>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-xs leading-6 text-slate-400">
                     No account. No sales call. Add contact info inside the editor if you want to save your quote.
                   </div>
-                  <button
-                    type="submit"
-                    disabled={!canSubmit}
-                    className="rounded-xl bg-sky-400 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
-                  >
-                    {submitting ? "Opening live quote…" : "Get Instant Quote →"}
-                  </button>
+                  <div className="flex flex-col items-center sm:items-end gap-1 shrink-0">
+                    <button
+                      type="submit"
+                      disabled={!canSubmit}
+                      className="rounded-xl bg-sky-400 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {submitting ? "Opening live quote…" : "See Live Quote →"}
+                    </button>
+                    <p className="text-xs text-center text-slate-500">
+                      Takes 60 seconds · No login required
+                    </p>
+                  </div>
                 </div>
               </form>
               </div>{/* end glow wrapper */}
@@ -813,13 +934,7 @@ export default function LandingPage() {
               <div className="shrink-0 text-center">
                 <div className="text-4xl font-extrabold text-white">$399</div>
                 <div className="text-sm text-slate-400">/ month for 90 days</div>
-                <a
-                  href="mailto:chuck@alex-io.com?subject=90-Day Pilot — Alex-IO&body=Hi Chuck, I'd like to get started with the 90-day pilot program."
-                  className="mt-4 inline-flex rounded-xl bg-amber-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300"
-                >
-                  Start Pilot →
-                </a>
-                <div className="mt-2 text-xs text-slate-500">or email chuck@alex-io.com</div>
+                <InlineContactForm tier="Pilot" label="mt-4 inline-flex rounded-xl bg-amber-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300" />
               </div>
             </div>
           </div>
@@ -847,12 +962,7 @@ export default function LandingPage() {
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Admin dashboard</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>AI chat widget &amp; guided quote form</li>
               </ul>
-              <a
-                href="mailto:chuck@alex-io.com?subject=Alex-IO Starter Plan"
-                className="mt-6 inline-flex justify-center rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20"
-              >
-                Get Started
-              </a>
+              <InlineContactForm tier="Starter" label="mt-6 inline-flex justify-center rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20" />
             </div>
 
             {/* Pro */}
@@ -873,12 +983,7 @@ export default function LandingPage() {
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Commission tracking</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>10 user seats</li>
               </ul>
-              <a
-                href="mailto:chuck@alex-io.com?subject=Alex-IO Pro Plan"
-                className="mt-6 inline-flex justify-center rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
-              >
-                Get Started
-              </a>
+              <InlineContactForm tier="Pro" label="mt-6 inline-flex justify-center rounded-xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-400" />
             </div>
 
             {/* Shop */}
@@ -896,12 +1001,7 @@ export default function LandingPage() {
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Multi-location support</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>API access</li>
               </ul>
-              <a
-                href="mailto:chuck@alex-io.com?subject=Alex-IO Shop Plan"
-                className="mt-6 inline-flex justify-center rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20"
-              >
-                Get Started
-              </a>
+              <InlineContactForm tier="Shop" label="mt-6 inline-flex justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10" />
             </div>
 
           </div>
