@@ -14,6 +14,10 @@ type LeadRow = {
   phone: string | null;
   quote_no: string | null;
   annual_mode: boolean;
+  user_count: string | null;
+  product_description: string | null;
+  current_process: string | null;
+  notes: string | null;
   created_at: string;
 };
 
@@ -38,9 +42,11 @@ function fmtDate(raw: string): string {
 }
 
 const TIER_BADGE: Record<string, string> = {
-  Starter: "bg-neutral-700 text-neutral-300 border border-neutral-600",
-  Pro:     "bg-sky-900/40 text-sky-300 border border-sky-800",
-  Shop:    "bg-violet-900/40 text-violet-300 border border-violet-800",
+  Pilot:            "bg-amber-900/40 text-amber-300 border border-amber-800",
+  Starter:          "bg-neutral-700 text-neutral-300 border border-neutral-600",
+  Pro:              "bg-sky-900/40 text-sky-300 border border-sky-800",
+  Shop:             "bg-violet-900/40 text-violet-300 border border-violet-800",
+  "General inquiry":"bg-neutral-800 text-neutral-400 border border-neutral-700",
 };
 
 export default async function LeadsPage() {
@@ -49,13 +55,15 @@ export default async function LeadsPage() {
 
   const leads = await q<LeadRow>(
     `SELECT id, tier, name, email, company, phone, quote_no,
-            annual_mode, created_at
+            annual_mode, user_count, product_description,
+            current_process, notes, created_at
      FROM demo_leads
      ORDER BY created_at DESC
      LIMIT 500`,
   );
 
   const total   = leads.length;
+  const pilot   = leads.filter((l) => l.tier === "Pilot").length;
   const starter = leads.filter((l) => l.tier === "Starter").length;
   const pro     = leads.filter((l) => l.tier === "Pro").length;
   const shop    = leads.filter((l) => l.tier === "Shop").length;
@@ -76,10 +84,14 @@ export default async function LeadsPage() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-4">
           <div className="text-xs text-neutral-400 uppercase tracking-wider mb-1">Total Leads</div>
           <div className="text-2xl font-bold text-white">{fmt(total)}</div>
+        </div>
+        <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-4">
+          <div className="text-xs text-neutral-400 uppercase tracking-wider mb-1">Pilot Interest</div>
+          <div className="text-2xl font-bold text-amber-300">{fmt(pilot)}</div>
         </div>
         <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-4">
           <div className="text-xs text-neutral-400 uppercase tracking-wider mb-1">Starter Interest</div>
@@ -109,47 +121,93 @@ export default async function LeadsPage() {
                 <th className="px-4 py-3 text-left font-medium text-neutral-500">Phone</th>
                 <th className="px-4 py-3 text-left font-medium text-neutral-500">Quote</th>
                 <th className="px-4 py-3 text-left font-medium text-neutral-500">Billing</th>
+                <th className="px-4 py-3 text-left font-medium text-neutral-500">Details</th>
               </tr>
             </thead>
             <tbody>
               {leads.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-neutral-600">
+                  <td colSpan={9} className="px-4 py-12 text-center text-neutral-600">
                     No leads yet — they&apos;ll appear here after someone completes a demo and requests access
                   </td>
                 </tr>
               ) : (
-                leads.map((lead) => (
-                  <tr key={lead.id} className="border-b border-neutral-800 last:border-0 hover:bg-neutral-800/40">
-                    <td className="px-4 py-3 text-neutral-400 whitespace-nowrap">
-                      {fmtDate(lead.created_at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${TIER_BADGE[lead.tier] ?? "bg-neutral-700 text-neutral-300 border border-neutral-600"}`}>
-                        {lead.tier}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-neutral-200 font-medium">{lead.name}</td>
-                    <td className="px-4 py-3">
-                      <a
-                        href={`mailto:${lead.email}`}
-                        className="font-mono text-neutral-400 hover:text-sky-400"
-                      >
-                        {lead.email}
-                      </a>
-                    </td>
-                    <td className="px-4 py-3 text-neutral-300">{lead.company ?? "—"}</td>
-                    <td className="px-4 py-3 text-neutral-400">{lead.phone ?? "—"}</td>
-                    <td className="px-4 py-3 text-neutral-500">{lead.quote_no ?? "—"}</td>
-                    <td className="px-4 py-3">
-                      {lead.annual_mode ? (
-                        <span className="text-green-400">Annual</span>
-                      ) : (
-                        <span className="text-neutral-500">Monthly</span>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                leads.map((lead) => {
+                  const hasDetails =
+                    lead.user_count ||
+                    lead.product_description ||
+                    lead.current_process ||
+                    lead.notes;
+
+                  return (
+                    <tr key={lead.id} className="border-b border-neutral-800 last:border-0 hover:bg-neutral-800/40 align-top">
+                      <td className="px-4 py-3 text-neutral-400 whitespace-nowrap">
+                        {fmtDate(lead.created_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${TIER_BADGE[lead.tier] ?? "bg-neutral-700 text-neutral-300 border border-neutral-600"}`}>
+                          {lead.tier}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-neutral-200 font-medium">{lead.name}</td>
+                      <td className="px-4 py-3">
+                        <a
+                          href={`mailto:${lead.email}`}
+                          className="font-mono text-neutral-400 hover:text-sky-400"
+                        >
+                          {lead.email}
+                        </a>
+                      </td>
+                      <td className="px-4 py-3 text-neutral-300">{lead.company ?? "—"}</td>
+                      <td className="px-4 py-3 text-neutral-400">{lead.phone ?? "—"}</td>
+                      <td className="px-4 py-3 text-neutral-500">{lead.quote_no ?? "—"}</td>
+                      <td className="px-4 py-3">
+                        {lead.annual_mode ? (
+                          <span className="text-green-400">Annual</span>
+                        ) : (
+                          <span className="text-neutral-500">Monthly</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {hasDetails ? (
+                          <details className="group">
+                            <summary className="cursor-pointer select-none list-none text-neutral-500 hover:text-neutral-300 transition whitespace-nowrap">
+                              Details ▾
+                            </summary>
+                            <div className="mt-2 space-y-1.5 min-w-[200px]">
+                              {lead.user_count && (
+                                <div>
+                                  <span className="text-neutral-600 uppercase tracking-wider text-[10px]">Seats — </span>
+                                  <span className="text-neutral-300">{lead.user_count}</span>
+                                </div>
+                              )}
+                              {lead.product_description && (
+                                <div>
+                                  <span className="text-neutral-600 uppercase tracking-wider text-[10px]">Packaging — </span>
+                                  <span className="text-neutral-300">{lead.product_description}</span>
+                                </div>
+                              )}
+                              {lead.current_process && (
+                                <div>
+                                  <span className="text-neutral-600 uppercase tracking-wider text-[10px]">Quotes today — </span>
+                                  <span className="text-neutral-300">{lead.current_process}</span>
+                                </div>
+                              )}
+                              {lead.notes && (
+                                <div>
+                                  <span className="text-neutral-600 uppercase tracking-wider text-[10px]">Notes — </span>
+                                  <span className="text-neutral-300">{lead.notes}</span>
+                                </div>
+                              )}
+                            </div>
+                          </details>
+                        ) : (
+                          <span className="text-neutral-700">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

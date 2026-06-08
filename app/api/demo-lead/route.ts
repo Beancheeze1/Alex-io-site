@@ -115,9 +115,11 @@ export async function POST(req: NextRequest) {
 
     await q(
       `INSERT INTO demo_leads
-         (tier, name, email, company, phone, quote_no, annual_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [cleanTier, cleanName, cleanEmail, cleanCompany, cleanPhone, cleanQuoteNo, isAnnual],
+         (tier, name, email, company, phone, quote_no, annual_mode,
+          user_count, product_description, current_process, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [cleanTier, cleanName, cleanEmail, cleanCompany, cleanPhone, cleanQuoteNo, isAnnual,
+       cleanUserCount, cleanProductDesc, cleanCurrentProcess, cleanNotes],
     );
 
     const salesEmail = "chuck@alex-io.com";

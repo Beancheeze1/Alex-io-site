@@ -24,6 +24,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { saveFacts } from "@/app/lib/memory";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,6 +91,9 @@ type DemoSeedBody = {
 
 export async function POST(req: NextRequest) {
   try {
+    const rate = await rateLimit(req, 10, "demo-seed");
+    if (!rate.success) return rateLimitResponse(rate.reset);
+
     const body: DemoSeedBody = await req.json().catch(() => ({}));
 
     // ── Validate required dims ──────────────────────────────────────────────
