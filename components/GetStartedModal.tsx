@@ -4,7 +4,7 @@ import * as React from "react";
 
 interface Props {
   onClose: () => void;
-  tier?: "Pilot" | "Starter" | "Pro" | "Shop" | null;
+  tier?: "Pilot" | "Starter" | "Pro" | "Shop" | "FreeTrial" | null;
 }
 
 type FormState = {
@@ -94,15 +94,23 @@ export default function GetStartedModal({ onClose, tier }: Props) {
           >
             ✕
           </button>
-          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80 mb-1">
-            Alex-IO
+          <div className={`text-xs font-semibold uppercase tracking-[0.18em] mb-1 ${
+            tier === "FreeTrial" ? "text-emerald-300/80" : "text-sky-300/80"
+          }`}>
+            {tier === "FreeTrial" ? "Alex-IO · Free Trial" : "Alex-IO · Foam Quoting Software"}
           </div>
-          <div className="text-lg font-bold text-white">Get Alex-IO for your shop</div>
-          <div className="mt-1 text-sm text-slate-300">
-            {tier
+          <div className="text-lg font-bold text-white">
+            {tier === "FreeTrial"
+              ? "Claim your free onboarding slot"
+              : "Get Alex-IO for your shop"}
+          </div>
+          <p className="mt-1 text-sm text-slate-400">
+            {tier === "FreeTrial"
+              ? "Tell us about your operation and we'll confirm your slot within one business day. We'll schedule a 45-minute setup call — you'll be quoting live before it ends. No credit card, no commitment."
+              : tier
               ? `You selected the ${tier} plan. Tell us about your operation and we'll follow up within one business day with pricing and a live walkthrough.`
-              : `Tell us about your operation and we'll follow up within one business day with pricing and a live walkthrough.`}
-          </div>
+              : "Tell us about your operation and we'll follow up within one business day with pricing and a live walkthrough."}
+          </p>
         </div>
 
         {/* Body */}
@@ -268,11 +276,18 @@ export default function GetStartedModal({ onClose, tier }: Props) {
                 >
                   {submitting
                     ? "Sending…"
+                    : tier === "FreeTrial"
+                    ? "Confirm My Slot →"
                     : tier
                     ? `Request ${tier} Access →`
                     : "Get Alex-IO for my shop →"}
                 </button>
               </div>
+              <p className="text-center text-xs text-slate-600">
+                {tier === "FreeTrial"
+                  ? "No credit card · Slot confirmed within 1 business day"
+                  : "Name and email required · Response within 1 business day · No commitment"}
+              </p>
             </div>
           )}
         </div>

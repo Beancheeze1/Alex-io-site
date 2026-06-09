@@ -358,6 +358,135 @@ function CapabilitiesSection() {
   );
 }
 
+function OnboardingCalendar({ onClaim }: { onClaim: () => void }) {
+  const openSlots = React.useMemo(() => {
+    const slots: Date[] = [];
+    const today = new Date();
+    const d = new Date(today);
+    d.setDate(d.getDate() + 8);
+    let found = 0;
+    while (found < 2) {
+      const day = d.getDay();
+      if (day !== 0 && day !== 6) {
+        slots.push(new Date(d));
+        found++;
+        d.setDate(d.getDate() + 5);
+      } else {
+        d.setDate(d.getDate() + 1);
+      }
+    }
+    return slots;
+  }, []);
+
+  const monthName = new Date().toLocaleString("en-US", { month: "long", year: "numeric" });
+
+  const formatSlot = (d: Date) =>
+    d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+
+  return (
+    <div className="mb-10 rounded-3xl border border-emerald-400/25 bg-emerald-400/[0.05] p-6 sm:p-8">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+
+        {/* Left — description */}
+        <div className="flex-1">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300/80">
+            Limited · 3 Shops Per Quarter
+          </div>
+          <h2 className="mt-2 text-xl font-bold text-white">
+            Free 30-Day Trial
+          </h2>
+          <p className="mt-2 max-w-lg text-sm leading-6 text-slate-300">
+            Get full access to Alex-IO at no cost for 30 days. We include a personal
+            setup session — we configure your materials, pricing, and branding together
+            so you're quoting live on day one. Then you tell us honestly whether it's
+            worth the investment.
+          </p>
+          <ul className="mt-4 space-y-1.5 text-sm text-slate-300">
+            {[
+              "Full quoting workflow — foam inserts, RSC cartons, mailers",
+              "Customer-facing quote widget on your website",
+              "CAD exports, PDF quotes, cushion curve analysis",
+              "Personal onboarding session — get live in one call",
+              "No credit card · No contract · No obligation",
+            ].map((item) => (
+              <li key={item} className="flex items-start gap-2">
+                <span className="text-emerald-400 mt-0.5 shrink-0">✓</span>
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Right — calendar */}
+        <div className="shrink-0 w-full lg:w-64">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
+
+            {/* Calendar header */}
+            <div className="bg-white/[0.04] border-b border-white/10 px-4 py-3 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-300">📅 Onboarding Availability</span>
+              <span className="text-xs text-slate-500">{monthName}</span>
+            </div>
+
+            {/* Slots */}
+            <div className="p-4 space-y-2">
+              {/* Booked examples above */}
+              {[
+                { label: "Earlier this month", status: "booked" },
+                { label: "Last available slot", status: "booked" },
+              ].map((s, i) => (
+                <div key={i} className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/[0.02]">
+                  <span className="text-xs text-slate-600">{s.label}</span>
+                  <span className="text-xs font-medium text-slate-600 bg-white/5 px-2 py-0.5 rounded-full">
+                    Filled
+                  </span>
+                </div>
+              ))}
+
+              {/* Open slots */}
+              {openSlots.map((slot, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between py-2 px-3 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.06] cursor-pointer hover:bg-emerald-400/10 transition"
+                  onClick={onClaim}
+                >
+                  <span className="text-xs font-medium text-slate-200">{formatSlot(slot)}</span>
+                  <span className="text-xs font-semibold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full border border-emerald-400/20 shrink-0 ml-2">
+                    Open
+                  </span>
+                </div>
+              ))}
+
+              {/* One more booked after open slots */}
+              <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/[0.02]">
+                <span className="text-xs text-slate-600">Next available after →</span>
+                <span className="text-xs font-medium text-slate-600 bg-white/5 px-2 py-0.5 rounded-full">TBD</span>
+              </div>
+            </div>
+
+            {/* Claim button */}
+            <div className="px-4 pb-4">
+              <button
+                type="button"
+                onClick={onClaim}
+                className="w-full rounded-xl bg-emerald-500 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-400"
+              >
+                Claim an Open Slot →
+              </button>
+              <p className="mt-2 text-center text-xs text-slate-600">No credit card required</p>
+            </div>
+          </div>
+
+          {/* Social proof note */}
+          <p className="mt-3 text-center text-xs text-slate-600">
+            Setup session typically takes 45–60 minutes.<br />
+            You quote live before the call ends.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FaqSection() {
   const [open, setOpen] = React.useState<number | null>(null);
 
@@ -401,7 +530,7 @@ export default function LandingPage() {
   const router = useRouter();
   const { trackEvent } = usePageTracker("/landing");
 
-  const [activeTier, setActiveTier] = React.useState<"Pilot" | "Starter" | "Pro" | "Shop" | null>(null);
+  const [activeTier, setActiveTier] = React.useState<"Pilot" | "Starter" | "Pro" | "Shop" | "FreeTrial" | null>(null);
 
   const [form, setForm] = React.useState<FormState>({
     outsideL: "",
@@ -587,7 +716,7 @@ export default function LandingPage() {
                 <span className="font-semibold text-slate-200">$799/month</span>.{" "}
                 No long-term contract.{" "}
                 <a href="#pricing" className="text-sky-400 hover:text-sky-300 underline underline-offset-2">
-                  90-day pilot at $399/mo →
+                  Free 30-day trial available →
                 </a>
               </div>
             </div>
@@ -609,23 +738,24 @@ export default function LandingPage() {
       </section>
 
 
-      {/* Pilot banner — slim, early visibility */}
+      {/* Free trial banner */}
       <section className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 pt-2 pb-6">
-          <div className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.05] px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/[0.06] px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
-              <span className="text-amber-400 text-lg shrink-0">🚀</span>
+              <span className="text-emerald-400 text-lg shrink-0">🎯</span>
               <div>
-                <span className="text-sm font-semibold text-white">90-Day Pilot — $399/month. </span>
-                <span className="text-sm text-slate-300">Full access, no contract. Cancel anytime. Converts to standard pricing at day 91.</span>
+                <span className="text-sm font-semibold text-white">Free 30-Day Trial — 3 Onboarding Spots This Quarter.{" "}</span>
+                <span className="text-sm text-slate-300">Full access, personal setup session included. No credit card required.</span>
               </div>
             </div>
-            <a
-              href="#pricing"
-              className="shrink-0 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-400/20 whitespace-nowrap text-center"
+            <button
+              type="button"
+              onClick={() => { setActiveTier("FreeTrial"); trackEvent("cta_click"); }}
+              className="shrink-0 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400 whitespace-nowrap text-center"
             >
-              See Details →
-            </a>
+              Check Availability →
+            </button>
           </div>
         </div>
       </section>
@@ -810,41 +940,10 @@ export default function LandingPage() {
       <section id="pricing" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
 
-          {/* Pilot callout — full detail */}
-          <div className="mb-10 rounded-3xl border border-amber-400/30 bg-amber-400/[0.06] p-6 sm:p-8">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-300/80">
-                  Limited Time · New Customers Only
-                </div>
-                <h2 className="mt-2 text-xl font-bold text-white">
-                  90-Day Pilot Program — $399/month
-                </h2>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
-                  Full access to everything in the Starter plan. No contract — cancel anytime during the pilot.
-                  At day 91, your account automatically continues at standard Starter pricing ($799/mo) unless you cancel.
-                  Credit card required to start.
-                </p>
-                <ul className="mt-3 space-y-1 text-sm text-slate-300">
-                  <li className="flex items-center gap-2"><span className="text-amber-400">✓</span> Full quoting workflow, layout editor, printable quotes</li>
-                  <li className="flex items-center gap-2"><span className="text-amber-400">✓</span> Customer-facing quote widget for your website</li>
-                  <li className="flex items-center gap-2"><span className="text-amber-400">✓</span> Admin dashboard and material/pricing configuration</li>
-                  <li className="flex items-center gap-2"><span className="text-amber-400">✓</span> 2 user seats included</li>
-                </ul>
-              </div>
-              <div className="shrink-0 text-center">
-                <div className="text-4xl font-extrabold text-white">$399</div>
-                <div className="text-sm text-slate-400">/ month for 90 days</div>
-                <button
-                  type="button"
-                  onClick={() => { setActiveTier("Pilot"); trackEvent("cta_click"); }}
-                  className="mt-4 inline-flex rounded-xl bg-amber-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-300"
-                >
-                  Start Pilot →
-                </button>
-              </div>
-            </div>
-          </div>
+          {/* Free trial + onboarding calendar */}
+          <OnboardingCalendar
+            onClaim={() => { setActiveTier("FreeTrial"); trackEvent("cta_click"); }}
+          />
 
           {/* Pricing tiers */}
           <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
