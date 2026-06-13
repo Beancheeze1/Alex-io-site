@@ -9,7 +9,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 import { CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
@@ -599,88 +599,6 @@ function computeLoopCentroid(points: LoopPoint[] | null | undefined): { x: numbe
   return { x: sumX / count, y: sumY / count };
 }
 
-
-function SampleOverlay({ quoteNo }: { quoteNo: string }) {
-  const router = useRouter()
-  const [visible, setVisible] = React.useState(true)
-
-  if (!visible) return null
-
-  return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 9999,
-      background: "rgba(8,11,18,0.85)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: 16,
-    }}>
-      <div style={{
-        maxWidth: 480, width: "100%", borderRadius: 20,
-        background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)",
-        padding: 28, color: "#f1f5f9",
-      }}>
-        <div style={{
-          fontSize: 11, fontWeight: 700, letterSpacing: "0.16em",
-          textTransform: "uppercase", color: "#38bdf8", marginBottom: 8,
-        }}>
-          Sample Quote Preview
-        </div>
-        <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 12px" }}>
-          Here&apos;s what a real quote looks like
-        </h2>
-        <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6, marginBottom: 16 }}>
-          We&apos;ve pre-loaded a sample complete-pack quote so you can see
-          exactly how Alex-IO works — no typing required.
-        </p>
-
-        <div style={{
-          borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)",
-          background: "rgba(255,255,255,0.03)", padding: 14, marginBottom: 20,
-          fontSize: 13, lineHeight: 1.8,
-        }}>
-          <div><strong>Shipping carton:</strong> 16 × 12 × 10 in, RSC</div>
-          <div><strong>Foam insert:</strong> 2-layer, polyethylene 1.7 PCF</div>
-          <div><strong>Cavities:</strong> 2× circular, 3.5&quot; dia × 2&quot; deep</div>
-          <div><strong>Quantity:</strong> 100 units</div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <button
-            type="button"
-            onClick={() => setVisible(false)}
-            style={{
-              padding: "12px 0", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)",
-              background: "rgba(255,255,255,0.05)", color: "#e2e8f0",
-              fontSize: 14, fontWeight: 700, cursor: "pointer",
-            }}
-          >
-            🛠 Play around in the editor
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const params = new URLSearchParams(window.location.search)
-              params.delete("sample_overlay")
-              params.set("quote_no", quoteNo)
-              router.push(`/quote?${params.toString()}`)
-            }}
-            style={{
-              padding: "12px 0", borderRadius: 12, border: "none",
-              background: "linear-gradient(135deg,#0ea5e9,#38bdf8)",
-              color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer",
-            }}
-          >
-            💸 Skip to the priced quote →
-          </button>
-        </div>
-
-        <p style={{ fontSize: 11, color: "#64748b", textAlign: "center", marginTop: 14 }}>
-          You can change any of this — material, dimensions, layout,
-          quantity — once you&apos;re in the editor.
-        </p>
-      </div>
-    </div>
-  )
-}
 
 export default function LayoutPage({
   searchParams,
@@ -1742,9 +1660,6 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
     setUploadError,
   ]);
 
-  const clientSearchParams = useSearchParams()
-  const showSampleOverlay = clientSearchParams?.get("sample_overlay") === "1"
-
   if (loadingLayout || !initialLayout) {
     return (
     <main className="min-h-screen flex items-center justify-center bg-slate-950 bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--tenant-secondary)_16%,transparent),transparent_60%),radial-gradient(circle_at_bottom,_color-mix(in_srgb,var(--tenant-primary)_12%,transparent),transparent_60%)]">
@@ -1756,28 +1671,23 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
   }
 
   return (
-    <>
-      {showSampleOverlay && quoteNo && hasRealQuoteNo && (
-        <SampleOverlay quoteNo={quoteNo} />
-      )}
-      <LayoutEditorHost
-        key={`seed-${seedVersion}`}
-        quoteNo={quoteNo}
-        hasRealQuoteNo={hasRealQuoteNo}
-        initialLayout={initialLayout}
-        initialNotes={initialNotes}
-        initialQty={initialQty}
-        initialMaterialId={initialMaterialId}
-        initialMaterialLabel={initialMaterialLabel}
-        initialCustomerName={initialCustomerName}
-        initialCustomerEmail={initialCustomerEmail}
-        initialCustomerCompany={initialCustomerCompany}
-        initialCustomerPhone={initialCustomerPhone}
-        uploadError={uploadError}
-        setUploadError={setUploadError}
-        setFacesJson={setFacesJson}
-      />
-    </>
+    <LayoutEditorHost
+      key={`seed-${seedVersion}`}
+      quoteNo={quoteNo}
+      hasRealQuoteNo={hasRealQuoteNo}
+      initialLayout={initialLayout}
+      initialNotes={initialNotes}
+      initialQty={initialQty}
+      initialMaterialId={initialMaterialId}
+      initialMaterialLabel={initialMaterialLabel}
+      initialCustomerName={initialCustomerName}
+      initialCustomerEmail={initialCustomerEmail}
+      initialCustomerCompany={initialCustomerCompany}
+      initialCustomerPhone={initialCustomerPhone}
+      uploadError={uploadError}
+      setUploadError={setUploadError}
+      setFacesJson={setFacesJson}
+    />
   );
 }
 
@@ -1857,6 +1767,13 @@ function LayoutEditorHostReady(props: {
     setFacesJson,
 
   } = props;
+
+  const showSampleOverlay =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("sample_overlay") === "1"
+
+  const [sampleOverlayVisible, setSampleOverlayVisible] =
+    React.useState(showSampleOverlay)
 
   const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
   const persistPrinted = React.useCallback(
@@ -2496,6 +2413,13 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
   const [customerEmail, setCustomerEmail] = React.useState<string>(
     initialCustomerEmail || "",
   );
+
+  React.useEffect(() => {
+    if (showSampleOverlay && !customerEmail.trim()) {
+      setCustomerEmail("preview@alex-io.com")
+    }
+  }, [showSampleOverlay])
+
   const [customerCompany, setCustomerCompany] = React.useState<string>(
     initialCustomerCompany || "",
   );
@@ -3692,6 +3616,11 @@ const handleGoToFoamAdvisor = () => {
     }
   };
 
+  const handleSkipToQuote = () => {
+    setSampleOverlayVisible(false)
+    handleApplyToQuote()
+  }
+
   /* ---------- Layout ---------- */
 
   const canApplyButton = hasRealQuoteNo && !missingCustomerInfo && applyStatus !== "saving";
@@ -3902,6 +3831,75 @@ const tenantCssVars = React.useMemo(() => {
   style={tenantCssVars}
       className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--tenant-secondary)_14%,transparent),transparent_60%),radial-gradient(circle_at_bottom,_color-mix(in_srgb,var(--tenant-primary)_14%,transparent),transparent_60%)] flex items-stretch py-8 px-4"
 >
+      {sampleOverlayVisible && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          background: "rgba(8,11,18,0.85)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 16,
+        }}>
+          <div style={{
+            maxWidth: 480, width: "100%", borderRadius: 20,
+            background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)",
+            padding: 28, color: "#f1f5f9",
+          }}>
+            <div style={{
+              fontSize: 11, fontWeight: 700, letterSpacing: "0.16em",
+              textTransform: "uppercase", color: "#38bdf8", marginBottom: 8,
+            }}>
+              Sample Quote Preview
+            </div>
+            <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 12px" }}>
+              Here&apos;s what a real quote looks like
+            </h2>
+            <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6, marginBottom: 16 }}>
+              We&apos;ve pre-loaded a sample complete-pack quote so you can see
+              exactly how Alex-IO works — no typing required.
+            </p>
+
+            <div style={{
+              borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(255,255,255,0.03)", padding: 14, marginBottom: 20,
+              fontSize: 13, lineHeight: 1.8,
+            }}>
+              <div><strong>Shipping carton:</strong> 16 × 12 × 10 in, RSC</div>
+              <div><strong>Foam insert:</strong> 2-layer, polyethylene 1.7 PCF</div>
+              <div><strong>Quantity:</strong> 100 units</div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setSampleOverlayVisible(false)}
+                style={{
+                  padding: "12px 0", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.05)", color: "#e2e8f0",
+                  fontSize: 14, fontWeight: 700, cursor: "pointer",
+                }}
+              >
+                🛠 Play around in the editor
+              </button>
+              <button
+                type="button"
+                onClick={handleSkipToQuote}
+                style={{
+                  padding: "12px 0", borderRadius: 12, border: "none",
+                  background: "linear-gradient(135deg,#0ea5e9,#38bdf8)",
+                  color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer",
+                }}
+              >
+                💸 Skip to priced quote →
+              </button>
+            </div>
+
+            <p style={{ fontSize: 11, color: "#64748b", textAlign: "center", marginTop: 14 }}>
+              Add cavities or change material in the editor — pricing
+              updates live. Or skip straight to the priced quote and
+              edit later.
+            </p>
+          </div>
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"
