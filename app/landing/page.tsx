@@ -556,6 +556,46 @@ export default function LandingPage() {
     if (!formStartedRef.current && value) { formStartedRef.current = true; trackEvent("form_start"); }
   }
 
+  function viewSampleQuote() {
+    trackEvent("cta_click")
+    const prefill = {
+      quoteNo: `Q-DEMO-${Date.now()}`,
+      source: "landing-sample",
+      createdAtIso: new Date().toISOString(),
+
+      // Outer shipping box — 16x12x10 RSC
+      outside: { l: "16", w: "12", h: "10", units: "in" },
+      shipMode: "box",
+      boxStyle: "rsc",
+      printed: false,
+
+      qty: "100",
+
+      // Foam insert inside the box — 2-cavity layout
+      insertType: "set",
+      holding: "pockets",
+      pocketCount: "2",
+      layerCount: "2",
+      layerThicknesses: ["1.5", "1"],
+      cavities: "2x circle 3.5in dia, depth 2in",
+
+      material: {
+        mode: "known",
+        text: "Polyethylene 1.7 PCF",
+        id: "",
+      },
+
+      packagingSku: "",
+      packagingChoice: null,
+      pocketsOn: "",
+      customerName: "Sample Customer",
+      customerEmail: "",
+    }
+    router.push(
+      `/start-quote?prefill=${encodeURIComponent(JSON.stringify(prefill))}&demo=1`
+    )
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
@@ -709,6 +749,16 @@ export default function LandingPage() {
                 >
                   Try a Live Quote
                 </a>
+                <button
+                  type="button"
+                  onClick={viewSampleQuote}
+                  className="mt-3 inline-flex items-center justify-center gap-2
+                    rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3
+                    text-sm font-semibold text-sky-100 transition
+                    hover:bg-sky-400/20 sm:ml-3 sm:mt-0"
+                >
+                  👀 See a Complete Sample Quote →
+                </button>
               </div>
 
               <div className="mt-6 text-sm text-slate-400">
@@ -912,6 +962,16 @@ export default function LandingPage() {
                   </button>
                   {' '}(12 × 8 × 4 in, qty 50)
                 </p>
+                <div className="mt-2 text-center">
+                  <button
+                    type="button"
+                    onClick={viewSampleQuote}
+                    className="text-xs text-sky-400 hover:text-sky-300
+                      underline underline-offset-2"
+                  >
+                    Or skip ahead — see a complete sample quote with pricing →
+                  </button>
+                </div>
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="text-xs leading-6 text-slate-400">
                     No account. No sales call. Add contact info inside the editor if you want to save your quote.

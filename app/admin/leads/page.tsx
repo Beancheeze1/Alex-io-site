@@ -18,6 +18,7 @@ type LeadRow = {
   product_description: string | null;
   current_process: string | null;
   notes: string | null;
+  lead_type: string | null;
   created_at: string;
 };
 
@@ -56,7 +57,7 @@ export default async function LeadsPage() {
   const leads = await q<LeadRow>(
     `SELECT id, tier, name, email, company, phone, quote_no,
             annual_mode, user_count, product_description,
-            current_process, notes, created_at
+            current_process, notes, lead_type, created_at
      FROM demo_leads
      ORDER BY created_at DESC
      LIMIT 500`,
@@ -115,6 +116,7 @@ export default async function LeadsPage() {
               <tr className="border-b border-neutral-800">
                 <th className="px-4 py-3 text-left font-medium text-neutral-500 whitespace-nowrap">Date</th>
                 <th className="px-4 py-3 text-left font-medium text-neutral-500">Tier</th>
+                <th className="px-4 py-3 text-left font-medium text-neutral-500">Type</th>
                 <th className="px-4 py-3 text-left font-medium text-neutral-500">Name</th>
                 <th className="px-4 py-3 text-left font-medium text-neutral-500">Email</th>
                 <th className="px-4 py-3 text-left font-medium text-neutral-500">Company</th>
@@ -127,7 +129,7 @@ export default async function LeadsPage() {
             <tbody>
               {leads.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-neutral-600">
+                  <td colSpan={10} className="px-4 py-12 text-center text-neutral-600">
                     No leads yet — they&apos;ll appear here after someone completes a demo and requests access
                   </td>
                 </tr>
@@ -148,6 +150,17 @@ export default async function LeadsPage() {
                         <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${TIER_BADGE[lead.tier] ?? "bg-neutral-700 text-neutral-300 border border-neutral-600"}`}>
                           {lead.tier}
                         </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {lead.lead_type === "quote_email" ? (
+                          <span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold bg-sky-900/40 text-sky-300 border border-sky-800">
+                            Quote Copy
+                          </span>
+                        ) : (
+                          <span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold bg-neutral-800 text-neutral-500 border border-neutral-700">
+                            {lead.lead_type ?? "tier_interest"}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-neutral-200 font-medium">{lead.name}</td>
                       <td className="px-4 py-3">

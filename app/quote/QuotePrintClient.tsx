@@ -694,6 +694,10 @@ export default function QuotePrintClient() {
   const [leadSubmitting, setLeadSubmitting] = React.useState(false);
   const [leadSubmitted, setLeadSubmitted] = React.useState<string | null>(null);
 
+  const [quoteEmailCapture, setQuoteEmailCapture] = React.useState({ name: '', email: '' });
+  const [quoteEmailSubmitting, setQuoteEmailSubmitting] = React.useState(false);
+  const [quoteEmailSubmitted, setQuoteEmailSubmitted] = React.useState(false);
+
   async function handleLeadSubmit() {
     if (!modalLeadForm.name.trim() || !modalLeadForm.email.trim()) return;
     setModalLeadSubmitting(true);
@@ -720,6 +724,33 @@ export default function QuotePrintClient() {
 
   function setLeadField(key: keyof typeof modalLeadForm, value: string) {
     setModalLeadForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function submitQuoteEmailCapture() {
+    if (!quoteEmailCapture.email.trim()) return;
+    setQuoteEmailSubmitting(true);
+    try {
+      const quoteNo = new URLSearchParams(window.location.search).get("quote_no") || "";
+      await fetch("/api/demo-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tier: "Quote Copy",
+          name: quoteEmailCapture.name.trim() || "Not provided",
+          email: quoteEmailCapture.email.trim(),
+          company: null,
+          phone: null,
+          quote_no: quoteNo || null,
+          annual_mode: annualMode,
+          lead_type: "quote_email",
+        }),
+      });
+      setQuoteEmailSubmitted(true);
+    } catch {
+      // fail silently
+    } finally {
+      setQuoteEmailSubmitting(false);
+    }
   }
 
   const [loading, setLoading] = React.useState<boolean>(!!(initialQuoteNo || quoteNo));
@@ -2441,6 +2472,83 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Email capture — shown after the pricing summary */}
+            {!quoteEmailSubmitted ? (
+              <div style={{
+                marginTop: 20,
+                marginBottom: 20,
+                padding: "16px 18px",
+                borderRadius: 14,
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 12,
+              }}>
+                <div style={{ flex: "1 1 200px" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>
+                    📧 Want this quote emailed to you?
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                    We'll send a copy of this exact quote to your inbox — no commitment.
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flex: "1 1 320px" }}>
+                  <input
+                    type="text"
+                    placeholder="Your name (optional)"
+                    value={quoteEmailCapture.name}
+                    onChange={e => setQuoteEmailCapture(f => ({ ...f, name: e.target.value }))}
+                    style={{
+                      flex: 1, padding: "8px 10px", borderRadius: 8,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(255,255,255,0.05)", color: "#f1f5f9",
+                      fontSize: 12, outline: "none",
+                    }}
+                  />
+                  <input
+                    type="email"
+                    placeholder="Email *"
+                    value={quoteEmailCapture.email}
+                    onChange={e => setQuoteEmailCapture(f => ({ ...f, email: e.target.value }))}
+                    style={{
+                      flex: 1, padding: "8px 10px", borderRadius: 8,
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      background: "rgba(255,255,255,0.05)", color: "#f1f5f9",
+                      fontSize: 12, outline: "none",
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={quoteEmailSubmitting || !quoteEmailCapture.email.trim()}
+                    onClick={submitQuoteEmailCapture}
+                    style={{
+                      padding: "8px 16px", borderRadius: 8, border: "none",
+                      background: !quoteEmailCapture.email.trim() || quoteEmailSubmitting
+                        ? "rgba(14,165,233,0.25)"
+                        : "linear-gradient(135deg,#0ea5e9,#38bdf8)",
+                      color: "#fff", fontSize: 12, fontWeight: 700,
+                      cursor: !quoteEmailCapture.email.trim() ? "not-allowed" : "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {quoteEmailSubmitting ? "Sending…" : "Email it →"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{
+                marginTop: 20, marginBottom: 20, padding: "14px 18px",
+                borderRadius: 14, background: "rgba(16,185,129,0.08)",
+                border: "1px solid rgba(16,185,129,0.25)",
+                textAlign: "center", fontSize: 13, fontWeight: 600,
+                color: "#34d399",
+              }}>
+                ✓ Got it — we'll send this quote to your inbox shortly.
               </div>
             )}
 

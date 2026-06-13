@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
 
-const TIERS = new Set(["Starter", "Pro", "Shop", "Pilot", "General inquiry"]);
+const TIERS = new Set(["Starter", "Pro", "Shop", "Pilot", "General inquiry", "Quote Copy"]);
 
 function truncate(val: unknown, max: number): string | null {
   if (val == null || val === "") return null;
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
     if (!body || typeof body !== "object") return fail("Invalid request body");
 
     const { tier, name, email, company, phone, quote_no, annual_mode,
-            userCount, productDescription, currentProcess, notes } = body as Record<string, unknown>;
+            userCount, productDescription, currentProcess, notes, lead_type } = body as Record<string, unknown>;
 
     if (!tier || !TIERS.has(String(tier))) return fail("Invalid tier");
 
@@ -112,14 +112,15 @@ export async function POST(req: NextRequest) {
     const cleanProductDesc      = truncate(productDescription, 1000);
     const cleanCurrentProcess   = truncate(currentProcess, 1000);
     const cleanNotes            = truncate(notes, 2000);
+    const cleanLeadType         = truncate(lead_type, 50) ?? "tier_interest";
 
     await q(
       `INSERT INTO demo_leads
          (tier, name, email, company, phone, quote_no, annual_mode,
-          user_count, product_description, current_process, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          user_count, product_description, current_process, notes, lead_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [cleanTier, cleanName, cleanEmail, cleanCompany, cleanPhone, cleanQuoteNo, isAnnual,
-       cleanUserCount, cleanProductDesc, cleanCurrentProcess, cleanNotes],
+       cleanUserCount, cleanProductDesc, cleanCurrentProcess, cleanNotes, cleanLeadType],
     );
 
     const salesEmail = "chuck@alex-io.com";
