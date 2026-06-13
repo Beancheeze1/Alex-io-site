@@ -577,7 +577,7 @@ export default function LandingPage() {
           layerThicknesses: ["1.5", "1"],
           materialMode: "known",
           materialText: "Polyethylene 1.7 PCF",
-          cavities: "2x circle 3.5in dia, depth 2in",
+          cavities: "3.5 dia x 2, 3.5 dia x 2",
           packagingChoice: null,
           printed: false,
           customerName: "Sample Customer",
