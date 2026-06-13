@@ -3864,6 +3864,7 @@ const tenantCssVars = React.useMemo(() => {
             }}>
               <div><strong>Shipping carton:</strong> 16 × 12 × 10 in, RSC</div>
               <div><strong>Foam insert:</strong> 2-layer, polyethylene 1.7 PCF</div>
+              <div><strong>Pockets:</strong> 2× circular, 3.5&quot; dia × 2&quot; deep</div>
               <div><strong>Quantity:</strong> 100 units</div>
             </div>
 
