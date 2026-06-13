@@ -3850,11 +3850,12 @@ const tenantCssVars = React.useMemo(() => {
               Sample Quote Preview
             </div>
             <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 12px" }}>
-              Here&apos;s what a real quote looks like
+              We&apos;ve set up a sample quote for you
             </h2>
             <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6, marginBottom: 16 }}>
-              We&apos;ve pre-loaded a sample complete-pack quote so you can see
-              exactly how Alex-IO works — no typing required.
+              Everything below is pre-filled with a real complete-pack
+              example — explore the layout editor, or skip straight to
+              see the priced quote.
             </p>
 
             <div style={{

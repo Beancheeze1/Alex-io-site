@@ -1521,6 +1521,53 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
         {/* Happy path */}
         {!loading && quote && (
           <>
+            {/* Quote total summary — always first so visitors see the number without scrolling */}
+            {primaryItem && (
+              <div style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: 16,
+                marginBottom: 20,
+                padding: "14px 18px",
+                borderRadius: 14,
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                flexWrap: "wrap",
+              }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 4 }}>
+                    Quote estimate
+                  </div>
+                  {anyPricing ? (
+                    <>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
+                        {formatUsd(planningTotal > 0 ? planningTotal : effectiveGrandTotal > 0 ? effectiveGrandTotal : breakdownSubtotal)}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                        {breakdownUnitPrice != null ? `${formatUsd(breakdownUnitPrice)}/pc · ` : ""}
+                        Qty {primaryItem.qty.toLocaleString()}
+                        {shippingEstimate > 0 ? " · incl. est. shipping" : ""}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 14, color: "#6b7280" }}>Pricing pending — see full breakdown below</div>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, textAlign: "right", color: "#374151" }}>
+                  <div style={{ fontWeight: 600 }}>
+                    {(() => {
+                      const stackH = layoutMetrics?.stack_total_thickness_in;
+                      const h = stackH != null ? stackH : primaryItem.height_in;
+                      return `${formatDims(primaryItem.length_in, primaryItem.width_in, h)} in`;
+                    })()}
+                  </div>
+                  <div style={{ color: "#6b7280" }}>{primaryMaterialName || "Material TBD"}</div>
+                  <div style={{ color: "#9ca3af", marginTop: 4, fontSize: 11 }}>Full breakdown below ↓</div>
+                </div>
+              </div>
+            )}
+
             {/* Gradient header — demo and real quote variants */}
             {isDemo ? (
               /* ── Demo header: sells Alex-IO the software ── */
@@ -1679,6 +1726,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   </div>
 
                   {/* ── Full-width pricing grid ───────────────────────────── */}
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 24, marginBottom: 8 }}>
+                    Ready to get started?
+                  </div>
                   <div>
                       {/* Monthly / Annual toggle */}
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 16 }}>
@@ -1789,7 +1839,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                   key={tier.name}
                                   style={{
                                     borderRadius: 16,
-                                    padding: "16px 14px",
+                                    padding: "10px 10px",
                                     background: tier.highlight
                                       ? "rgba(14,165,233,0.12)"
                                       : "rgba(255,255,255,0.04)",
@@ -1827,7 +1877,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                                   {/* Price */}
                                   <div style={{ display: "flex", alignItems: "baseline", gap: 3, marginBottom: 2 }}>
-                                    <span style={{ fontSize: 26, fontWeight: 800, color: "#f9fafb", letterSpacing: "-0.02em" }}>
+                                    <span style={{ fontSize: 20, fontWeight: 800, color: "#f9fafb", letterSpacing: "-0.02em" }}>
                                       ${displayPrice.toLocaleString()}
                                     </span>
                                     <span style={{ fontSize: 11, color: "#64748b" }}>/mo</span>
@@ -1849,7 +1899,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                     borderRadius: 999,
                                     padding: "3px 8px",
                                     display: "inline-block",
-                                    marginBottom: 10,
+                                    marginBottom: 6,
                                   }}>
                                     {tier.users}
                                   </div>
@@ -1874,7 +1924,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                     type="button"
                                     onClick={() => setSelectedTier(selectedTier === tier.name ? null : tier.name)}
                                     style={{
-                                      marginTop: 14,
+                                      marginTop: 10,
                                       width: "100%",
                                       padding: "9px 0",
                                       borderRadius: 10,
@@ -2482,18 +2532,18 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 marginBottom: 20,
                 padding: "16px 18px",
                 borderRadius: 14,
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
                 display: "flex",
                 flexWrap: "wrap",
                 alignItems: "center",
                 gap: 12,
               }}>
                 <div style={{ flex: "1 1 200px" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
                     📧 Want this quote emailed to you?
                   </div>
-                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
                     We'll send a copy of this exact quote to your inbox — no commitment.
                   </div>
                 </div>
@@ -2505,8 +2555,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     onChange={e => setQuoteEmailCapture(f => ({ ...f, name: e.target.value }))}
                     style={{
                       flex: 1, padding: "8px 10px", borderRadius: 8,
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      background: "rgba(255,255,255,0.05)", color: "#f1f5f9",
+                      border: "1px solid #d1d5db",
+                      background: "#ffffff", color: "#0f172a",
                       fontSize: 12, outline: "none",
                     }}
                   />
@@ -2517,8 +2567,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     onChange={e => setQuoteEmailCapture(f => ({ ...f, email: e.target.value }))}
                     style={{
                       flex: 1, padding: "8px 10px", borderRadius: 8,
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      background: "rgba(255,255,255,0.05)", color: "#f1f5f9",
+                      border: "1px solid #d1d5db",
+                      background: "#ffffff", color: "#0f172a",
                       fontSize: 12, outline: "none",
                     }}
                   />
@@ -2529,9 +2579,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     style={{
                       padding: "8px 16px", borderRadius: 8, border: "none",
                       background: !quoteEmailCapture.email.trim() || quoteEmailSubmitting
-                        ? "rgba(14,165,233,0.25)"
+                        ? "#e2e8f0"
                         : "linear-gradient(135deg,#0ea5e9,#38bdf8)",
-                      color: "#fff", fontSize: 12, fontWeight: 700,
+                      color: !quoteEmailCapture.email.trim() || quoteEmailSubmitting ? "#94a3b8" : "#fff",
+                      fontSize: 12, fontWeight: 700,
                       cursor: !quoteEmailCapture.email.trim() ? "not-allowed" : "pointer",
                       whiteSpace: "nowrap",
                     }}
@@ -2555,6 +2606,30 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
             {/* LINE ITEMS CARD (foam items + layers + carton selections) */}
             <div style={{ ...cardBase, background: "#ffffff", marginBottom: 24 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>Line items</div>
+              {isDemo && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  marginTop: 8, marginBottom: 12,
+                }}>
+                  <button
+                    type="button"
+                    disabled
+                    style={{
+                      padding: "8px 14px", borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "#f3f4f6", color: "#9ca3af",
+                      fontSize: 12, fontWeight: 700,
+                      cursor: "not-allowed",
+                      display: "flex", alignItems: "center", gap: 6,
+                    }}
+                  >
+                    📐 Download CAD Files (DXF, STEP)
+                  </button>
+                  <span style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.4 }}>
+                    Generated automatically for every quote — available once your account is set up
+                  </span>
+                </div>
+              )}
               <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
                 These are the materials and quantities currently stored with your quote.
               </div>
