@@ -9,7 +9,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
@@ -1742,7 +1742,8 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
     setUploadError,
   ]);
 
-  const showSampleOverlay = (searchParams as any)?.sample_overlay === "1"
+  const clientSearchParams = useSearchParams()
+  const showSampleOverlay = clientSearchParams?.get("sample_overlay") === "1"
 
   if (loadingLayout || !initialLayout) {
     return (
