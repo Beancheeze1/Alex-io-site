@@ -358,8 +358,15 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
                       ? `${s.city}, ${s.region}`
                       : s.city ?? s.region ?? "—"}
                   </td>
-                  <td className="px-4 py-3 text-neutral-300">
-                    {s.utm_source ?? s.referrer ?? "direct"}
+                  <td
+                    className="px-4 py-3 text-neutral-300"
+                    style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    title={s.utm_source ?? s.referrer ?? "direct"}
+                  >
+                    {(() => {
+                      const val = s.utm_source ?? s.referrer ?? "direct";
+                      return val.length > 30 ? val.slice(0, 30) + "…" : val;
+                    })()}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">

@@ -84,10 +84,19 @@ export default async function TrafficPage({ searchParams }: Props) {
     ),
 
     q<SourceRow>(
-      `SELECT COALESCE(NULLIF(utm_source,''), NULLIF(referrer,''), 'direct') AS source,
-              COUNT(DISTINCT session_id)::int AS sessions,
-              COUNT(DISTINCT session_id) FILTER (WHERE event_type = 'cta_click')::int  AS cta_clicks,
-              COUNT(DISTINCT session_id) FILTER (WHERE event_type = 'form_submit')::int AS form_submits
+      `SELECT COALESCE(
+               NULLIF(utm_source,''),
+               NULLIF(
+                 CASE WHEN referrer ~ 'alex-io\\.com' THEN NULL ELSE referrer END,
+                 ''
+               ),
+               'direct'
+             ) AS source,
+             COUNT(DISTINCT session_id)::int AS sessions,
+             COUNT(DISTINCT session_id) FILTER (WHERE event_type = 'cta_click')::int AS cta_clicks,
+             COUNT(DISTINCT session_id) FILTER (
+               WHERE event_type IN ('form_submit','quote_applied','quote_email')
+             )::int AS form_submits
        FROM page_events
        WHERE created_at >= now() - ($1 || ' days')::interval
        GROUP BY source
@@ -97,15 +106,20 @@ export default async function TrafficPage({ searchParams }: Props) {
 
     q<SessionRow>(
       `SELECT session_id,
-              MIN(created_at)::text                                                   AS first_seen,
-              MAX(created_at)::text                                                   AS last_seen,
-              MAX(device)                                                             AS device,
-              MAX(utm_source)                                                         AS utm_source,
-              MAX(referrer)                                                           AS referrer,
-              MAX(city)                                                               AS city,
-              MAX(region)                                                             AS region,
-              STRING_AGG(DISTINCT event_type, ',' ORDER BY event_type)               AS events,
-              BOOL_OR(event_type = 'form_submit')                                    AS converted
+              MIN(created_at)::text AS first_seen,
+              MAX(created_at)::text AS last_seen,
+              MAX(device)           AS device,
+              MAX(utm_source)       AS utm_source,
+              MAX(
+                CASE
+                  WHEN referrer ~ 'alex-io\\.com' THEN NULL
+                  ELSE referrer
+                END
+              ) AS referrer,
+              MAX(city)   AS city,
+              MAX(region) AS region,
+              STRING_AGG(DISTINCT event_type, ',' ORDER BY event_type) AS events,
+              BOOL_OR(event_type IN ('form_submit','quote_applied','quote_email')) AS converted
        FROM page_events
        WHERE created_at >= now() - ($1 || ' days')::interval
        GROUP BY session_id
