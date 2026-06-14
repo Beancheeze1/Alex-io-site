@@ -7,6 +7,10 @@ const ALLOWED_EVENTS = new Set([
   "cta_click",
   "form_start",
   "form_submit",
+  "sample_editor",      // clicked "Play around in the editor"
+  "sample_skip",        // clicked "Skip to priced quote"
+  "quote_applied",      // handleApplyToQuote succeeded
+  "quote_email",        // submitted "email this quote" box
 ]);
 
 const BOT_PATTERNS = [

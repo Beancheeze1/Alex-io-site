@@ -26,6 +26,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
+import { usePageTracker } from "@/hooks/usePageTracker";
 
 type QuoteRow = {
   id: number;
@@ -661,6 +662,7 @@ if ((c as any).shape === "poly" && Array.isArray((c as any).points) && (c as any
 
 export default function QuotePrintClient() {
   const searchParams = useSearchParams();
+  const { trackEvent } = usePageTracker("/quote");
 
   const initialQuoteNo = searchParams?.get("quote_no") || "";
   const [quoteNo, setQuoteNo] = React.useState<string>(initialQuoteNo);
@@ -746,6 +748,7 @@ export default function QuotePrintClient() {
         }),
       });
       setQuoteEmailSubmitted(true);
+      trackEvent("quote_email");
     } catch {
       // fail silently
     } finally {

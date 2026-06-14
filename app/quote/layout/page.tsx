@@ -15,6 +15,7 @@ import { CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas from "./editor/InteractiveCanvas";
+import { usePageTracker } from "@/hooks/usePageTracker";
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
@@ -1767,6 +1768,8 @@ function LayoutEditorHostReady(props: {
     setFacesJson,
 
   } = props;
+
+  const { trackEvent } = usePageTracker("/quote/layout");
 
   const showSampleOverlay =
     typeof window !== "undefined" &&
@@ -3602,6 +3605,7 @@ const handleGoToFoamAdvisor = () => {
       }
 
       if (typeof window !== "undefined") {
+        trackEvent("quote_applied");
               const base = "/quote?quote_no=" + encodeURIComponent(quoteNo);
               window.location.href = isPrinted ? base + "&printed=1" : base;
         return;
@@ -3617,6 +3621,7 @@ const handleGoToFoamAdvisor = () => {
   };
 
   const handleSkipToQuote = () => {
+    trackEvent("sample_skip")
     setSampleOverlayVisible(false)
     handleApplyToQuote()
   }
@@ -3872,7 +3877,7 @@ const tenantCssVars = React.useMemo(() => {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <button
                 type="button"
-                onClick={() => setSampleOverlayVisible(false)}
+                onClick={() => { trackEvent("sample_editor"); setSampleOverlayVisible(false); }}
                 style={{
                   padding: "12px 0", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)",
                   background: "rgba(255,255,255,0.05)", color: "#e2e8f0",

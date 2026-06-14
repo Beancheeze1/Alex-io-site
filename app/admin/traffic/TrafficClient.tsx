@@ -39,12 +39,30 @@ const FUNNEL_LABELS: Record<string, string> = {
 };
 
 const BADGE_COLORS: Record<string, string> = {
-  page_view:   "bg-sky-400/20 text-sky-300",
-  scroll_50:   "bg-indigo-400/20 text-indigo-300",
-  cta_click:   "bg-orange-400/20 text-orange-300",
-  form_start:  "bg-yellow-400/20 text-yellow-300",
-  form_submit: "bg-green-400/20 text-green-300",
+  page_view:     "bg-sky-400/20 text-sky-300",
+  scroll_50:     "bg-indigo-400/20 text-indigo-300",
+  cta_click:     "bg-orange-400/20 text-orange-300",
+  form_start:    "bg-yellow-400/20 text-yellow-300",
+  form_submit:   "bg-green-400/20 text-green-300",
+  sample_editor: "bg-indigo-400/20 text-indigo-300",
+  sample_skip:   "bg-orange-400/20 text-orange-300",
+  quote_applied: "bg-emerald-400/25 text-emerald-300",
+  quote_email:   "bg-emerald-400/25 text-emerald-300",
 };
+
+const BADGE_LABELS: Record<string, string> = {
+  page_view:     "page view",
+  scroll_50:     "scrolled 50%",
+  cta_click:     "CTA click",
+  form_start:    "form start",
+  form_submit:   "form submit",
+  sample_editor: "tried editor",
+  sample_skip:   "skipped to quote",
+  quote_applied: "applied quote",
+  quote_email:   "requested email",
+};
+
+const HIGH_INTENT = new Set(["quote_applied", "quote_email"]);
 
 function fmt(n: number) {
   return n.toLocaleString();
@@ -350,9 +368,10 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
                           key={ev}
                           className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                             BADGE_COLORS[ev] ?? "bg-neutral-700 text-neutral-400"
-                          }`}
+                          } ${HIGH_INTENT.has(ev) ? "font-bold ring-1 ring-emerald-500/40" : ""}`}
                         >
-                          {ev}
+                          {HIGH_INTENT.has(ev) && "★ "}
+                          {BADGE_LABELS[ev] ?? ev}
                         </span>
                       ))}
                     </div>
