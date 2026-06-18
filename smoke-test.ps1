@@ -146,6 +146,119 @@ if ($r.status -in @(401, 403)) { Pass "GET /api/admin/users without auth -> $($r
 elseif ($r.status -eq 404) { Pass "GET /api/admin/users -> 404 (not exposed)" }
 else { Fail "GET /api/admin/users without auth -> 401 or 403" "Got $($r.status)" }
 
+# ── 9. Complete demo quote flow ───────────────────────────────
+Write-Section "9. Complete demo quote flow"
+
+# Step 1: Seed a fresh demo quote
+$seedBody = @{
+    outsideL = "14"; outsideW = "10"; outsideH = "8"; qty = "50"
+    shipMode = "box"; insertType = "single"; holding = "pockets"
+    pocketCount = "1"; layerCount = "1"
+    materialMode = "known"; materialText = "Polyethylene 1.7 PCF"
+    cavities = "4 x 3 x 2"; source = "smoke-test-flow"
+}
+$seed = Post-Url "/api/demo/seed" $seedBody
+if ($seed.parsed.ok -eq $true -and $seed.parsed.quoteNo) {
+    $flowQuoteNo = $seed.parsed.quoteNo
+    Pass "Flow seed created quote: $flowQuoteNo"
+} else {
+    Fail "Flow seed failed" "Got: $($seed.raw)"
+    $flowQuoteNo = $null
+}
+
+if ($flowQuoteNo) {
+    # Step 2: Quote print returns items and pricing
+    $print = Get-Url "/api/quote/print?quote_no=$([uri]::EscapeDataString($flowQuoteNo))"
+    if ($print.status -eq 200) {
+        $printData = $print.body | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($printData.ok -eq $true) {
+            Pass "Quote print returned 200 ok:true"
+            # Check items exist
+            if ($printData.items -and $printData.items.Count -gt 0) {
+                Pass "Quote has $($printData.items.Count) line item(s)"
+            } else {
+                Fail "Quote has no line items" "Pricing engine may not have run"
+            }
+            # Check grand total > 0
+            $gt = $printData.quote.grand_total
+            if ($gt -and [double]$gt -gt 0) {
+                Pass "Quote grand_total = $gt (pricing engine ran)"
+            } else {
+                Fail "Quote grand_total is 0 or null" "Pricing engine broken or seeding failed"
+            }
+        } else {
+            Fail "Quote print ok:false" "Got: $($print.body)"
+        }
+    } else {
+        Fail "Quote print status" "Expected 200, got $($print.status)"
+    }
+
+    # Step 3: Quote page loads
+    $quotePage = Get-Url "/quote?quote_no=$([uri]::EscapeDataString($flowQuoteNo))"
+    if ($quotePage.status -eq 200) {
+        Pass "Quote page /quote?quote_no=... loads 200"
+    } else {
+        Fail "Quote page failed to load" "Got $($quotePage.status)"
+    }
+
+    # Step 4: Demo page contains demo marker, not real-quote marker
+    if ($quotePage.body -match "Foam Quoting Software") {
+        Pass "Demo quote page shows demo marketing content"
+    } else {
+        Fail "Demo quote page missing demo content" "isDemo check may be broken"
+    }
+    if ($quotePage.body -match "Interactive quote viewer") {
+        Fail "Demo quote page showing real-quote header" "isDemo=false on a Q-DEMO- quote"
+    } else {
+        Pass "Demo quote page not showing real-quote header"
+    }
+
+    # Step 5: Lead capture (FreeTrial modal)
+    $lead = Post-Url "/api/demo-lead" @{
+        tier = "FreeTrial"; quote_no = $flowQuoteNo
+        name = "Flow Test User"; email = "smoketest+flow@alex-io.com"
+        company = "Smoke Test Co"; lead_type = "demo_quote"
+    }
+    if ($lead.parsed.ok -eq $true) {
+        Pass "FreeTrial lead captured ok:true"
+    } else {
+        Fail "FreeTrial lead capture failed" "Got: $($lead.raw)"
+    }
+
+    # Step 6: Check lead appears in admin/leads (requires ALEX_IO_ADMIN_KEY env var)
+    $adminKey = $env:ALEX_IO_ADMIN_KEY
+    if ($adminKey) {
+        try {
+            $leadsResp = Invoke-WebRequest -Uri "$BaseUrl/api/admin/leads" `
+                -Headers @{ "x-admin-key" = $adminKey } `
+                -UseBasicParsing -ErrorAction Stop -TimeoutSec 15
+            $leadsData = $leadsResp.Content | ConvertFrom-Json -ErrorAction SilentlyContinue
+            $match = $leadsData.leads | Where-Object { $_.quote_no -eq $flowQuoteNo }
+            if ($match) {
+                Pass "Lead appears in /admin/leads with correct quote_no"
+            } else {
+                Fail "Lead NOT found in /admin/leads" "Saved to wrong table or insert failed"
+            }
+        } catch {
+            Fail "Could not read /admin/leads" $_.Exception.Message
+        }
+    } else {
+        Pass "Skipped /admin/leads check (set ALEX_IO_ADMIN_KEY env var to enable)"
+    }
+
+    # Step 7: Quote contact saves (fire-and-forget path)
+    $contact = Post-Url "/api/demo/contact" @{
+        quoteNo = $flowQuoteNo
+        name = "Flow Test User"; email = "smoketest+flow@alex-io.com"
+        phone = "555-0100"; company = "Smoke Test Co"
+    }
+    if ($contact.parsed.ok -eq $true) {
+        Pass "Demo contact save ok:true (quote marked lead_captured)"
+    } else {
+        Fail "Demo contact save failed" "Got: $($contact.raw)"
+    }
+}
+
 # Summary
 $total = $pass + $fail
 Write-Host ""

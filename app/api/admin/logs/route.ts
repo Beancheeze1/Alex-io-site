@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
+import { adminOnly } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,7 +30,7 @@ function ok(extra: Record<string, any> = {}, status = 200) {
   return NextResponse.json({ ok: true, ...extra }, { status });
 }
 
-export async function GET(_req: NextRequest) {
+export const GET = adminOnly(async (_req: NextRequest) => {
   try {
     const rows = await q<EventLogRow>(
       `
@@ -82,4 +83,4 @@ export async function GET(_req: NextRequest) {
       ],
     });
   }
-}
+});
