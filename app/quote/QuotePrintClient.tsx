@@ -705,10 +705,16 @@ export default function QuotePrintClient() {
     setModalLeadSubmitting(true);
     setModalLeadError(null);
     try {
-      const res = await fetch("/api/demo/contact", {
+      // Save to demo_leads + send notification email (free trial lead)
+      const res = await fetch("/api/demo-lead", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quoteNo, ...modalLeadForm }),
+        body: JSON.stringify({
+          tier: "FreeTrial",
+          quote_no: quoteNo,
+          lead_type: "demo_quote",
+          ...modalLeadForm,
+        }),
       });
       const data = await res.json().catch(() => ({ ok: false }));
       if (!data?.ok) {
@@ -716,6 +722,12 @@ export default function QuotePrintClient() {
         setModalLeadSubmitting(false);
         return;
       }
+      // Also mark the demo quote as lead_captured in the DB (fire and forget)
+      fetch("/api/demo/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quoteNo, ...modalLeadForm }),
+      }).catch(() => {});
       setModalLeadSubmitted(true);
     } catch {
       setModalLeadError("Something went wrong. Please try again.");
@@ -847,7 +859,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
     const salesEmail =
       salesRepEmail ||
       (process.env.NEXT_PUBLIC_SALES_FORWARD_TO as string | undefined) ||
-      "sales@example.com";
+      "chuck@alex-io.com";
 
     const subject = "Quote " + effectiveQuoteNo;
 
@@ -901,7 +913,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
     if (typeof window === "undefined") return;
 
     const url =
-      (process.env.NEXT_PUBLIC_SCHEDULE_CALL_URL as string | undefined) || "https://calendly.com/your-company/30min";
+      (process.env.NEXT_PUBLIC_SCHEDULE_CALL_URL as string | undefined) || "https://calendly.com/chuckjohnson/alex-io-demo";
 
     window.open(url, "_blank", "noopener,noreferrer");
   }, []);
@@ -1687,12 +1699,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         marginBottom: 10,
                       }}
                     >
-                      Get This Running in Your Shop →
+                      Start Your Free 30-Day Trial →
                     </button>
                     <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
-                      {annualMode
-                        ? "Pro at $959/mo billed annually"
-                        : "Pro at $1,299/mo · switch to annual to save 20%"}
+                      Free 30-day trial · no credit card required
                     </div>
                     <div style={{ fontSize: 11, color: "#475569", marginBottom: 16 }}>
                       Fully branded quote flow · Response within 1 business day
@@ -2528,8 +2538,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               </div>
             )}
 
-            {/* Email capture — shown after the pricing summary */}
-            {!quoteEmailSubmitted ? (
+            {/* Email capture — demo quotes only. Real Q-AI- quotes must NOT show Alex-IO lead capture. */}
+            {isDemo && !quoteEmailSubmitted ? (
               <div style={{
                 marginTop: 20,
                 marginBottom: 20,
@@ -3394,10 +3404,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   Alex-IO · Foam Quoting Software
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: "#f9fafb" }}>
-                  Get Alex-IO for your shop
+                  Start your free 30-day trial
                 </div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
-                  Tell us about your operation and we'll follow up within one business day with pricing and a live walkthrough.
+                  No credit card required. Fill in your details and we'll get your trial account set up.
                 </div>
               </div>
               <button
@@ -3448,8 +3458,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     You're on the list — we'll be in touch soon.
                   </div>
                   <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>
-                    Our team will reach out to <span style={{ color: "#38bdf8" }}>{modalLeadForm.email}</span> within
-                    one business day to walk you through Alex-IO and discuss pricing for your operation.
+                    We'll send your trial setup details to <span style={{ color: "#38bdf8" }}>{modalLeadForm.email}</span> shortly. You'll hear from us within one business day.
                   </div>
                   <button
                     type="button"

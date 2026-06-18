@@ -1,4 +1,5 @@
-// Public (unauthenticated) read-only endpoint for rough_ship_pct.
+// app/api/public/shipping-settings/route.ts
+// Public read-only endpoint for rough_ship_pct.
 // Used by the public quote page so it never calls an admin-protected route.
 import { NextResponse } from "next/server";
 import { one } from "@/lib/db";

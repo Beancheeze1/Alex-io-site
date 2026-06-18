@@ -1,7 +1,7 @@
 # Dependencies
 node_modules/
 .pnp
-.pnp.*
+.pnp.js
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
@@ -16,16 +16,18 @@ build/
 /coverage
 
 # Env files
-.env*
+.env
+.env*.local
+.env.production
 
-# Dev test JSON payloads at repo root
+# Dev test JSON payloads at repo root (keep real config files)
 /*.json
 !package.json
 !package-lock.json
 !tsconfig.json
 !pricebook.sample.json
 
-# Other dev artifacts
+# Other dev artifacts at root
 /*.ps1
 /*.html
 cushion_curves_material_1.csv

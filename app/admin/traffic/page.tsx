@@ -96,7 +96,7 @@ export default async function TrafficPage({ searchParams }: Props) {
              COUNT(DISTINCT session_id)::int AS sessions,
              COUNT(DISTINCT session_id) FILTER (WHERE event_type = 'cta_click')::int AS cta_clicks,
              COUNT(DISTINCT session_id) FILTER (
-               WHERE event_type IN ('form_submit','quote_applied','quote_email')
+               WHERE event_type IN ('form_submit','quote_email')
              )::int AS form_submits
        FROM page_events
        WHERE created_at >= now() - ($1 || ' days')::interval
@@ -120,8 +120,10 @@ export default async function TrafficPage({ searchParams }: Props) {
               MAX(city)   AS city,
               MAX(region) AS region,
               STRING_AGG(DISTINCT event_type, ',' ORDER BY event_type) AS events,
-              BOOL_OR(event_type IN ('form_submit','quote_applied','quote_email')) AS converted,
-              BOOL_OR(event_type = 'form_start') AND NOT BOOL_OR(event_type IN ('form_submit','quote_applied','quote_email')) AS engaged
+              BOOL_OR(event_type IN ('form_submit','quote_email')) AS converted,
+              BOOL_OR(event_type IN ('form_start','sample_skip','sample_editor','quote_applied'))
+              AND NOT BOOL_OR(event_type IN ('form_submit','quote_email'))
+              AS engaged
        FROM page_events
        WHERE created_at >= now() - ($1 || ' days')::interval
        GROUP BY session_id
