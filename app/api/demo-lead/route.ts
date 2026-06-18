@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
 
-const TIERS = new Set(["Starter", "Pro", "Shop", "Pilot", "General inquiry", "Quote Copy"]);
+const TIERS = new Set(["Starter", "Pro", "Shop", "Pilot", "FreeTrial", "General inquiry", "Quote Copy"]);
 
 function truncate(val: unknown, max: number): string | null {
   if (val == null || val === "") return null;

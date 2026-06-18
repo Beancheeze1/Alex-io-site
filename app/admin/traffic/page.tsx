@@ -34,6 +34,7 @@ export type SessionRow = {
   referrer: string | null;
   events: string;
   converted: boolean;
+  engaged: boolean;
   city: string | null;
   region: string | null;
 };
@@ -119,7 +120,8 @@ export default async function TrafficPage({ searchParams }: Props) {
               MAX(city)   AS city,
               MAX(region) AS region,
               STRING_AGG(DISTINCT event_type, ',' ORDER BY event_type) AS events,
-              BOOL_OR(event_type IN ('form_submit','quote_applied','quote_email')) AS converted
+              BOOL_OR(event_type IN ('form_submit','quote_applied','quote_email')) AS converted,
+              BOOL_OR(event_type = 'form_start') AND NOT BOOL_OR(event_type IN ('form_submit','quote_applied','quote_email')) AS engaged
        FROM page_events
        WHERE created_at >= now() - ($1 || ' days')::interval
        GROUP BY session_id

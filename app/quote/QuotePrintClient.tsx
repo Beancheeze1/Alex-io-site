@@ -1087,7 +1087,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
     async function load() {
       try {
-        const res = await fetch("/api/admin/shipping-settings", { cache: "no-store" });
+        const res = await fetch("/api/public/shipping-settings", { cache: "no-store" });
         const json = (await res.json().catch(() => null)) as ShippingSettingsResponse | null;
 
         if (!active) return;

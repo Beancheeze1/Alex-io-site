@@ -385,7 +385,11 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
                   </td>
                   <td className="px-4 py-3">
                     {s.converted ? (
-                      <span className="text-green-400 font-semibold">Yes</span>
+                      <span className="text-green-400 font-semibold">✓ Converted</span>
+                    ) : s.engaged ? (
+                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-400/20 text-amber-300">
+                        In quote flow
+                      </span>
                     ) : (
                       <span className="text-neutral-600">—</span>
                     )}

@@ -26,7 +26,7 @@ export function db(): Pool {
 
     globalThis.__pgPool__ = new Pool({
       connectionString,
-      max: 3,
+      max: 10,
       idleTimeoutMillis: 10_000,
       ssl: needsSsl ? { rejectUnauthorized } : undefined,
     });

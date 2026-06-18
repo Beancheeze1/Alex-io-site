@@ -1,8 +1,6 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
+# Dependencies
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,38 +8,49 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
+# Build outputs
+.next/
+out/
+dist/
+build/
 /coverage
 
-# next.js
-/.next/
-/out/
+# Env files
+.env*
 
-# production
-/build
+# Dev test JSON payloads at repo root
+/*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!pricebook.sample.json
 
-# misc
+# Other dev artifacts
+/*.ps1
+/*.html
+cushion_curves_material_1.csv
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# OS / editor
 .DS_Store
+Thumbs.db
 *.pem
+.vscode/
+.idea/
 
-# debug
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
+# Vercel / data
 .vercel
 .data/
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-
-# token store & webhook logs
-.data/
+# Local artifacts
 Alex-IO-clean/

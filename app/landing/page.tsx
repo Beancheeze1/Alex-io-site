@@ -587,9 +587,10 @@ export default function LandingPage() {
       const data = await res.json()
       if (!data.ok) throw new Error(data.message || "Failed to create sample")
       router.push(`${data.redirectPath}&sample_overlay=1`)
-    } catch {
+    } catch (err) {
+      console.error("[viewSampleQuote] Failed to load sample quote:", err)
       setSampleLoading(false)
-      // fail silently — could optionally fall back to the form
+      setSeedError(true)
     }
   }
 
