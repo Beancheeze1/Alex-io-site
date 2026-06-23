@@ -960,7 +960,7 @@ export default function LandingPage() {
                             <button
                               type="button"
                               disabled={submitting}
-                              onClick={() => { if (isPreset) set("qty", ""); }}
+                              onClick={() => set("qty", "")}
                               className={[
                                 "rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50",
                                 isCustom

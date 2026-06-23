@@ -1624,10 +1624,10 @@ export default function StartQuoteModal() {
                             onClick={onLaunchEditor}
                             disabled={!qtyOk || (quoteType === "foam_insert" ? !insertDimsOk : (!boxOk || !foamFitOk || !thicknessOk))}
                             className={[
-                              "rounded-xl px-5 py-2 text-sm font-semibold",
+                              "rounded-xl px-6 py-3 text-sm font-bold shadow-[0_4px_14px_rgba(16,185,129,0.3)]",
                               qtyOk && (quoteType === "foam_insert" ? insertDimsOk : (boxOk && foamFitOk && thicknessOk))
-                                ? "bg-sky-500/80 text-white hover:bg-sky-500"
-                                : "cursor-not-allowed bg-sky-500/30 text-white/70",
+                                ? "bg-emerald-500 text-white hover:bg-emerald-400"
+                                : "cursor-not-allowed bg-emerald-500/30 text-white/60",
                             ].join(" ")}
                           >
                             Launch Layout Editor
@@ -1959,6 +1959,9 @@ function GuidedCavityBuilder({
           {shape === "rect"
             ? "Creates a rectangular pocket — enter length, width, and depth."
             : "Creates a round pocket — enter diameter and depth."}
+        </div>
+        <div className="mt-2 text-xs text-sky-300/70">
+          Not sure about exact positions? Add approximate cavities here and fine-tune their placement in the editor.
         </div>
       </div>
 
