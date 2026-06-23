@@ -1060,59 +1060,25 @@ export default function StartQuoteModal() {
 
                   <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                     <div className="text-xs font-semibold tracking-widest text-slate-400">
-                      BASICS
+                      DETAILS
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-3">
-                      <MiniField label="Qty (required)">
-                        <input
-                          value={qty}
-                          onChange={(e) => setQty(e.target.value)}
-                          inputMode="numeric"
-                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                          placeholder="0"
-                        />
-                        {!qtyOk ? (
-                          <div className="mt-1 text-xs text-amber-200/90">
-                            Required
-                          </div>
-                        ) : null}
-                      </MiniField>
-
-                      <MiniField label="Cavity seed (e.g. 3x2x1 or Ø2.5x1; separate multiple with ;)">
-                        <input
-                          value={cavitySeed}
-                          onChange={(e) => setCavitySeed(e.target.value)}
-                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                          placeholder='e.g. 3x2x1   or   Ø2.5x1   or   3x2x1;Ø2x1'
-                        />
-                        {cavitySeed.trim() ? (
-                          <div className="mt-1 text-xs text-slate-400">
-                            Normalized:{" "}
-                            <span className="text-slate-200">
-                              {normalizedSeed || "—"}
-                            </span>
-                          </div>
-                        ) : null}
-                      </MiniField>
-
-                      <MiniField label="Material text">
-                        <input
-                          value={materialText}
-                          onChange={(e) => setMaterialText(e.target.value)}
-                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                          placeholder="(auto when selected)"
-                        />
-                      </MiniField>
-
-                      <MiniField label="Material ID">
-                        <input
-                          value={materialId}
-                          onChange={(e) => setMaterialId(e.target.value)}
-                          inputMode="numeric"
-                          className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                          placeholder="(auto when selected)"
-                        />
-                      </MiniField>
+                      <div>
+                        <div className="text-[11px] font-semibold tracking-widest text-slate-400">Qty</div>
+                        <div className="mt-1 text-sm text-white">{qty || "—"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-semibold tracking-widest text-slate-400">Cavities</div>
+                        <div className="mt-1 text-sm text-white">{normalizedSeed || "—"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-semibold tracking-widest text-slate-400">Material</div>
+                        <div className="mt-1 text-sm text-white">{materialText || "—"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-semibold tracking-widest text-slate-400">Material ID</div>
+                        <div className="mt-1 text-sm text-white">{materialId || "—"}</div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1665,8 +1631,8 @@ export default function StartQuoteModal() {
                     className={[
                       "rounded-xl px-4 py-2 text-sm font-semibold",
                       canGoNext(activeStep)
-                        ? "bg-sky-500/80 text-white hover:bg-sky-500"
-                        : "cursor-not-allowed bg-sky-500/30 text-white/70",
+                        ? "bg-emerald-500 text-white hover:bg-emerald-400"
+                        : "cursor-not-allowed bg-emerald-500/30 text-white/70",
                     ].join(" ")}
                   >
                     Next
@@ -1961,7 +1927,7 @@ function GuidedCavityBuilder({
             : "Creates a round pocket — enter diameter and depth."}
         </div>
         <div className="mt-2 text-xs text-sky-300/70">
-          Not sure about exact positions? Add approximate cavities here and fine-tune their placement in the editor.
+          Fine-tune cavity placement in the layout editor.
         </div>
       </div>
 

@@ -539,6 +539,7 @@ export default function LandingPage() {
     qty: "",
   });
 
+  const [showCustomQty, setShowCustomQty] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [seedError, setSeedError] = React.useState(false);
   const formStartedRef = React.useRef(false);
@@ -936,8 +937,6 @@ export default function LandingPage() {
                     <div className="mb-2 text-sm font-medium text-slate-200">Quantity</div>
                     {(() => {
                       const QTY_PRESETS = ["25", "50", "100", "250", "500", "1000"];
-                      const isPreset = QTY_PRESETS.includes(form.qty);
-                      const isCustom = form.qty !== "" && !isPreset;
                       return (
                         <>
                           <div className="flex flex-wrap gap-1.5">
@@ -946,10 +945,10 @@ export default function LandingPage() {
                                 key={q}
                                 type="button"
                                 disabled={submitting}
-                                onClick={() => set("qty", q)}
+                                onClick={() => { setShowCustomQty(false); set("qty", q); }}
                                 className={[
                                   "rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50",
-                                  form.qty === q
+                                  form.qty === q && !showCustomQty
                                     ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
                                     : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
                                 ].join(" ")}
@@ -960,10 +959,10 @@ export default function LandingPage() {
                             <button
                               type="button"
                               disabled={submitting}
-                              onClick={() => set("qty", "")}
+                              onClick={() => { setShowCustomQty(true); set("qty", ""); }}
                               className={[
                                 "rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50",
-                                isCustom
+                                showCustomQty
                                   ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
                                   : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
                               ].join(" ")}
@@ -971,7 +970,7 @@ export default function LandingPage() {
                               Custom
                             </button>
                           </div>
-                          {isCustom && (
+                          {showCustomQty && (
                             <input
                               type="text"
                               inputMode="numeric"
