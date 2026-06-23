@@ -2539,7 +2539,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
             )}
 
             {/* Email capture — demo quotes only. Real Q-AI- quotes must NOT show Alex-IO lead capture. */}
-            {isDemo && !quoteEmailSubmitted ? (
+            {isDemo && (!quoteEmailSubmitted ? (
               <div style={{
                 marginTop: 20,
                 marginBottom: 20,

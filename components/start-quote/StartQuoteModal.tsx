@@ -1179,10 +1179,61 @@ export default function StartQuoteModal() {
                           <div className="text-xs font-semibold tracking-widest text-slate-400">
                             QUANTITY (REQUIRED)
                           </div>
-                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <DimInput label="Qty" value={qty} onChange={setQty} />
-                            <MiniStat label="Status" value={qtyOk ? "OK" : "Required"} />
-                          </div>
+                          {(() => {
+                            const QTY_PRESETS = ["25", "50", "100", "250", "500", "1000"];
+                            const isPreset = QTY_PRESETS.includes(qty);
+                            const isCustomActive = qty !== "" && !isPreset;
+                            return (
+                              <>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {QTY_PRESETS.map((p) => (
+                                    <button
+                                      key={p}
+                                      type="button"
+                                      onClick={() => setQty(p)}
+                                      className={[
+                                        "rounded-xl border px-4 py-2 text-sm font-semibold",
+                                        qty === p
+                                          ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
+                                          : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
+                                      ].join(" ")}
+                                    >
+                                      {p}
+                                    </button>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() => { if (isPreset) setQty(""); }}
+                                    className={[
+                                      "rounded-xl border px-4 py-2 text-sm font-semibold",
+                                      isCustomActive
+                                        ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
+                                        : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
+                                    ].join(" ")}
+                                  >
+                                    Custom
+                                  </button>
+                                </div>
+                                {isCustomActive ? (
+                                  <input
+                                    autoFocus
+                                    value={qty}
+                                    onChange={(e) => setQty(e.target.value)}
+                                    inputMode="numeric"
+                                    className="mt-3 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
+                                    placeholder="Enter quantity"
+                                  />
+                                ) : null}
+                                <div className="mt-2 text-xs">
+                                  {!qtyOk ? (
+                                    <span className="text-amber-200/90">Quantity is required to continue.</span>
+                                  ) : (
+                                    <span className="text-sky-300/70">{Number(qty).toLocaleString()} units selected</span>
+                                  )}
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     </StepCard>
@@ -1213,15 +1264,19 @@ export default function StartQuoteModal() {
                         </div>
 
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          <ChoiceCard
-                            title="Mailer"
-                            desc="Most common (supports bottom+top pad workflow)"
+                          <BoxStyleCard
+                            title="Mailer box"
+                            desc="Tuck-top lid, no tape needed. Great for e-commerce and unboxing."
+                            imgSrc="/boxes/Mailer.png"
+                            imgAlt="Mailer box open"
                             selected={boxStyle === "mailer"}
                             onClick={() => setBoxStyle("mailer")}
                           />
-                          <ChoiceCard
-                            title="RSC"
-                            desc="Regular slotted container"
+                          <BoxStyleCard
+                            title="RSC / Shipper"
+                            desc="Regular slotted container. Standard tape-sealed shipping box."
+                            imgSrc="/boxes/RSC.png"
+                            imgAlt="RSC shipper box open"
                             selected={boxStyle === "rsc"}
                             onClick={() => setBoxStyle("rsc")}
                           />
@@ -1424,37 +1479,12 @@ export default function StartQuoteModal() {
                           : "Optional"
                       }
                     >
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                        <div className="text-xs font-semibold tracking-widest text-slate-400">
-                          SEED (OPTIONAL)
-                        </div>
-                        <div className="mt-2 text-sm text-slate-300">
-                          Seed one or more cavities into the editor as a starting point. Separate multiple with semicolons.
-                        </div>
-                        <div className="mt-3">
-                          <input
-                            value={cavitySeed}
-                            onChange={(e) => setCavitySeed(e.target.value)}
-                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
-                            placeholder='Rect: 3x2x1   |   Round: Ø2.5x1   |   Multi: 3x2x1;Ø2x1'
-                          />
-                        </div>
-
-                        {cavitySeed.trim() ? (
-                          <div className="mt-2 text-sm text-slate-300">
-                            Normalized:{" "}
-                            <span className="font-semibold text-white">
-                              {normalizedSeed || "—"}
-                            </span>
-                          </div>
-                        ) : null}
-
-                        {cavitySeedInvalid ? (
-                          <div className="mt-3 text-sm text-amber-200/90">
-                            Format must be <b>LxWxD</b> (rect) or <b>ØDiaxDepth</b> (round). Separate multiple with semicolons. Examples: <b>3x2x1</b>, <b>Ø2.5x1</b>, <b>3x2x1;Ø2x1</b>.
-                          </div>
-                        ) : null}
-                      </div>
+                      <GuidedCavityBuilder
+                        value={cavitySeed}
+                        onChange={setCavitySeed}
+                        normalizedSeed={normalizedSeed}
+                        isInvalid={cavitySeedInvalid}
+                      />
                     </StepCard>
                   ) : null}
 
@@ -1892,5 +1922,226 @@ function SkeletonCard() {
       <div className="mt-2 h-3 w-1/2 rounded bg-white/10" />
       <div className="mt-3 h-7 w-16 rounded bg-white/10" />
     </div>
+  );
+}
+
+function GuidedCavityBuilder({
+  value,
+  onChange,
+  normalizedSeed,
+  isInvalid,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  normalizedSeed: string;
+  isInvalid: boolean;
+}) {
+  const [shape, setShape] = React.useState<"rect" | "circle">("rect");
+  const [L, setL] = React.useState("");
+  const [W, setW] = React.useState("");
+  const [D, setD] = React.useState("");
+  const [dia, setDia] = React.useState("");
+  const [dep, setDep] = React.useState("");
+  const [addError, setAddError] = React.useState("");
+
+  const tokens = normalizedSeed
+    ? normalizedSeed.split(";").filter(Boolean)
+    : [];
+
+  const removeToken = (idx: number) => {
+    const next = tokens.filter((_, i) => i !== idx).join(";");
+    onChange(next);
+  };
+
+  const handleAdd = () => {
+    setAddError("");
+    if (shape === "rect") {
+      const lv = Number(L), wv = Number(W), dv = Number(D);
+      if (!(lv > 0 && wv > 0 && dv > 0)) {
+        setAddError("L, W, and D must all be positive numbers.");
+        return;
+      }
+      const token = `${lv}x${wv}x${dv}`;
+      const next = tokens.length > 0 ? `${tokens.join(";")};${token}` : token;
+      onChange(next);
+      setL(""); setW(""); setD("");
+    } else {
+      const diaV = Number(dia), depV = Number(dep);
+      if (!(diaV > 0 && depV > 0)) {
+        setAddError("Diameter and Depth must both be positive numbers.");
+        return;
+      }
+      const token = `Ø${diaV}x${depV}`;
+      const next = tokens.length > 0 ? `${tokens.join(";")};${token}` : token;
+      onChange(next);
+      setDia(""); setDep("");
+    }
+  };
+
+  const inputCls =
+    "flex-1 min-w-0 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60";
+
+  return (
+    <div className="space-y-4">
+      {/* Cavity list */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="text-xs font-semibold tracking-widest text-slate-400">
+          CAVITY LIST
+        </div>
+        {tokens.length === 0 ? (
+          <p className="mt-3 text-sm italic text-slate-400">
+            No cavities yet — add one below, or skip to let the editor start blank.
+          </p>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {tokens.map((tok, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-1.5 rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-sm text-white"
+              >
+                <span className="font-mono">{tok}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove cavity ${tok}`}
+                  onClick={() => removeToken(i)}
+                  className="text-slate-300 hover:text-white"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Add a cavity */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="text-xs font-semibold tracking-widest text-slate-400">
+          ADD A CAVITY
+        </div>
+
+        {/* Shape toggle */}
+        <div className="mt-3 flex gap-2">
+          {(["rect", "circle"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => { setShape(s); setAddError(""); }}
+              className={[
+                "rounded-xl border px-4 py-2 text-sm font-semibold",
+                shape === s
+                  ? "border-sky-400/60 bg-sky-500/20 text-white"
+                  : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]",
+              ].join(" ")}
+            >
+              {s === "rect" ? "Rectangular" : "Round"}
+            </button>
+          ))}
+        </div>
+
+        {/* Dimension inputs */}
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          {shape === "rect" ? (
+            <>
+              <div className="flex min-w-[72px] flex-1 flex-col gap-1">
+                <label className="text-xs font-semibold tracking-widest text-slate-400">L (in)</label>
+                <input value={L} onChange={(e) => setL(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
+              </div>
+              <div className="flex min-w-[72px] flex-1 flex-col gap-1">
+                <label className="text-xs font-semibold tracking-widest text-slate-400">W (in)</label>
+                <input value={W} onChange={(e) => setW(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
+              </div>
+              <div className="flex min-w-[72px] flex-1 flex-col gap-1">
+                <label className="text-xs font-semibold tracking-widest text-slate-400">D (in)</label>
+                <input value={D} onChange={(e) => setD(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex min-w-[100px] flex-1 flex-col gap-1">
+                <label className="text-xs font-semibold tracking-widest text-slate-400">Diameter (in)</label>
+                <input value={dia} onChange={(e) => setDia(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
+              </div>
+              <div className="flex min-w-[100px] flex-1 flex-col gap-1">
+                <label className="text-xs font-semibold tracking-widest text-slate-400">Depth (in)</label>
+                <input value={dep} onChange={(e) => setDep(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={handleAdd}
+            className="rounded-xl border border-sky-400/40 bg-sky-500/15 px-5 py-2 text-sm font-semibold text-white hover:bg-sky-500/25"
+          >
+            + Add
+          </button>
+        </div>
+
+        {addError ? (
+          <div className="mt-2 text-xs text-amber-200/90">{addError}</div>
+        ) : null}
+
+        <div className="mt-2 text-xs text-slate-500">
+          {shape === "rect"
+            ? "Creates a rectangular pocket — enter length, width, and depth."
+            : "Creates a round pocket — enter diameter and depth."}
+        </div>
+      </div>
+
+      {/* Raw seed string */}
+      {tokens.length > 0 ? (
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-xs">
+          <span className="text-slate-400">Seed string: </span>
+          <span className="font-mono text-slate-200">{normalizedSeed}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BoxStyleCard({
+  title,
+  desc,
+  imgSrc,
+  imgAlt,
+  selected,
+  onClick,
+}: {
+  title: string;
+  desc: string;
+  imgSrc: string;
+  imgAlt: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "w-full text-left rounded-2xl border p-4 transition",
+        selected
+          ? "border-sky-400/60 bg-sky-500/10 shadow-[0_0_0_3px_rgba(56,189,248,0.12)]"
+          : "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]",
+      ].join(" ")}
+    >
+      <div
+        className="overflow-hidden rounded-xl flex items-center justify-center"
+        style={{ backgroundColor: "#F7F0E4", height: "120px" }}
+      >
+        <img
+          src={imgSrc}
+          alt={imgAlt}
+          style={{ maxHeight: "108px", maxWidth: "90%", objectFit: "contain" }}
+        />
+      </div>
+      <div className="mt-3 text-sm font-semibold text-white">{title}</div>
+      <div className="mt-1 text-sm text-slate-300">{desc}</div>
+      {selected ? (
+        <div className="mt-2 inline-block rounded-full border border-sky-400/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-300">
+          ✓ Selected
+        </div>
+      ) : null}
+    </button>
   );
 }
