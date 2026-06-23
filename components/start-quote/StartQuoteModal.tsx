@@ -231,19 +231,6 @@ export default function StartQuoteModal() {
   const [qty, setQty] = React.useState<string>(
     searchParams.get("qty") || "",
   );
-  const [name, setName] = React.useState<string>(
-    searchParams.get("customer_name") || "",
-  );
-  const [email, setEmail] = React.useState<string>(
-    searchParams.get("customer_email") || "",
-  );
-  const [company, setCompany] = React.useState<string>(
-    searchParams.get("customer_company") || "",
-  );
-  const [phone, setPhone] = React.useState<string>(
-    searchParams.get("customer_phone") || "",
-  );
-
   // Material selection
   const [materialText, setMaterialText] = React.useState<string>(
     searchParams.get("material_text") ||
@@ -302,10 +289,6 @@ export default function StartQuoteModal() {
 
     // Cavity seed (multi-cavity string)
     if (prefillData.cavities) setCavitySeed(prefillData.cavities);
-
-    // Customer contact
-    if (prefillData.customerName) setName(prefillData.customerName);
-    if (prefillData.customerEmail) setEmail(prefillData.customerEmail);
 
     // Printing preference
     if (prefillData.printed === true) setPrinted(true);
@@ -862,10 +845,6 @@ export default function StartQuoteModal() {
 
     if (qtyNum) p.set("qty", String(qtyNum));
 
-    if (name.trim()) p.set("customer_name", name.trim());
-    if (email.trim()) p.set("customer_email", email.trim());
-    if (company.trim()) p.set("customer_company", company.trim());
-    if (phone.trim()) p.set("customer_phone", phone.trim());
 
     const matIdNum = Number(materialId);
     const hasMaterialId = Number.isFinite(matIdNum) && matIdNum > 0;
@@ -1158,83 +1137,6 @@ export default function StartQuoteModal() {
                           />
                         </div>
 
-                        {/* Customer info (D) */}
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
-                            CUSTOMER
-                          </div>
-                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <TextInput label="Name" value={name} onChange={setName} />
-                            <TextInput label="Email" value={email} onChange={setEmail} />
-                            <TextInput label="Company" value={company} onChange={setCompany} />
-                            <TextInput label="Phone" value={phone} onChange={setPhone} />
-                          </div>
-                          <div className="mt-3 text-sm text-slate-300">
-                            This info will carry into the editor URL (for future recommendations).
-                          </div>
-                        </div>
-
-                        {/* Qty in-flow (required) */}
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
-                            QUANTITY (REQUIRED)
-                          </div>
-                          {(() => {
-                            const QTY_PRESETS = ["25", "50", "100", "250", "500", "1000"];
-                            const isPreset = QTY_PRESETS.includes(qty);
-                            const isCustomActive = qty !== "" && !isPreset;
-                            return (
-                              <>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                  {QTY_PRESETS.map((p) => (
-                                    <button
-                                      key={p}
-                                      type="button"
-                                      onClick={() => setQty(p)}
-                                      className={[
-                                        "rounded-xl border px-4 py-2 text-sm font-semibold",
-                                        qty === p
-                                          ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
-                                          : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
-                                      ].join(" ")}
-                                    >
-                                      {p}
-                                    </button>
-                                  ))}
-                                  <button
-                                    type="button"
-                                    onClick={() => { if (isPreset) setQty(""); }}
-                                    className={[
-                                      "rounded-xl border px-4 py-2 text-sm font-semibold",
-                                      isCustomActive
-                                        ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
-                                        : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
-                                    ].join(" ")}
-                                  >
-                                    Custom
-                                  </button>
-                                </div>
-                                {isCustomActive ? (
-                                  <input
-                                    autoFocus
-                                    value={qty}
-                                    onChange={(e) => setQty(e.target.value)}
-                                    inputMode="numeric"
-                                    className="mt-3 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60"
-                                    placeholder="Enter quantity"
-                                  />
-                                ) : null}
-                                <div className="mt-2 text-xs">
-                                  {!qtyOk ? (
-                                    <span className="text-amber-200/90">Quantity is required to continue.</span>
-                                  ) : (
-                                    <span className="text-sky-300/70">{Number(qty).toLocaleString()} units selected</span>
-                                  )}
-                                </div>
-                              </>
-                            );
-                          })()}
-                        </div>
                       </div>
                     </StepCard>
                   ) : null}
@@ -1698,10 +1600,6 @@ export default function StartQuoteModal() {
                             )}
 
                             <Row k="Qty" v={qtyNum ? String(qtyNum) : "(missing)"} />
-                            <Row k="Customer" v={name.trim() ? name.trim() : "-"} />
-                            <Row k="Email" v={email.trim() ? email.trim() : "-"} />
-                            <Row k="Company" v={company.trim() ? company.trim() : "-"} />
-                            <Row k="Phone" v={phone.trim() ? phone.trim() : "-"} />
 
                             <Row k="Material" v={materialText || "-"} />
                             <Row k="Material ID" v={materialId || "-"} />
@@ -1847,30 +1745,6 @@ function DimInput({
             : "border-white/10 bg-white/[0.03] text-white focus:border-sky-400/60",
         ].join(" ")}
         placeholder={disabled ? "-" : "0"}
-      />
-    </div>
-  );
-}
-
-function TextInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div>
-      <div className="mb-1 text-xs font-semibold tracking-widest text-slate-400">
-        {label}
-      </div>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-sky-400/60"
-        placeholder="-"
       />
     </div>
   );

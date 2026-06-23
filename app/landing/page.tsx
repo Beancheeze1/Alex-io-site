@@ -932,13 +932,60 @@ export default function LandingPage() {
                     placeholder="3"
                     disabled={submitting}
                   />
-                  <DimField
-                    label="Quantity"
-                    value={form.qty}
-                    onChange={(v) => set("qty", v)}
-                    placeholder="100"
-                    disabled={submitting}
-                  />
+                  <div className="block">
+                    <div className="mb-2 text-sm font-medium text-slate-200">Quantity</div>
+                    {(() => {
+                      const QTY_PRESETS = ["25", "50", "100", "250", "500", "1000"];
+                      const isPreset = QTY_PRESETS.includes(form.qty);
+                      const isCustom = form.qty !== "" && !isPreset;
+                      return (
+                        <>
+                          <div className="flex flex-wrap gap-1.5">
+                            {QTY_PRESETS.map((q) => (
+                              <button
+                                key={q}
+                                type="button"
+                                disabled={submitting}
+                                onClick={() => set("qty", q)}
+                                className={[
+                                  "rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50",
+                                  form.qty === q
+                                    ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
+                                    : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
+                                ].join(" ")}
+                              >
+                                {q}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              disabled={submitting}
+                              onClick={() => { if (isPreset) set("qty", ""); }}
+                              className={[
+                                "rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50",
+                                isCustom
+                                  ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
+                                  : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
+                              ].join(" ")}
+                            >
+                              Custom
+                            </button>
+                          </div>
+                          {isCustom && (
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={form.qty}
+                              onChange={(e) => set("qty", e.target.value)}
+                              placeholder="Enter quantity"
+                              disabled={submitting}
+                              className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 transition focus:border-sky-400/60 focus:bg-white/[0.06] disabled:opacity-50"
+                            />
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
 
                 {seedError && (
