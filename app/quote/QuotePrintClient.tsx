@@ -2614,7 +2614,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               }}>
                 ✓ Got it — we'll send this quote to your inbox shortly.
               </div>
-            )}
+            ))}
 
             {/* LINE ITEMS CARD (foam items + layers + carton selections) */}
             <div style={{ ...cardBase, background: "#ffffff", marginBottom: 24 }}>
