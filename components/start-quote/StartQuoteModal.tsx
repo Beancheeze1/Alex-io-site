@@ -1081,6 +1081,26 @@ export default function StartQuoteModal() {
                       </div>
                     </div>
                   </div>
+
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                    <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+                      WHAT HAPPENS NEXT
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      <ReassuranceItem
+                        title="A real, saved quote number"
+                        desc="Come back to it anytime — no account needed."
+                      />
+                      <ReassuranceItem
+                        title="You review before anything's final"
+                        desc="See layout and pricing, adjust as needed, then submit when ready."
+                      />
+                      <ReassuranceItem
+                        title="No payment to get a quote"
+                        desc="Pricing is free to see — nothing is charged here."
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Right panel (active step) */}
@@ -1101,6 +1121,22 @@ export default function StartQuoteModal() {
                             selected={quoteType === "complete_pack"}
                             onClick={() => setQuoteType("complete_pack")}
                           />
+                        </div>
+
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                            QUANTITY
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <DimInput label="Quantity" value={qty} onChange={setQty} />
+                          </div>
+
+                          {!qtyOk ? (
+                            <div className="mt-3 text-sm text-amber-200/90">
+                              Enter a quantity to continue.
+                            </div>
+                          ) : null}
                         </div>
 
                       </div>
@@ -1680,6 +1716,20 @@ function ChoiceCard({
       <div className="text-sm font-semibold text-white">{title}</div>
       <div className="mt-1 text-sm text-slate-300">{desc}</div>
     </button>
+  );
+}
+
+function ReassuranceItem({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-[11px] text-sky-300">
+        ✓
+      </div>
+      <div>
+        <div className="text-sm font-medium text-white">{title}</div>
+        <div className="text-xs text-slate-400">{desc}</div>
+      </div>
+    </div>
   );
 }
 
