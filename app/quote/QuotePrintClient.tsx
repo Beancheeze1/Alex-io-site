@@ -1536,53 +1536,6 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
         {/* Happy path */}
         {!loading && quote && (
           <>
-            {/* Quote total summary — always first so visitors see the number without scrolling */}
-            {primaryItem && (
-              <div style={{
-                display: "flex",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-                gap: 16,
-                marginBottom: 20,
-                padding: "14px 18px",
-                borderRadius: 14,
-                background: "#f8fafc",
-                border: "1px solid #e2e8f0",
-                flexWrap: "wrap",
-              }}>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 4 }}>
-                    Quote estimate
-                  </div>
-                  {anyPricing ? (
-                    <>
-                      <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
-                        {formatUsd(planningTotal > 0 ? planningTotal : effectiveGrandTotal > 0 ? effectiveGrandTotal : breakdownSubtotal)}
-                      </div>
-                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                        {breakdownUnitPrice != null ? `${formatUsd(breakdownUnitPrice)}/pc · ` : ""}
-                        Qty {primaryItem.qty.toLocaleString()}
-                        {shippingEstimate > 0 ? " · incl. est. shipping" : ""}
-                      </div>
-                    </>
-                  ) : (
-                    <div style={{ fontSize: 14, color: "#6b7280" }}>Pricing pending — see full breakdown below</div>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, textAlign: "right", color: "#374151" }}>
-                  <div style={{ fontWeight: 600 }}>
-                    {(() => {
-                      const stackH = layoutMetrics?.stack_total_thickness_in;
-                      const h = stackH != null ? stackH : primaryItem.height_in;
-                      return `${formatDims(primaryItem.length_in, primaryItem.width_in, h)} in`;
-                    })()}
-                  </div>
-                  <div style={{ color: "#6b7280" }}>{primaryMaterialName || "Material TBD"}</div>
-                  <div style={{ color: "#9ca3af", marginTop: 4, fontSize: 11 }}>Full breakdown below ↓</div>
-                </div>
-              </div>
-            )}
-
             {/* Gradient header — demo and real quote variants */}
             {isDemo ? (
               /* ── Demo header: sells Alex-IO the software ── */
@@ -2158,6 +2111,35 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Quote total summary — now placed under the gradient header */}
+            {primaryItem && (
+              <div style={{
+                marginBottom: 20,
+                padding: "14px 18px",
+                borderRadius: 14,
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 4 }}>
+                  Quote estimate
+                </div>
+                {anyPricing ? (
+                  <>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
+                      {formatUsd(planningTotal > 0 ? planningTotal : effectiveGrandTotal > 0 ? effectiveGrandTotal : breakdownSubtotal)}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                      {breakdownUnitPrice != null ? `${formatUsd(breakdownUnitPrice)}/pc · ` : ""}
+                      Qty {primaryItem.qty.toLocaleString()}
+                      {shippingEstimate > 0 ? " · incl. est. shipping" : ""}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 14, color: "#6b7280" }}>Pricing pending — see full breakdown below</div>
+                )}
               </div>
             )}
 

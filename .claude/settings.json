@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(git check-ignore *)",
+      "Bash(powershell -Command \"Get-Process node -ErrorAction SilentlyContinue | Select-Object Id,StartTime\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen)",
+      "PowerShell(Stop-Process -Id 25684 -Force)",
+      "Read(//tmp/**)",
+      "Bash(break)",
+      "Bash(curl -s -X POST http://localhost:3000/api/demo/seed -H \"Content-Type: application/json\" -d '{\"outsideL\":12,\"outsideW\":10,\"outsideH\":4,\"qty\":25,\"customerName\":\"Test Customer\",\"shipMode\":\"box\",\"insertType\":\"single\"}')",
+      "Bash(node -e ' *)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force })",
+      "Bash(npm uninstall *)"
+    ]
+  }
+}
