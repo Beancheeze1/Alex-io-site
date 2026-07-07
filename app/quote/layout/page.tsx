@@ -474,7 +474,8 @@ function parseCavityDims(raw: string): {
   L: number;
   W: number;
   D: number;
-  shape?: "rect" | "circle";
+  shape?: "rect" | "circle" | "roundedRect";
+  radius?: number;
 } | null {
   const t = raw
     .toLowerCase()
@@ -514,6 +515,23 @@ const circlePrefixRe = new RegExp(
     if (!dia || !depth) return null;
 
     return { L: dia, W: dia, D: depth, shape: "circle" };
+  }
+
+  // ---- Rounded rectangle: rr3x2x1x0.25 or round3x2x1x0.25 / rounded3x2x1x0.25 ----
+  // Checked before the plain rect triple match since it also contains
+  // x-separated numbers and would otherwise be swallowed by tripleRe.
+  const roundedRectRe = new RegExp(
+    String.raw`(?:rr|rounded|round)\s*(${num})\s*[x×]\s*(${num})\s*[x×]\s*(${num})\s*[x×]\s*(${num})`,
+  );
+
+  m = t.match(roundedRectRe);
+  if (m) {
+    const L = Number(m[1]) || 0;
+    const W = Number(m[2]) || 0;
+    const D = Number(m[3]) || 0;
+    const radius = Number(m[4]) || 0;
+    if (!L || !W || !D) return null;
+    return { L, W, D, shape: "roundedRect", radius };
   }
 
   // ---- Rect forms (existing behavior) ----
@@ -932,7 +950,8 @@ export default function LayoutPage({
           L: number;
           W: number;
           D: number;
-          shape?: "rect" | "circle";
+          shape?: "rect" | "circle" | "roundedRect";
+          radius?: number;
         }[];
 
         const count = parsedCavs.length;
@@ -971,12 +990,17 @@ export default function LayoutPage({
             const yNorm = block.widthIn > 0 ? yIn / block.widthIn : 0.1;
 
             const isCircle = (c as any).shape === "circle";
+            const isRounded = (c as any).shape === "roundedRect";
 
             cavities.push({
               id: `cav-${idx + 1}`,
-              label: isCircle ? `Ø${c.L}×${c.D} in` : `${c.L}×${c.W}×${c.D} in`,
-              shape: isCircle ? "circle" : "rect",
-              cornerRadiusIn: 0,
+              label: isCircle
+                ? `Ø${c.L}×${c.D} in`
+                : isRounded
+                  ? `${c.L}×${c.W}×${c.D} in (r${(c as any).radius ?? 0})`
+                  : `${c.L}×${c.W}×${c.D} in`,
+              shape: isCircle ? "circle" : isRounded ? "roundedRect" : "rect",
+              cornerRadiusIn: isRounded ? Number((c as any).radius) || 0 : 0,
               lengthIn: c.L,
               widthIn: c.W,
               depthIn: c.D,

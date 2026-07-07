@@ -50,7 +50,7 @@ type QtyBreak = {
   price: string;
 };
 
-type CavityShape = "rect" | "circle";
+type CavityShape = "rect" | "circle" | "roundedRect";
 
 type CavityRow = {
   id: string;
@@ -60,8 +60,12 @@ type CavityRow = {
   d: string;
   dia: string;
   depth: string;
+  radius: string;
   count: string;
+  layer: string;
 };
+
+type LayerOption = { index: number; label: string };
 
 type CustomerOption = {
   name: string;
@@ -102,57 +106,6 @@ function familyLabel(fam: string | null) {
   return t ? t : "Other";
 }
 
-function parseSingleCavity(raw: string): string | null {
-  const s = String(raw || "")
-    .replace(/[×\*]/g, "x")
-    .replace(/\s+/g, "")
-    .trim();
-  if (!s) return null;
-
-  const circlePrefixRe = /^(?:[Øø@]|dia(?:m(?:eter)?)?)(.+)/i;
-  const circleMatch = s.match(circlePrefixRe);
-  if (circleMatch) {
-    const rest = circleMatch[1];
-    const nums = rest.match(/(\d+(?:\.\d+)?|\.\d+)/g);
-    if (!nums || nums.length < 2) return null;
-    const dia = Number(nums[0]);
-    const depth = Number(nums[1]);
-    if (!dia || !depth) return null;
-    return `Ø${dia}x${depth}`;
-  }
-
-  const nums = s.match(/(\d+(?:\.\d+)?|\.\d+)/g);
-  if (!nums) return null;
-
-  if (nums.length >= 3) {
-    const L = Number(nums[0]);
-    const W = Number(nums[1]);
-    const D = Number(nums[2]);
-    if (![L, W, D].every((n) => Number.isFinite(n) && n > 0)) return null;
-    return `${L}x${W}x${D}`;
-  }
-
-  if (nums.length === 2) {
-    const dia = Number(nums[0]);
-    const depth = Number(nums[1]);
-    if (![dia, depth].every((n) => Number.isFinite(n) && n > 0)) return null;
-    return `Ø${dia}x${depth}`;
-  }
-
-  return null;
-}
-
-function parseSeedCavities(raw: string): { normalized: string; isValid: boolean } {
-  if (!raw || !raw.trim()) return { normalized: "", isValid: true };
-  const tokens = raw.split(/[;,]/).map((t) => t.trim()).filter(Boolean);
-  const parsed = tokens.map(parseSingleCavity);
-  const valid = parsed.filter((p): p is string => p !== null);
-  return {
-    normalized: valid.join(";"),
-    isValid: valid.length === tokens.length && tokens.length > 0,
-  };
-}
-
 function newQtyBreakRow(): QtyBreak {
   return { id: Math.random().toString(36).slice(2), qty: "", price: "" };
 }
@@ -166,33 +119,83 @@ function newCavityRow(): CavityRow {
     d: "",
     dia: "",
     depth: "",
+    radius: "",
     count: "1",
+    layer: "1",
   };
 }
 
-/** Turn structured cavity rows into the semicolon-delimited seed string the
- * rest of the submit pipeline (parseSeedCavities → cavities= URL param)
- * already expects. A row with count > 1 is repeated that many times, since
- * the URL contract has no per-token quantity concept of its own. */
-function buildCavitySeedFromRows(rows: CavityRow[]): string {
-  const tokens: string[] = [];
+/** Resolve a row's effective layer index against the currently-available
+ * layer options, clamping out-of-range values (e.g. a row left on layer 2
+ * after the quote type/foam config changed back to a single layer). */
+function resolveRowLayerIndex(row: CavityRow, layerOptions: LayerOption[]): number {
+  const raw = Math.round(Number(row.layer) || 1);
+  const maxLayer = Math.max(1, layerOptions.length);
+  return Math.min(Math.max(1, raw), maxLayer);
+}
+
+type CavityBuildResult = {
+  /** layer index (1-based) -> ordered list of cavity tokens for that layer */
+  tokensByLayer: Map<number, string[]>;
+  /** row ids that could not produce a valid token even after the depth fallback */
+  incompleteRowIds: Set<string>;
+};
+
+/** Turn structured cavity rows into per-layer token lists.
+ * - rect: LxWxD
+ * - circle: Ø{diameter}x{depth}
+ * - roundedRect: rr{L}x{W}x{D}x{radius} (radius falls back to 0, matching
+ *   the layout editor's own corner-radius fallback)
+ * A row's explicit depth always wins; if left blank, `defaultDepthForLayer`
+ * supplies the layer's configured thickness. A row with count > 1 is
+ * repeated that many times in its layer's token list, since the URL
+ * contract has no per-token quantity concept of its own. Rows that still
+ * can't produce a token (no L/W or diameter at all) are tracked as
+ * "incomplete" instead of silently vanishing. */
+function buildCavityTokensByLayer(
+  rows: CavityRow[],
+  layerOptions: LayerOption[],
+  defaultDepthForLayer: (layerIndex: number) => string,
+): CavityBuildResult {
+  const tokensByLayer = new Map<number, string[]>();
+  const incompleteRowIds = new Set<string>();
+
   for (const row of rows) {
+    const layerIndex = resolveRowLayerIndex(row, layerOptions);
     const count = Math.max(1, Math.round(Number(row.count) || 1));
+    const fallbackDepth = () => toNumOrNull(defaultDepthForLayer(layerIndex));
+
     let token = "";
-    if (row.shape === "rect") {
+    if (row.shape === "rect" || row.shape === "roundedRect") {
       const L = toNumOrNull(row.l);
       const W = toNumOrNull(row.w);
-      const D = toNumOrNull(row.d);
-      if (L && W && D) token = `${L}x${W}x${D}`;
+      const D = toNumOrNull(row.d) ?? fallbackDepth();
+      if (L && W && D) {
+        if (row.shape === "roundedRect") {
+          const radiusNum = Number(row.radius);
+          const radius = Number.isFinite(radiusNum) && radiusNum >= 0 ? radiusNum : 0;
+          token = `rr${L}x${W}x${D}x${radius}`;
+        } else {
+          token = `${L}x${W}x${D}`;
+        }
+      }
     } else {
       const dia = toNumOrNull(row.dia);
-      const depth = toNumOrNull(row.depth);
+      const depth = toNumOrNull(row.depth) ?? fallbackDepth();
       if (dia && depth) token = `Ø${dia}x${depth}`;
     }
-    if (!token) continue;
-    for (let i = 0; i < count; i++) tokens.push(token);
+
+    if (!token) {
+      incompleteRowIds.add(row.id);
+      continue;
+    }
+
+    const list = tokensByLayer.get(layerIndex) ?? [];
+    for (let i = 0; i < count; i++) list.push(token);
+    tokensByLayer.set(layerIndex, list);
   }
-  return tokens.join(";");
+
+  return { tokensByLayer, incompleteRowIds };
 }
 
 type StepKey = "customer" | "order" | "type" | "specs" | "cav" | "mat" | "rev";
@@ -292,6 +295,37 @@ export default function RepStartQuoteModal({
 
   // ----- Step 5: Cavities -----
   const [cavityRows, setCavityRows] = React.useState<CavityRow[]>([newCavityRow()]);
+
+  // Available layers a cavity row can be assigned to. Complete Pack with
+  // "Bottom + Top" foam config is the only case with more than one physical
+  // layer; every other combination is a single layer, so there's no real
+  // choice to offer (labels mirror the layer_label values sent on submit).
+  const layerOptions: LayerOption[] = React.useMemo(() => {
+    if (quoteType === "complete_pack" && foamConfig === "bottom_top") {
+      return [
+        { index: 1, label: "Bottom Insert" },
+        { index: 2, label: "Top Pad" },
+      ];
+    }
+    return [{ index: 1, label: "Layer 1" }];
+  }, [quoteType, foamConfig]);
+
+  // Sensible default depth for cavities on a given layer, sourced from the
+  // matching Specs-step thickness field. Only used as a placeholder/fallback
+  // — an explicit depth typed on the row always wins.
+  const defaultDepthForLayer = React.useCallback(
+    (layerIndex: number): string => {
+      if (quoteType === "foam_insert") return insertD;
+      if (foamConfig === "bottom_top" && layerIndex === 2) return topThk;
+      return bottomThk;
+    },
+    [quoteType, foamConfig, insertD, bottomThk, topThk],
+  );
+
+  const cavityBuild = React.useMemo(
+    () => buildCavityTokensByLayer(cavityRows, layerOptions, defaultDepthForLayer),
+    [cavityRows, layerOptions, defaultDepthForLayer],
+  );
 
   // ----- Step 6: Material -----
   const [materialsLoading, setMaterialsLoading] = React.useState(false);
@@ -476,8 +510,6 @@ export default function RepStartQuoteModal({
       }
       if (materialText.trim()) p.set("material_text", materialText.trim());
 
-      const seedCav = parseSeedCavities(buildCavitySeedFromRows(cavityRows)).normalized;
-
       if (quoteType === "foam_insert") {
         const L = toNumOrNull(insertL);
         const W = toNumOrNull(insertW);
@@ -488,11 +520,8 @@ export default function RepStartQuoteModal({
         p.set("layer_count", "1");
         p.append("layer_thicknesses", String(D || 1));
         p.append("layer_label", "Layer 1");
-        p.set("layer_cavity_layer_index", "1");
         p.set("activeLayer", "1");
         p.set("active_layer", "1");
-
-        if (seedCav) p.set("cavities", seedCav);
       } else {
         const L = toNumOrNull(boxL);
         const W = toNumOrNull(boxW);
@@ -507,7 +536,6 @@ export default function RepStartQuoteModal({
           p.append("layer_label", "Bottom Insert");
           p.append("layer_thicknesses", String(t || DEFAULT_TOP_PAD_IN));
           p.append("layer_label", "Top Pad");
-          p.set("layer_cavity_layer_index", "1");
           p.set("activeLayer", "1");
           p.set("active_layer", "1");
           if (t) p.set("top_pad_in", String(t));
@@ -515,12 +543,9 @@ export default function RepStartQuoteModal({
           p.set("layer_count", "1");
           p.append("layer_thicknesses", String(bottomD || 1));
           p.append("layer_label", "Layer 1");
-          p.set("layer_cavity_layer_index", "1");
           p.set("activeLayer", "1");
           p.set("active_layer", "1");
         }
-
-        if (seedCav) p.set("cavities", seedCav);
 
         if (toNumOrNull(boxL)) p.set("box_l", String(toNumOrNull(boxL)));
         if (toNumOrNull(boxW)) p.set("box_w", String(toNumOrNull(boxW)));
@@ -530,6 +555,15 @@ export default function RepStartQuoteModal({
         p.set("pack_type", "complete_pack");
         p.set("foam_config", foamConfig);
         p.set("fit_allow_in", String(FIT_ALLOW_IN));
+      }
+
+      // Per-layer cavity params (cavities_l1, cavities_l2, ...) — matches the
+      // layout editor's readLayerCavitiesFromUrl contract (cavities_l{n} /
+      // cavity_l{n}) so cavities land on exactly the layer the rep picked
+      // instead of being guessed at by the editor.
+      for (const [layerIndex, tokens] of cavityBuild.tokensByLayer.entries()) {
+        if (!tokens.length) continue;
+        p.set(`cavities_l${layerIndex}`, tokens.join(";"));
       }
 
       resetForm();
@@ -826,10 +860,20 @@ export default function RepStartQuoteModal({
                       hint="Add one row per distinct cavity shape/size"
                     >
                       <div className="space-y-3">
-                        {cavityRows.map((row) => (
+                        {cavityRows.map((row) => {
+                          const layerIndex = resolveRowLayerIndex(row, layerOptions);
+                          const depthPlaceholder = defaultDepthForLayer(layerIndex) || "1";
+                          const isIncomplete = cavityBuild.incompleteRowIds.has(row.id);
+
+                          return (
                           <div
                             key={row.id}
-                            className="rounded-2xl border border-white/10 bg-white/[0.02] p-3"
+                            className={[
+                              "rounded-2xl border p-3",
+                              isIncomplete
+                                ? "border-amber-400/50 bg-amber-500/[0.06]"
+                                : "border-white/10 bg-white/[0.02]",
+                            ].join(" ")}
                           >
                             <div className="flex flex-wrap items-end gap-3">
                               <Field label="Shape">
@@ -848,10 +892,35 @@ export default function RepStartQuoteModal({
                                 >
                                   <option value="rect">Rectangle</option>
                                   <option value="circle">Circle</option>
+                                  <option value="roundedRect">Rounded rectangle</option>
                                 </select>
                               </Field>
 
-                              {row.shape === "rect" ? (
+                              {layerOptions.length > 1 ? (
+                                <div className="w-36">
+                                  <Field label="Layer">
+                                    <select
+                                      value={String(layerIndex)}
+                                      onChange={(e) =>
+                                        setCavityRows((prev) =>
+                                          prev.map((r) =>
+                                            r.id === row.id ? { ...r, layer: e.target.value } : r,
+                                          ),
+                                        )
+                                      }
+                                      className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
+                                    >
+                                      {layerOptions.map((opt) => (
+                                        <option key={opt.index} value={String(opt.index)}>
+                                          {opt.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </Field>
+                                </div>
+                              ) : null}
+
+                              {row.shape === "rect" || row.shape === "roundedRect" ? (
                                 <>
                                   <div className="w-20">
                                     <Field label="L (in)">
@@ -888,10 +957,25 @@ export default function RepStartQuoteModal({
                                             prev.map((r) => (r.id === row.id ? { ...r, d: v } : r)),
                                           )
                                         }
-                                        placeholder="1"
+                                        placeholder={depthPlaceholder}
                                       />
                                     </Field>
                                   </div>
+                                  {row.shape === "roundedRect" ? (
+                                    <div className="w-24">
+                                      <Field label="Corner radius (in)">
+                                        <Input
+                                          value={row.radius}
+                                          onChange={(v) =>
+                                            setCavityRows((prev) =>
+                                              prev.map((r) => (r.id === row.id ? { ...r, radius: v } : r)),
+                                            )
+                                          }
+                                          placeholder="0.25"
+                                        />
+                                      </Field>
+                                    </div>
+                                  ) : null}
                                 </>
                               ) : (
                                 <>
@@ -917,7 +1001,7 @@ export default function RepStartQuoteModal({
                                             prev.map((r) => (r.id === row.id ? { ...r, depth: v } : r)),
                                           )
                                         }
-                                        placeholder="1"
+                                        placeholder={depthPlaceholder}
                                       />
                                     </Field>
                                   </div>
@@ -951,8 +1035,15 @@ export default function RepStartQuoteModal({
                                 Remove
                               </button>
                             </div>
+
+                            {isIncomplete ? (
+                              <div className="mt-2 text-xs text-amber-300">
+                                Missing dimensions — this cavity will be excluded from the quote.
+                              </div>
+                            ) : null}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       <button
@@ -967,8 +1058,12 @@ export default function RepStartQuoteModal({
                         Leave all rows blank to lay cavities out directly in the editor instead.
                       </div>
 
-                      <div className="mt-3 text-xs text-slate-500">
-                        Preview: {buildCavitySeedFromRows(cavityRows) || "—"}
+                      <div className="mt-3 space-y-1 text-xs text-slate-500">
+                        {layerOptions.map((opt) => (
+                          <div key={opt.index}>
+                            Preview ({opt.label}): {(cavityBuild.tokensByLayer.get(opt.index) || []).join(";") || "—"}
+                          </div>
+                        ))}
                       </div>
                     </StepCard>
                   ) : null}
@@ -1058,8 +1153,22 @@ export default function RepStartQuoteModal({
                         />
                         <ReviewRow label="Quote type" value={quoteType === "foam_insert" ? "Foam Insert" : "Complete Pack"} />
                         <ReviewRow label="Material" value={materialText || "—"} />
-                        <ReviewRow label="Cavities" value={parseSeedCavities(buildCavitySeedFromRows(cavityRows)).normalized || "—"} />
+                        {layerOptions.map((opt) => (
+                          <ReviewRow
+                            key={opt.index}
+                            label={`Cavities — ${opt.label}`}
+                            value={(cavityBuild.tokensByLayer.get(opt.index) || []).join(";") || "none"}
+                          />
+                        ))}
                       </div>
+
+                      {cavityBuild.incompleteRowIds.size > 0 ? (
+                        <div className="mt-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                          {cavityBuild.incompleteRowIds.size === 1
+                            ? "1 cavity row is missing dimensions and will be excluded from the quote."
+                            : `${cavityBuild.incompleteRowIds.size} cavity rows are missing dimensions and will be excluded from the quote.`}
+                        </div>
+                      ) : null}
 
                       {internalNotes.trim() ? (
                         <div className="mt-4">
