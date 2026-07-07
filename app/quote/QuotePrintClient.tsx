@@ -1258,18 +1258,31 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
   // Match on footprint (L × W) only — the foam height is always shorter than the
   // carton's inside height on a complete-pack quote, so including H would cause
   // the filter to miss box-outer-dim helper rows and show them as foam layers.
-  for (const rb of requestedBoxes) {
-    const L = Number(rb.inside_length_in);
-    const W = Number(rb.inside_width_in);
-    if (!Number.isFinite(L) || !Number.isFinite(W)) continue;
-
-    if (
+  const footprintMatches = (L: number, W: number) => {
+    if (!Number.isFinite(L) || !Number.isFinite(W)) return false;
+    return (
       (Math.abs(itemL - L) < BOX_DIM_TOL && Math.abs(itemW - W) < BOX_DIM_TOL) ||
       (Math.abs(itemL - W) < BOX_DIM_TOL && Math.abs(itemW - L) < BOX_DIM_TOL)
-    ) {
-      return true;
-    }
+    );
+  };
+
+  for (const rb of requestedBoxes) {
+    if (footprintMatches(Number(rb.inside_length_in), Number(rb.inside_width_in))) return true;
   }
+
+  // requestedBoxes stays empty for custom (non-catalog-matched) boxes — the
+  // packaging line for those comes from apiPackagingLines instead, so check
+  // there too, or the phantom helper row never gets filtered.
+  for (const rb of apiPackagingLines) {
+    if (footprintMatches(Number(rb.inside_length_in), Number(rb.inside_width_in))) return true;
+  }
+
+  // Final fallback: the raw customer-entered box dims (always populated for
+  // custom boxes, regardless of whether either API list above has resolved).
+  if (customerBoxDims && footprintMatches(Number(customerBoxDims.L), Number(customerBoxDims.W))) {
+    return true;
+  }
+
   return false;
 };
 

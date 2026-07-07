@@ -50,6 +50,25 @@ type QtyBreak = {
   price: string;
 };
 
+type CavityShape = "rect" | "circle";
+
+type CavityRow = {
+  id: string;
+  shape: CavityShape;
+  l: string;
+  w: string;
+  d: string;
+  dia: string;
+  depth: string;
+  count: string;
+};
+
+type CustomerOption = {
+  name: string;
+  email: string | null;
+  phone: string | null;
+};
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -138,6 +157,44 @@ function newQtyBreakRow(): QtyBreak {
   return { id: Math.random().toString(36).slice(2), qty: "", price: "" };
 }
 
+function newCavityRow(): CavityRow {
+  return {
+    id: Math.random().toString(36).slice(2),
+    shape: "rect",
+    l: "",
+    w: "",
+    d: "",
+    dia: "",
+    depth: "",
+    count: "1",
+  };
+}
+
+/** Turn structured cavity rows into the semicolon-delimited seed string the
+ * rest of the submit pipeline (parseSeedCavities → cavities= URL param)
+ * already expects. A row with count > 1 is repeated that many times, since
+ * the URL contract has no per-token quantity concept of its own. */
+function buildCavitySeedFromRows(rows: CavityRow[]): string {
+  const tokens: string[] = [];
+  for (const row of rows) {
+    const count = Math.max(1, Math.round(Number(row.count) || 1));
+    let token = "";
+    if (row.shape === "rect") {
+      const L = toNumOrNull(row.l);
+      const W = toNumOrNull(row.w);
+      const D = toNumOrNull(row.d);
+      if (L && W && D) token = `${L}x${W}x${D}`;
+    } else {
+      const dia = toNumOrNull(row.dia);
+      const depth = toNumOrNull(row.depth);
+      if (dia && depth) token = `Ø${dia}x${depth}`;
+    }
+    if (!token) continue;
+    for (let i = 0; i < count; i++) tokens.push(token);
+  }
+  return tokens.join(";");
+}
+
 type StepKey = "customer" | "order" | "type" | "specs" | "cav" | "mat" | "rev";
 
 const STEP_ORDER: StepKey[] = ["customer", "order", "type", "specs", "cav", "mat", "rev"];
@@ -172,6 +229,43 @@ export default function RepStartQuoteModal({
   const [phone, setPhone] = React.useState("");
   const [salesRepSlug, setSalesRepSlug] = React.useState("");
 
+  const [customerOptions, setCustomerOptions] = React.useState<CustomerOption[]>([]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/quotes/customers?t=${Math.random()}`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+        });
+        const json = await res.json().catch(() => null);
+        if (!cancelled && json?.ok && Array.isArray(json.customers)) {
+          setCustomerOptions(json.customers);
+        }
+      } catch {
+        // Non-fatal — the field still works as free text without suggestions.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  // If the typed name exactly matches a known customer, offer to fill in
+  // their email/phone (only into fields that are currently empty).
+  function handleCustomerNameChange(v: string) {
+    setCustomerName(v);
+    const match = customerOptions.find(
+      (c) => c.name.trim().toLowerCase() === v.trim().toLowerCase(),
+    );
+    if (match) {
+      if (!email.trim() && match.email) setEmail(match.email);
+      if (!phone.trim() && match.phone) setPhone(match.phone);
+    }
+  }
+
   // ----- Step 2: Order details -----
   const [poNumber, setPoNumber] = React.useState("");
   const [isRush, setIsRush] = React.useState(false);
@@ -197,7 +291,7 @@ export default function RepStartQuoteModal({
   const [topThk, setTopThk] = React.useState(String(DEFAULT_TOP_PAD_IN));
 
   // ----- Step 5: Cavities -----
-  const [cavitySeed, setCavitySeed] = React.useState("");
+  const [cavityRows, setCavityRows] = React.useState<CavityRow[]>([newCavityRow()]);
 
   // ----- Step 6: Material -----
   const [materialsLoading, setMaterialsLoading] = React.useState(false);
@@ -311,7 +405,7 @@ export default function RepStartQuoteModal({
     setFoamConfig("bottom_top");
     setBottomThk("");
     setTopThk(String(DEFAULT_TOP_PAD_IN));
-    setCavitySeed("");
+    setCavityRows([newCavityRow()]);
     setMaterialText("");
     setMaterialId("");
   }
@@ -382,7 +476,7 @@ export default function RepStartQuoteModal({
       }
       if (materialText.trim()) p.set("material_text", materialText.trim());
 
-      const seedCav = parseSeedCavities(cavitySeed).normalized;
+      const seedCav = parseSeedCavities(buildCavitySeedFromRows(cavityRows)).normalized;
 
       if (quoteType === "foam_insert") {
         const L = toNumOrNull(insertL);
@@ -514,7 +608,17 @@ export default function RepStartQuoteModal({
                     <StepCard title="Customer & sales" hint="Who this quote is for">
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <Field label="Customer name *">
-                          <Input value={customerName} onChange={setCustomerName} placeholder="Acme Corp" />
+                          <Input
+                            value={customerName}
+                            onChange={handleCustomerNameChange}
+                            placeholder="Acme Corp"
+                            listId="rep-customer-options"
+                          />
+                          <datalist id="rep-customer-options">
+                            {customerOptions.map((c) => (
+                              <option key={c.name} value={c.name} />
+                            ))}
+                          </datalist>
                         </Field>
                         <Field label="Sales rep slug">
                           <Input value={salesRepSlug} onChange={setSalesRepSlug} placeholder="chuck" />
@@ -719,13 +823,152 @@ export default function RepStartQuoteModal({
                   {activeStep === "cav" ? (
                     <StepCard
                       title="Cavities"
-                      hint='Semicolon-separated, e.g. "3x2x1; Ø2.5x1"'
+                      hint="Add one row per distinct cavity shape/size"
                     >
-                      <Field label="Cavity seed">
-                        <Input value={cavitySeed} onChange={setCavitySeed} placeholder="3x2x1; Ø2.5x1" />
-                      </Field>
-                      <div className="mt-2 text-xs text-slate-400">
-                        Leave blank to lay cavities out directly in the editor instead.
+                      <div className="space-y-3">
+                        {cavityRows.map((row) => (
+                          <div
+                            key={row.id}
+                            className="rounded-2xl border border-white/10 bg-white/[0.02] p-3"
+                          >
+                            <div className="flex flex-wrap items-end gap-3">
+                              <Field label="Shape">
+                                <select
+                                  value={row.shape}
+                                  onChange={(e) =>
+                                    setCavityRows((prev) =>
+                                      prev.map((r) =>
+                                        r.id === row.id
+                                          ? { ...r, shape: e.target.value as CavityShape }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                  className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
+                                >
+                                  <option value="rect">Rectangle</option>
+                                  <option value="circle">Circle</option>
+                                </select>
+                              </Field>
+
+                              {row.shape === "rect" ? (
+                                <>
+                                  <div className="w-20">
+                                    <Field label="L (in)">
+                                      <Input
+                                        value={row.l}
+                                        onChange={(v) =>
+                                          setCavityRows((prev) =>
+                                            prev.map((r) => (r.id === row.id ? { ...r, l: v } : r)),
+                                          )
+                                        }
+                                        placeholder="3"
+                                      />
+                                    </Field>
+                                  </div>
+                                  <div className="w-20">
+                                    <Field label="W (in)">
+                                      <Input
+                                        value={row.w}
+                                        onChange={(v) =>
+                                          setCavityRows((prev) =>
+                                            prev.map((r) => (r.id === row.id ? { ...r, w: v } : r)),
+                                          )
+                                        }
+                                        placeholder="2"
+                                      />
+                                    </Field>
+                                  </div>
+                                  <div className="w-20">
+                                    <Field label="D (in)">
+                                      <Input
+                                        value={row.d}
+                                        onChange={(v) =>
+                                          setCavityRows((prev) =>
+                                            prev.map((r) => (r.id === row.id ? { ...r, d: v } : r)),
+                                          )
+                                        }
+                                        placeholder="1"
+                                      />
+                                    </Field>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="w-24">
+                                    <Field label="Diameter (in)">
+                                      <Input
+                                        value={row.dia}
+                                        onChange={(v) =>
+                                          setCavityRows((prev) =>
+                                            prev.map((r) => (r.id === row.id ? { ...r, dia: v } : r)),
+                                          )
+                                        }
+                                        placeholder="2.5"
+                                      />
+                                    </Field>
+                                  </div>
+                                  <div className="w-24">
+                                    <Field label="Depth (in)">
+                                      <Input
+                                        value={row.depth}
+                                        onChange={(v) =>
+                                          setCavityRows((prev) =>
+                                            prev.map((r) => (r.id === row.id ? { ...r, depth: v } : r)),
+                                          )
+                                        }
+                                        placeholder="1"
+                                      />
+                                    </Field>
+                                  </div>
+                                </>
+                              )}
+
+                              <div className="w-20">
+                                <Field label="Count">
+                                  <Input
+                                    value={row.count}
+                                    onChange={(v) =>
+                                      setCavityRows((prev) =>
+                                        prev.map((r) => (r.id === row.id ? { ...r, count: v } : r)),
+                                      )
+                                    }
+                                    placeholder="1"
+                                  />
+                                </Field>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setCavityRows((prev) =>
+                                    prev.length > 1 ? prev.filter((r) => r.id !== row.id) : prev,
+                                  )
+                                }
+                                className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.06]"
+                                disabled={cavityRows.length <= 1}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setCavityRows((prev) => [...prev, newCavityRow()])}
+                        className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.06]"
+                      >
+                        + Add cavity
+                      </button>
+
+                      <div className="mt-3 text-xs text-slate-400">
+                        Leave all rows blank to lay cavities out directly in the editor instead.
+                      </div>
+
+                      <div className="mt-3 text-xs text-slate-500">
+                        Preview: {buildCavitySeedFromRows(cavityRows) || "—"}
                       </div>
                     </StepCard>
                   ) : null}
@@ -815,7 +1058,7 @@ export default function RepStartQuoteModal({
                         />
                         <ReviewRow label="Quote type" value={quoteType === "foam_insert" ? "Foam Insert" : "Complete Pack"} />
                         <ReviewRow label="Material" value={materialText || "—"} />
-                        <ReviewRow label="Cavities" value={parseSeedCavities(cavitySeed).normalized || "—"} />
+                        <ReviewRow label="Cavities" value={parseSeedCavities(buildCavitySeedFromRows(cavityRows)).normalized || "—"} />
                       </div>
 
                       {internalNotes.trim() ? (
@@ -892,10 +1135,12 @@ function Input({
   value,
   onChange,
   placeholder,
+  listId,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  listId?: string;
 }) {
   return (
     <input
@@ -903,6 +1148,7 @@ function Input({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      list={listId}
       className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-400/60 focus:outline-none"
     />
   );
