@@ -103,7 +103,12 @@ function toNumOrNull(s: string) {
 
 function familyLabel(fam: string | null) {
   const t = (fam || "").trim();
-  return t ? t : "Other";
+  if (!t) return "Other";
+  // Display-only: drop a trailing "Foam" word (e.g. "Polyurethane Foam" ->
+  // "Polyurethane"). The underlying material_family string is untouched —
+  // other files still filter/match on the full "... Foam" value.
+  const stripped = t.replace(/\s*foam\s*$/i, "").trim();
+  return stripped || t;
 }
 
 function newQtyBreakRow(): QtyBreak {
@@ -501,6 +506,10 @@ export default function RepStartQuoteModal({
       p.set("quote_no", quote_no);
       if (salesRepSlug.trim()) p.set("sales_rep_slug", salesRepSlug.trim());
       if (toNumOrNull(qty)) p.set("qty", String(toNumOrNull(qty)));
+      // Unlike StartQuoteModal (customer-facing), this is a rep typing notes
+      // meant to carry straight through to the editor, not left for the
+      // customer to fill in themselves.
+      if (internalNotes.trim()) p.set("notes", internalNotes.trim());
 
       const matIdNum = Number(materialId);
       const hasMaterialId = Number.isFinite(matIdNum) && matIdNum > 0;
@@ -812,8 +821,8 @@ export default function RepStartQuoteModal({
                                 onChange={(e) => setBoxStyle(e.target.value as BoxStyle)}
                                 className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
                               >
-                                <option value="mailer">Mailer</option>
-                                <option value="rsc">RSC</option>
+                                <option value="mailer" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Mailer</option>
+                                <option value="rsc" style={{ color: "#0f172a", backgroundColor: "#fff" }}>RSC</option>
                               </select>
                             </Field>
                             <Field label="Foam config">
@@ -822,9 +831,9 @@ export default function RepStartQuoteModal({
                                 onChange={(e) => setFoamConfig(e.target.value as FoamConfig)}
                                 className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
                               >
-                                <option value="bottom_top">Bottom + Top</option>
-                                <option value="bottom_only">Bottom only</option>
-                                <option value="custom">Custom</option>
+                                <option value="bottom_top" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Bottom + Top</option>
+                                <option value="bottom_only" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Bottom only</option>
+                                <option value="custom" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Custom</option>
                               </select>
                             </Field>
                           </div>
@@ -890,9 +899,9 @@ export default function RepStartQuoteModal({
                                   }
                                   className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
                                 >
-                                  <option value="rect">Rectangle</option>
-                                  <option value="circle">Circle</option>
-                                  <option value="roundedRect">Rounded rectangle</option>
+                                  <option value="rect" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Rectangle</option>
+                                  <option value="circle" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Circle</option>
+                                  <option value="roundedRect" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Rounded rectangle</option>
                                 </select>
                               </Field>
 
@@ -911,7 +920,11 @@ export default function RepStartQuoteModal({
                                       className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
                                     >
                                       {layerOptions.map((opt) => (
-                                        <option key={opt.index} value={String(opt.index)}>
+                                        <option
+                                          key={opt.index}
+                                          value={String(opt.index)}
+                                          style={{ color: "#0f172a", backgroundColor: "#fff" }}
+                                        >
                                           {opt.label}
                                         </option>
                                       ))}
