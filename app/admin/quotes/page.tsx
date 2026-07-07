@@ -18,6 +18,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import RepStartQuoteModal from "@/components/start-quote/RepStartQuoteModal";
 
 type QuoteRow = {
   id: number;
@@ -58,6 +59,7 @@ export default function AdminQuotesPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
+  const [showStartModal, setShowStartModal] = React.useState(false);
 
 
   // Client-side filters
@@ -392,12 +394,20 @@ export default function AdminQuotesPage() {
           <div className="flex items-center gap-4">
                         <button
               type="button"
-              onClick={createNewQuoteAndOpenEditor}
+              onClick={() => setShowStartModal(true)}
               disabled={creating}
               className="inline-flex items-center justify-center rounded-lg border border-sky-300 bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm transition hover:bg-sky-400 disabled:opacity-60 disabled:bg-sky-500/40 disabled:border-sky-500/40"
 
             >
-              {creating ? "Starting…" : "Start new quote"}
+              Start new quote
+            </button>
+            <button
+              type="button"
+              onClick={createNewQuoteAndOpenEditor}
+              disabled={creating}
+              className="inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2 text-xs font-semibold text-slate-200 shadow-sm transition hover:bg-white/[0.06] disabled:opacity-60"
+            >
+              {creating ? "Starting…" : "Skip to blank editor"}
             </button>
             {isAdmin && (
   <Link
@@ -793,6 +803,8 @@ export default function AdminQuotesPage() {
           </p>
         </section>
       </div>
+
+      <RepStartQuoteModal open={showStartModal} onClose={() => setShowStartModal(false)} />
     </main>
   );
 }

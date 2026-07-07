@@ -188,7 +188,20 @@ export async function POST(req: NextRequest) {
       status = "draft",
       sales_rep_id: rawSalesRepId,
       sales_rep_slug: rawSalesRepSlug,
+      po_number = null,
+      is_rush = false,
+      qty: rawQty = null,
+      qty_breaks: rawQtyBreaks = null,
+      internal_notes = null,
     } = body;
+
+    const qty =
+      rawQty !== null && rawQty !== undefined && Number.isFinite(Number(rawQty))
+        ? Number(rawQty)
+        : null;
+
+    const qtyBreaksJson =
+      Array.isArray(rawQtyBreaks) && rawQtyBreaks.length ? JSON.stringify(rawQtyBreaks) : null;
 
     if (!quote_no || !customer_name) {
       return NextResponse.json(
@@ -250,9 +263,14 @@ export async function POST(req: NextRequest) {
         email,
         phone,
         status,
-        sales_rep_id
+        sales_rep_id,
+        po_number,
+        is_rush,
+        qty,
+        qty_breaks,
+        internal_notes
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       ON CONFLICT (quote_no) DO UPDATE
         SET customer_name = EXCLUDED.customer_name,
             email         = EXCLUDED.email,
@@ -263,6 +281,11 @@ export async function POST(req: NextRequest) {
             -- Only update sales_rep_id if a new non-null value was provided;
             -- otherwise keep the existing assignment.
             sales_rep_id  = COALESCE(EXCLUDED.sales_rep_id, public."quotes".sales_rep_id),
+            po_number     = COALESCE(EXCLUDED.po_number, public."quotes".po_number),
+            is_rush       = EXCLUDED.is_rush,
+            qty           = COALESCE(EXCLUDED.qty, public."quotes".qty),
+            qty_breaks    = COALESCE(EXCLUDED.qty_breaks, public."quotes".qty_breaks),
+            internal_notes = COALESCE(EXCLUDED.internal_notes, public."quotes".internal_notes),
             updated_at    = now()
       WHERE public."quotes".tenant_id = $1
       RETURNING id,
@@ -273,13 +296,31 @@ export async function POST(req: NextRequest) {
                 phone,
                 status,
                 sales_rep_id,
+                po_number,
+                is_rush,
+                qty,
+                qty_breaks,
+                internal_notes,
                 locked,
                 geometry_hash,
                 locked_at,
                 created_at,
                 updated_at
     `,
-      [user.tenant_id, quote_no, customer_name, email, phone, status, salesRepId],
+      [
+        user.tenant_id,
+        quote_no,
+        customer_name,
+        email,
+        phone,
+        status,
+        salesRepId,
+        po_number,
+        !!is_rush,
+        qty,
+        qtyBreaksJson,
+        internal_notes,
+      ],
     );
 
     if (!row) {

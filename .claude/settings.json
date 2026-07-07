@@ -11,7 +11,17 @@
       "Bash(curl -s -X POST http://localhost:3000/api/demo/seed -H \"Content-Type: application/json\" -d '{\"outsideL\":12,\"outsideW\":10,\"outsideH\":4,\"qty\":25,\"customerName\":\"Test Customer\",\"shipMode\":\"box\",\"insertType\":\"single\"}')",
       "Bash(node -e ' *)",
       "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force })",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "Bash(node tmp_gen_token.mjs)",
+      "Bash(node tmp_verify_rep_modal.mjs \"eyJ1c2VySWQiOjEsImVtYWlsIjoiMjV0aGhvdXJkZXNpZ25AZ21haWwuY29tIiwibmFtZSI6IkFkbWluIiwicm9sZSI6ImFkbWluIiwidGVuYW50X2lkIjoxLCJpYXQiOjE3ODM0MjY0OTYsImV4cCI6MTc4MzQ1NTI5Nn0.1b213fc16643a00640cb01bfd29e4d615cad7c78706b0d373132adb5c2c43ab7\")",
+      "Bash(node tmp_debug_cookie.mjs \"eyJ1c2VySWQiOjEsImVtYWlsIjoiMjV0aGhvdXJkZXNpZ25AZ21haWwuY29tIiwibmFtZSI6IkFkbWluIiwicm9sZSI6ImFkbWluIiwidGVuYW50X2lkIjoxLCJpYXQiOjE3ODM0MjY0OTYsImV4cCI6MTc4MzQ1NTI5Nn0.1b213fc16643a00640cb01bfd29e4d615cad7c78706b0d373132adb5c2c43ab7\")",
+      "Bash(grep -i \"api.alex-io.com\" /c/Windows/System32/drivers/etc/hosts 2>&1)",
+      "Read(//c/Windows/System32/drivers/etc/**)",
+      "Bash(curl -s -X POST http://127.0.0.1:3000/api/quotes -H 'Host: api.alex-io.com' -H 'Content-Type: application/json' -H 'Cookie: alexio_session=eyJ1c2VySWQiOjEsImVtYWlsIjoiMjV0aGhvdXJkZXNpZ25AZ21haWwuY29tIiwibmFtZSI6IkFkbWluIiwicm9sZSI6ImFkbWluIiwidGVuYW50X2lkIjoxLCJpYXQiOjE3ODM0MjY0OTYsImV4cCI6MTc4MzQ1NTI5Nn0.1b213fc16643a00640cb01bfd29e4d615cad7c78706b0d373132adb5c2c43ab7' -d '{ *)",
+      "Bash(node -e \"process.stdin.setEncoding\\('utf8'\\); let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>console.log\\(JSON.stringify\\(JSON.parse\\(d\\),null,2\\)\\)\\)\")",
+      "Bash(node tmp_verify_modal_ui.mjs)",
+      "Bash(rm -f tmp_*.mjs tmp_*.png)",
+      "Bash(rm -rf app/tmpverifyrepmodal999)"
     ]
   }
 }
