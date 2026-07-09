@@ -1806,10 +1806,10 @@ function LayoutEditorHostReady(props: {
   const persistPrinted = React.useCallback(
     (next: boolean) => {
       const key = hasRealQuoteNo ? quoteNo.trim() : "";
-      if (!key) return;
+      if (!key) return Promise.resolve();
       // Use the public customer-box route (supports a `printed` field).
       // /api/admin/mem requires admin auth and fails silently for public customers.
-      fetch("/api/quote/customer-box", {
+      return fetch("/api/quote/customer-box", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ quote_no: key, printed: next }),
@@ -1823,10 +1823,31 @@ function LayoutEditorHostReady(props: {
 
   const [customerBox, setCustomerBox] = React.useState<BoxDims | null>(null);
 
+  // Raw string drafts for the L/W/H inputs, kept separate from the numeric
+  // customerBox state so a keystroke like "17." doesn't get collapsed back
+  // to "17" by an immediate Number() round-trip before the next digit lands.
+  const [boxDraft, setBoxDraft] = React.useState<{ L: string; W: string; H: string }>({
+    L: "",
+    W: "",
+    H: "",
+  });
+
+  // Re-sync drafts from customerBox whenever it changes via any *other* path
+  // (style toggle, Clear button, initial URL/API load, or our own onBlur
+  // commit below) — never from typing itself, since typing only touches
+  // boxDraft directly.
+  React.useEffect(() => {
+    setBoxDraft({
+      L: customerBox && customerBox.L > 0 ? String(customerBox.L) : "",
+      W: customerBox && customerBox.W > 0 ? String(customerBox.W) : "",
+      H: customerBox && customerBox.H > 0 ? String(customerBox.H) : "",
+    });
+  }, [customerBox]);
+
   const persistCustomerBox = React.useCallback(
     (next: BoxDims | null) => {
       const key = hasRealQuoteNo ? quoteNo.trim() : "";
-      if (!key) return;
+      if (!key) return Promise.resolve();
 
       // Store either null (clears) or normalized numeric dims.
       // NOTE: uses /api/quote/customer-box (public route) — NOT /api/admin/mem,
@@ -1841,7 +1862,7 @@ function LayoutEditorHostReady(props: {
             }
           : null;
 
-      fetch("/api/quote/customer-box", {
+      return fetch("/api/quote/customer-box", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ quote_no: key, box: payload }),
@@ -3642,6 +3663,15 @@ const handleGoToFoamAdvisor = () => {
         throw new Error(`HTTP ${res.status}`);
       }
 
+      // The quotes row is now guaranteed to exist (ensureQuoteHeader just ran
+      // server-side as part of /api/quote/layout/apply), so re-fire these —
+      // earlier auto-save-on-load calls to the same endpoints 404'd silently
+      // because the row didn't exist yet at that point.
+      await Promise.all([
+        customerBox ? persistCustomerBox(customerBox) : Promise.resolve(),
+        persistPrinted(isPrinted),
+      ]);
+
       if (typeof window !== "undefined") {
         trackEvent("quote_applied");
               const base = "/quote?quote_no=" + encodeURIComponent(quoteNo);
@@ -4800,32 +4830,28 @@ const tenantCssVars = React.useMemo(() => {
 
                     <div className="mt-2 grid grid-cols-3 gap-2">
                       {(["L", "W", "H"] as const).map((k) => {
-                        const val = customerBox ? (customerBox as any)[k] : "";
                         return (
                           <label key={k} className="block">
                             <div className="mb-1 text-[10px] text-slate-400">{k} (in)</div>
                             <input
                               inputMode="decimal"
                               className="w-full rounded-lg border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-[var(--tenant-secondary)]"
-                              value={val}
+                              value={boxDraft[k]}
                               onChange={(e) => {
                                 const raw = e.target.value;
-                                // allow empty during edit
-                                if (raw.trim() === "") {
-                                  const next = customerBox ? { ...customerBox } : { L: 0, W: 0, H: 0 };
-                                  (next as any)[k] = 0;
-                                  setCustomerBox(next);
-                                  return;
-                                }
-                                const n = parseBoxNum(raw);
+                                // Allow only digits and at most one decimal point while
+                                // typing; the actual numeric parse happens on blur.
+                                if (!/^\d*\.?\d*$/.test(raw)) return;
+                                setBoxDraft((prev) => ({ ...prev, [k]: raw }));
+                              }}
+                              onBlur={() => {
+                                const n = parseBoxNum(boxDraft[k]);
                                 const next = customerBox ? { ...customerBox } : { L: 0, W: 0, H: 0 };
                                 (next as any)[k] = n;
                                 setCustomerBox(next);
-                              }}
-                              onBlur={() => {
                                 // Only persist when we have all 3 positive numbers.
-                                if (customerBox && customerBox.L > 0 && customerBox.W > 0 && customerBox.H > 0) {
-                                  persistCustomerBox(customerBox);
+                                if (next.L > 0 && next.W > 0 && next.H > 0) {
+                                  persistCustomerBox(next);
                                 } else {
                                   persistCustomerBox(null);
                                 }

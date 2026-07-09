@@ -922,7 +922,7 @@ export default function StartQuoteModal() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             quote_no,
-            box: { L: boxLNum, W: boxWNum, H: boxDNum },
+            box: { L: boxLNum, W: boxWNum, H: boxDNum, style: boxStyle },
             printed: printed ? 1 : 0,
           }),
         }).catch(() => null);
