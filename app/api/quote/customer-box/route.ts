@@ -78,6 +78,10 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({} as any));
     const quoteNo = (body?.quote_no || "").trim();
+    // Distinguish "box" omitted (e.g. a printed-only update) from "box"
+    // explicitly sent as null (an intentional clear) — omitting it must NOT
+    // wipe a previously saved box.
+    const hasBoxKey = Object.prototype.hasOwnProperty.call(body ?? {}, "box");
     const rawBox = body?.box ?? null;
     // Optional: also persist printed flag when included in the same request
     const printedRaw = body?.printed;
@@ -102,10 +106,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const box = coerceBox(rawBox);
-
     const existing = (await loadFacts(quoteNo)) || {};
-    const patch: Record<string, any> = { customer_box_in: box ?? null };
+    const box = hasBoxKey ? coerceBox(rawBox) : coerceBox((existing as any)?.customer_box_in);
+
+    const patch: Record<string, any> = {};
+    if (hasBoxKey) {
+      patch.customer_box_in = box ?? null;
+    }
     if (typeof printedRaw === "boolean" || printedRaw === 1 || printedRaw === 0) {
       patch.printed = printedRaw ? 1 : 0;
     }
