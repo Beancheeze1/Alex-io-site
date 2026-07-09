@@ -497,15 +497,19 @@ export default function StartQuoteModal() {
       setFoamFitDirty(false);
       setFoamFitLenIn(null);
       setFoamFitWidIn(null);
-      // Don't reset thicknesses or thicknessMode if prefill already seeded them.
-      // If we reset thicknessMode to 'auto' here, freezeFoamFitFromCurrentBox will
-      // overwrite the widget values with rounded auto-calculated numbers on Next.
+      // Don't reset thicknesses, thicknessMode, or foamConfig if prefill already
+      // seeded them. If we reset thicknessMode to 'auto' here, freezeFoamFitFromCurrentBox
+      // will overwrite the widget values with rounded auto-calculated numbers on Next.
+      // foamConfig in particular must stay guarded too — this effect fires on mount
+      // with quoteType still at its "foam_insert" default (seededIsCompletePack only
+      // checks URL params, not prefillData), so without the guard it clobbers the
+      // prefill effect's setFoamConfig("bottom_only") for insertType: "single".
       if (!prefillSeededRef.current) {
         setThicknessMode("auto");
         setBottomThk("");
         setTopThk(String(DEFAULT_TOP_PAD_IN));
+        setFoamConfig("bottom_top");
       }
-      setFoamConfig("bottom_top");
     }
   }, [quoteType]);
 
