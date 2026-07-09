@@ -8,13 +8,13 @@
 // a valid quote_no is needed to confirm the quote exists.
 //
 // POST body:
-//   { "quote_no": "Q-AI-...", "box": { "L": 18, "W": 12, "H": 6 } | null }
+//   { "quote_no": "Q-AI-...", "box": { "L": 18, "W": 12, "H": 6, "style": "mailer" | "rsc" } | null }
 //
 // GET params:
 //   ?quote_no=Q-AI-...
 //
 // Behaviour:
-//   POST – merges { customer_box_in: {L,W,H} | null } into the facts store.
+//   POST – merges { customer_box_in: {L,W,H,style?} | null } into the facts store.
 //   GET  – returns the stored customer_box_in for the given quote.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -26,13 +26,19 @@ export const runtime = "nodejs";
 
 type QuoteRow = { id: number };
 
-function coerceBox(raw: any): { L: number; W: number; H: number } | null {
+type BoxStyle = "mailer" | "rsc";
+
+function coerceBox(
+  raw: any,
+): { L: number; W: number; H: number; style?: BoxStyle } | null {
   if (!raw || typeof raw !== "object") return null;
   const L = Number(raw.L);
   const W = Number(raw.W);
   const H = Number(raw.H);
-  if ([L, W, H].every((n) => Number.isFinite(n) && n > 0)) return { L, W, H };
-  return null;
+  if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return null;
+  const box: { L: number; W: number; H: number; style?: BoxStyle } = { L, W, H };
+  if (raw.style === "mailer" || raw.style === "rsc") box.style = raw.style;
+  return box;
 }
 
 // ── GET ──────────────────────────────────────────────────────────────────────

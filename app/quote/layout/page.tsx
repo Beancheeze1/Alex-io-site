@@ -1819,7 +1819,7 @@ function LayoutEditorHostReady(props: {
   );
 
   // ---------------- Customer-entered box (inside dims) ----------------
-  type BoxDims = { L: number; W: number; H: number };
+  type BoxDims = { L: number; W: number; H: number; style?: "mailer" | "rsc" };
 
   const [customerBox, setCustomerBox] = React.useState<BoxDims | null>(null);
 
@@ -1833,7 +1833,12 @@ function LayoutEditorHostReady(props: {
       // which requires admin auth that customers in the public editor don't have.
       const payload =
         next && next.L > 0 && next.W > 0 && next.H > 0
-          ? { L: Number(next.L), W: Number(next.W), H: Number(next.H) }
+          ? {
+              L: Number(next.L),
+              W: Number(next.W),
+              H: Number(next.H),
+              ...(next.style ? { style: next.style } : null),
+            }
           : null;
 
       fetch("/api/quote/customer-box", {
@@ -1865,6 +1870,9 @@ function LayoutEditorHostReady(props: {
       const boxLParam = url.searchParams.get("boxL") ?? url.searchParams.get("box_l");
       const boxWParam = url.searchParams.get("boxW") ?? url.searchParams.get("box_w");
       const boxHParam = url.searchParams.get("boxH") ?? url.searchParams.get("box_d");
+      const boxStyleParam = url.searchParams.get("box_style");
+      const boxStyle: "mailer" | "rsc" | undefined =
+        boxStyleParam === "mailer" || boxStyleParam === "rsc" ? boxStyleParam : undefined;
 
       const hasBoxParams = boxLParam !== null || boxWParam !== null || boxHParam !== null;
 
@@ -1883,7 +1891,10 @@ function LayoutEditorHostReady(props: {
         const L = parseBoxNum(boxLParam);
         const W = parseBoxNum(boxWParam);
         const H = parseBoxNum(boxHParam);
-        const nextBox = L > 0 && W > 0 && H > 0 ? { L, W, H } : null;
+        const nextBox =
+          L > 0 && W > 0 && H > 0
+            ? { L, W, H, ...(boxStyle ? { style: boxStyle } : null) }
+            : null;
         setCustomerBox(nextBox);
         persistCustomerBox(nextBox);
         // Load persisted printed state from the print API if not set via URL.
@@ -1915,8 +1926,11 @@ function LayoutEditorHostReady(props: {
           const L = parseBoxNum(cb?.L);
           const W = parseBoxNum(cb?.W);
           const H = parseBoxNum(cb?.H);
-          if (L > 0 && W > 0 && H > 0) setCustomerBox({ L, W, H });
-          else setCustomerBox(null);
+          const style: "mailer" | "rsc" | undefined =
+            cb?.style === "mailer" || cb?.style === "rsc" ? cb.style : undefined;
+          if (L > 0 && W > 0 && H > 0) {
+            setCustomerBox({ L, W, H, ...(style ? { style } : null) });
+          } else setCustomerBox(null);
 
           if (printedParam === null && typeof (data as any)?.printed === "boolean") {
             setIsPrinted(!!(data as any).printed);
@@ -4757,6 +4771,31 @@ const tenantCssVars = React.useMemo(() => {
                       >
                         Clear
                       </button>
+                    </div>
+
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <span className="text-[10px] text-slate-400">Style</span>
+                      {(["mailer", "rsc"] as const).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => {
+                            const next = customerBox
+                              ? { ...customerBox, style: s }
+                              : { L: 0, W: 0, H: 0, style: s };
+                            setCustomerBox(next);
+                            persistCustomerBox(next);
+                          }}
+                          className={
+                            "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium " +
+                            (customerBox?.style === s
+                              ? "border-[color:var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_88%,white)]"
+                              : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)]")
+                          }
+                        >
+                          {s === "mailer" ? "Mailer" : "RSC"}
+                        </button>
+                      ))}
                     </div>
 
                     <div className="mt-2 grid grid-cols-3 gap-2">

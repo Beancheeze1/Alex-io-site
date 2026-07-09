@@ -112,14 +112,15 @@ function bad(body: any, status = 400) {
 function parseDimsString(dims: string | object | null | undefined) {
   if (!dims) return null;
 
-  // Handle object form: { L, W, H } (stored by persistCustomerBox in layout editor)
+  // Handle object form: { L, W, H, style? } (stored by persistCustomerBox in layout editor)
   if (typeof dims === "object") {
     const obj = dims as any;
     const L = Number(obj.L);
     const W = Number(obj.W);
     const H = Number(obj.H);
-    if ([L, W, H].every((n) => Number.isFinite(n) && n > 0)) return { L, W, H };
-    return null;
+    if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return null;
+    const style = obj.style === "mailer" || obj.style === "rsc" ? obj.style : undefined;
+    return style ? { L, W, H, style } : { L, W, H };
   }
 
   // Handle string form: "LxWxH"

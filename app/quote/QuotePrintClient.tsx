@@ -130,7 +130,7 @@ type ApiOk = {
   printingUpcharge: number;
   grandTotal: number;
   isPrinted?: boolean;
-  customerBoxDims?: { L: number; W: number; H: number } | null;
+  customerBoxDims?: { L: number; W: number; H: number; style?: "mailer" | "rsc" } | null;
   customerBoxMatch?: {
     sku: string;
     description: string | null;
@@ -798,7 +798,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
   // Printed flag and customer box dims from API
   const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
-  const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number } | null>(null);
+  const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number; style?: "mailer" | "rsc" } | null>(null);
   const [customerBoxMatch, setCustomerBoxMatch] = React.useState<ApiOk["customerBoxMatch"]>(null);
   // packagingLines from the print API — used when requestedBoxes (for-quote) is empty
   const [apiPackagingLines, setApiPackagingLines] = React.useState<RequestedBox[]>([]);
@@ -2873,8 +2873,16 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         const isCustomerBoxLine = !!(customerBoxDims && customerBoxMatch && rb.sku === customerBoxMatch.sku);
 
                         // For customer box lines, show clean customer-facing label only
+                        const customerBoxStyleLabel =
+                          customerBoxDims?.style === "mailer"
+                            ? "Mailer"
+                            : customerBoxDims?.style === "rsc"
+                              ? "RSC"
+                              : null;
                         const mainLabel = isCustomerBoxLine
-                          ? "Custom box"
+                          ? customerBoxStyleLabel
+                            ? `Custom box (${customerBoxStyleLabel})`
+                            : "Custom box"
                           : ((rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) || "Carton");
 
                         // Display dims are always the customer's requested dims for customer box lines
