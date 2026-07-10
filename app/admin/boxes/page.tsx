@@ -14,6 +14,7 @@
 "use client";
 
 import * as React from "react";
+import { validateBoxTierOrdering } from "@/app/lib/box-tier-pricing";
 
 type BoxApiRow = {
   box_id: number;
@@ -197,6 +198,30 @@ export default function AdminBoxesPage() {
     );
   }
 
+  // Live-computed from whatever is currently on screen (including unsaved
+  // edits), so the warning shows the moment backwards data is entered and
+  // stays visible across reloads if bad data was already saved.
+  const tierWarnings = React.useMemo(() => {
+    const out: { box_id: number; sku: string; messages: string[] }[] = [];
+    for (const r of rows) {
+      const w = validateBoxTierOrdering({
+        base_unit_price: r.base_unit_price,
+        tier1_min_qty: r.tier1_min_qty,
+        tier1_unit_price: r.tier1_unit_price,
+        tier2_min_qty: r.tier2_min_qty,
+        tier2_unit_price: r.tier2_unit_price,
+        tier3_min_qty: r.tier3_min_qty,
+        tier3_unit_price: r.tier3_unit_price,
+        tier4_min_qty: r.tier4_min_qty,
+        tier4_unit_price: r.tier4_unit_price,
+      });
+      if (w.length > 0) {
+        out.push({ box_id: r.box_id, sku: r.sku, messages: w.map((x) => x.message) });
+      }
+    }
+    return out;
+  }, [rows]);
+
   async function handleSaveAll() {
     if (!rows.length) return;
 
@@ -308,6 +333,24 @@ export default function AdminBoxesPage() {
             </button>
           </div>
         </div>
+
+        {/* Tier ordering warnings */}
+        {tierWarnings.length > 0 && (
+          <div className="mb-4 rounded-lg border border-amber-600/60 bg-amber-950/40 px-4 py-3 text-xs text-amber-100">
+            <div className="mb-1 font-semibold text-amber-200">
+              {tierWarnings.length} carton{tierWarnings.length === 1 ? "" : "s"} with
+              out-of-order tier pricing
+            </div>
+            <ul className="space-y-1">
+              {tierWarnings.map((w) => (
+                <li key={w.box_id}>
+                  <span className="font-mono text-amber-200">{w.sku}</span>:{" "}
+                  {w.messages.join(" ")}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Table */}
         <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60">

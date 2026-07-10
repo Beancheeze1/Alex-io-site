@@ -59,6 +59,26 @@ import {
 } from "@/app/lib/layout/exports";
 
 export const dynamic = "force-dynamic";
+
+// Resolves a carton's unit price by the tier with the LARGEST min_qty that
+// qty satisfies (not by fixed slot order tier4>tier3>tier2>tier1) — mirrors
+// resolveBoxUnitPrice in app/lib/box-tier-pricing.ts. Interpolate this
+// fragment wherever bpt (box_price_tiers) and qbs.qty (or another qty
+// column) are in scope; it evaluates to the resolved unit price.
+const BOX_TIER_UNIT_PRICE_SQL = `
+  COALESCE((
+    SELECT t.unit_price
+    FROM (VALUES
+      (bpt.tier1_min_qty, bpt.tier1_unit_price),
+      (bpt.tier2_min_qty, bpt.tier2_unit_price),
+      (bpt.tier3_min_qty, bpt.tier3_unit_price),
+      (bpt.tier4_min_qty, bpt.tier4_unit_price)
+    ) AS t(min_qty, unit_price)
+    WHERE t.min_qty IS NOT NULL AND t.unit_price IS NOT NULL AND qbs.qty >= t.min_qty
+    ORDER BY t.min_qty DESC
+    LIMIT 1
+  ), bpt.base_unit_price)
+`;
 export const runtime = "nodejs";
 
 function nextStageRev(cur?: string | null): string {
@@ -1551,24 +1571,8 @@ export async function POST(req: NextRequest) {
         `
     UPDATE public.quote_box_selections qbs
     SET
-      unit_price_usd = CASE
-        WHEN bpt.tier4_min_qty IS NOT NULL AND qbs.qty >= bpt.tier4_min_qty AND bpt.tier4_unit_price IS NOT NULL THEN bpt.tier4_unit_price
-        WHEN bpt.tier3_min_qty IS NOT NULL AND qbs.qty >= bpt.tier3_min_qty AND bpt.tier3_unit_price IS NOT NULL THEN bpt.tier3_unit_price
-        WHEN bpt.tier2_min_qty IS NOT NULL AND qbs.qty >= bpt.tier2_min_qty AND bpt.tier2_unit_price IS NOT NULL THEN bpt.tier2_unit_price
-        WHEN bpt.tier1_min_qty IS NOT NULL AND qbs.qty >= bpt.tier1_min_qty AND bpt.tier1_unit_price IS NOT NULL THEN bpt.tier1_unit_price
-        ELSE bpt.base_unit_price
-      END,
-      extended_price_usd = ROUND(
-        (
-          CASE
-            WHEN bpt.tier4_min_qty IS NOT NULL AND qbs.qty >= bpt.tier4_min_qty AND bpt.tier4_unit_price IS NOT NULL THEN bpt.tier4_unit_price
-            WHEN bpt.tier3_min_qty IS NOT NULL AND qbs.qty >= bpt.tier3_min_qty AND bpt.tier3_unit_price IS NOT NULL THEN bpt.tier3_unit_price
-            WHEN bpt.tier2_min_qty IS NOT NULL AND qbs.qty >= bpt.tier2_min_qty AND bpt.tier2_unit_price IS NOT NULL THEN bpt.tier2_unit_price
-            WHEN bpt.tier1_min_qty IS NOT NULL AND qbs.qty >= bpt.tier1_min_qty AND bpt.tier1_unit_price IS NOT NULL THEN bpt.tier1_unit_price
-            ELSE bpt.base_unit_price
-          END
-        ) * qbs.qty
-      , 2)
+      unit_price_usd = ${BOX_TIER_UNIT_PRICE_SQL},
+      extended_price_usd = ROUND((${BOX_TIER_UNIT_PRICE_SQL}) * qbs.qty, 2)
     FROM public.box_price_tiers bpt
     WHERE qbs.quote_id = $1
       AND bpt.box_id = qbs.box_id
@@ -2184,22 +2188,8 @@ export async function POST(req: NextRequest) {
           await q(
             `UPDATE public.quote_box_selections qbs
              SET
-               unit_price_usd = CASE
-                 WHEN bpt.tier4_min_qty IS NOT NULL AND qbs.qty >= bpt.tier4_min_qty AND bpt.tier4_unit_price IS NOT NULL THEN bpt.tier4_unit_price
-                 WHEN bpt.tier3_min_qty IS NOT NULL AND qbs.qty >= bpt.tier3_min_qty AND bpt.tier3_unit_price IS NOT NULL THEN bpt.tier3_unit_price
-                 WHEN bpt.tier2_min_qty IS NOT NULL AND qbs.qty >= bpt.tier2_min_qty AND bpt.tier2_unit_price IS NOT NULL THEN bpt.tier2_unit_price
-                 WHEN bpt.tier1_min_qty IS NOT NULL AND qbs.qty >= bpt.tier1_min_qty AND bpt.tier1_unit_price IS NOT NULL THEN bpt.tier1_unit_price
-                 ELSE bpt.base_unit_price
-               END,
-               extended_price_usd = ROUND(
-                 (CASE
-                   WHEN bpt.tier4_min_qty IS NOT NULL AND qbs.qty >= bpt.tier4_min_qty AND bpt.tier4_unit_price IS NOT NULL THEN bpt.tier4_unit_price
-                   WHEN bpt.tier3_min_qty IS NOT NULL AND qbs.qty >= bpt.tier3_min_qty AND bpt.tier3_unit_price IS NOT NULL THEN bpt.tier3_unit_price
-                   WHEN bpt.tier2_min_qty IS NOT NULL AND qbs.qty >= bpt.tier2_min_qty AND bpt.tier2_unit_price IS NOT NULL THEN bpt.tier2_unit_price
-                   WHEN bpt.tier1_min_qty IS NOT NULL AND qbs.qty >= bpt.tier1_min_qty AND bpt.tier1_unit_price IS NOT NULL THEN bpt.tier1_unit_price
-                   ELSE bpt.base_unit_price
-                 END) * qbs.qty
-               , 2)
+               unit_price_usd = ${BOX_TIER_UNIT_PRICE_SQL},
+               extended_price_usd = ROUND((${BOX_TIER_UNIT_PRICE_SQL}) * qbs.qty, 2)
              FROM public.box_price_tiers bpt
              WHERE qbs.quote_id = $1
                AND bpt.box_id = qbs.box_id`,

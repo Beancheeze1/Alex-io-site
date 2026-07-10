@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
+import { validateBoxTierOrdering } from "@/app/lib/box-tier-pricing";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -219,6 +220,7 @@ export async function POST(req: NextRequest) {
     }
 
     let applied = 0;
+    const warnings: Array<{ box_id: number; messages: string[] }> = [];
 
     for (const u of body.updates) {
       const boxId = Number(u.box_id);
@@ -235,6 +237,24 @@ export async function POST(req: NextRequest) {
       const tier3_unit_price = toNullableNumber(u.tier3_unit_price);
       const tier4_min_qty = toNullableInt(u.tier4_min_qty);
       const tier4_unit_price = toNullableNumber(u.tier4_unit_price);
+
+      const orderWarnings = validateBoxTierOrdering({
+        base_unit_price,
+        tier1_min_qty,
+        tier1_unit_price,
+        tier2_min_qty,
+        tier2_unit_price,
+        tier3_min_qty,
+        tier3_unit_price,
+        tier4_min_qty,
+        tier4_unit_price,
+      });
+      if (orderWarnings.length > 0) {
+        warnings.push({
+          box_id: boxId,
+          messages: orderWarnings.map((w) => w.message),
+        });
+      }
 
       const tierId = u.tier_id != null ? Number(u.tier_id) : null;
 
@@ -320,6 +340,7 @@ export async function POST(req: NextRequest) {
     return ok({
       ok: true,
       applied,
+      warnings,
     });
   } catch (err: any) {
     console.error("Error in POST /api/admin/boxes:", err);

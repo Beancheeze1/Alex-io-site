@@ -30,6 +30,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
+import { resolveBoxUnitPrice } from "@/app/lib/box-tier-pricing";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -298,43 +299,7 @@ export async function POST(req: NextRequest) {
 
     const qtyForPrice = Math.max(1, selection.qty ?? 1);
 
-    const base =
-      tier?.base_unit_price != null ? Number(tier.base_unit_price) : null;
-
-    const tiers = [
-      {
-        min: tier?.tier1_min_qty ?? null,
-        unit:
-          tier?.tier1_unit_price != null ? Number(tier.tier1_unit_price) : null,
-      },
-      {
-        min: tier?.tier2_min_qty ?? null,
-        unit:
-          tier?.tier2_unit_price != null ? Number(tier.tier2_unit_price) : null,
-      },
-      {
-        min: tier?.tier3_min_qty ?? null,
-        unit:
-          tier?.tier3_unit_price != null ? Number(tier.tier3_unit_price) : null,
-      },
-      {
-        min: tier?.tier4_min_qty ?? null,
-        unit:
-          tier?.tier4_unit_price != null ? Number(tier.tier4_unit_price) : null,
-      },
-    ].filter(
-      (t) => t.min != null && Number.isFinite(t.min as any) && (t.min as number) > 0,
-    );
-
-    let unitPrice: number | null = base;
-
-    for (const t of tiers) {
-      const minQty = t.min as number;
-      const u = t.unit;
-      if (u != null && Number.isFinite(u) && qtyForPrice >= minQty) {
-        unitPrice = u;
-      }
-    }
+    const unitPrice = resolveBoxUnitPrice(tier, qtyForPrice);
 
     const extendedPrice =
       unitPrice != null ? roundToCents(unitPrice * qtyForPrice) : null;

@@ -29,6 +29,7 @@ import { buildLayoutExports, computeGeometryHash } from "@/app/lib/layout/export
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
+import { resolveBoxUnitPrice } from "@/app/lib/box-tier-pricing";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -257,22 +258,7 @@ async function findAndPriceClosestBox(
     [best.id],
   );
 
-  const safeN = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
-
-  let unitPrice: number | null = tier ? safeN(tier.base_unit_price) : null;
-
-  if (tier) {
-    const tiers = [
-      { min: tier.tier1_min_qty, unit: safeN(tier.tier1_unit_price) },
-      { min: tier.tier2_min_qty, unit: safeN(tier.tier2_unit_price) },
-      { min: tier.tier3_min_qty, unit: safeN(tier.tier3_unit_price) },
-      { min: tier.tier4_min_qty, unit: safeN(tier.tier4_unit_price) },
-    ].filter((t) => t.min != null && (t.min as number) > 0);
-
-    for (const t of tiers) {
-      if (t.unit != null && qty >= (t.min as number)) unitPrice = t.unit;
-    }
-  }
+  const unitPrice = resolveBoxUnitPrice(tier, qty);
 
   const extendedPrice = unitPrice != null ? Math.round(unitPrice * qty * 100) / 100 : null;
 
