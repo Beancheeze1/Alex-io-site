@@ -77,6 +77,43 @@ function isForgeSupportedUpload(
   return { ok: false, sourceType: null };
 }
 
+// Allowlist for the default (non-Forge) legacy upload path — matches the
+// sketch-upload form's accept="image/*,application/pdf" on the server side,
+// since the accept attribute alone is not enforced for non-picker submissions
+// (drag-and-drop, direct API calls, etc.).
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+  "heic",
+  "heif",
+  "pdf",
+]);
+
+const ALLOWED_UPLOAD_CONTENT_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+  "application/pdf",
+]);
+
+function isAllowedLegacyUpload(filename: string, rawContentType: string): boolean {
+  const ext = extOf(filename);
+  if (!ALLOWED_UPLOAD_EXTENSIONS.has(ext)) return false;
+
+  const ct = (rawContentType || "").toLowerCase().trim();
+  if (ct && ct !== "application/octet-stream" && !ALLOWED_UPLOAD_CONTENT_TYPES.has(ct)) {
+    return false;
+  }
+
+  return true;
+}
+
 type ForgeDiag = { severity?: string; code?: string; message?: string; data_json?: any };
 type ForgeArtifact = { id: number; kind: string; storage_key: string };
 
@@ -623,6 +660,14 @@ export async function POST(req: NextRequest) {
           forge: { used: true, manifest, faces_attachment_id: facesAttachmentId },
         },
         { status: 200 },
+      );
+    }
+
+    if (!isAllowedLegacyUpload(origFilename, file.type || "")) {
+      return err(
+        "unsupported_file_type",
+        `"${origFilename}" (${contentType}) isn't a supported file type. Please upload a JPG, PNG, WEBP, GIF, HEIC/HEIF photo, or a PDF drawing.`,
+        415,
       );
     }
 

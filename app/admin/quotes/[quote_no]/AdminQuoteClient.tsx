@@ -20,6 +20,7 @@
 import * as React from "react";
 import { buildOuterOutlinePolyline } from "@/app/lib/layout/outline";
 import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
+import QuoteAttachmentsPanel from "@/components/admin/QuoteAttachmentsPanel";
 
 
 type QuoteRow = {
@@ -2462,6 +2463,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 </>
               )}
             </div>
+
+            {quoteNoValue && <QuoteAttachmentsPanel quoteNo={quoteNoValue} />}
 
             {/* layout + CAD downloads */}
             <div style={{ marginTop: 4, marginBottom: 20 }}>
