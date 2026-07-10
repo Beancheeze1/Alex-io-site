@@ -1798,6 +1798,30 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
         return;
       }
 
+      // Arm the next staging bump so the next Apply advances the revision letter.
+      try {
+        const armRes = await fetch("/api/admin/quotes/revise?t=" + String(Date.now()), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ quoteNo: quoteNoValue }),
+        });
+
+        const armCt = armRes.headers.get("content-type") || "";
+        const armJson: any = armCt.includes("application/json")
+          ? await armRes.json()
+          : { ok: armRes.ok, message: await armRes.text() };
+
+        if (!armRes.ok || !armJson?.ok) {
+          setRevisionError("Unlocked, but failed to arm the next revision bump.");
+          return;
+        }
+      } catch (armErr: any) {
+        console.error("Admin: revise arm-bump failed:", armErr);
+        setRevisionError("Unlocked, but failed to arm the next revision bump.");
+        return;
+      }
+
       setRevisionOkAt(new Date().toLocaleString());
       // Refresh print payload so revisionValue updates from facts.revision
       setRefreshTick((x) => x + 1);

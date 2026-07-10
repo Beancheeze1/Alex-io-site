@@ -3417,6 +3417,19 @@ const handleGoToFoamAdvisor = () => {
       return;
     }
 
+    const hasAnyLayerMaterial =
+      perLayerMaterialMode &&
+      Array.isArray(layers) &&
+      layers.some((l: any) => {
+        const v = Number(l?.materialId);
+        return Number.isFinite(v) && v > 0;
+      });
+
+    if (selectedMaterialId == null && !hasAnyLayerMaterial) {
+      alert("Select a foam material before applying to quote.");
+      return;
+    }
+
     try {
       setApplyStatus("saving");
 
@@ -4705,7 +4718,7 @@ const tenantCssVars = React.useMemo(() => {
                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
                   >
                     <option value="">
-                      {materialsLoading ? "Loading materials…" : "Select material (optional)"}
+                      {materialsLoading ? "Loading materials…" : "Select material"}
                     </option>
                     <option value="per-layer">⚡ Per layer (set per layer below)</option>
                     {materialsByFamily.map(([family, list]) => (

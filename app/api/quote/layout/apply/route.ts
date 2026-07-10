@@ -459,18 +459,23 @@ function primaryBillableQuoteItemWhere(quoteIdSql: string): string {
           `;
 }
 
+type EnsurePrimaryQuoteItemResult =
+  | { ok: true }
+  | { ok: false; error: string; message: string };
+
 async function ensurePrimaryQuoteItem(args: {
   quoteId: number;
   layoutForSave: any;
   qtyMaybe: number | null;
   materialIdMaybe: number | null;
-}) {
+  foamLayers?: any[] | null;
+}): Promise<EnsurePrimaryQuoteItemResult> {
   const existingCount = await one<{ c: number }>(
     `select count(*)::int as c from quote_items where quote_id = $1`,
     [args.quoteId],
   );
 
-  if ((existingCount?.c ?? 0) > 0) return;
+  if ((existingCount?.c ?? 0) > 0) return { ok: true };
 
   const block = args.layoutForSave?.block ?? null;
 
@@ -480,7 +485,11 @@ async function ensurePrimaryQuoteItem(args: {
 
   if (!Number.isFinite(L) || L <= 0 || !Number.isFinite(W) || W <= 0) {
     console.warn("[layout/apply] Cannot create primary quote_item (missing block dims)", { quoteId: args.quoteId });
-    return;
+    return {
+      ok: false,
+      error: "missing_block_dims",
+      message: "Couldn't apply: the foam block is missing a valid length/width.",
+    };
   }
 
   if (!Number.isFinite(T) || T <= 0) {
@@ -490,21 +499,38 @@ async function ensurePrimaryQuoteItem(args: {
 
   if (!Number.isFinite(T) || T <= 0) {
     console.warn("[layout/apply] Cannot create primary quote_item (missing thickness)", { quoteId: args.quoteId });
-    return;
+    return {
+      ok: false,
+      error: "missing_thickness",
+      message: "Couldn't apply: the foam block is missing a valid thickness.",
+    };
   }
 
   const qty = args.qtyMaybe != null && Number.isFinite(args.qtyMaybe) && args.qtyMaybe > 0 ? args.qtyMaybe : 1;
-  const materialId =
+
+  let materialId =
     args.materialIdMaybe != null && Number.isFinite(args.materialIdMaybe) && args.materialIdMaybe > 0
       ? args.materialIdMaybe
       : null;
 
-  // NOTE: we proceed even when materialId is null (DB column is nullable).
-  // Previously we bailed here, which caused the primary quote_item to never be
-  // created when materialId wasn't resolved yet, causing every subsequent UPDATE
-  // targeting "the primary item" to silently touch zero rows and Apply to 500.
+  // Fallback for per-layer material mode: no quote-level materialId is sent in that
+  // mode, so fall back to the first layer that has one before treating this as missing.
+  if (!materialId && Array.isArray(args.foamLayers)) {
+    const firstLayerMaterialId = args.foamLayers
+      .map((l: any) => Number(l?.materialId))
+      .find((v: number) => Number.isFinite(v) && v > 0);
+    if (firstLayerMaterialId != null) {
+      materialId = firstLayerMaterialId;
+    }
+  }
+
   if (!materialId) {
-    console.warn("[layout/apply] Creating primary quote_item with null material_id — user can set material in editor", { quoteId: args.quoteId });
+    console.warn("[layout/apply] Cannot create primary quote_item (missing material)", { quoteId: args.quoteId });
+    return {
+      ok: false,
+      error: "missing_material",
+      message: "Couldn't apply: no foam material is selected.",
+    };
   }
 
   await q(
@@ -532,6 +558,8 @@ async function ensurePrimaryQuoteItem(args: {
     materialId,
     qty,
   });
+
+  return { ok: true };
 }
 
 /* ===================== DXF builder from layout (fallback) ===================== */
@@ -1466,7 +1494,7 @@ export async function POST(req: NextRequest) {
           ? Number(layoutForSave.materialId ?? layoutForSave.material_id) || null
           : null;
 
-    await ensurePrimaryQuoteItem({
+    const primaryItemResult = await ensurePrimaryQuoteItem({
       quoteId: quote.id,
       layoutForSave,
       qtyMaybe,
@@ -1474,7 +1502,12 @@ export async function POST(req: NextRequest) {
         materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0
           ? materialIdMaybe
           : null,
+      foamLayers: Array.isArray(body?.foamLayers) ? body.foamLayers : null,
     });
+
+    if (!primaryItemResult.ok) {
+      return bad({ ok: false, error: primaryItemResult.error, message: primaryItemResult.message }, 422);
+    }
 
     // NEW: If Apply provided a qty, keep cartons in sync with the quote qty.
     // Also recompute carton pricing (unit + extended) so totals update immediately.
