@@ -1770,7 +1770,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
     }
   }, [quoteNoValue, rebuildBusy]);
 
-  // NEW (Path A): Revise = bump staging revision (AS->BS->CS...) by calling admin lock route with lock:false
+  // Revise = unlock only. Every Apply now bumps its own staging revision
+  // unconditionally, so there's nothing left to arm here.
   const handleReviseNow = React.useCallback(async () => {
     if (!quoteNoValue) return;
     if (revisionBusy) return;
@@ -1795,30 +1796,6 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
       if (!res.ok || !json?.ok) {
         setRevisionError(json?.error || json?.message || "Revise failed.");
-        return;
-      }
-
-      // Arm the next staging bump so the next Apply advances the revision letter.
-      try {
-        const armRes = await fetch("/api/admin/quotes/revise?t=" + String(Date.now()), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({ quoteNo: quoteNoValue }),
-        });
-
-        const armCt = armRes.headers.get("content-type") || "";
-        const armJson: any = armCt.includes("application/json")
-          ? await armRes.json()
-          : { ok: armRes.ok, message: await armRes.text() };
-
-        if (!armRes.ok || !armJson?.ok) {
-          setRevisionError("Unlocked, but failed to arm the next revision bump.");
-          return;
-        }
-      } catch (armErr: any) {
-        console.error("Admin: revise arm-bump failed:", armErr);
-        setRevisionError("Unlocked, but failed to arm the next revision bump.");
         return;
       }
 
@@ -2099,7 +2076,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         fontWeight: 800,
                         cursor: revisionBusy ? "not-allowed" : "pointer",
                       }}
-                      title="Revise = bump staging revision (ASBSCS...)"
+                      title="Unlock so this quote can be edited again"
                     >
                       {revisionBusy ? "Revising..." : "Revise"}
                     </button>

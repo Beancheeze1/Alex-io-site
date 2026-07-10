@@ -193,19 +193,11 @@ export default function AdminQuotesPage() {
   }
 
   async function handleReviseQuote(quoteNo: string, isLocked: boolean) {
-    // If Released for Mfg, Revise should unlock + open editor without skipping a revision.
-    // IMPORTANT: unlock must NOT bump staging rev (that bump is armed below and applied on next Apply).
+    // If Released for Mfg, Revise should unlock + open editor. Every Apply now
+    // bumps its own staging revision unconditionally, so there's nothing to arm.
     if (isLocked) {
       await setQuoteLock(quoteNo, false);
     }
-
-    // Arm a single staging bump (do NOT bump yet)
-    await fetch("/api/admin/quotes/revise?t=" + Date.now(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ quoteNo }),
-      cache: "no-store",
-    });
 
     // Go straight to editor
     router.push(`/quote/layout?quote_no=${quoteNo}`);
@@ -765,7 +757,7 @@ export default function AdminQuotesPage() {
                                 border: "1px solid #374151",
                                 cursor: "pointer",
                               }}
-                              title="Revise quote (bumps staging revision on next Apply)"
+                              title="Unlock and open the layout editor"
                             >
                               Revise
                             </button>

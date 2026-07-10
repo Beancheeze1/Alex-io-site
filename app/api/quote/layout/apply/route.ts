@@ -63,11 +63,21 @@ export const runtime = "nodejs";
 
 function nextStageRev(cur?: string | null): string {
   const t = String(cur || "").trim();
-  if (!t || t.length < 2) return "AS";
+  if (!t) return "AS"; // no prior revision at all -> quote's first stage
+
   const c = t.charAt(0).toUpperCase();
   const code = c.charCodeAt(0);
-  if (code < 65 || code > 90) return "AS";
-  return String.fromCharCode(code + 1) + "S";
+  if (code < 65 || code > 90) return "AS"; // truly invalid input -> fall back to first stage
+
+  const hasStageSuffix = t.length >= 2 && t.charAt(1).toUpperCase() === "S";
+
+  if (hasStageSuffix) {
+    // Already staging (e.g. "BS" -> "CS"): advance the letter, stay staging.
+    return String.fromCharCode(code + 1) + "S";
+  }
+
+  // Released only, no "S" (e.g. "B" right after RFM -> "BS"): same letter, now staging.
+  return c + "S";
 }
 
 type QuoteRow = {
@@ -1429,22 +1439,56 @@ export async function POST(req: NextRequest) {
 
     const notes = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
 
+    // --- MATERIAL / PRIMARY ITEM VALIDATION (must run before the staging bump) ---
+    // If this fails, Apply is rejected outright and the revision must NOT advance —
+    // there'd be nothing behind the bumped letter.
+    let qtyMaybe: number | null = null;
+    if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
+      const qn = Number(body.qty);
+      if (Number.isFinite(qn) && qn > 0) qtyMaybe = qn;
+    }
+
+    const materialIdMaybe =
+      materialId != null
+        ? materialId
+        : layoutForSave && (layoutForSave.materialId != null || layoutForSave.material_id != null)
+          ? Number(layoutForSave.materialId ?? layoutForSave.material_id) || null
+          : null;
+
+    const primaryItemResult = await ensurePrimaryQuoteItem({
+      quoteId: quote.id,
+      layoutForSave,
+      qtyMaybe,
+      materialIdMaybe:
+        materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0
+          ? materialIdMaybe
+          : null,
+      foamLayers: Array.isArray(body?.foamLayers) ? body.foamLayers : null,
+    });
+
+    if (!primaryItemResult.ok) {
+      return bad({ ok: false, error: primaryItemResult.error, message: primaryItemResult.message }, 422);
+    }
+    // --- END MATERIAL / PRIMARY ITEM VALIDATION ---
+
     // --- STAGING REV BUMP ON APPLY (Path A) ---
+    // Every successful Apply is definitionally its own staging revision — same way
+    // every Lock/RFM is definitionally its own released revision. No arming needed.
     // IMPORTANT: bump BEFORE tagging notes/packages so the package carries the current revision.
     let factsForRev: any = null;
     try {
       factsForRev = await loadFacts(String(quoteNo));
 
-      if (factsForRev?.stage_pending_bump === true) {
-        const curStage = factsForRev.stage_rev || factsForRev.revision || "AS";
-        const nextStage = nextStageRev(curStage);
+      // Do NOT default a missing stage to "AS" here — nextStageRev's own
+      // "no prior revision" handling correctly produces "AS" for a quote's
+      // very first Apply. Defaulting to "AS" here would skip straight to "BS".
+      const curStage = factsForRev?.stage_rev || factsForRev?.revision || null;
+      const nextStage = nextStageRev(curStage);
 
-        factsForRev.stage_rev = nextStage;
-        factsForRev.revision = nextStage;
-        factsForRev.stage_pending_bump = false;
+      factsForRev.stage_rev = nextStage;
+      factsForRev.revision = nextStage;
 
-        await saveFacts(String(quoteNo), factsForRev);
-      }
+      await saveFacts(String(quoteNo), factsForRev);
     } catch {
       // Non-fatal: apply must succeed even if revision update fails
     }
@@ -1479,35 +1523,6 @@ export async function POST(req: NextRequest) {
 
     // ✅ Server-enforced chamfer (fixes broken client checkbox)
     const svgFixed = enforceChamferedBlockInSvg(svgCanonical, layoutForSave);
-
-    // NEW: If quote_items is missing, create the PRIMARY row now (safe self-heal).
-    let qtyMaybe: number | null = null;
-    if (body.qty !== undefined && body.qty !== null && body.qty !== "") {
-      const qn = Number(body.qty);
-      if (Number.isFinite(qn) && qn > 0) qtyMaybe = qn;
-    }
-
-    const materialIdMaybe =
-      materialId != null
-        ? materialId
-        : layoutForSave && (layoutForSave.materialId != null || layoutForSave.material_id != null)
-          ? Number(layoutForSave.materialId ?? layoutForSave.material_id) || null
-          : null;
-
-    const primaryItemResult = await ensurePrimaryQuoteItem({
-      quoteId: quote.id,
-      layoutForSave,
-      qtyMaybe,
-      materialIdMaybe:
-        materialIdMaybe != null && Number.isFinite(materialIdMaybe) && materialIdMaybe > 0
-          ? materialIdMaybe
-          : null,
-      foamLayers: Array.isArray(body?.foamLayers) ? body.foamLayers : null,
-    });
-
-    if (!primaryItemResult.ok) {
-      return bad({ ok: false, error: primaryItemResult.error, message: primaryItemResult.message }, 422);
-    }
 
     // NEW: If Apply provided a qty, keep cartons in sync with the quote qty.
     // Also recompute carton pricing (unit + extended) so totals update immediately.
