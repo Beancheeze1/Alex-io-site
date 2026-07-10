@@ -1482,7 +1482,15 @@ export async function POST(req: NextRequest) {
       // Do NOT default a missing stage to "AS" here — nextStageRev's own
       // "no prior revision" handling correctly produces "AS" for a quote's
       // very first Apply. Defaulting to "AS" here would skip straight to "BS".
-      const curStage = factsForRev?.stage_rev || factsForRev?.revision || null;
+      //
+      // Prefer `revision` over `stage_rev`: the RFM release-mint logic
+      // (app/api/admin/quotes/lock/route.ts) resets `revision` to the fresh
+      // released letter (e.g. "A") but does NOT touch `stage_rev`, which is
+      // left holding whatever staging letter was reached before release
+      // (e.g. "CS"). Reading stage_rev first would resume from that stale
+      // value instead of correctly starting the next stage from the letter
+      // that was just released.
+      const curStage = factsForRev?.revision || factsForRev?.stage_rev || null;
       const nextStage = nextStageRev(curStage);
 
       factsForRev.stage_rev = nextStage;
