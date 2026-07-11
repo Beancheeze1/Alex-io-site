@@ -153,6 +153,22 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    if (priceRaw !== undefined && price_per_cuin !== null && price_per_cuin < 0) {
+      return bad(
+        "invalid_price",
+        { message: "Price per cu in must be a non-negative number." },
+        400,
+      );
+    }
+
+    if (minRaw !== undefined && min_charge_usd !== null && min_charge_usd < 0) {
+      return bad(
+        "invalid_min_charge",
+        { message: "Min charge must be a non-negative number." },
+        400,
+      );
+    }
+
     const sets: string[] = [];
     const params: any[] = [id];
 

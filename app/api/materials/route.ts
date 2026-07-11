@@ -37,6 +37,7 @@ export async function GET(req: NextRequest) {
         density_lb_ft3,
         is_active
       from materials
+      where is_active is not false
       order by material_family, material_name;
     `);
 
