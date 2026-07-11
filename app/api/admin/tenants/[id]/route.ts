@@ -107,6 +107,14 @@ export async function PATCH(req: NextRequest, ctx: ParamsCtx) {
 
   const name = typeof nameRaw === "string" ? nameRaw.trim() : undefined;
   const active = typeof activeRaw === "boolean" ? activeRaw : undefined;
+
+  if (
+    themeRaw !== undefined &&
+    (themeRaw === null || typeof themeRaw !== "object" || Array.isArray(themeRaw))
+  ) {
+    return bad("invalid_theme_json", "theme_json must be a plain object.", 400);
+  }
+
   const theme_json = themeRaw !== undefined ? themeRaw : undefined;
 
   // Validate plan if provided

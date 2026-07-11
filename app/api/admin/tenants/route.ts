@@ -242,6 +242,14 @@ export const POST = adminOnly(async (req: NextRequest) => {
     return bad("invalid_input", "name and slug required");
   }
 
+  const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+  if (!SLUG_RE.test(slug)) {
+    return bad(
+      "invalid_slug",
+      "Slug must be lowercase letters, numbers, and hyphens only, and cannot start or end with a hyphen.",
+    );
+  }
+
   const admin_email = adminEmailForSlug(slug);
   const temp_password = makeTempPassword();
 
