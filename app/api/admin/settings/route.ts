@@ -18,6 +18,50 @@ export const GET = adminOnly(async (req: NextRequest) => {
   return NextResponse.json({ ok: true, settings }, { status: 200 });
 });
 
+type ValidationError = { field: string; message: string };
+
+function validateNonNegative(field: string, value: any): ValidationError | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return { field, message: `${field} must be a non-negative number.` };
+  }
+  return null;
+}
+
+function validateMarkupFactor(value: any): ValidationError | null {
+  const negative = validateNonNegative("markup_factor_default", value);
+  if (negative) return negative;
+  if (value === 0) {
+    return {
+      field: "markup_factor_default",
+      message:
+        "markup_factor_default cannot be zero — this would price every quote at zero cost or a loss.",
+    };
+  }
+  return null;
+}
+
+function validateKerfPct(value: any): ValidationError | null {
+  const negative = validateNonNegative("kerf_pct_default", value);
+  if (negative) return negative;
+  if (value > 200) {
+    return {
+      field: "kerf_pct_default",
+      message: "kerf_pct_default cannot exceed 200%.",
+    };
+  }
+  return null;
+}
+
+function validateCushionFamilyOrder(value: any): ValidationError | null {
+  if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
+    return {
+      field: "cushion_family_order",
+      message: "cushion_family_order must be an array of strings.",
+    };
+  }
+  return null;
+}
+
 export const PATCH = adminOnly(async (req: NextRequest) => {
   try {
     const user = await getCurrentUserFromRequest(req);
@@ -45,6 +89,30 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
     const filtered: Partial<PricingSettings> = {};
     for (const k of keys) {
       if (k in body) (filtered as any)[k] = (body as any)[k];
+    }
+
+    for (const k of keys) {
+      if (!(k in filtered)) continue;
+
+      const value = (filtered as any)[k];
+      let error: ValidationError | null;
+
+      if (k === "markup_factor_default") {
+        error = validateMarkupFactor(value);
+      } else if (k === "kerf_pct_default") {
+        error = validateKerfPct(value);
+      } else if (k === "cushion_family_order") {
+        error = validateCushionFamilyOrder(value);
+      } else {
+        error = validateNonNegative(k, value);
+      }
+
+      if (error) {
+        return NextResponse.json(
+          { ok: false, error: "invalid_value", field: error.field, message: error.message },
+          { status: 400 },
+        );
+      }
     }
 
     const settings = await updatePricingSettings(filtered, tenantId);

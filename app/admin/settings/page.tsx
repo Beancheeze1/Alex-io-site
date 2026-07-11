@@ -182,7 +182,7 @@ export default function AdminSettingsPage() {
       const json = await res.json().catch(() => null);
       if (!res.ok || !json || !json.ok) {
         throw new Error(
-          (json && (json.error || json.message)) ||
+          (json && (json.message || json.error)) ||
             `PATCH /api/admin/settings ${res.status}`,
         );
       }
