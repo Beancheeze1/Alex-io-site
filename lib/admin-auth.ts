@@ -4,12 +4,18 @@ import { env } from "./env";
 import logger from "./logger";
 import { getCurrentUserFromRequest, isRoleAllowed, type CurrentUser } from "./auth";
 
-// Platform-owner allowlist — same email(+alias) convention used for tenant
-// writes in app/api/admin/tenants/route.ts. Distinct from a plain "admin"
-// role: an admin is scoped to their own tenant, the platform owner is not.
+// Platform-owner check — the single bootstrap owner account only.
+//
+// NOTE: this deliberately does NOT use the "25thhourdesign+*" wildcard
+// pattern from canWriteTenants() in app/api/admin/tenants/route.ts. That
+// pattern matches every tenant's seeded admin email too, since
+// adminEmailForSlug() generates admin logins as 25thhourdesign+<slug>@gmail.com
+// for ALL tenants — so a startsWith("25thhourdesign+") check here would let
+// any tenant's own admin through as if they were the platform owner. Only
+// the exact bare address identifies the actual owner.
 export function isPlatformOwner(user: CurrentUser | null | undefined): boolean {
   const email = String(user?.email || "").trim().toLowerCase();
-  return email === "25thhourdesign@gmail.com" || email.startsWith("25thhourdesign+");
+  return email === "25thhourdesign@gmail.com";
 }
 
 export async function requireAdmin(req: NextRequest): Promise<NextResponse | null> {
