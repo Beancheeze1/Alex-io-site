@@ -1,65 +1,84 @@
 // app/api/admin/templates/route.ts
-import { NextRequest, NextResponse } from "next/server";
+//
+// CRUD list/create for the `templates` table (email templates managed via
+// /admin/templates). GET returns { ok, items }, POST creates a new row.
+//
+// The email-preview/render diagnostic that used to live at GET here has
+// moved to app/api/admin/templates/preview/route.ts — it was a different
+// feature entirely (renders a sample email using the active template +
+// signature) and didn't return the { items } shape this list page needs.
 
-import { pickTemplateWithKey } from "@/app/lib/templates";
-import { pickSignature } from "@/app/lib/signature";
-import { renderTemplate } from "@/app/lib/tpl";
-import { shouldWrap, wrapHtml } from "@/app/lib/layout";
+import { NextRequest, NextResponse } from "next/server";
+import { Pool } from "pg";
 import { adminOnly } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
-function mustStr(v: string | undefined, fb = ""): string {
-  return v ?? fb;
+declare global {
+  // eslint-disable-next-line no-var
+  var __TEMPLATE_DB_POOL__: Pool | undefined;
 }
 
-function pickTemplateSafe(inboxEmail: string) {
-  try {
-    // @ts-expect-error object overload allowed
-    return pickTemplateWithKey({ inboxEmail }) ?? pickTemplateWithKey(inboxEmail);
-  } catch {
-    try {
-      // @ts-expect-error string overload allowed
-      return pickTemplateWithKey(inboxEmail);
-    } catch {
-      return { subject: "[Alex-IO]", html: "{{body}}" };
-    }
+function getPool() {
+  if (!global.__TEMPLATE_DB_POOL__) {
+    const conn = process.env.DATABASE_URL;
+    if (!conn) throw new Error("Missing env: DATABASE_URL");
+    global.__TEMPLATE_DB_POOL__ = new Pool({ connectionString: conn, max: 5 });
   }
-}
-
-function pickSignatureSafe(inboxEmail: string) {
-  try {
-    // @ts-expect-error object overload allowed
-    return pickSignature({ inboxEmail }) ?? pickSignature(inboxEmail);
-  } catch {
-    try {
-      // @ts-expect-error string overload allowed
-      return pickSignature(inboxEmail);
-    } catch {
-      return { key: "(fallback)", html: "" };
-    }
-  }
+  return global.__TEMPLATE_DB_POOL__;
 }
 
 export const GET = adminOnly(async (_req: NextRequest) => {
-  const inboxEmail = String(process.env.MS_MAILBOX_FROM || "sales@alex-io.com").toLowerCase();
-  const templ = pickTemplateSafe(inboxEmail);
-  const sig = pickSignatureSafe(inboxEmail);
+  try {
+    const pool = getPool();
+    const { rows } = await pool.query(
+      `select id, tkey, name, subject, body_html, body_text, vars, is_active, created_at, updated_at
+       from templates
+       order by updated_at desc`
+    );
+    return NextResponse.json({ ok: true, items: rows });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || "failed" }, { status: 500 });
+  }
+});
 
-  const subject = mustStr((templ as any)?.subject, "[Alex-IO]");
-  const htmlTmpl = mustStr((templ as any)?.html, "{{body}}");
+export const POST = adminOnly(async (req: NextRequest) => {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const {
+      tkey,
+      name,
+      subject,
+      body_html,
+      body_text,
+      vars,
+      is_active,
+    } = body || {};
 
-  const sample = renderTemplate(htmlTmpl, { body: "Template OK" });
-  const composed = sample + mustStr(sig?.html, "");
+    if (!tkey || !name) {
+      return NextResponse.json({ ok: false, error: "tkey and name are required" }, { status: 400 });
+    }
 
-  // ✅ object form to satisfy Partial<WrapOpts>
-  const wrapped = shouldWrap() ? wrapHtml({ subject, html: composed }) : composed;
-
-  return NextResponse.json({
-    ok: true,
-    inboxEmail,
-    template: { subject, html: htmlTmpl },
-    signature: { key: sig?.key ?? "(fallback)", html: mustStr(sig?.html, "") },
-    preview: { subject, html: wrapped },
-  });
+    const pool = getPool();
+    const { rows } = await pool.query(
+      `insert into templates (tkey, name, subject, body_html, body_text, vars, is_active)
+       values ($1, $2, $3, $4, $5, $6, $7)
+       returning id, tkey, name, subject, body_html, body_text, vars, is_active, created_at, updated_at`,
+      [
+        tkey,
+        name,
+        subject ?? "",
+        body_html ?? "",
+        body_text ?? "",
+        vars ?? {},
+        !!is_active,
+      ]
+    );
+    return NextResponse.json({ ok: true, item: rows[0] }, { status: 201 });
+  } catch (e: any) {
+    if (String(e?.code) === "23505") {
+      return NextResponse.json({ ok: false, error: "tkey already exists" }, { status: 409 });
+    }
+    return NextResponse.json({ ok: false, error: e?.message || "failed" }, { status: 500 });
+  }
 });

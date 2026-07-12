@@ -42,7 +42,7 @@ export default function TemplatesAdminPage() {
       const r = await fetch(`${BASE}/api/admin/templates`, { cache: "no-store" });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || "Failed");
-      setItems(j.items);
+      setItems(Array.isArray(j.items) ? j.items : []);
     } catch (e: any) {
       setError(e.message || "Failed to load");
     } finally {
@@ -109,7 +109,7 @@ export default function TemplatesAdminPage() {
   }
 
   const sorted = useMemo(
-    () => [...items].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1)),
+    () => (Array.isArray(items) ? [...items] : []).sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1)),
     [items]
   );
 
