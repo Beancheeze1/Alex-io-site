@@ -1,5 +1,7 @@
 // app/api/admin/kv/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromRequest } from "@/lib/auth";
+import { isPlatformOwner } from "@/lib/admin-auth";
 export const dynamic = "force-dynamic";
 
 async function kvSafe() {
@@ -9,7 +11,15 @@ async function kvSafe() {
   } catch { return null; }
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
+  const user = await getCurrentUserFromRequest(req);
+  if (!user) {
+    return NextResponse.json({ ok: false, error: "unauthorized", message: "Login required." }, { status: 401 });
+  }
+  if (!isPlatformOwner(user)) {
+    return NextResponse.json({ ok: false, error: "forbidden", message: "Platform owner access required." }, { status: 403 });
+  }
+
   const url = new URL(req.url);
   const key = url.searchParams.get("key") || "hs:refresh_token";
   const kv = await kvSafe();

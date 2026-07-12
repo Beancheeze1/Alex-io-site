@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { isPlatformOwner } from "@/lib/admin-auth";
 import { listMigrations, runPendingMigrations } from "@/lib/migrate";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +55,13 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    if (!isPlatformOwner(user)) {
+      return bad(
+        { ok: false, error: "forbidden", message: "Platform owner access required." },
+        403,
+      );
+    }
+
     const out = await listMigrations();
     return ok(out, 200);
   } catch (e: any) {
@@ -82,6 +90,13 @@ export async function POST(req: NextRequest) {
     if (!isAdminUser(user)) {
       return bad(
         { ok: false, error: "forbidden", message: "Admin role required." },
+        403,
+      );
+    }
+
+    if (!isPlatformOwner(user)) {
+      return bad(
+        { ok: false, error: "forbidden", message: "Platform owner access required." },
         403,
       );
     }

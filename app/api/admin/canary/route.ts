@@ -1,6 +1,7 @@
 // app/api/admin/canary/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { makeKv } from "@/app/lib/kv";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,9 @@ function todayKey(prefix: string) {
 }
 
 export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   try {
     const url = new URL(req.url);
     const SELF = process.env.INTERNAL_SELF_URL || `${url.protocol}//${url.host}`;

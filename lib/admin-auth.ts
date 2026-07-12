@@ -2,7 +2,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "./env";
 import logger from "./logger";
-import { getCurrentUserFromRequest, isRoleAllowed } from "./auth";
+import { getCurrentUserFromRequest, isRoleAllowed, type CurrentUser } from "./auth";
+
+// Platform-owner allowlist — same email(+alias) convention used for tenant
+// writes in app/api/admin/tenants/route.ts. Distinct from a plain "admin"
+// role: an admin is scoped to their own tenant, the platform owner is not.
+export function isPlatformOwner(user: CurrentUser | null | undefined): boolean {
+  const email = String(user?.email || "").trim().toLowerCase();
+  return email === "25thhourdesign@gmail.com" || email.startsWith("25thhourdesign+");
+}
 
 export async function requireAdmin(req: NextRequest): Promise<NextResponse | null> {
   // 1. Check for x-admin-key header (extra security layer)
