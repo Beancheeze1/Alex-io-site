@@ -97,12 +97,27 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/materials" className="hover:text-neutral-200">
                   Materials
                 </Link>
-                {/* <Link href="/admin/pricing" className="hover:text-neutral-200">
+                <Link href="/admin/pricing" className="hover:text-neutral-200">
                   Pricing
+                </Link>
+                <Link href="/admin/settings" className="hover:text-neutral-200">
+                  Settings
+                </Link>
+                <Link href="/admin/boxes" className="hover:text-neutral-200">
+                  Boxes
+                </Link>
+                <Link href="/admin/products" className="hover:text-neutral-200">
+                  Products
+                </Link>
+                <Link href="/admin/templates" className="hover:text-neutral-200">
+                  Templates
+                </Link>
+                <Link href="/admin/commissions" className="hover:text-neutral-200">
+                  Commissions
                 </Link>
                 <Link href="/admin/logs" className="hover:text-neutral-200">
                   Logs
-                </Link> */}
+                </Link>
                 <Link href="/admin/quotes" className="hover:text-neutral-200">
                   Quotes
                 </Link>
