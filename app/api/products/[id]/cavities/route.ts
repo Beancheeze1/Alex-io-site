@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,10 @@ function getPool() {
 }
 
 // Already have POST in this file from before; add GET:
-export async function GET(_: Request, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   const productId = Number(params.id);
   if (!Number.isInteger(productId) || productId <= 0) {
     return NextResponse.json({ error: "bad product id" }, { status: 400 });

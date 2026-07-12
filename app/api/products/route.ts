@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,10 @@ function getPool() {
   return _pool;
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   const pool = getPool();
   try {
     const url = new URL(req.url);
@@ -40,7 +44,10 @@ export async function GET(req: Request) {
 }
 
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   const pool = getPool();
   try {
     const b = await req.json();

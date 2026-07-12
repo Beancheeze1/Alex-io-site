@@ -1,13 +1,17 @@
 // app/api/products/price/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/products/price?sku=FOAM-BLK-VALVE
  */
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   const { searchParams } = new URL(req.url);
   const sku = searchParams.get("sku");
   if (!sku) return NextResponse.json({ ok: false, error: "Missing ?sku" }, { status: 400 });

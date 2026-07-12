@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,10 @@ function getPool() {
   return _pool;
 }
 
-export async function DELETE(_: Request, { params }: { params: { id: string; cavityId: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: { id: string; cavityId: string } }) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   const productId = Number(params.id);
   const cavityId = Number(params.cavityId);
   if (!Number.isInteger(productId) || !Number.isInteger(cavityId)) {
