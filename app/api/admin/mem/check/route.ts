@@ -1,11 +1,15 @@
 // app/api/admin/mem/check/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { memSelfTest, LAST_STORE, REDIS_LAST_ERROR } from "@/app/lib/memory";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   try {
     const probe = await memSelfTest();
     return NextResponse.json(

@@ -1,6 +1,7 @@
 // app/api/admin/db/health/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { dbPing } from "@/lib/db";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -23,7 +24,10 @@ function inspectDbUrl() {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   const info = inspectDbUrl();
 
   try {

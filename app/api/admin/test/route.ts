@@ -1,5 +1,6 @@
 // app/api/admin/test/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -9,7 +10,10 @@ export const runtime = "nodejs";
  * PowerShell:
  *   curl.exe -i "$BASE/api/admin/test?t=$(Get-Random)"
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   return NextResponse.json({
     ok: true,
     route: "/api/admin/test",

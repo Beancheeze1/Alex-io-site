@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { safeLogEvent } from "../../../../lib/adminLog";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,6 +28,9 @@ function bad(extra: Record<string, any> = {}, status = 400) {
 }
 
 export async function POST(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   let body: any = null;
 
   try {

@@ -1,5 +1,6 @@
 // app/api/admin/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,10 @@ async function tokensStatus() {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   const status = await tokensStatus();
   const last = await getLastWebhook();
   return NextResponse.json({

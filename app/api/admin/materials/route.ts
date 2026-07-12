@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -52,7 +53,10 @@ function toNumberOrNull(raw: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   try {
     const rows = await q<MaterialRow>(
       `
@@ -122,6 +126,9 @@ export async function GET(_req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   try {
     const body = await req.json().catch(() => ({}));
     const id = Number(body?.id);

@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
 import { validateBoxTierOrdering } from "@/app/lib/box-tier-pricing";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -95,7 +96,10 @@ function toNullableInt(raw: any): number | null {
 }
 
 // ---------- GET: list boxes + tiers (with safe fallback) ----------
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   try {
     try {
       // Preferred path: join boxes + box_price_tiers
@@ -206,6 +210,9 @@ export async function GET() {
 
 // ---------- POST: save pricing updates ----------
 export async function POST(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   try {
     const body = (await req.json()) as SavePayload | null;
     if (!body || !Array.isArray(body.updates)) {

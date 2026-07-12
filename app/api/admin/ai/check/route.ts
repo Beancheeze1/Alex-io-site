@@ -1,5 +1,6 @@
 // app/api/admin/ai/check/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,7 +11,10 @@ function requireEnv(name: string) {
   return v;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   try {
     const apiKey = requireEnv("OPENAI_API_KEY");
 

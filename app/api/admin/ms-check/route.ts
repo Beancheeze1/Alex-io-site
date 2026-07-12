@@ -1,7 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/admin-auth";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const deny = await requireAdmin(req);
+  if (deny) return deny;
+
   const env = {
     MS_TENANT_ID: !!process.env.MS_TENANT_ID,
     MS_CLIENT_ID: !!process.env.MS_CLIENT_ID,
