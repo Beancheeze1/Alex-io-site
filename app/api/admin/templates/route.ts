@@ -23,7 +23,7 @@ function getPool() {
   if (!global.__TEMPLATE_DB_POOL__) {
     const conn = process.env.DATABASE_URL;
     if (!conn) throw new Error("Missing env: DATABASE_URL");
-    global.__TEMPLATE_DB_POOL__ = new Pool({ connectionString: conn, max: 5 });
+    global.__TEMPLATE_DB_POOL__ = new Pool({ connectionString: conn, max: 5, ssl: { rejectUnauthorized: false } });
   }
   return global.__TEMPLATE_DB_POOL__;
 }
