@@ -12,13 +12,17 @@ export async function POST(_req: NextRequest) {
   const res = NextResponse.json({ ok: true }, { status: 200 });
 
   // Clear cookie by setting empty + maxAge 0.
+  // domain/sameSite must match what login sets it with (app/api/auth/login/route.ts)
+  // — a mismatched domain creates a *different* cookie instead of clearing
+  // the real one, silently leaving the session active.
   res.cookies.set({
     name: SESSION_COOKIE_NAME,
     value: "",
     httpOnly: true,
     secure: true,
-    sameSite: "lax",
+    sameSite: "none",
     path: "/",
+    domain: ".alex-io.com",
     maxAge: 0,
   });
 

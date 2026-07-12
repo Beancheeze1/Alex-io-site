@@ -12,7 +12,7 @@ import crypto from "crypto";
 import { q, withTxn } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { getPlanForTenant, planMeets } from "@/lib/plan";
-import { adminOnly } from "@/lib/admin-auth";
+import { adminOnly, isPlatformOwner } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,22 +23,6 @@ function ok(body: any, status = 200) {
 
 function bad(error: string, message?: string, status = 400) {
   return NextResponse.json({ ok: false, error, message }, { status });
-}
-
-const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
-  "25thhourdesign@gmail.com",
-"25thhourdesign+default@gmail.com",
-  "25thhourdesign+acme@gmail.com",
-  "25thhourdesign+mline@gmail.com"]);
-
-function canWriteTenants(user: any): boolean {
-  const email = String(user?.email || "").trim().toLowerCase();
-
-  // Allow base gmail OR any +alias of it
-  return (
-    email === "25thhourdesign@gmail.com" ||
-    email.startsWith("25thhourdesign+")
-  );
 }
 
 // Deterministic admin email strategy (global-unique users.email):
@@ -189,6 +173,12 @@ export const GET = adminOnly(async (req: NextRequest) => {
     return bad("forbidden", "Admin role required.", 403);
   }
 
+  // OWNER ONLY — the tenant list spans every tenant on the platform, not
+  // just the caller's own, so a regular tenant admin must not see it.
+  if (!isPlatformOwner(user)) {
+    return bad("forbidden", "Platform owner access required.", 403);
+  }
+
   // Hide inactive tenants from the list (non-destructive).
   const tenants = await q(`
     select id, name, slug, active, theme_json, plan, created_at
@@ -207,7 +197,7 @@ export const POST = adminOnly(async (req: NextRequest) => {
   }
 
   // OWNER ONLY — no one else can create tenants
-  if (!canWriteTenants(user)) {
+  if (!isPlatformOwner(user)) {
     return bad("forbidden", "Tenant changes are restricted.", 403);
   }
 

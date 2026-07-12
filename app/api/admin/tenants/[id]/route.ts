@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { isPlatformOwner } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,13 +20,6 @@ function ok(body: any, status = 200) {
 
 function bad(error: string, message?: string, status = 400) {
   return NextResponse.json({ ok: false, error, message }, { status });
-}
-
-function canWriteTenants(user: any): boolean {
-  const email = String(user?.email || "").trim().toLowerCase();
-
-  // Allow base gmail OR any +alias of it
-  return email === "25thhourdesign@gmail.com" || email.startsWith("25thhourdesign+");
 }
 
 type ParamsCtx = { params?: { id?: string } };
@@ -54,6 +48,12 @@ export async function GET(req: NextRequest, ctx: ParamsCtx) {
   const user = await getCurrentUserFromRequest(req);
   if (!isRoleAllowed(user, ["admin"])) {
     return bad("forbidden", "Admin role required.", 403);
+  }
+
+  // OWNER ONLY — this can fetch any tenant's record by id, not just the
+  // caller's own.
+  if (!isPlatformOwner(user)) {
+    return bad("forbidden", "Platform owner access required.", 403);
   }
 
   const id = getIdFromRequest(req, ctx?.params);
@@ -85,7 +85,7 @@ export async function PATCH(req: NextRequest, ctx: ParamsCtx) {
   }
 
   // OWNER ONLY — no one else can change tenants
-  if (!canWriteTenants(user)) {
+  if (!isPlatformOwner(user)) {
     return bad("forbidden", "Tenant changes are restricted.", 403);
   }
 
