@@ -690,9 +690,11 @@ export async function GET(req: NextRequest) {
       // Derive qty from primary foam item for tier pricing
       const primaryQty = items.length > 0 ? (Number(items[0].qty) || 1) : 1;
 
-      if (packagingLines.length > 0) {
-        // A carton was already explicitly picked — override display dims only,
-        // keep that carton's own pricing intact.
+      if (packagingLines.length === 1) {
+        // Exactly one carton was explicitly picked — override display dims only,
+        // keep that carton's own pricing intact. With multiple cartons on the
+        // quote, customerBox can't apply to all of them, so each line keeps its
+        // own actual dims/description instead.
         packagingLinesForDisplay = packagingLines.map((l) => {
           const baseDesc = typeof l.description === "string" ? l.description : "";
           const note = `Customer box (inside): ${customerBox.L} × ${customerBox.W} × ${customerBox.H} in`;
@@ -705,7 +707,7 @@ export async function GET(req: NextRequest) {
             description: nextDesc,
           };
         });
-      } else {
+      } else if (packagingLines.length === 0) {
         // No carton picked yet — find + price the closest matching stock box
         // and inject it as a synthetic packaging line.
         const matched = await findAndPriceClosestBox(
