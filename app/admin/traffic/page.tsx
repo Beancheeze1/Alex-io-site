@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUserFromCookies } from "@/lib/auth";
+import { isPlatformOwner } from "@/lib/admin-auth";
 import { q } from "@/lib/db";
 import TrafficClient from "./TrafficClient";
 
@@ -53,7 +54,7 @@ type Props = {
 
 export default async function TrafficPage({ searchParams }: Props) {
   const user = await getCurrentUserFromCookies();
-  if (!user || user.role !== "admin") redirect("/login");
+  if (!user || user.role !== "admin" || !isPlatformOwner(user)) redirect("/login");
 
   const sp = await searchParams;
   const daysRaw = Number(sp?.days ?? 30);
