@@ -1,5 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
+import { getCurrentUserFromRequest } from "@/lib/auth";
+import { isPlatformOwner } from "@/lib/admin-auth";
 import {
   CREATE_TABLES,
   ALTER_COLUMNS,
@@ -10,7 +12,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = await getCurrentUserFromRequest(req);
+  if (!user || !isPlatformOwner(user)) {
+    return NextResponse.json({ ok: false, error: "forbidden", message: "Platform owner access required." }, { status: 403 });
+  }
+
   const pool = getPool();
   try {
     for (const sql of CREATE_TABLES)  await pool.query(sql);
