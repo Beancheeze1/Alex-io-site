@@ -2912,11 +2912,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           (rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) ||
                           "Carton";
 
-                        // If the customer specified a custom box size, display those dims
-                        // but use the standard box pricing underneath.
-                        const displayL = customerBoxDims ? customerBoxDims.L : Number(rb.inside_length_in);
-                        const displayW = customerBoxDims ? customerBoxDims.W : Number(rb.inside_width_in);
-                        const displayH = customerBoxDims ? customerBoxDims.H : Number(rb.inside_height_in);
+                        // If the customer specified a custom box size and there's exactly one
+                        // requested box (no stock match), display those dims but use the
+                        // standard box pricing underneath. With multiple requested boxes, each
+                        // row must show its own dims — customerBoxDims can't apply to all of them.
+                        const useCustomerDims = customerBoxDims && requestedBoxes.length === 1;
+                        const displayL = useCustomerDims ? customerBoxDims.L : Number(rb.inside_length_in);
+                        const displayW = useCustomerDims ? customerBoxDims.W : Number(rb.inside_width_in);
+                        const displayH = useCustomerDims ? customerBoxDims.H : Number(rb.inside_height_in);
 
                         const L = displayL;
                         const W = displayW;

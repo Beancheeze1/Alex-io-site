@@ -207,7 +207,7 @@ export async function POST(req: NextRequest) {
       [quote.id, box.id],
     )) as { id: number; qty: number } | null;
 
-    const isNewSelection = !existingSelection;
+    let isNewSelection = !existingSelection;
 
     if (existingSelection) {
       // FIX: set qty to incomingQty (do not increment)
@@ -233,25 +233,56 @@ export async function POST(req: NextRequest) {
       );
       selection = (rows[0] ?? null) as SelectionRow | null;
     } else {
-      const rows = await q(
-        `
-        INSERT INTO public.quote_box_selections
-          (quote_id, quote_no, box_id, sku, qty)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING
-          id,
-          quote_id,
-          quote_no,
-          box_id,
-          sku,
-          qty,
-          created_at,
-          unit_price_usd,
-          extended_price_usd
-        `,
-        [quote.id, quote.quote_no, box.id, box.sku, incomingQty],
-      );
-      selection = (rows[0] ?? null) as SelectionRow | null;
+      try {
+        const rows = await q(
+          `
+          INSERT INTO public.quote_box_selections
+            (quote_id, quote_no, box_id, sku, qty)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING
+            id,
+            quote_id,
+            quote_no,
+            box_id,
+            sku,
+            qty,
+            created_at,
+            unit_price_usd,
+            extended_price_usd
+          `,
+          [quote.id, quote.quote_no, box.id, box.sku, incomingQty],
+        );
+        selection = (rows[0] ?? null) as SelectionRow | null;
+      } catch (err: any) {
+        // 23505 = unique_violation on (quote_id, box_id) — a concurrent request
+        // won the INSERT race between our SELECT and this INSERT. Fall back to
+        // updating the row it just created instead of surfacing a raw error.
+        // That request also owns the one-time quote_items carton line insert
+        // below, so this request must not treat the selection as newly created.
+        if (err?.code !== "23505") throw err;
+        isNewSelection = false;
+
+        const rows = await q(
+          `
+          UPDATE public.quote_box_selections
+          SET qty = $1
+          WHERE quote_id = $2
+            AND box_id = $3
+          RETURNING
+            id,
+            quote_id,
+            quote_no,
+            box_id,
+            sku,
+            qty,
+            created_at,
+            unit_price_usd,
+            extended_price_usd
+          `,
+          [incomingQty, quote.id, box.id],
+        );
+        selection = (rows[0] ?? null) as SelectionRow | null;
+      }
     }
 
     if (!selection) {
