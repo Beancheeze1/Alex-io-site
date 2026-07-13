@@ -17,14 +17,14 @@ export default function StepCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-5">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
             {title}
           </div>
           {hint ? (
-            <div className="mt-1 text-xs text-slate-400">{hint}</div>
+            <div className="mt-1 text-xs text-[var(--text-muted)]">{hint}</div>
           ) : null}
         </div>
       </div>

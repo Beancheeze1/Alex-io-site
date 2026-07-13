@@ -25,8 +25,8 @@ export default function StartQuotePage() {
       .then((data) => {
         if (!data?.ok || !data?.theme_json) return;
 
-        const primary = data.theme_json.primaryColor || "#0ea5e9";
-        const secondary = data.theme_json.secondaryColor || "#6366f1";
+        const primary = data.theme_json.primaryColor || "#2B2B28";
+        const secondary = data.theme_json.secondaryColor || "#3D3D38";
 
         document.documentElement.style.setProperty("--tenant-primary", primary);
         document.documentElement.style.setProperty("--tenant-secondary", secondary);

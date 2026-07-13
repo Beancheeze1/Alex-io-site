@@ -966,41 +966,26 @@ export default function StartQuoteModal() {
   return (
     <div className="fixed inset-0 z-50">
       <style jsx global>{`
-        /* Start Quote modal: bind leftover sky accents to tenant vars (local override) */
-        .text-sky-300\/80,
-        .text-sky-200,
-        .text-sky-100,
-        .text-sky-50 {
-          color: color-mix(in srgb, var(--tenant-secondary) 78%, white) !important;
-        }
-
-        .border-sky-400\/60,
-        .border-sky-400\/70,
-        .border-sky-500\/60,
-        .border-sky-500\/70,
-        .border-sky-500\/80 {
+        /* Start Quote modal: bind tenant-brand accents onto the graphite action tokens (local override) */
+        .border-\[var\(--action-primary\)\],
+        .border-\[var\(--border-strong\)\] {
           border-color: color-mix(in srgb, var(--tenant-secondary) 70%, transparent) !important;
         }
 
-        .bg-sky-500\/10,
-        .bg-sky-500\/15,
-        .bg-sky-500\/20,
-        .bg-sky-500\/30 {
-          background-color: color-mix(in srgb, var(--tenant-secondary) 16%, transparent) !important;
+        .bg-\[var\(--surface-subtle\)\] {
+          background-color: color-mix(in srgb, var(--tenant-secondary) 10%, var(--surface-card)) !important;
         }
 
-        .bg-sky-500\/80,
-        .bg-sky-500 {
+        .bg-\[var\(--action-primary\)\] {
           background-color: var(--tenant-primary) !important;
         }
 
-        .hover\:bg-sky-500:hover,
-        .hover\:bg-sky-500\/10:hover {
+        .hover\:bg-\[var\(--action-primary-hover\)\]:hover {
           background-color: color-mix(in srgb, var(--tenant-primary) 85%, white) !important;
         }
 
         /* Input focus */
-        .focus\:border-sky-400\/60:focus {
+        .focus\:border-\[var\(--action-primary\)\]:focus {
           border-color: color-mix(in srgb, var(--tenant-secondary) 70%, transparent) !important;
           box-shadow: 0 0 0 2px color-mix(in srgb, var(--tenant-secondary) 22%, transparent) !important;
         }
@@ -1014,30 +999,17 @@ export default function StartQuoteModal() {
 
       {/* Modal wrapper */}
       <div className="relative mx-auto flex min-h-screen max-w-5xl items-center justify-center px-4 py-10">
-        <div className="relative w-full overflow-hidden rounded-3xl border border-white/10 bg-[#0B1020] shadow-[0_20px_80px_-20px_rgba(0,0,0,0.8)]">
-          {/* Grid background (subtle, matches app vibe) */}
-          <div className="pointer-events-none absolute inset-0 opacity-[0.18]">
-            <div
-              className="absolute inset-0"
-              style={{
-                backgroundImage:
-                  "linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
-                backgroundSize: "48px 48px",
-                backgroundPosition: "0 0",
-              }}
-            />
-          </div>
-
+        <div className="relative w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-page)] shadow-[0_20px_80px_-20px_rgba(0,0,0,0.25)]">
           {/* Header */}
-          <div className="relative flex items-start justify-between gap-4 border-b border-white/10 px-6 py-5">
+          <div className="relative flex items-start justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
             <div>
-              <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+              <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                 START A QUOTE
               </div>
-              <div className="mt-1 text-xl font-semibold text-white">
+              <div className="mt-1 text-xl font-medium text-[var(--text-primary)]">
                 Guided setup
               </div>
-              <div className="mt-1 text-sm text-slate-300">
+              <div className="mt-1 text-sm text-[var(--text-secondary)]">
                 {quoteType === "complete_pack"
                   ? "Complete Pack: box + foam (bottom insert + optional top pad)."
                   : "Foam Insert: foam only (block + cavities)."}
@@ -1047,7 +1019,7 @@ export default function StartQuoteModal() {
             <button
               type="button"
               onClick={close}
-              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
+              className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
               aria-label="Close"
             >
               Close
@@ -1062,32 +1034,32 @@ export default function StartQuoteModal() {
                 <div className="md:pr-2">
                   <ProgressRail steps={railSteps} />
 
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                    <div className="text-xs font-semibold tracking-widest text-slate-400">
+                  <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                    <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                       DETAILS
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-3">
                       <div>
-                        <div className="text-[11px] font-semibold tracking-widest text-slate-400">Qty</div>
-                        <div className="mt-1 text-sm text-white">{qty || "—"}</div>
+                        <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Qty</div>
+                        <div className="mt-1 text-sm text-[var(--text-primary)]">{qty || "—"}</div>
                       </div>
                       <div>
-                        <div className="text-[11px] font-semibold tracking-widest text-slate-400">Cavities</div>
-                        <div className="mt-1 text-sm text-white">{normalizedSeed || "—"}</div>
+                        <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Cavities</div>
+                        <div className="mt-1 text-sm text-[var(--text-primary)]">{normalizedSeed || "—"}</div>
                       </div>
                       <div>
-                        <div className="text-[11px] font-semibold tracking-widest text-slate-400">Material</div>
-                        <div className="mt-1 text-sm text-white">{materialText || "—"}</div>
+                        <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Material</div>
+                        <div className="mt-1 text-sm text-[var(--text-primary)]">{materialText || "—"}</div>
                       </div>
                       <div>
-                        <div className="text-[11px] font-semibold tracking-widest text-slate-400">Material ID</div>
-                        <div className="mt-1 text-sm text-white">{materialId || "—"}</div>
+                        <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Material ID</div>
+                        <div className="mt-1 text-sm text-[var(--text-primary)]">{materialId || "—"}</div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                    <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+                  <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                    <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                       WHAT HAPPENS NEXT
                     </div>
                     <div className="mt-3 space-y-3">
@@ -1127,8 +1099,8 @@ export default function StartQuoteModal() {
                           />
                         </div>
 
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             QUANTITY
                           </div>
 
@@ -1137,7 +1109,7 @@ export default function StartQuoteModal() {
                           </div>
 
                           {!qtyOk ? (
-                            <div className="mt-3 text-sm text-amber-200/90">
+                            <div className="mt-3 text-sm text-[var(--attention)]">
                               Enter a quantity to continue.
                             </div>
                           ) : null}
@@ -1153,8 +1125,8 @@ export default function StartQuoteModal() {
                       hint="Internal box size (ID) + style + printing"
                     >
                       <div className="space-y-4">
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             BOX INTERNAL DIMENSIONS
                           </div>
 
@@ -1165,7 +1137,7 @@ export default function StartQuoteModal() {
                           </div>
 
                           {!boxOk ? (
-                            <div className="mt-3 text-sm text-amber-200/90">
+                            <div className="mt-3 text-sm text-[var(--attention)]">
                               Box L/W/D are required, and L/W must be greater than {FIT_ALLOW_IN}" (fit allowance).
                             </div>
                           ) : null}
@@ -1190,13 +1162,13 @@ export default function StartQuoteModal() {
                           />
                         </div>
 
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                           <div className="flex items-center justify-between gap-3">
                             <div>
-                              <div className="text-xs font-semibold tracking-widest text-slate-400">
+                              <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                                 PRINTED BOX
                               </div>
-                              <div className="mt-1 text-sm text-slate-200">
+                              <div className="mt-1 text-sm text-[var(--text-secondary)]">
                                 If printed, add a $50 upcharge (shown in review).
                               </div>
                             </div>
@@ -1204,10 +1176,10 @@ export default function StartQuoteModal() {
                               type="button"
                               onClick={() => setPrinted((p) => !p)}
                               className={[
-                                "rounded-xl border px-4 py-2 text-sm font-semibold",
+                                "rounded-md border px-4 py-2 text-sm font-medium",
                                 printed
-                                  ? "border-sky-400/60 bg-sky-500/20 text-white"
-                                  : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
+                                  ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] text-[var(--text-primary)]"
+                                  : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
                               ].join(" ")}
                             >
                               {printed ? "Printed  +$50" : "Not printed"}
@@ -1215,11 +1187,11 @@ export default function StartQuoteModal() {
                           </div>
                         </div>
 
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             FOAM FIT (AUTO)
                           </div>
-                          <div className="mt-2 text-sm text-slate-200">
+                          <div className="mt-2 text-sm text-[var(--text-secondary)]">
                             Foam L/W = Box ID − {FIT_ALLOW_IN}" for fit.
                           </div>
 
@@ -1240,8 +1212,8 @@ export default function StartQuoteModal() {
                     >
                       <div className="space-y-4">
                         {foamFitFrozen ? (
-                          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                            <div className="text-xs font-semibold tracking-widest text-slate-400">
+                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                            <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                               FROZEN FOAM FIT
                             </div>
                             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -1251,14 +1223,14 @@ export default function StartQuoteModal() {
                             </div>
 
                             {foamFitDirty ? (
-                              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/30 bg-amber-400/10 px-4 py-3">
-                                <div className="text-sm text-amber-200/90">
+                              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-4 py-3">
+                                <div className="text-sm text-[var(--attention)]">
                                   Box dimensions changed. Foam fit has not been recalculated.
                                 </div>
                                 <button
                                   type="button"
                                   onClick={onRecalcFoamFit}
-                                  className="rounded-xl border border-amber-300/40 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-400/15"
+                                  className="rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-4 py-2 text-sm font-medium text-[var(--attention)] hover:opacity-80"
                                 >
                                   Recalculate foam fit
                                 </button>
@@ -1266,7 +1238,7 @@ export default function StartQuoteModal() {
                             ) : null}
                           </div>
                         ) : (
-                          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-200">
+                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]">
                             Foam fit will freeze after Box Setup.
                           </div>
                         )}
@@ -1305,8 +1277,8 @@ export default function StartQuoteModal() {
                           />
                         </div>
 
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             THICKNESS (IN)
                           </div>
 
@@ -1339,15 +1311,15 @@ export default function StartQuoteModal() {
                           </div>
 
                           {!thicknessOk ? (
-                            <div className="mt-3 text-sm text-amber-200/90">
+                            <div className="mt-3 text-sm text-[var(--attention)]">
                               Thickness must fit within Box Depth.
                             </div>
                           ) : null}
 
                           {foamConfig === "bottom_top" ? (
-                            <div className="mt-3 text-sm text-slate-300">
+                            <div className="mt-3 text-sm text-[var(--text-secondary)]">
                               Cavities apply to the{" "}
-                              <span className="font-semibold text-white">
+                              <span className="font-medium text-[var(--text-primary)]">
                                 bottom insert
                               </span>{" "}
                               only. Top pad is flat.
@@ -1360,8 +1332,8 @@ export default function StartQuoteModal() {
 
                   {activeStep === "specs" && quoteType === "foam_insert" ? (
                     <StepCard title="Foam Specs" hint="Block size (L × W × D)">
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                        <div className="text-xs font-semibold tracking-widest text-slate-400">
+                      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                        <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                           FOAM BLOCK DIMENSIONS
                         </div>
                         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -1370,7 +1342,7 @@ export default function StartQuoteModal() {
                           <DimInput label="Depth (in)" value={insertD} onChange={setInsertD} />
                         </div>
                         {!insertDimsOk ? (
-                          <div className="mt-3 text-sm text-amber-200/90">
+                          <div className="mt-3 text-sm text-[var(--attention)]">
                             Length/Width/Depth are required for Foam Insert.
                           </div>
                         ) : null}
@@ -1403,7 +1375,7 @@ export default function StartQuoteModal() {
                     >
                       <div className="space-y-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="text-sm text-slate-200">
+                          <div className="text-sm text-[var(--text-secondary)]">
                             {materialsLoading
                               ? "Loading materials…"
                               : materialsError
@@ -1415,14 +1387,14 @@ export default function StartQuoteModal() {
                             <button
                               type="button"
                               onClick={clearMaterial}
-                              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
+                              className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
                             >
                               Clear
                             </button>
                             <button
                               type="button"
                               onClick={loadMaterials}
-                              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
+                              className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
                             >
                               Refresh
                             </button>
@@ -1430,16 +1402,16 @@ export default function StartQuoteModal() {
                         </div>
 
                         {materialsError ? (
-                          <div className="rounded-2xl border border-amber-300/30 bg-amber-400/10 p-4 text-sm text-amber-200/90">
+                          <div className="rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] p-4 text-sm text-[var(--attention)]">
                             {materialsError}
                           </div>
                         ) : null}
 
                         {/* Family tabs */}
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-3">
                           <div className="flex flex-wrap gap-2">
                             {families.length === 0 ? (
-                              <div className="text-sm text-slate-400">No materials.</div>
+                              <div className="text-sm text-[var(--text-muted)]">No materials.</div>
                             ) : (
                               families.map((fam) => {
                                 const isActive = fam === activeFamily;
@@ -1449,10 +1421,10 @@ export default function StartQuoteModal() {
                                     type="button"
                                     onClick={() => setActiveFamily(fam)}
                                     className={[
-                                      "rounded-xl border px-3 py-2 text-sm",
+                                      "rounded-md border px-3 py-2 text-sm",
                                       isActive
-                                        ? "border-sky-400/60 bg-sky-500/10 text-white"
-                                        : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
+                                        ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] text-[var(--text-primary)]"
+                                        : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
                                     ].join(" ")}
                                   >
                                     {fam}
@@ -1473,7 +1445,7 @@ export default function StartQuoteModal() {
                               <SkeletonCard />
                             </>
                           ) : familyMaterials.length === 0 ? (
-                            <div className="col-span-full rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">
+                            <div className="col-span-full rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]">
                               No materials in this family.
                             </div>
                           ) : (
@@ -1488,24 +1460,24 @@ export default function StartQuoteModal() {
                                   type="button"
                                   onClick={() => onSelectMaterial(m)}
                                   className={[
-                                    "text-left rounded-2xl border p-4 transition",
+                                    "text-left rounded-xl border p-4 transition",
                                     selected
-                                      ? "border-sky-400/60 bg-sky-500/10 shadow-[0_0_0_3px_rgba(56,189,248,0.12)]"
-                                      : "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]",
+                                      ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] shadow-[0_0_0_3px_rgba(43,43,40,0.08)]"
+                                      : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
                                   ].join(" ")}
                                 >
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
-                                      <div className="text-sm font-semibold text-white">
+                                      <div className="text-sm font-medium text-[var(--text-primary)]">
                                         {m.material_name}
                                       </div>
-                                      <div className="mt-1 text-xs text-slate-400">
+                                      <div className="mt-1 text-xs text-[var(--text-muted)]">
                                         {familyLabel(m.material_family)}
                                       </div>
                                     </div>
 
                                     {m.density_lb_ft3 != null ? (
-                                      <div className="shrink-0 rounded-xl border border-white/10 bg-white/[0.03] px-2 py-1 text-xs text-slate-200">
+                                      <div className="shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-secondary)]">
                                         {fmtIn(m.density_lb_ft3)}#
                                       </div>
                                     ) : null}
@@ -1517,20 +1489,20 @@ export default function StartQuoteModal() {
                         </div>
 
                         {/* Selected summary */}
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             SELECTED
                           </div>
-                          <div className="mt-2 text-sm text-slate-200">
+                          <div className="mt-2 text-sm text-[var(--text-secondary)]">
                             <div>
-                              <span className="text-slate-400">Material ID: </span>
-                              <span className="text-white font-semibold">
+                              <span className="text-[var(--text-muted)]">Material ID: </span>
+                              <span className="text-[var(--text-primary)] font-medium">
                                 {materialId || "-"}
                               </span>
                             </div>
                             <div className="mt-1">
-                              <span className="text-slate-400">Material: </span>
-                              <span className="text-white font-semibold">
+                              <span className="text-[var(--text-muted)]">Material: </span>
+                              <span className="text-[var(--text-primary)] font-medium">
                                 {materialText || "-"}
                               </span>
                             </div>
@@ -1543,12 +1515,12 @@ export default function StartQuoteModal() {
                   {activeStep === "rev" ? (
                     <StepCard title="Review" hint="Confirm setup and launch the editor">
                       <div className="space-y-4">
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             SUMMARY
                           </div>
 
-                          <div className="mt-3 space-y-2 text-sm text-slate-200">
+                          <div className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]">
                             <Row
                               k="Quote type"
                               v={
@@ -1620,7 +1592,7 @@ export default function StartQuoteModal() {
                           <button
                             type="button"
                             onClick={close}
-                            className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
+                            className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
                           >
                             Cancel
                           </button>
@@ -1630,10 +1602,10 @@ export default function StartQuoteModal() {
                             onClick={onLaunchEditor}
                             disabled={!qtyOk || (quoteType === "foam_insert" ? !insertDimsOk : (!boxOk || !foamFitOk || !thicknessOk))}
                             className={[
-                              "rounded-xl px-6 py-3 text-sm font-bold shadow-[0_4px_14px_rgba(16,185,129,0.3)]",
+                              "rounded-md px-6 py-3 text-sm font-medium",
                               qtyOk && (quoteType === "foam_insert" ? insertDimsOk : (boxOk && foamFitOk && thicknessOk))
-                                ? "bg-emerald-500 text-white hover:bg-emerald-400"
-                                : "cursor-not-allowed bg-emerald-500/30 text-white/60",
+                                ? "bg-[var(--action-primary)] text-white hover:bg-[var(--action-primary-hover)]"
+                                : "cursor-not-allowed bg-[var(--action-primary)]/30 text-white/60",
                             ].join(" ")}
                           >
                             Launch Layout Editor
@@ -1648,17 +1620,17 @@ export default function StartQuoteModal() {
 
             {/* Sticky footer nav (B) */}
             {activeStep !== "rev" ? (
-              <div className="relative border-t border-white/10 bg-[#0B1020]/90 px-6 py-4 backdrop-blur">
+              <div className="relative border-t border-[var(--border)] bg-[var(--surface-page)]/90 px-6 py-4 backdrop-blur">
                 <div className="flex items-center justify-between gap-3">
                   <button
                     type="button"
                     onClick={onBack}
                     disabled={activeStep === "type"}
                     className={[
-                      "rounded-xl border px-4 py-2 text-sm",
+                      "rounded-md border px-4 py-2 text-sm",
                       activeStep === "type"
-                        ? "cursor-not-allowed border-white/10 bg-white/[0.02] text-slate-500"
-                        : "border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]",
+                        ? "cursor-not-allowed border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-faint)]"
+                        : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
                     ].join(" ")}
                   >
                     Back
@@ -1669,10 +1641,10 @@ export default function StartQuoteModal() {
                     onClick={onNext}
                     disabled={!canGoNext(activeStep)}
                     className={[
-                      "rounded-xl px-4 py-2 text-sm font-semibold",
+                      "rounded-md px-4 py-2 text-sm font-medium",
                       canGoNext(activeStep)
-                        ? "bg-emerald-500 text-white hover:bg-emerald-400"
-                        : "cursor-not-allowed bg-emerald-500/30 text-white/70",
+                        ? "bg-[var(--action-primary)] text-white hover:bg-[var(--action-primary-hover)]"
+                        : "cursor-not-allowed bg-[var(--action-primary)]/30 text-white/70",
                     ].join(" ")}
                   >
                     Next
@@ -1680,7 +1652,7 @@ export default function StartQuoteModal() {
                 </div>
 
                 {cavitySeedInvalid ? (
-                  <div className="mt-2 text-sm text-amber-200/90">
+                  <div className="mt-2 text-sm text-[var(--attention)]">
                     Cavity seed format invalid. Use <b>3x2x1</b> (rect) or <b>Ø2.5x1</b> (round). Separate multiple with semicolons.
                   </div>
                 ) : null}
@@ -1711,14 +1683,14 @@ function ChoiceCard({
       type="button"
       onClick={onClick}
       className={[
-        "text-left rounded-2xl border p-4 transition",
+        "text-left rounded-xl border p-4 transition",
         selected
-          ? "border-sky-400/60 bg-sky-500/10 shadow-[0_0_0_3px_rgba(56,189,248,0.12)]"
-          : "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]",
+          ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] shadow-[0_0_0_3px_rgba(43,43,40,0.08)]"
+          : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
       ].join(" ")}
     >
-      <div className="text-sm font-semibold text-white">{title}</div>
-      <div className="mt-1 text-sm text-slate-300">{desc}</div>
+      <div className="text-sm font-medium text-[var(--text-primary)]">{title}</div>
+      <div className="mt-1 text-sm text-[var(--text-secondary)]">{desc}</div>
     </button>
   );
 }
@@ -1726,12 +1698,12 @@ function ChoiceCard({
 function ReassuranceItem({ title, desc }: { title: string; desc: string }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-[11px] text-sky-300">
+      <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--surface-subtle)] text-[11px] text-[var(--text-primary)]">
         ✓
       </div>
       <div>
-        <div className="text-sm font-medium text-white">{title}</div>
-        <div className="text-xs text-slate-400">{desc}</div>
+        <div className="text-sm font-medium text-[var(--text-primary)]">{title}</div>
+        <div className="text-xs text-[var(--text-muted)]">{desc}</div>
       </div>
     </div>
   );
@@ -1750,7 +1722,7 @@ function DimInput({
 }) {
   return (
     <div>
-      <div className="mb-1 text-xs font-semibold tracking-widest text-slate-400">
+      <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">
         {label}
       </div>
       <input
@@ -1759,10 +1731,10 @@ function DimInput({
         inputMode="decimal"
         disabled={!!disabled}
         className={[
-          "w-full rounded-xl border px-3 py-3 text-sm outline-none",
+          "w-full rounded-md border px-3 py-3 text-sm outline-none",
           disabled
-            ? "cursor-not-allowed border-white/10 bg-white/[0.02] text-slate-500"
-            : "border-white/10 bg-white/[0.03] text-white focus:border-sky-400/60",
+            ? "cursor-not-allowed border-[var(--border)] bg-[var(--surface-subtle)] text-[var(--text-faint)]"
+            : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-primary)] focus:border-[var(--action-primary)]",
         ].join(" ")}
         placeholder={disabled ? "-" : "0"}
       />
@@ -1779,7 +1751,7 @@ function MiniField({
 }) {
   return (
     <div>
-      <div className="mb-1 text-xs font-semibold tracking-widest text-slate-400">
+      <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">
         {label}
       </div>
       {children}
@@ -1789,32 +1761,32 @@ function MiniField({
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-      <div className="text-[11px] font-semibold tracking-widest text-slate-400">
+    <div className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] p-3">
+      <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">
         {label}
       </div>
-      <div className="mt-1 text-sm font-semibold text-white">{value || "-"}</div>
+      <div className="mt-1 text-sm font-medium text-[var(--text-primary)]">{value || "-"}</div>
     </div>
   );
 }
 
 function Row({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-white/10 py-2 last:border-b-0">
-      <div className="text-xs font-semibold tracking-widest text-slate-400">
+    <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] py-2 last:border-b-0">
+      <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
         {k}
       </div>
-      <div className="text-sm text-white text-right">{v}</div>
+      <div className="text-sm text-[var(--text-primary)] text-right">{v}</div>
     </div>
   );
 }
 
 function SkeletonCard() {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-      <div className="h-4 w-2/3 rounded bg-white/10" />
-      <div className="mt-2 h-3 w-1/2 rounded bg-white/10" />
-      <div className="mt-3 h-7 w-16 rounded bg-white/10" />
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+      <div className="h-4 w-2/3 rounded bg-[var(--surface-subtle)]" />
+      <div className="mt-2 h-3 w-1/2 rounded bg-[var(--surface-subtle)]" />
+      <div className="mt-3 h-7 w-16 rounded bg-[var(--surface-subtle)]" />
     </div>
   );
 }
@@ -1873,17 +1845,17 @@ function GuidedCavityBuilder({
   };
 
   const inputCls =
-    "flex-1 min-w-0 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-sky-400/60";
+    "flex-1 min-w-0 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]";
 
   return (
     <div className="space-y-4">
       {/* Cavity list */}
-      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-        <div className="text-xs font-semibold tracking-widest text-slate-400">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+        <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
           CAVITY LIST
         </div>
         {tokens.length === 0 ? (
-          <p className="mt-3 text-sm italic text-slate-400">
+          <p className="mt-3 text-sm italic text-[var(--text-muted)]">
             No cavities yet — add one below, or skip to let the editor start blank.
           </p>
         ) : (
@@ -1891,14 +1863,14 @@ function GuidedCavityBuilder({
             {tokens.map((tok, i) => (
               <div
                 key={i}
-                className="flex items-center gap-1.5 rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-sm text-white"
+                className="flex items-center gap-1.5 rounded-md border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-3 py-1.5 text-sm text-[var(--text-primary)]"
               >
                 <span className="font-mono">{tok}</span>
                 <button
                   type="button"
                   aria-label={`Remove cavity ${tok}`}
                   onClick={() => removeToken(i)}
-                  className="text-slate-300 hover:text-white"
+                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 >
                   ×
                 </button>
@@ -1909,8 +1881,8 @@ function GuidedCavityBuilder({
       </div>
 
       {/* Add a cavity */}
-      <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-        <div className="text-xs font-semibold tracking-widest text-slate-400">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+        <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
           ADD A CAVITY
         </div>
 
@@ -1922,10 +1894,10 @@ function GuidedCavityBuilder({
               type="button"
               onClick={() => { setShape(s); setAddError(""); }}
               className={[
-                "rounded-xl border px-4 py-2 text-sm font-semibold",
+                "rounded-md border px-4 py-2 text-sm font-medium",
                 shape === s
-                  ? "border-sky-400/60 bg-sky-500/20 text-white"
-                  : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]",
+                  ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] text-[var(--text-primary)]"
+                  : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
               ].join(" ")}
             >
               {s === "rect" ? "Rectangular" : "Round"}
@@ -1938,26 +1910,26 @@ function GuidedCavityBuilder({
           {shape === "rect" ? (
             <>
               <div className="flex min-w-[72px] flex-1 flex-col gap-1">
-                <label className="text-xs font-semibold tracking-widest text-slate-400">L (in)</label>
+                <label className="text-xs font-medium tracking-widest text-[var(--text-muted)]">L (in)</label>
                 <input value={L} onChange={(e) => setL(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
               </div>
               <div className="flex min-w-[72px] flex-1 flex-col gap-1">
-                <label className="text-xs font-semibold tracking-widest text-slate-400">W (in)</label>
+                <label className="text-xs font-medium tracking-widest text-[var(--text-muted)]">W (in)</label>
                 <input value={W} onChange={(e) => setW(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
               </div>
               <div className="flex min-w-[72px] flex-1 flex-col gap-1">
-                <label className="text-xs font-semibold tracking-widest text-slate-400">D (in)</label>
+                <label className="text-xs font-medium tracking-widest text-[var(--text-muted)]">D (in)</label>
                 <input value={D} onChange={(e) => setD(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
               </div>
             </>
           ) : (
             <>
               <div className="flex min-w-[100px] flex-1 flex-col gap-1">
-                <label className="text-xs font-semibold tracking-widest text-slate-400">Diameter (in)</label>
+                <label className="text-xs font-medium tracking-widest text-[var(--text-muted)]">Diameter (in)</label>
                 <input value={dia} onChange={(e) => setDia(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
               </div>
               <div className="flex min-w-[100px] flex-1 flex-col gap-1">
-                <label className="text-xs font-semibold tracking-widest text-slate-400">Depth (in)</label>
+                <label className="text-xs font-medium tracking-widest text-[var(--text-muted)]">Depth (in)</label>
                 <input value={dep} onChange={(e) => setDep(e.target.value)} inputMode="decimal" className={inputCls} placeholder="0" />
               </div>
             </>
@@ -1965,31 +1937,31 @@ function GuidedCavityBuilder({
           <button
             type="button"
             onClick={handleAdd}
-            className="rounded-xl border border-sky-400/40 bg-sky-500/15 px-5 py-2 text-sm font-semibold text-white hover:bg-sky-500/25"
+            className="rounded-md bg-[var(--action-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)]"
           >
             + Add
           </button>
         </div>
 
         {addError ? (
-          <div className="mt-2 text-xs text-amber-200/90">{addError}</div>
+          <div className="mt-2 text-xs text-[var(--attention)]">{addError}</div>
         ) : null}
 
-        <div className="mt-2 text-xs text-slate-500">
+        <div className="mt-2 text-xs text-[var(--text-faint)]">
           {shape === "rect"
             ? "Creates a rectangular pocket — enter length, width, and depth."
             : "Creates a round pocket — enter diameter and depth."}
         </div>
-        <div className="mt-2 text-xs text-sky-300/70">
+        <div className="mt-2 text-xs text-[var(--text-muted)]">
           Fine-tune cavity placement in the layout editor.
         </div>
       </div>
 
       {/* Raw seed string */}
       {tokens.length > 0 ? (
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-xs">
-          <span className="text-slate-400">Seed string: </span>
-          <span className="font-mono text-slate-200">{normalizedSeed}</span>
+        <div className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 text-xs">
+          <span className="text-[var(--text-muted)]">Seed string: </span>
+          <span className="font-mono text-[var(--text-secondary)]">{normalizedSeed}</span>
         </div>
       ) : null}
     </div>
@@ -2016,14 +1988,14 @@ function BoxStyleCard({
       type="button"
       onClick={onClick}
       className={[
-        "w-full text-left rounded-2xl border p-4 transition",
+        "w-full text-left rounded-xl border p-4 transition",
         selected
-          ? "border-sky-400/60 bg-sky-500/10 shadow-[0_0_0_3px_rgba(56,189,248,0.12)]"
-          : "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]",
+          ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] shadow-[0_0_0_3px_rgba(43,43,40,0.08)]"
+          : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
       ].join(" ")}
     >
       <div
-        className="overflow-hidden rounded-xl flex items-center justify-center"
+        className="overflow-hidden rounded-lg flex items-center justify-center"
         style={{ backgroundColor: "#F7F0E4", height: "120px" }}
       >
         <img
@@ -2032,10 +2004,10 @@ function BoxStyleCard({
           style={{ maxHeight: "108px", maxWidth: "90%", objectFit: "contain" }}
         />
       </div>
-      <div className="mt-3 text-sm font-semibold text-white">{title}</div>
-      <div className="mt-1 text-sm text-slate-300">{desc}</div>
+      <div className="mt-3 text-sm font-medium text-[var(--text-primary)]">{title}</div>
+      <div className="mt-1 text-sm text-[var(--text-secondary)]">{desc}</div>
       {selected ? (
-        <div className="mt-2 inline-block rounded-full border border-sky-400/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-300">
+        <div className="mt-2 inline-block rounded-full border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-primary)]">
           ✓ Selected
         </div>
       ) : null}

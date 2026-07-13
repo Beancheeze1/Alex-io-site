@@ -1312,20 +1312,19 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
   function getStatusPill(statusRaw: any): { label: string; style: React.CSSProperties } {
     const s = typeof statusRaw === "string" ? statusRaw.trim().toLowerCase() : "";
 
-    // Base pill style (matches your current look)
+    // Base pill style — neutral/draft
     const base: React.CSSProperties = {
       display: "inline-block",
       padding: "4px 10px",
       borderRadius: 999,
-      background: "rgba(15,23,42,0.2)",
-      border: "1px solid rgba(15,23,42,0.25)",
-      color: "#f9fafb",
-      fontWeight: 700,
+      background: "var(--status-neutral-bg)",
+      color: "var(--status-neutral-text)",
+      fontWeight: 500,
       letterSpacing: "0.08em",
       textTransform: "uppercase",
     };
 
-    // Label + subtle per-status tweaks (kept minimal)
+    // Label + semantic per-status color (tied to meaning, not decoration)
     if (s === "draft") {
       return { label: "Draft", style: base };
     }
@@ -1335,8 +1334,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
         label: "Applied",
         style: {
           ...base,
-          background: "rgba(15,23,42,0.25)",
-          border: "1px solid rgba(15,23,42,0.35)",
+          background: "var(--status-success-bg)",
+          color: "var(--status-success-text)",
         },
       };
     }
@@ -1346,8 +1345,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
         label: "Sent",
         style: {
           ...base,
-          background: "rgba(2,132,199,0.30)", // subtle blue tint
-          border: "1px solid rgba(2,132,199,0.40)",
+          background: "var(--status-pending-bg)",
+          color: "var(--status-pending-text)",
         },
       };
     }
@@ -1357,8 +1356,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
         label: "Revised",
         style: {
           ...base,
-          background: "rgba(99,102,241,0.30)", // subtle indigo tint
-          border: "1px solid rgba(99,102,241,0.45)",
+          background: "var(--status-pending-bg)",
+          color: "var(--status-pending-text)",
         },
       };
     }
@@ -1373,15 +1372,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
   // Shared card styles
   const cardBase: React.CSSProperties = {
     borderRadius: 16,
-    border: "1px solid #e5e7eb",
-    background: "#f9fafb",
+    border: "1px solid var(--border)",
+    background: "var(--surface-page)",
     padding: "12px 14px",
   };
 
   const cardTitleStyle: React.CSSProperties = {
     fontSize: 13,
     fontWeight: 600,
-    color: "#0f172a",
+    color: "var(--text-primary)",
     marginBottom: 6,
   };
 
@@ -1389,7 +1388,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: "0.08em",
-    color: "#6b7280",
+    color: "var(--text-muted)",
     marginBottom: 2,
   };
 
@@ -1483,8 +1482,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
   return (
     <div
       style={{
-        fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        background: "#020617",
+        fontFamily: "Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
+        background: "var(--surface-page)",
         minHeight: "100vh",
         padding: "24px",
       }}
@@ -1493,17 +1492,17 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
         style={{
           maxWidth: "960px",
           margin: "0 auto",
-          background: "#ffffff",
+          background: "var(--surface-card)",
           borderRadius: "24px",
           padding: "24px 24px 32px 24px",
-          boxShadow: "0 16px 40px rgba(15,23,42,0.45)",
+          border: "1px solid var(--border)",
         }}
       >
         {/* No quote number at all */}
         {!quoteNo && !loading && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
-            <p style={{ color: "#555" }}>
+            <p style={{ color: "var(--text-secondary)" }}>
               We could not find a quote number in this link. Please double-check the URL or open the quote directly from
               your inbox.
             </p>
@@ -1514,7 +1513,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
         {loading && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Loading quote...</h1>
-            <p style={{ color: "#6b7280", fontSize: 13 }}>Please wait while we load the latest version of this quote.</p>
+            <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Please wait while we load the latest version of this quote.</p>
           </>
         )}
 
@@ -1522,7 +1521,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
         {!loading && notFound && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
-            <p style={{ color: "#555" }}>
+            <p style={{ color: "var(--text-secondary)" }}>
               {notFound}{" "}
               {quoteNo ? (
                 <>
@@ -1538,11 +1537,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Problem loading quote</h1>
             {quoteNo && (
-              <p style={{ color: "#555", marginBottom: 6 }}>
+              <p style={{ color: "var(--text-secondary)", marginBottom: 6 }}>
                 Quote number: <code>{quoteNo}</code>
               </p>
             )}
-            <p style={{ color: "#6b7280", fontSize: 13 }}>{error}</p>
+            <p style={{ color: "var(--text-muted)", fontSize: 13 }}>{error}</p>
           </>
         )}
 
@@ -1557,16 +1556,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   margin: "-24px -24px 20px -24px",
                   padding: "28px 28px 24px",
                   borderRadius: "24px 24px 0 0",
-                  background: "linear-gradient(135deg,#0f172a 0%,#0c1a35 40%,#0d1f3c 100%)",
-                  borderBottom: "1px solid rgba(14,165,233,0.2)",
+                  background: "var(--surface-subtle)",
+                  borderBottom: "1px solid var(--border)",
                   position: "relative",
-                  overflow: "hidden",
                 }}
               >
-                {/* Subtle glow blobs */}
-                <div style={{ position: "absolute", top: -60, left: -60, width: 240, height: 240, borderRadius: "50%", background: "rgba(14,165,233,0.12)", filter: "blur(60px)", pointerEvents: "none" }} />
-                <div style={{ position: "absolute", top: -40, right: 80, width: 200, height: 200, borderRadius: "50%", background: "rgba(99,102,241,0.10)", filter: "blur(50px)", pointerEvents: "none" }} />
-
                 <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 20 }}>
 
                   {/* ── Top row: pitch (left) + CTA card (right) ── */}
@@ -1576,21 +1570,20 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                       <div style={{
                         fontSize: 10,
-                        fontWeight: 700,
+                        fontWeight: 500,
                         letterSpacing: "0.18em",
                         textTransform: "uppercase",
-                        color: "#38bdf8",
+                        color: "var(--text-muted)",
                       }}>
                         Alex-IO · Foam Quoting Software
                       </div>
                       <div style={{
                         fontSize: 10,
-                        fontWeight: 700,
+                        fontWeight: 500,
                         letterSpacing: "0.12em",
                         textTransform: "uppercase",
-                        color: "#f59e0b",
-                        background: "rgba(245,158,11,0.12)",
-                        border: "1px solid rgba(245,158,11,0.28)",
+                        color: "var(--status-neutral-text)",
+                        background: "var(--status-neutral-bg)",
                         borderRadius: 999,
                         padding: "2px 8px",
                       }}>
@@ -1598,11 +1591,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       </div>
                     </div>
 
-                    <div style={{ fontSize: 22, fontWeight: 800, color: "#f9fafb", letterSpacing: "-0.01em", lineHeight: 1.25, marginBottom: 8 }}>
+                    <div style={{ fontSize: 22, fontWeight: 500, color: "var(--text-primary)", letterSpacing: "-0.01em", lineHeight: 1.25, marginBottom: 8 }}>
                       Your shop just quoted this in minutes.
                     </div>
 
-                    <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.7, maxWidth: 480 }}>
+                    <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, maxWidth: 480 }}>
                       Alex-IO turns your RFQ emails into priced foam inserts with layout, cavities,
                       and CAD-ready outputs — without the usual back-and-forth.
                     </div>
@@ -1613,9 +1606,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         <span key={pill} style={{
                           fontSize: 11,
                           fontWeight: 500,
-                          color: "#cbd5e1",
-                          background: "rgba(255,255,255,0.06)",
-                          border: "1px solid rgba(255,255,255,0.10)",
+                          color: "var(--text-secondary)",
+                          background: "var(--surface-card)",
+                          border: "1px solid var(--border)",
                           borderRadius: 999,
                           padding: "4px 10px",
                         }}>
@@ -1629,18 +1622,18 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   {/* Right: CTA card */}
                   <div style={{
                     flexShrink: 0,
-                    background: "rgba(14,165,233,0.08)",
-                    border: "1px solid rgba(14,165,233,0.22)",
-                    borderRadius: 20,
+                    background: "var(--surface-card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 12,
                     padding: "20px 24px",
                     textAlign: "center",
                     minWidth: 260,
                     maxWidth: 340,
                   }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 4 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", marginBottom: 4 }}>
                       This is exactly what your customer would receive—fully branded and ready to send.
                     </div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
                       {quote.customer_name ? `${quote.customer_name} · ` : ""}{quote.quote_no}
                     </div>
                     <button
@@ -1653,51 +1646,50 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         justifyContent: "center",
                         gap: 8,
                         padding: "12px 20px",
-                        borderRadius: 999,
-                        background: "linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)",
-                        color: "#0f172a",
+                        borderRadius: 8,
+                        background: "var(--action-primary)",
+                        color: "#FFFFFF",
                         fontSize: 14,
-                        fontWeight: 800,
+                        fontWeight: 500,
                         cursor: "pointer",
                         border: "none",
-                        boxShadow: "0 4px 20px rgba(14,165,233,0.40)",
                         letterSpacing: "0.01em",
                         marginBottom: 10,
                       }}
                     >
                       Start Your Free 30-Day Trial →
                     </button>
-                    <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
                       Free 30-day trial · no credit card required
                     </div>
-                    <div style={{ fontSize: 11, color: "#475569", marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 16 }}>
                       Fully branded quote flow · Response within 1 business day
                     </div>
 
                     {/* ── Customer-facing input callout ─────────────────────── */}
                     <div style={{
-                      borderTop: "1px solid rgba(255,255,255,0.07)",
+                      borderTop: "1px solid var(--border)",
                       paddingTop: 14,
                       textAlign: "left",
                     }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#a5b4fc", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
                         Customer-facing tools included
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                           <span style={{ fontSize: 13, lineHeight: 1 }}>💬</span>
-                          <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.55 }}>
-                            <span style={{ color: "#c7d2fe", fontWeight: 600 }}>AI chat widget</span> — customers describe what they need in plain language and get an instant quote
+                          <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+                            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>AI chat widget</span> — customers describe what they need in plain language and get an instant quote
                           </div>
                         </div>
                         <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                           <span style={{ fontSize: 13, lineHeight: 1 }}>📋</span>
-                          <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.55 }}>
-                            <span style={{ color: "#c7d2fe", fontWeight: 600 }}>Structured quote form</span> — for customers who prefer to type in specs directly, no chat required
+                          <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.55 }}>
+                            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>Structured quote form</span> — for customers who prefer to type in specs directly, no chat required
                           </div>
                         </div>
                       </div>
-                      <div style={{ marginTop: 8, fontSize: 10, color: "#475569", lineHeight: 1.5 }}>
+                      <div style={{ marginTop: 8, fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5 }}>
                         Both embed on your website. Every submission lands in your backend as a fully priced, layout-ready quote.
                       </div>
                     </div>
@@ -1705,13 +1697,13 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   </div>
 
                   {/* ── Full-width pricing grid ───────────────────────────── */}
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 24, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 24, marginBottom: 8 }}>
                     Ready to get started?
                   </div>
                   <div>
                       {/* Monthly / Annual toggle */}
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 16 }}>
-                        <span style={{ fontSize: 12, color: annualMode ? "#64748b" : "#e2e8f0", fontWeight: annualMode ? 400 : 600 }}>
+                        <span style={{ fontSize: 12, color: annualMode ? "var(--text-muted)" : "var(--text-primary)", fontWeight: annualMode ? 400 : 500 }}>
                           Monthly
                         </span>
                         <button
@@ -1723,7 +1715,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             height: 22,
                             borderRadius: 999,
                             border: "none",
-                            background: annualMode ? "#0ea5e9" : "rgba(255,255,255,0.15)",
+                            background: annualMode ? "var(--action-primary)" : "var(--border-strong)",
                             cursor: "pointer",
                             transition: "background 0.2s",
                             flexShrink: 0,
@@ -1740,16 +1732,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             transition: "left 0.2s",
                           }} />
                         </button>
-                        <span style={{ fontSize: 12, color: annualMode ? "#e2e8f0" : "#64748b", fontWeight: annualMode ? 600 : 400 }}>
+                        <span style={{ fontSize: 12, color: annualMode ? "var(--text-primary)" : "var(--text-muted)", fontWeight: annualMode ? 500 : 400 }}>
                           Annual
                         </span>
                         {annualMode && (
                           <span style={{
                             fontSize: 10,
-                            fontWeight: 700,
-                            color: "#4ade80",
-                            background: "rgba(74,222,128,0.12)",
-                            border: "1px solid rgba(74,222,128,0.25)",
+                            fontWeight: 500,
+                            color: "var(--status-success-text)",
+                            background: "var(--status-success-bg)",
                             borderRadius: 999,
                             padding: "2px 8px",
                             letterSpacing: "0.06em",
@@ -1817,14 +1808,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                 <div
                                   key={tier.name}
                                   style={{
-                                    borderRadius: 16,
+                                    borderRadius: 12,
                                     padding: "10px 10px",
                                     background: tier.highlight
-                                      ? "rgba(14,165,233,0.12)"
-                                      : "rgba(255,255,255,0.04)",
+                                      ? "var(--surface-subtle)"
+                                      : "var(--surface-card)",
                                     border: tier.highlight
-                                      ? "1px solid rgba(14,165,233,0.40)"
-                                      : "1px solid rgba(255,255,255,0.08)",
+                                      ? "1px solid var(--action-primary)"
+                                      : "1px solid var(--border)",
                                     position: "relative",
                                   }}
                                 >
@@ -1836,11 +1827,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       left: "50%",
                                       transform: "translateX(-50%)",
                                       fontSize: 9,
-                                      fontWeight: 800,
+                                      fontWeight: 500,
                                       letterSpacing: "0.10em",
                                       textTransform: "uppercase",
-                                      color: "#0f172a",
-                                      background: "linear-gradient(135deg,#0ea5e9,#38bdf8)",
+                                      color: "#FFFFFF",
+                                      background: "var(--action-primary)",
                                       borderRadius: 999,
                                       padding: "3px 10px",
                                       whiteSpace: "nowrap",
@@ -1850,21 +1841,21 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                   )}
 
                                   {/* Tier name */}
-                                  <div style={{ fontSize: 11, fontWeight: 700, color: tier.highlight ? "#38bdf8" : "#94a3b8", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 6 }}>
+                                  <div style={{ fontSize: 11, fontWeight: 500, color: tier.highlight ? "var(--text-primary)" : "var(--text-muted)", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 6 }}>
                                     {tier.name}
                                   </div>
 
                                   {/* Price */}
                                   <div style={{ display: "flex", alignItems: "baseline", gap: 3, marginBottom: 2 }}>
-                                    <span style={{ fontSize: 20, fontWeight: 800, color: "#f9fafb", letterSpacing: "-0.02em" }}>
+                                    <span style={{ fontSize: 20, fontWeight: 500, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
                                       ${displayPrice.toLocaleString()}
                                     </span>
-                                    <span style={{ fontSize: 11, color: "#64748b" }}>/mo</span>
+                                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>/mo</span>
                                   </div>
 
                                   {/* Annual note */}
                                   {annualMode && (
-                                    <div style={{ fontSize: 10, color: "#4ade80", marginBottom: 6 }}>
+                                    <div style={{ fontSize: 10, color: "var(--status-success-text)", marginBottom: 6 }}>
                                       Billed ${(displayPrice * 12).toLocaleString()}/yr
                                     </div>
                                   )}
@@ -1872,9 +1863,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                   {/* Users */}
                                   <div style={{
                                     fontSize: 11,
-                                    fontWeight: 600,
-                                    color: "#cbd5e1",
-                                    background: "rgba(255,255,255,0.06)",
+                                    fontWeight: 500,
+                                    color: "var(--text-secondary)",
+                                    background: "var(--surface-subtle)",
                                     borderRadius: 999,
                                     padding: "3px 8px",
                                     display: "inline-block",
@@ -1887,14 +1878,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                                     {tier.features.map((feat) => (
                                       <div key={feat} style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-                                        <span style={{ color: "#4ade80", fontSize: 11, flexShrink: 0, marginTop: 1 }}>✓</span>
-                                        <span style={{ fontSize: 11, color: "#cbd5e1", lineHeight: 1.4 }}>{feat}</span>
+                                        <span style={{ color: "var(--status-success-text)", fontSize: 11, flexShrink: 0, marginTop: 1 }}>✓</span>
+                                        <span style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>{feat}</span>
                                       </div>
                                     ))}
                                     {tier.notIncluded.map((feat) => (
                                       <div key={feat} style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-                                        <span style={{ color: "#334155", fontSize: 11, flexShrink: 0, marginTop: 1 }}>✕</span>
-                                        <span style={{ fontSize: 11, color: "#334155", lineHeight: 1.4 }}>{feat}</span>
+                                        <span style={{ color: "var(--text-faint)", fontSize: 11, flexShrink: 0, marginTop: 1 }}>✕</span>
+                                        <span style={{ fontSize: 11, color: "var(--text-faint)", lineHeight: 1.4 }}>{feat}</span>
                                       </div>
                                     ))}
                                   </div>
@@ -1906,14 +1897,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       marginTop: 10,
                                       width: "100%",
                                       padding: "9px 0",
-                                      borderRadius: 10,
-                                      border: tier.highlight ? "none" : "1px solid rgba(255,255,255,0.12)",
+                                      borderRadius: 8,
+                                      border: tier.highlight ? "none" : "1px solid var(--border-strong)",
                                       background: tier.highlight
-                                        ? "linear-gradient(135deg,#0ea5e9,#38bdf8)"
-                                        : "rgba(255,255,255,0.06)",
-                                      color: "#ffffff",
+                                        ? "var(--action-primary)"
+                                        : "var(--surface-card)",
+                                      color: tier.highlight ? "#FFFFFF" : "var(--text-primary)",
                                       fontSize: 12,
-                                      fontWeight: 700,
+                                      fontWeight: 500,
                                       letterSpacing: "0.06em",
                                       cursor: "pointer",
                                     }}
@@ -1931,56 +1922,56 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         <div style={{
                           marginTop: 16,
                           padding: "20px 18px",
-                          borderRadius: 14,
-                          background: "rgba(14,165,233,0.08)",
-                          border: "1px solid rgba(14,165,233,0.25)",
+                          borderRadius: 12,
+                          background: "var(--surface-subtle)",
+                          border: "1px solid var(--border-strong)",
                         }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 4 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", marginBottom: 4 }}>
                             Get started with {selectedTier}
                           </div>
-                          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 14 }}>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 14 }}>
                             We'll reach out within one business day to get you set up.
                           </div>
 
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
                             <div>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Name *</div>
+                              <div style={{ fontSize: 10, fontWeight: 500, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Name *</div>
                               <input
                                 type="text"
                                 value={leadForm.name}
                                 onChange={e => setLeadForm(f => ({ ...f, name: e.target.value }))}
                                 placeholder="Your name"
-                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#f1f5f9", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, outline: "none", boxSizing: "border-box" }}
                               />
                             </div>
                             <div>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Email *</div>
+                              <div style={{ fontSize: 10, fontWeight: 500, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Email *</div>
                               <input
                                 type="email"
                                 value={leadForm.email}
                                 onChange={e => setLeadForm(f => ({ ...f, email: e.target.value }))}
                                 placeholder="you@company.com"
-                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#f1f5f9", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, outline: "none", boxSizing: "border-box" }}
                               />
                             </div>
                             <div>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Company</div>
+                              <div style={{ fontSize: 10, fontWeight: 500, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Company</div>
                               <input
                                 type="text"
                                 value={leadForm.company}
                                 onChange={e => setLeadForm(f => ({ ...f, company: e.target.value }))}
                                 placeholder="Your shop name"
-                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#f1f5f9", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, outline: "none", boxSizing: "border-box" }}
                               />
                             </div>
                             <div>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Phone</div>
+                              <div style={{ fontSize: 10, fontWeight: 500, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 4 }}>Phone</div>
                               <input
                                 type="tel"
                                 value={leadForm.phone}
                                 onChange={e => setLeadForm(f => ({ ...f, phone: e.target.value }))}
                                 placeholder="Optional"
-                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", color: "#f1f5f9", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, outline: "none", boxSizing: "border-box" }}
                               />
                             </div>
                           </div>
@@ -2017,14 +2008,16 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             style={{
                               width: "100%",
                               padding: "10px 0",
-                              borderRadius: 10,
+                              borderRadius: 8,
                               border: "none",
                               background: (!leadForm.name.trim() || !leadForm.email.trim() || leadSubmitting)
-                                ? "rgba(14,165,233,0.25)"
-                                : "linear-gradient(135deg,#0ea5e9,#38bdf8)",
-                              color: "#ffffff",
+                                ? "var(--border-strong)"
+                                : "var(--action-primary)",
+                              color: (!leadForm.name.trim() || !leadForm.email.trim() || leadSubmitting)
+                                ? "var(--text-faint)"
+                                : "#FFFFFF",
                               fontSize: 12,
-                              fontWeight: 700,
+                              fontWeight: 500,
                               letterSpacing: "0.06em",
                               cursor: (!leadForm.name.trim() || !leadForm.email.trim() || leadSubmitting) ? "not-allowed" : "pointer",
                             }}
@@ -2035,7 +2028,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       )}
 
                       {/* Fine print */}
-                      <div style={{ marginTop: 12, fontSize: 11, color: "#475569", textAlign: "center" }}>
+                      <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
                         All plans include a 30-day onboarding period · No long-term contract required · Cancel anytime
                       </div>
                     {/* ── End pricing grid ─────────────────────────────────── */}
@@ -2049,22 +2042,23 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   margin: "-24px -24px 20px -24px",
                   padding: "16px 24px",
                   borderRadius: "24px 24px 0 0",
-                  background: "linear-gradient(90deg,#0ea5e9 0%,#22d3ee 35%,#6366f1 100%)",
+                  background: "var(--surface-subtle)",
+                  borderBottom: "1px solid var(--border)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 16,
-                  color: "#e5e7eb",
+                  color: "var(--text-secondary)",
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.9, marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 4 }}>
                     Powered by Alex-IO
                   </div>
-                  <div style={{ margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: "0.02em" }}>
+                  <div style={{ margin: 0, fontSize: 20, fontWeight: 500, letterSpacing: "0.02em", color: "var(--text-primary)" }}>
                     Interactive quote viewer
                   </div>
-                  <div style={{ marginTop: 4, fontSize: 12, opacity: 0.94 }}>
+                  <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-secondary)" }}>
                     Quote {quote.quote_no}
                     {facts?.revision ? (
                       <span
@@ -2073,18 +2067,19 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           marginLeft: 8,
                           padding: "2px 8px",
                           borderRadius: 999,
-                          background: "rgba(15,23,42,0.25)",
-                          border: "1px solid rgba(15,23,42,0.35)",
+                          background: "var(--surface-card)",
+                          border: "1px solid var(--border)",
                           fontSize: 11,
-                          fontWeight: 700,
+                          fontWeight: 500,
                           letterSpacing: "0.06em",
+                          color: "var(--text-primary)",
                         }}
                       >
                         {facts.revision}
                       </span>
                     ) : null}
                   </div>
-                  <p style={{ margin: "2px 0 0 0", fontSize: 12, opacity: 0.9 }}>
+                  <p style={{ margin: "2px 0 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
                     {quote.customer_name}
                     {quote.company ? <> • {quote.company}</> : null}
                     {quote.email ? <> • {quote.email}</> : null}
@@ -2092,33 +2087,33 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   </p>
                 </div>
 
-                <div style={{ textAlign: "right", fontSize: 12, color: "#e5e7eb" }}>
+                <div style={{ textAlign: "right", fontSize: 12, color: "var(--text-secondary)" }}>
                   {(() => {
                     const pill = getStatusPill(quote.status);
                     return <div style={pill.style}>{pill.label}</div>;
                   })()}
-                  <p style={{ margin: "4px 0 0 0", fontSize: 11, opacity: 0.9 }}>
+                  <p style={{ margin: "4px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>
                     Created: {new Date(quote.created_at).toLocaleString()}
                   </p>
                   <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
                     <button
                       type="button"
                       onClick={() => { if (typeof window !== "undefined") window.print(); }}
-                      style={{ padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(15,23,42,0.15)", background: "rgba(15,23,42,0.12)", color: "#e5e7eb", fontSize: 12, fontWeight: 500, cursor: "pointer", backdropFilter: "blur(4px)" }}
+                      style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border-strong)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}
                     >
                       Print this quote
                     </button>
                     <button
                       type="button"
                       onClick={handleForwardToSales}
-                      style={{ padding: "6px 12px", borderRadius: 999, border: "1px solid rgba(15,23,42,0.15)", background: "rgba(15,23,42,0.12)", color: "#e5e7eb", fontSize: 12, fontWeight: 500, cursor: "pointer", backdropFilter: "blur(4px)" }}
+                      style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border-strong)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}
                     >
                       Forward to sales
                     </button>
                     <button
                       type="button"
                       onClick={handleScheduleCall}
-                      style={{ padding: "6px 12px", borderRadius: 999, border: "1px solid #0f172a", background: "#0f172a", color: "#f9fafb", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                      style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--action-primary)", background: "var(--action-primary)", color: "#FFFFFF", fontSize: 12, fontWeight: 500, cursor: "pointer" }}
                     >
                       Schedule a call
                     </button>
@@ -2132,26 +2127,26 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               <div style={{
                 marginBottom: 20,
                 padding: "14px 18px",
-                borderRadius: 14,
-                background: "#f8fafc",
-                border: "1px solid #e2e8f0",
+                borderRadius: 12,
+                background: "var(--surface-subtle)",
+                border: "1px solid var(--border)",
               }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 500, color: "var(--text-muted)", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 4 }}>
                   Quote estimate
                 </div>
                 {anyPricing ? (
                   <>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
+                    <div style={{ fontSize: 28, fontWeight: 600, color: "var(--text-primary)", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
                       {formatUsd(planningTotal > 0 ? planningTotal : effectiveGrandTotal > 0 ? effectiveGrandTotal : breakdownSubtotal)}
                     </div>
-                    <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
                       {breakdownUnitPrice != null ? `${formatUsd(breakdownUnitPrice)}/pc · ` : ""}
                       Qty {primaryItem.qty.toLocaleString()}
                       {shippingEstimate > 0 ? " · incl. est. shipping" : ""}
                     </div>
                   </>
                 ) : (
-                  <div style={{ fontSize: 14, color: "#6b7280" }}>Pricing pending — see full breakdown below</div>
+                  <div style={{ fontSize: 14, color: "var(--text-muted)" }}>Pricing pending — see full breakdown below</div>
                 )}
               </div>
             )}
@@ -2162,9 +2157,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 style={{
                   margin: "0 0 20px 0",
                   padding: "14px 20px",
-                  borderRadius: 16,
-                  background: "rgba(245,158,11,0.08)",
-                  border: "1px solid rgba(245,158,11,0.30)",
+                  borderRadius: 12,
+                  background: "var(--status-pending-bg)",
+                  border: "1px solid var(--status-pending-text)",
                   display: "flex",
                   alignItems: "flex-start",
                   justifyContent: "space-between",
@@ -2180,14 +2175,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       width: 36,
                       height: 36,
                       borderRadius: "50%",
-                      background: "rgba(245,158,11,0.15)",
-                      border: "1px solid rgba(245,158,11,0.35)",
+                      background: "var(--surface-card)",
+                      border: "1px solid var(--status-pending-text)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       fontSize: 16,
-                      fontWeight: 800,
-                      color: "#b45309",
+                      fontWeight: 500,
+                      color: "var(--status-pending-text)",
                       letterSpacing: "-0.02em",
                     }}
                   >
@@ -2197,8 +2192,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     <div
                       style={{
                         fontSize: 11,
-                        fontWeight: 700,
-                        color: "#92400e",
+                        fontWeight: 500,
+                        color: "var(--status-pending-text)",
                         letterSpacing: "0.10em",
                         textTransform: "uppercase",
                         marginBottom: 4,
@@ -2206,7 +2201,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     >
                       Demo — Pricing is live, this document is a sample
                     </div>
-                    <div style={{ fontSize: 12, color: "#b45309", lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 12, color: "var(--status-pending-text)", lineHeight: 1.6 }}>
                       This is what Alex-IO produces for every RFQ your team receives — layout, cavities,
                       material selection, and a priced quote, all without the usual back-and-forth.
                       Use the button above to get Alex-IO running in your shop.
@@ -2219,12 +2214,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     flexShrink: 0,
                     alignSelf: "center",
                     fontSize: 10,
-                    fontWeight: 700,
+                    fontWeight: 500,
                     letterSpacing: "0.14em",
                     textTransform: "uppercase",
-                    color: "#b45309",
-                    background: "rgba(245,158,11,0.12)",
-                    border: "1px solid rgba(245,158,11,0.28)",
+                    color: "var(--status-pending-text)",
+                    background: "var(--surface-card)",
+                    border: "1px solid var(--status-pending-text)",
                     borderRadius: 999,
                     padding: "4px 12px",
                     whiteSpace: "nowrap",
@@ -2251,7 +2246,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <div>
                       <div style={labelStyle}>Dimensions</div>
-                      <div style={{ fontSize: 13, color: "#111827" }}>
+                      <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
                         {(() => {
                           // Path A: Outside size / total thickness should reflect the layer stack total.
                           const stackH = layoutMetrics?.stack_total_thickness_in;
@@ -2265,13 +2260,13 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
   style={{
     marginTop: 6,
     fontSize: 11,
-    color: "#6b7280",
+    color: "var(--text-muted)",
     lineHeight: 1.35,
   }}
 >
   <span style={{ fontWeight: 600, color: "#374151" }}>Foam sizing note:</span>{" "}
   If you are requesting a carton/mailer, please specify foam length/width{" "}
-  <span style={{ fontWeight: 700, color: "#111827" }}>0.125&quot; (1/8&quot;) undersize</span>{" "}
+  <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>0.125&quot; (1/8&quot;) undersize</span>{" "}
   versus the carton/mailer inside dimensions (unless you want a different fit).
 </div>
 
@@ -2283,7 +2278,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         return (
                           <div>
                             <div style={labelStyle}>Min thickness under cavities</div>
-                            <div style={{ fontSize: 13, color: "#111827" }}>{v.toFixed(3)} in</div>
+                            <div style={{ fontSize: 13, color: "var(--text-primary)" }}>{v.toFixed(3)} in</div>
                           </div>
                         );
                       }
@@ -2292,7 +2287,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                     <div>
                       <div style={labelStyle}>Quantity</div>
-                      <div style={{ fontSize: 13, color: "#111827" }}>{primaryItem.qty.toLocaleString()}</div>
+                      <div style={{ fontSize: 13, color: "var(--text-primary)" }}>{primaryItem.qty.toLocaleString()}</div>
                     </div>
                     <div>
                       <div style={labelStyle}>Material</div>
@@ -2300,21 +2295,21 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2 }}>
                           {layerMaterials.map((lm, i) => (
                             <div key={i}>
-                              <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 1 }}>
+                              <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 1 }}>
                                 {lm.layerLabel}
                               </div>
-                              <div style={{ fontSize: 13, color: "#111827" }}>{lm.name}</div>
+                              <div style={{ fontSize: 13, color: "var(--text-primary)" }}>{lm.name}</div>
                               {lm.subline && (
-                                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1 }}>{lm.subline}</div>
+                                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>{lm.subline}</div>
                               )}
                             </div>
                           ))}
                         </div>
                       ) : (
                         <>
-                          <div style={{ fontSize: 13, color: "#111827" }}>{primaryMaterialName}</div>
+                          <div style={{ fontSize: 13, color: "var(--text-primary)" }}>{primaryMaterialName}</div>
                           {primaryMaterialSubline && (
-                            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{primaryMaterialSubline}</div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{primaryMaterialSubline}</div>
                           )}
                         </>
                       )}
@@ -2336,7 +2331,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 <div style={cardBase}>
                   <div style={cardTitleStyle}>Pricing</div>
                   {anyPricing ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13, color: "#111827" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13, color: "var(--text-primary)" }}>
                       <div>
                         <div style={labelStyle}>Primary unit price</div>
                         <div>{formatUsd(breakdownUnitPrice ?? null)}</div>
@@ -2373,7 +2368,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <div style={labelStyle}>Rough shipping estimate</div>
                             <div style={{ fontSize: 13 }}>
                               {formatUsd(shippingEstimate)}{" "}
-                              <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 4 }}>
+                              <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
                                 ({roughShipPct?.toFixed(1).replace(/\.0$/, "")}% of foam + packaging; for planning only)
                               </span>
                             </div>
@@ -2394,7 +2389,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             style={{
                               marginTop: 4,
                               paddingTop: 6,
-                              borderTop: "1px dashed #e5e7eb",
+                              borderTop: "1px dashed var(--border)",
                               display: "grid",
                               gridTemplateColumns: "repeat(2,minmax(0,1fr))",
                               gap: 8,
@@ -2427,7 +2422,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           </div>
 
                           {priceBreaks && priceBreaks.length > 1 && (
-                            <div style={{ marginTop: 6, fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
+                            <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
                               <span style={{ fontWeight: 500 }}>Example price breaks: </span>
                               {priceBreaks
                                 .filter((b) => b.qty === 10 || b.qty === 50)
@@ -2438,7 +2433,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </>
                       )}
 
-                      <div style={{ marginTop: 4, fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
+                      <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
                         {primaryPricing ? (
                           <>
                             <span>
@@ -2465,7 +2460,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
                       Pricing is still being finalized for this quote. Once pricing is applied, the per-piece and subtotal
                       values will appear here and in the line items below.
                     </div>
@@ -2482,10 +2477,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       alignItems: "center",
                       padding: "2px 8px",
                       borderRadius: 999,
-                      background: "#eef2ff",
-                      color: "#1d4ed8",
+                      background: "var(--status-neutral-bg)",
+                      color: "var(--status-neutral-text)",
                       fontSize: 11,
-                      fontWeight: 600,
+                      fontWeight: 500,
                       textTransform: "uppercase",
                       letterSpacing: "0.08em",
                     }}
@@ -2495,10 +2490,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                   {layoutPkg ? (
                     <>
-                      <div style={{ fontSize: 13, color: "#111827", marginBottom: 4 }}>
+                      <div style={{ fontSize: 13, color: "var(--text-primary)", marginBottom: 4 }}>
                         A foam layout has been saved for this quote.
                       </div>
-                      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8, lineHeight: 1.4 }}>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8, lineHeight: 1.4 }}>
                         You can open the layout editor from this page or from your emailed quote to adjust pocket locations
                         before finalizing.
                       </div>
@@ -2506,24 +2501,24 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
   <div
     style={{
       fontSize: 12,
-      color: "#0f172a",
-      background: "#eef2ff",
-      border: "1px solid #c7d2fe",
-      borderRadius: 12,
+      color: "var(--text-primary)",
+      background: "var(--surface-subtle)",
+      border: "1px solid var(--border)",
+      borderRadius: 8,
       padding: "8px 10px",
       lineHeight: 1.4,
       whiteSpace: "pre-wrap",
       wordBreak: "break-word",
     }}
   >
-    <span style={{ fontWeight: 700 }}>Notes: </span>
+    <span style={{ fontWeight: 500 }}>Notes: </span>
     {notesFull}
   </div>
 )}
 
                     </>
                   ) : (
-                    <div style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
                       No foam layout has been saved yet. Use the layout editor link in your emailed quote to place cavities
                       where you’d like your parts to sit, then click <strong>Apply to quote</strong> to store the layout
                       with this quote.
@@ -2539,19 +2534,19 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 marginTop: 20,
                 marginBottom: 20,
                 padding: "16px 18px",
-                borderRadius: 14,
-                background: "#f8fafc",
-                border: "1px solid #e2e8f0",
+                borderRadius: 12,
+                background: "var(--surface-subtle)",
+                border: "1px solid var(--border)",
                 display: "flex",
                 flexWrap: "wrap",
                 alignItems: "center",
                 gap: 12,
               }}>
                 <div style={{ flex: "1 1 200px" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
                     📧 Want this quote emailed to you?
                   </div>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                     We'll send a copy of this exact quote to your inbox — no commitment.
                   </div>
                 </div>
@@ -2563,8 +2558,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     onChange={e => setQuoteEmailCapture(f => ({ ...f, name: e.target.value }))}
                     style={{
                       flex: 1, padding: "8px 10px", borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "#ffffff", color: "#0f172a",
+                      border: "1px solid var(--border-strong)",
+                      background: "var(--surface-card)", color: "var(--text-primary)",
                       fontSize: 12, outline: "none",
                     }}
                   />
@@ -2575,8 +2570,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     onChange={e => setQuoteEmailCapture(f => ({ ...f, email: e.target.value }))}
                     style={{
                       flex: 1, padding: "8px 10px", borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "#ffffff", color: "#0f172a",
+                      border: "1px solid var(--border-strong)",
+                      background: "var(--surface-card)", color: "var(--text-primary)",
                       fontSize: 12, outline: "none",
                     }}
                   />
@@ -2587,10 +2582,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     style={{
                       padding: "8px 16px", borderRadius: 8, border: "none",
                       background: !quoteEmailCapture.email.trim() || quoteEmailSubmitting
-                        ? "#e2e8f0"
-                        : "linear-gradient(135deg,#0ea5e9,#38bdf8)",
-                      color: !quoteEmailCapture.email.trim() || quoteEmailSubmitting ? "#94a3b8" : "#fff",
-                      fontSize: 12, fontWeight: 700,
+                        ? "var(--border-strong)"
+                        : "var(--action-primary)",
+                      color: !quoteEmailCapture.email.trim() || quoteEmailSubmitting ? "var(--text-faint)" : "#FFFFFF",
+                      fontSize: 12, fontWeight: 500,
                       cursor: !quoteEmailCapture.email.trim() ? "not-allowed" : "pointer",
                       whiteSpace: "nowrap",
                     }}
@@ -2612,8 +2607,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
             ))}
 
             {/* LINE ITEMS CARD (foam items + layers + carton selections) */}
-            <div style={{ ...cardBase, background: "#ffffff", marginBottom: 24 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>Line items</div>
+            <div style={{ ...cardBase, background: "var(--surface-card)", marginBottom: 24 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Line items</div>
               {isDemo && (
                 <div style={{
                   display: "flex", alignItems: "center", gap: 10,
@@ -2624,8 +2619,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     disabled
                     style={{
                       padding: "8px 14px", borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "#f3f4f6", color: "#9ca3af",
+                      border: "1px solid var(--border-strong)",
+                      background: "var(--surface-subtle)", color: "var(--text-faint)",
                       fontSize: 12, fontWeight: 700,
                       cursor: "not-allowed",
                       display: "flex", alignItems: "center", gap: 6,
@@ -2633,17 +2628,17 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   >
                     📐 Download CAD Files (DXF, STEP)
                   </button>
-                  <span style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.4 }}>
+                  <span style={{ fontSize: 11, color: "var(--text-faint)", lineHeight: 1.4 }}>
                     Generated automatically for every quote — available once your account is set up
                   </span>
                 </div>
               )}
-              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
                 These are the materials and quantities currently stored with your quote.
               </div>
 
               {items.length === 0 && requestedBoxes.length === 0 && layerDisplayRows.length === 0 ? (
-                <p style={{ color: "#6b7280", fontSize: 13 }}>
+                <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
                   No line items stored for this quote yet. Once the material and details are finalized, the primary line
                   will appear here.
                 </p>
@@ -2660,14 +2655,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     }}
                   >
                     <thead>
-                      <tr style={{ background: "#eef2ff" }}>
-                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Item</th>
-                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb" }}>
+                      <tr style={{ background: "var(--surface-subtle)" }}>
+                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid var(--border)" }}>Item</th>
+                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid var(--border)" }}>
                           Dimensions (L x W x H in)
                         </th>
-                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Qty</th>
-                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Unit price</th>
-                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Line total</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Qty</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Unit price</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Line total</th>
                       </tr>
                     </thead>
 
@@ -2679,13 +2674,13 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             colSpan={5}
                             style={{
                               padding: "6px 8px",
-                              borderBottom: "1px solid #e5e7eb",
-                              background: "#f9fafb",
+                              borderBottom: "1px solid var(--border)",
+                              background: "var(--surface-page)",
                               fontSize: 11,
                               fontWeight: 600,
                               letterSpacing: "0.08em",
                               textTransform: "uppercase",
-                              color: "#6b7280",
+                              color: "var(--text-muted)",
                             }}
                           >
                             Foam materials
@@ -2741,18 +2736,18 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                         return (
                           <tr key={item.id}>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
                               {isPrimary ? (
                                 <>
                                   <div style={{ fontWeight: 600 }}>Foam set — layered construction</div>
-                                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, lineHeight: 1.35 }}>
+                                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.35 }}>
                                     Includes all bonded layers shown below (for reference).
                                   </div>
                                 </>
                               ) : (
                                 <>
                                   <div style={{ fontWeight: 500 }}>Included layer</div>
-                                  <div style={{ color: "#6b7280" }}>
+                                  <div style={{ color: "var(--text-muted)" }}>
                                     {baseLabel}
                                     {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                   </div>
@@ -2765,9 +2760,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                         style={{
                                           padding: "3px 8px",
                                           borderRadius: 999,
-                                          border: "1px solid #fecaca",
-                                          background: isRemovingLayer ? "#fee2e2" : "#fef2f2",
-                                          color: "#b91c1c",
+                                          border: "1px solid var(--attention-border)",
+                                          background: isRemovingLayer ? "var(--attention-border)" : "var(--attention-bg)",
+                                          color: "var(--attention)",
                                           fontSize: 11,
                                           fontWeight: 600,
                                           cursor: isRemovingLayer ? "default" : "pointer",
@@ -2780,11 +2775,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       <span style={{
                                         padding: "3px 8px",
                                         borderRadius: 999,
-                                        border: "1px solid #fed7aa",
-                                        background: "#fff7ed",
-                                        color: "#c2410c",
+                                        border: "1px solid var(--status-pending-text)",
+                                        background: "var(--status-pending-bg)",
+                                        color: "var(--status-pending-text)",
                                         fontSize: 11,
-                                        fontWeight: 600,
+                                        fontWeight: 500,
                                       }}>
                                         Skived
                                       </span>
@@ -2794,16 +2789,16 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                               )}
                             </td>
 
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{dims}</td>
 
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{item.qty}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{item.qty}</td>
 
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {isPrimary ? formatUsd(unitForPrimary ?? null) : <span style={{ color: "#6b7280" }}>Included</span>}
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {isPrimary ? formatUsd(unitForPrimary ?? null) : <span style={{ color: "var(--text-muted)" }}>Included</span>}
                             </td>
 
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {isPrimary ? formatUsd(totalForPrimary ?? null) : <span style={{ color: "#6b7280" }}>Included</span>}
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {isPrimary ? formatUsd(totalForPrimary ?? null) : <span style={{ color: "var(--text-muted)" }}>Included</span>}
                             </td>
                           </tr>
                         );
@@ -2812,16 +2807,16 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       {/* Foam layers (display only, not priced separately) */}
                       {layerDisplayRows.map((layer) => (
                         <tr key={layer.key}>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
                             <div style={{ fontWeight: 500 }}>Foam layer: {layer.name}</div>
-                            <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>
+                            <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>
                               Layer details from saved layout (for reference; included in foam pricing above).
                             </div>
                           </td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{layer.dims}</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{layer.qty}</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(null)}</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(null)}</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{layer.dims}</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{layer.qty}</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(null)}</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(null)}</td>
                         </tr>
                       ))}
 
@@ -2832,14 +2827,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             colSpan={5}
                             style={{
                               padding: "6px 8px",
-                              borderTop: "1px solid #e5e7eb",
-                              borderBottom: "1px solid #f3f4f6",
-                              background: "#fef2f2",
+                              borderTop: "1px solid var(--border)",
+                              borderBottom: "1px solid var(--surface-subtle)",
+                              background: "var(--surface-subtle)",
                               fontSize: 11,
-                              fontWeight: 600,
+                              fontWeight: 500,
                               letterSpacing: "0.08em",
                               textTransform: "uppercase",
-                              color: "#b91c1c",
+                              color: "var(--text-secondary)",
                             }}
                           >
                             Packaging
@@ -2850,21 +2845,21 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       {/* Customer box with matched pricing — shown when customer entered dims but no carton was explicitly picked */}
                       {customerBoxDims && requestedBoxes.length === 0 && apiPackagingLines.length === 0 && (
                         <tr>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
-                            <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#4b5563", marginBottom: 2 }}>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-secondary)", marginBottom: 2 }}>
                               Packaging – Customer box (inside)
                             </div>
                             <div style={{ fontWeight: 500 }}>
                               {customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in
                             </div>
-                            <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>
+                            <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>
                               No matching stock box found. Pricing TBD.
                             </div>
                           </td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>TBD</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>TBD</td>
                         </tr>
                       )}
 
@@ -2897,15 +2892,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         const lineTotal = parsePriceField((rb as any).extended_price_usd ?? null);
                         return (
                           <tr key={`api-pkg-${idx}`}>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
                               <div style={{ fontWeight: 500 }}>{mainLabel}</div>
                             </td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{dimsText ?? "—"}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{qty}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{dimsText ?? "—"}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{qty}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
                               {unitPrice != null ? formatUsd(unitPrice) : "—"}
                             </td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
                               {lineTotal != null ? formatUsd(lineTotal) : unitPrice != null ? formatUsd(unitPrice * qty) : "—"}
                             </td>
                           </tr>
@@ -2953,7 +2948,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                         return (
                           <tr key={`carton-${rb.id}`}>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                                 <div>
                                   <div
@@ -2962,14 +2957,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       fontWeight: 600,
                                       textTransform: "uppercase",
                                       letterSpacing: "0.08em",
-                                      color: "#4b5563",
+                                      color: "var(--text-secondary)",
                                       marginBottom: 2,
                                     }}
                                   >
                                     Packaging – Carton selection
                                   </div>
                                   <div style={{ fontWeight: 500 }}>{mainLabel}</div>
-                                  {subLabel && <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
+                                  {subLabel && <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                 </div>
                                 <button
                                   type="button"
@@ -2978,9 +2973,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                   style={{
                                     padding: "4px 10px",
                                     borderRadius: 999,
-                                    border: "1px solid #fecaca",
-                                    background: isRemoving ? "#fee2e2" : "#fef2f2",
-                                    color: "#b91c1c",
+                                    border: "1px solid var(--attention-border)",
+                                    background: isRemoving ? "var(--attention-border)" : "var(--attention-bg)",
+                                    color: "var(--attention)",
                                     fontSize: 11,
                                     fontWeight: 600,
                                     cursor: isRemoving ? "default" : "pointer",
@@ -2991,10 +2986,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                 </button>
                               </div>
                             </td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>{dimsDisplay}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{qty}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(unitPrice)}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(lineTotal)}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{dimsDisplay}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{qty}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(unitPrice)}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(lineTotal)}</td>
                           </tr>
                         );
                       })}
@@ -3002,14 +2997,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       {/* Printing upcharge — inside the Packaging section */}
                       {(isPrinted || effectivePrintingUpcharge > 0) && (
                         <tr>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
                             <div
                               style={{
                                 fontSize: 11,
                                 fontWeight: 600,
                                 textTransform: "uppercase",
                                 letterSpacing: "0.08em",
-                                color: "#4b5563",
+                                color: "var(--text-secondary)",
                                 marginBottom: 2,
                               }}
                             >
@@ -3017,10 +3012,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             </div>
                             <div style={{ fontWeight: 500 }}>Custom printed mailer / box</div>
                           </td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6" }}>—</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
                             {effectivePrintingUpcharge > 0 ? formatUsd(effectivePrintingUpcharge) : "TBD"}
                           </td>
                         </tr>
@@ -3030,18 +3025,18 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                   <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>Total quantity</div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Total quantity</div>
                       <div style={{ fontSize: 18, fontWeight: 600 }}>{overallQty}</div>
                       {anyPricing && (
                         <>
                           {/* Foam subtotal always shown */}
-                          <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>Foam subtotal</div>
+                          <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Foam subtotal</div>
                           <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(foamSubtotal)}</div>
 
                           {/* Packaging subtotal includes printing upcharge */}
                           {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0) && (
                             <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>Packaging subtotal</div>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Packaging subtotal</div>
                               <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectivePackagingSubtotal + effectivePrintingUpcharge)}</div>
                             </>
                           )}
@@ -3049,7 +3044,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           {/* Printing upcharge line in summary */}
                           {effectivePrintingUpcharge > 0 && (
                             <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>Printing upcharge</div>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Printing upcharge</div>
                               <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectivePrintingUpcharge)}</div>
                             </>
                           )}
@@ -3057,7 +3052,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           {/* Grand subtotal — show when packaging or printing is present */}
                           {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0) && (
                             <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
                                 Estimated subtotal (foam + packaging{effectivePrintingUpcharge > 0 ? " + printing" : ""})
                               </div>
                               <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge)}</div>
@@ -3073,11 +3068,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
             {/* Foam layout package section */}
             <div style={{ marginTop: 4 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Foam layout package</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Foam layout package</div>
 
-              <div style={{ ...cardBase, background: "#ffffff" }}>
+              <div style={{ ...cardBase, background: "var(--surface-card)" }}>
                 {!layoutPkg ? (
-                  <p style={{ color: "#6b7280", fontSize: 13 }}>
+                  <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
                     No foam layout has been saved for this quote yet. Use the <strong>Open layout preview</strong> button
                     in the emailed quote to arrange cavities, then click <strong>Apply to quote</strong> to store the
                     layout here.
@@ -3086,8 +3081,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   <>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                       <div>
-                        <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>Layout package #{layoutPkg.id}</div>
-                        <div style={{ color: "#6b7280", fontSize: 12 }}>Saved: {new Date(layoutPkg.created_at).toLocaleString()}</div>
+                        <div style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 2 }}>Layout package #{layoutPkg.id}</div>
+                        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Saved: {new Date(layoutPkg.created_at).toLocaleString()}</div>
                       </div>
                       <div style={{ textAlign: "right", fontSize: 12 }}>
                         <a
@@ -3097,9 +3092,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             display: "inline-block",
                             padding: "4px 10px",
                             borderRadius: 999,
-                            border: "1px solid #c7d2fe",
-                            background: "#eef2ff",
-                            color: "#1d4ed8",
+                            border: "1px solid var(--border-strong)",
+                            background: "var(--surface-card)",
+                            color: "var(--text-primary)",
                             textDecoration: "none",
                             fontWeight: 500,
                           }}
@@ -3113,7 +3108,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
   <div
     style={{
       marginTop: 8,
-      color: "#0f172a",
+      color: "var(--text-primary)",
       fontSize: 12,
       lineHeight: 1.45,
       whiteSpace: "pre-wrap",
@@ -3146,10 +3141,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                               marginTop: 10,
                               padding: 10,
                               borderRadius: 10,
-                              border: "1px solid #e5e7eb",
-                              background: "#ffffff",
+                              border: "1px solid var(--border)",
+                              background: "var(--surface-card)",
                               fontSize: 12,
-                              color: "#6b7280",
+                              color: "var(--text-muted)",
                             }}
                           >
                             Layout saved, but no layers were found to preview.
@@ -3159,7 +3154,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                       return (
                         <div style={{ marginTop: 12 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
                             Layers (preview)
                           </div>
 
@@ -3203,13 +3198,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                     }
                                   }}
                                   style={{
-                                    border: isSelected ? "2px solid #0ea5e9" : "1px solid #e5e7eb",
-                                    borderRadius: 14,
+                                    border: isSelected ? "2px solid var(--action-primary)" : "1px solid var(--border)",
+                                    borderRadius: 12,
                                     padding: 10,
-                                    background: "#ffffff",
-                                    boxShadow: isSelected
-                                      ? "0 10px 22px rgba(14,165,233,0.20)"
-                                      : "0 6px 16px rgba(15,23,42,0.06)",
+                                    background: "var(--surface-card)",
                                     cursor: "pointer",
                                     outline: "none",
                                   }}
@@ -3217,15 +3209,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                 >
                                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                     <div>
-                                      <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{label}</div>
-                                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>{label}</div>
+                                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                                         {t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}
                                       </div>
-                                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                                         {depthSummary ? `Pocket depth: ${depthSummary}` : "Pocket depth: —"}
                                       </div>
                                     </div>
-                                    <div style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>
+                                    <div style={{ fontSize: 11, color: "var(--text-faint)", whiteSpace: "nowrap" }}>
                                       Layer {idx + 1}/{layersForPreview.length}
                                     </div>
                                   </div>
@@ -3235,8 +3227,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       marginTop: 8,
                                       height: 160,
                                       borderRadius: 10,
-                                      border: "1px solid #e5e7eb",
-                                      background: "#f3f4f6",
+                                      border: "1px solid var(--border)",
+                                      background: "var(--surface-subtle)",
                                       overflow: "hidden",
                                     }}
                                   >
@@ -3253,7 +3245,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                           alignItems: "center",
                                           justifyContent: "center",
                                           fontSize: 12,
-                                          color: "#6b7280",
+                                          color: "var(--text-muted)",
                                         }}
                                       >
                                         No preview
@@ -3261,7 +3253,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                     )}
                                   </div>
 
-                                  <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
+                                  <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)" }}>
                                     Preview shows foam outline + cavity geometry for this layer.
                                   </div>
                                 </div>
@@ -3275,8 +3267,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                               marginTop: 14,
                               padding: 8,
                               borderRadius: 10,
-                              border: "1px solid #e5e7eb",
-                              background: "#ffffff",
+                              border: "1px solid var(--border)",
+                              background: "var(--surface-card)",
                             }}
                           >
                             {(() => {
@@ -3306,14 +3298,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       {Math.min(selIdx + 1, layersForPreview.length)}/{layersForPreview.length})
                                     </span>
                                     {t ? (
-                                      <span style={{ marginLeft: 10, color: "#6b7280" }}>• Thickness: {t.toFixed(3)} in</span>
+                                      <span style={{ marginLeft: 10, color: "var(--text-muted)" }}>• Thickness: {t.toFixed(3)} in</span>
                                     ) : (
-                                      <span style={{ marginLeft: 10, color: "#6b7280" }}>• Thickness: —</span>
+                                      <span style={{ marginLeft: 10, color: "var(--text-muted)" }}>• Thickness: —</span>
                                     )}
                                     {depthSummary ? (
-                                      <span style={{ marginLeft: 10, color: "#6b7280" }}>• Pocket depth: {depthSummary}</span>
+                                      <span style={{ marginLeft: 10, color: "var(--text-muted)" }}>• Pocket depth: {depthSummary}</span>
                                     ) : (
-                                      <span style={{ marginLeft: 10, color: "#6b7280" }}>• Pocket depth: —</span>
+                                      <span style={{ marginLeft: 10, color: "var(--text-muted)" }}>• Pocket depth: —</span>
                                     )}
                                   </div>
 
@@ -3325,14 +3317,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       alignItems: "center",
                                       justifyContent: "center",
                                       borderRadius: 8,
-                                      border: "1px solid #e5e7eb",
-                                      background: "#f3f4f6",
+                                      border: "1px solid var(--border)",
+                                      background: "var(--surface-subtle)",
                                       overflow: "hidden",
                                     }}
                                   >
                                     {(() => {
                                       const svg = buildSvgPreviewForLayer(json, selIdx);
-                                      if (!svg) return <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>;
+                                      if (!svg) return <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No preview</div>;
                                       return (
                                         <div
                                           style={{ width: "100%", height: "100%", display: "flex" }}
@@ -3353,7 +3345,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               </div>
             </div>
 
-            <p style={{ marginTop: 24, fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+            <p style={{ marginTop: 24, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
               This print view mirrors the core specs of your emailed quote. Actual charges may differ if specs or
               quantities change or if additional services are requested.
             </p>
@@ -3372,8 +3364,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
             alignItems: "center",
             justifyContent: "center",
             padding: "16px",
-            background: "rgba(2,6,23,0.75)",
-            backdropFilter: "blur(6px)",
+            background: "rgba(28,28,26,0.6)",
+            backdropFilter: "blur(4px)",
           }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowLeadModal(false); }}
         >
@@ -3383,33 +3375,32 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               maxWidth: 520,
               maxHeight: "90vh",
               overflowY: "auto",
-              background: "#0f172a",
-              borderRadius: 24,
-              border: "1px solid rgba(255,255,255,0.1)",
-              boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+              background: "var(--surface-page)",
+              borderRadius: 12,
+              border: "1px solid var(--border)",
             }}
           >
             {/* Modal header */}
             <div
               style={{
                 padding: "20px 24px 16px",
-                borderBottom: "1px solid rgba(255,255,255,0.08)",
+                borderBottom: "1px solid var(--border)",
                 display: "flex",
                 alignItems: "flex-start",
                 justifyContent: "space-between",
                 gap: 16,
-                background: "linear-gradient(90deg,rgba(14,165,233,0.18) 0%,rgba(99,102,241,0.12) 100%)",
-                borderRadius: "24px 24px 0 0",
+                background: "var(--surface-subtle)",
+                borderRadius: "12px 12px 0 0",
               }}
             >
               <div>
-                <div style={{ fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase", color: "rgba(14,165,233,0.9)", marginBottom: 4 }}>
+                <div style={{ fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 4 }}>
                   Alex-IO · Foam Quoting Software
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#f9fafb" }}>
+                <div style={{ fontSize: 18, fontWeight: 500, color: "var(--text-primary)" }}>
                   Start your free 30-day trial
                 </div>
-                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
                   No credit card required. Fill in your details and we'll get your trial account set up.
                 </div>
               </div>
@@ -3421,9 +3412,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   width: 28,
                   height: 28,
                   borderRadius: "50%",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "#94a3b8",
+                  border: "1px solid var(--border-strong)",
+                  background: "var(--surface-card)",
+                  color: "var(--text-secondary)",
                   fontSize: 14,
                   cursor: "pointer",
                   display: "flex",
@@ -3445,23 +3436,23 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       width: 52,
                       height: 52,
                       borderRadius: "50%",
-                      background: "rgba(14,165,233,0.12)",
-                      border: "1px solid rgba(14,165,233,0.3)",
+                      background: "var(--status-success-bg)",
+                      border: "1px solid var(--status-success-text)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       fontSize: 22,
                       margin: "0 auto 16px",
-                      color: "#38bdf8",
+                      color: "var(--status-success-text)",
                     }}
                   >
                     ✓
                   </div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: "#f9fafb", marginBottom: 8 }}>
+                  <div style={{ fontSize: 17, fontWeight: 500, color: "var(--text-primary)", marginBottom: 8 }}>
                     You're on the list — we'll be in touch soon.
                   </div>
-                  <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6 }}>
-                    We'll send your trial setup details to <span style={{ color: "#38bdf8" }}>{modalLeadForm.email}</span> shortly. You'll hear from us within one business day.
+                  <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                    We'll send your trial setup details to <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{modalLeadForm.email}</span> shortly. You'll hear from us within one business day.
                   </div>
                   <button
                     type="button"
@@ -3469,10 +3460,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     style={{
                       marginTop: 20,
                       padding: "8px 20px",
-                      borderRadius: 999,
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      background: "rgba(255,255,255,0.06)",
-                      color: "#e2e8f0",
+                      borderRadius: 8,
+                      border: "1px solid var(--border-strong)",
+                      background: "var(--surface-card)",
+                      color: "var(--text-primary)",
                       fontSize: 13,
                       cursor: "pointer",
                     }}
@@ -3491,8 +3482,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       { key: "email" as const, label: "Email", placeholder: "you@company.com", required: true },
                     ].map(({ key, label, placeholder, required }) => (
                       <label key={key} style={{ display: "block" }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
-                          {label}{required && <span style={{ color: "#38bdf8" }}> *</span>}
+                        <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 6 }}>
+                          {label}{required && <span style={{ color: "var(--attention)" }}> *</span>}
                         </div>
                         <input
                           type={key === "email" ? "email" : "text"}
@@ -3502,10 +3493,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           style={{
                             width: "100%",
                             padding: "10px 12px",
-                            borderRadius: 12,
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            background: "rgba(255,255,255,0.04)",
-                            color: "#f9fafb",
+                            borderRadius: 6,
+                            border: "1px solid var(--border)",
+                            background: "var(--surface-card)",
+                            color: "var(--text-primary)",
                             fontSize: 13,
                             outline: "none",
                             boxSizing: "border-box",
@@ -3522,7 +3513,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       { key: "company" as const, label: "Company", placeholder: "Acme Packaging" },
                     ].map(({ key, label, placeholder }) => (
                       <label key={key} style={{ display: "block" }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                        <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 6 }}>
                           {label}
                         </div>
                         <input
@@ -3533,10 +3524,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           style={{
                             width: "100%",
                             padding: "10px 12px",
-                            borderRadius: 12,
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            background: "rgba(255,255,255,0.04)",
-                            color: "#f9fafb",
+                            borderRadius: 6,
+                            border: "1px solid var(--border)",
+                            background: "var(--surface-card)",
+                            color: "var(--text-primary)",
                             fontSize: 13,
                             outline: "none",
                             boxSizing: "border-box",
@@ -3548,7 +3539,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                   {/* Number of users — full width, prominent */}
                   <label style={{ display: "block" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 6 }}>
                       How many users / seats will you need?
                     </div>
                     <select
@@ -3557,10 +3548,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       style={{
                         width: "100%",
                         padding: "10px 12px",
-                        borderRadius: 12,
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        background: "#1e293b",
-                        color: modalLeadForm.userCount ? "#f9fafb" : "#64748b",
+                        borderRadius: 6,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface-card)",
+                        color: modalLeadForm.userCount ? "var(--text-primary)" : "var(--text-faint)",
                         fontSize: 13,
                         outline: "none",
                         cursor: "pointer",
@@ -3578,7 +3569,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                   {/* What are you packaging */}
                   <label style={{ display: "block" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 6 }}>
                       What are you packaging?
                     </div>
                     <input
@@ -3589,10 +3580,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       style={{
                         width: "100%",
                         padding: "10px 12px",
-                        borderRadius: 12,
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        background: "rgba(255,255,255,0.04)",
-                        color: "#f9fafb",
+                        borderRadius: 6,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface-card)",
+                        color: "var(--text-primary)",
                         fontSize: 13,
                         outline: "none",
                         boxSizing: "border-box",
@@ -3602,7 +3593,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                   {/* Current quoting process */}
                   <label style={{ display: "block" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 6 }}>
                       How do you quote today?
                     </div>
                     <input
@@ -3613,10 +3604,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       style={{
                         width: "100%",
                         padding: "10px 12px",
-                        borderRadius: 12,
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        background: "rgba(255,255,255,0.04)",
-                        color: "#f9fafb",
+                        borderRadius: 6,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface-card)",
+                        color: "var(--text-primary)",
                         fontSize: 13,
                         outline: "none",
                         boxSizing: "border-box",
@@ -3626,7 +3617,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                   {/* Notes */}
                   <label style={{ display: "block" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.10em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.10em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 6 }}>
                       Anything else?
                     </div>
                     <textarea
@@ -3637,10 +3628,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       style={{
                         width: "100%",
                         padding: "10px 12px",
-                        borderRadius: 12,
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        background: "rgba(255,255,255,0.04)",
-                        color: "#f9fafb",
+                        borderRadius: 6,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface-card)",
+                        color: "var(--text-primary)",
                         fontSize: 13,
                         outline: "none",
                         resize: "vertical",
@@ -3653,11 +3644,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   {modalLeadError && (
                     <div style={{
                       padding: "10px 14px",
-                      borderRadius: 12,
-                      background: "rgba(239,68,68,0.1)",
-                      border: "1px solid rgba(239,68,68,0.25)",
+                      borderRadius: 8,
+                      background: "var(--attention-bg)",
+                      border: "1px solid var(--attention-border)",
                       fontSize: 12,
-                      color: "#fca5a5",
+                      color: "var(--attention)",
                     }}>
                       {modalLeadError}
                     </div>
@@ -3671,16 +3662,16 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     style={{
                       width: "100%",
                       padding: "12px 24px",
-                      borderRadius: 999,
+                      borderRadius: 8,
                       border: "none",
                       background: modalLeadSubmitting || !modalLeadForm.name.trim() || !modalLeadForm.email.trim()
-                        ? "rgba(14,165,233,0.3)"
-                        : "linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%)",
+                        ? "var(--border-strong)"
+                        : "var(--action-primary)",
                       color: modalLeadSubmitting || !modalLeadForm.name.trim() || !modalLeadForm.email.trim()
-                        ? "rgba(255,255,255,0.4)"
-                        : "#0f172a",
+                        ? "var(--text-faint)"
+                        : "#FFFFFF",
                       fontSize: 14,
-                      fontWeight: 700,
+                      fontWeight: 500,
                       cursor: modalLeadSubmitting || !modalLeadForm.name.trim() || !modalLeadForm.email.trim()
                         ? "not-allowed"
                         : "pointer",
@@ -3690,7 +3681,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     {modalLeadSubmitting ? "Sending…" : "Get Alex-IO for my shop →"}
                   </button>
 
-                  <div style={{ fontSize: 11, color: "#475569", textAlign: "center" }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
                     Name and email required · Response within 1 business day · No commitment
                   </div>
                 </div>
