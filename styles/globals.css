@@ -3,61 +3,52 @@
 /* Tailwind v4 */
 @import "tailwindcss";
 
-/* === Brand + UI tokens (inlined) === */
+/* Inter — see DESIGN_SYSTEM.md. Weights used: 400, 500. 600 reserved for rare
+   large-value emphasis (e.g. the total on a printed quote). */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
+
+/* === Alex-IO Design System tokens — see DESIGN_SYSTEM.md for the full spec
+   and reasoning. This is a light-only system; dark mode has been retired. === */
 :root {
-  /* Brand (swap 500/600/700 to your real hexes when ready) */
-  --color-brand-50:  #eef6ff;
-  --color-brand-100: #dbeafe;
-  --color-brand-200: #bfdbfe;
-  --color-brand-300: #93c5fd;
-  --color-brand-400: #60a5fa;
-  --color-brand-500: #3b82f6;
-  --color-brand-600: #2563eb;
-  --color-brand-700: #1d4ed8;
-  --color-brand-800: #1e40af;
-  --color-brand-900: #1e3a8a;
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
 
-  /* Neutral */
-  --color-neutral-50:  #f9fafb;
-  --color-neutral-100: #f3f4f6;
-  --color-neutral-200: #e5e7eb;
-  --color-neutral-300: #d1d5db;
-  --color-neutral-400: #9ca3af;
-  --color-neutral-500: #6b7280;
-  --color-neutral-600: #4b5563;
-  --color-neutral-700: #374151;
-  --color-neutral-800: #1f2937;
-  --color-neutral-900: #111827;
+  /* Surfaces */
+  --surface-page: #FAFAF8;
+  --surface-card: #FFFFFF;
+  --surface-subtle: #F7F5F0;
 
-  /* Accent + semantic */
-  --color-accent: var(--color-brand-500);
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-danger:  #ef4444;
+  /* Borders */
+  --border: #E4E4E0;
+  --border-strong: #D6D6D0;
 
-  /* Radii & shadows */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
-  --radius-2xl: 1.5rem;
+  /* Text */
+  --text-primary: #1C1C1A;
+  --text-secondary: #4A4A45;
+  --text-muted: #7A7A74;
+  --text-faint: #9A9A94;
 
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-}
+  /* Primary action — graphite, no hue */
+  --action-primary: #2B2B28;
+  --action-primary-hover: #3D3D38;
+  --action-text-on-primary: #FFFFFF;
 
-/* Optional: dark-mode neutral ramp */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-neutral-50:  #0b0f15;
-    --color-neutral-100: #0f172a;
-    --color-neutral-200: #111827;
-    --color-neutral-300: #1f2937;
-    --color-neutral-400: #374151;
-    --color-neutral-500: #4b5563;
-    --color-neutral-600: #6b7280;
-    --color-neutral-700: #9ca3af;
-    --color-neutral-800: #e5e7eb;
-    --color-neutral-900: #f9fafb;
-  }
+  /* Redline — reserved exclusively for "needs attention" (errors, blocked/
+     locked states, validation issues). Never a decorative or CTA color. */
+  --attention: #A63D2E;
+  --attention-bg: #FAECE7;
+  --attention-border: #E8B8AC;
+
+  /* Status colors — semantic, tied to meaning, not decoration */
+  --status-success-bg: #EAF3DE;
+  --status-success-text: #27500A;
+  --status-pending-bg: #FAEEDA;
+  --status-pending-text: #633806;
+  --status-neutral-bg: #F1EFE8;
+  --status-neutral-text: #444441;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 20px;
 }

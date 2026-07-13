@@ -11,8 +11,6 @@ export default function TenantLanding() {
 
   const salesRepSlug = searchParams?.get("sales_rep_slug")?.trim() || "";
 
-  // Build the path the chatbot will push to when the customer completes intake.
-  // Include sales_rep_slug if present so the quote gets attributed to the rep.
   const startQuotePath = salesRepSlug
     ? `/start-quote?tenant=${tenant}&sales_rep_slug=${encodeURIComponent(salesRepSlug)}`
     : `/start-quote?tenant=${tenant}`;
@@ -32,13 +30,17 @@ export default function TenantLanding() {
           setTheme(data.theme_json);
           setLogoFailed(false);
 
+          // Defaults changed to match the new design system's graphite
+          // primary action color. Tenants who've configured their own
+          // brand color in theme_json still override this — this is
+          // only what an unconfigured tenant falls back to.
           document.documentElement.style.setProperty(
             "--tenant-primary",
-            data.theme_json.primaryColor || "#0ea5e9",
+            data.theme_json.primaryColor || "#2B2B28",
           );
           document.documentElement.style.setProperty(
             "--tenant-secondary",
-            data.theme_json.secondaryColor || "#6366f1",
+            data.theme_json.secondaryColor || "#3D3D38",
           );
         }
       });
@@ -53,9 +55,15 @@ export default function TenantLanding() {
   const showLogo = heroUseLogo && !!logoUrl && !logoFailed;
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white px-6">
+    <main
+      className="min-h-screen flex flex-col items-center justify-center px-6"
+      style={{ background: "var(--surface-page)", color: "var(--text-primary)" }}
+    >
       <div className="text-center max-w-xl">
-        <div className="mb-6 text-sm uppercase tracking-widest opacity-60">
+        <div
+          className="mb-6 text-xs font-medium uppercase tracking-widest"
+          style={{ color: "var(--text-muted)" }}
+        >
           Powered by Alex-IO
         </div>
 
@@ -70,18 +78,20 @@ export default function TenantLanding() {
           </div>
         ) : (
           <h1
-            className="text-4xl font-bold mb-4"
+            className="text-4xl font-medium mb-4"
             style={{ color: "var(--tenant-primary)" }}
           >
             {brandName}
           </h1>
         )}
 
-        <p className="mb-8 opacity-80">Start your custom packaging quote.</p>
+        <p className="mb-8" style={{ color: "var(--text-secondary)" }}>
+          Start your custom packaging quote.
+        </p>
 
         <a
           href={startQuotePath}
-          className="inline-block px-6 py-3 rounded-full font-semibold transition"
+          className="inline-block px-6 py-3 rounded-md font-medium transition"
           style={{
             background: "var(--tenant-primary)",
             color: "white",

@@ -70,7 +70,7 @@ function DimField({
 }) {
   return (
     <label className="block">
-      <div className="mb-2 text-sm font-medium text-slate-200">{label}</div>
+      <div className="mb-2 text-sm font-medium text-[var(--text-secondary)]">{label}</div>
       <input
         type="text"
         inputMode="decimal"
@@ -78,7 +78,7 @@ function DimField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
-        className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 transition focus:border-sky-400/60 focus:bg-white/[0.06] disabled:opacity-50"
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-faint)] transition focus:border-[var(--action-primary)] disabled:opacity-50"
       />
     </label>
   );
@@ -94,7 +94,7 @@ function Shot({
   priority?: boolean;
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_20px_60px_rgba(0,0,0,0.45)]">
+    <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-card)]">
       <Image
         src={src}
         alt={alt}
@@ -109,9 +109,9 @@ function Shot({
 
 function MiniCard({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-      <div className="text-sm font-semibold text-white">{title}</div>
-      <div className="mt-2 text-sm leading-relaxed text-slate-300">{body}</div>
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-5">
+      <div className="text-sm font-medium text-[var(--text-primary)]">{title}</div>
+      <div className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">{body}</div>
     </div>
   );
 }
@@ -164,14 +164,14 @@ function CapabilityCard({
   accent?: boolean;
 }) {
   return (
-    <div className={`rounded-2xl border p-5 flex flex-col gap-3 ${
+    <div className={`rounded-xl border p-5 flex flex-col gap-3 ${
       accent
-        ? "border-sky-400/25 bg-sky-400/[0.05]"
-        : "border-white/10 bg-white/[0.03]"
+        ? "border-[var(--border-strong)] bg-[var(--surface-subtle)]"
+        : "border-[var(--border)] bg-[var(--surface-card)]"
     }`}>
       <div className="text-2xl leading-none">{icon}</div>
-      <div className="text-sm font-semibold text-white leading-snug">{title}</div>
-      <div className="text-sm leading-relaxed text-slate-400">{body}</div>
+      <div className="text-sm font-medium text-[var(--text-primary)] leading-snug">{title}</div>
+      <div className="text-sm leading-relaxed text-[var(--text-secondary)]">{body}</div>
     </div>
   );
 }
@@ -182,19 +182,19 @@ function CapabilitiesSection() {
       <div className="mx-auto max-w-7xl px-4 py-10 sm:py-14">
 
         {/* Section header */}
-        <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+        <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
           Everything Alex-IO does
         </div>
-        <h2 className="mb-3 text-2xl font-bold text-white sm:text-3xl">
+        <h2 className="mb-3 text-2xl font-medium text-[var(--text-primary)] sm:text-3xl">
           This isn't just a quoting form.
         </h2>
-        <p className="mb-10 max-w-2xl text-sm leading-7 text-slate-300">
+        <p className="mb-10 max-w-2xl text-sm leading-7 text-[var(--text-secondary)]">
           Alex-IO is a full quoting and estimating platform built specifically for foam fabricators.
           Whether a customer fills out a form on your site, chats with your AI widget, or a salesperson is sitting across from them in a meeting — from first dimension to production-ready CAD file, it's all handled.
         </p>
 
         {/* ── Row 1: Getting the quote started ──────────────────────────────────── */}
-        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        <div className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
           Getting the quote started
         </div>
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -219,7 +219,7 @@ function CapabilitiesSection() {
         </div>
 
         {/* ── Row 2: Building the quote ────────────────────────────────────── */}
-        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        <div className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
           Building the quote
         </div>
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -246,7 +246,7 @@ function CapabilitiesSection() {
         </div>
 
         {/* ── Row 3: Getting the quote out ─────────────────────────────────── */}
-        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        <div className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
           Getting the quote out
         </div>
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -273,7 +273,7 @@ function CapabilitiesSection() {
         </div>
 
         {/* ── Row 4: Running your shop ─────────────────────────────────────── */}
-        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        <div className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
           Running your shop
         </div>
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -313,21 +313,21 @@ function CapabilitiesSection() {
 
         {/* Admin dashboard trust screenshot */}
         <div className="mb-8">
-          <div className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wider">Admin dashboard — system health, integrations, everything wired up</div>
+          <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Admin dashboard — system health, integrations, everything wired up</div>
           <Shot src="/splash/admin-dashboard.png" alt="Alex-IO admin dashboard showing system health, HubSpot and email configured" />
         </div>
 
-        <div className="rounded-3xl border border-sky-400/20 bg-gradient-to-br from-sky-400/[0.07] via-transparent to-cyan-400/[0.04] p-6 sm:p-8">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6 sm:p-8">
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="lg:col-span-2">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80 mb-2">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)] mb-2">
                 The bottom line
               </div>
-              <h3 className="text-xl font-bold text-white sm:text-2xl leading-snug">
+              <h3 className="text-xl font-medium text-[var(--text-primary)] sm:text-2xl leading-snug">
                 Your rep is still in the parking lot.<br />
                 The customer already has a quote.
               </h3>
-              <p className="mt-4 text-sm leading-7 text-slate-300">
+              <p className="mt-4 text-sm leading-7 text-[var(--text-secondary)]">
                 That's not a future state — that's Alex-IO today. A salesperson enters
                 dimensions during the meeting, the pricing engine runs against your real
                 material costs, and a branded PDF is ready before they shake hands at
@@ -344,8 +344,8 @@ function CapabilitiesSection() {
                 "No more chasing CAD files",
                 "No more manual commission math",
               ].map((t) => (
-                <div key={t} className="flex items-center gap-3 text-sm text-slate-300">
-                  <span className="shrink-0 text-sky-400">✓</span>
+                <div key={t} className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
+                  <span className="shrink-0 text-[var(--text-primary)]">✓</span>
                   {t}
                 </div>
               ))}
@@ -384,24 +384,24 @@ function OnboardingCalendar({ onClaim }: { onClaim: () => void }) {
     d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   return (
-    <div className="mb-10 rounded-3xl border border-emerald-400/25 bg-emerald-400/[0.05] p-6 sm:p-8">
+    <div className="mb-10 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-subtle)] p-6 sm:p-8">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
 
         {/* Left — description */}
         <div className="flex-1">
-          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300/80">
+          <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Limited · 3 Shops Per Quarter
           </div>
-          <h2 className="mt-2 text-xl font-bold text-white">
+          <h2 className="mt-2 text-xl font-medium text-[var(--text-primary)]">
             Free 30-Day Trial
           </h2>
-          <p className="mt-2 max-w-lg text-sm leading-6 text-slate-300">
+          <p className="mt-2 max-w-lg text-sm leading-6 text-[var(--text-secondary)]">
             Get full access to Alex-IO at no cost for 30 days. We include a personal
             setup session — we configure your materials, pricing, and branding together
             so you're quoting live on day one. Then you tell us honestly whether it's
             worth the investment.
           </p>
-          <ul className="mt-4 space-y-1.5 text-sm text-slate-300">
+          <ul className="mt-4 space-y-1.5 text-sm text-[var(--text-secondary)]">
             {[
               "Full quoting workflow — foam inserts, RSC cartons, mailers",
               "Customer-facing quote widget on your website",
@@ -410,7 +410,7 @@ function OnboardingCalendar({ onClaim }: { onClaim: () => void }) {
               "No credit card · No contract · No obligation",
             ].map((item) => (
               <li key={item} className="flex items-start gap-2">
-                <span className="text-emerald-400 mt-0.5 shrink-0">✓</span>
+                <span className="text-[var(--text-primary)] mt-0.5 shrink-0">✓</span>
                 {item}
               </li>
             ))}
@@ -419,12 +419,12 @@ function OnboardingCalendar({ onClaim }: { onClaim: () => void }) {
 
         {/* Right — calendar */}
         <div className="shrink-0 w-full lg:w-64">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-card)] overflow-hidden">
 
             {/* Calendar header */}
-            <div className="bg-white/[0.04] border-b border-white/10 px-4 py-3 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-300">📅 Onboarding Availability</span>
-              <span className="text-xs text-slate-500">{monthName}</span>
+            <div className="bg-[var(--surface-subtle)] border-b border-[var(--border)] px-4 py-3 flex items-center justify-between">
+              <span className="text-xs font-medium text-[var(--text-secondary)]">📅 Onboarding Availability</span>
+              <span className="text-xs text-[var(--text-muted)]">{monthName}</span>
             </div>
 
             {/* Slots */}
@@ -434,9 +434,9 @@ function OnboardingCalendar({ onClaim }: { onClaim: () => void }) {
                 { label: "Earlier this month", status: "booked" },
                 { label: "Last available slot", status: "booked" },
               ].map((s, i) => (
-                <div key={i} className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/[0.02]">
-                  <span className="text-xs text-slate-600">{s.label}</span>
-                  <span className="text-xs font-medium text-slate-600 bg-white/5 px-2 py-0.5 rounded-full">
+                <div key={i} className="flex items-center justify-between py-2 px-3 rounded-md bg-[var(--surface-subtle)]">
+                  <span className="text-xs text-[var(--text-faint)]">{s.label}</span>
+                  <span className="text-xs font-medium text-[var(--status-neutral-text)] bg-[var(--status-neutral-bg)] px-2 py-0.5 rounded-full">
                     Filled
                   </span>
                 </div>
@@ -446,20 +446,20 @@ function OnboardingCalendar({ onClaim }: { onClaim: () => void }) {
               {openSlots.map((slot, i) => (
                 <div
                   key={i}
-                  className="flex items-center justify-between py-2 px-3 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.06] cursor-pointer hover:bg-emerald-400/10 transition"
+                  className="flex items-center justify-between py-2 px-3 rounded-md border border-[var(--status-success-bg)] bg-[var(--status-success-bg)] cursor-pointer hover:opacity-80 transition"
                   onClick={onClaim}
                 >
-                  <span className="text-xs font-medium text-slate-200">{formatSlot(slot)}</span>
-                  <span className="text-xs font-semibold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full border border-emerald-400/20 shrink-0 ml-2">
+                  <span className="text-xs font-medium text-[var(--text-primary)]">{formatSlot(slot)}</span>
+                  <span className="text-xs font-medium text-[var(--status-success-text)] bg-[var(--surface-card)] px-2 py-0.5 rounded-full border border-[var(--status-success-text)]/20 shrink-0 ml-2">
                     Open
                   </span>
                 </div>
               ))}
 
               {/* One more booked after open slots */}
-              <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/[0.02]">
-                <span className="text-xs text-slate-600">Next available after →</span>
-                <span className="text-xs font-medium text-slate-600 bg-white/5 px-2 py-0.5 rounded-full">TBD</span>
+              <div className="flex items-center justify-between py-2 px-3 rounded-md bg-[var(--surface-subtle)]">
+                <span className="text-xs text-[var(--text-faint)]">Next available after →</span>
+                <span className="text-xs font-medium text-[var(--status-neutral-text)] bg-[var(--status-neutral-bg)] px-2 py-0.5 rounded-full">TBD</span>
               </div>
             </div>
 
@@ -468,16 +468,16 @@ function OnboardingCalendar({ onClaim }: { onClaim: () => void }) {
               <button
                 type="button"
                 onClick={onClaim}
-                className="w-full rounded-xl bg-emerald-500 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-400"
+                className="w-full rounded-md bg-[var(--action-primary)] py-2.5 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)]"
               >
                 Claim an Open Slot →
               </button>
-              <p className="mt-2 text-center text-xs text-slate-600">No credit card required</p>
+              <p className="mt-2 text-center text-xs text-[var(--text-faint)]">No credit card required</p>
             </div>
           </div>
 
           {/* Social proof note */}
-          <p className="mt-3 text-center text-xs text-slate-600">
+          <p className="mt-3 text-center text-xs text-[var(--text-faint)]">
             Setup session typically takes 45–60 minutes.<br />
             You quote live before the call ends.
           </p>
@@ -493,26 +493,26 @@ function FaqSection() {
   return (
     <section className="relative z-10">
       <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+        <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
           Common questions
         </div>
-        <h2 className="mb-8 text-2xl font-bold text-white">
+        <h2 className="mb-8 text-2xl font-medium text-[var(--text-primary)]">
           Everything you need to know
         </h2>
-        <div className="divide-y divide-white/10 rounded-3xl border border-white/10 bg-white/[0.03] overflow-hidden">
+        <div className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface-card)] overflow-hidden">
           {FAQ_ITEMS.map((item, i) => (
             <div key={i}>
               <button
                 onClick={() => setOpen(open === i ? null : i)}
-                className="flex w-full items-center justify-between px-6 py-5 text-left text-sm font-semibold text-white hover:bg-white/[0.03] transition"
+                className="flex w-full items-center justify-between px-6 py-5 text-left text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)] transition"
               >
                 <span>{item.q}</span>
-                <span className="ml-4 shrink-0 text-sky-400 text-lg leading-none">
+                <span className="ml-4 shrink-0 text-[var(--text-muted)] text-lg leading-none">
                   {open === i ? "−" : "+"}
                 </span>
               </button>
               {open === i && (
-                <div className="px-6 pb-5 text-sm leading-7 text-slate-300">
+                <div className="px-6 pb-5 text-sm leading-7 text-[var(--text-secondary)]">
                   {item.a}
                 </div>
               )}
@@ -676,33 +676,20 @@ export default function LandingPage() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-50">
-      {/* Background grid */}
-      <div className="pointer-events-none absolute inset-0 opacity-[0.16]">
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage:
-              "repeating-linear-gradient(0deg, rgba(148,163,184,0.12) 0, rgba(148,163,184,0.12) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.12) 0, rgba(148,163,184,0.12) 1px, transparent 1px, transparent 24px)",
-          }}
-        />
-      </div>
-      <div className="pointer-events-none absolute left-1/2 top-[-220px] h-[460px] w-[860px] -translate-x-1/2 rounded-full bg-sky-500/10 blur-3xl" />
-      <div className="pointer-events-none absolute right-[-120px] top-[420px] h-[380px] w-[380px] rounded-full bg-cyan-400/10 blur-3xl" />
-
+    <main className="relative min-h-screen overflow-hidden bg-[var(--surface-page)] text-[var(--text-primary)]">
       {/* Nav */}
-      <section className="relative z-10 border-b border-white/10 bg-[linear-gradient(135deg,rgba(14,165,233,0.20),rgba(15,23,42,0.20)_45%,rgba(2,6,23,0.60)_100%)]">
+      <section className="relative z-10 border-b border-[var(--border)] bg-[var(--surface-card)]">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-200/80">
+            <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--text-muted)]">
               Alex-IO
             </div>
-            <div className="text-sm text-slate-300">Quoting · Layout · CAD</div>
+            <div className="text-sm text-[var(--text-secondary)]">Quoting · Layout · CAD</div>
           </div>
           <a
             href="#sample-quote"
             onClick={() => trackEvent("cta_click")}
-            className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs sm:px-4 sm:text-sm font-medium text-sky-100 transition hover:bg-sky-400/15 whitespace-nowrap"
+            className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-2 text-xs sm:px-4 sm:text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--surface-subtle)] whitespace-nowrap"
           >
             <span className="hidden sm:inline">Try a Live </span>Quote
           </a>
@@ -714,13 +701,13 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-14 lg:py-16">
           <div className="grid gap-10 lg:grid-cols-12 lg:items-start">
             <div className="lg:col-span-6">
-              <div className="text-xs font-semibold uppercase tracking-[0.20em] text-sky-300/80">
+              <div className="text-xs font-medium uppercase tracking-[0.20em] text-[var(--text-muted)]">
                 Quoting Software for Foam Fabricators
               </div>
-              <h1 className="mt-4 max-w-3xl text-3xl font-extrabold leading-tight text-white sm:text-4xl lg:text-5xl">
+              <h1 className="mt-4 max-w-3xl text-3xl font-medium leading-tight text-[var(--text-primary)] sm:text-4xl lg:text-5xl">
                 Stop quoting foam packaging by hand.
               </h1>
-              <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
+              <p className="mt-5 max-w-2xl text-base leading-7 text-[var(--text-secondary)] sm:text-lg">
                 Alex-IO is quoting software built specifically for foam fabricators and packaging shops. Real material pricing, layered cavity layouts, and printable customer-ready quotes — generated in minutes, not days.
               </p>
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -732,7 +719,7 @@ export default function LandingPage() {
                 ].map((t) => (
                   <div
                     key={t}
-                    className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200"
+                    className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 text-sm text-[var(--text-secondary)]"
                   >
                     {t}
                   </div>
@@ -744,7 +731,7 @@ export default function LandingPage() {
                 <a
                   href="#sample-quote"
                   onClick={() => trackEvent("cta_click")}
-                  className="inline-flex rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
+                  className="inline-flex rounded-md bg-[var(--action-primary)] px-5 py-3 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)]"
                 >
                   Try a Live Quote
                 </a>
@@ -753,19 +740,19 @@ export default function LandingPage() {
                   onClick={viewSampleQuote}
                   disabled={sampleLoading}
                   className="mt-3 inline-flex items-center justify-center gap-2
-                    rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3
-                    text-sm font-semibold text-sky-100 transition
-                    hover:bg-sky-400/20 disabled:opacity-50 sm:ml-3 sm:mt-0"
+                    rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-5 py-3
+                    text-sm font-medium text-[var(--text-primary)] transition
+                    hover:bg-[var(--surface-subtle)] disabled:opacity-50 sm:ml-3 sm:mt-0"
                 >
                   {sampleLoading ? "Loading sample…" : "👀 See a Complete Sample Quote →"}
                 </button>
               </div>
 
-              <div className="mt-6 text-sm text-slate-400">
+              <div className="mt-6 text-sm text-[var(--text-muted)]">
                 Starts at{" "}
-                <span className="font-semibold text-slate-200">$799/month</span>.{" "}
+                <span className="font-medium text-[var(--text-secondary)]">$799/month</span>.{" "}
                 No long-term contract.{" "}
-                <a href="#pricing" className="text-sky-400 hover:text-sky-300 underline underline-offset-2">
+                <a href="#pricing" className="text-[var(--text-primary)] underline underline-offset-2">
                   Free 30-day trial available →
                 </a>
               </div>
@@ -791,18 +778,18 @@ export default function LandingPage() {
       {/* Free trial banner */}
       <section className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 pt-2 pb-6">
-          <div className="rounded-2xl border border-emerald-400/30 bg-emerald-400/[0.06] px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
-              <span className="text-emerald-400 text-lg shrink-0">🎯</span>
+              <span className="text-[var(--text-primary)] text-lg shrink-0">🎯</span>
               <div>
-                <span className="text-sm font-semibold text-white">Free 30-Day Trial — 3 Onboarding Spots This Quarter.{" "}</span>
-                <span className="text-sm text-slate-300">Full access, personal setup session included. No credit card required.</span>
+                <span className="text-sm font-medium text-[var(--text-primary)]">Free 30-Day Trial — 3 Onboarding Spots This Quarter.{" "}</span>
+                <span className="text-sm text-[var(--text-secondary)]">Full access, personal setup session included. No credit card required.</span>
               </div>
             </div>
             <button
               type="button"
               onClick={() => { setActiveTier("FreeTrial"); trackEvent("cta_click"); }}
-              className="shrink-0 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400 whitespace-nowrap text-center"
+              className="shrink-0 rounded-md bg-[var(--action-primary)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)] whitespace-nowrap text-center"
             >
               Check Availability →
             </button>
@@ -816,28 +803,28 @@ export default function LandingPage() {
       {/* Screenshots — moved up, after capabilities */}
       <section id="proof" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 pb-10 sm:pb-12">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+          <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             See it in action
           </div>
-          <h2 className="mb-2 text-2xl font-bold text-white">What your team actually sees</h2>
-          <p className="mb-8 text-sm leading-7 text-slate-400">
+          <h2 className="mb-2 text-2xl font-medium text-[var(--text-primary)]">What your team actually sees</h2>
+          <p className="mb-8 text-sm leading-7 text-[var(--text-secondary)]">
             Real screens. Real data. No mockups.
           </p>
 
           {/* Hero screenshot — layout editor full width */}
           <div className="mb-3">
-            <div className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wider">Layout editor — build cavities, set layers, price live</div>
+            <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Layout editor — build cavities, set layers, price live</div>
             <Shot src="/splash/layout-editor-live.png" alt="Alex-IO layout editor with live cavities and pricing" priority={false} />
           </div>
 
           {/* Two supporting screenshots side by side */}
           <div className="mt-6 grid gap-6 sm:grid-cols-2">
             <div>
-              <div className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wider">Quote line items — every cost broken out</div>
+              <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Quote line items — every cost broken out</div>
               <Shot src="/splash/quote-line-items.png" alt="Alex-IO quote line items with foam, packaging and print costs" />
             </div>
             <div>
-              <div className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wider">Quote management — status, revisions, send to customer</div>
+              <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Quote management — status, revisions, send to customer</div>
               <Shot src="/splash/quotes-list.png" alt="Alex-IO quotes list with status badges and management tools" />
             </div>
           </div>
@@ -847,21 +834,21 @@ export default function LandingPage() {
       {/* Quote form — after capabilities so prospect is already convinced */}
       <section id="sample-quote" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 pb-8 sm:pb-12">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+          <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Try it yourself
           </div>
-          <h2 className="mb-8 text-2xl font-bold text-white">Run a real quote — live, no signup</h2>
+          <h2 className="mb-8 text-2xl font-medium text-[var(--text-primary)]">Run a real quote — live, no signup</h2>
           <div className="grid gap-8 lg:grid-cols-12">
             {/* Left: explainer */}
             <div className="lg:col-span-5 hidden lg:block">
-              <div className="rounded-3xl border border-sky-400/20 bg-sky-400/[0.05] p-6">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6">
+                <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
                   See It Live — No Signup Required
                 </div>
-                <h2 className="mt-3 text-2xl font-bold text-white">
+                <h2 className="mt-3 text-2xl font-medium text-[var(--text-primary)]">
                   Run a real customer quote — live
                 </h2>
-                <p className="mt-3 text-sm leading-7 text-slate-300">
+                <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">
                   This is the exact flow your customers would see on your site. Enter your dimensions and we'll drop you straight into the layout editor with real pricing. No sign-up. No sales call.
                 </p>
                 <div className="mt-6 space-y-3">
@@ -884,29 +871,22 @@ export default function LandingPage() {
             {/* Right: minimal form */}
             <div className="lg:col-span-7">
               <div className="lg:hidden mb-5">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+                <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
                   See It Live — No Signup Required
                 </div>
-                <h2 className="mt-2 text-xl font-bold text-white">
+                <h2 className="mt-2 text-xl font-medium text-[var(--text-primary)]">
                   Run the full quote flow — live
                 </h2>
-                <p className="mt-2 text-sm text-slate-300">
+                <p className="mt-2 text-sm text-[var(--text-secondary)]">
                   Enter your insert dimensions and go straight into the layout editor with real pricing.
                 </p>
               </div>
 
-              {/* Glow wrapper */}
-              <div className="relative">
-                {/* Outer glow layers */}
-                <div className="pointer-events-none absolute -inset-[3px] rounded-[28px] bg-gradient-to-br from-sky-400/40 via-cyan-400/25 to-sky-500/40 blur-[2px]" />
-                <div className="pointer-events-none absolute -inset-[8px] rounded-[32px] bg-sky-400/10 blur-[12px]" />
-                <div className="pointer-events-none absolute -inset-[16px] rounded-[40px] bg-sky-500/8 blur-[28px]" />
-
               <form
                 onSubmit={handleSubmit}
-                className="relative rounded-3xl border border-sky-400/40 bg-[rgba(2,12,30,0.85)] p-6 shadow-[0_18px_50px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(148,220,255,0.08)]"
+                className="relative rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6"
               >
-                <div className="mb-5 rounded-2xl border border-sky-400/20 bg-sky-400/[0.05] px-4 py-3 text-sm leading-6 text-slate-300">
+                <div className="mb-5 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-sm leading-6 text-[var(--text-secondary)]">
                   Enter your insert dimensions below — or use the example dims to see a live quote in under 60 seconds. No account, no sign-up, no sales call.
                 </div>
 
@@ -934,7 +914,7 @@ export default function LandingPage() {
                     disabled={submitting}
                   />
                   <div className="block">
-                    <div className="mb-2 text-sm font-medium text-slate-200">Quantity</div>
+                    <div className="mb-2 text-sm font-medium text-[var(--text-secondary)]">Quantity</div>
                     {(() => {
                       const QTY_PRESETS = ["25", "50", "100", "250", "500", "1000"];
                       return (
@@ -947,10 +927,10 @@ export default function LandingPage() {
                                 disabled={submitting}
                                 onClick={() => { setShowCustomQty(false); set("qty", q); }}
                                 className={[
-                                  "rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50",
+                                  "rounded-md border px-3 py-1.5 text-sm font-medium transition disabled:opacity-50",
                                   form.qty === q && !showCustomQty
-                                    ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
-                                    : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
+                                    ? "border-[var(--action-primary)] bg-[var(--action-primary)] text-white"
+                                    : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-primary)]",
                                 ].join(" ")}
                               >
                                 {q}
@@ -961,10 +941,10 @@ export default function LandingPage() {
                               disabled={submitting}
                               onClick={() => { setShowCustomQty(true); set("qty", ""); }}
                               className={[
-                                "rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50",
+                                "rounded-md border px-3 py-1.5 text-sm font-medium transition disabled:opacity-50",
                                 showCustomQty
-                                  ? "border-sky-400/60 bg-sky-500/20 text-white shadow-[0_0_0_2px_rgba(56,189,248,0.12)]"
-                                  : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] hover:text-white",
+                                  ? "border-[var(--action-primary)] bg-[var(--action-primary)] text-white"
+                                  : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-primary)]",
                               ].join(" ")}
                             >
                               Custom
@@ -978,7 +958,7 @@ export default function LandingPage() {
                               onChange={(e) => set("qty", e.target.value)}
                               placeholder="Enter quantity"
                               disabled={submitting}
-                              className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 transition focus:border-sky-400/60 focus:bg-white/[0.06] disabled:opacity-50"
+                              className="mt-2 w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-faint)] transition focus:border-[var(--action-primary)] disabled:opacity-50"
                             />
                           )}
                         </>
@@ -988,16 +968,16 @@ export default function LandingPage() {
                 </div>
 
                 {seedError && (
-                  <div className="mt-4 rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-200">
+                  <div className="mt-4 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-4 py-3 text-sm text-[var(--attention)]">
                     Something went wrong starting the demo. Please try again.
                   </div>
                 )}
 
-                <p className="mt-5 text-xs text-center text-slate-500">
+                <p className="mt-5 text-xs text-center text-[var(--text-muted)]">
                   Not sure of your dimensions?{' '}
                   <button
                     type="button"
-                    className="text-sky-400 hover:text-sky-300 underline underline-offset-2"
+                    className="text-[var(--text-primary)] underline underline-offset-2"
                     onClick={() => {
                       setForm({ outsideL: '12', outsideW: '8', outsideH: '4', qty: '50' })
                       trackEvent('form_start')
@@ -1012,31 +992,30 @@ export default function LandingPage() {
                     type="button"
                     onClick={viewSampleQuote}
                     disabled={sampleLoading}
-                    className="text-xs text-sky-400 hover:text-sky-300
+                    className="text-xs text-[var(--text-primary)]
                       underline underline-offset-2 disabled:opacity-50"
                   >
                     {sampleLoading ? "Loading sample…" : "Or skip ahead — see a complete sample quote with pricing →"}
                   </button>
                 </div>
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="text-xs leading-6 text-slate-400">
+                  <div className="text-xs leading-6 text-[var(--text-muted)]">
                     No account. No sales call. Add contact info inside the editor if you want to save your quote.
                   </div>
                   <div className="flex flex-col items-center sm:items-end gap-1 shrink-0">
                     <button
                       type="submit"
                       disabled={!canSubmit}
-                      className="rounded-xl bg-sky-400 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+                      className="rounded-md bg-[var(--action-primary)] px-6 py-3 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
                     >
                       {submitting ? "Opening live quote…" : "See Live Quote →"}
                     </button>
-                    <p className="text-xs text-center text-slate-500">
+                    <p className="text-xs text-center text-[var(--text-muted)]">
                       Takes 60 seconds · No login required
                     </p>
                   </div>
                 </div>
               </form>
-              </div>{/* end glow wrapper */}
             </div>
           </div>
         </div>
@@ -1052,83 +1031,83 @@ export default function LandingPage() {
           />
 
           {/* Pricing tiers */}
-          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+          <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Pricing
           </div>
-          <h2 className="mb-8 text-2xl font-bold text-white">Simple, transparent plans</h2>
+          <h2 className="mb-8 text-2xl font-medium text-[var(--text-primary)]">Simple, transparent plans</h2>
           <div className="grid gap-6 lg:grid-cols-3">
 
             {/* Starter */}
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 flex flex-col">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-300/80">Starter</div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6 flex flex-col">
+              <div className="text-xs font-medium uppercase tracking-[0.16em] text-[var(--text-muted)]">Starter</div>
               <div className="mt-3 flex items-end gap-1">
-                <span className="text-4xl font-extrabold text-white">$799</span>
-                <span className="mb-1 text-sm text-slate-400">/ month</span>
+                <span className="text-4xl font-medium text-[var(--text-primary)]">$799</span>
+                <span className="mb-1 text-sm text-[var(--text-muted)]">/ month</span>
               </div>
-              <div className="mt-1 text-xs text-slate-500">2 seats · month-to-month</div>
-              <ul className="mt-5 space-y-2 text-sm text-slate-300 flex-1">
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Full quoting workflow</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Customer-facing quote widget</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Layout editor with live pricing</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Printable customer-ready quotes</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Admin dashboard</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>AI chat widget &amp; guided quote form</li>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">2 seats · month-to-month</div>
+              <ul className="mt-5 space-y-2 text-sm text-[var(--text-secondary)] flex-1">
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Full quoting workflow</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Customer-facing quote widget</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Layout editor with live pricing</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Printable customer-ready quotes</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Admin dashboard</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>AI chat widget &amp; guided quote form</li>
               </ul>
               <button
                 type="button"
                 onClick={() => { setActiveTier("Starter"); trackEvent("cta_click"); }}
-                className="mt-6 inline-flex justify-center rounded-xl border border-sky-400/30 bg-sky-400/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-400/20"
+                className="mt-6 inline-flex justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-5 py-3 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--surface-subtle)]"
               >
                 Get Started →
               </button>
             </div>
 
             {/* Pro */}
-            <div className="rounded-3xl border border-sky-400/30 bg-sky-400/[0.05] p-6 flex flex-col relative">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-sky-400 px-3 py-0.5 text-xs font-semibold text-slate-950">
+            <div className="rounded-xl border border-[var(--border-strong)] bg-[var(--surface-subtle)] p-6 flex flex-col relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[var(--action-primary)] px-3 py-0.5 text-xs font-medium text-white">
                 Most Popular
               </div>
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-300/80">Pro</div>
+              <div className="text-xs font-medium uppercase tracking-[0.16em] text-[var(--text-muted)]">Pro</div>
               <div className="mt-3 flex items-end gap-1">
-                <span className="text-4xl font-extrabold text-white">$1,299</span>
-                <span className="mb-1 text-sm text-slate-400">/ month</span>
+                <span className="text-4xl font-medium text-[var(--text-primary)]">$1,299</span>
+                <span className="mb-1 text-sm text-[var(--text-muted)]">/ month</span>
               </div>
-              <div className="mt-1 text-xs text-slate-500">10 seats · month-to-month</div>
-              <ul className="mt-5 space-y-2 text-sm text-slate-300 flex-1">
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Everything in Starter</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>CAD exports (DXF / STEP)</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>HubSpot CRM sync</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Commission tracking</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>10 user seats</li>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">10 seats · month-to-month</div>
+              <ul className="mt-5 space-y-2 text-sm text-[var(--text-secondary)] flex-1">
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Everything in Starter</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>CAD exports (DXF / STEP)</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>HubSpot CRM sync</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Commission tracking</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>10 user seats</li>
               </ul>
               <button
                 type="button"
                 onClick={() => { setActiveTier("Pro"); trackEvent("cta_click"); }}
-                className="mt-6 inline-flex justify-center rounded-xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-400"
+                className="mt-6 inline-flex justify-center rounded-md bg-[var(--action-primary)] px-5 py-3 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)]"
               >
                 Get Started →
               </button>
             </div>
 
             {/* Shop */}
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 flex flex-col">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-300/80">Shop</div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6 flex flex-col">
+              <div className="text-xs font-medium uppercase tracking-[0.16em] text-[var(--text-muted)]">Shop</div>
               <div className="mt-3 flex items-end gap-1">
-                <span className="text-4xl font-extrabold text-white">$1,999</span>
-                <span className="mb-1 text-sm text-slate-400">/ month</span>
+                <span className="text-4xl font-medium text-[var(--text-primary)]">$1,999</span>
+                <span className="mb-1 text-sm text-[var(--text-muted)]">/ month</span>
               </div>
-              <div className="mt-1 text-xs text-slate-500">Unlimited seats · month-to-month</div>
-              <ul className="mt-5 space-y-2 text-sm text-slate-300 flex-1">
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Everything in Pro</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Unlimited user seats</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>White-label / custom branding</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>Multi-location support</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-sky-400">✓</span>API access</li>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">Unlimited seats · month-to-month</div>
+              <ul className="mt-5 space-y-2 text-sm text-[var(--text-secondary)] flex-1">
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Everything in Pro</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Unlimited user seats</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>White-label / custom branding</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Multi-location support</li>
+                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>API access</li>
               </ul>
               <button
                 type="button"
                 onClick={() => { setActiveTier("Shop"); trackEvent("cta_click"); }}
-                className="mt-6 inline-flex justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/10"
+                className="mt-6 inline-flex justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-5 py-3 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--surface-subtle)]"
               >
                 Get Started →
               </button>
@@ -1142,16 +1121,16 @@ export default function LandingPage() {
       <FaqSection />
 
       {/* Final CTA */}
-      <section className="relative z-10 border-t border-white/10">
+      <section className="relative z-10 border-t border-[var(--border)]">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8 text-center">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300/80">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6 sm:p-8 text-center">
+            <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               Ready to see it in action?
             </div>
-            <h2 className="mt-3 text-3xl font-bold text-white">
+            <h2 className="mt-3 text-3xl font-medium text-[var(--text-primary)]">
               See a real foam quote generated in under 2 minutes.
             </h2>
-            <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-slate-300">
+            <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-[var(--text-secondary)]">
               Enter your dimensions and go straight into the layout editor. No fake
               handoff, no canned output. The pricing is live and the workflow is the
               same one your customer would follow.
@@ -1160,7 +1139,7 @@ export default function LandingPage() {
               <a
                 href="#sample-quote"
                 onClick={() => trackEvent("cta_click")}
-                className="inline-flex rounded-xl bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-sky-300"
+                className="inline-flex rounded-md bg-[var(--action-primary)] px-5 py-3 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)]"
               >
                 Try a Live Quote
               </a>
