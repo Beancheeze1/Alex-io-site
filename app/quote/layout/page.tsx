@@ -1687,8 +1687,8 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
 
   if (loadingLayout || !initialLayout) {
     return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-950 bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--tenant-secondary)_16%,transparent),transparent_60%),radial-gradient(circle_at_bottom,_color-mix(in_srgb,var(--tenant-primary)_12%,transparent),transparent_60%)]">
-        <div className="rounded-xl border border-slate-800/80 bg-slate-950/80 px-4 py-3 text-sm text-slate-200 shadow-[0_18px_45px_rgba(15,23,42,0.9)]">
+    <main className="min-h-screen flex items-center justify-center bg-[var(--surface-page)]">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 text-sm text-[var(--text-secondary)]">
           Loading layout preview&hellip;
         </div>
       </main>
@@ -3900,11 +3900,11 @@ const tenantCssVars = React.useMemo(() => {
   const primary =
     typeof tenantTheme?.primaryColor === "string" && tenantTheme.primaryColor.trim()
       ? tenantTheme.primaryColor.trim()
-      : "#2563eb";
+      : "#2B2B28";
   const secondary =
     typeof tenantTheme?.secondaryColor === "string" && tenantTheme.secondaryColor.trim()
       ? tenantTheme.secondaryColor.trim()
-      : "#0ea5e9";
+      : "#3D3D38";
 
   return {
     ["--tenant-primary" as any]: primary,
@@ -3915,38 +3915,38 @@ const tenantCssVars = React.useMemo(() => {
   return (
     <main
   style={tenantCssVars}
-      className="min-h-screen bg-slate-950 bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--tenant-secondary)_14%,transparent),transparent_60%),radial-gradient(circle_at_bottom,_color-mix(in_srgb,var(--tenant-primary)_14%,transparent),transparent_60%)] flex items-stretch py-8 px-4"
+      className="min-h-screen bg-[var(--surface-page)] flex items-stretch py-8 px-4"
 >
       {sampleOverlayVisible && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 9999,
-          background: "rgba(8,11,18,0.85)", backdropFilter: "blur(4px)",
+          background: "rgba(28,28,26,0.6)", backdropFilter: "blur(4px)",
           display: "flex", alignItems: "center", justifyContent: "center",
           padding: 16,
         }}>
           <div style={{
-            maxWidth: 480, width: "100%", borderRadius: 20,
-            background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)",
-            padding: 28, color: "#f1f5f9",
+            maxWidth: 480, width: "100%", borderRadius: 12,
+            background: "var(--surface-page)", border: "1px solid var(--border)",
+            padding: 28, color: "var(--text-primary)",
           }}>
             <div style={{
-              fontSize: 11, fontWeight: 700, letterSpacing: "0.16em",
-              textTransform: "uppercase", color: "#38bdf8", marginBottom: 8,
+              fontSize: 11, fontWeight: 500, letterSpacing: "0.16em",
+              textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8,
             }}>
               Sample Quote Preview
             </div>
-            <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 12px" }}>
+            <h2 style={{ fontSize: 20, fontWeight: 500, margin: "0 0 12px" }}>
               We&apos;ve set up a sample quote for you
             </h2>
-            <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.6, marginBottom: 16 }}>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 16 }}>
               Everything below is pre-filled with a real complete-pack
               example — explore the layout editor, or skip straight to
               see the priced quote.
             </p>
 
             <div style={{
-              borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(255,255,255,0.03)", padding: 14, marginBottom: 20,
+              borderRadius: 8, border: "1px solid var(--border)",
+              background: "var(--surface-subtle)", padding: 14, marginBottom: 20,
               fontSize: 13, lineHeight: 1.8,
             }}>
               <div><strong>Shipping carton:</strong> 16 × 12 × 10 in, RSC</div>
@@ -3960,9 +3960,9 @@ const tenantCssVars = React.useMemo(() => {
                 type="button"
                 onClick={() => { trackEvent("sample_editor"); setSampleOverlayVisible(false); }}
                 style={{
-                  padding: "12px 0", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.05)", color: "#e2e8f0",
-                  fontSize: 14, fontWeight: 700, cursor: "pointer",
+                  padding: "12px 0", borderRadius: 8, border: "1px solid var(--border-strong)",
+                  background: "var(--surface-card)", color: "var(--text-primary)",
+                  fontSize: 14, fontWeight: 500, cursor: "pointer",
                 }}
               >
                 🛠 Play around in the editor
@@ -3971,16 +3971,16 @@ const tenantCssVars = React.useMemo(() => {
                 type="button"
                 onClick={handleSkipToQuote}
                 style={{
-                  padding: "12px 0", borderRadius: 12, border: "none",
-                  background: "linear-gradient(135deg,#0ea5e9,#38bdf8)",
-                  color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer",
+                  padding: "12px 0", borderRadius: 8, border: "none",
+                  background: "var(--action-primary)",
+                  color: "#fff", fontSize: 14, fontWeight: 500, cursor: "pointer",
                 }}
               >
                 💸 Skip to priced quote →
               </button>
             </div>
 
-            <p style={{ fontSize: 11, color: "#64748b", textAlign: "center", marginTop: 14 }}>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center", marginTop: 14 }}>
               Add cavities or change material in the editor — pricing
               updates live. Or skip straight to the priced quote and
               edit later.
@@ -3996,19 +3996,11 @@ const tenantCssVars = React.useMemo(() => {
         onChange={handleFileSelected}
       />
       <div className="w-full max-w-none mx-auto">
-        <div className="relative rounded-2xl border border-slate-800/80 bg-slate-950/90 shadow-[0_26px_60px_rgba(15,23,42,0.95)] overflow-hidden">
-          {/* global grid/glow overlay */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 opacity-65 bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--tenant-secondary)_16%,transparent),transparent_55%),linear-gradient(to_right,rgba(15,23,42,0.95)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.95)_1px,transparent_1px)] [background-size:460px_460px,28px_28px,28px_28px]"
-          />
+        <div className="relative rounded-xl border border-[var(--border)] bg-[var(--surface-card)] overflow-hidden">
           <div className="relative">
             {/* Header */}
             <div
-  className="border-b border-slate-800/80 px-6 py-4"
-  style={{
-    background: `linear-gradient(to right, var(--tenant-primary), var(--tenant-secondary), #0f172a)`
-  }}
+  className="border-b border-[var(--border)] px-6 py-4 bg-[var(--surface-subtle)]"
 >
               <div className="flex items-center gap-4 w-full">
                 {/* LEFT: powered by + quote */}
@@ -4019,23 +4011,23 @@ const tenantCssVars = React.useMemo(() => {
     <img
       src={tenantTheme.logoUrl.trim()}
       alt="Tenant logo"
-      className="h-6 w-6 rounded bg-white/5 object-contain"
+      className="h-6 w-6 rounded bg-[var(--surface-card)] object-contain"
     />
   ) : null}
 
-              <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-white/90">
+              <div className="text-[11px] font-medium tracking-[0.16em] uppercase text-[var(--text-primary)]">
     {typeof tenantTheme?.brandName === "string" && tenantTheme.brandName.trim()
       ? tenantTheme.brandName.trim()
       : "Alex-IO"}
   </div>
 </div>
-                  <div className="mt-1 text-xs text-slate-300">
+                  <div className="mt-1 text-xs text-[var(--text-secondary)]">
                     Quote{" "}
-                    <span className="font-mono font-semibold text-slate-50">{quoteNo}</span>
+                    <span className="font-mono font-medium text-[var(--text-primary)]">{quoteNo}</span>
                     {hasRealQuoteNo ? (
-                      <span className="ml-1 text-slate-300">· Linked to active quote</span>
+                      <span className="ml-1 text-[var(--text-secondary)]">· Linked to active quote</span>
                     ) : (
-                      <span className="ml-1 text-amber-50/90">· Demo view (no quote linked)</span>
+                      <span className="ml-1 text-[var(--attention)]">· Demo view (no quote linked)</span>
                     )}
                   </div>
                 </div>
@@ -4043,10 +4035,10 @@ const tenantCssVars = React.useMemo(() => {
                 {/* CENTER: stylized title */}
                 <div className="flex-1 text-center">
                   <div className="inline-flex flex-col items-center gap-1">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-white/70">
+                    <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--text-muted)]">
                       Foam layout tools
                     </div>
-                    <div className="text-2xl md:text-[26px] font-extrabold leading-snug bg-gradient-to-r from-[color:var(--tenant-primary)] via-[color:var(--tenant-secondary)] to-[color:var(--tenant-primary)] bg-clip-text text-white/70">
+                    <div className="text-2xl md:text-[26px] font-medium leading-snug text-[var(--text-primary)]">
                       Interactive foam layout editor
                     </div>
                   </div>
@@ -4054,8 +4046,8 @@ const tenantCssVars = React.useMemo(() => {
 
                 {/* RIGHT: BETA pill */}
                 <div className="flex items-center justify-end gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-slate-200">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.95)]" />
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--status-pending-text)]" />
                     Layout editor · V2.0
                   </span>
                 </div>
@@ -4063,9 +4055,9 @@ const tenantCssVars = React.useMemo(() => {
             </div>
 
             {/* How this works */}
-            <div className="border-b border-slate-800/80 bg-slate-950/95 px-6 py-3 text-[11px] text-slate-200 flex flex-wrap items-start gap-4">
-              <div className="flex items-center gap-2 font-semibold text-[var(--tenant-secondary-readable)]">
-                <span className="inline-flex h-5 w-1.5 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_70%,transparent)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[10px] font-bold shadow-[0_0_14px_color-mix(in_srgb,var(--tenant-secondary)_55%,transparent)]">
+            <div className="border-b border-[var(--border)] bg-[var(--surface-card)] px-6 py-3 text-[11px] text-[var(--text-secondary)] flex flex-wrap items-start gap-4">
+              <div className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-subtle)] text-[10px] font-medium text-[var(--text-primary)]">
                   ?
                 </span>
                 How this layout editor works
@@ -4073,40 +4065,40 @@ const tenantCssVars = React.useMemo(() => {
 
               <ul className="flex flex-wrap gap-x-4 gap-y-1">
                 <li>
-                  <span className="text-[var(--tenant-secondary-readable)] mr-1">1.</span>
+                  <span className="text-[var(--text-muted)] mr-1">1.</span>
                   Adjust the foam block, add cavities from the left palette.
                 </li>
                 <li>
-                  <span className="text-[var(--tenant-secondary-readable)] mr-1">2.</span>
+                  <span className="text-[var(--text-muted)] mr-1">2.</span>
                   Drag / resize in the center canvas to fine-tune placement.
                 </li>
                 <li>
-                  <span className="text-[var(--tenant-secondary-readable)] mr-1">3.</span>
+                  <span className="text-[var(--text-muted)] mr-1">3.</span>
                   Fill in customer + material, then{" "}
-                  <span className="font-semibold text-[var(--tenant-secondary-readable)]">Apply to quote</span>.
+                  <span className="font-medium text-[var(--text-primary)]">Apply to quote</span>.
                 </li>
               </ul>
             </div>
 
             {/* Compressed top metrics + controls row */}
-            <div className="px-5 pt-3 pb-2 bg-slate-950/95 border-b border-slate-900/80">
+            <div className="px-5 pt-3 pb-2 bg-[var(--surface-card)] border-b border-[var(--border)]">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {/* LEFT: Layers summary + quick metrics + block dims */}
                 <div
                   data-guided="layers"
-                  className={`rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 text-[11px] text-slate-200 ${guidedClass("layers")}`}
+                  className={`rounded-xl border border-[var(--border)] bg-[var(--surface-page)] px-4 py-2.5 text-[11px] text-[var(--text-secondary)] ${guidedClass("layers")}`}
                 >
                   <div className="flex items-start justify-between gap-3 mb-1.5">
                     <div className="flex flex-col gap-0.5">
-                      <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+                      <span className="uppercase tracking-[0.14em] text-[10px] text-[var(--text-muted)]">
                         Layers
                       </span>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-200">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--text-secondary)]">
                         <span>
                           {layers && layers.length > 0 ? (
                             <>
                               {layers.length} layer{layers.length > 1 ? "s" : ""} · Active:{" "}
-                              <span className="font-semibold text-slate-50">
+                              <span className="font-medium text-[var(--text-primary)]">
                                 {activeLayerDisplayLabel}
                               </span>
                             </>
@@ -4114,20 +4106,20 @@ const tenantCssVars = React.useMemo(() => {
                             "Single foam block"
                           )}
                         </span>
-                        <span className="text-slate-400">
+                        <span className="text-[var(--text-muted)]">
                           · Footprint{" "}
-                          <span className="font-mono text-slate-100">{footprintLabel}</span>
+                          <span className="font-mono text-[var(--text-primary)]">{footprintLabel}</span>
                         </span>
-                        <span className="text-slate-400">
+                        <span className="text-[var(--text-muted)]">
                           · Stack depth{" "}
-                          <span className="font-mono text-slate-100">{stackDepthLabel}</span>
+                          <span className="font-mono text-[var(--text-primary)]">{stackDepthLabel}</span>
                         </span>
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={addLayer}
-                      className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 text-[11px] text-slate-200 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
+                      className="inline-flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:text-[var(--text-primary)] transition"
                     >
                       + Layer
                     </button>
@@ -4135,7 +4127,7 @@ const tenantCssVars = React.useMemo(() => {
 
                   <div className="grid grid-cols-3 gap-2 text-xs mt-1">
                     <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-slate-400">Length (in)</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">Length (in)</span>
                       <input
   type="number"
   step={0.125}
@@ -4149,12 +4141,12 @@ const tenantCssVars = React.useMemo(() => {
       (e.currentTarget as HTMLInputElement).blur();
     }
   }}
-  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+  className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)]"
 />
 
                     </label>
                     <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-slate-400">Width (in)</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">Width (in)</span>
                       <input
   type="number"
   step={0.125}
@@ -4168,12 +4160,12 @@ const tenantCssVars = React.useMemo(() => {
       (e.currentTarget as HTMLInputElement).blur();
     }
   }}
-  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+  className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)]"
 />
 
                     </label>
                     <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-slate-400">Active layer thick (in)</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">Active layer thick (in)</span>
                       <input
                         type="number"
                         step={0.125}
@@ -4190,32 +4182,32 @@ const tenantCssVars = React.useMemo(() => {
                             (e.currentTarget as HTMLInputElement).blur();
                           }
                         }}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)]"
                       />
                     </label>
                   </div>
-                  <div className="mt-2 text-xs text-slate-400">
-  <span className="font-semibold text-slate-300">Fit note:</span>{" "}
-  Foam OD is typically undersized <span className="font-semibold">0.125"</span> to ensure it fits into a box/mailer
+                  <div className="mt-2 text-xs text-[var(--text-muted)]">
+  <span className="font-medium text-[var(--text-secondary)]">Fit note:</span>{" "}
+  Foam OD is typically undersized <span className="font-medium">0.125"</span> to ensure it fits into a box/mailer
   (unless you specify otherwise).
 </div>
 
 
                   {/* NEW: thin layer summary strip (visual balance) */}
-                  <div className="mt-2 pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                  <div className="mt-2 pt-2 border-t border-[var(--border)] flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--text-muted)]">
                     <span>
                       Active{" "}
-                      <span className="text-slate-100 font-semibold">
+                      <span className="text-[var(--text-primary)] font-medium">
                         {activeLayerDisplayLabel ?? "—"}
                       </span>
                     </span>
                     <span>
                       · Stack{" "}
-                      <span className="font-mono text-slate-100">{stackDepthLabel}</span>
+                      <span className="font-mono text-[var(--text-primary)]">{stackDepthLabel}</span>
                     </span>
                     <span>
                       · Footprint{" "}
-                      <span className="font-mono text-slate-100">{footprintLabel}</span>
+                      <span className="font-mono text-[var(--text-primary)]">{footprintLabel}</span>
                     </span>
                   </div>
                 </div>
@@ -4223,24 +4215,24 @@ const tenantCssVars = React.useMemo(() => {
                 {/* CENTER: Layout controls (Zoom + Qty + CTA buttons) */}
                 <div
                   data-guided="apply"
-                  className={`rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 flex flex-col justify-between ${guidedClass("apply")}`}
+                  className={`rounded-xl border border-[var(--border)] bg-[var(--surface-page)] px-4 py-2.5 flex flex-col justify-between ${guidedClass("apply")}`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-slate-400">
-                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-[color:color-mix(in_srgb,var(--tenant-secondary)_75%,transparent)]" />
+                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--border-strong)]" />
                       Layout controls
                     </div>
 
                     {/* Editor mode toggle */}
-                    <div className="flex items-center gap-1 rounded-full border border-slate-700 bg-slate-900 p-0.5 text-[10px]">
+                    <div className="flex items-center gap-1 rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] p-0.5 text-[10px]">
                       <button
                         type="button"
                         onClick={() => setEditorMode("basic")}
                         className={
-                          "px-2.5 py-0.5 rounded-full transition " +
+                          "px-2.5 py-0.5 rounded-md transition " +
                           (editorMode === "basic"
-                            ? "bg-[var(--tenant-primary)] text-slate-950 font-semibold"
-                            : "text-slate-300 hover:text-slate-100")
+                            ? "bg-[var(--tenant-primary)] text-white font-medium"
+                            : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]")
                         }
                       >
                         Basic
@@ -4249,10 +4241,10 @@ const tenantCssVars = React.useMemo(() => {
                         type="button"
                         onClick={() => setEditorMode("advanced")}
                         className={
-                          "px-2.5 py-0.5 rounded-full transition " +
+                          "px-2.5 py-0.5 rounded-md transition " +
                           (editorMode === "advanced"
-                            ? "bg-amber-400 text-slate-950 font-semibold"
-                            : "text-slate-300 hover:text-slate-100")
+                            ? "bg-[var(--status-pending-text)] text-white font-medium"
+                            : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]")
                         }
                       >
                         Advanced
@@ -4260,12 +4252,12 @@ const tenantCssVars = React.useMemo(() => {
                     </div>
                   </div>
 
-                  <div className="text-[11px] text-slate-400">
-                    Quoted qty: <span className="font-mono text-slate-50">{qtyLabel}</span>
+                  <div className="text-[11px] text-[var(--text-muted)]">
+                    Quoted qty: <span className="font-mono text-[var(--text-primary)]">{qtyLabel}</span>
                   </div>
 
                   <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2 text-[11px] text-slate-400 flex-1">
+                    <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)] flex-1">
                       <span>Zoom</span>
                       <input
                         type="range"
@@ -4276,9 +4268,9 @@ const tenantCssVars = React.useMemo(() => {
                         onChange={(e) => setZoom(Number(e.target.value))}
                       className="w-32 accent-[var(--tenant-secondary)]"
                       />
-                      <span className="ml-1 text-[var(--tenant-secondary-readable)] font-mono">{Math.round(zoom * 100)}%</span>
+                      <span className="ml-1 text-[var(--text-primary)] font-mono">{Math.round(zoom * 100)}%</span>
                     </div>
-                    <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                    <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
                       <span>Qty</span>
                       <input
                         type="number"
@@ -4296,26 +4288,26 @@ const tenantCssVars = React.useMemo(() => {
                           setQty(num);
                         }}
                         disabled={!hasRealQuoteNo}
-                        className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 disabled:opacity-60"
+                        className="w-20 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] disabled:opacity-60"
                       />
                     </div>
                   </div>
 
                   {editorMode === "advanced" && (
-                    <div className="mb-2 rounded-xl border border-slate-700/80 bg-slate-950/45 px-3 py-2 text-[11px] text-slate-200">
+                    <div className="mb-2 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 font-semibold text-slate-50">
-                          <span className="h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_10px_rgba(252,211,77,0.8)]" />
+                        <div className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
+                          <span className="h-2 w-2 rounded-full bg-[var(--status-pending-text)]" />
                           Advanced tools
                         </div>
-                        <span className="rounded-full border border-amber-300/25 bg-slate-950/40 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-amber-100/80">
+                        <span className="rounded-full border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
                           Live
                         </span>
                       </div>
 
-                      <div className="mt-1 text-slate-300/80">
+                      <div className="mt-1 text-[var(--text-muted)]">
                         Select a cavity, then use Align / Duplicate, or nudge with{" "}
-                        <span className="font-semibold text-slate-100">Arrow keys</span> (Shift = 1&quot;).
+                        <span className="font-medium text-[var(--text-primary)]">Arrow keys</span> (Shift = 1&quot;).
                       </div>
 
                       <div className="mt-2 grid grid-cols-2 gap-2">
@@ -4323,7 +4315,7 @@ const tenantCssVars = React.useMemo(() => {
                           type="button"
                           onClick={duplicateSelected}
                           disabled={!selectedCavity}
-                          className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                          className="inline-flex items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] disabled:opacity-50"
                         >
                           Duplicate selected
                         </button>
@@ -4332,7 +4324,7 @@ const tenantCssVars = React.useMemo(() => {
                           type="button"
                           onClick={handleCenterSelectedCavity}
                           disabled={!selectedCavity}
-                          className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                          className="inline-flex items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] disabled:opacity-50"
                         >
                           Center in block
                         </button>
@@ -4343,7 +4335,7 @@ const tenantCssVars = React.useMemo(() => {
                           type="button"
                           onClick={() => alignSelected("left")}
                           disabled={!selectedCavity}
-                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                          className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[10px] text-[var(--text-secondary)] disabled:opacity-50"
                         >
                           Align Left
                         </button>
@@ -4351,7 +4343,7 @@ const tenantCssVars = React.useMemo(() => {
                           type="button"
                           onClick={() => alignSelected("centerX")}
                           disabled={!selectedCavity}
-                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                          className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[10px] text-[var(--text-secondary)] disabled:opacity-50"
                         >
                           Center X
                         </button>
@@ -4359,7 +4351,7 @@ const tenantCssVars = React.useMemo(() => {
                           type="button"
                           onClick={() => alignSelected("right")}
                           disabled={!selectedCavity}
-                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                          className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[10px] text-[var(--text-secondary)] disabled:opacity-50"
                         >
                           Align Right
                         </button>
@@ -4368,7 +4360,7 @@ const tenantCssVars = React.useMemo(() => {
                           type="button"
                           onClick={() => alignSelected("top")}
                           disabled={!selectedCavity}
-                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                          className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[10px] text-[var(--text-secondary)] disabled:opacity-50"
                         >
                           Align Top
                         </button>
@@ -4376,7 +4368,7 @@ const tenantCssVars = React.useMemo(() => {
                           type="button"
                           onClick={() => alignSelected("centerY")}
                           disabled={!selectedCavity}
-                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                          className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[10px] text-[var(--text-secondary)] disabled:opacity-50"
                         >
                           Center Y
                         </button>
@@ -4384,7 +4376,7 @@ const tenantCssVars = React.useMemo(() => {
                           type="button"
                           onClick={() => alignSelected("bottom")}
                           disabled={!selectedCavity}
-                          className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] text-slate-200 disabled:opacity-50"
+                          className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[10px] text-[var(--text-secondary)] disabled:opacity-50"
                         >
                           Align Bottom
                         </button>
@@ -4397,7 +4389,7 @@ const tenantCssVars = React.useMemo(() => {
                       type="button"
                       onClick={handleGoToFoamAdvisor}
                       disabled={missingCustomerInfo}
-                      className="inline-flex flex-1 items-center justify-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_55%,transparent)] bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:border-[color:var(--tenant-secondary)] transition disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="inline-flex flex-1 items-center justify-center rounded-md border border-[color:color-mix(in_srgb,var(--tenant-secondary)_55%,transparent)] bg-[var(--surface-card)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:border-[var(--tenant-secondary)] transition disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Recommend my foam
                     </button>
@@ -4406,7 +4398,7 @@ const tenantCssVars = React.useMemo(() => {
                       type="button"
                       onClick={openFilePicker}
                       disabled={uploadStatus === "uploading"}
-                      className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/60 px-4 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 transition disabled:opacity-60"
+                      className="inline-flex items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-4 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)] transition disabled:opacity-60"
                     >
                       {uploadStatus === "uploading" ? "Uploading" : "Upload file"}
                     </button>
@@ -4415,7 +4407,7 @@ const tenantCssVars = React.useMemo(() => {
                       type="button"
                       onClick={handleApplyToQuote}
                       disabled={!canApplyButton}
-                      className="inline-flex flex-1 items-center justify-center rounded-full border border-[color:var(--tenant-primary)] bg-[color:var(--tenant-primary)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[color:color-mix(in_srgb,var(--tenant-primary)_85%,white)] transition disabled:opacity-60"
+                      className="inline-flex flex-1 items-center justify-center rounded-md border border-[var(--tenant-primary)] bg-[var(--tenant-primary)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[color:color-mix(in_srgb,var(--tenant-primary)_85%,white)] transition disabled:opacity-60"
                     >
                       {!hasRealQuoteNo
                         ? "Link to a quote first"
@@ -4431,27 +4423,27 @@ const tenantCssVars = React.useMemo(() => {
                     </button>
                   </div>
                   {uploadStatus === "error" && uploadError ? (
-                    <div className="mt-1 text-[11px] text-red-300">{uploadError}</div>
+                    <div className="mt-1 text-[11px] text-[var(--attention)]">{uploadError}</div>
                   ) : null}
                 </div>
 
                 {/* RIGHT: Layer details (stack + per-layer list + per-layer crop) */}
                 <div
                   data-guided="layer-details"
-                  className={`rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-2.5 text-[11px] text-slate-200 ${guidedClass("layer-details")}`}
+                  className={`rounded-xl border border-[var(--border)] bg-[var(--surface-page)] px-4 py-2.5 text-[11px] text-[var(--text-secondary)] ${guidedClass("layer-details")}`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex flex-col gap-0.5">
-                      <span className="uppercase tracking-[0.14em] text-[10px] text-slate-400">
+                      <span className="uppercase tracking-[0.14em] text-[10px] text-[var(--text-muted)]">
                         Layer details
                       </span>
-                      <span className="text-xs text-slate-200">
+                      <span className="text-xs text-[var(--text-secondary)]">
                         Stack depth:{" "}
-                        <span className="font-mono text-slate-50">{stackDepthLabel}</span>
+                        <span className="font-mono text-[var(--text-primary)]">{stackDepthLabel}</span>
                       </span>
 
                       {/* NEW: subtle helper line (visual density only) */}
-                      <span className="text-[10px] text-slate-500">
+                      <span className="text-[10px] text-[var(--text-faint)]">
                         Per-layer thickness &amp; edge treatment
                       </span>
                     </div>
@@ -4474,10 +4466,10 @@ const tenantCssVars = React.useMemo(() => {
                           <div
                             key={layer.id}
                             className={
-                              "rounded-lg border px-2.5 py-1 flex items-center justify-between gap-2 " +
+                              "rounded-md border px-2.5 py-1 flex items-center justify-between gap-2 " +
                               (isActive
-                                ? "border-white ring-1 ring-white bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)]"
-                                : "border-slate-700 bg-slate-900/80 hover:border-[color:color-mix(in_srgb,var(--tenant-secondary)_70%,transparent)]")
+                                ? "border-[var(--tenant-primary)] ring-1 ring-[var(--tenant-primary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,var(--surface-card))]"
+                                : "border-[var(--border)] bg-[var(--surface-card)] hover:border-[var(--border-strong)]")
                             }
                           >
                             <div className="flex flex-col gap-0.5 flex-1">
@@ -4487,12 +4479,12 @@ const tenantCssVars = React.useMemo(() => {
                                   onClick={() => setActiveLayerId(layer.id)}
                                   className={
                                     "text-xs font-medium " +
-                                    (isActive ? "text-[var(--tenant-secondary-readable)]" : "text-slate-100")
+                                    (isActive ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]")
                                   }
                                 >
                                   {layerDisplayLabel(layerIndex)}
                                 </button>
-                                <span className="text-[10px] text-slate-400">· Thickness (in)</span>
+                                <span className="text-[10px] text-[var(--text-muted)]">· Thickness (in)</span>
                                 <input
                                   type="number"
                                   step={0.125}
@@ -4503,10 +4495,10 @@ const tenantCssVars = React.useMemo(() => {
                                     if (!Number.isFinite(num) || num <= 0) return;
                                     setLayerThicknessIn(layer.id, num);
                                   }}
-                                  className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100"
+                                  className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-1.5 py-0.5 text-[11px] text-[var(--text-primary)]"
                                 />
                                 <label
-                                  className="ml-2 flex items-center gap-1 text-xs text-slate-400"
+                                  className="ml-2 flex items-center gap-1 text-xs text-[var(--text-muted)]"
                                   title={isCrop ? "Disable Crop to enable Round corners." : undefined}
                                 >
                                   <input
@@ -4522,7 +4514,7 @@ const tenantCssVars = React.useMemo(() => {
                                   />
                                   Crop
                                 </label>
-                                <label className="ml-2 flex items-center gap-1 text-xs text-slate-400">
+                                <label className="ml-2 flex items-center gap-1 text-xs text-[var(--text-muted)]">
                                   <input
                                     type="checkbox"
                                     checked={isRound}
@@ -4537,7 +4529,7 @@ const tenantCssVars = React.useMemo(() => {
                                   />
                                   Round
                                 </label>
-                                <label className="ml-2 flex items-center gap-1 text-xs text-slate-400">
+                                <label className="ml-2 flex items-center gap-1 text-xs text-[var(--text-muted)]">
                                   <span>Radius (in)</span>
                                   <input
                                     type="number"
@@ -4561,14 +4553,14 @@ const tenantCssVars = React.useMemo(() => {
                                         (e.currentTarget as HTMLInputElement).blur();
                                       }
                                     }}
-                                    className="w-16 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-slate-100 disabled:opacity-60"
+                                    className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-1.5 py-0.5 text-[11px] text-[var(--text-primary)] disabled:opacity-60"
                                   />
                                 </label>
                               </div>
                               {/* Per-layer material override — only shown when "Per layer" is selected in the Foam material dropdown */}
                               {perLayerMaterialMode && (
                                 <div className="flex items-center gap-1.5 mt-1">
-                                  <span className="text-[10px] text-sky-400 shrink-0 font-semibold">Material:</span>
+                                  <span className="text-[10px] text-[var(--text-muted)] shrink-0 font-medium">Material:</span>
                                   <select
                                     value={(layer as any).materialId ?? ""}
                                     onChange={(e) => {
@@ -4582,7 +4574,7 @@ const tenantCssVars = React.useMemo(() => {
                                         }
                                       }
                                     }}
-                                    className="flex-1 rounded-md border border-sky-700 bg-slate-950 px-1.5 py-0.5 text-[10px] text-slate-100"
+                                    className="flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-1.5 py-0.5 text-[10px] text-[var(--text-primary)]"
                                   >
                                     <option value="">— pick a material —</option>
                                     {materialsByFamily.map(([family, list]) => (
@@ -4600,12 +4592,12 @@ const tenantCssVars = React.useMemo(() => {
                               )}
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-slate-500">ID: {layer.id}</span>
+                              <span className="text-[10px] text-[var(--text-faint)]">ID: {layer.id}</span>
                               {stack && stack.length > 1 && (
                                 <button
                                   type="button"
                                   onClick={() => deleteLayer(layer.id)}
-                                  className="text-[11px] text-slate-400 hover:text-red-400"
+                                  className="text-[11px] text-[var(--text-muted)] hover:text-[var(--attention)]"
                                 >
                                   Remove
                                 </button>
@@ -4616,7 +4608,7 @@ const tenantCssVars = React.useMemo(() => {
                       })}
                     </div>
                   ) : (
-                    <div className="mt-1 text-[11px] text-slate-400">
+                    <div className="mt-1 text-[11px] text-[var(--text-muted)]">
                       Single-layer foam block. Add layers from the panel on the left if this layout needs multiple pads.
                     </div>
                   )}
@@ -4627,12 +4619,12 @@ const tenantCssVars = React.useMemo(() => {
    
 
             {/* Body: three-column layout */}
-            <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100 min-h-[620px]">
+            <div className="flex flex-row gap-5 p-5 bg-[var(--surface-card)] text-[var(--text-primary)] min-h-[620px]">
               {/* LEFT: Cavity palette + material + cartons + notes */}
               <aside className="w-52 shrink-0 flex flex-col gap-3">
                 <div data-guided="cavity-palette" className={guidedClass("cavity-palette")}>
-                  <div className="text-xs font-semibold text-slate-100 mb-1">Cavity palette</div>
-                  <p className="text-[11px] text-slate-400 mb-2">
+                  <div className="text-xs font-medium text-[var(--text-primary)] mb-1">Cavity palette</div>
+                  <p className="text-[11px] text-[var(--text-muted)] mb-2">
                     Click a style to add a new pocket, then drag and resize it in the block.
                   </p>
                 </div>
@@ -4640,49 +4632,49 @@ const tenantCssVars = React.useMemo(() => {
                 <button
                   type="button"
                   onClick={() => handleAddPreset("rect")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-[color:var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
+                  className="w-full text-left rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-3 py-2 text-xs hover:border-[var(--border-strong)] hover:bg-[var(--surface-subtle)] transition"
                 >
-                  <div className="font-semibold text-slate-50 flex items-center gap-2">
-                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-slate-400/70 bg-slate-900/80" />
+                  <div className="font-medium text-[var(--text-primary)] flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-[3px] border border-[var(--border-strong)] bg-[var(--surface-card)]" />
                     Rectangle
                   </div>
-                  <div className="text-[11px] text-slate-400">Rectangular pocket (4&quot; × 2&quot;)</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">Rectangular pocket (4&quot; × 2&quot;)</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => handleAddPreset("circle")}
-                  className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-[color:var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
+                  className="w-full text-left rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-3 py-2 text-xs hover:border-[var(--border-strong)] hover:bg-[var(--surface-subtle)] transition"
                 >
-                  <div className="font-semibold text-slate-50 flex items-center gap-2">
-                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 bg-slate-900/80" />
+                  <div className="font-medium text-[var(--text-primary)] flex items-center gap-2">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-card)]" />
                     Circle
                   </div>
-                  <div className="text-[11px] text-slate-400">Round pocket (3&quot; Ø)</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">Round pocket (3&quot; Ø)</div>
                 </button>
               {editorMode === "advanced" && (
                               <button
                                 type="button"
                                 onClick={() => handleAddPreset("roundedRect")}
-                                className="w-full text-left rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs hover:border-[color:var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
+                                className="w-full text-left rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-3 py-2 text-xs hover:border-[var(--border-strong)] hover:bg-[var(--surface-subtle)] transition"
                               >
-                                <div className="font-semibold text-slate-50 flex items-center gap-2">
-                                  <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-slate-400/70 bg-slate-900/80" />
+                                <div className="font-medium text-[var(--text-primary)] flex items-center gap-2">
+                                  <span className="inline-flex h-4 w-6 items-center justify-center rounded-[4px] border border-[var(--border-strong)] bg-[var(--surface-card)]" />
                                   Rounded rectangle
                                 </div>
-                                <div className="text-[11px] text-slate-400">
+                                <div className="text-[11px] text-[var(--text-muted)]">
                                   Rounded corners (4&quot; × 3&quot;, 0.5&quot; R)
                                 </div>
                               </button>
               )}
 
               {editorMode === "basic" && (
-  <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-[11px] text-slate-400">
+  <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
     Need rounded pockets? Switch to{" "}
     <button
       type="button"
       onClick={() => setEditorMode("advanced")}
-      className="font-semibold text-amber-200 hover:text-amber-100 underline underline-offset-2"
+      className="font-medium text-[var(--text-primary)] hover:text-[var(--action-primary)] underline underline-offset-2"
     >
       Advanced
     </button>
@@ -4693,8 +4685,8 @@ const tenantCssVars = React.useMemo(() => {
 
                 {/* Foam material (in left bar) */}
                 <div data-guided="foam-material" className={`mt-2 ${guidedClass("foam-material")}`}>
-                  <div className="text-xs font-semibold text-slate-100 mb-1">Foam material</div>
-                  <div className="text-[11px] text-slate-400 mb-2">
+                  <div className="text-xs font-medium text-[var(--text-primary)] mb-1">Foam material</div>
+                  <div className="text-[11px] text-[var(--text-muted)] mb-2">
                     Choose the foam family and grade used for this layout.
                   </div>
                   <select
@@ -4715,7 +4707,7 @@ const tenantCssVars = React.useMemo(() => {
                         }
                       }
                     }}
-                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                    className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)]"
                   >
                     <option value="">
                       {materialsLoading ? "Loading materials…" : "Select material"}
@@ -4733,36 +4725,36 @@ const tenantCssVars = React.useMemo(() => {
                     ))}
                   </select>
                   {perLayerMaterialMode && (
-                    <div className="mt-1.5 rounded-md border border-sky-700 bg-sky-950/60 px-2 py-1.5 text-[11px] text-sky-300">
+                    <div className="mt-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] px-2 py-1.5 text-[11px] text-[var(--text-secondary)]">
                       Per-layer mode active — set each layer's material in the Layer details panel above.
                     </div>
                   )}
-                  {materialsError && <div className="mt-1 text-[11px] text-amber-300">{materialsError}</div>}
+                  {materialsError && <div className="mt-1 text-[11px] text-[var(--attention)]">{materialsError}</div>}
                 </div>
 
                 {/* Closest matching cartons (live suggester, always visible) */}
                 <div
                   data-guided="box-suggester"
-                  className={`mt-3 rounded-2xl border border-slate-800 bg-slate-900/85 p-3 ${guidedClass("box-suggester")}`}
+                  className={`mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-page)] p-3 ${guidedClass("box-suggester")}`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <div className="text-xs font-semibold text-slate-100">Closest matching cartons</div>
-                    <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                    <div className="text-xs font-medium text-[var(--text-primary)]">Closest matching cartons</div>
+                    <span className="inline-flex items-center rounded-full bg-[var(--status-neutral-bg)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-[var(--status-neutral-text)]">
                       Box suggester · V2
                     </span>
                   </div>
 
-                  <p className="text-[11px] text-slate-400 mb-2">
+                  <p className="text-[11px] text-[var(--text-muted)] mb-2">
                     Uses the foam footprint{" "}
-                    <span className="font-mono text-[var(--tenant-secondary-readable)]">{footprintLabel}</span>, stack depth{" "}
-                    <span className="font-mono text-[var(--tenant-secondary-readable)]">{stackDepthLabel}</span> and quoted qty{" "}
-                    <span className="font-mono text-[var(--tenant-secondary-readable)]">{qtyLabel}</span> to suggest a best-fit{" "}
-                    <span className="text-[var(--tenant-secondary-readable)] font-medium">RSC</span> and{" "}
-                    <span className="text-[var(--tenant-secondary-readable)] font-medium">mailer</span>.
+                    <span className="font-mono text-[var(--text-primary)]">{footprintLabel}</span>, stack depth{" "}
+                    <span className="font-mono text-[var(--text-primary)]">{stackDepthLabel}</span> and quoted qty{" "}
+                    <span className="font-mono text-[var(--text-primary)]">{qtyLabel}</span> to suggest a best-fit{" "}
+                    <span className="text-[var(--text-primary)] font-medium">RSC</span> and{" "}
+                    <span className="text-[var(--text-primary)] font-medium">mailer</span>.
                   </p>
 
                   {selectedCartonKind && (
-                    <div className="mb-2 text-[11px] text-[var(--tenant-secondary-readable)]">
+                    <div className="mb-2 text-[11px] text-[var(--text-primary)]">
                       Selected carton:{" "}
                       <span className="font-mono">
                         {selectedCartonKind === "RSC" ? boxSuggest.bestRsc?.sku : boxSuggest.bestMailer?.sku}
@@ -4770,15 +4762,15 @@ const tenantCssVars = React.useMemo(() => {
                     </div>
                   )}
 
-                  <div className="mt-2 flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-                    <div className="text-[11px] text-slate-200">
+                  <div className="mt-2 flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2">
+                    <div className="text-[11px] text-[var(--text-secondary)]">
                       Printed box
-                      <div className="text-[10px] text-slate-400">
+                      <div className="text-[10px] text-[var(--text-muted)]">
                         Adds printing upcharge to the quote total.
                       </div>
                     </div>
 
-                    <label className="inline-flex items-center gap-2 text-[11px] text-slate-200 select-none">
+                    <label className="inline-flex items-center gap-2 text-[11px] text-[var(--text-secondary)] select-none">
                       <input
                         type="checkbox"
                         checked={isPrinted}
@@ -4787,26 +4779,26 @@ const tenantCssVars = React.useMemo(() => {
                           setIsPrinted(next);
                           persistPrinted(next);
                         }}
-                        className="h-4 w-4 rounded border-slate-600 bg-slate-900 accent-[var(--tenant-secondary)]"
+                        className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)] accent-[var(--tenant-secondary)]"
                       />
-                      <span className="text-[var(--tenant-secondary-readable)] font-medium">Printed</span>
+                      <span className="text-[var(--text-primary)] font-medium">Printed</span>
                     </label>
                   </div>
 
                   {/* Customer-entered box size (inside dims)  display-only for now.
                       Pricing remains based on closest matching standard carton. */}
-                  <div className="mt-2 rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                  <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="text-[11px] text-slate-200">
+                      <div className="text-[11px] text-[var(--text-secondary)]">
                         Customer box (inside)
-                        <div className="text-[10px] text-slate-400">
+                        <div className="text-[10px] text-[var(--text-muted)]">
                           Shown on the quote. Pricing uses the closest matching standard carton for now.
                         </div>
                       </div>
 
                       <button
                         type="button"
-                        className="text-[10px] text-slate-300 hover:text-slate-100 underline underline-offset-2"
+                        className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline underline-offset-2"
                         onClick={() => {
                           setCustomerBox(null);
                           persistCustomerBox(null);
@@ -4817,7 +4809,7 @@ const tenantCssVars = React.useMemo(() => {
                     </div>
 
                     <div className="mt-2 flex items-center gap-1.5">
-                      <span className="text-[10px] text-slate-400">Style</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">Style</span>
                       {(["mailer", "rsc"] as const).map((s) => (
                         <button
                           key={s}
@@ -4832,8 +4824,8 @@ const tenantCssVars = React.useMemo(() => {
                           className={
                             "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium " +
                             (customerBox?.style === s
-                              ? "border-[color:var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_88%,white)]"
-                              : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)]")
+                              ? "border-[var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[var(--text-primary)]"
+                              : "border-[var(--border-strong)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-primary)]")
                           }
                         >
                           {s === "mailer" ? "Mailer" : "RSC"}
@@ -4845,10 +4837,10 @@ const tenantCssVars = React.useMemo(() => {
                       {(["L", "W", "H"] as const).map((k) => {
                         return (
                           <label key={k} className="block">
-                            <div className="mb-1 text-[10px] text-slate-400">{k} (in)</div>
+                            <div className="mb-1 text-[10px] text-[var(--text-muted)]">{k} (in)</div>
                             <input
                               inputMode="decimal"
-                              className="w-full rounded-lg border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-[var(--tenant-secondary)]"
+                              className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--tenant-secondary)]"
                               value={boxDraft[k]}
                               onChange={(e) => {
                                 const raw = e.target.value;
@@ -4877,22 +4869,22 @@ const tenantCssVars = React.useMemo(() => {
                     </div>
 
                     {customerBox && customerBox.L > 0 && customerBox.W > 0 && customerBox.H > 0 ? (
-                      <div className="mt-2 text-[10px] text-slate-400">
+                      <div className="mt-2 text-[10px] text-[var(--text-muted)]">
                         Saved:{" "}
-                        <span className="font-mono text-[var(--tenant-secondary-readable)]">
+                        <span className="font-mono text-[var(--text-primary)]">
                           {customerBox.L.toFixed(2)}  {customerBox.W.toFixed(2)}  {customerBox.H.toFixed(2)}
                         </span>
                       </div>
                     ) : (
-                      <div className="mt-2 text-[10px] text-slate-500">
+                      <div className="mt-2 text-[10px] text-[var(--text-faint)]">
                         Enter L/W/H to save.
                       </div>
                     )}
                   </div>
 
                   {!suggesterReady ? (
-                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
-                      <div className="font-semibold text-slate-100 mb-1">Waiting for layout &amp; customer info…</div>
+                    <div className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
+                      <div className="font-medium text-[var(--text-primary)] mb-1">Waiting for layout &amp; customer info…</div>
                       <ul className="list-disc list-inside space-y-0.5">
                         <li>Set block length, width and stack depth.</li>
                         <li>Enter customer name + email.</li>
@@ -4900,41 +4892,41 @@ const tenantCssVars = React.useMemo(() => {
                       </ul>
                     </div>
                   ) : boxSuggest.loading ? (
-                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-200">
+                    <div className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
                       Calculating best-fit cartons…
                     </div>
                   ) : boxSuggest.error ? (
-                    <div className="rounded-xl border border-amber-500/70 bg-amber-900/40 px-3 py-2 text-[11px] text-amber-50">
+                    <div className="rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)]">
                       {boxSuggest.error}
                     </div>
                   ) : !boxSuggest.bestRsc && !boxSuggest.bestMailer ? (
-                    <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+                    <div className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
                       No good carton matches found in the current stub catalog.
                     </div>
                   ) : (
                     <div className="space-y-2 text-[11px]">
                       {boxSuggest.bestRsc && (
-                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                        <div className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2">
                           <div className="flex items-center justify-between mb-0.5">
-                            <div className="font-semibold text-slate-100">Best RSC match</div>
-                            <span className="font-mono text-[var(--tenant-secondary-readable)] text-[10px]">{boxSuggest.bestRsc.sku}</span>
+                            <div className="font-medium text-[var(--text-primary)]">Best RSC match</div>
+                            <span className="font-mono text-[var(--text-primary)] text-[10px]">{boxSuggest.bestRsc.sku}</span>
                           </div>
-                          <div className="text-slate-300">{boxSuggest.bestRsc.description}</div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                          <div className="text-[var(--text-secondary)]">{boxSuggest.bestRsc.description}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[var(--text-muted)]">
                             <span>
                               Inside{" "}
-                              <span className="font-mono text-slate-50">
+                              <span className="font-mono text-[var(--text-primary)]">
                                 {boxSuggest.bestRsc.inside_length_in}" × {boxSuggest.bestRsc.inside_width_in}" ×{" "}
                                 {boxSuggest.bestRsc.inside_height_in}"
                               </span>
                             </span>
-                            <span className="inline-flex items-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_70%,transparent)] bg-[var(--tenant-secondary)]/10 px-2 py-0.5 text-[10px] text-[var(--tenant-secondary-readable)]">
+                            <span className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
                               Fit score: {boxSuggest.bestRsc.fit_score}
                             </span>
                           </div>
 
                           {boxSuggest.bestRsc.notes && (
-                            <div className="mt-0.5 text-slate-400">{boxSuggest.bestRsc.notes}</div>
+                            <div className="mt-0.5 text-[var(--text-muted)]">{boxSuggest.bestRsc.notes}</div>
                           )}
 
                           <div className="mt-2 flex items-center justify-between">
@@ -4944,8 +4936,8 @@ const tenantCssVars = React.useMemo(() => {
                               className={
                                 "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium " +
                                 (selectedCartonKind === "RSC"
-                                  ? "border-[color:var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_88%,white)]"
-                                  : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)]")
+                                  ? "border-[var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[var(--text-primary)]"
+                                  : "border-[var(--border-strong)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-primary)]")
                               }
                             >
                               {selectedCartonKind === "RSC" ? "Selected carton" : "Pick this box"}
@@ -4955,27 +4947,27 @@ const tenantCssVars = React.useMemo(() => {
                       )}
 
                       {boxSuggest.bestMailer && (
-                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                        <div className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2">
                           <div className="flex items-center justify-between mb-0.5">
-                            <div className="font-semibold text-slate-100">Best mailer match</div>
-                            <span className="font-mono text-[var(--tenant-secondary-readable)] text-[10px]">{boxSuggest.bestMailer.sku}</span>
+                            <div className="font-medium text-[var(--text-primary)]">Best mailer match</div>
+                            <span className="font-mono text-[var(--text-primary)] text-[10px]">{boxSuggest.bestMailer.sku}</span>
                           </div>
-                          <div className="text-slate-300">{boxSuggest.bestMailer.description}</div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-slate-400">
+                          <div className="text-[var(--text-secondary)]">{boxSuggest.bestMailer.description}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[var(--text-muted)]">
                             <span>
                               Inside{" "}
-                              <span className="font-mono text-slate-50">
+                              <span className="font-mono text-[var(--text-primary)]">
                                 {boxSuggest.bestMailer.inside_length_in}" × {boxSuggest.bestMailer.inside_width_in}" ×{" "}
                                 {boxSuggest.bestMailer.inside_height_in}"
                               </span>
                             </span>
-                            <span className="inline-flex items-center rounded-full border border-[color:color-mix(in_srgb,var(--tenant-secondary)_70%,transparent)] bg-[var(--tenant-secondary)]/10 px-2 py-0.5 text-[10px] text-[var(--tenant-secondary-readable)]">
+                            <span className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
                               Fit score: {boxSuggest.bestMailer.fit_score}
                             </span>
                           </div>
 
                           {boxSuggest.bestMailer.notes && (
-                            <div className="mt-0.5 text-slate-400">{boxSuggest.bestMailer.notes}</div>
+                            <div className="mt-0.5 text-[var(--text-muted)]">{boxSuggest.bestMailer.notes}</div>
                           )}
 
                           <div className="mt-2 flex items-center justify-between">
@@ -4985,8 +4977,8 @@ const tenantCssVars = React.useMemo(() => {
                               className={
                                 "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium " +
                                 (selectedCartonKind === "MAILER"
-                                  ? "border-[color:var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_88%,white)]"
-                                  : "border-slate-600 bg-slate-900/80 text-slate-200 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)]")
+                                  ? "border-[var(--tenant-secondary)] bg-[color:color-mix(in_srgb,var(--tenant-secondary)_20%,transparent)] text-[var(--text-primary)]"
+                                  : "border-[var(--border-strong)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-primary)]")
                               }
                             >
                               {selectedCartonKind === "MAILER" ? "Selected carton" : "Pick this box"}
@@ -5001,10 +4993,10 @@ const tenantCssVars = React.useMemo(() => {
                 {/* Notes / special instructions */}
                 <div
                   data-guided="notes"
-                  className={`mt-2 bg-slate-900/80 rounded-2xl border border-slate-700 p-3 ${guidedClass("notes")}`}
+                  className={`mt-2 bg-[var(--surface-page)] rounded-xl border border-[var(--border)] p-3 ${guidedClass("notes")}`}
                 >
-                  <div className="text-xs font-semibold text-slate-100 mb-1">Notes / special instructions</div>
-                  <div className="text-[11px] text-slate-400 mb-2">
+                  <div className="text-xs font-medium text-[var(--text-primary)] mb-1">Notes / special instructions</div>
+                  <div className="text-[11px] text-[var(--text-muted)] mb-2">
                     Optional text for anything the foam layout needs to call out (loose parts, labels, extra protection,
                     etc.). This will be saved with the quote when you apply.
                   </div>
@@ -5012,11 +5004,11 @@ const tenantCssVars = React.useMemo(() => {
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     rows={4}
-                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 resize-vertical"
+                    className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] resize-vertical"
                   />
                 </div>
 
-                <div className="mt-1 border-t border-slate-800 pt-2 text-[11px] text-slate-500 space-y-1">
+                <div className="mt-1 border-t border-[var(--border)] pt-2 text-[11px] text-[var(--text-faint)] space-y-1">
   <div>
     Cavities snap to 0.125&quot; and keep 0.5&quot; walls to block edges and between pockets.
   </div>
@@ -5024,7 +5016,7 @@ const tenantCssVars = React.useMemo(() => {
 
 
                 {!hasRealQuoteNo && (
-                  <div className="mt-3 rounded-xl border border-amber-500/70 bg-amber-900/50 px-3 py-2 text-[11px] text-amber-50">
+                  <div className="mt-3 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)]">
                     No quote is linked yet. Open this page from an emailed quote or the /quote print view to save layouts
                     back to a real quote.
                   </div>
@@ -5038,14 +5030,14 @@ const tenantCssVars = React.useMemo(() => {
               >
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
                   <div>
-                    <div className="flex items-center gap-2 text-sm text-slate-50">
-                      <span className="font-semibold">Foam layout preview</span>
-                      <span className="px-2 py-0.5 rounded-full bg-[color:color-mix(in_srgb,var(--tenant-secondary)_15%,transparent)] border border-[color:color-mix(in_srgb,var(--tenant-secondary)_60%,transparent)] text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)] text-[11px] font-medium">
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                      <span className="font-medium">Foam layout preview</span>
+                      <span className="px-2 py-0.5 rounded-full bg-[var(--status-neutral-bg)] border border-[var(--border-strong)] text-[var(--status-neutral-text)] text-[11px] font-medium">
                         Interactive layout
                       </span>
                     </div>
                     {!hasRealQuoteNo && (
-                      <div className="text-[11px] text-amber-300 mt-1">
+                      <div className="text-[11px] text-[var(--attention)] mt-1">
                         Demo only – link from a real quote email to apply layouts.
                       </div>
                     )}
@@ -5054,7 +5046,7 @@ const tenantCssVars = React.useMemo(() => {
                     <button
                       type="button"
                       onClick={guided.start}
-                      className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1 text-[11px] font-medium text-amber-300 hover:border-[color:var(--tenant-secondary)] hover:text-amber-200 hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
+                      className="inline-flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)] transition"
                     >
                       Start Guided Input
                     </button>
@@ -5062,18 +5054,14 @@ const tenantCssVars = React.useMemo(() => {
                   <div aria-hidden="true" />
                 </div>
 
-                <p className="text-[11px] text-slate-400 leading-snug">
+                <p className="text-[11px] text-[var(--text-muted)] leading-snug">
                   Drag cavities to adjust placement. Use the square handle at the bottom-right of each cavity to resize.
                   Cavities are placed inside a 0.5&quot; wall on all sides. When a cavity is selected, the nearest
                   horizontal and vertical gaps to other cavities and to the block edges are dimensioned.
                 </p>
 
                 {/* canvas wrapper */}
-                <div className="relative flex-1 rounded-2xl border border-slate-800/90 bg-slate-950 overflow-hidden shadow-[0_22px_55px_rgba(15,23,42,0.95)]">
-                  <div
-                    aria-hidden="true"
-                className="pointer-events-none absolute inset-0 opacity-80 bg-[radial-gradient(circle_at_center,_rgba(15,23,42,0.96),transparent_56%),linear-gradient(to_right,color-mix(in_srgb,var(--tenant-primary)_30%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--tenant-primary)_30%,transparent)_1px,transparent_1px)] [background-size:560px_560px,24px_24px,24px_24px]"
-                  />
+                <div className="relative flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface-page)] overflow-hidden">
                   <div className="relative p-4 overflow-auto">
                   <InteractiveCanvas
   layout={layout}
@@ -5101,53 +5089,53 @@ const tenantCssVars = React.useMemo(() => {
 
                 {/* Box suggester preview + bottom cartons row (hidden for now, JSX preserved) */}
                 {false && (
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
-                    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-[var(--text-secondary)]">
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-3">
                       <div className="flex items-center justify-between mb-1">
-                        <div className="text-xs font-semibold text-slate-100">Box suggester inputs</div>
-                        <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                        <div className="text-xs font-medium text-[var(--text-primary)]">Box suggester inputs</div>
+                        <span className="inline-flex items-center rounded-full bg-[var(--status-neutral-bg)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-[var(--status-neutral-text)]">
                           Preview only
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 mb-2">
+                      <p className="text-[11px] text-[var(--text-muted)] mb-2">
                         These are the dimensions and quantity the box suggester will use. Next step is wiring this into
                         the real Box Partners lookup.
                       </p>
                       <div className="space-y-1.5 text-[11px]">
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-400">Foam footprint (L × W)</span>
-                          <span className="font-mono text-slate-50">
+                          <span className="text-[var(--text-muted)]">Foam footprint (L × W)</span>
+                          <span className="font-mono text-[var(--text-primary)]">
                             {Number(block.lengthIn).toFixed(2)}" × {Number(block.widthIn).toFixed(2)}"
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-400">Stack depth</span>
-                          <span className="font-mono text-slate-50">{totalStackThicknessIn.toFixed(2)}"</span>
+                          <span className="text-[var(--text-muted)]">Stack depth</span>
+                          <span className="font-mono text-[var(--text-primary)]">{totalStackThicknessIn.toFixed(2)}"</span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-400">Quoted quantity</span>
-                          <span className="font-mono text-slate-50">{qtyLabel}</span>
+                          <span className="text-[var(--text-muted)]">Quoted quantity</span>
+                          <span className="font-mono text-[var(--text-primary)]">{qtyLabel}</span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3">
-                      <div className="text-xs font-semibold text-slate-100 mb-1">Closest matching cartons (coming soon)</div>
-                      <p className="text-[11px] text-slate-400 mb-2">
-                        This panel will show the best fit <span className="text-[var(--tenant-secondary-readable)] font-medium">RSC</span> and{" "}
-                        <span className="text-[var(--tenant-secondary-readable)] font-medium">mailer</span> for the foam stack above, based on the
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-3">
+                      <div className="text-xs font-medium text-[var(--text-primary)] mb-1">Closest matching cartons (coming soon)</div>
+                      <p className="text-[11px] text-[var(--text-muted)] mb-2">
+                        This panel will show the best fit <span className="text-[var(--text-primary)] font-medium">RSC</span> and{" "}
+                        <span className="text-[var(--text-primary)] font-medium">mailer</span> for the foam stack above, based on the
                         Box Partners catalog. The selection will be saved back to the quote when you apply.
                       </p>
                       <div className="grid grid-cols-1 gap-2">
-                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-                          <div className="text-[11px] font-semibold text-slate-100">Best RSC match</div>
-                          <div className="text-[11px] text-slate-500">
+                        <div className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-3 py-2">
+                          <div className="text-[11px] font-medium text-[var(--text-primary)]">Best RSC match</div>
+                          <div className="text-[11px] text-[var(--text-faint)]">
                             Will show: part number, inside dims, and fit score.
                           </div>
                         </div>
-                        <div className="rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
-                          <div className="text-[11px] font-semibold text-slate-100">Best Mailer match</div>
-                          <div className="text-[11px] text-slate-500">
+                        <div className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-3 py-2">
+                          <div className="text-[11px] font-medium text-[var(--text-primary)]">Best Mailer match</div>
+                          <div className="text-[11px] text-[var(--text-faint)]">
                             Will show: part number, inside dims, and fit score.
                           </div>
                         </div>
@@ -5162,76 +5150,76 @@ const tenantCssVars = React.useMemo(() => {
                 {/* Customer info card */}
                 <div
                   data-guided="customer-info"
-                  className={`bg-slate-900 rounded-2xl border border-slate-800 p-3 ${guidedClass("customer-info")}`}
+                  className={`bg-[var(--surface-page)] rounded-xl border border-[var(--border)] p-3 ${guidedClass("customer-info")}`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <div className="text-xs font-semibold text-slate-100">Customer info</div>
+                    <div className="text-xs font-medium text-[var(--text-primary)]">Customer info</div>
                     <span
                       className={
                         "inline-flex h-1.5 w-1.5 rounded-full " +
                         (missingCustomerInfo && hasRealQuoteNo
-                          ? "bg-rose-400 shadow-[0_0_8px_rgba(248,113,113,0.9)]"
-                          : "bg-emerald-400/70 shadow-[0_0_7px_rgba(52,211,153,0.85)]")
+                          ? "bg-[var(--attention)]"
+                          : "bg-[var(--status-success-text)]")
                       }
                     />
                   </div>
-                  <div className="text-[11px] text-slate-400 mb-2">
+                  <div className="text-[11px] text-[var(--text-muted)] mb-2">
                     Add who this foam layout is for.{" "}
-                    <span className="text-[var(--tenant-secondary-readable)]">
+                    <span className="text-[var(--text-muted)]">
                       Name + email are required before recommending foam or applying to the quote.
                     </span>
                   </div>
 
                   <div className="space-y-2 text-xs">
                     <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-300">
-                        Customer name <span className="text-rose-300">*</span>
+                      <span className="text-[11px] text-[var(--text-secondary)]">
+                        Customer name <span className="text-[var(--attention)]">*</span>
                       </span>
                       <input
                         type="text"
                         value={customerName}
                         onChange={(e) => setCustomerName(e.target.value)}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)]"
                       />
                     </label>
 
                     <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-300">Company (optional)</span>
+                      <span className="text-[11px] text-[var(--text-secondary)]">Company (optional)</span>
                       <input
                         type="text"
                         value={customerCompany}
                         onChange={(e) => setCustomerCompany(e.target.value)}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)]"
                       />
                     </label>
 
                     <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-300">
-                        Email <span className="text-rose-300">*</span>
+                      <span className="text-[11px] text-[var(--text-secondary)]">
+                        Email <span className="text-[var(--attention)]">*</span>
                       </span>
                       <input
                         type="email"
                         value={customerEmail}
                         onChange={(e) => setCustomerEmail(e.target.value)}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)]"
                       />
                     </label>
 
                     <label className="flex flex-col gap-1">
-                      <span className="text-[11px] text-slate-300">Phone (optional)</span>
+                      <span className="text-[11px] text-[var(--text-secondary)]">Phone (optional)</span>
                       <input
                         type="tel"
                         value={customerPhone}
                         onChange={(e) => setCustomerPhone(e.target.value)}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)]"
                       />
                     </label>
                   </div>
 
                   {missingCustomerInfo && hasRealQuoteNo && (
-                    <div className="mt-2 text-[11px] text-amber-300">
-                      Enter a name and email to enable <span className="font-semibold">Recommend my foam</span> and{" "}
-                      <span className="font-semibold">Apply to quote</span>.
+                    <div className="mt-2 text-[11px] text-[var(--attention)]">
+                      Enter a name and email to enable <span className="font-medium">Recommend my foam</span> and{" "}
+                      <span className="font-medium">Apply to quote</span>.
                     </div>
                   )}
                 </div>
@@ -5239,19 +5227,19 @@ const tenantCssVars = React.useMemo(() => {
                 {/* Cavities list + editor */}
                 <div
                   data-guided="cavity-editor"
-                  className={`bg-slate-900 rounded-2xl border border-slate-800 p-3 flex-1 flex flex-col ${guidedClass("cavity-editor")}`}
+                  className={`bg-[var(--surface-page)] rounded-xl border border-[var(--border)] p-3 flex-1 flex flex-col ${guidedClass("cavity-editor")}`}
                 >
-                  <div className="text-xs font-semibold text-slate-100">
+                  <div className="text-xs font-medium text-[var(--text-primary)]">
                     Cavities
                     {activeLayerDisplayLabel && (
-                      <span className="ml-1 text-[11px] font-normal text-slate-400">
+                      <span className="ml-1 text-[11px] font-normal text-[var(--text-muted)]">
                         — {activeLayerDisplayLabel}
                       </span>
                     )}
                   </div>
 
                   {cavities.length === 0 ? (
-                    <div className="mt-2 text-xs text-slate-400">
+                    <div className="mt-2 text-xs text-[var(--text-muted)]">
                       No cavities yet. Use the palette on the left to add a pocket.
                     </div>
                   ) : (
@@ -5263,14 +5251,14 @@ const tenantCssVars = React.useMemo(() => {
                         const inactiveBg = `${color}33`;
                         const chipStyle = {
                           backgroundColor: isActive ? color : inactiveBg,
-                          color: isActive ? "#020617" : "#e5e7eb",
+                          color: isActive ? "#020617" : "#1C1C1A",
                         } as React.CSSProperties;
 
                         return (
                           <li
                             key={cav.id}
-                            className={`flex items-center justify-between gap-2 rounded-lg px-1 py-1 ${
-                              isActive ? "bg-slate-800/80" : "bg-slate-900/40 hover:bg-slate-800/50"
+                            className={`flex items-center justify-between gap-2 rounded-md px-1 py-1 ${
+                              isActive ? "bg-[var(--surface-subtle)]" : "hover:bg-[var(--surface-subtle)]"
                             }`}
                           >
                             <button
@@ -5280,18 +5268,18 @@ const tenantCssVars = React.useMemo(() => {
                             >
                               <span
                                 style={chipStyle}
-                                className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold"
+                                className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-medium"
                               >
                                 {formatCavityChip(cav.id)}
                               </span>
-                              <span className={isActive ? "text-slate-50 font-medium" : "text-slate-200"}>
+                              <span className={isActive ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-secondary)]"}>
                                 {cav.label}
                               </span>
                             </button>
                             <button
                               type="button"
                               onClick={() => deleteCavity(cav.id)}
-                              className="text-[11px] text-slate-500 hover:text-red-400"
+                              className="text-[11px] text-[var(--text-faint)] hover:text-[var(--attention)]"
                               title="Delete cavity"
                             >
                               ✕
@@ -5302,10 +5290,10 @@ const tenantCssVars = React.useMemo(() => {
                     </ul>
                   )}
 
-                  <div className="mt-2 border-t border-slate-800 pt-2 text-[11px] text-slate-400">
+                  <div className="mt-2 border-t border-[var(--border)] pt-2 text-[11px] text-[var(--text-muted)]">
                     {selectedCavity ? (
                       <span>
-                        Editing <strong className="text-slate-100">{selectedCavity.label}</strong>
+                        Editing <strong className="text-[var(--text-primary)]">{selectedCavity.label}</strong>
                       </span>
                     ) : (
                       <span>Select a cavity above to edit its size and depth.</span>
@@ -5317,7 +5305,7 @@ const tenantCssVars = React.useMemo(() => {
                       {selectedCavity.shape === "circle" ? (
                         <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                           <label className="flex flex-col gap-1">
-                            <span className="text-[11px] text-slate-400">Diameter (in)</span>
+                            <span className="text-[11px] text-[var(--text-muted)]">Diameter (in)</span>
                             <input
                               type="number"
                               step={0.125}
@@ -5330,11 +5318,11 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("length");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
+                              className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[var(--tenant-secondary)]"
                             />
                           </label>
                           <label className="flex flex-col gap-1">
-                            <span className="text-[11px] text-slate-400">Depth (in)</span>
+                            <span className="text-[11px] text-[var(--text-muted)]">Depth (in)</span>
                             <input
                               type="number"
                               step={0.125}
@@ -5347,14 +5335,14 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("depth");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
+                              className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[var(--tenant-secondary)]"
                             />
                           </label>
                         </div>
                       ) : (
                         <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                           <label className="flex flex-col gap-1">
-                            <span className="text-[11px] text-slate-400">Length (in)</span>
+                            <span className="text-[11px] text-[var(--text-muted)]">Length (in)</span>
                             <input
                               type="number"
                               step={0.125}
@@ -5367,11 +5355,11 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("length");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
+                              className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[var(--tenant-secondary)]"
                             />
                           </label>
                           <label className="flex flex-col gap-1">
-                            <span className="text-[11px] text-slate-400">Width (in)</span>
+                            <span className="text-[11px] text-[var(--text-muted)]">Width (in)</span>
                             <input
                               type="number"
                               step={0.125}
@@ -5384,11 +5372,11 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("width");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
+                              className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[var(--tenant-secondary)]"
                             />
                           </label>
                           <label className="flex flex-col gap-1">
-                            <span className="text-[11px] text-slate-400">Depth (in)</span>
+                            <span className="text-[11px] text-[var(--text-muted)]">Depth (in)</span>
                             <input
                               type="number"
                               step={0.125}
@@ -5401,12 +5389,12 @@ const tenantCssVars = React.useMemo(() => {
                                   commitCavityField("depth");
                                 }
                               }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
+                              className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[var(--tenant-secondary)]"
                             />
                           </label>
                           {editorMode === "advanced" && selectedCavity.shape === "roundedRect" && (
                                                       <label className="flex flex-col gap-1">
-                                                        <span className="text-[11px] text-slate-400">Corner radius (in)</span>
+                                                        <span className="text-[11px] text-[var(--text-muted)]">Corner radius (in)</span>
                                                         <input
                                                           type="number"
                                                           step={0.125}
@@ -5419,7 +5407,7 @@ const tenantCssVars = React.useMemo(() => {
                                                               commitCavityField("cornerRadius");
                                                             }
                                                           }}
-                              className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[color:var(--tenant-secondary)]"
+                              className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--tenant-secondary)_35%,transparent)] focus:border-[var(--tenant-secondary)]"
                                                         />
                                                       </label>
                           )}
@@ -5430,7 +5418,7 @@ const tenantCssVars = React.useMemo(() => {
                       <button
                         type="button"
                         onClick={handleCenterSelectedCavity}
-                        className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] font-medium text-slate-100 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
+                        className="mt-3 inline-flex items-center justify-center rounded-md border border-[var(--border-strong)] px-3 py-1 text-[11px] font-medium text-[var(--text-primary)] hover:border-[var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] transition"
                       >
                         Center this cavity in block
                       </button>
@@ -5443,11 +5431,11 @@ const tenantCssVars = React.useMemo(() => {
         </div>
       </div>
       {guided.enabled && (
-        <div className="fixed bottom-4 right-4 z-50 w-[260px] rounded-2xl border border-amber-500/70 bg-slate-950/95 p-3 text-[11px] text-slate-100 shadow-[0_18px_40px_rgba(15,23,42,0.6)]">
-          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-400">
+        <div className="fixed bottom-4 right-4 z-50 w-[260px] rounded-xl border border-[var(--border-strong)] bg-[var(--surface-card)] p-3 text-[11px] text-[var(--text-primary)] shadow-[0_18px_40px_rgba(28,28,26,0.15)]">
+          <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
             GUIDED INPUT
           </div>
-          <div className="mt-1 text-xs font-semibold text-slate-100">
+          <div className="mt-1 text-xs font-medium text-[var(--text-primary)]">
             Step {guided.stepIndex + 1} of {guided.steps.length} - {guidedStepLabel}
           </div>
           <div className="mt-2 flex items-center gap-2">
@@ -5455,7 +5443,7 @@ const tenantCssVars = React.useMemo(() => {
               type="button"
               onClick={guided.prev}
               disabled={guided.stepIndex === 0}
-              className="inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+              className="inline-flex items-center justify-center rounded-md border border-[var(--border-strong)] px-3 py-1 text-[11px] text-[var(--text-primary)] disabled:opacity-50"
             >
               Back
             </button>
@@ -5463,7 +5451,7 @@ const tenantCssVars = React.useMemo(() => {
               <button
                 type="button"
                 onClick={guided.finish}
-                className="inline-flex items-center justify-center rounded-full border border-[color:var(--tenant-primary)] bg-[color:var(--tenant-primary)] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[color:color-mix(in_srgb,var(--tenant-primary)_85%,white)] transition"
+                className="inline-flex items-center justify-center rounded-md border border-[var(--tenant-primary)] bg-[var(--tenant-primary)] px-3 py-1 text-[11px] font-medium text-white hover:bg-[color:color-mix(in_srgb,var(--tenant-primary)_85%,white)] transition"
               >
                 Finish
               </button>
@@ -5471,7 +5459,7 @@ const tenantCssVars = React.useMemo(() => {
               <button
                 type="button"
                 onClick={guided.next}
-                className="inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] text-slate-100 hover:border-[color:var(--tenant-secondary)] hover:text-[color:color-mix(in_srgb,var(--tenant-secondary-readable)_85%,white)]"
+                className="inline-flex items-center justify-center rounded-md border border-[var(--border-strong)] px-3 py-1 text-[11px] text-[var(--text-primary)] hover:border-[var(--tenant-secondary)]"
               >
                 Next
               </button>
@@ -5479,7 +5467,7 @@ const tenantCssVars = React.useMemo(() => {
             <button
               type="button"
               onClick={guided.stop}
-              className="ml-auto inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+              className="ml-auto inline-flex items-center justify-center rounded-md border border-[var(--border-strong)] px-3 py-1 text-[11px] text-[var(--text-secondary)] hover:border-[var(--border-strong)]"
             >
               Exit
             </button>
@@ -5487,7 +5475,7 @@ const tenantCssVars = React.useMemo(() => {
           <button
             type="button"
             onClick={guided.finish}
-            className="mt-2 text-[11px] text-slate-400 hover:text-slate-200 underline underline-offset-2"
+            className="mt-2 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] underline underline-offset-2"
           >
             Don't show again
           </button>
