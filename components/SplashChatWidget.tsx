@@ -196,13 +196,17 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
   const [minimizedHint, setMinimizedHint] = React.useState(false);
 
   const [facts, setFacts] = React.useState<WidgetFacts>(() => {
-    const saved = safeJsonParse<{ facts: WidgetFacts }>(localStorage.getItem(LS_KEY));
+    const saved = safeJsonParse<{ facts: WidgetFacts }>(
+      typeof window !== "undefined" ? localStorage.getItem(LS_KEY) : null,
+    );
     if (saved?.facts) return saved.facts;
     return { createdAtIso: new Date().toISOString() };
   });
 
   const [msgs, setMsgs] = React.useState<Msg[]>(() => {
-    const saved = safeJsonParse<{ msgs: Msg[] }>(localStorage.getItem(LS_KEY));
+    const saved = safeJsonParse<{ msgs: Msg[] }>(
+      typeof window !== "undefined" ? localStorage.getItem(LS_KEY) : null,
+    );
     if (saved?.msgs?.length) return saved.msgs;
 
     return [
@@ -226,12 +230,16 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
 
   // “done” = the brain says we have enough to open /start-quote
   const [done, setDone] = React.useState<boolean>(() => {
-    const saved = safeJsonParse<{ done: boolean }>(localStorage.getItem(LS_KEY));
+    const saved = safeJsonParse<{ done: boolean }>(
+      typeof window !== "undefined" ? localStorage.getItem(LS_KEY) : null,
+    );
     return saved?.done ?? false;
   });
 
   const [quickReplies, setQuickReplies] = React.useState<string[]>(() => {
-    const saved = safeJsonParse<{ quickReplies: string[] }>(localStorage.getItem(LS_KEY));
+    const saved = safeJsonParse<{ quickReplies: string[] }>(
+      typeof window !== "undefined" ? localStorage.getItem(LS_KEY) : null,
+    );
     return saved?.quickReplies ?? [];
   });
 
