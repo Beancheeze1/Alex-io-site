@@ -39,10 +39,10 @@ function classifyStatus(status: string | null | undefined) {
 
 function statusClasses(tone: "success" | "danger" | "warning" | "neutral") {
   switch (tone) {
-    case "success": return "bg-emerald-900/40 text-emerald-200 border-emerald-700/60";
-    case "danger":  return "bg-rose-900/40 text-rose-200 border-rose-700/60";
-    case "warning": return "bg-amber-900/40 text-amber-200 border-amber-700/60";
-    default:        return "bg-neutral-900/60 text-neutral-200 border-neutral-700/60";
+    case "success": return "bg-[var(--status-success-bg)] text-[var(--status-success-text)] border-[var(--status-success-text)]/40";
+    case "danger":  return "bg-[var(--attention-bg)] text-[var(--attention)] border-[var(--attention-border)]";
+    case "warning": return "bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border-[var(--status-pending-text)]/40";
+    default:        return "bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)] border-[var(--border)]";
   }
 }
 
@@ -104,21 +104,21 @@ export default function MyQuotesPage() {
   const unpaidTotal = unpaidPayouts.reduce((s, p) => s + Number(p.commission_usd), 0);
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-50">
+    <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
       <div className="mx-auto max-w-6xl px-4 py-8 lg:py-10 space-y-6">
 
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-sky-300">My quotes</h1>
-            <p className="mt-2 text-sm text-neutral-300">
+            <h1 className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">My quotes</h1>
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">
               Quotes assigned to your seat. Older quotes without a sales rep set won&apos;t show here.
             </p>
           </div>
           <div className="flex gap-3 text-xs">
-            <Link href="/quote/start?rep=sales-demo" className="rounded-full bg-sky-500 px-3 py-1.5 font-medium text-white hover:bg-sky-400">
+            <Link href="/quote/start?rep=sales-demo" className="rounded-md bg-[var(--action-primary)] px-3 py-1.5 font-medium text-white hover:bg-[var(--action-primary-hover)]">
               Start a new quote
             </Link>
-            <Link href="/admin" className="rounded-full border border-neutral-700 px-3 py-1.5 text-neutral-200 hover:bg-neutral-900">
+            <Link href="/admin" className="rounded-md border border-[var(--border)] px-3 py-1.5 text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]">
               Admin home
             </Link>
           </div>
@@ -126,33 +126,33 @@ export default function MyQuotesPage() {
 
         {/* Summary tiles */}
         <section className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 px-4 py-3">
-            <p className="text-[11px] uppercase tracking-wide text-neutral-400">Total assigned</p>
-            <p className="mt-2 text-2xl font-semibold">{total}</p>
-            <p className="mt-1 text-[11px] text-neutral-500">Quotes tagged to your seat</p>
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Total assigned</p>
+            <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{total}</p>
+            <p className="mt-1 text-[11px] text-[var(--text-faint)]">Quotes tagged to your seat</p>
           </div>
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 px-4 py-3">
-            <p className="text-[11px] uppercase tracking-wide text-neutral-400">Last 7 days</p>
-            <p className="mt-2 text-2xl font-semibold">{last7Days}</p>
-            <p className="mt-1 text-[11px] text-neutral-500">Fresh quotes created this week</p>
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Last 7 days</p>
+            <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{last7Days}</p>
+            <p className="mt-1 text-[11px] text-[var(--text-faint)]">Fresh quotes created this week</p>
           </div>
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 px-4 py-3">
-            <p className="text-[11px] uppercase tracking-wide text-neutral-400">Active pipeline</p>
-            <p className="mt-2 text-2xl font-semibold">{activeCount}</p>
-            <p className="mt-1 text-[11px] text-neutral-500">Open or unlabeled quotes</p>
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Active pipeline</p>
+            <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{activeCount}</p>
+            <p className="mt-1 text-[11px] text-[var(--text-faint)]">Open or unlabeled quotes</p>
           </div>
         </section>
 
         {/* Commission section */}
         {commission && commission.pct != null && (
-          <section className="rounded-2xl border border-sky-800/50 bg-sky-950/40 px-5 py-4">
+          <section className="rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-5 py-4">
             <div className="mb-3 flex items-center justify-between">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-sky-400">Your commission</p>
+              <p className="text-[11px] font-medium uppercase tracking-widest text-[var(--text-secondary)]">Your commission</p>
               {payouts.length > 0 && (
-                <button onClick={() => setShowPayouts((v) => !v)} className="text-xs text-neutral-500 hover:text-neutral-300">
+                <button onClick={() => setShowPayouts((v) => !v)} className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
                   {showPayouts ? "Hide history" : "View payout history"}
                   {unpaidPayouts.length > 0 && !showPayouts && (
-                    <span className="ml-1.5 rounded-full bg-amber-700/40 px-1.5 py-0.5 text-[10px] text-amber-300">
+                    <span className="ml-1.5 rounded-full bg-[var(--status-pending-bg)] px-1.5 py-0.5 text-[10px] text-[var(--status-pending-text)]">
                       {unpaidPayouts.length} unpaid
                     </span>
                   )}
@@ -163,32 +163,32 @@ export default function MyQuotesPage() {
             {/* Current totals */}
             <div className="grid gap-4 sm:grid-cols-3">
               <div>
-                <p className="text-[11px] text-neutral-400">Rate</p>
-                <p className="mt-1 text-2xl font-semibold text-sky-300">{commission.pct}%</p>
+                <p className="text-[11px] text-[var(--text-muted)]">Rate</p>
+                <p className="mt-1 text-2xl font-semibold text-[var(--text-primary)]">{commission.pct}%</p>
               </div>
               <div>
-                <p className="text-[11px] text-neutral-400">All-time RFM quotes total</p>
-                <p className="mt-1 text-2xl font-semibold text-neutral-100">${fmt(commission.quotes_total_usd)}</p>
-                <p className="mt-0.5 text-[10px] text-neutral-500">{commission.quote_count} quote{commission.quote_count !== 1 ? "s" : ""}</p>
+                <p className="text-[11px] text-[var(--text-muted)]">All-time RFM quotes total</p>
+                <p className="mt-1 text-2xl font-semibold text-[var(--text-primary)]">${fmt(commission.quotes_total_usd)}</p>
+                <p className="mt-0.5 text-[10px] text-[var(--text-faint)]">{commission.quote_count} quote{commission.quote_count !== 1 ? "s" : ""}</p>
               </div>
               <div>
-                <p className="text-[11px] text-neutral-400">All-time earned</p>
-                <p className="mt-1 text-2xl font-semibold text-emerald-300">${fmt(commission.commission_usd)}</p>
+                <p className="text-[11px] text-[var(--text-muted)]">All-time earned</p>
+                <p className="mt-1 text-2xl font-semibold text-[var(--text-primary)]">${fmt(commission.commission_usd)}</p>
               </div>
             </div>
 
             {/* Payout history table */}
             {showPayouts && (
               <div className="mt-5">
-                <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-neutral-400">Payout history</p>
-                {payoutsLoading && <p className="text-xs text-neutral-500">Loading…</p>}
+                <p className="mb-2 text-[11px] font-medium uppercase tracking-widest text-[var(--text-muted)]">Payout history</p>
+                {payoutsLoading && <p className="text-xs text-[var(--text-faint)]">Loading…</p>}
                 {!payoutsLoading && payouts.length === 0 && (
-                  <p className="text-xs text-neutral-500">No closed periods yet. Your admin will close each month to record payouts.</p>
+                  <p className="text-xs text-[var(--text-faint)]">No closed periods yet. Your admin will close each month to record payouts.</p>
                 )}
                 {!payoutsLoading && payouts.length > 0 && (
-                  <div className="overflow-x-auto rounded-xl border border-neutral-700/50">
+                  <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
                     <table className="min-w-full text-left text-xs">
-                      <thead className="border-b border-neutral-700/50 text-neutral-500">
+                      <thead className="border-b border-[var(--border)] text-[var(--text-faint)]">
                         <tr>
                           <th className="py-2 px-3">Period</th>
                           <th className="py-2 pr-3 text-right">Quotes</th>
@@ -200,26 +200,26 @@ export default function MyQuotesPage() {
                       </thead>
                       <tbody>
                         {payouts.map((p) => (
-                          <tr key={p.id} className="border-b border-neutral-800/50 last:border-0">
-                            <td className="py-2 px-3 font-medium text-neutral-200">{formatPeriod(p.period)}</td>
-                            <td className="py-2 pr-3 text-right text-neutral-400">{p.quote_count}</td>
-                            <td className="py-2 pr-3 text-right text-neutral-300">${fmt(p.quotes_total_usd)}</td>
-                            <td className="py-2 pr-3 text-right text-sky-300">{p.commission_pct}%</td>
-                            <td className="py-2 pr-3 text-right font-semibold text-emerald-300">${fmt(p.commission_usd)}</td>
+                          <tr key={p.id} className="border-b border-[var(--border)] last:border-0">
+                            <td className="py-2 px-3 font-medium text-[var(--text-primary)]">{formatPeriod(p.period)}</td>
+                            <td className="py-2 pr-3 text-right text-[var(--text-muted)]">{p.quote_count}</td>
+                            <td className="py-2 pr-3 text-right text-[var(--text-secondary)]">${fmt(p.quotes_total_usd)}</td>
+                            <td className="py-2 pr-3 text-right text-[var(--text-secondary)]">{p.commission_pct}%</td>
+                            <td className="py-2 pr-3 text-right font-semibold text-[var(--text-primary)]">${fmt(p.commission_usd)}</td>
                             <td className="py-2 pr-3 text-right">
                               {p.paid_at
-                                ? <span className="text-emerald-400">Paid ✓ <span className="text-neutral-500">{new Date(p.paid_at).toLocaleDateString()}</span></span>
-                                : <span className="text-amber-400">Unpaid</span>}
+                                ? <span className="text-[var(--status-success-text)]">Paid ✓ <span className="text-[var(--text-faint)]">{new Date(p.paid_at).toLocaleDateString()}</span></span>
+                                : <span className="text-[var(--status-pending-text)]">Unpaid</span>}
                             </td>
                           </tr>
                         ))}
                       </tbody>
-                      <tfoot className="border-t border-neutral-700/50">
+                      <tfoot className="border-t border-[var(--border-strong)]">
                         <tr>
-                          <td colSpan={4} className="py-2 px-3 text-[11px] text-neutral-500">
+                          <td colSpan={4} className="py-2 px-3 text-[11px] text-[var(--text-faint)]">
                             Unpaid balance
                           </td>
-                          <td className="py-2 pr-3 text-right font-semibold text-amber-300">${fmt(unpaidTotal)}</td>
+                          <td className="py-2 pr-3 text-right font-semibold text-[var(--status-pending-text)]">${fmt(unpaidTotal)}</td>
                           <td />
                         </tr>
                       </tfoot>
@@ -232,19 +232,19 @@ export default function MyQuotesPage() {
         )}
 
         {/* Quotes table */}
-        <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4 shadow-md">
-          {loading && <p className="text-sm text-neutral-300">Loading your quotes…</p>}
-          {error && !loading && <p className="text-sm text-rose-300">{error}</p>}
+        <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+          {loading && <p className="text-sm text-[var(--text-secondary)]">Loading your quotes…</p>}
+          {error && !loading && <p className="text-sm text-[var(--attention)]">{error}</p>}
           {!loading && !error && total === 0 && (
-            <div className="py-6 text-center text-sm text-neutral-300">
+            <div className="py-6 text-center text-sm text-[var(--text-secondary)]">
               <p className="mb-2">You don&apos;t have any quotes yet.</p>
-              <p className="text-xs text-neutral-400">When new quotes are created and assigned to your seat, they&apos;ll appear here automatically.</p>
+              <p className="text-xs text-[var(--text-muted)]">When new quotes are created and assigned to your seat, they&apos;ll appear here automatically.</p>
             </div>
           )}
           {total > 0 && !loading && (
             <div className="mt-1 overflow-x-auto">
               <table className="min-w-full text-left text-xs">
-                <thead className="border-b border-neutral-800 text-neutral-400">
+                <thead className="border-b border-[var(--border)] text-[var(--text-muted)]">
                   <tr>
                     <th className="py-2 pr-4">Quote #</th>
                     <th className="py-2 pr-4">Customer</th>
@@ -263,24 +263,24 @@ export default function MyQuotesPage() {
                     const diffDays = (now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
                     const needsFollowUp = (info.tone === "warning" || info.tone === "neutral") && diffDays >= 3;
                     return (
-                      <tr key={q.id} className="border-b border-neutral-900 last:border-0 hover:bg-neutral-900/70">
-                        <td className="py-2 pr-4 text-neutral-50">{q.quote_no}</td>
-                        <td className="py-2 pr-4 text-neutral-200">{q.customer_name || "—"}</td>
-                        <td className="py-2 pr-4 text-neutral-300">{q.email || "—"}</td>
+                      <tr key={q.id} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-subtle)]">
+                        <td className="py-2 pr-4 text-[var(--text-primary)]">{q.quote_no}</td>
+                        <td className="py-2 pr-4 text-[var(--text-secondary)]">{q.customer_name || "—"}</td>
+                        <td className="py-2 pr-4 text-[var(--text-muted)]">{q.email || "—"}</td>
                         <td className="py-2 pr-4">
                           <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${cls}`}>{info.label}</span>
                         </td>
-                        <td className="py-2 pr-4 text-neutral-400">
+                        <td className="py-2 pr-4 text-[var(--text-muted)]">
                           {created.toLocaleDateString()}{" "}
-                          <span className="text-[10px] text-neutral-500">{created.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                          <span className="text-[10px] text-[var(--text-faint)]">{created.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                         </td>
                         <td className="py-2 pr-4">
                           {needsFollowUp && (
-                            <span className="inline-flex rounded-full bg-amber-900/50 px-2 py-0.5 text-[11px] text-amber-200">Follow up</span>
+                            <span className="inline-flex rounded-full bg-[var(--status-pending-bg)] px-2 py-0.5 text-[11px] text-[var(--status-pending-text)]">Follow up</span>
                           )}
                         </td>
                         <td className="py-2 pr-0 text-right">
-                          <Link href={`/quote?quote_no=${encodeURIComponent(q.quote_no)}`} className="text-xs text-sky-300 hover:text-sky-200 hover:underline">
+                          <Link href={`/quote?quote_no=${encodeURIComponent(q.quote_no)}`} className="text-xs text-[var(--text-primary)] hover:underline">
                             Open
                           </Link>
                         </td>

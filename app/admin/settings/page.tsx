@@ -195,15 +195,15 @@ export default function AdminSettingsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
+    <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
       <div className="mx-auto max-w-4xl px-4 py-8 lg:py-10">
         {/* Header */}
         <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-sky-300">
+            <h1 className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">
               Pricing settings
             </h1>
-            <p className="mt-2 text-sm text-slate-300">
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">
               Global knobs that shape how the pricing engine behaves behind the
               scenes. These are admin-only inputs; customers never see this page.
             </p>
@@ -211,7 +211,7 @@ export default function AdminSettingsPage() {
 
           <Link
             href="/admin"
-            className="text-xs text-sky-300 underline-offset-2 hover:text-sky-200 hover:underline"
+            className="text-xs text-[var(--text-secondary)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline"
           >
             &larr; Back to admin home
           </Link>
@@ -219,23 +219,23 @@ export default function AdminSettingsPage() {
 
         {/* Top summary row */}
         <section className="mb-6 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]">
+            <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               What these settings do
             </div>
-            <p className="text-xs text-slate-300">
+            <p className="text-xs text-[var(--text-secondary)]">
               These values are the starting point for quotes that don&apos;t have
               material-specific overrides:
             </p>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-slate-300">
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-[var(--text-secondary)]">
               <li>Default price-per-cubic-inch and board-foot rates.</li>
               <li>Global minimum charge and kerf waste assumption.</li>
               <li>Skive upcharge for non-1&quot; thicknesses.</li>
               <li>Machine throughput, hourly cost, and markup factor.</li>
             </ul>
-            <p className="mt-3 text-[11px] text-slate-500">
+            <p className="mt-3 text-[11px] text-[var(--text-faint)]">
               Today these are stored in memory via{" "}
-              <span className="font-mono text-sky-300">
+              <span className="font-mono text-[var(--text-secondary)]">
                 /api/admin/settings
               </span>
               . In this step we&apos;re not changing the math yet, only
@@ -243,23 +243,23 @@ export default function AdminSettingsPage() {
             </p>
           </div>
 
-          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]">
+            <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               Status
             </div>
             {loading ? (
-              <p className="text-xs text-slate-300">Loading settings…</p>
+              <p className="text-xs text-[var(--text-secondary)]">Loading settings…</p>
             ) : err ? (
-              <p className="text-xs text-rose-300">
+              <p className="text-xs text-[var(--attention)]">
                 Error:{" "}
                 <span className="font-mono text-[11px]">{err}</span>
               </p>
             ) : (
               <>
-                <p className="text-xs text-slate-300">
+                <p className="text-xs text-[var(--text-secondary)]">
                   Settings loaded from the current server process.
                 </p>
-                <p className="mt-2 text-[11px] text-slate-500">
+                <p className="mt-2 text-[11px] text-[var(--text-faint)]">
                   Changes are effective immediately for any endpoints that read
                   from this route. Values reset on a full redeploy (no DB
                   persistence yet).
@@ -270,41 +270,41 @@ export default function AdminSettingsPage() {
         </section>
 
         {/* Main form */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-5 text-sm text-[var(--text-secondary)]">
           <div className="mb-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+            <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               Global pricing knobs
             </div>
-            <p className="mt-1 text-xs text-slate-300">
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">
               Adjust carefully. These values will eventually drive the same
               numbers you and the customer see on quotes and admin views.
             </p>
           </div>
 
           {err && !loading && (
-            <div className="mb-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-100">
+            <div className="mb-3 rounded-lg border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)]">
               {err}
             </div>
           )}
 
           {loading ? (
-            <p className="text-xs text-slate-300">Loading…</p>
+            <p className="text-xs text-[var(--text-secondary)]">Loading…</p>
           ) : (
             <div className="space-y-5">
               {/* Skiving & base rates */}
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <h2 className="mb-3 text-sm font-semibold text-slate-100">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
+                <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">
                   Skiving &amp; base rates
                 </h2>
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Skive upcharge (per piece) — $
                     </span>
                     <input
                       type="number"
                       step="0.01"
-                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.skive_upcharge_each}
                       onChange={(e) =>
                         setNum("skive_upcharge_each")(e.target.value)
@@ -313,13 +313,13 @@ export default function AdminSettingsPage() {
                   </label>
 
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Art Setup fee (USD)
                     </span>
                     <input
                       type="number"
                       step="0.01"
-                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.printing_upcharge_usd}
                       onChange={(e) =>
                         setNum("printing_upcharge_usd")(e.target.value)
@@ -328,14 +328,14 @@ export default function AdminSettingsPage() {
                   </label>
 
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Printing upcharge (% of foam + boxes)
                     </span>
                     <input
                       type="number"
                       step="0.1"
                       min="0"
-                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.printing_upcharge_pct}
                       onChange={(e) =>
                         setNum("printing_upcharge_pct")(e.target.value)
@@ -344,13 +344,13 @@ export default function AdminSettingsPage() {
                   </label>
 
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Default rate ($ / cubic inch)
                     </span>
                     <input
                       type="number"
                       step="0.0001"
-                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.ratePerCI_default}
                       onChange={(e) =>
                         setNum("ratePerCI_default")(e.target.value)
@@ -359,13 +359,13 @@ export default function AdminSettingsPage() {
                   </label>
 
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Default rate ($ / board foot)
                     </span>
                     <input
                       type="number"
                       step="0.01"
-                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.ratePerBF_default}
                       onChange={(e) =>
                         setNum("ratePerBF_default")(e.target.value)
@@ -374,13 +374,13 @@ export default function AdminSettingsPage() {
                   </label>
 
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Default kerf waste (%)
                     </span>
                     <input
                       type="number"
                       step="1"
-                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.kerf_pct_default}
                       onChange={(e) =>
                         setNum("kerf_pct_default")(e.target.value)
@@ -389,13 +389,13 @@ export default function AdminSettingsPage() {
                   </label>
 
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Default minimum charge ($)
                     </span>
                     <input
                       type="number"
                       step="0.01"
-                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.min_charge_default}
                       onChange={(e) =>
                         setNum("min_charge_default")(e.target.value)
@@ -403,26 +403,26 @@ export default function AdminSettingsPage() {
                     />
                   </label>
                 </div>
-                <p className="mt-3 text-[11px] text-slate-500">
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
                   Tip: Non-1″ thicknesses will apply the skive upcharge per piece
                   when the pricing endpoint detects non-integer thickness.
                 </p>
               </div>
 
               {/* Machine & markup */}
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <h2 className="mb-3 text-sm font-semibold text-slate-100">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
+                <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">
                   Machine throughput &amp; markup
                 </h2>
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Machine throughput (in³ / minute)
                     </span>
                     <input
                       type="number"
                       step="1"
-                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.machining_in3_per_min}
                       onChange={(e) =>
                         setNum("machining_in3_per_min")(e.target.value)
@@ -431,13 +431,13 @@ export default function AdminSettingsPage() {
                   </label>
 
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Machine cost ($ / minute)
                     </span>
                     <input
                       type="number"
                       step="0.01"
-                      className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.machine_cost_per_min}
                       onChange={(e) =>
                         setNum("machine_cost_per_min")(e.target.value)
@@ -446,13 +446,13 @@ export default function AdminSettingsPage() {
                   </label>
 
                   <label className="flex flex-col gap-1 text-xs md:col-span-2">
-                    <span className="text-slate-300">
+                    <span className="text-[var(--text-secondary)]">
                       Default markup factor (× over raw cost)
                     </span>
                     <input
                       type="number"
                       step="0.01"
-                      className="w-40 rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                      className="w-40 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                       value={settings.markup_factor_default}
                       onChange={(e) =>
                         setNum("markup_factor_default")(e.target.value)
@@ -460,24 +460,24 @@ export default function AdminSettingsPage() {
                     />
                   </label>
                 </div>
-                <p className="mt-3 text-[11px] text-slate-500">
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
                   These values will eventually align with the pricing breakdown
                   you see in the quote viewer: material vs. machine vs. markup.
                 </p>
               </div>
 
               {/* Cushion family order */}
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <h2 className="mb-3 text-sm font-semibold text-slate-100">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
+                <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">
                   Cushion family priority
                 </h2>
                 <label className="flex flex-col gap-1 text-xs">
-                  <span className="text-slate-300">
+                  <span className="text-[var(--text-secondary)]">
                     Preferred family order (comma-separated)
                   </span>
                   <input
                     type="text"
-                    className="rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-500"
+                    className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
                     placeholder="PE, EPE, PU, EVA"
                     value={settings.cushion_family_order.join(", ")}
                     onChange={(e) =>
@@ -485,7 +485,7 @@ export default function AdminSettingsPage() {
                     }
                   />
                 </label>
-                <p className="mt-3 text-[11px] text-slate-500">
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
                   Polyethylene and Expanded Polyethylene stay separate families;
                   this only controls which options the advisor prefers when
                   multiple curves could work.
@@ -497,7 +497,7 @@ export default function AdminSettingsPage() {
                 <button
                   onClick={save}
                   disabled={saving}
-                  className="rounded-full border border-sky-500/60 bg-sky-600/20 px-4 py-1.5 text-xs font-semibold text-sky-100 shadow-sm transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-md bg-[var(--action-primary)] px-4 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? "Saving…" : "Save settings"}
                 </button>

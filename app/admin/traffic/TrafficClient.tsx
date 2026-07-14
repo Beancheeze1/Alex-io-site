@@ -22,12 +22,16 @@ const FUNNEL_ORDER = [
   "form_submit",
 ] as const;
 
+// Muted funnel-stage palette (legitimate exception to the single-accent rule —
+// a multi-series chart genuinely needs distinguishable hues). Desaturated from
+// the original neon sky/indigo/orange/yellow/green so it reads as considered
+// against the light design system rather than leftover dark-theme accents.
 const FUNNEL_COLORS: Record<string, string> = {
-  page_view:   "#38bdf8",
-  scroll_50:   "#818cf8",
-  cta_click:   "#fb923c",
-  form_start:  "#facc15",
-  form_submit: "#4ade80",
+  page_view:   "#4A9BC4",
+  scroll_50:   "#7B7FD1",
+  cta_click:   "#E08847",
+  form_start:  "#D4A82F",
+  form_submit: "#4FAD6E",
 };
 
 const FUNNEL_LABELS: Record<string, string> = {
@@ -38,16 +42,18 @@ const FUNNEL_LABELS: Record<string, string> = {
   form_submit: "Form Submit",
 };
 
+// Badge pairs: pale tint background + darker-shade text of the same muted hue
+// (same treatment as --status-success-bg/text, applied per funnel category).
 const BADGE_COLORS: Record<string, string> = {
-  page_view:     "bg-sky-400/20 text-sky-300",
-  scroll_50:     "bg-indigo-400/20 text-indigo-300",
-  cta_click:     "bg-orange-400/20 text-orange-300",
-  form_start:    "bg-yellow-400/20 text-yellow-300",
-  form_submit:   "bg-green-400/20 text-green-300",
-  sample_editor: "bg-indigo-400/20 text-indigo-300",
-  sample_skip:   "bg-orange-400/20 text-orange-300",
-  quote_applied: "bg-emerald-400/25 text-emerald-300",
-  quote_email:   "bg-emerald-400/25 text-emerald-300",
+  page_view:     "bg-[#E7F1F7] text-[#1F5A78]",
+  scroll_50:     "bg-[#EAEAF9] text-[#3F3F8F]",
+  cta_click:     "bg-[#FBEBDD] text-[#8A4D1D]",
+  form_start:    "bg-[#FAF1D6] text-[#6B5310]",
+  form_submit:   "bg-[#E6F4EA] text-[#2B6B3F]",
+  sample_editor: "bg-[#EAEAF9] text-[#3F3F8F]",
+  sample_skip:   "bg-[#FBEBDD] text-[#8A4D1D]",
+  quote_applied: "bg-[var(--status-success-bg)] text-[var(--status-success-text)]",
+  quote_email:   "bg-[var(--status-success-bg)] text-[var(--status-success-text)]",
 };
 
 const BADGE_LABELS: Record<string, string> = {
@@ -83,12 +89,12 @@ function KpiCard({
   sub?: string;
 }) {
   return (
-    <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-4">
-      <div className="text-xs text-neutral-400 uppercase tracking-wider mb-1">{label}</div>
-      <div className="text-2xl font-bold text-white">
+    <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] p-4">
+      <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">{label}</div>
+      <div className="text-2xl font-semibold text-[var(--text-primary)]">
         {typeof value === "number" ? fmt(value) : value}
       </div>
-      {sub && <div className="text-xs text-neutral-500 mt-1">{sub}</div>}
+      {sub && <div className="text-xs text-[var(--text-faint)] mt-1">{sub}</div>}
     </div>
   );
 }
@@ -169,7 +175,7 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
     <div className="space-y-8">
       {/* Header + day filter */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">Landing Traffic</h1>
+        <h1 className="text-xl font-medium text-[var(--text-primary)]">Landing Traffic</h1>
         <div className="flex gap-2">
           {([7, 30, 90] as const).map((d) => (
             <button
@@ -177,8 +183,8 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
               onClick={() => setDays(d)}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                 days === d
-                  ? "bg-sky-500 text-white"
-                  : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
+                  ? "bg-[var(--action-primary)] text-white"
+                  : "bg-[var(--surface-subtle)] text-[var(--text-muted)] hover:bg-[var(--surface-card)] hover:text-[var(--text-secondary)]"
               }`}
             >
               {d}d
@@ -197,16 +203,16 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
       </div>
 
       {/* Conversion funnel */}
-      <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-5">
-        <h2 className="text-sm font-semibold text-neutral-200 mb-4">Conversion Funnel</h2>
+      <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] p-5">
+        <h2 className="text-sm font-medium text-[var(--text-primary)] mb-4">Conversion Funnel</h2>
         <div className="space-y-3">
           {FUNNEL_ORDER.map((et) => {
             const count = funnelMap[et] ?? 0;
             const width = pageViews ? Math.round((count / pageViews) * 100) : 0;
             return (
               <div key={et} className="flex items-center gap-3">
-                <div className="w-28 shrink-0 text-xs text-neutral-400">{FUNNEL_LABELS[et]}</div>
-                <div className="flex-1 h-5 rounded bg-neutral-800 overflow-hidden">
+                <div className="w-28 shrink-0 text-xs text-[var(--text-muted)]">{FUNNEL_LABELS[et]}</div>
+                <div className="flex-1 h-5 rounded bg-[var(--surface-subtle)] overflow-hidden">
                   <div
                     className="h-full rounded transition-all"
                     style={{
@@ -215,9 +221,9 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
                     }}
                   />
                 </div>
-                <div className="w-28 shrink-0 text-right text-xs text-neutral-300">
+                <div className="w-28 shrink-0 text-right text-xs text-[var(--text-secondary)]">
                   {fmt(count)}{" "}
-                  <span className="text-neutral-500">({pct(count, pageViews)})</span>
+                  <span className="text-[var(--text-faint)]">({pct(count, pageViews)})</span>
                 </div>
               </div>
             );
@@ -227,43 +233,43 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
 
       {/* Daily activity chart */}
       <div
-        className="rounded-xl border border-neutral-800 p-5"
-        style={{ backgroundColor: "#171717" }}
+        className="rounded-xl border border-[var(--border)] p-5"
+        style={{ backgroundColor: "#FFFFFF" }}
       >
-        <h2 className="text-sm font-semibold text-neutral-200 mb-4">Daily Activity</h2>
+        <h2 className="text-sm font-medium text-[var(--text-primary)] mb-4">Daily Activity</h2>
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={daily} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-            <XAxis dataKey="day" tick={{ fill: "#737373", fontSize: 11 }} />
-            <YAxis tick={{ fill: "#737373", fontSize: 11 }} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E0" />
+            <XAxis dataKey="day" tick={{ fill: "#7A7A74", fontSize: 11 }} />
+            <YAxis tick={{ fill: "#7A7A74", fontSize: 11 }} />
             <Tooltip
               contentStyle={{
-                backgroundColor: "#171717",
-                border: "1px solid #404040",
+                backgroundColor: "#FFFFFF",
+                border: "1px solid #E4E4E0",
                 borderRadius: 8,
               }}
-              labelStyle={{ color: "#e5e5e5" }}
-              itemStyle={{ color: "#e5e5e5" }}
+              labelStyle={{ color: "#1C1C1A" }}
+              itemStyle={{ color: "#1C1C1A" }}
             />
-            <Legend wrapperStyle={{ fontSize: 11, color: "#a3a3a3" }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: "#7A7A74" }} />
             <Line
               type="monotone"
               dataKey="page_views"
-              stroke="#38bdf8"
+              stroke={FUNNEL_COLORS.page_view}
               dot={false}
               strokeWidth={2}
             />
             <Line
               type="monotone"
               dataKey="cta_clicks"
-              stroke="#fb923c"
+              stroke={FUNNEL_COLORS.cta_click}
               dot={false}
               strokeWidth={2}
             />
             <Line
               type="monotone"
               dataKey="form_submits"
-              stroke="#4ade80"
+              stroke={FUNNEL_COLORS.form_submit}
               dot={false}
               strokeWidth={2}
             />
@@ -272,35 +278,35 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
       </div>
 
       {/* Traffic sources table */}
-      <div className="rounded-xl bg-neutral-900 border border-neutral-800 overflow-hidden">
-        <div className="px-5 py-4 border-b border-neutral-800">
-          <h2 className="text-sm font-semibold text-neutral-200">Traffic Sources</h2>
+      <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] overflow-hidden">
+        <div className="px-5 py-4 border-b border-[var(--border)]">
+          <h2 className="text-sm font-medium text-[var(--text-primary)]">Traffic Sources</h2>
         </div>
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-neutral-800">
-              <th className="px-4 py-3 text-left font-medium text-neutral-500">Source</th>
-              <th className="px-4 py-3 text-right font-medium text-neutral-500">Sessions</th>
-              <th className="px-4 py-3 text-right font-medium text-neutral-500">CTA Clicks</th>
-              <th className="px-4 py-3 text-right font-medium text-neutral-500">CTA Rate</th>
-              <th className="px-4 py-3 text-right font-medium text-neutral-500">Demo Subs</th>
-              <th className="px-4 py-3 text-right font-medium text-neutral-500">Conv Rate</th>
+            <tr className="border-b border-[var(--border)]">
+              <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Source</th>
+              <th className="px-4 py-3 text-right font-medium text-[var(--text-muted)]">Sessions</th>
+              <th className="px-4 py-3 text-right font-medium text-[var(--text-muted)]">CTA Clicks</th>
+              <th className="px-4 py-3 text-right font-medium text-[var(--text-muted)]">CTA Rate</th>
+              <th className="px-4 py-3 text-right font-medium text-[var(--text-muted)]">Demo Subs</th>
+              <th className="px-4 py-3 text-right font-medium text-[var(--text-muted)]">Conv Rate</th>
             </tr>
           </thead>
           <tbody>
             {sources.map((s) => (
-              <tr key={s.source} className="border-b border-neutral-800 last:border-0">
-                <td className="px-4 py-3 text-neutral-200">{s.source}</td>
-                <td className="px-4 py-3 text-right text-neutral-300">{fmt(s.sessions)}</td>
-                <td className="px-4 py-3 text-right text-neutral-300">{fmt(s.cta_clicks)}</td>
-                <td className="px-4 py-3 text-right text-neutral-400">{pct(s.cta_clicks, s.sessions)}</td>
-                <td className="px-4 py-3 text-right text-neutral-300">{fmt(s.form_submits)}</td>
-                <td className="px-4 py-3 text-right text-neutral-400">{pct(s.form_submits, s.sessions)}</td>
+              <tr key={s.source} className="border-b border-[var(--border)] last:border-0">
+                <td className="px-4 py-3 text-[var(--text-primary)]">{s.source}</td>
+                <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{fmt(s.sessions)}</td>
+                <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{fmt(s.cta_clicks)}</td>
+                <td className="px-4 py-3 text-right text-[var(--text-muted)]">{pct(s.cta_clicks, s.sessions)}</td>
+                <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{fmt(s.form_submits)}</td>
+                <td className="px-4 py-3 text-right text-[var(--text-muted)]">{pct(s.form_submits, s.sessions)}</td>
               </tr>
             ))}
             {sources.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-neutral-600">
+                <td colSpan={6} className="px-4 py-8 text-center text-[var(--text-faint)]">
                   No data yet
                 </td>
               </tr>
@@ -310,11 +316,11 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
       </div>
 
       {/* Recent sessions table */}
-      <div className="rounded-xl bg-neutral-900 border border-neutral-800 overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-800">
-          <h2 className="text-sm font-semibold text-neutral-200">
+      <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+          <h2 className="text-sm font-medium text-[var(--text-primary)]">
             Recent Sessions
-            <span className="ml-2 text-xs font-normal text-neutral-600">
+            <span className="ml-2 text-xs font-normal text-[var(--text-faint)]">
               ({filteredSessions.length} shown)
             </span>
           </h2>
@@ -322,22 +328,22 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter…"
-            className="rounded-lg bg-neutral-800 border border-neutral-700 px-3 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600 outline-none focus:border-sky-600 w-48"
+            className="rounded-lg bg-[var(--surface-card)] border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none focus:border-[var(--action-primary)] w-48"
           />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-neutral-800">
+              <tr className="border-b border-[var(--border)]">
                 {SESSION_COLS.map(({ key, label }) => (
                   <th
                     key={key}
                     onClick={() => toggleSort(key)}
-                    className="px-4 py-3 text-left font-medium text-neutral-500 cursor-pointer hover:text-neutral-300 select-none whitespace-nowrap"
+                    className="px-4 py-3 text-left font-medium text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-secondary)] select-none whitespace-nowrap"
                   >
                     {label}
                     {sortCol === key && (
-                      <span className="ml-1 text-neutral-600">{sortAsc ? "↑" : "↓"}</span>
+                      <span className="ml-1 text-[var(--text-faint)]">{sortAsc ? "↑" : "↓"}</span>
                     )}
                   </th>
                 ))}
@@ -345,21 +351,21 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
             </thead>
             <tbody>
               {filteredSessions.map((s) => (
-                <tr key={s.session_id} className="border-b border-neutral-800 last:border-0">
-                  <td className="px-4 py-3 text-neutral-400 whitespace-nowrap">
+                <tr key={s.session_id} className="border-b border-[var(--border)] last:border-0">
+                  <td className="px-4 py-3 text-[var(--text-muted)] whitespace-nowrap">
                     {new Date(s.first_seen).toLocaleDateString()}
                   </td>
-                  <td className="px-4 py-3 text-neutral-400 whitespace-nowrap">
+                  <td className="px-4 py-3 text-[var(--text-muted)] whitespace-nowrap">
                     {new Date(s.last_seen).toLocaleString()}
                   </td>
-                  <td className="px-4 py-3 text-neutral-300">{s.device ?? "—"}</td>
-                  <td className="px-4 py-3 text-neutral-300 whitespace-nowrap">
+                  <td className="px-4 py-3 text-[var(--text-secondary)]">{s.device ?? "—"}</td>
+                  <td className="px-4 py-3 text-[var(--text-secondary)] whitespace-nowrap">
                     {s.city && s.region
                       ? `${s.city}, ${s.region}`
                       : s.city ?? s.region ?? "—"}
                   </td>
                   <td
-                    className="px-4 py-3 text-neutral-300"
+                    className="px-4 py-3 text-[var(--text-secondary)]"
                     style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                     title={s.utm_source ?? s.referrer ?? "direct"}
                   >
@@ -374,8 +380,8 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
                         <span
                           key={ev}
                           className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            BADGE_COLORS[ev] ?? "bg-neutral-700 text-neutral-400"
-                          } ${HIGH_INTENT.has(ev) ? "font-bold ring-1 ring-emerald-500/40" : ""}`}
+                            BADGE_COLORS[ev] ?? "bg-[var(--surface-subtle)] text-[var(--text-muted)]"
+                          } ${HIGH_INTENT.has(ev) ? "font-bold ring-1 ring-[var(--status-success-text)]/40" : ""}`}
                         >
                           {HIGH_INTENT.has(ev) && "★ "}
                           {BADGE_LABELS[ev] ?? ev}
@@ -385,20 +391,20 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
                   </td>
                   <td className="px-4 py-3">
                     {s.converted ? (
-                      <span className="text-green-400 font-semibold">✓ Converted</span>
+                      <span className="text-[var(--status-success-text)] font-semibold">✓ Converted</span>
                     ) : s.engaged ? (
-                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-400/20 text-amber-300">
+                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[var(--status-pending-bg)] text-[var(--status-pending-text)]">
                         In quote flow
                       </span>
                     ) : (
-                      <span className="text-neutral-600">—</span>
+                      <span className="text-[var(--text-faint)]">—</span>
                     )}
                   </td>
                 </tr>
               ))}
               {filteredSessions.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-neutral-600">
+                  <td colSpan={7} className="px-4 py-8 text-center text-[var(--text-faint)]">
                     No sessions
                   </td>
                 </tr>

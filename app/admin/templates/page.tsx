@@ -118,7 +118,7 @@ export default function TemplatesAdminPage() {
       <h1 className="text-2xl font-semibold">Templates</h1>
 
       {error && (
-        <div className="rounded-xl border p-3 text-sm bg-red-50 border-red-200">
+        <div className="rounded-xl border p-3 text-sm bg-[var(--attention-bg)] border-[var(--attention-border)] text-[var(--attention)]">
           {error}
         </div>
       )}

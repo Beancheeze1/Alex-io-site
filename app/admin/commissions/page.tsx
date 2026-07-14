@@ -125,28 +125,28 @@ export default function AdminCommissionsPage() {
   }, [payouts, unpaidPayouts, showPaid]);
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-50">
+    <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
       <div className="mx-auto max-w-6xl px-4 py-8 space-y-8">
 
         <header className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-sky-300">Commissions</h1>
-            <p className="mt-1 text-sm text-neutral-400">
+            <h1 className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">Commissions</h1>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
               RFM quotes only. Set rates in{" "}
-              <Link href="/admin" className="text-sky-400 hover:underline">Admin → Users</Link>.
+              <Link href="/admin" className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:underline">Admin → Users</Link>.
             </p>
           </div>
           <button onClick={() => { loadLive(); loadPayouts(); }}
-            className="rounded-full border border-neutral-700 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800">
+            className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]">
             Refresh
           </button>
         </header>
 
-        {error && <p className="rounded-lg border border-rose-700/50 bg-rose-950/60 px-4 py-2 text-sm text-rose-300">{error}</p>}
-        {okMsg && <p className="rounded-lg border border-emerald-700/50 bg-emerald-950/60 px-4 py-2 text-sm text-emerald-300">{okMsg}</p>}
+        {error && <p className="rounded-lg border border-[var(--attention-border)] bg-[var(--attention-bg)] px-4 py-2 text-sm text-[var(--attention)]">{error}</p>}
+        {okMsg && <p className="rounded-lg border border-[var(--status-success-text)]/30 bg-[var(--status-success-bg)] px-4 py-2 text-sm text-[var(--status-success-text)]">{okMsg}</p>}
 
         {showReminder && (
-          <div className="flex items-center justify-between rounded-lg border border-amber-700/50 bg-amber-950/40 px-4 py-3 text-sm text-amber-300">
+          <div className="flex items-center justify-between rounded-lg border border-[var(--attention-border)] bg-[var(--attention-bg)] px-4 py-3 text-sm text-[var(--attention)]">
             <span>⚠ {formatPeriod(lastMonth)} has not been closed yet.</span>
             <button onClick={() => setSelectedPeriod(lastMonth)} className="ml-4 text-xs underline hover:no-underline">Select it</button>
           </div>
@@ -154,30 +154,30 @@ export default function AdminCommissionsPage() {
 
         {/* Live section */}
         <section>
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-neutral-500">Live — All-time RFM totals</h2>
+          <h2 className="mb-3 text-xs font-medium uppercase tracking-widest text-[var(--text-muted)]">Live — All-time RFM totals</h2>
           {!liveLoading && liveRows.length > 0 && (
             <div className="mb-4 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 px-4 py-3">
-                <p className="text-[11px] uppercase tracking-wide text-neutral-400">Reps tracked</p>
-                <p className="mt-2 text-2xl font-semibold">{liveRows.length}</p>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Reps tracked</p>
+                <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{liveRows.length}</p>
               </div>
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 px-4 py-3">
-                <p className="text-[11px] uppercase tracking-wide text-neutral-400">RFM quotes total</p>
-                <p className="mt-2 text-2xl font-semibold">${fmt(liveTotal)}</p>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">RFM quotes total</p>
+                <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">${fmt(liveTotal)}</p>
               </div>
-              <div className="rounded-2xl border border-sky-800/50 bg-sky-950/40 px-4 py-3">
-                <p className="text-[11px] uppercase tracking-wide text-sky-400">Total commission</p>
-                <p className="mt-2 text-2xl font-semibold text-emerald-300">${fmt(liveCommission)}</p>
+              <div className="rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-4 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">Total commission</p>
+                <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">${fmt(liveCommission)}</p>
               </div>
             </div>
           )}
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4">
-            {liveLoading && <p className="text-sm text-neutral-400">Loading…</p>}
-            {!liveLoading && liveRows.length === 0 && <p className="py-6 text-center text-sm text-neutral-500">No reps with a sales slug found.</p>}
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+            {liveLoading && <p className="text-sm text-[var(--text-muted)]">Loading…</p>}
+            {!liveLoading && liveRows.length === 0 && <p className="py-6 text-center text-sm text-[var(--text-faint)]">No reps with a sales slug found.</p>}
             {!liveLoading && liveRows.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-xs">
-                  <thead className="border-b border-neutral-800 text-neutral-400">
+                  <thead className="border-b border-[var(--border)] text-[var(--text-muted)]">
                     <tr>
                       <th className="py-2 pr-4">Rep</th>
                       <th className="py-2 pr-4">Slug</th>
@@ -189,22 +189,22 @@ export default function AdminCommissionsPage() {
                   </thead>
                   <tbody>
                     {liveRows.map((r) => (
-                      <tr key={r.user_id} className="border-b border-neutral-900 last:border-0 hover:bg-neutral-900/70">
-                        <td className="py-2 pr-4 font-medium text-neutral-100">{r.name}</td>
-                        <td className="py-2 pr-4"><span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[11px] text-neutral-300">{r.sales_slug}</span></td>
-                        <td className="py-2 pr-4 text-right text-neutral-300">{r.quote_count}</td>
-                        <td className="py-2 pr-4 text-right text-neutral-100">${fmt(r.quotes_total_usd)}</td>
-                        <td className="py-2 pr-4 text-right">{r.commission_pct != null ? <span className="text-sky-300">{r.commission_pct}%</span> : <span className="text-neutral-600">—</span>}</td>
-                        <td className="py-2 pr-0 text-right font-semibold text-emerald-300">${fmt(r.commission_usd)}</td>
+                      <tr key={r.user_id} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-subtle)]">
+                        <td className="py-2 pr-4 font-medium text-[var(--text-primary)]">{r.name}</td>
+                        <td className="py-2 pr-4"><span className="rounded bg-[var(--surface-subtle)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--text-secondary)]">{r.sales_slug}</span></td>
+                        <td className="py-2 pr-4 text-right text-[var(--text-secondary)]">{r.quote_count}</td>
+                        <td className="py-2 pr-4 text-right text-[var(--text-primary)]">${fmt(r.quotes_total_usd)}</td>
+                        <td className="py-2 pr-4 text-right">{r.commission_pct != null ? <span className="text-[var(--text-secondary)]">{r.commission_pct}%</span> : <span className="text-[var(--text-faint)]">—</span>}</td>
+                        <td className="py-2 pr-0 text-right font-semibold text-[var(--text-primary)]">${fmt(r.commission_usd)}</td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot className="border-t border-neutral-700">
+                  <tfoot className="border-t border-[var(--border-strong)]">
                     <tr>
-                      <td colSpan={3} className="py-2 text-[11px] text-neutral-500">Totals</td>
-                      <td className="py-2 pr-4 text-right font-semibold text-neutral-100">${fmt(liveTotal)}</td>
+                      <td colSpan={3} className="py-2 text-[11px] text-[var(--text-faint)]">Totals</td>
+                      <td className="py-2 pr-4 text-right font-semibold text-[var(--text-primary)]">${fmt(liveTotal)}</td>
                       <td />
-                      <td className="py-2 pr-0 text-right font-semibold text-emerald-300">${fmt(liveCommission)}</td>
+                      <td className="py-2 pr-0 text-right font-semibold text-[var(--text-primary)]">${fmt(liveCommission)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -214,14 +214,14 @@ export default function AdminCommissionsPage() {
         </section>
 
         {/* Close month */}
-        <section className="rounded-2xl border border-neutral-700 bg-neutral-900/40 px-5 py-4">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-neutral-400">Close a month</h2>
-          <p className="mb-4 text-sm text-neutral-400">Snapshots each rep's RFM totals for the selected month. Already-paid periods won't be overwritten.</p>
+        <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] px-5 py-4">
+          <h2 className="mb-2 text-xs font-medium uppercase tracking-widest text-[var(--text-muted)]">Close a month</h2>
+          <p className="mb-4 text-sm text-[var(--text-muted)]">Snapshots each rep's RFM totals for the selected month. Already-paid periods won't be overwritten.</p>
           <div className="flex items-center gap-3">
             <input type="month" value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)}
-              className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 outline-none focus:border-sky-500" />
+              className="rounded-lg border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]" />
             <button onClick={closeMonth} disabled={closingMonth}
-              className="rounded-full bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">
+              className="rounded-md bg-[var(--action-primary)] px-4 py-1.5 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)] disabled:opacity-50">
               {closingMonth ? "Closing…" : `Close ${formatPeriod(selectedPeriod)}`}
             </button>
           </div>
@@ -230,23 +230,23 @@ export default function AdminCommissionsPage() {
         {/* Payout history */}
         <section>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-neutral-500">
+            <h2 className="text-xs font-medium uppercase tracking-widest text-[var(--text-muted)]">
               Payout history
               {unpaidPayouts.length > 0 && (
-                <span className="ml-2 rounded-full bg-amber-700/40 px-2 py-0.5 text-[10px] text-amber-300">
+                <span className="ml-2 rounded-full bg-[var(--status-pending-bg)] px-2 py-0.5 text-[10px] text-[var(--status-pending-text)]">
                   {unpaidPayouts.length} unpaid · ${fmt(unpaidTotal)} owed
                 </span>
               )}
             </h2>
-            <button onClick={() => setShowPaid((v) => !v)} className="text-xs text-neutral-500 hover:text-neutral-300">
+            <button onClick={() => setShowPaid((v) => !v)} className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
               {showPaid ? "Hide paid" : "Show paid history"}
             </button>
           </div>
 
-          {payoutsLoading && <p className="text-sm text-neutral-400">Loading…</p>}
+          {payoutsLoading && <p className="text-sm text-[var(--text-muted)]">Loading…</p>}
 
           {!payoutsLoading && periodGroups.length === 0 && (
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6 text-center text-sm text-neutral-500">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] p-6 text-center text-sm text-[var(--text-faint)]">
               No payout records yet. Use "Close a month" above to create the first snapshot.
             </div>
           )}
@@ -255,19 +255,19 @@ export default function AdminCommissionsPage() {
             const periodTotal = rows.reduce((s, r) => s + Number(r.commission_usd), 0);
             const allPaid = rows.every((r) => r.paid_at);
             return (
-              <div key={period} className="mb-4 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/60">
-                <div className={`flex items-center justify-between px-4 py-2 ${allPaid ? "bg-emerald-950/30" : "bg-neutral-900"}`}>
+              <div key={period} className="mb-4 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-card)]">
+                <div className={`flex items-center justify-between px-4 py-2 ${allPaid ? "bg-[var(--status-success-bg)]" : "bg-[var(--surface-subtle)]"}`}>
                   <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium text-neutral-100">{formatPeriod(period)}</span>
+                    <span className="text-sm font-medium text-[var(--text-primary)]">{formatPeriod(period)}</span>
                     {allPaid
-                      ? <span className="rounded-full bg-emerald-800/50 px-2 py-0.5 text-[10px] text-emerald-300">All paid</span>
-                      : <span className="rounded-full bg-amber-800/40 px-2 py-0.5 text-[10px] text-amber-300">Unpaid</span>}
+                      ? <span className="rounded-full bg-[var(--status-success-bg)] border border-[var(--status-success-text)]/30 px-2 py-0.5 text-[10px] text-[var(--status-success-text)]">All paid</span>
+                      : <span className="rounded-full bg-[var(--status-pending-bg)] px-2 py-0.5 text-[10px] text-[var(--status-pending-text)]">Unpaid</span>}
                   </div>
-                  <span className="text-sm font-semibold text-emerald-300">${fmt(periodTotal)}</span>
+                  <span className="text-sm font-semibold text-[var(--text-primary)]">${fmt(periodTotal)}</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-left text-xs">
-                    <thead className="border-b border-neutral-800 text-neutral-500">
+                    <thead className="border-b border-[var(--border)] text-[var(--text-faint)]">
                       <tr>
                         <th className="py-2 px-4">Rep</th>
                         <th className="py-2 pr-4 text-right">Quotes</th>
@@ -280,21 +280,21 @@ export default function AdminCommissionsPage() {
                     </thead>
                     <tbody>
                       {rows.map((p) => (
-                        <tr key={p.id} className="border-b border-neutral-900 last:border-0 hover:bg-neutral-900/70">
-                          <td className="py-2 px-4 font-medium text-neutral-100">{p.name}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-400">{p.quote_count}</td>
-                          <td className="py-2 pr-4 text-right text-neutral-200">${fmt(p.quotes_total_usd)}</td>
-                          <td className="py-2 pr-4 text-right text-sky-300">{p.commission_pct}%</td>
-                          <td className="py-2 pr-4 text-right font-semibold text-emerald-300">${fmt(p.commission_usd)}</td>
+                        <tr key={p.id} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-subtle)]">
+                          <td className="py-2 px-4 font-medium text-[var(--text-primary)]">{p.name}</td>
+                          <td className="py-2 pr-4 text-right text-[var(--text-muted)]">{p.quote_count}</td>
+                          <td className="py-2 pr-4 text-right text-[var(--text-secondary)]">${fmt(p.quotes_total_usd)}</td>
+                          <td className="py-2 pr-4 text-right text-[var(--text-secondary)]">{p.commission_pct}%</td>
+                          <td className="py-2 pr-4 text-right font-semibold text-[var(--text-primary)]">${fmt(p.commission_usd)}</td>
                           <td className="py-2 pr-4 text-right">
                             {p.paid_at
-                              ? <span className="text-[11px] text-emerald-400">Paid {new Date(p.paid_at).toLocaleDateString()}{p.paid_by_name && <span className="text-neutral-500"> · {p.paid_by_name}</span>}</span>
-                              : <span className="text-[11px] text-amber-400">Unpaid</span>}
+                              ? <span className="text-[11px] text-[var(--status-success-text)]">Paid {new Date(p.paid_at).toLocaleDateString()}{p.paid_by_name && <span className="text-[var(--text-faint)]"> · {p.paid_by_name}</span>}</span>
+                              : <span className="text-[11px] text-[var(--status-pending-text)]">Unpaid</span>}
                           </td>
                           <td className="py-2 pr-4 text-right">
                             {p.paid_at
-                              ? <button onClick={() => markPaid(p.id, true)} disabled={markingPaidId === p.id} className="text-[11px] text-neutral-500 underline hover:text-neutral-300 disabled:opacity-40">{markingPaidId === p.id ? "…" : "Undo"}</button>
-                              : <button onClick={() => markPaid(p.id)} disabled={markingPaidId === p.id} className="rounded bg-emerald-700/40 px-2 py-0.5 text-[11px] text-emerald-200 hover:bg-emerald-700/60 disabled:opacity-40">{markingPaidId === p.id ? "…" : "Mark paid"}</button>}
+                              ? <button onClick={() => markPaid(p.id, true)} disabled={markingPaidId === p.id} className="text-[11px] text-[var(--text-faint)] underline hover:text-[var(--text-secondary)] disabled:opacity-40">{markingPaidId === p.id ? "…" : "Undo"}</button>
+                              : <button onClick={() => markPaid(p.id)} disabled={markingPaidId === p.id} className="rounded bg-[var(--status-success-bg)] px-2 py-0.5 text-[11px] text-[var(--status-success-text)] hover:opacity-80 disabled:opacity-40">{markingPaidId === p.id ? "…" : "Mark paid"}</button>}
                           </td>
                         </tr>
                       ))}

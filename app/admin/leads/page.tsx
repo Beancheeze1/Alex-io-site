@@ -42,13 +42,7 @@ function fmtDate(raw: string): string {
   }
 }
 
-const TIER_BADGE: Record<string, string> = {
-  Pilot:            "bg-amber-900/40 text-amber-300 border border-amber-800",
-  Starter:          "bg-neutral-700 text-neutral-300 border border-neutral-600",
-  Pro:              "bg-sky-900/40 text-sky-300 border border-sky-800",
-  Shop:             "bg-violet-900/40 text-violet-300 border border-violet-800",
-  "General inquiry":"bg-neutral-800 text-neutral-400 border border-neutral-700",
-};
+const TIER_BADGE_CLS = "bg-[var(--surface-subtle)] text-[var(--text-secondary)] border border-[var(--border)]";
 
 export default async function LeadsPage() {
   const user = await getCurrentUserFromCookies();
@@ -74,62 +68,62 @@ export default async function LeadsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Demo Leads</h1>
-          <p className="mt-0.5 text-xs text-neutral-500">
+          <h1 className="text-xl font-medium text-[var(--text-primary)]">Demo Leads</h1>
+          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
             Contacts who requested access after viewing the live demo
           </p>
         </div>
-        <span className="rounded-full border border-neutral-700 bg-neutral-800 px-3 py-1 text-xs font-semibold text-neutral-300">
+        <span className="rounded-full border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
           {fmt(total)} total
         </span>
       </div>
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-4">
-          <div className="text-xs text-neutral-400 uppercase tracking-wider mb-1">Total Leads</div>
-          <div className="text-2xl font-bold text-white">{fmt(total)}</div>
+        <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] p-4">
+          <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Total Leads</div>
+          <div className="text-2xl font-semibold text-[var(--text-primary)]">{fmt(total)}</div>
         </div>
-        <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-4">
-          <div className="text-xs text-neutral-400 uppercase tracking-wider mb-1">Pilot Interest</div>
-          <div className="text-2xl font-bold text-amber-300">{fmt(pilot)}</div>
+        <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] p-4">
+          <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Pilot Interest</div>
+          <div className="text-2xl font-semibold text-[var(--text-primary)]">{fmt(pilot)}</div>
         </div>
-        <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-4">
-          <div className="text-xs text-neutral-400 uppercase tracking-wider mb-1">Starter Interest</div>
-          <div className="text-2xl font-bold text-white">{fmt(starter)}</div>
+        <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] p-4">
+          <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Starter Interest</div>
+          <div className="text-2xl font-semibold text-[var(--text-primary)]">{fmt(starter)}</div>
         </div>
-        <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-4">
-          <div className="text-xs text-neutral-400 uppercase tracking-wider mb-1">Pro Interest</div>
-          <div className="text-2xl font-bold text-sky-300">{fmt(pro)}</div>
+        <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] p-4">
+          <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Pro Interest</div>
+          <div className="text-2xl font-semibold text-[var(--text-primary)]">{fmt(pro)}</div>
         </div>
-        <div className="rounded-xl bg-neutral-900 border border-neutral-800 p-4">
-          <div className="text-xs text-neutral-400 uppercase tracking-wider mb-1">Shop Interest</div>
-          <div className="text-2xl font-bold text-violet-300">{fmt(shop)}</div>
+        <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] p-4">
+          <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Shop Interest</div>
+          <div className="text-2xl font-semibold text-[var(--text-primary)]">{fmt(shop)}</div>
         </div>
       </div>
 
       {/* Table */}
-      <div className="rounded-xl bg-neutral-900 border border-neutral-800 overflow-hidden">
+      <div className="rounded-xl bg-[var(--surface-card)] border border-[var(--border)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-neutral-800">
-                <th className="px-4 py-3 text-left font-medium text-neutral-500 whitespace-nowrap">Date</th>
-                <th className="px-4 py-3 text-left font-medium text-neutral-500">Tier</th>
-                <th className="px-4 py-3 text-left font-medium text-neutral-500">Type</th>
-                <th className="px-4 py-3 text-left font-medium text-neutral-500">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-neutral-500">Email</th>
-                <th className="px-4 py-3 text-left font-medium text-neutral-500">Company</th>
-                <th className="px-4 py-3 text-left font-medium text-neutral-500">Phone</th>
-                <th className="px-4 py-3 text-left font-medium text-neutral-500">Quote</th>
-                <th className="px-4 py-3 text-left font-medium text-neutral-500">Billing</th>
-                <th className="px-4 py-3 text-left font-medium text-neutral-500">Details</th>
+              <tr className="border-b border-[var(--border)]">
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)] whitespace-nowrap">Date</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Tier</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Type</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Name</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Email</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Company</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Phone</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Quote</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Billing</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--text-muted)]">Details</th>
               </tr>
             </thead>
             <tbody>
               {leads.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-neutral-600">
+                  <td colSpan={10} className="px-4 py-12 text-center text-[var(--text-faint)]">
                     No leads yet — they&apos;ll appear here after someone completes a demo and requests access
                   </td>
                 </tr>
@@ -142,80 +136,80 @@ export default async function LeadsPage() {
                     lead.notes;
 
                   return (
-                    <tr key={lead.id} className="border-b border-neutral-800 last:border-0 hover:bg-neutral-800/40 align-top">
-                      <td className="px-4 py-3 text-neutral-400 whitespace-nowrap">
+                    <tr key={lead.id} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-subtle)] align-top">
+                      <td className="px-4 py-3 text-[var(--text-muted)] whitespace-nowrap">
                         {fmtDate(lead.created_at)}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${TIER_BADGE[lead.tier] ?? "bg-neutral-700 text-neutral-300 border border-neutral-600"}`}>
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${TIER_BADGE_CLS}`}>
                           {lead.tier}
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         {lead.lead_type === "quote_email" ? (
-                          <span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold bg-sky-900/40 text-sky-300 border border-sky-800">
+                          <span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-medium bg-[var(--surface-subtle)] text-[var(--text-secondary)] border border-[var(--border)]">
                             Quote Copy
                           </span>
                         ) : (
-                          <span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold bg-neutral-800 text-neutral-500 border border-neutral-700">
+                          <span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-medium bg-[var(--surface-subtle)] text-[var(--text-secondary)] border border-[var(--border)]">
                             {lead.lead_type ?? "tier_interest"}
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-neutral-200 font-medium">{lead.name}</td>
+                      <td className="px-4 py-3 text-[var(--text-primary)] font-medium">{lead.name}</td>
                       <td className="px-4 py-3">
                         <a
                           href={`mailto:${lead.email}`}
-                          className="font-mono text-neutral-400 hover:text-sky-400"
+                          className="font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                         >
                           {lead.email}
                         </a>
                       </td>
-                      <td className="px-4 py-3 text-neutral-300">{lead.company ?? "—"}</td>
-                      <td className="px-4 py-3 text-neutral-400">{lead.phone ?? "—"}</td>
-                      <td className="px-4 py-3 text-neutral-500">{lead.quote_no ?? "—"}</td>
+                      <td className="px-4 py-3 text-[var(--text-secondary)]">{lead.company ?? "—"}</td>
+                      <td className="px-4 py-3 text-[var(--text-muted)]">{lead.phone ?? "—"}</td>
+                      <td className="px-4 py-3 text-[var(--text-faint)]">{lead.quote_no ?? "—"}</td>
                       <td className="px-4 py-3">
                         {lead.annual_mode ? (
-                          <span className="text-green-400">Annual</span>
+                          <span className="text-[var(--status-success-text)]">Annual</span>
                         ) : (
-                          <span className="text-neutral-500">Monthly</span>
+                          <span className="text-[var(--text-muted)]">Monthly</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
                         {hasDetails ? (
                           <details className="group">
-                            <summary className="cursor-pointer select-none list-none text-neutral-500 hover:text-neutral-300 transition whitespace-nowrap">
+                            <summary className="cursor-pointer select-none list-none text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition whitespace-nowrap">
                               Details ▾
                             </summary>
                             <div className="mt-2 space-y-1.5 min-w-[200px]">
                               {lead.user_count && (
                                 <div>
-                                  <span className="text-neutral-600 uppercase tracking-wider text-[10px]">Seats — </span>
-                                  <span className="text-neutral-300">{lead.user_count}</span>
+                                  <span className="text-[var(--text-faint)] uppercase tracking-wider text-[10px]">Seats — </span>
+                                  <span className="text-[var(--text-secondary)]">{lead.user_count}</span>
                                 </div>
                               )}
                               {lead.product_description && (
                                 <div>
-                                  <span className="text-neutral-600 uppercase tracking-wider text-[10px]">Packaging — </span>
-                                  <span className="text-neutral-300">{lead.product_description}</span>
+                                  <span className="text-[var(--text-faint)] uppercase tracking-wider text-[10px]">Packaging — </span>
+                                  <span className="text-[var(--text-secondary)]">{lead.product_description}</span>
                                 </div>
                               )}
                               {lead.current_process && (
                                 <div>
-                                  <span className="text-neutral-600 uppercase tracking-wider text-[10px]">Quotes today — </span>
-                                  <span className="text-neutral-300">{lead.current_process}</span>
+                                  <span className="text-[var(--text-faint)] uppercase tracking-wider text-[10px]">Quotes today — </span>
+                                  <span className="text-[var(--text-secondary)]">{lead.current_process}</span>
                                 </div>
                               )}
                               {lead.notes && (
                                 <div>
-                                  <span className="text-neutral-600 uppercase tracking-wider text-[10px]">Notes — </span>
-                                  <span className="text-neutral-300">{lead.notes}</span>
+                                  <span className="text-[var(--text-faint)] uppercase tracking-wider text-[10px]">Notes — </span>
+                                  <span className="text-[var(--text-secondary)]">{lead.notes}</span>
                                 </div>
                               )}
                             </div>
                           </details>
                         ) : (
-                          <span className="text-neutral-700">—</span>
+                          <span className="text-[var(--text-faint)]">—</span>
                         )}
                       </td>
                     </tr>

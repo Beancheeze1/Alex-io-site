@@ -13,6 +13,7 @@ export default function ProductsPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [pricing, setPricing] = useState<Product[]>([]);
   const [msg, setMsg] = useState('');
+  const [msgError, setMsgError] = useState(false);
 
   const [form, setForm] = useState({
     sku:'', name:'', material_id:'', base_length_in:'', base_width_in:'', base_height_in:''
@@ -33,6 +34,7 @@ export default function ProductsPage() {
 
   async function load() {
     setMsg('');
+    setMsgError(false);
     const [m, p] = await Promise.all([
       fetch('/api/materials', { cache:'no-store' }).then(r=>r.json()),
       fetch('/api/products?t='+Math.random(), { cache:'no-store' }).then(r=>r.json()),
@@ -45,6 +47,7 @@ export default function ProductsPage() {
   async function createProduct(e: React.FormEvent) {
     e.preventDefault();
     setMsg('');
+    setMsgError(false);
     const r = await fetch('/api/products', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -57,13 +60,14 @@ export default function ProductsPage() {
       }),
     });
     const j = await r.json().catch(()=>({}));
-    if (r.ok) { setForm({ sku:'', name:'', material_id:'', base_length_in:'', base_width_in:'', base_height_in:'' }); setMsg('Product saved'); await load(); }
-    else setMsg(j?.error || 'Save failed');
+    if (r.ok) { setForm({ sku:'', name:'', material_id:'', base_length_in:'', base_width_in:'', base_height_in:'' }); setMsgError(false); setMsg('Product saved'); await load(); }
+    else { setMsgError(true); setMsg(j?.error || 'Save failed'); }
   }
 
   async function addCavity(e: React.FormEvent) {
     e.preventDefault();
     setMsg('');
+    setMsgError(false);
     const pid = Number(cavity.product_id);
     const r = await fetch(`/api/products/${pid}/cavities`, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -78,8 +82,8 @@ export default function ProductsPage() {
       }),
     });
     const j = await r.json().catch(()=>({}));
-    if (r.ok) { setCavity({ product_id:'', label:'', count:'1', cav_length_in:'', cav_width_in:'', cav_depth_in:'' }); setMsg('Cavity added'); await load(); }
-    else setMsg(j?.error || 'Add cavity failed');
+    if (r.ok) { setCavity({ product_id:'', label:'', count:'1', cav_length_in:'', cav_width_in:'', cav_depth_in:'' }); setMsgError(false); setMsg('Cavity added'); await load(); }
+    else { setMsgError(true); setMsg(j?.error || 'Add cavity failed'); }
   }
 
   return (
@@ -114,12 +118,16 @@ export default function ProductsPage() {
         <button disabled={!canAddCavity} className="bg-black text-white rounded-lg px-4 py-2 disabled:opacity-40">Add cavity</button>
       </form>
 
-      {msg && <div className="text-sm text-green-700">{msg}</div>}
+      {msg && (
+        <div className={`text-sm ${msgError ? "text-[var(--attention)]" : "text-[var(--status-success-text)]"}`}>
+          {msg}
+        </div>
+      )}
 
       {/* Live pricing list from view */}
       <div className="overflow-x-auto rounded-2xl shadow">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50">
+          <thead className="bg-[var(--surface-subtle)]">
             <tr>
               <th className="text-left p-2">SKU</th>
               <th className="text-left p-2">Name</th>

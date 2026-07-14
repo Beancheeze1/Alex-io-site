@@ -53,13 +53,13 @@ type ConfirmState = {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function inputCls(extra = "") {
-  return `bg-neutral-900 border border-neutral-700 rounded px-2 py-1.5 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-neutral-500 w-full ${extra}`;
+  return `bg-[var(--surface-card)] border border-[var(--border)] rounded px-2 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-faint)] focus:outline-none focus:border-[var(--action-primary)] w-full ${extra}`;
 }
 
 function LabelRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <div className="text-[11px] text-neutral-500 uppercase tracking-wide">{label}</div>
+      <div className="text-[11px] text-[var(--text-muted)] uppercase tracking-wide">{label}</div>
       {children}
     </div>
   );
@@ -67,7 +67,7 @@ function LabelRow({ label, children }: { label: string; children: React.ReactNod
 
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border border-neutral-800 rounded-lg p-5 space-y-4 bg-neutral-950">
+    <div className="border border-[var(--border)] rounded-lg p-5 space-y-4 bg-[var(--surface-card)]">
       {children}
     </div>
   );
@@ -75,10 +75,10 @@ function SectionCard({ children }: { children: React.ReactNode }) {
 
 function StatusBadge({ children, color }: { children: React.ReactNode; color: "red" | "amber" | "emerald" | "neutral" }) {
   const cls = {
-    red: "bg-red-500/10 border-red-500/30 text-red-300",
-    amber: "bg-amber-500/10 border-amber-500/30 text-amber-300",
-    emerald: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
-    neutral: "bg-neutral-800 border-neutral-700 text-neutral-400",
+    red: "bg-[var(--attention-bg)] border-[var(--attention-border)] text-[var(--attention)]",
+    amber: "bg-[var(--status-pending-bg)] border-[var(--status-pending-text)]/30 text-[var(--status-pending-text)]",
+    emerald: "bg-[var(--status-success-bg)] border-[var(--status-success-text)]/30 text-[var(--status-success-text)]",
+    neutral: "bg-[var(--surface-subtle)] border-[var(--border)] text-[var(--text-muted)]",
   }[color];
   return (
     <div className={`border rounded px-3 py-2 text-xs ${cls}`}>{children}</div>
@@ -105,29 +105,29 @@ function ConfirmModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-neutral-900 border border-neutral-700 rounded-xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+      <div className="bg-[var(--surface-page)] border border-[var(--border)] rounded-xl p-6 w-full max-w-md space-y-4 shadow-[0_20px_80px_-20px_rgba(0,0,0,0.25)]">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center">
-            <span className="text-red-400 text-sm">!</span>
+          <div className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-full bg-[var(--attention-bg)] border border-[var(--attention-border)] flex items-center justify-center">
+            <span className="text-[var(--attention)] text-sm">!</span>
           </div>
           <div>
-            <div className="text-sm font-semibold text-neutral-100">Confirm permanent deletion</div>
-            <div className="text-xs text-neutral-400 mt-1">This action cannot be undone.</div>
+            <div className="text-sm font-medium text-[var(--text-primary)]">Confirm permanent deletion</div>
+            <div className="text-xs text-[var(--text-muted)] mt-1">This action cannot be undone.</div>
           </div>
         </div>
 
-        <div className="bg-neutral-800/60 border border-neutral-700 rounded-lg p-4 space-y-1.5">
-          <div className="text-sm text-neutral-200">
-            <span className="font-semibold text-red-300">{preview.count.toLocaleString()}</span>{" "}
+        <div className="bg-[var(--surface-subtle)] border border-[var(--border)] rounded-lg p-4 space-y-1.5">
+          <div className="text-sm text-[var(--text-secondary)]">
+            <span className="font-medium text-[var(--attention)]">{preview.count.toLocaleString()}</span>{" "}
             {label} will be permanently deleted.
           </div>
           {typeof preview.quoteCount === "number" && (
-            <div className="text-xs text-neutral-400">
-              Includes <span className="text-neutral-300">{preview.quoteCount.toLocaleString()}</span> quotes and{" "}
-              <span className="text-neutral-300">{preview.userCount?.toLocaleString()}</span> users.
+            <div className="text-xs text-[var(--text-muted)]">
+              Includes <span className="text-[var(--text-secondary)]">{preview.quoteCount.toLocaleString()}</span> quotes and{" "}
+              <span className="text-[var(--text-secondary)]">{preview.userCount?.toLocaleString()}</span> users.
             </div>
           )}
-          <div className="text-[11px] text-neutral-500 mt-1">
+          <div className="text-[11px] text-[var(--text-faint)] mt-1">
             {tab === "quotes" && "Locked (RFM) quotes are excluded from deletion."}
             {tab === "users" && "Users with locked quotes are excluded. Their quotes will have sales rep cleared."}
             {tab === "tenants" && "The 'default' tenant is always excluded. All tenant data will be cascaded."}
@@ -136,14 +136,14 @@ function ConfirmModal({
 
         <div className="flex gap-2 justify-end">
           <button
-            className="px-4 py-2 text-sm rounded border border-neutral-700 text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+            className="px-4 py-2 text-sm rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] disabled:opacity-50"
             onClick={onCancel}
             disabled={busy}
           >
             Cancel
           </button>
           <button
-            className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-500 text-white font-medium disabled:opacity-50"
+            className="px-4 py-2 text-sm rounded bg-[var(--attention)] hover:opacity-90 text-white font-medium disabled:opacity-50"
             onClick={onConfirm}
             disabled={busy}
           >
@@ -241,8 +241,8 @@ function QuotesSection({
   return (
     <SectionCard>
       <div>
-        <div className="text-sm font-semibold text-neutral-200">Quotes &amp; Line Items</div>
-        <div className="text-xs text-neutral-500 mt-0.5">
+        <div className="text-sm font-medium text-[var(--text-primary)]">Quotes &amp; Line Items</div>
+        <div className="text-xs text-[var(--text-muted)] mt-0.5">
           Deletes matching quotes + layout packages. Locked (RFM) quotes are always excluded.
         </div>
       </div>
@@ -280,7 +280,7 @@ function QuotesSection({
 
       <div className="flex items-center gap-3 flex-wrap">
         <button
-          className="px-3 py-1.5 text-sm rounded border border-neutral-600 text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+          className="px-3 py-1.5 text-sm rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] disabled:opacity-50"
           onClick={runPreview}
           disabled={previewBusy}
         >
@@ -289,7 +289,7 @@ function QuotesSection({
 
         {preview !== null && (
           <button
-            className="px-3 py-1.5 text-sm rounded bg-red-700 hover:bg-red-600 text-white disabled:opacity-50"
+            className="px-3 py-1.5 text-sm rounded bg-[var(--attention)] hover:opacity-90 text-white disabled:opacity-50"
             onClick={() => setConfirm(true)}
             disabled={preview.count === 0}
           >
@@ -412,8 +412,8 @@ function UsersSection({
   return (
     <SectionCard>
       <div>
-        <div className="text-sm font-semibold text-neutral-200">Sales Reps &amp; Users</div>
-        <div className="text-xs text-neutral-500 mt-0.5">
+        <div className="text-sm font-medium text-[var(--text-primary)]">Sales Reps &amp; Users</div>
+        <div className="text-xs text-[var(--text-muted)] mt-0.5">
           Users with locked quotes are never deleted. Their quotes will have sales rep cleared.
         </div>
       </div>
@@ -448,7 +448,7 @@ function UsersSection({
         </LabelRow>
       </div>
 
-      <label className="flex items-center gap-2 text-xs text-neutral-300 cursor-pointer select-none">
+      <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer select-none">
         <input
           type="checkbox"
           checked={filters.hasNoQuotes}
@@ -460,7 +460,7 @@ function UsersSection({
 
       <div className="flex items-center gap-3 flex-wrap">
         <button
-          className="px-3 py-1.5 text-sm rounded border border-neutral-600 text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+          className="px-3 py-1.5 text-sm rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] disabled:opacity-50"
           onClick={runPreview}
           disabled={previewBusy}
         >
@@ -469,7 +469,7 @@ function UsersSection({
 
         {preview !== null && (
           <button
-            className="px-3 py-1.5 text-sm rounded bg-red-700 hover:bg-red-600 text-white disabled:opacity-50"
+            className="px-3 py-1.5 text-sm rounded bg-[var(--attention)] hover:opacity-90 text-white disabled:opacity-50"
             onClick={() => setConfirm(true)}
             disabled={preview.count === 0}
           >
@@ -589,13 +589,13 @@ function TenantsSection({
     <SectionCard>
       <div className="flex items-start justify-between">
         <div>
-          <div className="text-sm font-semibold text-neutral-200">Tenants</div>
-          <div className="text-xs text-neutral-500 mt-0.5">
+          <div className="text-sm font-medium text-[var(--text-primary)]">Tenants</div>
+          <div className="text-xs text-[var(--text-muted)] mt-0.5">
             Cascade-deletes all tenant data: users, quotes, layout packages, payouts. The{" "}
-            <span className="font-mono text-neutral-400">default</span> tenant is always protected.
+            <span className="font-mono text-[var(--text-muted)]">default</span> tenant is always protected.
           </div>
         </div>
-        <span className="text-[10px] border border-amber-500/30 text-amber-400 rounded px-1.5 py-0.5 ml-3 flex-shrink-0">
+        <span className="text-[10px] border border-[var(--status-pending-text)]/30 text-[var(--status-pending-text)] rounded px-1.5 py-0.5 ml-3 flex-shrink-0">
           Owner only
         </span>
       </div>
@@ -629,7 +629,7 @@ function TenantsSection({
 
       <div className="flex items-center gap-3 flex-wrap">
         <button
-          className="px-3 py-1.5 text-sm rounded border border-neutral-600 text-neutral-300 hover:bg-neutral-800 disabled:opacity-50"
+          className="px-3 py-1.5 text-sm rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] disabled:opacity-50"
           onClick={runPreview}
           disabled={previewBusy}
         >
@@ -638,7 +638,7 @@ function TenantsSection({
 
         {preview !== null && (
           <button
-            className="px-3 py-1.5 text-sm rounded bg-red-700 hover:bg-red-600 text-white disabled:opacity-50"
+            className="px-3 py-1.5 text-sm rounded bg-[var(--attention)] hover:opacity-90 text-white disabled:opacity-50"
             onClick={() => setConfirm(true)}
             disabled={preview.count === 0}
           >
@@ -716,25 +716,25 @@ export default function CleanupPage() {
   ];
 
   return (
-    <div className="p-6 space-y-6 text-neutral-100 max-w-4xl">
+    <div className="p-6 space-y-6 text-[var(--text-primary)] max-w-4xl">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <div className="text-xl font-semibold text-neutral-100">Data Cleanup</div>
-          <div className="text-xs text-neutral-500 mt-1">
+          <div className="text-xl font-medium text-[var(--text-primary)]">Data Cleanup</div>
+          <div className="text-xs text-[var(--text-muted)] mt-1">
             Remove test data before launch. Preview before deleting — locked/RFM records are always protected.
           </div>
         </div>
-        <div className="text-[10px] border border-neutral-700 rounded px-2 py-1 text-neutral-500">
+        <div className="text-[10px] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-faint)]">
           Audit-logged
         </div>
       </div>
 
       {/* Warning banner */}
-      <div className="border border-amber-500/25 bg-amber-500/5 rounded-lg px-4 py-3 text-xs text-amber-300/80 flex items-start gap-2">
+      <div className="border border-[var(--attention-border)] bg-[var(--attention-bg)] rounded-lg px-4 py-3 text-xs text-[var(--attention)] flex items-start gap-2">
         <span className="flex-shrink-0 mt-0.5">⚠</span>
         <span>
-          Deletions are <strong className="text-amber-200">permanent and immediate</strong>. Use "Preview count" to verify
+          Deletions are <strong className="text-[var(--attention)]">permanent and immediate</strong>. Use "Preview count" to verify
           what will be deleted before confirming. All actions are written to the audit log.
         </span>
       </div>
@@ -742,15 +742,15 @@ export default function CleanupPage() {
       {/* Tabs */}
       {authLoaded && (
         <>
-          <div className="flex gap-1 border-b border-neutral-800">
+          <div className="flex gap-1 border-b border-[var(--border)]">
             {tabs.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   tab === t.key
-                    ? "border-neutral-300 text-neutral-100"
-                    : "border-transparent text-neutral-500 hover:text-neutral-300"
+                    ? "border-[var(--action-primary)] text-[var(--text-primary)]"
+                    : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                 }`}
               >
                 {t.label}
@@ -767,7 +767,7 @@ export default function CleanupPage() {
       )}
 
       {!authLoaded && (
-        <div className="text-xs text-neutral-500">Loading…</div>
+        <div className="text-xs text-[var(--text-faint)]">Loading…</div>
       )}
     </div>
   );
