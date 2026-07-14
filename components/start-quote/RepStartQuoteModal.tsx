@@ -598,29 +598,17 @@ export default function RepStartQuoteModal({
 
       {/* Modal wrapper */}
       <div className="relative mx-auto flex min-h-screen max-w-5xl items-center justify-center px-4 py-10">
-        <div className="relative w-full overflow-hidden rounded-3xl border border-white/10 bg-[#0B1020] shadow-[0_20px_80px_-20px_rgba(0,0,0,0.8)]">
-          <div className="pointer-events-none absolute inset-0 opacity-[0.18]">
-            <div
-              className="absolute inset-0"
-              style={{
-                backgroundImage:
-                  "linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
-                backgroundSize: "48px 48px",
-                backgroundPosition: "0 0",
-              }}
-            />
-          </div>
-
+        <div className="relative w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-page)] shadow-[0_20px_80px_-20px_rgba(0,0,0,0.25)]">
           {/* Header */}
-          <div className="relative flex items-start justify-between gap-4 border-b border-white/10 px-6 py-5">
+          <div className="relative flex items-start justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
             <div>
-              <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+              <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                 START NEW QUOTE
               </div>
-              <div className="mt-1 text-xl font-semibold text-white">
+              <div className="mt-1 text-xl font-medium text-[var(--text-primary)]">
                 Rep intake
               </div>
-              <div className="mt-1 text-sm text-slate-300">
+              <div className="mt-1 text-sm text-[var(--text-secondary)]">
                 Full quote details before opening the layout editor.
               </div>
             </div>
@@ -628,7 +616,7 @@ export default function RepStartQuoteModal({
             <button
               type="button"
               onClick={handleClose}
-              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 hover:bg-white/[0.06]"
+              className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
               aria-label="Close"
               disabled={submitting}
             >
@@ -687,18 +675,18 @@ export default function RepStartQuoteModal({
                         </Field>
                       </div>
 
-                      <label className="mt-4 flex items-center gap-2 text-sm text-slate-200">
+                      <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                         <input
                           type="checkbox"
                           checked={isRush}
                           onChange={(e) => setIsRush(e.target.checked)}
-                          className="h-4 w-4 rounded border-white/20 bg-white/5"
+                          className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)]"
                         />
                         Rush order
                       </label>
 
                       <div className="mt-5">
-                        <div className="text-xs font-semibold tracking-widest text-slate-400">
+                        <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                           QTY / PRICE BREAKS
                         </div>
                         <div className="mt-2 space-y-2">
@@ -729,7 +717,7 @@ export default function RepStartQuoteModal({
                                     prev.length > 1 ? prev.filter((r) => r.id !== row.id) : prev,
                                   )
                                 }
-                                className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.06]"
+                                className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
                                 disabled={qtyBreaks.length <= 1}
                               >
                                 Remove
@@ -740,7 +728,7 @@ export default function RepStartQuoteModal({
                         <button
                           type="button"
                           onClick={() => setQtyBreaks((prev) => [...prev, newQtyBreakRow()])}
-                          className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.06]"
+                          className="mt-2 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
                         >
                           + Add qty break
                         </button>
@@ -752,7 +740,7 @@ export default function RepStartQuoteModal({
                             value={internalNotes}
                             onChange={(e) => setInternalNotes(e.target.value)}
                             rows={4}
-                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-400/60 focus:outline-none"
+                            className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)] focus:outline-none"
                             placeholder="Anything the layout editor / next rep should know"
                           />
                         </Field>
@@ -819,7 +807,7 @@ export default function RepStartQuoteModal({
                               <select
                                 value={boxStyle}
                                 onChange={(e) => setBoxStyle(e.target.value as BoxStyle)}
-                                className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
                               >
                                 <option value="mailer" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Mailer</option>
                                 <option value="rsc" style={{ color: "#0f172a", backgroundColor: "#fff" }}>RSC</option>
@@ -829,7 +817,7 @@ export default function RepStartQuoteModal({
                               <select
                                 value={foamConfig}
                                 onChange={(e) => setFoamConfig(e.target.value as FoamConfig)}
-                                className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
                               >
                                 <option value="bottom_top" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Bottom + Top</option>
                                 <option value="bottom_only" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Bottom only</option>
@@ -849,12 +837,12 @@ export default function RepStartQuoteModal({
                             ) : null}
                           </div>
 
-                          <label className="mt-4 flex items-center gap-2 text-sm text-slate-200">
+                          <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                             <input
                               type="checkbox"
                               checked={printed}
                               onChange={(e) => setPrinted(e.target.checked)}
-                              className="h-4 w-4 rounded border-white/20 bg-white/5"
+                              className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)]"
                             />
                             Printed box
                           </label>
@@ -878,10 +866,10 @@ export default function RepStartQuoteModal({
                           <div
                             key={row.id}
                             className={[
-                              "rounded-2xl border p-3",
+                              "rounded-xl border p-3",
                               isIncomplete
-                                ? "border-amber-400/50 bg-amber-500/[0.06]"
-                                : "border-white/10 bg-white/[0.02]",
+                                ? "border-[var(--attention-border)] bg-[var(--attention-bg)]"
+                                : "border-[var(--border)] bg-[var(--surface-card)]",
                             ].join(" ")}
                           >
                             <div className="flex flex-wrap items-end gap-3">
@@ -897,7 +885,7 @@ export default function RepStartQuoteModal({
                                       ),
                                     )
                                   }
-                                  className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
+                                  className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
                                 >
                                   <option value="rect" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Rectangle</option>
                                   <option value="circle" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Circle</option>
@@ -917,7 +905,7 @@ export default function RepStartQuoteModal({
                                           ),
                                         )
                                       }
-                                      className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-400/60 focus:outline-none"
+                                      className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
                                     >
                                       {layerOptions.map((opt) => (
                                         <option
@@ -1042,7 +1030,7 @@ export default function RepStartQuoteModal({
                                     prev.length > 1 ? prev.filter((r) => r.id !== row.id) : prev,
                                   )
                                 }
-                                className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.06]"
+                                className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
                                 disabled={cavityRows.length <= 1}
                               >
                                 Remove
@@ -1050,7 +1038,7 @@ export default function RepStartQuoteModal({
                             </div>
 
                             {isIncomplete ? (
-                              <div className="mt-2 text-xs text-amber-300">
+                              <div className="mt-2 text-xs text-[var(--attention)]">
                                 Missing dimensions — this cavity will be excluded from the quote.
                               </div>
                             ) : null}
@@ -1062,16 +1050,16 @@ export default function RepStartQuoteModal({
                       <button
                         type="button"
                         onClick={() => setCavityRows((prev) => [...prev, newCavityRow()])}
-                        className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.06]"
+                        className="mt-3 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
                       >
                         + Add cavity
                       </button>
 
-                      <div className="mt-3 text-xs text-slate-400">
+                      <div className="mt-3 text-xs text-[var(--text-muted)]">
                         Leave all rows blank to lay cavities out directly in the editor instead.
                       </div>
 
-                      <div className="mt-3 space-y-1 text-xs text-slate-500">
+                      <div className="mt-3 space-y-1 text-xs text-[var(--text-faint)]">
                         {layerOptions.map((opt) => (
                           <div key={opt.index}>
                             Preview ({opt.label}): {(cavityBuild.tokensByLayer.get(opt.index) || []).join(";") || "—"}
@@ -1084,9 +1072,9 @@ export default function RepStartQuoteModal({
                   {activeStep === "mat" ? (
                     <StepCard title="Material" hint="Pulled live from your materials list">
                       {materialsLoading ? (
-                        <div className="text-sm text-slate-400">Loading materials…</div>
+                        <div className="text-sm text-[var(--text-muted)]">Loading materials…</div>
                       ) : materialsError ? (
-                        <div className="text-sm text-amber-300">{materialsError}</div>
+                        <div className="text-sm text-[var(--attention)]">{materialsError}</div>
                       ) : (
                         <>
                           <div className="flex flex-wrap gap-2">
@@ -1096,10 +1084,10 @@ export default function RepStartQuoteModal({
                                 type="button"
                                 onClick={() => setActiveFamily(fam)}
                                 className={[
-                                  "rounded-full px-3 py-1.5 text-xs font-semibold",
+                                  "rounded-full px-3 py-1.5 text-xs font-medium",
                                   activeFamily === fam
-                                    ? "bg-sky-500 text-slate-950"
-                                    : "border border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]",
+                                    ? "bg-[var(--action-primary)] text-white"
+                                    : "border border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
                                 ].join(" ")}
                               >
                                 {fam}
@@ -1117,15 +1105,15 @@ export default function RepStartQuoteModal({
                                   setMaterialText(m.material_name);
                                 }}
                                 className={[
-                                  "rounded-xl border px-3 py-2 text-left text-sm",
+                                  "rounded-md border px-3 py-2 text-left text-sm",
                                   Number(materialId) === m.id
-                                    ? "border-sky-400/60 bg-sky-500/10 text-white"
-                                    : "border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]",
+                                    ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] text-[var(--text-primary)]"
+                                    : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
                                 ].join(" ")}
                               >
                                 <div className="font-medium">{m.material_name}</div>
                                 {m.density_lb_ft3 ? (
-                                  <div className="text-xs text-slate-400">
+                                  <div className="text-xs text-[var(--text-muted)]">
                                     {m.density_lb_ft3} lb/ft³
                                   </div>
                                 ) : null}
@@ -1176,7 +1164,7 @@ export default function RepStartQuoteModal({
                       </div>
 
                       {cavityBuild.incompleteRowIds.size > 0 ? (
-                        <div className="mt-4 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                        <div className="mt-4 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-sm text-[var(--attention)]">
                           {cavityBuild.incompleteRowIds.size === 1
                             ? "1 cavity row is missing dimensions and will be excluded from the quote."
                             : `${cavityBuild.incompleteRowIds.size} cavity rows are missing dimensions and will be excluded from the quote.`}
@@ -1185,17 +1173,17 @@ export default function RepStartQuoteModal({
 
                       {internalNotes.trim() ? (
                         <div className="mt-4">
-                          <div className="text-xs font-semibold tracking-widest text-slate-400">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             INTERNAL NOTES
                           </div>
-                          <div className="mt-1 whitespace-pre-wrap text-sm text-slate-300">
+                          <div className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">
                             {internalNotes}
                           </div>
                         </div>
                       ) : null}
 
                       {submitError ? (
-                        <div className="mt-4 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+                        <div className="mt-4 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-sm text-[var(--attention)]">
                           {submitError}
                         </div>
                       ) : null}
@@ -1206,12 +1194,12 @@ export default function RepStartQuoteModal({
             </div>
 
             {/* Footer nav */}
-            <div className="flex items-center justify-between gap-3 border-t border-white/10 px-6 py-4">
+            <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] px-6 py-4">
               <button
                 type="button"
                 onClick={goBack}
                 disabled={stepIndex === 0 || submitting}
-                className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-slate-200 hover:bg-white/[0.06] disabled:opacity-40"
+                className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] disabled:opacity-40"
               >
                 Back
               </button>
@@ -1221,7 +1209,7 @@ export default function RepStartQuoteModal({
                   type="button"
                   onClick={handleSubmit}
                   disabled={submitting}
-                  className="rounded-xl bg-sky-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+                  className="rounded-md bg-[var(--action-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)] disabled:opacity-60"
                 >
                   {submitting ? "Creating…" : "Create quote & open editor"}
                 </button>
@@ -1229,7 +1217,7 @@ export default function RepStartQuoteModal({
                 <button
                   type="button"
                   onClick={goNext}
-                  className="rounded-xl bg-sky-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400"
+                  className="rounded-md bg-[var(--action-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)]"
                 >
                   Next
                 </button>
@@ -1247,7 +1235,7 @@ export default function RepStartQuoteModal({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-1 text-xs font-semibold tracking-widest text-slate-400">{label}</div>
+      <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">{label}</div>
       {children}
     </div>
   );
@@ -1271,7 +1259,7 @@ function Input({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       list={listId}
-      className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-400/60 focus:outline-none"
+      className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)] focus:outline-none"
     />
   );
 }
@@ -1292,14 +1280,14 @@ function ChoiceCard({
       type="button"
       onClick={onClick}
       className={[
-        "rounded-2xl border px-4 py-3 text-left transition",
+        "rounded-xl border px-4 py-3 text-left transition",
         selected
-          ? "border-sky-400/60 bg-sky-500/10"
-          : "border-white/10 bg-white/[0.02] hover:bg-white/[0.05]",
+          ? "border-[var(--action-primary)] bg-[var(--surface-subtle)]"
+          : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
       ].join(" ")}
     >
-      <div className="text-sm font-semibold text-white">{title}</div>
-      <div className="mt-1 text-xs text-slate-400">{desc}</div>
+      <div className="text-sm font-medium text-[var(--text-primary)]">{title}</div>
+      <div className="mt-1 text-xs text-[var(--text-muted)]">{desc}</div>
     </button>
   );
 }
@@ -1307,8 +1295,8 @@ function ChoiceCard({
 function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold tracking-widest text-slate-400">{label}</div>
-      <div className="mt-0.5 text-sm text-white">{value}</div>
+      <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">{label}</div>
+      <div className="mt-0.5 text-sm text-[var(--text-primary)]">{value}</div>
     </div>
   );
 }
