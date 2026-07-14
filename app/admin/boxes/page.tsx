@@ -283,29 +283,29 @@ export default function AdminBoxesPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
+    <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)] p-6">
       <div className="mx-auto max-w-6xl">
         {/* Header */}
-        <div className="mb-4 border-b border-slate-800 pb-4">
-          <h1 className="text-2xl font-semibold text-sky-300">
+        <div className="mb-4 border-b border-[var(--border)] pb-4">
+          <h1 className="text-2xl font-medium text-[var(--text-primary)]">
             Carton pricing (RSC & mailers)
           </h1>
-          <p className="mt-1 text-sm text-slate-300">
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
             Internal pricing controls for carton add-ons. Changes here affect
             packaging pricing when cartons are attached to quotes.
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-[var(--text-faint)]">
             Prices are stored as per-carton amounts with{" "}
-            <span className="font-semibold text-sky-300">2 decimal places</span>{" "}
+            <span className="font-medium text-[var(--text-primary)]">2 decimal places</span>{" "}
             in the database. Leave fields blank to treat them as{" "}
-            <span className="font-semibold text-sky-300">NULL</span> (no tier
+            <span className="font-medium text-[var(--text-primary)]">NULL</span> (no tier
             price).
           </p>
         </div>
 
         {/* Toolbar */}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-slate-400">
+          <div className="text-xs text-[var(--text-muted)]">
             {loading
               ? "Loading carton catalog…"
               : rows.length === 0
@@ -316,10 +316,10 @@ export default function AdminBoxesPage() {
           </div>
           <div className="flex items-center gap-3">
             {saveMessage && (
-              <div className="text-[11px] text-emerald-300">{saveMessage}</div>
+              <div className="text-[11px] text-[var(--status-success-text)]">{saveMessage}</div>
             )}
             {error && (
-              <div className="text-[11px] text-rose-300 max-w-xs text-right">
+              <div className="text-[11px] text-[var(--attention)] max-w-xs text-right">
                 {error}
               </div>
             )}
@@ -327,7 +327,7 @@ export default function AdminBoxesPage() {
               type="button"
               onClick={handleSaveAll}
               disabled={saving || loading || rows.length === 0}
-              className="inline-flex items-center rounded-full border border-sky-500/60 bg-sky-600/20 px-4 py-1.5 text-xs font-medium text-sky-100 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center rounded-md bg-[var(--action-primary)] px-4 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? "Saving…" : "Save all changes"}
             </button>
@@ -336,15 +336,15 @@ export default function AdminBoxesPage() {
 
         {/* Tier ordering warnings */}
         {tierWarnings.length > 0 && (
-          <div className="mb-4 rounded-lg border border-amber-600/60 bg-amber-950/40 px-4 py-3 text-xs text-amber-100">
-            <div className="mb-1 font-semibold text-amber-200">
+          <div className="mb-4 rounded-lg border border-[var(--attention-border)] bg-[var(--attention-bg)] px-4 py-3 text-xs text-[var(--attention)]">
+            <div className="mb-1 font-medium text-[var(--attention)]">
               {tierWarnings.length} carton{tierWarnings.length === 1 ? "" : "s"} with
               out-of-order tier pricing
             </div>
             <ul className="space-y-1">
               {tierWarnings.map((w) => (
                 <li key={w.box_id}>
-                  <span className="font-mono text-amber-200">{w.sku}</span>:{" "}
+                  <span className="font-mono text-[var(--attention)]">{w.sku}</span>:{" "}
                   {w.messages.join(" ")}
                 </li>
               ))}
@@ -353,50 +353,50 @@ export default function AdminBoxesPage() {
         )}
 
         {/* Table */}
-        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60">
+        <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface-card)]">
           <table className="min-w-full border-collapse text-xs">
-            <thead className="bg-slate-900/90">
+            <thead className="bg-[var(--surface-subtle)]">
               <tr>
-                <th className="border-b border-slate-800 px-3 py-2 text-left font-medium text-slate-300">
+                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
                   Vendor / SKU
                 </th>
-                <th className="border-b border-slate-800 px-3 py-2 text-left font-medium text-slate-300">
+                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
                   Description
                 </th>
-                <th className="border-b border-slate-800 px-3 py-2 text-left font-medium text-slate-300">
+                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
                   Inside dims (L x W x H in)
                 </th>
-                <th className="border-b border-slate-800 px-3 py-2 text-left font-medium text-slate-300">
+                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
                   Base unit price
-                  <div className="text-[10px] font-normal text-slate-500">
+                  <div className="text-[10px] font-normal text-[var(--text-faint)]">
                     Default per carton
                   </div>
                 </th>
                 {/* Tier 1 */}
-                <th className="border-b border-slate-800 px-3 py-2 text-left font-medium text-slate-300">
+                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
                   Tier 1
-                  <div className="text-[10px] font-normal text-slate-500">
+                  <div className="text-[10px] font-normal text-[var(--text-faint)]">
                     Min qty / unit price
                   </div>
                 </th>
                 {/* Tier 2 */}
-                <th className="border-b border-slate-800 px-3 py-2 text-left font-medium text-slate-300">
+                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
                   Tier 2
-                  <div className="text-[10px] font-normal text-slate-500">
+                  <div className="text-[10px] font-normal text-[var(--text-faint)]">
                     Min qty / unit price
                   </div>
                 </th>
                 {/* Tier 3 */}
-                <th className="border-b border-slate-800 px-3 py-2 text-left font-medium text-slate-300">
+                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
                   Tier 3
-                  <div className="text-[10px] font-normal text-slate-500">
+                  <div className="text-[10px] font-normal text-[var(--text-faint)]">
                     Min qty / unit price
                   </div>
                 </th>
                 {/* Tier 4 (future) */}
-                <th className="border-b border-slate-800 px-3 py-2 text-left font-medium text-slate-300">
+                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
                   Tier 4 (future)
-                  <div className="text-[10px] font-normal text-slate-500">
+                  <div className="text-[10px] font-normal text-[var(--text-faint)]">
                     Min qty / unit price
                   </div>
                 </th>
@@ -407,7 +407,7 @@ export default function AdminBoxesPage() {
                 <tr>
                   <td
                     colSpan={8}
-                    className="px-3 py-4 text-center text-xs text-slate-500"
+                    className="px-3 py-4 text-center text-xs text-[var(--text-faint)]"
                   >
                     No active cartons found.
                   </td>
@@ -422,25 +422,25 @@ export default function AdminBoxesPage() {
                 return (
                   <tr
                     key={row.box_id}
-                    className="border-t border-slate-800/70 hover:bg-slate-900/80"
+                    className="border-t border-[var(--border)] hover:bg-[var(--surface-subtle)]"
                   >
                     {/* Vendor / SKU */}
                     <td className="px-3 py-2 align-top">
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
                           {showVendorBadge && (
-                            <span className="inline-flex rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-200">
+                            <span className="inline-flex rounded-full bg-[var(--surface-subtle)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)]">
                               {row.vendor}
                             </span>
                           )}
                           {!showVendorBadge && (
-                            <span className="inline-flex w-3 border-t border-slate-700" />
+                            <span className="inline-flex w-3 border-t border-[var(--border)]" />
                           )}
                         </div>
-                        <div className="text-[11px] font-semibold text-slate-100">
+                        <div className="text-[11px] font-medium text-[var(--text-primary)]">
                           {row.sku}
                         </div>
-                        <div className="text-[10px] text-slate-500">
+                        <div className="text-[10px] text-[var(--text-faint)]">
                           {row.style}
                         </div>
                       </div>
@@ -448,14 +448,14 @@ export default function AdminBoxesPage() {
 
                     {/* Description */}
                     <td className="px-3 py-2 align-top">
-                      <div className="max-w-xs text-[11px] text-slate-200">
+                      <div className="max-w-xs text-[11px] text-[var(--text-secondary)]">
                         {row.description}
                       </div>
                     </td>
 
                     {/* Inside dims */}
                     <td className="px-3 py-2 align-top">
-                      <div className="text-[11px] text-slate-100">
+                      <div className="text-[11px] text-[var(--text-primary)]">
                         {row.inside_dims}
                       </div>
                     </td>
@@ -466,7 +466,7 @@ export default function AdminBoxesPage() {
                         type="number"
                         step="0.01"
                         inputMode="decimal"
-                        className="w-24 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                        className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                         value={row.base_unit_price}
                         onChange={(e) =>
                           updateRow(
@@ -477,7 +477,7 @@ export default function AdminBoxesPage() {
                         }
                         placeholder="e.g. 1.25"
                       />
-                      <div className="mt-1 text-[10px] text-slate-500">
+                      <div className="mt-1 text-[10px] text-[var(--text-faint)]">
                         Leave blank to use tier pricing only.
                       </div>
                     </td>
@@ -489,7 +489,7 @@ export default function AdminBoxesPage() {
                           type="number"
                           step="1"
                           inputMode="numeric"
-                          className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                          className="w-20 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                           value={row.tier1_min_qty}
                           onChange={(e) =>
                             updateRow(
@@ -504,7 +504,7 @@ export default function AdminBoxesPage() {
                           type="number"
                           step="0.01"
                           inputMode="decimal"
-                          className="w-24 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                          className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                           value={row.tier1_unit_price}
                           onChange={(e) =>
                             updateRow(
@@ -525,7 +525,7 @@ export default function AdminBoxesPage() {
                           type="number"
                           step="1"
                           inputMode="numeric"
-                          className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                          className="w-20 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                           value={row.tier2_min_qty}
                           onChange={(e) =>
                             updateRow(
@@ -540,7 +540,7 @@ export default function AdminBoxesPage() {
                           type="number"
                           step="0.01"
                           inputMode="decimal"
-                          className="w-24 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                          className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                           value={row.tier2_unit_price}
                           onChange={(e) =>
                             updateRow(
@@ -561,7 +561,7 @@ export default function AdminBoxesPage() {
                           type="number"
                           step="1"
                           inputMode="numeric"
-                          className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                          className="w-20 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                           value={row.tier3_min_qty}
                           onChange={(e) =>
                             updateRow(
@@ -576,7 +576,7 @@ export default function AdminBoxesPage() {
                           type="number"
                           step="0.01"
                           inputMode="decimal"
-                          className="w-24 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                          className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                           value={row.tier3_unit_price}
                           onChange={(e) =>
                             updateRow(
@@ -597,7 +597,7 @@ export default function AdminBoxesPage() {
                           type="number"
                           step="1"
                           inputMode="numeric"
-                          className="w-20 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                          className="w-20 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                           value={row.tier4_min_qty}
                           onChange={(e) =>
                             updateRow(
@@ -612,7 +612,7 @@ export default function AdminBoxesPage() {
                           type="number"
                           step="0.01"
                           inputMode="decimal"
-                          className="w-24 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                          className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                           value={row.tier4_unit_price}
                           onChange={(e) =>
                             updateRow(
@@ -632,7 +632,7 @@ export default function AdminBoxesPage() {
           </table>
         </div>
 
-        <p className="mt-4 text-[11px] text-slate-500">
+        <p className="mt-4 text-[11px] text-[var(--text-faint)]">
           Admin only – changes here are for internal pricing control and are not
           visible on the customer quote page except as updated packaging prices.
         </p>
