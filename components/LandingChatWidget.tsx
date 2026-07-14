@@ -399,9 +399,8 @@ export default function LandingChatWidget() {
             style={{
               fontFamily: "'Segoe UI', system-ui, sans-serif",
               fontSize: 22,
-              fontWeight: 700,
-              color: "#38bdf8",
-              textShadow: "0 0 28px rgba(56,189,248,0.5)",
+              fontWeight: 600,
+              color: "var(--action-primary)",
               whiteSpace: "nowrap",
               letterSpacing: "0.01em",
               lineHeight: 1.35,
@@ -418,12 +417,11 @@ export default function LandingChatWidget() {
             viewBox="0 0 64 48"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
-            style={{ filter: "drop-shadow(0 0 10px rgba(56,189,248,0.45))" }}
           >
             {/* Sketchy curved arrow shaft */}
             <path
               d="M 8 4 C 12 8, 18 14, 22 22 C 26 30, 30 36, 36 42"
-              stroke="#38bdf8"
+              stroke="#2B2B28"
               strokeWidth="2.2"
               strokeLinecap="round"
               fill="none"
@@ -432,7 +430,7 @@ export default function LandingChatWidget() {
             {/* Second pass — slight offset for hand-drawn feel */}
             <path
               d="M 9 5 C 13 9, 19 15, 23 23 C 27 31, 31 37, 37 43"
-              stroke="#38bdf8"
+              stroke="#2B2B28"
               strokeWidth="1.2"
               strokeLinecap="round"
               fill="none"
@@ -441,7 +439,7 @@ export default function LandingChatWidget() {
             {/* Arrowhead — hand-drawn, slightly off-angle */}
             <path
               d="M 36 42 L 28 38 M 36 42 L 40 34"
-              stroke="#38bdf8"
+              stroke="#2B2B28"
               strokeWidth="2.2"
               strokeLinecap="round"
               fill="none"
@@ -450,7 +448,7 @@ export default function LandingChatWidget() {
             {/* Arrowhead second pass */}
             <path
               d="M 37 43 L 29 39 M 37 43 L 41 35"
-              stroke="#38bdf8"
+              stroke="#2B2B28"
               strokeWidth="1.2"
               strokeLinecap="round"
               fill="none"
@@ -465,18 +463,18 @@ export default function LandingChatWidget() {
         <button
           type="button"
           onClick={() => { setOpen(true); setMinimizedHint(true); }}
-          className="group flex items-center gap-2 sm:gap-3 rounded-full border border-white/15 bg-slate-950/80 px-3 sm:px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur hover:bg-slate-950/90"
+          className="group flex items-center gap-2 sm:gap-3 rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 sm:px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-sm hover:bg-[var(--surface-subtle)]"
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-500/20 ring-1 ring-sky-300/20">
-            <span className="h-2.5 w-2.5 rounded-full bg-sky-400" />
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--surface-subtle)] ring-1 ring-[var(--border)]">
+            <span className="h-2.5 w-2.5 rounded-full bg-[var(--action-primary)]" />
           </span>
           <span className="leading-tight">
             <span className="block">Talk to Alex-IO</span>
-            <span className="block text-[11px] font-medium text-slate-300">
+            <span className="block text-[11px] font-medium text-[var(--text-muted)]">
               chat → layout → pricing
             </span>
           </span>
-          <span className="ml-1 rounded-full border border-white/15 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-200">
+          <span className="ml-1 rounded-full border border-[var(--border)] bg-[var(--surface-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
             Live
           </span>
         </button>
@@ -484,12 +482,12 @@ export default function LandingChatWidget() {
 
       {/* Chat panel */}
       {open && (
-        <div className="w-[calc(100vw-24px)] max-w-[360px] overflow-hidden rounded-2xl border border-white/12 bg-slate-950/85 shadow-[0_18px_70px_rgba(0,0,0,0.65)] backdrop-blur">
+        <div className="w-[calc(100vw-24px)] max-w-[360px] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] shadow-sm">
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
             <div>
-              <div className="text-xs font-semibold tracking-widest text-sky-300/80">ALEX-IO</div>
-              <div className="mt-0.5 text-[11px] text-slate-300">
+              <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">ALEX-IO</div>
+              <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
                 Chat your way into a real quote.
               </div>
             </div>
@@ -497,14 +495,14 @@ export default function LandingChatWidget() {
               <button
                 type="button"
                 onClick={reset}
-                className="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200 hover:bg-white/10"
+                className="rounded-full border border-[var(--border)] bg-[var(--surface-subtle)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--border)]"
               >
                 Reset
               </button>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200 hover:bg-white/10"
+                className="rounded-full border border-[var(--border)] bg-[var(--surface-subtle)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--border)]"
               >
                 ✕
               </button>
@@ -523,8 +521,8 @@ export default function LandingChatWidget() {
                     className={[
                       "max-w-[88%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed",
                       m.role === "user"
-                        ? "bg-sky-500/25 text-white ring-1 ring-sky-300/20"
-                        : "bg-white/[0.05] text-slate-200 ring-1 ring-white/10",
+                        ? "bg-[var(--action-primary)] text-white"
+                        : "bg-[var(--surface-subtle)] text-[var(--text-primary)] ring-1 ring-[var(--border)]",
                     ].join(" ")}
                   >
                     {m.text}
@@ -542,7 +540,7 @@ export default function LandingChatWidget() {
                     type="button"
                     onClick={() => void handleSend(q)}
                     disabled={busy}
-                    className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-[12px] text-slate-100 hover:bg-white/[0.08] disabled:opacity-50"
+                    className="rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] disabled:opacity-50"
                   >
                     {q}
                   </button>
@@ -552,18 +550,18 @@ export default function LandingChatWidget() {
 
             {/* Done card — only shown when AI confirms done=true (mirrors SplashChatWidget) */}
             {done && (
-              <div ref={doneCardRef} className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+              <div ref={doneCardRef} className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
+                <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                   QUICK SUMMARY
                 </div>
-                <ul className="mt-2 space-y-1 text-sm text-slate-200">
+                <ul className="mt-2 space-y-1 text-sm text-[var(--text-primary)]">
                   {summaryLines.map((l) => (
                     <li key={l}>• {l}</li>
                   ))}
                 </ul>
 
                 {seedError && (
-                  <div className="mt-2 rounded-xl border border-red-400/25 bg-red-400/10 px-3 py-2 text-xs text-red-200">
+                  <div className="mt-2 rounded-xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-xs text-[var(--attention)]">
                     Something went wrong — please try again.
                   </div>
                 )}
@@ -573,13 +571,13 @@ export default function LandingChatWidget() {
                     type="button"
                     onClick={() => void openDemo()}
                     disabled={seeding}
-                    className="w-full rounded-full bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full rounded-md bg-[var(--action-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {seeding ? "Setting up your quote…" : "Open layout & pricing"}
                   </button>
                 </div>
 
-                <div className="mt-2 text-[11px] text-slate-400">
+                <div className="mt-2 text-[11px] text-[var(--text-muted)]">
                   You can keep chatting to add or correct anything — I'll update the
                   summary. Open the layout when you're ready.
                 </div>
@@ -588,7 +586,7 @@ export default function LandingChatWidget() {
           </div>
 
           {/* Input */}
-          <div className="border-t border-white/10 p-3">
+          <div className="border-t border-[var(--border)] p-3">
             <div className="flex items-end gap-2">
               <textarea
                 value={input}
@@ -605,7 +603,7 @@ export default function LandingChatWidget() {
                 }}
                 rows={1}
                 placeholder={done ? "Add anything else…" : "Type here…"}
-                className="min-h-[42px] flex-1 resize-none rounded-2xl border border-white/12 bg-white/[0.04] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                className="min-h-[42px] flex-1 resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--action-primary)]/40"
               />
               <button
                 type="button"
@@ -617,15 +615,15 @@ export default function LandingChatWidget() {
                   }
                 }}
                 disabled={busy || !input.trim()}
-                className="rounded-2xl bg-sky-500/90 px-4 py-2 text-sm font-semibold text-white ring-1 ring-sky-300/20 hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-2xl bg-[var(--action-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Send
               </button>
             </div>
 
             {minimizedHint && (
-              <div className="mt-2 text-[11px] text-slate-400">
-                Press <span className="text-slate-300">Esc</span> to close.
+              <div className="mt-2 text-[11px] text-[var(--text-muted)]">
+                Press <span className="text-[var(--text-secondary)]">Esc</span> to close.
               </div>
             )}
           </div>

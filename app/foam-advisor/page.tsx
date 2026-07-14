@@ -697,28 +697,28 @@ export default function FoamAdvisorPage({
     }, [advisorResult, selectedRecKey]);
 
   return (
-    <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
+    <main className="min-h-screen bg-[var(--surface-page)] flex items-stretch py-8 px-4">
       <div className="w-full max-w-6xl mx-auto">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/90 shadow-[0_22px_45px_rgba(15,23,42,0.85)] overflow-hidden">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] shadow-sm overflow-hidden">
           {/* Header – match layout editor vibe */}
-          <div className="border-b border-slate-800 bg-gradient-to-r from-sky-500 via-sky-500/80 to-slate-900 px-6 py-4">
+          <div className="border-b border-[var(--border)] bg-[var(--surface-subtle)] px-6 py-4">
             <div className="flex items-center gap-4 w-full">
               {/* LEFT: powered by + quote */}
               <div className="flex flex-col">
-                <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-sky-50/90">
+                <div className="text-[11px] font-medium tracking-[0.16em] uppercase text-[var(--text-secondary)]">
                   Powered by Alex-IO
                 </div>
-                <div className="mt-1 text-xs text-sky-50/95">
+                <div className="mt-1 text-xs text-[var(--text-secondary)]">
                   Foam Advisor ·{" "}
                   {hasQuote ? (
                     <>
                       Quote{" "}
-                      <span className="font-mono font-semibold text-slate-50">
+                      <span className="font-mono font-medium text-[var(--text-primary)]">
                         {effectiveQuoteNo}
                       </span>
                     </>
                   ) : (
-                    <span className="text-amber-50/90">
+                    <span className="text-[var(--text-muted)]">
                       No quote linked (demo input)
                     </span>
                   )}
@@ -727,14 +727,14 @@ export default function FoamAdvisorPage({
 
               {/* CENTER: big title */}
               <div className="flex-1 text-center">
-                <div className="text-xl font-extrabold text-slate-50 leading-snug drop-shadow-[0_0_8px_rgba(15,23,42,0.6)]">
+                <div className="text-xl font-medium text-[var(--text-primary)] leading-snug">
                   Foam recommendation assistant
                 </div>
               </div>
 
               {/* RIGHT: BETA pill */}
               <div className="flex items-center justify-end">
-                <span className="inline-flex items-center rounded-full border border-slate-200/70 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
+                <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
                   Foam Advisor · BETA
                 </span>
               </div>
@@ -742,33 +742,33 @@ export default function FoamAdvisorPage({
           </div>
 
           {/* Body – three-column layout */}
-          <div className="flex flex-row gap-5 p-5 bg-slate-950/90 text-slate-100">
+          <div className="flex flex-row gap-5 p-5 bg-[var(--surface-card)] text-[var(--text-primary)]">
             {/* LEFT: Inputs + context */}
             <aside className="w-72 shrink-0 flex flex-col gap-3">
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                <div className="text-xs font-semibold text-slate-100 mb-1">
+              <div className="bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-3">
+                <div className="text-xs font-medium text-[var(--text-primary)] mb-1">
                   How this works
                 </div>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-[11px] text-[var(--text-muted)]">
                   Enter the product weight, contact area, environment, and
                   fragility. Foam Advisor computes static load and suggests foam
                   families as a starting point.
                 </p>
-                <p className="mt-2 text-[11px] text-slate-500">
+                <p className="mt-2 text-[11px] text-[var(--text-faint)]">
                   The center canvas uses your cushion curve data to show where
                   this load sits.
                 </p>
               </div>
 
               {parsedBlock && (
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 text-[11px] text-slate-200">
-                  <div className="text-xs font-semibold text-slate-100 mb-1">
+                <div className="bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-3 text-[11px] text-[var(--text-secondary)]">
+                  <div className="text-xs font-medium text-[var(--text-primary)] mb-1">
                     From layout
                   </div>
                   <div className="font-mono">
                     {parsedBlock.L}" × {parsedBlock.W}" × {parsedBlock.H}"
                   </div>
-                  <div className="mt-1 text-slate-400">
+                  <div className="mt-1 text-[var(--text-muted)]">
                     Contact area can start as L × W for snug fits. You can
                     override it below.
                   </div>
@@ -778,11 +778,11 @@ export default function FoamAdvisorPage({
               {/* Advisor form */}
               <form
                 onSubmit={handleSubmit}
-                className="space-y-4 text-xs bg-slate-900 rounded-2xl border border-slate-800 p-4"
+                className="space-y-4 text-xs bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-4"
               >
                 <div className="grid grid-cols-1 gap-3">
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] text-slate-300">
+                    <span className="text-[11px] text-[var(--text-secondary)]">
                       Product weight (lb)
                     </span>
                     <input
@@ -791,16 +791,16 @@ export default function FoamAdvisorPage({
                       min="0"
                       value={weightLb}
                       onChange={(e) => setWeightLb(e.target.value)}
-                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)]"
                     />
-                    <span className="text-[10px] text-slate-500">
+                    <span className="text-[10px] text-[var(--text-faint)]">
                       Approximate weight of the protected item or load on each
                       cavity.
                     </span>
                   </label>
 
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] text-slate-300">
+                    <span className="text-[11px] text-[var(--text-secondary)]">
                       Product contact length (in)
                     </span>
                     <input
@@ -811,15 +811,15 @@ export default function FoamAdvisorPage({
                       onChange={(e) =>
                         setProductContactLengthIn(e.target.value)
                       }
-                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)]"
                     />
-                    <span className="text-[10px] text-slate-500">
+                    <span className="text-[10px] text-[var(--text-faint)]">
                       Length of the area actually touching/supporting the product.
                     </span>
                   </label>
 
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] text-slate-300">
+                    <span className="text-[11px] text-[var(--text-secondary)]">
                       Product contact width (in)
                     </span>
                     <input
@@ -830,26 +830,26 @@ export default function FoamAdvisorPage({
                       onChange={(e) =>
                         setProductContactWidthIn(e.target.value)
                       }
-                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)]"
                     />
-                    <span className="text-[10px] text-slate-500">
+                    <span className="text-[10px] text-[var(--text-faint)]">
                       Width of the area actually touching/supporting the product.
                     </span>
                   </label>
 
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2">
-                    <div className="text-[11px] text-slate-300">
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-page)] px-3 py-2">
+                    <div className="text-[11px] text-[var(--text-secondary)]">
                       Contact area (computed)
                     </div>
                     <div className="mt-1 flex items-baseline justify-between">
-                      <div className="font-mono text-sky-200 text-[12px]">
+                      <div className="font-mono text-[var(--text-primary)] text-[12px]">
                         {computedContactAreaIn2 != null
                           ? `${computedContactAreaIn2.toFixed(2)} in`
                           : ""}
                       </div>
-                      <div className="text-[10px] text-slate-500">L  W</div>
+                      <div className="text-[10px] text-[var(--text-faint)]">L  W</div>
                     </div>
-                    <div className="mt-1 text-[10px] text-slate-500">
+                    <div className="mt-1 text-[10px] text-[var(--text-faint)]">
                       This drives psi and the cushion curve operating point.
                     </div>
                   </div>
@@ -857,7 +857,7 @@ export default function FoamAdvisorPage({
 
                 <div className="grid grid-cols-1 gap-3">
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] text-slate-300">
+                    <span className="text-[11px] text-[var(--text-secondary)]">
                       Shipping environment
                     </span>
                     <select
@@ -867,7 +867,7 @@ export default function FoamAdvisorPage({
                           e.target.value as EnvironmentOption,
                         )
                       }
-                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)]"
                     >
                       <option value="normal">
                         Normal parcel / LTL
@@ -879,13 +879,13 @@ export default function FoamAdvisorPage({
                         Heavy vibration / rough handling
                       </option>
                     </select>
-                    <span className="text-[10px] text-slate-500">
+                    <span className="text-[10px] text-[var(--text-faint)]">
                       Tunes recommendations toward harsher or gentler handling.
                     </span>
                   </label>
 
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] text-slate-300">
+                    <span className="text-[11px] text-[var(--text-secondary)]">
                       Product fragility
                     </span>
                     <select
@@ -895,7 +895,7 @@ export default function FoamAdvisorPage({
                           e.target.value as FragilityOption,
                         )
                       }
-                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)]"
                     >
                       <option value="very_fragile">
                         Very fragile electronics / optics
@@ -907,7 +907,7 @@ export default function FoamAdvisorPage({
                         Rugged hardware / tooling
                       </option>
                     </select>
-                    <span className="text-[10px] text-slate-500">
+                    <span className="text-[10px] text-[var(--text-faint)]">
                       Later this maps to g-level bands for curve selection.
                     </span>
                   </label>
@@ -917,7 +917,7 @@ export default function FoamAdvisorPage({
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="inline-flex items-center rounded-full border border-sky-500/80 bg-sky-500 px-4 py-1.5 text-xs font-medium text-slate-950 hover:bg-sky-400 transition disabled:opacity-60"
+                    className="inline-flex items-center rounded-md border border-[var(--action-primary)] bg-[var(--action-primary)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[var(--action-primary-hover)] transition disabled:opacity-60"
                   >
                     {submitting
                       ? "Analyzing…"
@@ -926,13 +926,13 @@ export default function FoamAdvisorPage({
                 </div>
 
                 {advisorError && (
-                  <div className="mt-3 rounded-xl border border-amber-600 bg-amber-900/60 px-3 py-2 text-[11px] text-amber-50">
+                  <div className="mt-3 rounded-xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)]">
                     {advisorError}
                   </div>
                 )}
 
                 {materialsError && (
-                  <div className="mt-2 rounded-xl border border-amber-700 bg-amber-950/70 px-3 py-2 text-[11px] text-amber-100">
+                  <div className="mt-2 rounded-xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)]">
                     {materialsError}
                   </div>
                 )}
@@ -941,12 +941,12 @@ export default function FoamAdvisorPage({
 
             {/* CENTER: Graphical cushion canvas */}
             <section className="flex-1 flex flex-col">
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 flex-1 flex flex-col shadow-[0_18px_45px_rgba(15,23,42,0.9)]">
+              <div className="bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-4 flex-1 flex flex-col shadow-sm">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-[15px] font-semibold text-slate-100 tracking-tight">
+                  <div className="text-[15px] font-medium text-[var(--text-primary)] tracking-tight">
                     Cushion curve canvas
                   </div>
-                  <div className="text-[10px] text-slate-500">
+                  <div className="text-[10px] text-[var(--text-faint)]">
                     Choose a recommendation on the right to drive this view.
                   </div>
                 </div>
@@ -954,7 +954,7 @@ export default function FoamAdvisorPage({
                 {/* States when we don't have an analysis yet */}
                 {!advisorResult && (
                   <div className="flex-1 flex items-center justify-center">
-                    <div className="text-[11px] text-slate-500 text-center max-w-xs">
+                    <div className="text-[11px] text-[var(--text-faint)] text-center max-w-xs">
                       Run an analysis on the left. Once Foam Advisor has a
                       static load and recommendations, this canvas will pull the
                       matching cushion curve and show your operating point.
@@ -966,9 +966,9 @@ export default function FoamAdvisorPage({
                 {advisorResult && (
                   <div className="flex-1 flex flex-col gap-4">
                     {/* Static load + band bar */}
-                    <div className="text-[11px] text-slate-300">
+                    <div className="text-[11px] text-[var(--text-secondary)]">
                       <div className="mb-1">
-                        <span className="font-semibold text-sky-200">
+                        <span className="font-medium text-[var(--text-primary)]">
                           Static load:
                         </span>{" "}
                         {advisorResult.staticLoadPsi.toFixed(3)} psi
@@ -978,7 +978,7 @@ export default function FoamAdvisorPage({
 
                     {/* Band visualization */}
                     <div className="mt-2">
-                      <div className="text-[11px] text-slate-300 mb-1">
+                      <div className="text-[11px] text-[var(--text-secondary)] mb-1">
                         Operating band preview
                       </div>
                       <div className="relative h-12 rounded-full overflow-hidden border border-slate-700 bg-slate-950">
@@ -1047,7 +1047,7 @@ export default function FoamAdvisorPage({
                           })()}
                         </div>
                       </div>
-                      <p className="mt-1 text-[10px] text-slate-500">
+                      <p className="mt-1 text-[10px] text-[var(--text-faint)]">
                         The colored bar shows a typical static-load range for
                         this type of foam. The dashed line and glow mark where
                         your product sits within that range.
@@ -1056,19 +1056,19 @@ export default function FoamAdvisorPage({
                     {/* Curve loading / error / chart */}
                     <div className="mt-3 flex-1 flex flex-col">
                       <div className="flex items-center justify-between mb-1">
-                        <div className="text-[11px] font-semibold text-slate-100">
+                        <div className="text-[11px] font-medium text-[var(--text-primary)]">
                           {selectedRecommendation
                             ? `Curve preview: ${selectedRecommendation.label}`
                             : "Primary curve preview"}
                         </div>
-                        <div className="text-[10px] text-slate-500">
+                        <div className="text-[10px] text-[var(--text-faint)]">
                           Source: public.cushion_curves
                         </div>
                       </div>
 
                       {curveLoading && (
                         <div className="flex-1 flex items-center justify-center">
-                          <div className="text-[11px] text-sky-200">
+                          <div className="text-[11px] text-[var(--text-secondary)]">
                             Loading cushion curve data…
                           </div>
                         </div>
@@ -1076,7 +1076,7 @@ export default function FoamAdvisorPage({
 
                       {!curveLoading && curveError && (
                         <div className="flex-1 flex items-center justify-center">
-                          <div className="rounded-xl border border-rose-700/70 bg-rose-950/60 px-3 py-2 text-[11px] text-rose-50 max-w-xs text-center">
+                          <div className="rounded-xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)] max-w-xs text-center">
                             Couldn’t load cushion curve for the selected
                             recommendation.
                             <br />
@@ -1089,10 +1089,10 @@ export default function FoamAdvisorPage({
                         !curveError &&
                         (!curvePoints || curvePoints.length === 0) && (
                           <div className="flex-1 flex items-center justify-center">
-                            <div className="text-[11px] text-slate-500 text-center max-w-xs">
+                            <div className="text-[11px] text-[var(--text-faint)] text-center max-w-xs">
                               No curve data was found for the selected catalog
                               material yet. You can still click{" "}
-                              <span className="font-semibold">
+                              <span className="font-medium">
                                 View cushion curve
                               </span>{" "}
                               in the sidebar to open its admin view.
@@ -1105,11 +1105,11 @@ export default function FoamAdvisorPage({
                         curvePoints &&
                         curvePoints.length > 0 && (
                           <div className="flex-1 flex flex-col gap-2">
-                            <div className="text-[11px] text-slate-300">
+                            <div className="text-[11px] text-[var(--text-secondary)]">
                               {curveMaterial ? (
                                 <>
                                   Plotting{" "}
-                                  <span className="font-semibold text-sky-200">
+                                  <span className="font-medium text-[var(--text-primary)]">
                                     {curveMaterial.material_family ?? "Foam"}
                                     {" – "}
                                     {curveMaterial.name}
@@ -1503,30 +1503,30 @@ export default function FoamAdvisorPage({
 
                             {/* Nearest-point numeric readout + disclaimer */}
                             {nearestCurvePoint && hasOperating && (
-                              <div className="mt-3 text-[10px] text-slate-300">
+                              <div className="mt-3 text-[10px] text-[var(--text-secondary)]">
                                 <div>
-                                  <span className="font-semibold text-slate-200">
+                                  <span className="font-medium text-[var(--text-primary)]">
                                     Nearest tested point:
                                   </span>{" "}
-                                  <span className="font-mono text-sky-200">
+                                  <span className="font-mono text-[var(--text-primary)]">
                                     {nearestCurvePoint.static_psi.toFixed(3)} psi
                                   </span>
-                                  <span className="text-slate-500">
+                                  <span className="text-[var(--text-faint)]">
                                     {" "}
                                     ·{" "}
                                   </span>
-                                  <span className="font-mono text-sky-200">
+                                  <span className="font-mono text-[var(--text-primary)]">
                                     {nearestCurvePoint.deflect_pct.toFixed(1)}%
                                   </span>
-                                  <span className="text-slate-500">
+                                  <span className="text-[var(--text-faint)]">
                                     {" "}
                                     ·{" "}
                                   </span>
-                                  <span className="font-mono text-sky-200">
+                                  <span className="font-mono text-[var(--text-primary)]">
                                     {nearestCurvePoint.g_level.toFixed(1)} G
                                   </span>
                                 </div>
-                                <div className="mt-1 text-[9px] text-slate-500">
+                                <div className="mt-1 text-[9px] text-[var(--text-faint)]">
                                   Lab curves are a guide, not a guarantee.
                                   Always verify with real-world testing.
                                 </div>
@@ -1542,7 +1542,7 @@ export default function FoamAdvisorPage({
             {/* RIGHT: Summary + recommendations (clickable) */}
             <aside className="w-80 shrink-0 flex flex-col gap-3">
               {!advisorResult && (
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3 text-[11px] text-slate-400">
+                <div className="bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-3 text-[11px] text-[var(--text-muted)]">
                   Run an analysis on the left to see a summary and mapped foam
                   families here.
                 </div>
@@ -1550,23 +1550,23 @@ export default function FoamAdvisorPage({
 
               {advisorResult && (
                 <>
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
-                    <div className="font-semibold text-sky-200 mb-1">
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-[11px] text-[var(--text-secondary)]">
+                    <div className="font-medium text-[var(--text-primary)] mb-1">
                       Analysis summary
                     </div>
                     <p className="mb-2">
                       {advisorResult.staticLoadPsiLabel}
                     </p>
                     <p className="mb-1">
-                      <span className="font-semibold">Environment: </span>
+                      <span className="font-medium">Environment: </span>
                       {advisorResult.environmentLabel}
                     </p>
                     <p>
-                      <span className="font-semibold">Fragility: </span>
+                      <span className="font-medium">Fragility: </span>
                       {advisorResult.fragilityLabel}
                     </p>
                     {parsedBlock && (
-                      <p className="mt-2 text-[10px] text-slate-500">
+                      <p className="mt-2 text-[10px] text-[var(--text-faint)]">
                         Block from layout: {parsedBlock.L}" × {parsedBlock.W}"
                         × {parsedBlock.H}".
                       </p>
@@ -1574,18 +1574,18 @@ export default function FoamAdvisorPage({
                   </div>
 
                   {/* Suggested foam families */}
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-[11px] text-slate-200">
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-[11px] text-[var(--text-secondary)]">
                     <div className="flex items-center justify-between mb-2">
-                      <div className="text-[11px] font-semibold text-slate-100">
+                      <div className="text-[11px] font-medium text-[var(--text-primary)]">
                         Suggested foam families
                       </div>
-                      <div className="text-[10px] text-slate-500">
+                      <div className="text-[10px] text-[var(--text-faint)]">
                         Using /api/materials for catalog mapping.
                       </div>
                     </div>
 
                     {advisorResult.recommendations.length === 0 ? (
-                      <div className="text-[11px] text-slate-300">
+                      <div className="text-[11px] text-[var(--text-secondary)]">
                         No specific suggestions returned for this combination
                         yet.
                       </div>
@@ -1608,17 +1608,17 @@ export default function FoamAdvisorPage({
                             className={[
                               "mb-3 last:mb-0 rounded-xl border px-3 py-2 cursor-pointer transition",
                               isActive
-                                ? "border-sky-500/90 bg-slate-900 shadow-[0_0_0_1px_rgba(56,189,248,0.4)]"
-                                : "border-slate-700 bg-slate-950/80 hover:border-sky-500/70 hover:bg-sky-500/5",
+                                ? "border-[var(--action-primary)] bg-[var(--surface-card)] shadow-[0_0_0_1px_var(--action-primary)]"
+                                : "border-[var(--border)] bg-[var(--surface-page)] hover:border-[var(--action-primary)] hover:bg-[var(--surface-subtle)]",
                             ].join(" ")}
                             onClick={() => setSelectedRecKey(rec.key)}
                           >
                             <div className="flex items-center justify-between mb-1">
                               <div>
-                                <div className="font-semibold">
+                                <div className="font-medium">
                                   {rec.label}
                                 </div>
-                                <div className="text-[10px] text-slate-400">
+                                <div className="text-[10px] text-[var(--text-muted)]">
                                   {rec.family}
                                 </div>
                               </div>
@@ -1627,10 +1627,10 @@ export default function FoamAdvisorPage({
                                   className={[
                                     "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
                                     rec.confidence === "primary"
-                                      ? "bg-sky-500/20 border border-sky-400 text-sky-100"
+                                      ? "bg-[var(--action-primary)] border border-[var(--action-primary)] text-white"
                                       : rec.confidence === "alternative"
-                                      ? "bg-emerald-500/15 border border-emerald-400 text-emerald-100"
-                                      : "bg-slate-700/60 border border-slate-500 text-slate-100",
+                                      ? "bg-[var(--status-success-bg)] border border-[var(--status-success-text)]/30 text-[var(--status-success-text)]"
+                                      : "bg-[var(--status-neutral-bg)] border border-[var(--border-strong)] text-[var(--status-neutral-text)]",
                                   ].join(" ")}
                                 >
                                   {rec.confidence === "primary"
@@ -1640,7 +1640,7 @@ export default function FoamAdvisorPage({
                                     : "Stretch option"}
                                 </span>
                                 {isActive && (
-                                  <span className="inline-flex items-center rounded-full border border-sky-400/70 bg-sky-500/10 px-2 py-0.5 text-[9px] font-medium text-sky-100">
+                                  <span className="inline-flex items-center rounded-full border border-[var(--action-primary)]/50 bg-[var(--surface-subtle)] px-2 py-0.5 text-[9px] font-medium text-[var(--action-primary)]">
                                     Showing on canvas
                                   </span>
                                 )}
@@ -1651,8 +1651,8 @@ export default function FoamAdvisorPage({
                             </p>
 
                             {matchedMaterials.length > 0 && (
-                              <div className="mt-1 text-[10px] text-slate-400">
-                                <div className="font-semibold text-[10px] text-slate-300 mb-0.5">
+                              <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                                <div className="font-medium text-[10px] text-[var(--text-secondary)] mb-0.5">
                                   In your catalog:
                                 </div>
                                 <ul className="list-disc list-inside space-y-0.5">
@@ -1674,7 +1674,7 @@ export default function FoamAdvisorPage({
                                       href={`/admin/cushion/curves/${firstMatched.id}`}
                                       target="_blank"
                                       rel="noreferrer"
-                                      className="inline-flex items-center rounded-full border border-sky-500/70 px-3 py-1 text-[10px] font-medium text-sky-100 hover:bg-sky-500/15 transition"
+                                      className="inline-flex items-center rounded-full border border-[var(--border-strong)] px-3 py-1 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] transition"
                                       onClick={(e) => e.stopPropagation()}
                                     >
                                       View cushion curve
@@ -1682,7 +1682,7 @@ export default function FoamAdvisorPage({
 
                                     <button
                                       type="button"
-                                      className="inline-flex items-center rounded-full border border-emerald-500/70 bg-emerald-500/20 px-3 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/30 transition"
+                                      className="inline-flex items-center rounded-full border border-[var(--status-success-text)]/30 bg-[var(--status-success-bg)] px-3 py-1 text-[10px] font-medium text-[var(--status-success-text)] hover:bg-[var(--status-success-bg)]/70 transition"
                                       onClick={(e) => {
   e.stopPropagation();
 
@@ -1728,7 +1728,7 @@ window.location.href = editorUrl.toString();
                                 )}
 
                                 {materialsLoading && (
-                                  <div className="mt-1 text-[10px] text-slate-500">
+                                  <div className="mt-1 text-[10px] text-[var(--text-faint)]">
                                     Loading materials…
                                   </div>
                                 )}

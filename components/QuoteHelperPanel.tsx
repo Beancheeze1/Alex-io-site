@@ -64,37 +64,34 @@ export default function QuoteHelperPanel({ className }: { className?: string }) 
 
   return (
     <section className={className ?? "mx-auto max-w-3xl"}>
-      <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_20px_80px_rgba(0,0,0,0.55)]">
-        {/* subtle top glow like the rest of the splash */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-sky-500/10 via-transparent to-transparent" />
-
+      <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] p-6">
         <div className="relative">
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
-              <div className="text-xs font-semibold tracking-widest text-sky-300/80">
+              <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                 EXAMPLE INPUT
               </div>
-              <h2 className="mt-1 text-base font-semibold text-white">
+              <h2 className="mt-1 text-base font-medium text-[var(--text-primary)]">
                 A clean quote request (fastest turnaround)
               </h2>
-              <p className="mt-2 text-sm leading-relaxed text-slate-300">
+              <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
                 Copy/paste this structure into your first email so Alex-IO can
                 price and build the layout with minimal back-and-forth.
               </p>
             </div>
 
-            <span className="shrink-0 rounded-full bg-white/5 px-3 py-1 text-[11px] font-medium text-slate-200 ring-1 ring-white/10">
+            <span className="shrink-0 rounded-full bg-[var(--surface-subtle)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] ring-1 ring-[var(--border)]">
               Email-ready
             </span>
           </div>
 
           <div className="grid gap-5 lg:grid-cols-2">
             {/* Checklist */}
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-              <div className="mb-2 text-xs font-semibold tracking-widest text-slate-200/90">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
+              <div className="mb-2 text-xs font-medium tracking-widest text-[var(--text-secondary)]">
                 INCLUDE THESE
               </div>
-              <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-300">
+              <ul className="list-disc space-y-1.5 pl-5 text-sm text-[var(--text-secondary)]">
                 {checklist.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
@@ -102,23 +99,23 @@ export default function QuoteHelperPanel({ className }: { className?: string }) 
             </div>
 
             {/* Example block */}
-            <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs font-semibold tracking-widest text-slate-200/90">
+                  <div className="text-xs font-medium tracking-widest text-[var(--text-secondary)]">
                     COPY / PASTE
                   </div>
-                  <div className="text-[11px] text-slate-400">plain text</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">plain text</div>
                 </div>
 
                 <button
                   type="button"
                   onClick={handleCopy}
                   className={[
-                    "rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 transition",
+                    "rounded-full px-3 py-1.5 text-[11px] font-medium ring-1 transition",
                     copied
-                      ? "bg-emerald-500/20 text-emerald-200 ring-emerald-400/20"
-                      : "bg-white/5 text-slate-200 ring-white/10 hover:bg-white/10",
+                      ? "bg-[var(--status-success-bg)] text-[var(--status-success-text)] ring-[var(--status-success-text)]/30"
+                      : "bg-[var(--surface-card)] text-[var(--text-secondary)] ring-[var(--border)] hover:bg-[var(--surface-page)]",
                   ].join(" ")}
                   aria-label="Copy example quote request to clipboard"
                 >
@@ -126,11 +123,11 @@ export default function QuoteHelperPanel({ className }: { className?: string }) 
                 </button>
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-neutral-950/70 p-4 font-mono text-xs leading-relaxed text-slate-100 whitespace-pre-wrap">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-page)] p-4 font-mono text-xs leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap">
                 {example}
               </div>
 
-              <div className="mt-3 text-[11px] text-slate-400">
+              <div className="mt-3 text-[11px] text-[var(--text-muted)]">
                 Tip: If you need a tight fit into a carton/mailer, mention any
                 clearance requirements.
               </div>
