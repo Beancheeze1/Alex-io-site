@@ -71,7 +71,7 @@ const BADGE_LABELS: Record<string, string> = {
 const HIGH_INTENT = new Set(["quote_applied", "quote_email"]);
 
 function fmt(n: number) {
-  return n.toLocaleString();
+  return n.toLocaleString("en-US");
 }
 
 function pct(n: number, total: number) {
@@ -353,10 +353,10 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
               {filteredSessions.map((s) => (
                 <tr key={s.session_id} className="border-b border-[var(--border)] last:border-0">
                   <td className="px-4 py-3 text-[var(--text-muted)] whitespace-nowrap">
-                    {new Date(s.first_seen).toLocaleDateString()}
+                    {new Date(s.first_seen).toLocaleDateString("en-US", { timeZone: "UTC" })}
                   </td>
                   <td className="px-4 py-3 text-[var(--text-muted)] whitespace-nowrap">
-                    {new Date(s.last_seen).toLocaleString()}
+                    {new Date(s.last_seen).toLocaleString("en-US", { timeZone: "UTC" })}
                   </td>
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{s.device ?? "—"}</td>
                   <td className="px-4 py-3 text-[var(--text-secondary)] whitespace-nowrap">
