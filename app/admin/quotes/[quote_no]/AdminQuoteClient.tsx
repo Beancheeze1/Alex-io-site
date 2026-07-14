@@ -1343,15 +1343,15 @@ const overallQty =
 
   const cardBase: React.CSSProperties = {
     borderRadius: 16,
-    border: "1px solid #e5e7eb",
-    background: "#f9fafb",
+    border: "1px solid var(--border)",
+    background: "var(--surface-page)",
     padding: "12px 14px",
   };
 
   const cardTitleStyle: React.CSSProperties = {
     fontSize: 13,
     fontWeight: 600,
-    color: "#0f172a",
+    color: "var(--text-primary)",
     marginBottom: 6,
   };
 
@@ -1359,7 +1359,7 @@ const overallQty =
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: "0.08em",
-    color: "#6b7280",
+    color: "var(--text-muted)",
     marginBottom: 2,
   };
 
@@ -1911,7 +1911,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
     <div
       style={{
         fontFamily: "system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
-        background: "#020617",
+        background: "var(--surface-page)",
         minHeight: "100vh",
         padding: "24px",
       }}
@@ -1920,13 +1920,13 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
         style={{
           maxWidth: "1100px",
           margin: "0 auto",
-          background: "#ffffff",
+          background: "var(--surface-card)",
           borderRadius: "24px",
           padding: "24px 24px 32px 24px",
-          boxShadow: "0 16px 40px rgba(15,23,42,0.45)",
+          border: "1px solid var(--border)",
         }}
       >
-       
+
 
         {/* Header */}
         <div
@@ -1934,12 +1934,13 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
             margin: "-24px -24px 20px -24px",
             padding: "16px 24px",
             borderRadius: "24px 24px 0 0",
-            background: "linear-gradient(90deg,#0ea5e9 0%,#22d3ee 35%,#6366f1 100%)",
+            background: "var(--surface-subtle)",
+            borderBottom: "1px solid var(--border)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             gap: 16,
-            color: "#e5e7eb",
+            color: "var(--text-primary)",
           }}
         >
           <div>
@@ -1948,7 +1949,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
               style={{
                 display: "inline-block",
                 fontSize: 11,
-                color: "rgba(255,255,255,0.92)",
+                color: "var(--text-secondary)",
                 textDecoration: "none",
                 marginBottom: 6,
               }}
@@ -1961,7 +1962,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 fontSize: 11,
                 letterSpacing: "0.18em",
                 textTransform: "uppercase",
-                opacity: 0.9,
+                color: "var(--text-muted)",
                 marginBottom: 4,
               }}
             >
@@ -1981,7 +1982,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
               style={{
                 marginTop: 4,
                 fontSize: 12,
-                opacity: 0.94,
+                color: "var(--text-secondary)",
               }}
             >
               Quote {quoteNoValue || "—"}
@@ -1992,7 +1993,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
             style={{
               textAlign: "right",
               fontSize: 12,
-              color: "#e5e7eb",
+              color: "var(--text-primary)",
               display: "flex",
               flexDirection: "column",
               alignItems: "flex-end",
@@ -2008,9 +2009,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       display: "inline-block",
                       padding: "4px 10px",
                       borderRadius: 999,
-                      background: "rgba(15,23,42,0.2)",
-                      border: "1px solid rgba(15,23,42,0.25)",
-                      color: "#f9fafb",
+                      background: "var(--status-neutral-bg)",
+                      border: "1px solid var(--border)",
+                      color: "var(--status-neutral-text)",
                       fontWeight: 600,
                     }}
                   >
@@ -2026,15 +2027,13 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
   display: "inline-block",
   padding: "4px 10px",
   borderRadius: 999,
-  background: sendBusy
-    ? "rgba(15,23,42,0.12)"
-    : "rgba(15,23,42,0.2)",
-  border: "1px solid rgba(15,23,42,0.25)",
-  color: "#f9fafb",
+  background: "var(--action-primary)",
+  border: "1px solid var(--action-primary)",
+  color: "#FFFFFF",
   fontSize: 11,
   fontWeight: 600,
   cursor: sendBusy || !quoteState?.email ? "not-allowed" : "pointer",
-  opacity: sendBusy || !quoteState?.email ? 0.7 : 1,
+  opacity: sendBusy || !quoteState?.email ? 0.6 : 1,
 }}
 
                     title={quoteState?.email ? "Send quote email to customer (Graph; saves to Sent Items)" : "No customer email on this quote"}
@@ -2051,16 +2050,16 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       gap: 6,
                       padding: "4px 10px",
                       borderRadius: 999,
-                      background: "rgba(15,23,42,0.18)",
-                      border: "1px solid rgba(15,23,42,0.20)",
-                      color: "#f9fafb",
+                      background: "var(--surface-card)",
+                      border: "1px solid var(--border)",
+                      color: "var(--text-primary)",
                     }}
                     title="Revision is auto-managed (staging: AS/BS/; released: A/B/ when locked)."
                   >
-                    <span style={{ fontSize: 11, opacity: 0.95, fontWeight: 700 }}>REV</span>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 700 }}>REV</span>
                     <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.2 }}>{revisionValue}</span>
 
-                    <span style={{ width: 1, height: 14, background: "rgba(255,255,255,0.25)", margin: "0 4px" }} />
+                    <span style={{ width: 1, height: 14, background: "var(--border-strong)", margin: "0 4px" }} />
 
                     <button
                       type="button"
@@ -2069,12 +2068,13 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       style={{
                         padding: "2px 8px",
                         borderRadius: 999,
-                        border: "1px solid rgba(255,255,255,0.40)",
-                        background: revisionBusy ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.12)",
-                        color: "#ffffff",
+                        border: "1px solid var(--action-primary)",
+                        background: "var(--action-primary)",
+                        color: "#FFFFFF",
                         fontSize: 11,
                         fontWeight: 800,
                         cursor: revisionBusy ? "not-allowed" : "pointer",
+                        opacity: revisionBusy ? 0.6 : 1,
                       }}
                       title="Unlock so this quote can be edited again"
                     >
@@ -2088,16 +2088,16 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                     style={{
                       margin: 0,
                       fontSize: 11,
-                      opacity: 0.9,
+                      color: "var(--text-muted)",
                     }}
                   >
                     Created: {new Date(quoteState.created_at).toLocaleString()}
                   </p>
 
-                  {revisionOkAt && <span style={{ fontSize: 11, color: "#dcfce7", fontWeight: 700 }}>✅ Saved</span>}
-                  {revisionError && <span style={{ fontSize: 11, color: "#fee2e2", fontWeight: 700 }}>❌ {revisionError}</span>}
-                                    {sendOkAt && <span style={{ fontSize: 11, color: "#dcfce7", fontWeight: 700 }}>✅ Sent</span>}
-                  {sendError && <span style={{ fontSize: 11, color: "#fee2e2", fontWeight: 700 }}>❌ {sendError}</span>}
+                  {revisionOkAt && <span style={{ fontSize: 11, color: "var(--status-success-text)", fontWeight: 700 }}>✅ Saved</span>}
+                  {revisionError && <span style={{ fontSize: 11, color: "var(--attention)", fontWeight: 700 }}>❌ {revisionError}</span>}
+                                    {sendOkAt && <span style={{ fontSize: 11, color: "var(--status-success-text)", fontWeight: 700 }}>✅ Sent</span>}
+                  {sendError && <span style={{ fontSize: 11, color: "var(--attention)", fontWeight: 700 }}>❌ {sendError}</span>}
 
                 </div>
               </>
@@ -2109,21 +2109,21 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
         {loading && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Loading quote...</h1>
-            <p style={{ color: "#6b7280", fontSize: 13 }}>Fetching quote + latest foam layout package.</p>
+            <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Fetching quote + latest foam layout package.</p>
           </>
         )}
 
         {!loading && notFound && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Quote not found</h1>
-            <p style={{ color: "#555" }}>{notFound}</p>
+            <p style={{ color: "var(--text-muted)" }}>{notFound}</p>
           </>
         )}
 
         {!loading && error && !quoteState && (
           <>
             <h1 style={{ fontSize: 20, marginBottom: 8 }}>Problem loading quote</h1>
-            <p style={{ color: "#6b7280", fontSize: 13 }}>{error}</p>
+            <p style={{ color: "var(--text-muted)", fontSize: 13 }}>{error}</p>
           </>
         )}
 
@@ -2147,7 +2147,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                     flexDirection: "column",
                     gap: 6,
                     fontSize: 13,
-                    color: "#111827",
+                    color: "var(--text-primary)",
                   }}
                 >
                   <div>
@@ -2182,7 +2182,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
               <div style={cardBase}>
                 <div style={cardTitleStyle}>Pricing snapshot</div>
                 {items.length === 0 ? (
-                  <div style={{ fontSize: 13, color: "#6b7280" }}>
+                  <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
                     No stored line items yet. Once quote_items are written, you&apos;ll see per-line pricing here.
                   </div>
                 ) : (
@@ -2192,7 +2192,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       flexDirection: "column",
                       gap: 6,
                       fontSize: 13,
-                      color: "#111827",
+                      color: "var(--text-primary)",
                     }}
                   >
                     <div>
@@ -2230,7 +2230,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                           </div>
                         )}
                         {primaryPricing && (
-                          <div style={{ marginTop: 4, fontSize: 11, color: "#6b7280", lineHeight: 1.5 }}>
+                          <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>
                             <span>
                               Calc basis: volumetric foam charge with{" "}
                               {typeof kerfPct === "number" ? `~${kerfPct}% kerf/waste` : "standard kerf/waste"}.{" "}
@@ -2244,7 +2244,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       </>
                     )}
                     {!anyPricing && (
-                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
                         Volumetric calc did not attach pricing. Check material / dims / qty if you expect a value here.
                       </div>
                     )}
@@ -2258,7 +2258,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
               <div
                 style={{
                   ...cardBase,
-                  background: "#ffffff",
+                  background: "var(--surface-card)",
                   marginBottom: 20,
                   display: "grid",
                   gridTemplateColumns: "minmax(0,2.2fr) minmax(0,1.8fr)",
@@ -2270,7 +2270,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   <div
                     style={{
                       fontSize: 13,
-                      color: "#111827",
+                      color: "var(--text-primary)",
                       display: "flex",
                       flexDirection: "column",
                       gap: 6,
@@ -2282,19 +2282,19 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                     </div>
                     <div>
                       <div style={labelStyle}>Family</div>
-                      <div>{primaryMaterialFamily || <span style={{ color: "#9ca3af" }}>Unassigned (set in materials admin)</span>}</div>
+                      <div>{primaryMaterialFamily || <span style={{ color: "var(--text-faint)" }}>Unassigned (set in materials admin)</span>}</div>
                     </div>
                     <div>
                       <div style={labelStyle}>Density</div>
                       <div>{primaryDensityDisplay != null ? `${primaryDensityDisplay} pcf` : "—"}</div>
                     </div>
-                    <div style={{ fontSize: 11, color: "#6b7280" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                       Family + density come directly from the{" "}
                       <span
                         style={{
                           fontFamily: "ui-monospace, SFMono-Regular, monospace",
                           fontSize: 11,
-                          color: "#0369a1",
+                          color: "var(--text-secondary)",
                         }}
                       >
                         materials
@@ -2311,7 +2311,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                     justifyContent: "space-between",
                     gap: 8,
                     fontSize: 12,
-                    color: "#111827",
+                    color: "var(--text-primary)",
                   }}
                 >
                   <div>
@@ -2322,12 +2322,12 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         paddingLeft: 18,
                         marginTop: 4,
                         marginBottom: 4,
-                        color: "#1f2937",
+                        color: "var(--text-primary)",
                         fontSize: 12,
                       }}
                     >
                       <li>
-                        <a href="/admin/materials" style={{ color: "#0369a1", textDecoration: "none" }}>
+                        <a href="/admin/materials" style={{ color: "var(--text-primary)", textDecoration: "underline" }}>
                           Open materials catalog
                         </a>{" "}
                         to confirm family / density.
@@ -2336,12 +2336,12 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   {materialId ? (
                     <a
                       href={`/admin/cushion-curves/${materialId}`}
-                      style={{ color: "#0369a1", textDecoration: "none" }}
+                      style={{ color: "var(--text-primary)", textDecoration: "underline" }}
                     >
                       View cushion curves for this material
                     </a>
                   ) : (
-                    <span style={{ color: "#6b7280" }}>
+                    <span style={{ color: "var(--text-muted)" }}>
                       View cushion curves for this material (missing material)
                     </span>
                   )}{" "}
@@ -2351,7 +2351,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   </div>
 
                   {customerQuoteUrl && (
-                    <div style={{ marginTop: 4, paddingTop: 6, borderTop: "1px dashed #e5e7eb" }}>
+                    <div style={{ marginTop: 4, paddingTop: 6, borderTop: "1px dashed var(--border)" }}>
                       <div style={labelStyle}>Customer-facing view</div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
                         <a
@@ -2364,9 +2364,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             gap: 6,
                             padding: "4px 10px",
                             borderRadius: 999,
-                            border: "1px solid #0ea5e9",
-                            background: "#e0f2fe",
-                            color: "#0369a1",
+                            border: "1px solid var(--border)",
+                            background: "var(--surface-card)",
+                            color: "var(--text-primary)",
                             fontSize: 11,
                             fontWeight: 500,
                             textDecoration: "none",
@@ -2389,9 +2389,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                               gap: 6,
                               padding: "4px 10px",
                               borderRadius: 999,
-                              border: "1px solid #7c3aed",
-                              background: "#ede9fe",
-                              color: "#5b21b6",
+                              border: "1px solid var(--border)",
+                              background: "var(--surface-card)",
+                              color: "var(--text-primary)",
                               fontSize: 11,
                               fontWeight: 500,
                               textDecoration: "none",
@@ -2409,37 +2409,37 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
             )}
 
             {/* Customer requested cartons */}
-            <div style={{ ...cardBase, background: "#ffffff", marginBottom: 20 }}>
+            <div style={{ ...cardBase, background: "var(--surface-card)", marginBottom: 20 }}>
               <div style={cardTitleStyle}>Customer requested cartons</div>
               {boxSelectionsLoading && (
-                <p style={{ fontSize: 12, color: "#6b7280" }}>
+                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   Looking up any cartons the customer marked as <strong>Requested</strong> from the quote viewer…
                 </p>
               )}
-              {!boxSelectionsLoading && boxSelectionsError && <p style={{ fontSize: 12, color: "#b91c1c" }}>{boxSelectionsError}</p>}
+              {!boxSelectionsLoading && boxSelectionsError && <p style={{ fontSize: 12, color: "var(--attention)" }}>{boxSelectionsError}</p>}
               {!boxSelectionsLoading && !boxSelectionsError && (!boxSelections || boxSelections.length === 0) && !customerBoxDims && (
-                <p style={{ fontSize: 12, color: "#6b7280" }}>No cartons have been requested on this quote yet from the customer-facing /quote page.</p>
+                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>No cartons have been requested on this quote yet from the customer-facing /quote page.</p>
               )}
               {/* Customer-entered custom box size (from facts.customer_box_in) */}
               {customerBoxDims && (
                 <div style={{ marginBottom: boxSelections && boxSelections.length > 0 ? 10 : 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280", marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)", marginBottom: 4 }}>
                     Customer-entered box size
                   </div>
-                  <div style={{ fontSize: 13, color: "#111827", fontWeight: 500 }}>
+                  <div style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 500 }}>
                     Inside: {customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in
                   </div>
-                  
+
                 </div>
               )}
               {!boxSelectionsLoading && !boxSelectionsError && boxSelections && boxSelections.length > 0 && (
                 <>
-                  <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 6 }}>
+                  <p style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>
                     These selections come from the public quote viewer when the customer clicks{" "}
                     <strong>&ldquo;Add this carton to my quote&rdquo;</strong>. Use this list as a heads-up when finalizing packaging and placing box
                     orders.
                   </p>
-                  <ul style={{ listStyle: "disc", paddingLeft: 18, margin: 0, fontSize: 12, color: "#111827" }}>
+                  <ul style={{ listStyle: "disc", paddingLeft: 18, margin: 0, fontSize: 12, color: "var(--text-primary)" }}>
                     {boxSelections.map((sel) => {
                       const metaParts: string[] = [];
                       if (sel.vendor) metaParts.push(sel.vendor);
@@ -2449,14 +2449,14 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       return (
                         <li key={sel.id} style={{ marginBottom: 4 }}>
                           <div style={{ fontWeight: 500 }}>{sel.description || sel.sku}</div>
-                          <div style={{ fontSize: 11, color: "#6b7280" }}>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                             {metaParts.join(" • ")} — Qty {sel.qty.toLocaleString()}
                           </div>
                         </li>
                       );
                     })}
                   </ul>
-                  <p style={{ marginTop: 6, fontSize: 11, color: "#9ca3af" }}>
+                  <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-faint)" }}>
                     Read-only mirror of{" "}
                     <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>quote_box_selections</span>. Changing cartons or quantities
                     still happens via your normal quoting workflow.
@@ -2469,11 +2469,11 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
             {/* layout + CAD downloads */}
             <div style={{ marginTop: 4, marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Foam layout & CAD exports</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Foam layout & CAD exports</div>
 
-              <div style={{ ...cardBase, background: "#ffffff" }}>
+              <div style={{ ...cardBase, background: "var(--surface-card)" }}>
                 {!layoutPkg ? (
-                  <p style={{ color: "#6b7280", fontSize: 13 }}>
+                  <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
                     No foam layout package has been stored for this quote yet. Have the client use the layout editor from their emailed quote and click{" "}
                     <strong>Apply to quote</strong>.
                   </p>
@@ -2481,15 +2481,15 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   <>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 12, flexWrap: "wrap" }}>
                       <div>
-                        <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>Layout package #{layoutPkg.id}</div>
-                        <div style={{ color: "#6b7280", fontSize: 12 }}>Saved: {new Date(layoutPkg.created_at).toLocaleString()}</div>
+                        <div style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 2 }}>Layout package #{layoutPkg.id}</div>
+                        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>Saved: {new Date(layoutPkg.created_at).toLocaleString()}</div>
                         {notesPreview && (
                                                  <div
                             style={{
                               marginTop: 6,
-                              color: "#4b5563",
+                              color: "var(--text-secondary)",
                               fontSize: 12,
-                              background: "#eef2ff",
+                              background: "var(--surface-subtle)",
                               borderRadius: 10,
                               padding: "8px 10px",
                               maxWidth: 520,
@@ -2509,7 +2509,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         {/* Admin-only: rebuild STEP — hidden from view */}
                         {false && (
                         <div style={{ marginTop: 10 }}>
-                          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280", marginBottom: 4 }}>
+                          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)", marginBottom: 4 }}>
                             STEP maintenance
                           </div>
 
@@ -2521,27 +2521,28 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                               style={{
                                 padding: "4px 10px",
                                 borderRadius: 999,
-                                border: "1px solid #111827",
-                                background: rebuildBusy ? "#e5e7eb" : "#111827",
-                                color: rebuildBusy ? "#6b7280" : "#ffffff",
+                                border: "1px solid var(--action-primary)",
+                                background: "var(--action-primary)",
+                                color: "#FFFFFF",
                                 fontSize: 11,
                                 fontWeight: 700,
                                 cursor: rebuildBusy ? "not-allowed" : "pointer",
+                                opacity: rebuildBusy ? 0.6 : 1,
                               }}
                               title="Rebuilds and saves STEP into the latest quote_layout_packages.step_text via the STEP microservice"
                             >
                               {rebuildBusy ? "Rebuilding STEP..." : "Rebuild STEP now"}
                             </button>
 
-                            {rebuildOkAt && <span style={{ fontSize: 11, color: "#065f46" }}>✅ Rebuilt: {rebuildOkAt}</span>}
-                            {rebuildError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {rebuildError}</span>}
+                            {rebuildOkAt && <span style={{ fontSize: 11, color: "var(--status-success-text)" }}>✅ Rebuilt: {rebuildOkAt}</span>}
+                            {rebuildError && <span style={{ fontSize: 11, color: "var(--attention)" }}>❌ {rebuildError}</span>}
                           </div>
                         </div>
                         )}
                       </div>
 
                      {/*} <div style={{ textAlign: "right", fontSize: 12, minWidth: 320 }}>
-                        <div style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280" }}>Full Package</div>
+                        <div style={{ marginBottom: 4, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)" }}>Full Package</div>
 
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
                           {layoutPkg.svg_text && layoutPkg.svg_text.trim().length > 0 && (
@@ -2551,9 +2552,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                               style={{
                                 padding: "4px 10px",
                                 borderRadius: 999,
-                                border: "1px solid #c7d2fe",
-                                background: "#eef2ff",
-                                color: "#1d4ed8",
+                                border: "1px solid var(--border)",
+                                background: "var(--surface-card)",
+                                color: "var(--text-primary)",
                                 fontSize: 11,
                                 fontWeight: 500,
                                 cursor: "pointer",
@@ -2570,9 +2571,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             style={{
                               padding: "4px 10px",
                               borderRadius: 999,
-                              border: "1px solid #e5e7eb",
-                              background: "#f9fafb",
-                              color: "#111827",
+                              border: "1px solid var(--border)",
+                              background: "var(--surface-page)",
+                              color: "var(--text-primary)",
                               fontSize: 11,
                               fontWeight: 500,
                               cursor: layoutPkg.layout_json ? "pointer" : "not-allowed",
@@ -2583,16 +2584,16 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             Download DXF
                           </button>
 
-                          
+
                           <button
                             type="button"
                             onClick={handleDownloadStep}
                             style={{
                               padding: "4px 10px",
                               borderRadius: 999,
-                              border: "1px solid #0ea5e9",
-                              background: "#e0f2fe",
-                              color: "#0369a1",
+                              border: "1px solid var(--border)",
+                              background: "var(--surface-card)",
+                              color: "var(--text-primary)",
                               fontSize: 11,
                               fontWeight: 600,
                               cursor: "pointer",
@@ -2602,7 +2603,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             Download STEP
                           </button>
 
-                          
+
 
                           <button
                             type="button"
@@ -2610,9 +2611,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             style={{
                               padding: "4px 10px",
                               borderRadius: 999,
-                              border: "1px solid #0ea5e9",
-                              background: "#e0f2fe",
-                              color: "#0369a1",
+                              border: "1px solid var(--border)",
+                              background: "var(--surface-card)",
+                              color: "var(--text-primary)",
                               fontSize: 11,
                               fontWeight: 600,
                               cursor: "pointer",
@@ -2629,20 +2630,21 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             style={{
                               padding: "4px 10px",
                               borderRadius: 999,
-                              border: "1px solid #111827",
-                              background: zipBusy ? "#e5e7eb" : "#111827",
-                              color: zipBusy ? "#6b7280" : "#ffffff",
+                              border: "1px solid var(--action-primary)",
+                              background: "var(--action-primary)",
+                              color: "#FFFFFF",
                               fontSize: 11,
                               fontWeight: 800,
                               cursor: zipBusy ? "not-allowed" : "pointer",
+                              opacity: zipBusy ? 0.6 : 1,
                             }}
                             title="Downloads a ZIP containing per-layer DXF + STEP with manufacturer-friendly filenames."
                           >
                             {zipBusy ? "Building ZIP..." : "Download All Layers (ZIP)"}
                           </button>
 
-                          {zipOkAt && <span style={{ fontSize: 11, color: "#065f46" }}>✅ ZIP: {zipOkAt}</span>}
-                          {zipError && <span style={{ fontSize: 11, color: "#b91c1c" }}>❌ {zipError}</span>}
+                          {zipOkAt && <span style={{ fontSize: 11, color: "var(--status-success-text)" }}>✅ ZIP: {zipOkAt}</span>}
+                          {zipError && <span style={{ fontSize: 11, color: "var(--attention)" }}>❌ {zipError}</span>}
                         </div>
                       </div>
                       */}
@@ -2651,7 +2653,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                     {/* Per-layer previews + buttons */}
                     {layersForDxf && layersForDxf.length > 0 && layoutPkg.layout_json && (
                       <div style={{ marginTop: 12 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", marginBottom: 8 }}>Layers (preview + downloads)</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Layers (preview + downloads)</div>
 
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
                           {layersForDxf.map((layer, idx) => {
@@ -2679,11 +2681,11 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                   }
                                 }}
                                 style={{
-                                  border: isSelected ? "2px solid #0ea5e9" : "1px solid #e5e7eb",
+                                  border: isSelected ? "2px solid var(--action-primary)" : "1px solid var(--border)",
                                   borderRadius: 14,
                                   padding: 10,
-                                  background: "#ffffff",
-                                  boxShadow: isSelected ? "0 10px 22px rgba(14,165,233,0.20)" : "0 6px 16px rgba(15,23,42,0.06)",
+                                  background: "var(--surface-card)",
+                                  boxShadow: isSelected ? "0 0 0 3px rgba(43,43,40,0.12)" : "0 1px 3px rgba(0,0,0,0.06)",
                                   cursor: "pointer",
                                   outline: "none",
                                 }}
@@ -2691,11 +2693,11 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                               >
                                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                   <div>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{label}</div>
-                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}</div>
-                                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>Pocket depth: {pocket.text}</div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>{label}</div>
+                                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t ? `Thickness: ${t.toFixed(3)} in` : "Thickness: —"}</div>
+                                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Pocket depth: {pocket.text}</div>
                                   </div>
-                                  <div style={{ fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>
+                                  <div style={{ fontSize: 11, color: "var(--text-faint)", whiteSpace: "nowrap" }}>
                                     Layer {idx + 1}/{layersForDxf.length}
                                   </div>
                                 </div>
@@ -2705,15 +2707,15 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                     marginTop: 8,
                                     height: 160,
                                     borderRadius: 10,
-                                    border: "1px solid #e5e7eb",
-                                    background: "#f3f4f6",
+                                    border: "1px solid var(--border)",
+                                    background: "var(--surface-subtle)",
                                     overflow: "hidden",
                                   }}
                                 >
                                   {svg ? (
                                     <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />
                                   ) : (
-                                    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#6b7280" }}>
+                                    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--text-muted)" }}>
                                       No preview
                                     </div>
                                   )}
@@ -2729,9 +2731,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                     style={{
                                       padding: "4px 10px",
                                       borderRadius: 999,
-                                      border: "1px dashed #e5e7eb",
-                                      background: "#f9fafb",
-                                      color: "#111827",
+                                      border: "1px dashed var(--border)",
+                                      background: "var(--surface-page)",
+                                      color: "var(--text-primary)",
                                       fontSize: 11,
                                       cursor: "pointer",
                                     }}
@@ -2748,9 +2750,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                     style={{
                                       padding: "4px 10px",
                                       borderRadius: 999,
-                                      border: "1px solid #0ea5e9",
-                                      background: "#e0f2fe",
-                                      color: "#0369a1",
+                                      border: "1px solid var(--border)",
+                                      background: "var(--surface-card)",
+                                      color: "var(--text-primary)",
                                       fontSize: 11,
                                       fontWeight: 700,
                                       cursor: "pointer",
@@ -2761,7 +2763,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                   </button>
                                 </div>
 
-                                <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>Preview shows foam outline + cavity geometry (layer-specific).</div>
+                                <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)" }}>Preview shows foam outline + cavity geometry (layer-specific).</div>
                               </div>
                             );
                           })}
@@ -2773,8 +2775,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             marginTop: 14,
                             padding: 8,
                             borderRadius: 10,
-                            border: "1px solid #e5e7eb",
-                            background: "#ffffff",
+                            border: "1px solid var(--border)",
+                            background: "var(--surface-card)",
                           }}
                         >
                           {(() => {
@@ -2787,15 +2789,15 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             const pocket = layoutPkg?.layout_json ? getLayerPocketDepthSummary(layoutPkg.layout_json, selectedLayerIdx) : { text: "—", hasMultiple: false };
 
                             return (
-                              <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
+                              <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 6 }}>
                                 Selected layer preview:{" "}
                                 <span style={{ fontWeight: 700 }}>
                                   {selLabel} (Layer {Math.min(selectedLayerIdx + 1, layersForDxf.length)}/{layersForDxf.length})
                                 </span>
                                 {" · "}
-                                <span style={{ fontWeight: 600, color: "#111827" }}>Thickness: {selT ? `${selT.toFixed(3)} in` : "—"}</span>
+                                <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Thickness: {selT ? `${selT.toFixed(3)} in` : "—"}</span>
                                 {" · "}
-                                <span style={{ fontWeight: 600, color: "#111827" }}>Pocket depth: {pocket.text}</span>
+                                <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Pocket depth: {pocket.text}</span>
                               </div>
                             );
                           })()}
@@ -2808,14 +2810,14 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                               alignItems: "center",
                               justifyContent: "center",
                               borderRadius: 8,
-                              border: "1px solid #e5e7eb",
-                              background: "#f3f4f6",
+                              border: "1px solid var(--border)",
+                              background: "var(--surface-subtle)",
                               overflow: "hidden",
                             }}
                           >
                             {(() => {
                               const svg = buildSvgPreviewForLayer(layoutPkg.layout_json, selectedLayerIdx);
-                              if (!svg) return <div style={{ fontSize: 12, color: "#6b7280" }}>No preview</div>;
+                              if (!svg) return <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No preview</div>;
                               return <div style={{ width: "100%", height: "100%", display: "flex" }} dangerouslySetInnerHTML={{ __html: svg }} />;
                             })()}
                           </div>
@@ -2830,15 +2832,15 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
               {/* Layout activity with snapshot selector */}
               {layoutPkg && (
-                <div style={{ ...cardBase, background: "#ffffff", marginTop: 12 }}>
-                  <div style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
+                <div style={{ ...cardBase, background: "var(--surface-card)", marginTop: 12 }}>
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
                     justifyContent: "space-between",
                     marginBottom: 8
                   }}>
                     <div style={cardTitleStyle}>Layout activity</div>
-                    
+
                     {/* Admin-only: Load Previous Layout */}
                     <div style={{ transform: "scale(0.9)" }}>
                       <LayoutSnapshotSelector
@@ -2849,11 +2851,11 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       />
                     </div>
                   </div>
-                  
-                  <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 4 }}>
+
+                  <p style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4 }}>
                     Latest layout package is <strong>#{layoutPkg.id}</strong>, saved on {new Date(layoutPkg.created_at).toLocaleString()}.
                   </p>
-                  <p style={{ fontSize: 11, color: "#9ca3af" }}>
+                  <p style={{ fontSize: 11, color: "var(--text-faint)" }}>
                     Use "Load Previous Layout" above to open any saved layout package in the editor for revision.
                   </p>
                 </div>
@@ -2861,10 +2863,10 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
             </div>
 
             {/* optional: quick line items table (admin view) */}
-            <div style={{ ...cardBase, background: "#ffffff" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>Line items (admin view)</div>
+            <div style={{ ...cardBase, background: "var(--surface-card)" }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Line items (admin view)</div>
               {items.length === 0 ? (
-                <p style={{ color: "#6b7280", fontSize: 13 }}>No line items stored for this quote.</p>
+                <p style={{ color: "var(--text-muted)", fontSize: 13 }}>No line items stored for this quote.</p>
               ) : (
                 <table
                   style={{
@@ -2877,13 +2879,13 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   }}
                 >
                   <thead>
-                    <tr style={{ background: "#eef2ff", color: "#0f172a" }}>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Line</th>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Material</th>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Dims (L × W × H)</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Qty</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Unit</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid #e5e7eb" }}>Total</th>
+                    <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Line</th>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Material</th>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Dims (L × W × H)</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Qty</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Unit</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Total</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2894,43 +2896,43 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       const total = parsePriceField(item.price_total_usd ?? null);
                       const needsSkive = Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01;
                       return (
-                        <tr key={item.id} style={{ color: "#0f172a" }}>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{idx + 1}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>
+                        <tr key={item.id} style={{ color: "var(--text-primary)" }}>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{idx + 1}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
                             <span>{label}</span>
                             {needsSkive && (
                               <span style={{
                                 marginLeft: 6,
                                 padding: "2px 7px",
                                 borderRadius: 999,
-                                border: "1px solid #fed7aa",
-                                background: "#fff7ed",
-                                color: "#c2410c",
+                                border: "1px solid var(--status-pending-text)",
+                                background: "var(--status-pending-bg)",
+                                color: "var(--status-pending-text)",
                                 fontSize: 10,
                                 fontWeight: 600,
                               }}>Skived</span>
                             )}
                           </td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>{dims}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{item.qty}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(unit)}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(total)}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{dims}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{item.qty}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(unit)}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(total)}</td>
                         </tr>
                       );
                     })}
                     {effectivePrintingUpcharge > 0 && (
-                      <tr style={{ color: "#0f172a" }}>
-                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#4b5563", marginBottom: 2 }}>
+                      <tr style={{ color: "var(--text-primary)" }}>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-secondary)", marginBottom: 2 }}>
                             Packaging – Print upcharge
                           </div>
                           <div style={{ fontWeight: 500 }}>Custom printed mailer / box</div>
                         </td>
-                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>—</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6" }}>—</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>—</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid #f3f4f6", textAlign: "right" }}>{formatUsd(effectivePrintingUpcharge)}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(effectivePrintingUpcharge)}</td>
                       </tr>
                     )}
                   </tbody>
@@ -2938,7 +2940,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
               )}
             </div>
 
-            <p style={{ marginTop: 24, fontSize: 11, color: "#6b7280", lineHeight: 1.4 }}>
+            <p style={{ marginTop: 24, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
               Internal-only view. Use this page for engineering review and CAD exports. Clients should continue to use the public /quote link in their email.
             </p>
           </>

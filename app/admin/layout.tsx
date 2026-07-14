@@ -74,70 +74,70 @@ export default async function AdminLayout({ children }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-50">
-      <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+    <div className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
+      <header className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
         <div className="flex items-baseline gap-4">
-          <span className="text-sm font-semibold tracking-wide text-neutral-200">
+          <span className="text-sm font-medium tracking-wide text-[var(--text-primary)]">
             {adminHeaderLabel}
           </span>
 
-          <nav className="flex gap-3 text-xs text-neutral-400">
+          <nav className="flex gap-3 text-xs text-[var(--text-muted)]">
             {role === "admin" ? (
               <>
-                <Link href="/admin" className="hover:text-neutral-200">
+                <Link href="/admin" className="hover:text-[var(--text-primary)]">
                   Dashboard
                 </Link>
 
                 {showTenants ? (
-                  <Link href="/admin/tenants" className="hover:text-neutral-200">
+                  <Link href="/admin/tenants" className="hover:text-[var(--text-primary)]">
                     Tenants
                   </Link>
                 ) : null}
 
-                <Link href="/admin/materials" className="hover:text-neutral-200">
+                <Link href="/admin/materials" className="hover:text-[var(--text-primary)]">
                   Materials
                 </Link>
-                <Link href="/admin/pricing" className="hover:text-neutral-200">
+                <Link href="/admin/pricing" className="hover:text-[var(--text-primary)]">
                   Pricing
                 </Link>
-                <Link href="/admin/settings" className="hover:text-neutral-200">
+                <Link href="/admin/settings" className="hover:text-[var(--text-primary)]">
                   Settings
                 </Link>
-                <Link href="/admin/boxes" className="hover:text-neutral-200">
+                <Link href="/admin/boxes" className="hover:text-[var(--text-primary)]">
                   Boxes
                 </Link>
-                <Link href="/admin/products" className="hover:text-neutral-200">
+                <Link href="/admin/products" className="hover:text-[var(--text-primary)]">
                   Products
                 </Link>
-                <Link href="/admin/templates" className="hover:text-neutral-200">
+                <Link href="/admin/templates" className="hover:text-[var(--text-primary)]">
                   Templates
                 </Link>
-                <Link href="/admin/commissions" className="hover:text-neutral-200">
+                <Link href="/admin/commissions" className="hover:text-[var(--text-primary)]">
                   Commissions
                 </Link>
-                <Link href="/admin/logs" className="hover:text-neutral-200">
+                <Link href="/admin/logs" className="hover:text-[var(--text-primary)]">
                   Logs
                 </Link>
-                <Link href="/admin/quotes" className="hover:text-neutral-200">
+                <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
                 </Link>
-                <Link href="/admin/cleanup" className="hover:text-neutral-200">
+                <Link href="/admin/cleanup" className="hover:text-[var(--text-primary)]">
                   Cleanup
                 </Link>
 
                 {showTenants ? (
-                  <Link href="/admin/traffic" className="hover:text-neutral-200">
+                  <Link href="/admin/traffic" className="hover:text-[var(--text-primary)]">
                     Traffic
                   </Link>
                 ) : null}
 
-                <Link href="/admin/leads" className="hover:text-neutral-200">
+                <Link href="/admin/leads" className="hover:text-[var(--text-primary)]">
                   Leads
                 </Link>
               </>
             ) : (
               <>
-                <Link href="/admin/quotes" className="hover:text-neutral-200">
+                <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
                 </Link>
               </>
@@ -145,9 +145,9 @@ export default async function AdminLayout({ children }: Props) {
           </nav>
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-neutral-200">
+        <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)]">
           <span>{user.name || user.email}</span>
-          <span className="rounded-full border border-neutral-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400">
+          <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
             {user.role}
           </span>
           <LogoutButton />

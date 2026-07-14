@@ -369,15 +369,15 @@ export default function AdminQuotesPage() {
   }, [quotes]);
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
+    <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
       <div className="mx-auto max-w-5xl px-4 py-8 lg:py-10">
         {/* Header */}
         <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-sky-300">
+            <h1 className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">
               Quotes &amp; layouts
             </h1>
-            <p className="mt-2 text-sm text-slate-300">
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">
               Engineering-focused view of quotes, foam layouts, and CAD
               downloads for internal use.
             </p>
@@ -388,7 +388,7 @@ export default function AdminQuotesPage() {
               type="button"
               onClick={() => setShowStartModal(true)}
               disabled={creating}
-              className="inline-flex items-center justify-center rounded-lg border border-sky-300 bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm transition hover:bg-sky-400 disabled:opacity-60 disabled:bg-sky-500/40 disabled:border-sky-500/40"
+              className="inline-flex items-center justify-center rounded-md bg-[var(--action-primary)] px-4 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-[var(--action-primary-hover)] disabled:opacity-60"
 
             >
               Start new quote
@@ -397,14 +397,14 @@ export default function AdminQuotesPage() {
               type="button"
               onClick={createNewQuoteAndOpenEditor}
               disabled={creating}
-              className="inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2 text-xs font-semibold text-slate-200 shadow-sm transition hover:bg-white/[0.06] disabled:opacity-60"
+              className="inline-flex items-center justify-center rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-2 text-xs font-medium text-[var(--text-secondary)] shadow-sm transition hover:bg-[var(--surface-subtle)] disabled:opacity-60"
             >
               {creating ? "Starting…" : "Skip to blank editor"}
             </button>
             {isAdmin && (
   <Link
     href="/admin"
-    className="text-xs text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+    className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline-offset-2 hover:underline"
   >
     &larr; Back to admin home
   </Link>
@@ -415,14 +415,14 @@ export default function AdminQuotesPage() {
         {/* Jump to quote + summary */}
         <section className="mb-6 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           {/* Jump to quote */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]">
+            <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               Jump to quote
             </div>
-            <p className="mb-3 text-xs text-slate-300">
+            <p className="mb-3 text-xs text-[var(--text-secondary)]">
               Type a quote number to open its internal engineering view
               (layouts + CAD) at{" "}
-              <span className="font-mono text-[11px] text-sky-300">
+              <span className="font-mono text-[11px] text-[var(--text-secondary)]">
                 /admin/quotes/[quote_no]
               </span>
               .
@@ -436,48 +436,48 @@ export default function AdminQuotesPage() {
                 value={quoteNoInput}
                 onChange={(e) => setQuoteNoInput(e.target.value)}
                 placeholder="e.g. Q-AI-20251129-123456"
-                className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none ring-0 placeholder:text-slate-500 focus:border-sky-400"
+                className="flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none ring-0 placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)]"
               />
               <button
                 type="submit"
-                className="inline-flex items-center justify-center rounded-lg border border-sky-500/70 bg-sky-600/80 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm transition hover:bg-sky-500"
+                className="inline-flex items-center justify-center rounded-md bg-[var(--action-primary)] px-4 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-[var(--action-primary-hover)]"
               >
                 Go
               </button>
             </form>
-            <p className="mt-3 text-[11px] text-slate-500">
+            <p className="mt-3 text-[11px] text-[var(--text-faint)]">
               Admin only – not visible to customers.
             </p>
           </div>
 
           {/* Summary card (live counts) */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]">
+            <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               Summary
             </div>
 
             {error ? (
-              <p className="text-xs text-rose-300">{error}</p>
+              <p className="text-xs text-[var(--attention)]">{error}</p>
             ) : (
-              <ul className="space-y-1 text-xs text-slate-300">
+              <ul className="space-y-1 text-xs text-[var(--text-secondary)]">
                 <li>
-                  <span className="font-semibold text-slate-100">
+                  <span className="font-medium text-[var(--text-primary)]">
                     {loading ? "…" : totalCount}
                   </span>{" "}
                   quotes returned (latest from{" "}
-                  <span className="font-mono text-[11px] text-sky-300">
+                  <span className="font-mono text-[11px] text-[var(--text-secondary)]">
                     /api/quotes
                   </span>
                   ).
                 </li>
                 <li>
-                  <span className="font-semibold text-slate-100">
+                  <span className="font-medium text-[var(--text-primary)]">
                     {loading ? "…" : recentCount}
                   </span>{" "}
                   updated in the last 24 hours.
                 </li>
                 <li>
-                  <span className="font-semibold text-slate-100">
+                  <span className="font-medium text-[var(--text-primary)]">
                     {loading ? "…" : engineeringCount}
                   </span>{" "}
                   marked as engineering / in-progress.
@@ -485,9 +485,9 @@ export default function AdminQuotesPage() {
               </ul>
             )}
 
-            <p className="mt-3 text-[11px] text-slate-500">
+            <p className="mt-3 text-[11px] text-[var(--text-faint)]">
               Live data source:{" "}
-              <span className="font-mono text-[11px] text-sky-300">
+              <span className="font-mono text-[11px] text-[var(--text-secondary)]">
                 /api/quotes?limit=200
               </span>
               . This view is read-only; status changes still flow through your
@@ -497,13 +497,13 @@ export default function AdminQuotesPage() {
         </section>
 
         {/* Recent quotes section (filters + materials widget + table) */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-5 text-sm text-[var(--text-secondary)]">
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 Recent quotes
               </div>
-              <p className="mt-1 text-xs text-slate-300">
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
                 Live quote list from the database. Use the filters and search to
                 focus on specific statuses or customers.
               </p>
@@ -548,9 +548,9 @@ export default function AdminQuotesPage() {
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Search quotes..."
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-[11px] text-slate-100 outline-none ring-0 placeholder:text-slate-500 focus:border-sky-400"
+                  className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2.5 py-1.5 text-[11px] text-[var(--text-primary)] outline-none ring-0 placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)]"
                 />
-                <div className="mt-0.5 text-[10px] text-slate-500 text-right">
+                <div className="mt-0.5 text-[10px] text-[var(--text-faint)] text-right">
                   Showing {loading ? "…" : showingCount} of{" "}
                   {loading ? "…" : totalCount}
                 </div>
@@ -559,17 +559,17 @@ export default function AdminQuotesPage() {
           </div>
 
           {/* Materials used recently widget */}
-          <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-200">
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <div className="mb-4 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-4 text-xs text-[var(--text-secondary)]">
+            <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               Materials used recently
             </div>
             {materialStatsLoading && (
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-[var(--text-muted)]">
                 Analyzing the latest quotes…
               </p>
             )}
             {!materialStatsLoading && materialStatsError && (
-              <p className="text-[11px] text-rose-300">
+              <p className="text-[11px] text-[var(--attention)]">
                 {materialStatsError}
               </p>
             )}
@@ -577,7 +577,7 @@ export default function AdminQuotesPage() {
               !materialStatsError &&
               materialStats &&
               materialStats.length === 0 && (
-                <p className="text-[11px] text-slate-400">
+                <p className="text-[11px] text-[var(--text-muted)]">
                   No material information found in the latest quotes.
                 </p>
               )}
@@ -591,36 +591,36 @@ export default function AdminQuotesPage() {
                       key={m.name}
                       className="flex items-center justify-between gap-2"
                     >
-                      <span className="truncate text-[11px] text-slate-100">
+                      <span className="truncate text-[11px] text-[var(--text-primary)]">
                         {m.name}
                       </span>
-                      <span className="text-[11px] text-slate-400">
+                      <span className="text-[11px] text-[var(--text-muted)]">
                         {m.count} quote{m.count === 1 ? "" : "s"}
                       </span>
                     </li>
                   ))}
                 </ul>
               )}
-            <p className="mt-2 text-[10px] text-slate-500">
+            <p className="mt-2 text-[10px] text-[var(--text-faint)]">
               Sample based on the latest quotes returned by{" "}
-              <span className="font-mono text-[10px] text-sky-300">
+              <span className="font-mono text-[10px] text-[var(--text-secondary)]">
                 /api/quote/print
               </span>{" "}
               for a small batch of recent quote numbers.
             </p>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-slate-800/80 bg-slate-950/40">
+          <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface-card)]">
             <table className="min-w-full text-left text-xs">
-              <thead className="bg-slate-900/80 text-slate-400">
+              <thead className="bg-[var(--surface-subtle)] text-[var(--text-muted)]">
                 <tr>
-                  <th className="px-3 py-2 font-semibold">Quote #</th>
-                  <th className="px-3 py-2 font-semibold">Customer</th>
-                  <th className="px-3 py-2 font-semibold">Email / Phone</th>
-                 <th className="px-3 py-2 font-semibold text-right">
+                  <th className="px-3 py-2 font-medium">Quote #</th>
+                  <th className="px-3 py-2 font-medium">Customer</th>
+                  <th className="px-3 py-2 font-medium">Email / Phone</th>
+                 <th className="px-3 py-2 font-medium text-right">
   Updated
 </th>
-<th className="px-3 py-2 font-semibold text-right">
+<th className="px-3 py-2 font-medium text-right">
   Review
 </th>
 
@@ -631,7 +631,7 @@ export default function AdminQuotesPage() {
                   <tr>
                     <td
                       colSpan={4}
-                      className="px-3 py-4 text-center text-xs text-slate-400"
+                      className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                     >
                       Loading quotes…
                     </td>
@@ -642,7 +642,7 @@ export default function AdminQuotesPage() {
                   <tr>
                     <td
                       colSpan={4}
-                      className="px-3 py-4 text-center text-xs text-rose-300"
+                      className="px-3 py-4 text-center text-xs text-[var(--attention)]"
                     >
                       Unable to load quote list.
                     </td>
@@ -656,7 +656,7 @@ export default function AdminQuotesPage() {
                     <tr>
                       <td
                         colSpan={4}
-                        className="px-3 py-4 text-center text-xs text-slate-400"
+                        className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                       >
                         No quotes match the current filters.
                       </td>
@@ -674,63 +674,63 @@ export default function AdminQuotesPage() {
                     return (
                       <tr
                         key={q.id}
-                        className="border-t border-slate-800/60 hover:bg-slate-900/70"
+                        className="border-t border-[var(--border)] hover:bg-[var(--surface-subtle)]"
                       >
                         <td className="px-3 py-2 font-mono text-[11px]">
                           <Link
                             href={`/admin/quotes/${encodeURIComponent(
                               q.quote_no,
                             )}`}
-                            className="text-sky-300 hover:text-sky-200 hover:underline underline-offset-2"
+                            className="text-[var(--text-primary)] hover:underline underline-offset-2"
                           >
                             {q.quote_no}
                           </Link>
                         </td>
-                        <td className="px-3 py-2 text-xs text-slate-100">
+                        <td className="px-3 py-2 text-xs text-[var(--text-primary)]">
                           {q.customer_name || (
-                            <span className="text-slate-500">Unknown</span>
+                            <span className="text-[var(--text-faint)]">Unknown</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-[11px] text-slate-300">
+                        <td className="px-3 py-2 text-[11px] text-[var(--text-secondary)]">
                           {q.email && (
                             <span className="block truncate">
                               {q.email}
                             </span>
                           )}
                           {q.phone && (
-                            <span className="block text-slate-400">
+                            <span className="block text-[var(--text-muted)]">
                               {q.phone}
                             </span>
                           )}
                           {!q.email && !q.phone && (
-                            <span className="text-slate-500">
+                            <span className="text-[var(--text-faint)]">
                               No contact info
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-right text-[11px] text-slate-400">
+                        <td className="px-3 py-2 text-right text-[11px] text-[var(--text-muted)]">
   {updated}
 </td>
 
                         <td className="px-3 py-2 text-right">
                           <div className="inline-flex items-center gap-2">
                             {q.revision && (
-                              <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-200">
+                              <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
                                 {q.revision}
                               </span>
                             )}
 
                             {q.sales_rep_name && (
-                              <span className="inline-flex items-center rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] font-semibold text-indigo-200">
+                              <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
                                 {q.sales_rep_name}
                               </span>
                             )}
                             {q.locked ? (
-                              <span className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-300">
+                              <span className="inline-flex items-center rounded-full border border-[var(--status-success-text)]/40 bg-[var(--status-success-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-success-text)]">
                                 Released for Mfg
                               </span>
                             ) : (
-                              <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/40 px-2 py-1 text-[10px] font-semibold text-slate-300">
+                              <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
                                 Editable
                               </span>
                             )}
@@ -739,7 +739,7 @@ export default function AdminQuotesPage() {
                               type="button"
                               disabled={!!rowBusy[q.quote_no] || !!q.locked}
                               onClick={() => setQuoteLock(q.quote_no, true)}
-                              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] font-medium text-slate-100 transition hover:border-sky-400 disabled:opacity-60"
+                              className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-primary)] transition hover:border-[var(--action-primary)] disabled:opacity-60"
                               title={q.locked ? "Locked (use Revise to start a new revision)" : "Lock for production"}
                             >
                               {rowBusy[q.quote_no] ? "" : q.locked ? "Locked" : "RFM"}
@@ -750,11 +750,11 @@ export default function AdminQuotesPage() {
                                 marginLeft: 8,
                                 padding: "4px 8px",
                                 fontSize: 12,
-                                fontWeight: 600,
+                                fontWeight: 500,
                                 borderRadius: 6,
-                                background: "#1f2937",
+                                background: "var(--action-primary)",
                                 color: "white",
-                                border: "1px solid #374151",
+                                border: "1px solid var(--action-primary)",
                                 cursor: "pointer",
                               }}
                               title="Unlock and open the layout editor"
@@ -764,7 +764,7 @@ export default function AdminQuotesPage() {
 
                             <Link
                               href={`/quote?quote_no=${encodeURIComponent(q.quote_no)}`}
-                              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] font-medium text-sky-300 transition hover:border-sky-400 hover:text-sky-200"
+                              className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
                             >
                               Review
                             </Link>
@@ -778,19 +778,19 @@ export default function AdminQuotesPage() {
             </table>
           </div>
 
-          <p className="mt-3 text-[11px] text-slate-500">
+          <p className="mt-3 text-[11px] text-[var(--text-faint)]">
             All rows above are live from the{" "}
-            <span className="font-mono text-[11px] text-sky-300">
+            <span className="font-mono text-[11px] text-[var(--text-secondary)]">
               quotes
             </span>{" "}
             table via{" "}
-            <span className="font-mono text-[11px] text-sky-300">
+            <span className="font-mono text-[11px] text-[var(--text-secondary)]">
               /api/quotes
             </span>
             . This view remains read-only; any status changes still flow
             through your existing pipelines.
           </p>
-          <p className="mt-1 text-[11px] text-slate-500">
+          <p className="mt-1 text-[11px] text-[var(--text-faint)]">
             Admin only – not visible to customers.
           </p>
         </section>
@@ -826,18 +826,18 @@ function chipClassForStatus(status: string | null | undefined): string {
   const s = normalizeStatus(status);
 
   if (s === "engineering" || s === "in_progress") {
-    return "bg-amber-500/20 text-amber-300 border border-amber-500/40";
+    return "bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border border-[var(--status-pending-text)]/40";
   }
   if (s === "sent" || s === "approved") {
-    return "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40";
+    return "bg-[var(--status-success-bg)] text-[var(--status-success-text)] border border-[var(--status-success-text)]/40";
   }
   if (s === "rejected") {
-    return "bg-rose-500/15 text-rose-300 border border-rose-500/40";
+    return "bg-[var(--attention-bg)] text-[var(--attention)] border border-[var(--attention-border)]";
   }
   if (s === "draft") {
-    return "bg-slate-500/20 text-slate-200 border border-slate-500/40";
+    return "bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)] border border-[var(--border)]";
   }
-  return "bg-slate-600/20 text-slate-200 border border-slate-600/40";
+  return "bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)] border border-[var(--border)]";
 }
 
 function isWithinLast24Hours(iso: string | null): boolean {
@@ -876,8 +876,8 @@ function StatusChip({ label, active, onClick }: StatusChipProps) {
       onClick={onClick}
       className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] transition ${
         active
-          ? "border-sky-400 bg-sky-500/20 text-sky-200"
-          : "border-slate-700 bg-slate-900/60 text-slate-300 hover:border-sky-500/60 hover:text-sky-200"
+          ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] text-[var(--text-primary)]"
+          : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
       }`}
     >
       {label}
