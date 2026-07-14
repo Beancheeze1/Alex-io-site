@@ -1,18 +1,16 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
 import type { TrafficData } from "./page";
+
+// ssr: false — see DailyActivityChart.tsx for why the chart itself can't be
+// server-rendered.
+const DailyActivityChart = dynamic(() => import("./DailyActivityChart"), {
+  ssr: false,
+  loading: () => <div style={{ height: 240 }} />,
+});
 
 const FUNNEL_ORDER = [
   "page_view",
@@ -237,44 +235,14 @@ export default function TrafficClient({ data }: { data: TrafficData }) {
         style={{ backgroundColor: "#FFFFFF" }}
       >
         <h2 className="text-sm font-medium text-[var(--text-primary)] mb-4">Daily Activity</h2>
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={daily} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E0" />
-            <XAxis dataKey="day" tick={{ fill: "#7A7A74", fontSize: 11 }} />
-            <YAxis tick={{ fill: "#7A7A74", fontSize: 11 }} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#FFFFFF",
-                border: "1px solid #E4E4E0",
-                borderRadius: 8,
-              }}
-              labelStyle={{ color: "#1C1C1A" }}
-              itemStyle={{ color: "#1C1C1A" }}
-            />
-            <Legend wrapperStyle={{ fontSize: 11, color: "#7A7A74" }} />
-            <Line
-              type="monotone"
-              dataKey="page_views"
-              stroke={FUNNEL_COLORS.page_view}
-              dot={false}
-              strokeWidth={2}
-            />
-            <Line
-              type="monotone"
-              dataKey="cta_clicks"
-              stroke={FUNNEL_COLORS.cta_click}
-              dot={false}
-              strokeWidth={2}
-            />
-            <Line
-              type="monotone"
-              dataKey="form_submits"
-              stroke={FUNNEL_COLORS.form_submit}
-              dot={false}
-              strokeWidth={2}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        <DailyActivityChart
+          daily={daily}
+          colors={{
+            page_view: FUNNEL_COLORS.page_view,
+            cta_click: FUNNEL_COLORS.cta_click,
+            form_submit: FUNNEL_COLORS.form_submit,
+          }}
+        />
       </div>
 
       {/* Traffic sources table */}
