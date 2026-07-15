@@ -10,11 +10,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  searchParams?: { [key: string]: string | string[] | undefined };
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-export default function QuoteStartPage({ searchParams }: PageProps) {
-  const repParam = searchParams?.rep;
+export default async function QuoteStartPage({ searchParams }: PageProps) {
+  const sp = await searchParams;
+  const repParam = sp?.rep;
   const rep =
     Array.isArray(repParam) && repParam.length > 0
       ? repParam[0]

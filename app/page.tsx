@@ -145,14 +145,15 @@ function OverlapSnips() {
 
 // Splash CTAs (locked): demo + start-quote (no mailto)
 
-export default function Page({
+export default async function Page({
   searchParams,
 }: {
-  searchParams?: { sales_rep_slug?: string };
+  searchParams?: Promise<{ sales_rep_slug?: string }>;
 }) {
   // If a salesperson link was used, thread the slug through to the editor
   // so the quote gets attributed to the right rep.
-  const salesSlug = searchParams?.sales_rep_slug?.trim() || "";
+  const sp = await searchParams;
+  const salesSlug = sp?.sales_rep_slug?.trim() || "";
   const startQuotePath = salesSlug
     ? `/start-quote?sales_rep_slug=${encodeURIComponent(salesSlug)}`
     : START_QUOTE_PATH;
