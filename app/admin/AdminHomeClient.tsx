@@ -141,21 +141,21 @@ export default function AdminHomeClient({ dashboardTitle }: AdminHomeClientProps
   const emailHealth = useHealth("/api/health/email");
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
+    <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
       <div className="mx-auto max-w-6xl px-4 py-8 lg:py-10">
         {/* Header */}
-        <header className="mb-8 border-b border-slate-800 pb-6">
-          <h1 className="text-3xl font-semibold tracking-tight text-sky-300">
+        <header className="mb-8 border-b border-[var(--border)] pb-6">
+          <h1 className="text-3xl font-medium tracking-tight text-[var(--text-primary)]">
             {dashboardTitle}
           </h1>
-          <p className="mt-2 text-sm text-slate-300">
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">
             Internal tools for quotes, layouts, pricing &amp; foam data.
           </p>
         </header>
 
         {/* System health row */}
         <section className="mb-10">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             System Health
           </h2>
           <div className="grid gap-4 md:grid-cols-3">
@@ -187,7 +187,7 @@ export default function AdminHomeClient({ dashboardTitle }: AdminHomeClientProps
 
         {/* Main navigation tiles */}
         <section className="mb-10">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Admin Areas
           </h2>
 
@@ -251,7 +251,7 @@ export default function AdminHomeClient({ dashboardTitle }: AdminHomeClientProps
 
         {/* Rough shipping estimate knob - moved under Admin Areas */}
         <section className="mb-10">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Rough Shipping Estimate
           </h2>
           <div className="grid gap-4 md:grid-cols-2">
@@ -261,7 +261,7 @@ export default function AdminHomeClient({ dashboardTitle }: AdminHomeClientProps
 
         {/* Users & Roles (Admin-only via API enforcement) */}
         <section className="mb-10">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Users &amp; Roles
           </h2>
           <div className="grid gap-4">
@@ -293,7 +293,7 @@ function HealthCard({ title, description, flavor, state }: HealthCardProps) {
 
   let statusLabel = "Unknown";
   let statusClass =
-    "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-slate-700/40 text-slate-200 border border-slate-600/60";
+    "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)] border border-[var(--border-strong)]";
   let detailText = "Tests coming soon.";
   let extraLine: string | null = null;
 
@@ -303,14 +303,14 @@ function HealthCard({ title, description, flavor, state }: HealthCardProps) {
   } else if (error) {
     statusLabel = "Down";
     statusClass =
-      "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-rose-500/15 text-rose-300 border border-rose-500/40";
+      "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-[var(--attention-bg)] text-[var(--attention)] border border-[var(--attention-border)]";
     detailText = error;
   } else if (data) {
     if (flavor === "db") {
       if (data.ok && data.status === "up") {
         statusLabel = "Up";
         statusClass =
-          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/40";
+          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-[var(--status-success-bg)] text-[var(--status-success-text)] border border-[var(--status-success-text)]/30";
         detailText =
           data.detail ||
           "Database connection OK and basic query succeeded.";
@@ -320,7 +320,7 @@ function HealthCard({ title, description, flavor, state }: HealthCardProps) {
       } else {
         statusLabel = "Down";
         statusClass =
-          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-rose-500/15 text-rose-300 border border-rose-500/40";
+          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-[var(--attention-bg)] text-[var(--attention)] border border-[var(--attention-border)]";
         detailText =
           data.message || data.detail || "Database health check failed.";
       }
@@ -329,14 +329,14 @@ function HealthCard({ title, description, flavor, state }: HealthCardProps) {
       if (configured) {
         statusLabel = "Configured";
         statusClass =
-          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/40";
+          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-[var(--status-success-bg)] text-[var(--status-success-text)] border border-[var(--status-success-text)]/30";
         detailText =
           data.detail ||
           "Required environment variables are present for this integration.";
       } else {
         statusLabel = "Not configured";
         statusClass =
-          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-amber-500/20 text-amber-200 border border-amber-500/40";
+          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border border-[var(--status-pending-text)]/30";
         detailText =
           data.detail ||
           "One or more required environment variables are missing.";
@@ -387,35 +387,35 @@ function HealthCard({ title, description, flavor, state }: HealthCardProps) {
   }
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 shadow-sm">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+        <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-faint)]">
           {title}
         </div>
         <span className={statusClass}>{statusLabel}</span>
       </div>
-      <div className="text-xs text-slate-200">{description}</div>
-      <div className="mt-2 text-[11px] text-slate-400">{detailText}</div>
+      <div className="text-xs text-[var(--text-secondary)]">{description}</div>
+      <div className="mt-2 text-[11px] text-[var(--text-muted)]">{detailText}</div>
       {extraLine && (
-        <div className="mt-1 text-[11px] text-slate-500">{extraLine}</div>
+        <div className="mt-1 text-[11px] text-[var(--text-faint)]">{extraLine}</div>
       )}
 
       {/* Deep check UI for HubSpot + Graph */}
       {(flavor === "hubspot" || flavor === "email") && (
-        <div className="mt-3 border-t border-slate-800 pt-2">
+        <div className="mt-3 border-t border-[var(--border)] pt-2">
           <button
             type="button"
             onClick={runDeepCheck}
             disabled={deepLoading}
-            className="inline-flex items-center rounded-full border border-sky-500/60 bg-sky-600/20 px-3 py-1 text-[11px] font-medium text-sky-200 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center rounded-full bg-[var(--action-primary)] px-3 py-1 text-[11px] font-medium text-white transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {deepLoading ? "Running deep check…" : "Run deep check"}
           </button>
           {deepResult && !deepError && (
-            <p className="mt-2 text-[11px] text-emerald-300">{deepResult}</p>
+            <p className="mt-2 text-[11px] text-[var(--status-success-text)]">{deepResult}</p>
           )}
           {deepError && (
-            <p className="mt-2 text-[11px] text-rose-300">{deepError}</p>
+            <p className="mt-2 text-[11px] text-[var(--attention)]">{deepError}</p>
           )}
         </div>
       )}
@@ -433,13 +433,13 @@ function NavCard({ href, title, description }: NavCardProps) {
   return (
     <Link
       href={href}
-      className="group flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm transition hover:border-sky-400/70 hover:bg-slate-900"
+      className="group flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 shadow-sm transition hover:border-[var(--action-primary)]/50 hover:bg-[var(--surface-card)]"
     >
-      <div className="mb-2 text-sm font-semibold text-slate-100 group-hover:text-sky-300">
+      <div className="mb-2 text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--action-primary)]">
         {title}
       </div>
-      <p className="flex-1 text-xs text-slate-300">{description}</p>
-      <div className="mt-3 text-[11px] text-slate-500">
+      <p className="flex-1 text-xs text-[var(--text-secondary)]">{description}</p>
+      <div className="mt-3 text-[11px] text-[var(--text-faint)]">
         Admin only – not visible to customers.
       </div>
     </Link>
@@ -548,24 +548,24 @@ function ShippingSettingsCard() {
   const disabled = loading || !initialLoaded || saving;
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 shadow-sm">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+        <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-faint)]">
           Rough shipping %
         </div>
-        <span className="inline-flex items-center rounded-full bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-300">
+        <span className="inline-flex items-center rounded-full bg-[var(--status-neutral-bg)] px-2 py-0.5 text-[10px] text-[var(--status-neutral-text)]">
           Global knob
         </span>
       </div>
 
-      <p className="text-xs text-slate-200">
-        Controls the <span className="font-semibold">rough shipping estimate</span>{" "}
+      <p className="text-xs text-[var(--text-secondary)]">
+        Controls the <span className="font-medium">rough shipping estimate</span>{" "}
         as a percentage of the combined{" "}
-        <span className="font-mono">foam + packaging</span> subtotal. 
+        <span className="font-mono">foam + packaging</span> subtotal.
       </p>
 
       {loading && (
-        <p className="mt-3 text-[11px] text-slate-400">
+        <p className="mt-3 text-[11px] text-[var(--text-muted)]">
           Loading current setting…
         </p>
       )}
@@ -573,7 +573,7 @@ function ShippingSettingsCard() {
       {!loading && (
         <form onSubmit={handleSave} className="mt-4 space-y-3">
           <div className="flex items-center gap-3">
-            <label className="text-xs text-slate-300">
+            <label className="text-xs text-[var(--text-secondary)]">
               Rough shipping (% of foam + packaging)
             </label>
           </div>
@@ -586,27 +586,27 @@ function ShippingSettingsCard() {
               value={value}
               onChange={(e) => setValue(e.target.value)}
               disabled={disabled}
-              className="w-28 rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1 disabled:opacity-60"
+              className="w-28 rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none ring-[var(--action-primary)]/30 focus:border-[var(--action-primary)] focus:ring-1 disabled:opacity-60"
             />
-            <span className="text-xs text-slate-400">%</span>
+            <span className="text-xs text-[var(--text-muted)]">%</span>
           </div>
 
           <div className="flex items-center gap-3">
             <button
               type="submit"
               disabled={disabled}
-              className="inline-flex items-center rounded-full border border-sky-500/60 bg-sky-600/20 px-3 py-1 text-[11px] font-medium text-sky-200 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center rounded-full bg-[var(--action-primary)] px-3 py-1 text-[11px] font-medium text-white transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? "Saving…" : "Save rough shipping %"}
             </button>
             {savedMessage && (
-              <span className="text-[11px] text-emerald-300">
+              <span className="text-[11px] text-[var(--status-success-text)]">
                 {savedMessage}
               </span>
             )}
           </div>
 
-          {error && <p className="text-[11px] text-rose-300">{error}</p>}
+          {error && <p className="text-[11px] text-[var(--attention)]">{error}</p>}
         </form>
       )}
     </div>
@@ -840,17 +840,17 @@ function UsersAndRolesCard() {
   }
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 shadow-sm">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+        <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-faint)]">
           Create user
         </div>
-        <span className="inline-flex items-center rounded-full bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-300">
+        <span className="inline-flex items-center rounded-full bg-[var(--status-neutral-bg)] px-2 py-0.5 text-[10px] text-[var(--status-neutral-text)]">
           Admin only
         </span>
       </div>
 
-      <p className="text-xs text-slate-200">
+      <p className="text-xs text-[var(--text-secondary)]">
         Create internal accounts for testing login + role gates (viewer/sales/cs/admin).
         This tool is enforced server-side; non-admins will receive 401/403 JSON.
       </p>
@@ -858,35 +858,35 @@ function UsersAndRolesCard() {
       <form onSubmit={handleCreate} className="mt-4 space-y-3">
         <div className="grid gap-3 md:grid-cols-2">
           <label className="block">
-            <div className="mb-1 text-[11px] text-slate-400">Email</div>
+            <div className="mb-1 text-[11px] text-[var(--text-muted)]">Email</div>
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none ring-[var(--action-primary)]/30 focus:border-[var(--action-primary)] focus:ring-1"
               placeholder="user@alex-io.com"
               autoComplete="off"
             />
           </label>
 
           <label className="block">
-            <div className="mb-1 text-[11px] text-slate-400">Name</div>
+            <div className="mb-1 text-[11px] text-[var(--text-muted)]">Name</div>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none ring-[var(--action-primary)]/30 focus:border-[var(--action-primary)] focus:ring-1"
               placeholder="Jane Doe"
               autoComplete="off"
             />
           </label>
 
           <label className="block">
-            <div className="mb-1 text-[11px] text-slate-400">Role</div>
+            <div className="mb-1 text-[11px] text-[var(--text-muted)]">Role</div>
             <select
               value={role}
               onChange={(e) =>
                 setRole(e.target.value as "viewer" | "sales" | "cs" | "admin")
               }
-              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none ring-[var(--action-primary)]/30 focus:border-[var(--action-primary)] focus:ring-1"
             >
               <option value="viewer">viewer</option>
               <option value="sales">sales</option>
@@ -896,11 +896,11 @@ function UsersAndRolesCard() {
           </label>
 
           <label className="block">
-            <div className="mb-1 text-[11px] text-slate-400">Password</div>
+            <div className="mb-1 text-[11px] text-[var(--text-muted)]">Password</div>
             <input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none ring-[var(--action-primary)]/30 focus:border-[var(--action-primary)] focus:ring-1"
               placeholder="••••••••"
               type="password"
               autoComplete="new-password"
@@ -908,13 +908,13 @@ function UsersAndRolesCard() {
           </label>
 
           <label className="block md:col-span-2">
-            <div className="mb-1 text-[11px] text-slate-400">
+            <div className="mb-1 text-[11px] text-[var(--text-muted)]">
               Sales slug (optional, unique)
             </div>
             <input
               value={salesSlug}
               onChange={(e) => setSalesSlug(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none ring-sky-500/40 focus:border-sky-400 focus:ring-1"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none ring-[var(--action-primary)]/30 focus:border-[var(--action-primary)] focus:ring-1"
               placeholder="chuck (or leave blank)"
               autoComplete="off"
             />
@@ -925,7 +925,7 @@ function UsersAndRolesCard() {
           <button
             type="submit"
             disabled={saving}
-            className="inline-flex items-center rounded-full border border-sky-500/60 bg-sky-600/20 px-3 py-1 text-[11px] font-medium text-sky-200 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center rounded-full bg-[var(--action-primary)] px-3 py-1 text-[11px] font-medium text-white transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? "Creating…" : "Create user"}
           </button>
@@ -934,19 +934,19 @@ function UsersAndRolesCard() {
             type="button"
             onClick={loadUsers}
             disabled={loading}
-            className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/30 px-3 py-1 text-[11px] font-medium text-slate-200 transition hover:bg-slate-800/50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-page)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? "Refreshing…" : "Refresh list"}
           </button>
 
-          {okMsg && <span className="text-[11px] text-emerald-300">{okMsg}</span>}
+          {okMsg && <span className="text-[11px] text-[var(--status-success-text)]">{okMsg}</span>}
           {tempPassword && resetForEmail && (
-            <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-100">
+            <div className="mt-2 rounded-lg border border-[var(--status-pending-text)]/30 bg-[var(--status-pending-bg)] p-2 text-[11px] text-[var(--status-pending-text)]">
               <div className="mb-1 font-medium">
-                Temporary password for <span className="text-amber-200">{resetForEmail}</span>
+                Temporary password for <span className="text-[var(--status-pending-text)]">{resetForEmail}</span>
               </div>
               <div className="flex items-center gap-2">
-                <code className="rounded bg-black/30 px-2 py-1">{tempPassword}</code>
+                <code className="rounded bg-[var(--surface-card)] px-2 py-1">{tempPassword}</code>
                 <button
                   type="button"
                   onClick={async () => {
@@ -957,7 +957,7 @@ function UsersAndRolesCard() {
                       // no-op; clipboard may be blocked
                     }
                   }}
-                  className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/30 px-2 py-0.5 text-[10px] font-medium text-slate-200 transition hover:bg-slate-800/50"
+                  className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-page)]"
                 >
                   Copy
                 </button>
@@ -967,32 +967,32 @@ function UsersAndRolesCard() {
                     setTempPassword(null);
                     setResetForEmail(null);
                   }}
-                  className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/30 px-2 py-0.5 text-[10px] font-medium text-slate-200 transition hover:bg-slate-800/50"
+                  className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-page)]"
                 >
                   Dismiss
                 </button>
               </div>
-              <div className="mt-1 text-[10px] text-amber-200/80">
+              <div className="mt-1 text-[10px] text-[var(--status-pending-text)]/80">
                 This password is shown once. It is not stored in plaintext.
               </div>
             </div>
           )}
         </div>
 
-        {error && <p className="text-[11px] text-rose-300">{error}</p>}
+        {error && <p className="text-[11px] text-[var(--attention)]">{error}</p>}
       </form>
 
-      <div className="mt-4 border-t border-slate-800 pt-3">
-        <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+      <div className="mt-4 border-t border-[var(--border)] pt-3">
+        <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-faint)]">
           Existing users
         </div>
 
         {loading && (
-          <p className="text-[11px] text-slate-400">Loading users…</p>
+          <p className="text-[11px] text-[var(--text-muted)]">Loading users…</p>
         )}
 
         {!loading && users && Array.isArray(users) && users.length === 0 && (
-          <p className="text-[11px] text-slate-400">
+          <p className="text-[11px] text-[var(--text-muted)]">
             No users returned (or you are not logged in as admin).
           </p>
         )}
@@ -1001,7 +1001,7 @@ function UsersAndRolesCard() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[11px]">
               <thead>
-                <tr className="text-slate-400">
+                <tr className="text-[var(--text-muted)]">
                   <th className="py-1 pr-3">Email</th>
                   <th className="py-1 pr-3">Name</th>
                   <th className="py-1 pr-3">Role</th>
@@ -1016,11 +1016,11 @@ function UsersAndRolesCard() {
               </thead>
               <tbody>
                 {users.map((u: any) => (
-                                <tr key={u.id} className="border-t border-slate-800/60">
-                    <td className="py-1 pr-3 text-slate-200">{u.email}</td>
-                    <td className="py-1 pr-3 text-slate-200">{u.name}</td>
-                    <td className="py-1 pr-3 text-slate-200">{u.role}</td>
-                    <td className="py-1 pr-3 text-slate-300">
+                                <tr key={u.id} className="border-t border-[var(--border)]">
+                    <td className="py-1 pr-3 text-[var(--text-secondary)]">{u.email}</td>
+                    <td className="py-1 pr-3 text-[var(--text-secondary)]">{u.name}</td>
+                    <td className="py-1 pr-3 text-[var(--text-secondary)]">{u.role}</td>
+                    <td className="py-1 pr-3 text-[var(--text-muted)]">
                       {u.sales_slug || "—"}
                     </td>
                     <td className="py-1 pr-3">
@@ -1036,20 +1036,20 @@ function UsersAndRolesCard() {
                             onChange={(e) =>
                               setCommissionEdits((prev) => ({ ...prev, [u.id]: e.target.value }))
                             }
-                            className="w-16 rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                            className="w-16 rounded border border-[var(--border)] bg-[var(--surface-page)] px-1.5 py-0.5 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                           />
-                          <span className="text-[10px] text-slate-500">%</span>
+                          <span className="text-[10px] text-[var(--text-faint)]">%</span>
                           <button
                             type="button"
                             onClick={() => saveCommission(u.id)}
                             disabled={savingCommissionId === u.id}
-                            className="rounded bg-sky-700/40 px-1.5 py-0.5 text-[10px] text-sky-200 hover:bg-sky-700/60 disabled:opacity-50"
+                            className="rounded bg-[var(--action-primary)] px-1.5 py-0.5 text-[10px] text-white hover:bg-[var(--action-primary-hover)] disabled:opacity-50"
                           >
                             {savingCommissionId === u.id ? "…" : "Save"}
                           </button>
                         </div>
                       ) : (
-                        <span className="text-slate-600 text-[11px]">—</span>
+                        <span className="text-[var(--text-faint)] text-[11px]">—</span>
                       )}
                     </td>
                     <td className="py-1 pr-3">
@@ -1074,16 +1074,16 @@ function UsersAndRolesCard() {
                             }
                           }}
                           disabled={resettingId === u.id || deletingId === u.id || saving || loading}
-                          className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/30 px-2 py-0.5 text-[10px] font-medium text-slate-200 transition hover:bg-slate-800/50 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-page)] disabled:cursor-not-allowed disabled:opacity-60"
                           title="Copy salesperson start link"
                         >
                           Copy
                         </button>
                       ) : (
-                        <span className="text-slate-500"></span>
+                        <span className="text-[var(--text-faint)]"></span>
                       )}
                     </td>
-                    <td className="py-1 pr-3 text-slate-400">
+                    <td className="py-1 pr-3 text-[var(--text-muted)]">
                       {typeof u.created_at === "string"
                         ? u.created_at.slice(0, 10)
                         : "—"}
@@ -1093,7 +1093,7 @@ function UsersAndRolesCard() {
                         type="button"
                         onClick={() => handleResetPassword({ id: u.id, email: u.email })}
                         disabled={resettingId === u.id || deletingId === u.id || saving || loading}
-                        className="inline-flex items-center rounded-full border border-amber-500/50 bg-amber-600/10 px-2 py-0.5 text-[10px] font-medium text-amber-200 transition hover:bg-amber-600/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex items-center rounded-full border border-[var(--status-pending-text)]/30 bg-[var(--status-pending-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--status-pending-text)] transition hover:bg-[var(--status-pending-bg)]/70 disabled:cursor-not-allowed disabled:opacity-60"
                         title="Reset password (sets a new temporary password)"
                       >
                         {resettingId === u.id ? "Resetting" : "Reset"}
@@ -1104,7 +1104,7 @@ function UsersAndRolesCard() {
                         type="button"
                         onClick={() => handleDeleteUser({ id: u.id, email: u.email })}
                         disabled={deletingId === u.id || saving || loading}
-                        className="inline-flex items-center rounded-full border border-rose-500/50 bg-rose-600/10 px-2 py-0.5 text-[10px] font-medium text-rose-200 transition hover:bg-rose-600/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex items-center rounded-full border border-[var(--attention-border)] bg-[var(--attention-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--attention)] transition hover:bg-[var(--attention-bg)]/70 disabled:cursor-not-allowed disabled:opacity-60"
                         title="Delete user"
                       >
                         {deletingId === u.id ? "Deleting…" : "Delete"}

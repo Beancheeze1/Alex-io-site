@@ -268,67 +268,67 @@ export default function CushionCurvesMaterialPage() {
   }, [operatingPsi, points, summary]);
 
   return (
-    <main className="min-h-screen bg-slate-950 flex items-stretch py-8 px-4">
+    <main className="min-h-screen bg-[var(--surface-page)] flex items-stretch py-8 px-4">
       <div className="w-full max-w-6xl mx-auto">
         {/* Page-level label (like other admin pages) */}
         <div className="mb-4">
-          <div className="text-[11px] font-semibold tracking-[0.18em] uppercase text-sky-300/90">
+          <div className="text-[11px] font-medium tracking-[0.18em] uppercase text-[var(--text-secondary)]">
             Admin · Cushion curves
           </div>
-          <h1 className="mt-2 text-2xl font-extrabold text-slate-50">
+          <h1 className="mt-2 text-2xl font-medium text-[var(--text-primary)]">
             Cushion curves for{" "}
-            <span className="font-mono text-sky-300">
+            <span className="font-mono text-[var(--text-secondary)]">
               #{materialId}
             </span>
           </h1>
           {material && (
-            <p className="mt-1 text-sm text-slate-300">
-              <span className="font-semibold">{material.name}</span>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              <span className="font-medium">{material.name}</span>
               {material.material_family && (
-                <span className="ml-2 text-slate-400">
+                <span className="ml-2 text-[var(--text-muted)]">
                   ({material.material_family})
                 </span>
               )}
             </p>
           )}
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-[var(--text-faint)]">
             Read-only view. This page does not affect pricing, quotes, or
             layout — it just surfaces cushion data already in the database.
           </p>
         </div>
 
         {/* Main card with layout-editor style shell */}
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/80 shadow-[0_22px_45px_rgba(15,23,42,0.85)] overflow-hidden">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] shadow-sm overflow-hidden">
           {/* Header strip */}
-          <div className="border-b border-slate-800 bg-gradient-to-r from-sky-500 via-sky-500/80 to-slate-900 px-6 py-4">
+          <div className="border-b border-[var(--border)] bg-[var(--surface-subtle)] px-6 py-4">
             <div className="flex items-center justify-between gap-4">
               <div className="flex flex-col">
-                <div className="text-xs font-semibold text-slate-50">
+                <div className="text-xs font-medium text-[var(--text-primary)]">
                   Cushion curve data
                 </div>
-                <div className="text-[11px] text-sky-50/90">
+                <div className="text-[11px] text-[var(--text-secondary)]">
                   Static load vs deflection vs G-level
                 </div>
                 {title && (
-                  <div className="mt-1 text-[11px] text-slate-100">
+                  <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
                     {title}
                   </div>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 {loading && (
-                  <span className="text-[11px] text-sky-50/80">
+                  <span className="text-[11px] text-[var(--text-muted)]">
                     Loading…
                   </span>
                 )}
                 {!loading && points.length > 0 && (
-                  <span className="inline-flex items-center rounded-full border border-slate-200/80 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-sky-50">
+                  <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
                     {points.length} point
                     {points.length === 1 ? "" : "s"} loaded
                   </span>
                 )}
                 {!loading && !points.length && !error && (
-                  <span className="inline-flex items-center rounded-full border border-slate-200/80 bg-slate-900/40 px-3 py-1 text-[11px] font-medium text-amber-50">
+                  <span className="inline-flex items-center rounded-full border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-1 text-[11px] font-medium text-[var(--attention)]">
                     No cushion data found
                   </span>
                 )}
@@ -337,43 +337,43 @@ export default function CushionCurvesMaterialPage() {
           </div>
 
           {/* Body: three-column layout, same vibe as layout editor */}
-          <div className="flex flex-row gap-5 p-5 bg-slate-950/80 text-slate-100">
+          <div className="flex flex-row gap-5 p-5 bg-[var(--surface-card)] text-[var(--text-primary)]">
             {/* LEFT: Material card + DB hint */}
             <aside className="w-60 shrink-0 flex flex-col gap-3">
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                <div className="text-xs font-semibold text-slate-100 mb-1">
+              <div className="bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-3">
+                <div className="text-xs font-medium text-[var(--text-primary)] mb-1">
                   Material
                 </div>
                 {material ? (
                   <>
-                    <div className="text-[11px] text-slate-200">
-                      <span className="font-semibold">
+                    <div className="text-[11px] text-[var(--text-secondary)]">
+                      <span className="font-medium">
                         {material.name}
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
+                    <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
                       ID{" "}
-                      <span className="font-mono text-sky-300">
+                      <span className="font-mono text-[var(--text-secondary)]">
                         {material.id}
                       </span>
                     </div>
                     {material.material_family && (
-                      <div className="mt-1 text-[11px] text-slate-300">
+                      <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
                         Family:{" "}
-                        <span className="font-semibold">
+                        <span className="font-medium">
                           {material.material_family}
                         </span>
                       </div>
                     )}
                   </>
                 ) : (
-                  <div className="text-[11px] text-slate-400">
+                  <div className="text-[11px] text-[var(--text-muted)]">
                     Looking up material details…
                   </div>
                 )}
-                <div className="mt-3 text-[11px] text-slate-500">
+                <div className="mt-3 text-[11px] text-[var(--text-faint)]">
                   Curves are stored in{" "}
-                  <span className="font-mono text-sky-300">
+                  <span className="font-mono text-[var(--text-secondary)]">
                     public.cushion_curves
                   </span>{" "}
                   with{" "}
@@ -382,20 +382,20 @@ export default function CushionCurvesMaterialPage() {
                 </div>
               </div>
 
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                <div className="text-xs font-semibold text-slate-100 mb-1">
+              <div className="bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-3">
+                <div className="text-xs font-medium text-[var(--text-primary)] mb-1">
                   How this will be used
                 </div>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-[11px] text-[var(--text-muted)]">
                   Use this curve to validate a foam selection against your{" "}
-                  <span className="text-sky-300">operating psi</span> and compare
+                  <span className="text-[var(--text-secondary)]">operating psi</span> and compare
                   candidates.
                 </p>
 
                 <div className="mt-3">
                   <a
                     href={foamAdvisorHref}
-                    className="inline-flex items-center justify-center rounded-full border border-slate-200/20 bg-slate-950/40 px-3 py-1.5 text-[11px] font-semibold text-sky-200 hover:bg-slate-950/70"
+                    className="inline-flex items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-page)]"
                   >
                     Open Foam Advisor
                   </a>
@@ -406,17 +406,17 @@ export default function CushionCurvesMaterialPage() {
             {/* CENTER: Summary + table */}
             <section className="flex-1 min-w-0 flex flex-col gap-3">
               {error && (
-                <div className="rounded-xl border border-rose-700/70 bg-rose-950/60 px-3 py-2 text-[11px] text-rose-50">
+                <div className="rounded-xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)]">
                   Error loading cushion curves:{" "}
                   <span className="font-mono">{error}</span>
                 </div>
               )}
 
               {!error && !loading && !points.length && (
-                <div className="rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-3 text-xs text-slate-300">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-3 text-xs text-[var(--text-secondary)]">
                   No cushion curves are stored for this material yet. You can
                   add rows to{" "}
-                  <span className="font-mono text-sky-300">
+                  <span className="font-mono text-[var(--text-secondary)]">
                     public.cushion_curves
                   </span>{" "}
                   (material_id = {materialId}) and refresh this page to see
@@ -428,76 +428,76 @@ export default function CushionCurvesMaterialPage() {
                 <>
                   {/* Quick summary row (like mini dashboard) */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2">
-                      <div className="text-[11px] text-slate-400 mb-1">
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2">
+                      <div className="text-[11px] text-[var(--text-muted)] mb-1">
                         Lowest G-level point
                       </div>
                       {summary?.best ? (
-                        <div className="text-slate-100">
+                        <div className="text-[var(--text-primary)]">
                           <div>
-                            <span className="font-semibold">
+                            <span className="font-medium">
                               {summary.best.g_level.toFixed(1)} G
                             </span>{" "}
                             @ {summary.best.static_psi.toFixed(3)} psi
                           </div>
-                          <div className="text-[11px] text-slate-400">
+                          <div className="text-[11px] text-[var(--text-muted)]">
                             Deflection {summary.best.deflect_pct.toFixed(1)}%
                           </div>
                         </div>
                       ) : (
-                        <div className="text-slate-300">—</div>
+                        <div className="text-[var(--text-secondary)]">—</div>
                       )}
                     </div>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2">
-                      <div className="text-[11px] text-slate-400 mb-1">
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2">
+                      <div className="text-[11px] text-[var(--text-muted)] mb-1">
                         Static PSI range
                       </div>
                       {summary ? (
-                        <div className="text-slate-100">
+                        <div className="text-[var(--text-primary)]">
                           {summary.psiMin.toFixed(3)} psi –{" "}
                           {summary.psiMax.toFixed(3)} psi
                         </div>
                       ) : (
-                        <div className="text-slate-300">—</div>
+                        <div className="text-[var(--text-secondary)]">—</div>
                       )}
                     </div>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2">
-                      <div className="text-[11px] text-slate-400 mb-1">
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2">
+                      <div className="text-[11px] text-[var(--text-muted)] mb-1">
                         G-level range
                       </div>
                       {summary ? (
-                        <div className="text-slate-100">
+                        <div className="text-[var(--text-primary)]">
                           {summary.gMin.toFixed(1)} G –{" "}
                           {summary.gMax.toFixed(1)} G
                         </div>
                       ) : (
-                        <div className="text-slate-300">—</div>
+                        <div className="text-[var(--text-secondary)]">—</div>
                       )}
                     </div>
                   </div>
 
                   {/* Data table, centered like a “canvas” for now */}
-              <div className="flex-1 min-w-0 bg-slate-900 rounded-2xl border border-slate-800 p-4 overflow-auto">
-                    <div className="text-[11px] text-slate-400 mb-2">
+              <div className="flex-1 min-w-0 bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-4 overflow-auto">
+                    <div className="text-[11px] text-[var(--text-muted)] mb-2">
                       Raw cushion curve points. In a future step, this center
                       panel will render a graphical curve using these numbers.
                     </div>
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/80 max-h-[420px] overflow-auto">
+                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-page)] max-h-[420px] overflow-auto">
                 <table className="min-w-full text-xs table-fixed">
-                        <thead className="bg-slate-900/80 sticky top-0 z-10">
+                        <thead className="bg-[var(--surface-subtle)] sticky top-0 z-10">
                           <tr>
-                            <th className="px-3 py-2 text-left font-semibold text-slate-200 border-b border-slate-800">
+                            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)] border-b border-[var(--border)]">
                               Static load (psi)
                             </th>
-                            <th className="px-3 py-2 text-left font-semibold text-slate-200 border-b border-slate-800">
+                            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)] border-b border-[var(--border)]">
                               Deflection (%)
                             </th>
-                            <th className="px-3 py-2 text-left font-semibold text-slate-200 border-b border-slate-800">
+                            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)] border-b border-[var(--border)]">
                               G-level
                             </th>
-                            <th className="px-3 py-2 text-left font-semibold text-slate-200 border-b border-slate-800">
+                            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)] border-b border-[var(--border)]">
                               Source
                             </th>
                           </tr>
@@ -508,22 +508,22 @@ export default function CushionCurvesMaterialPage() {
                               key={`${p.static_psi}-${p.deflect_pct}-${p.g_level}-${idx}`}
                               className={
                                 idx % 2 === 0
-                                  ? "bg-slate-950"
-                                  : "bg-slate-950/70"
+                                  ? "bg-[var(--surface-page)]"
+                                  : "bg-[var(--surface-card)]"
                               }
                             >
-                              <td className="px-3 py-1.5 text-slate-100 font-mono">
+                              <td className="px-3 py-1.5 text-[var(--text-primary)] font-mono">
                                 {p.static_psi.toFixed(3)}
                               </td>
-                              <td className="px-3 py-1.5 text-slate-100 font-mono">
+                              <td className="px-3 py-1.5 text-[var(--text-primary)] font-mono">
                                 {p.deflect_pct.toFixed(1)}
                               </td>
-                              <td className="px-3 py-1.5 text-slate-100 font-mono">
+                              <td className="px-3 py-1.5 text-[var(--text-primary)] font-mono">
                                 {p.g_level.toFixed(1)}
                               </td>
-                          <td className="px-3 py-1.5 text-slate-300 break-words max-w-[360px]">
+                          <td className="px-3 py-1.5 text-[var(--text-secondary)] break-words max-w-[360px]">
                                 {p.source || (
-                                  <span className="text-slate-500">—</span>
+                                  <span className="text-[var(--text-faint)]">—</span>
                                 )}
                               </td>
                             </tr>
@@ -538,109 +538,109 @@ export default function CushionCurvesMaterialPage() {
 
             {/* RIGHT: Quick stats / usage notes */}
             <aside className="w-64 shrink-0 flex flex-col gap-3">
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                <div className="text-xs font-semibold text-slate-100 mb-1">
+              <div className="bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-3">
+                <div className="text-xs font-medium text-[var(--text-primary)] mb-1">
                   Quick stats
                 </div>
                 {summary && (
                   <>
-                    <div className="text-[11px] text-slate-400 mb-1">
+                    <div className="text-[11px] text-[var(--text-muted)] mb-1">
                       Deflection span
                     </div>
-                    <div className="text-xs text-slate-100 mb-2">
+                    <div className="text-xs text-[var(--text-primary)] mb-2">
                       {summary.deflMin.toFixed(1)}% –{" "}
                       {summary.deflMax.toFixed(1)}%
                     </div>
-                    <div className="text-[11px] text-slate-400 mb-1">
+                    <div className="text-[11px] text-[var(--text-muted)] mb-1">
                       Points in curve
                     </div>
-                    <div className="text-xs text-slate-100">
+                    <div className="text-xs text-[var(--text-primary)]">
                       {points.length} total
                     </div>
                   </>
                 )}
                 {!summary && (
-                  <div className="text-[11px] text-slate-400">
+                  <div className="text-[11px] text-[var(--text-muted)]">
                     Curve statistics will appear here once points are loaded.
                   </div>
                 )}
               </div>
 
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                <div className="text-xs font-semibold text-slate-100 mb-1">
+              <div className="bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-3">
+                <div className="text-xs font-medium text-[var(--text-primary)] mb-1">
                   Column legend
                 </div>
-                <ul className="text-[11px] text-slate-400 space-y-1">
+                <ul className="text-[11px] text-[var(--text-muted)] space-y-1">
                   <li>
-                    <span className="font-semibold text-slate-200">
+                    <span className="font-medium text-[var(--text-secondary)]">
                       Static load (psi)
                     </span>{" "}
                     – weight ÷ contact area at that test condition.
                   </li>
                   <li>
-                    <span className="font-semibold text-slate-200">
+                    <span className="font-medium text-[var(--text-secondary)]">
                       Deflection (%)
                     </span>{" "}
                     – how much the foam thickness was compressed.
                   </li>
                   <li>
-                    <span className="font-semibold text-slate-200">
+                    <span className="font-medium text-[var(--text-secondary)]">
                       G-level
                     </span>{" "}
                     – transmitted shock back to the product.
                   </li>
                 </ul>
-                <p className="mt-2 text-[11px] text-slate-500">
+                <p className="mt-2 text-[11px] text-[var(--text-faint)]">
                   Lower G at your operating psi and deflection is usually
                   better, as long as the foam isn&apos;t bottoming out.
                 </p>
               </div>
 
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-3">
-                <div className="text-xs font-semibold text-slate-100 mb-1">
+              <div className="bg-[var(--surface-subtle)] rounded-2xl border border-[var(--border)] p-3">
+                <div className="text-xs font-medium text-[var(--text-primary)] mb-1">
                   Operating point
                 </div>
 
-                <div className="text-[11px] text-slate-400 mb-2">
+                <div className="text-[11px] text-[var(--text-muted)] mb-2">
                   Enter the operating PSI to see the nearest tested point on this curve.
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <label className="text-[11px] text-slate-400">Operating psi</label>
+                  <label className="text-[11px] text-[var(--text-muted)]">Operating psi</label>
                   <input
                     value={operatingPsi}
                     onChange={(e) => setOperatingPsi(e.target.value)}
                     inputMode="decimal"
                     placeholder="e.g. 1.25"
-                    className="w-24 rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 font-mono outline-none focus:ring-2 focus:ring-sky-500/40"
+                    className="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-[11px] text-[var(--text-primary)] font-mono outline-none focus:ring-2 focus:ring-[var(--action-primary)]/30"
                   />
                 </div>
 
                 {!operating && (
-                  <div className="mt-2 text-[11px] text-slate-500">
+                  <div className="mt-2 text-[11px] text-[var(--text-faint)]">
                     Add an operating psi to compute a comparison point.
                   </div>
                 )}
 
                 {operating && (
-                  <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/50 p-2">
-                    <div className="text-[11px] text-slate-400 mb-1">
+                  <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-page)] p-2">
+                    <div className="text-[11px] text-[var(--text-muted)] mb-1">
                       Nearest tested point{" "}
                       {!operating.inRange && (
-                        <span className="ml-1 text-amber-200">
+                        <span className="ml-1 text-[var(--attention)]">
                           (outside tested range {operating.psiMin.toFixed(3)}{operating.psiMax.toFixed(3)} psi)
                         </span>
                       )}
                     </div>
 
-                    <div className="text-[11px] text-slate-100">
-                      <span className="font-semibold">{operating.nearest.g_level.toFixed(1)} G</span>{" "}
+                    <div className="text-[11px] text-[var(--text-primary)]">
+                      <span className="font-medium">{operating.nearest.g_level.toFixed(1)} G</span>{" "}
                       @ <span className="font-mono">{operating.nearest.static_psi.toFixed(3)}</span> psi
                     </div>
 
-                    <div className="text-[11px] text-slate-400 mt-0.5">
-                      Deflection <span className="font-mono text-slate-200">{operating.nearest.deflect_pct.toFixed(1)}%</span>{" "}
-                       Δpsi <span className="font-mono text-slate-200">{operating.nearestDelta.toFixed(3)}</span>
+                    <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                      Deflection <span className="font-mono text-[var(--text-secondary)]">{operating.nearest.deflect_pct.toFixed(1)}%</span>{" "}
+                       Δpsi <span className="font-mono text-[var(--text-secondary)]">{operating.nearestDelta.toFixed(3)}</span>
                     </div>
                   </div>
                 )}

@@ -120,15 +120,15 @@ export default function AdminPricingPage() {
   const hasBooks = priceBooks.length > 0;
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
+    <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
       <div className="mx-auto max-w-5xl px-4 py-8 lg:py-10">
         {/* Header */}
         <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-sky-300">
+            <h1 className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">
               Pricing &amp; price books
             </h1>
-            <p className="mt-2 text-sm text-slate-300">
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">
               Internal view of price books, volume breaks, and a future sandbox
               for testing pricing scenarios.
             </p>
@@ -136,7 +136,7 @@ export default function AdminPricingPage() {
 
           <Link
             href="/admin"
-            className="text-xs text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+            className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline-offset-2 hover:underline"
           >
             &larr; Back to admin home
           </Link>
@@ -145,19 +145,19 @@ export default function AdminPricingPage() {
         {/* Summary row */}
         <section className="mb-6 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           {/* Price books summary */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 text-sm text-[var(--text-secondary)]">
+            <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               Price books
             </div>
 
             {loading && !error && (
-              <p className="text-xs text-slate-300">
+              <p className="text-xs text-[var(--text-secondary)]">
                 Loading price book summary…
               </p>
             )}
 
             {error && (
-              <p className="text-xs text-rose-300">
+              <p className="text-xs text-[var(--attention)]">
                 Error loading price books:{" "}
                 <span className="font-mono text-[11px]">{error}</span>
               </p>
@@ -165,19 +165,19 @@ export default function AdminPricingPage() {
 
             {!loading && !error && stats && (
               <>
-                <ul className="space-y-1 text-xs text-slate-300">
+                <ul className="space-y-1 text-xs text-[var(--text-secondary)]">
                   <li>
-                    <span className="font-semibold text-slate-100">
+                    <span className="font-medium text-[var(--text-primary)]">
                       {stats.total}
                     </span>{" "}
                     price book{stats.total === 1 ? "" : "s"} configured.
                   </li>
                   <li>
-                    <span className="font-semibold text-slate-100">
+                    <span className="font-medium text-[var(--text-primary)]">
                       {stats.active}
                     </span>{" "}
                     active for quoting;{" "}
-                    <span className="font-semibold text-slate-100">
+                    <span className="font-medium text-[var(--text-primary)]">
                       {stats.archived}
                     </span>{" "}
                     archived.
@@ -187,9 +187,9 @@ export default function AdminPricingPage() {
                     pricing engine (not touched here).
                   </li>
                 </ul>
-                <p className="mt-3 text-[11px] text-slate-500">
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
                   Counts above are pulled directly from{" "}
-                  <span className="font-mono text-sky-300">
+                  <span className="font-mono text-[var(--text-secondary)]">
                     price_books
                   </span>
                   . Actual price-per-cubic-inch math stays in the existing
@@ -199,22 +199,22 @@ export default function AdminPricingPage() {
             )}
 
             {!loading && !error && !stats && (
-              <p className="text-xs text-slate-300">
+              <p className="text-xs text-[var(--text-secondary)]">
                 No price book summary is available yet.
               </p>
             )}
           </div>
 
           {/* Sandbox notes */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 text-sm text-[var(--text-secondary)]">
+            <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               Pricing sandbox (future)
             </div>
-            <p className="text-xs text-slate-300">
+            <p className="text-xs text-[var(--text-secondary)]">
               This area will give you a safe sandbox to test pricing scenarios
               without modifying live quotes:
             </p>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-slate-300">
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-[var(--text-secondary)]">
               <li>Compare pricing across materials and densities.</li>
               <li>Test different order quantities and waste factors.</li>
               <li>
@@ -222,7 +222,7 @@ export default function AdminPricingPage() {
                 into production.
               </li>
             </ul>
-            <p className="mt-3 text-[11px] text-slate-500">
+            <p className="mt-3 text-[11px] text-[var(--text-faint)]">
               Pricing math continues to live in the existing engine; this page
               will only orchestrate inputs &amp; display results.
             </p>
@@ -230,32 +230,32 @@ export default function AdminPricingPage() {
         </section>
 
         {/* Price books table */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-5 text-sm text-[var(--text-secondary)]">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 Price books
               </div>
-              <p className="mt-1 text-xs text-slate-300">
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
                 Live entries showing how price books and their scopes are
                 displayed. This is metadata only; pricing calculations stay in
                 the engine.
               </p>
             </div>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-[11px] text-[var(--text-faint)]">
               Future: effective dates, cloning, and change history.
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-slate-800/80 bg-slate-950/40">
+          <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-page)]">
             <table className="min-w-full text-left text-xs">
-              <thead className="bg-slate-900/80 text-slate-400">
+              <thead className="bg-[var(--surface-subtle)] text-[var(--text-muted)]">
                 <tr>
-                  <th className="px-3 py-2 font-semibold">Name</th>
-                  <th className="px-3 py-2 font-semibold">Scope</th>
-                  <th className="px-3 py-2 font-semibold">Status</th>
-                  <th className="px-3 py-2 font-semibold">Volume breaks</th>
-                  <th className="px-3 py-2 font-semibold text-right">
+                  <th className="px-3 py-2 font-medium">Name</th>
+                  <th className="px-3 py-2 font-medium">Scope</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium">Volume breaks</th>
+                  <th className="px-3 py-2 font-medium text-right">
                     Effective
                   </th>
                 </tr>
@@ -265,7 +265,7 @@ export default function AdminPricingPage() {
                   <tr>
                     <td
                       colSpan={5}
-                      className="px-3 py-4 text-center text-xs text-slate-400"
+                      className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                     >
                       Loading price books…
                     </td>
@@ -276,7 +276,7 @@ export default function AdminPricingPage() {
                   <tr>
                     <td
                       colSpan={5}
-                      className="px-3 py-4 text-center text-xs text-rose-300"
+                      className="px-3 py-4 text-center text-xs text-[var(--attention)]"
                     >
                       Unable to load price books.
                     </td>
@@ -287,7 +287,7 @@ export default function AdminPricingPage() {
                   <tr>
                     <td
                       colSpan={5}
-                      className="px-3 py-4 text-center text-xs text-slate-400"
+                      className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                     >
                       No price books configured yet.
                     </td>
@@ -300,29 +300,29 @@ export default function AdminPricingPage() {
                   priceBooks.map((pb) => (
                     <tr
                       key={pb.id}
-                      className="border-t border-slate-800/60 hover:bg-slate-900/70"
+                      className="border-t border-[var(--border)] hover:bg-[var(--surface-subtle)]"
                     >
-                      <td className="px-3 py-2 text-xs text-slate-100">
+                      <td className="px-3 py-2 text-xs text-[var(--text-primary)]">
                         {pb.name}
                       </td>
-                      <td className="px-3 py-2 text-xs text-slate-200">
+                      <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
                         {pb.scope}
                       </td>
                       <td className="px-3 py-2 text-xs">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] ${
                             pb.isActive
-                              ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
-                              : "bg-slate-500/20 text-slate-200 border border-slate-500/40"
+                              ? "bg-[var(--status-success-bg)] text-[var(--status-success-text)] border border-[var(--status-success-text)]/30"
+                              : "bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)] border border-[var(--border-strong)]"
                           }`}
                         >
                           {pb.isActive ? "Active" : "Archived"}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-xs text-slate-200">
+                      <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
                         {pb.breaks}
                       </td>
-                      <td className="px-3 py-2 text-right text-[11px] text-slate-400">
+                      <td className="px-3 py-2 text-right text-[11px] text-[var(--text-faint)]">
                         {pb.effective}
                       </td>
                     </tr>
@@ -331,12 +331,12 @@ export default function AdminPricingPage() {
             </table>
           </div>
 
-          <p className="mt-3 text-[11px] text-slate-500">
+          <p className="mt-3 text-[11px] text-[var(--text-faint)]">
             These rows represent how we&apos;re surfacing price book metadata.
             Actual price-per-cubic-inch calculations stay in the existing
             pricing engine.
           </p>
-          <p className="mt-1 text-[11px] text-slate-500">
+          <p className="mt-1 text-[11px] text-[var(--text-faint)]">
             Admin only – not visible to customers.
           </p>
         </section>

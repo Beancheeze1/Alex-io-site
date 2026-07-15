@@ -79,15 +79,15 @@ export default function AdminLogsPage() {
   const isFallback = source === "fallback";
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
+    <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
       <div className="mx-auto max-w-5xl px-4 py-8 lg:py-10">
         {/* Header */}
         <header className="mb-6 flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-sky-300">
+            <h1 className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">
               Logs &amp; events
             </h1>
-            <p className="mt-2 text-sm text-slate-300">
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">
               Central place to inspect webhook calls, errors, and other system
               diagnostics.
             </p>
@@ -95,50 +95,50 @@ export default function AdminLogsPage() {
 
           <Link
             href="/admin"
-            className="text-xs text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+            className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline-offset-2 hover:underline"
           >
             &larr; Back to admin home
           </Link>
         </header>
 
         {/* Summary / status */}
-        <section className="mb-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
+        <section className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 text-sm text-[var(--text-secondary)]">
           {(loading || error) && (
             <>
-              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="mb-1 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 Logs overview
               </div>
               {loading && (
-                <p className="text-xs text-slate-300">
+                <p className="text-xs text-[var(--text-secondary)]">
                   Loading logs from the backend…
                 </p>
               )}
               {error && !loading && (
-                <p className="text-xs text-rose-300">{error}</p>
+                <p className="text-xs text-[var(--attention)]">{error}</p>
               )}
             </>
           )}
 
           {!loading && !error && (
             <>
-              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="mb-1 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 Logs overview
               </div>
-              <p className="text-xs text-slate-300">
+              <p className="text-xs text-[var(--text-secondary)]">
                 Showing{" "}
-                <span className="font-semibold text-slate-100">
+                <span className="font-medium text-[var(--text-primary)]">
                   {hasLogs ? logs.length : 0}
                 </span>{" "}
                 event{hasLogs && logs.length !== 1 ? "s" : ""} from{" "}
-                <span className="font-mono text-[11px] text-sky-300">
+                <span className="font-mono text-[11px] text-[var(--text-secondary)]">
                   {source === "db" ? "event_logs (database)" : source}
                 </span>
                 .
               </p>
               {isFallback && (
-                <p className="mt-2 text-[11px] text-amber-300">
+                <p className="mt-2 text-[11px] text-[var(--attention)]">
                   Backend note: the{" "}
-                  <span className="font-mono text-[11px] text-sky-300">
+                  <span className="font-mono text-[11px] text-[var(--attention)]">
                     event_logs
                   </span>{" "}
                   table is not wired yet. The entry below is a synthetic
@@ -146,7 +146,7 @@ export default function AdminLogsPage() {
                   real webhook/error events automatically.
                 </p>
               )}
-              <p className="mt-2 text-[11px] text-slate-500">
+              <p className="mt-2 text-[11px] text-[var(--text-faint)]">
                 Admin only – not visible to customers.
               </p>
             </>
@@ -154,30 +154,30 @@ export default function AdminLogsPage() {
         </section>
 
         {/* Logs table */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-200">
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-5 text-sm text-[var(--text-secondary)]">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 Recent events
               </div>
-              <p className="mt-1 text-xs text-slate-300">
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
                 Read-only view of recent events: webhooks, errors, and system
                 diagnostics. Click a row to expand full details.
               </p>
             </div>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-[11px] text-[var(--text-faint)]">
               Future: filters by level, source, and date range.
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-slate-800/80 bg-slate-950/40">
+          <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-page)]">
             <table className="min-w-full text-left text-xs">
-              <thead className="bg-slate-900/80 text-slate-400">
+              <thead className="bg-[var(--surface-subtle)] text-[var(--text-muted)]">
                 <tr>
-                  <th className="px-3 py-2 font-semibold">Time</th>
-                  <th className="px-3 py-2 font-semibold">Level</th>
-                  <th className="px-3 py-2 font-semibold">Source</th>
-                  <th className="px-3 py-2 font-semibold">Summary</th>
+                  <th className="px-3 py-2 font-medium">Time</th>
+                  <th className="px-3 py-2 font-medium">Level</th>
+                  <th className="px-3 py-2 font-medium">Source</th>
+                  <th className="px-3 py-2 font-medium">Summary</th>
                 </tr>
               </thead>
               <tbody>
@@ -185,7 +185,7 @@ export default function AdminLogsPage() {
                   <tr>
                     <td
                       colSpan={4}
-                      className="px-3 py-4 text-center text-xs text-slate-400"
+                      className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                     >
                       Loading logs…
                     </td>
@@ -196,7 +196,7 @@ export default function AdminLogsPage() {
                   <tr>
                     <td
                       colSpan={4}
-                      className="px-3 py-4 text-center text-xs text-rose-300"
+                      className="px-3 py-4 text-center text-xs text-[var(--attention)]"
                     >
                       Unable to load logs.
                     </td>
@@ -207,7 +207,7 @@ export default function AdminLogsPage() {
                   <tr>
                     <td
                       colSpan={4}
-                      className="px-3 py-4 text-center text-xs text-slate-400"
+                      className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                     >
                       No logs available.
                     </td>
@@ -225,14 +225,14 @@ export default function AdminLogsPage() {
                     return (
                       <React.Fragment key={log.id}>
                         <tr
-                          className="cursor-pointer border-t border-slate-800/60 hover:bg-slate-900/70"
+                          className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--surface-subtle)]"
                           onClick={() =>
                             setExpandedId(
                               isExpanded ? null : (log.id as string | number),
                             )
                           }
                         >
-                          <td className="px-3 py-2 text-[11px] text-slate-400">
+                          <td className="px-3 py-2 text-[11px] text-[var(--text-faint)]">
                             {dt}
                           </td>
                           <td className="px-3 py-2 text-[11px]">
@@ -240,23 +240,23 @@ export default function AdminLogsPage() {
                               {levelChip.label}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-xs text-slate-200">
+                          <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
                             {log.source}
                           </td>
-                          <td className="px-3 py-2 text-xs text-slate-100">
+                          <td className="px-3 py-2 text-xs text-[var(--text-primary)]">
                             {log.summary}
                           </td>
                         </tr>
                         {isExpanded && log.detail && (
-                          <tr className="border-t border-slate-800/60 bg-slate-950/70">
+                          <tr className="border-t border-[var(--border)] bg-[var(--surface-subtle)]">
                             <td
                               colSpan={4}
-                              className="px-3 py-3 text-[11px] text-slate-300"
+                              className="px-3 py-3 text-[11px] text-[var(--text-secondary)]"
                             >
-                              <div className="mb-1 font-semibold text-slate-200">
+                              <div className="mb-1 font-medium text-[var(--text-secondary)]">
                                 Details
                               </div>
-                              <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-slate-900/80 p-2 text-[11px] text-slate-200">
+                              <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-[var(--surface-page)] p-2 text-[11px] text-[var(--text-secondary)]">
                                 {log.detail}
                               </pre>
                             </td>
@@ -291,19 +291,19 @@ function chipForLevel(levelRaw: string | null | undefined) {
     return {
       label: "ERROR",
       className:
-        "inline-flex items-center rounded-full border border-rose-500/40 bg-rose-500/15 px-2 py-0.5 text-[10px] text-rose-300",
+        "inline-flex items-center rounded-full border border-[var(--attention-border)] bg-[var(--attention-bg)] px-2 py-0.5 text-[10px] text-[var(--attention)]",
     };
   }
   if (level === "warn" || level === "warning") {
     return {
       label: "WARN",
       className:
-        "inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-200",
+        "inline-flex items-center rounded-full border border-[var(--status-pending-text)]/30 bg-[var(--status-pending-bg)] px-2 py-0.5 text-[10px] text-[var(--status-pending-text)]",
     };
   }
   return {
     label: "INFO",
     className:
-      "inline-flex items-center rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-200",
+      "inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--status-neutral-bg)] px-2 py-0.5 text-[10px] text-[var(--status-neutral-text)]",
   };
 }
