@@ -46,6 +46,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
+import { resolveCustomSelection } from "@/app/lib/packaging-selection";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { resolveTenantFromHost } from "@/lib/tenant";
@@ -2237,10 +2238,65 @@ export async function POST(req: NextRequest) {
               [quote.id, L, W, H, cartonMaterialId, qtyForCarton, cartonNotes],
             );
 
-            console.log(
-              "[layout/apply] custom carton inserted (no boxes row)",
-              { quoteNo, sku, L, W, H, qtyForCarton },
+            // Also upsert the real kind='custom' quote_box_selections row.
+            // Without this, quote_box_selections stays empty whenever a
+            // custom-sized box reaches Apply via this inline selectedCarton
+            // path — e.g. the sku here is often a synthetic "CUSTOM-LxWxD"
+            // placeholder built client-side from URL params, which never
+            // matches a row in public.boxes and always lands here. Since
+            // print/route.ts reads quote_box_selections as the sole source
+            // of truth for the packaging line (quote_items is display-only
+            // now), skipping this left quotes with a print upcharge but no
+            // packaging line at all — a commit gap, not a display bug.
+            //
+            // Guard: skip if a 'stock' selection already exists for this quote.
+            // The synthetic sku here fires for ANY complete_pack Apply without an
+            // explicit box_sku — including the case where the customer never
+            // interacted with the box picker at all, which is also exactly what
+            // the client's own legacy auto-pick effect (guessing from the live
+            // box suggester once it resolves) is racing to commit via
+            // /api/boxes/add-to-quote. Without this guard, both can land here:
+            // the legacy effect writes a real 'stock' row, and this fallback then
+            // ALSO writes a 'custom' row for the same quote, double-billing
+            // packaging. A real stock pick — explicit or the legacy live
+            // best-fit — always wins over this dims-only fallback.
+            const existingStockSelection = await one<{ id: number }>(
+              `SELECT id FROM public.quote_box_selections WHERE quote_id = $1 AND kind = 'stock' LIMIT 1`,
+              [quote.id],
             );
+
+            if (!existingStockSelection) {
+              const customStyle =
+                styleStr.toLowerCase() === "rsc" ? "rsc" : "mailer";
+              const { description, unit_price_usd, extended_price_usd } =
+                await resolveCustomSelection(L, W, H, customStyle, qtyForCarton);
+
+              await q(
+                `DELETE FROM public.quote_box_selections WHERE quote_id = $1 AND kind = 'custom'`,
+                [quote.id],
+              );
+              await q(
+                `INSERT INTO public.quote_box_selections
+                   (quote_id, quote_no, kind, box_id, sku,
+                    custom_length_in, custom_width_in, custom_height_in, custom_style,
+                    description, qty, unit_price_usd, extended_price_usd)
+                 VALUES ($1, $2, 'custom', NULL, NULL, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                [
+                  quote.id, quoteNo, L, W, H, customStyle,
+                  description, qtyForCarton, unit_price_usd, extended_price_usd,
+                ],
+              );
+
+              console.log(
+                "[layout/apply] custom carton inserted (no boxes row)",
+                { quoteNo, sku, L, W, H, qtyForCarton },
+              );
+            } else {
+              console.log(
+                "[layout/apply] skipped synthetic custom carton — stock selection already exists",
+                { quoteNo, sku, existingStockSelectionId: existingStockSelection.id },
+              );
+            }
           } else {
             console.warn(
               "[layout/apply] selectedCarton SKU not found and dims invalid — skipping",

@@ -34,7 +34,7 @@
 //   - Does not touch pricing, cavity parsing, or layout logic.
 
 import { NextRequest, NextResponse } from "next/server";
-import { q } from "@/lib/db";
+import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
@@ -88,7 +88,22 @@ export async function GET(req: NextRequest) {
     const enforced = await enforceTenantMatch(req, user, { allowPublic: true });
     if (!enforced.ok) return NextResponse.json(enforced.body, { status: enforced.status });
 
-    const tenantId = user?.tenant_id ?? enforced.tenant_id;
+    // enforced.tenant_id falls back to 0 when there's no x-tenant-slug header
+    // (core-host public access outside middleware's subdomain routing, e.g. the
+    // demo/chat-widget flow hitting this route with no session) and no logged-in
+    // user — same gap /api/quote/print and /api/quote/layout/apply already guard
+    // against by preferring the quote's own tenant_id. Without this, the WHERE
+    // q.tenant_id = $2 filter below silently matches zero rows even when a real
+    // quote_box_selections row exists, so the carton line never renders even
+    // though print/route.ts's separately-resolved subtotal is correct.
+    let tenantId = user?.tenant_id ?? enforced.tenant_id;
+    if (!tenantId) {
+      const existingQuote = await one<{ tenant_id: number }>(
+        `SELECT tenant_id FROM public.quotes WHERE quote_no = $1 LIMIT 1`,
+        [quoteNo],
+      );
+      if (existingQuote) tenantId = existingQuote.tenant_id;
+    }
 
     // Read-only join from quotes -> quote_box_selections -> boxes.
     // LEFT JOIN because custom selections (box_id null) have no boxes row to
