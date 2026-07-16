@@ -34,6 +34,18 @@ type MaterialRow = {
   is_active: boolean | null;
 };
 
+type StockCandidate = {
+  id: number;
+  sku: string;
+  description: string;
+  style: string;
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
+  fit_score: number;
+  notes?: string;
+};
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -272,6 +284,18 @@ export default function StartQuoteModal() {
     searchParams.get("box_sku") || "",
   );
 
+  // Real stock box candidates for the box being specced (Complete Pack only).
+  // Deliberately no price shown here (unlike the rep intake form) — this is
+  // a fit-only aid for customers. Picking a candidate writes its SKU into
+  // prefillPackagingSku directly, the same state an externally-prefilled
+  // box_sku (from the chat widget) already seeds — so the editor-side submit
+  // logic that reads prefillPackagingSku doesn't need to know which path set
+  // it. boxChoice only exists to know when the customer explicitly declined
+  // every stock match, so submit can tell the editor via box_choice=custom.
+  const [stockCandidates, setStockCandidates] = React.useState<StockCandidate[]>([]);
+  const [stockCandidatesLoading, setStockCandidatesLoading] = React.useState<boolean>(false);
+  const [boxChoice, setBoxChoice] = React.useState<"" | "stock" | "custom">("");
+
   // ---------- Seed all state from prefillData once it resolves ----------
   // prefillData comes from useMemo(searchParams) which may be null on first render
   // in Next.js App Router. This effect fires as soon as it's available.
@@ -382,6 +406,75 @@ export default function StartQuoteModal() {
   const [topThk, setTopThk] = React.useState<string>(
     String(DEFAULT_TOP_PAD_IN),
   );
+
+  // Debounced (500ms) lookup of real stock candidates once box L/W/D are
+  // filled in. Same /api/boxes/suggest endpoint the rep intake form and the
+  // layout editor's own auto-pick use, but qty is intentionally omitted —
+  // nothing here needs pricing, so the response's candidates come back
+  // unpriced. Unlike the rep form, this does NOT reset boxChoice or
+  // prefillPackagingSku when dims change: prefillPackagingSku already had a
+  // "sticky" contract with the chat-widget prefill path (an externally-set
+  // box_sku was never invalidated by later dimension edits), and this effect
+  // preserves that instead of introducing a new reset behavior.
+  React.useEffect(() => {
+    if (quoteType !== "complete_pack") {
+      setStockCandidates([]);
+      setStockCandidatesLoading(false);
+      return;
+    }
+
+    const boxLNum = toNumOrNull(boxL);
+    const boxWNum = toNumOrNull(boxW);
+    const boxDNum = toNumOrNull(boxD);
+
+    if (!boxLNum || !boxWNum || !boxDNum) {
+      setStockCandidates([]);
+      setStockCandidatesLoading(false);
+      return;
+    }
+
+    setStockCandidatesLoading(true);
+
+    const bottomThkNum = toNumOrNull(bottomThk) ?? 0;
+    const topThkNum = foamConfig === "bottom_top" ? (toNumOrNull(topThk) ?? 0) : 0;
+    const stackDepth = bottomThkNum + topThkNum;
+
+    const footprintL = Math.max(0, boxLNum - FIT_ALLOW_IN);
+    const footprintW = Math.max(0, boxWNum - FIT_ALLOW_IN);
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/boxes/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            footprint_length_in: footprintL,
+            footprint_width_in: footprintW,
+            stack_depth_in: stackDepth > 0 ? stackDepth : boxDNum,
+          }),
+        });
+        const json = await res.json().catch(() => null);
+        if (cancelled) return;
+
+        if (json?.ok) {
+          const list = boxStyle === "rsc" ? json.candidatesRsc : json.candidatesMailer;
+          setStockCandidates(Array.isArray(list) ? list : []);
+        } else {
+          setStockCandidates([]);
+        }
+      } catch {
+        if (!cancelled) setStockCandidates([]);
+      } finally {
+        if (!cancelled) setStockCandidatesLoading(false);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [quoteType, boxL, boxW, boxD, boxStyle, foamConfig, bottomThk, topThk]);
 
   // ----- Materials (Step C) -----
   const [materialsLoading, setMaterialsLoading] =
@@ -910,7 +1003,16 @@ export default function StartQuoteModal() {
       if (boxWNum) p.set("box_w", String(boxWNum));
       if (boxDNum) p.set("box_d", String(boxDNum));
       p.set("box_style", boxStyle);
-      if (prefillPackagingSku.trim()) p.set("box_sku", prefillPackagingSku.trim());
+      // A stock pick (from the chat-widget prefill OR the pick-list below)
+      // always wins; otherwise, if the customer explicitly declined every
+      // stock match, tell the editor to skip auto-suggestion and commit the
+      // typed dims as a real kind='custom' selection instead — same param
+      // the layout editor already respects from the rep-form work.
+      if (prefillPackagingSku.trim()) {
+        p.set("box_sku", prefillPackagingSku.trim());
+      } else if (boxChoice === "custom") {
+        p.set("box_choice", "custom");
+      }
       p.set("printed", printed ? "1" : "0");
       p.set("pack_type", "complete_pack");
       p.set("foam_config", foamConfig);
@@ -1160,6 +1262,78 @@ export default function StartQuoteModal() {
                             selected={boxStyle === "rsc"}
                             onClick={() => setBoxStyle("rsc")}
                           />
+                        </div>
+
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            BOX SELECTION
+                          </div>
+
+                          {!boxLNum || !boxWNum || !boxDNum ? (
+                            <div className="mt-2 text-xs text-[var(--text-muted)]">
+                              Enter box L/W/D above to see matching stock cartons.
+                            </div>
+                          ) : stockCandidatesLoading ? (
+                            <div className="mt-2 text-sm text-[var(--text-secondary)]">
+                              Looking up matching cartons…
+                            </div>
+                          ) : (
+                            <div className="mt-2 space-y-2">
+                              {stockCandidates.length === 0 ? (
+                                <div className="text-xs text-[var(--text-muted)]">
+                                  No close stock matches found for these dimensions.
+                                </div>
+                              ) : (
+                                stockCandidates.map((c) => {
+                                  const selected = boxChoice === "stock" && prefillPackagingSku === c.sku;
+                                  return (
+                                    <button
+                                      key={c.sku}
+                                      type="button"
+                                      onClick={() => {
+                                        setBoxChoice("stock");
+                                        setPrefillPackagingSku(c.sku);
+                                      }}
+                                      className={[
+                                        "w-full rounded-md border px-3 py-2 text-left text-sm",
+                                        selected
+                                          ? "border-[var(--action-primary)] bg-[var(--surface-subtle)]"
+                                          : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
+                                      ].join(" ")}
+                                    >
+                                      <div className="font-medium text-[var(--text-primary)]">
+                                        {c.description || c.sku}
+                                      </div>
+                                      <div className="mt-0.5 text-xs text-[var(--text-muted)]">
+                                        Inside {c.inside_length_in} x {c.inside_width_in} x {c.inside_height_in} in · {c.sku}
+                                      </div>
+                                    </button>
+                                  );
+                                })
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBoxChoice("custom");
+                                  setPrefillPackagingSku("");
+                                }}
+                                className={[
+                                  "w-full rounded-md border px-3 py-2 text-left text-sm",
+                                  boxChoice === "custom"
+                                    ? "border-[var(--action-primary)] bg-[var(--surface-subtle)]"
+                                    : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
+                                ].join(" ")}
+                              >
+                                <div className="font-medium text-[var(--text-primary)]">
+                                  Use my own size instead
+                                </div>
+                                <div className="mt-0.5 text-xs text-[var(--text-muted)]">
+                                  Skip stock matching — use the box dimensions entered above as-is.
+                                </div>
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
