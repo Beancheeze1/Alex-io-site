@@ -12,8 +12,9 @@
 //       {
 //         id: number;          // quote_box_selections.id
 //         quote_id: number;
-//         box_id: number;
-//         sku: string;
+//         kind: "stock" | "custom";
+//         box_id: number | null;   // null for custom selections
+//         sku: string | null;      // null for custom selections
 //         vendor: string | null;
 //         style: string | null;
 //         description: string | null;
@@ -43,8 +44,9 @@ export const dynamic = "force-dynamic";
 type Row = {
   id: number;
   quote_id: number;
-  box_id: number;
-  sku: string;
+  kind: "stock" | "custom";
+  box_id: number | null;
+  sku: string | null;
   vendor: string | null;
   style: string | null;
   description: string | null;
@@ -88,27 +90,31 @@ export async function GET(req: NextRequest) {
 
     const tenantId = user?.tenant_id ?? enforced.tenant_id;
 
-    // Read-only join from quotes -> quote_box_selections -> boxes
+    // Read-only join from quotes -> quote_box_selections -> boxes.
+    // LEFT JOIN because custom selections (box_id null) have no boxes row to
+    // join against; their own custom_* columns and frozen description carry
+    // the data instead (same fix as /api/quote/print).
     const rows = (await q<Row>(
       `
       SELECT
         qbs.id,
         qbs.quote_id,
+        qbs.kind,
         qbs.box_id,
-        b.sku,
+        qbs.sku,
         b.vendor,
-        b.style,
-        b.description,
+        coalesce(b.style, qbs.custom_style) as style,
+        qbs.description,
         qbs.qty,
-        b.inside_length_in,
-        b.inside_width_in,
-        b.inside_height_in,
+        coalesce(b.inside_length_in, qbs.custom_length_in) as inside_length_in,
+        coalesce(b.inside_width_in, qbs.custom_width_in) as inside_width_in,
+        coalesce(b.inside_height_in, qbs.custom_height_in) as inside_height_in,
         qbs.unit_price_usd,
         qbs.extended_price_usd
       FROM public.quote_box_selections AS qbs
       JOIN public."quotes" AS q
         ON q.id = qbs.quote_id
-      JOIN public.boxes AS b
+      LEFT JOIN public.boxes AS b
         ON b.id = qbs.box_id
       WHERE q.quote_no = $1
         AND q.tenant_id = $2
