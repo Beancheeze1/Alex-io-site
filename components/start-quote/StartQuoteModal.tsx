@@ -18,12 +18,12 @@ import ProgressRail, {
   ProgressState,
 } from "@/components/start-quote/ProgressRail";
 import StepCard from "@/components/start-quote/StepCard";
+import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 
 type QuoteType = "foam_insert" | "complete_pack";
 type BoxStyle = "mailer" | "rsc";
 type FoamConfig = "bottom_top" | "bottom_only" | "custom";
 
-const FIT_ALLOW_IN = 0.125;
 const DEFAULT_TOP_PAD_IN = 1.0;
 
 type MaterialRow = {

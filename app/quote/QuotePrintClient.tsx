@@ -660,7 +660,11 @@ if ((c as any).shape === "poly" && Array.isArray((c as any).points) && (c as any
   
 }
 
-export default function QuotePrintClient() {
+export default function QuotePrintClient({
+  isStaffView = false,
+}: {
+  isStaffView?: boolean;
+}) {
   const searchParams = useSearchParams();
   const { trackEvent } = usePageTracker("/quote");
 
@@ -2108,7 +2112,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       onClick={handleForwardToSales}
                       style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border-strong)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}
                     >
-                      Forward to sales
+                      {isStaffView ? "Email quote" : "Forward to sales"}
                     </button>
                     <button
                       type="button"
@@ -2912,14 +2916,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           (rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) ||
                           "Carton";
 
-                        // If the customer specified a custom box size and there's exactly one
-                        // requested box (no stock match), display those dims but use the
-                        // standard box pricing underneath. With multiple requested boxes, each
-                        // row must show its own dims — customerBoxDims can't apply to all of them.
-                        const useCustomerDims = customerBoxDims && requestedBoxes.length === 1;
-                        const displayL = useCustomerDims ? customerBoxDims.L : Number(rb.inside_length_in);
-                        const displayW = useCustomerDims ? customerBoxDims.W : Number(rb.inside_width_in);
-                        const displayH = useCustomerDims ? customerBoxDims.H : Number(rb.inside_height_in);
+                        // Every row here is a real, catalog-matched box (requestedBoxes rows
+                        // always join to boxes.id) — always show its own real inside dims.
+                        // customerBoxDims is the rep/customer-typed request and only applies to
+                        // the separate "no stock match" path below (requestedBoxes.length === 0);
+                        // it must never override a genuinely matched stock box's own dims.
+                        const displayL = Number(rb.inside_length_in);
+                        const displayW = Number(rb.inside_width_in);
+                        const displayH = Number(rb.inside_height_in);
 
                         const L = displayL;
                         const W = displayW;

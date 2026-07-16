@@ -902,7 +902,15 @@ export default function LayoutPage({
     (
       blockStr: string,
       cavityStr: string,
-      layersInfo?: { thicknesses: number[]; labels: string[] } | null,
+      layersInfo?:
+        | {
+            thicknesses: number[];
+            labels: string[];
+            cropCorners?: boolean[];
+            roundCorners?: boolean[];
+            roundRadiusIn?: number[];
+          }
+        | null,
       perLayerCavityStrs?: string[] | null,
     ): LayoutModel => {
       // Block from dims=..., default 10x10x2 if missing.
@@ -1055,6 +1063,9 @@ export default function LayoutPage({
           label,
           thicknessIn: snapInches(Number(t) || 0),
           cavities: layerLayout.cavities,
+          cropCorners: layersInfo.cropCorners?.[i],
+          roundCorners: layersInfo.roundCorners?.[i],
+          roundRadiusIn: layersInfo.roundRadiusIn?.[i],
         };
       });
 
@@ -1084,7 +1095,15 @@ export default function LayoutPage({
       let effectiveCavityStr = serverCavityStr;
 
       // NEW: optional multi-layer info from URL (used by fallback builder)
-      let layersInfo: { thicknesses: number[]; labels: string[] } | null = null;
+      let layersInfo:
+        | {
+            thicknesses: number[];
+            labels: string[];
+            cropCorners?: boolean[];
+            roundCorners?: boolean[];
+            roundRadiusIn?: number[];
+          }
+        | null = null;
       let perLayerCavityStrs: string[] | null = null;
 
       // NEW: customer seed from URL (form deep-links)
@@ -1242,6 +1261,34 @@ if (materialLabelSeedLocal) {
             : legacyThicknessesRaw
             ? parseLayersParam(legacyThicknessesRaw)
             : null;
+
+          // 1b) Per-layer crop/round-corner seeding (rep + AI intake forms):
+          //  - layer_crop=1&layer_crop=0            (repeated, same order as layer_thicknesses)
+          //  - layer_round=1&layer_round=1
+          //  - layer_round_radius=0.25&layer_round_radius=0.25
+          if (layersInfo && layersInfo.thicknesses.length > 0) {
+            const toBoolLoose = (v: string): boolean => {
+              const s = v.trim().toLowerCase();
+              return s === "1" || s === "true" || s === "yes" || s === "y";
+            };
+
+            const layerCropAll = url.searchParams.getAll("layer_crop");
+            const layerRoundAll = url.searchParams.getAll("layer_round");
+            const layerRoundRadiusAll = url.searchParams.getAll("layer_round_radius");
+
+            if (layerCropAll.length > 0) {
+              layersInfo.cropCorners = layerCropAll.map(toBoolLoose);
+            }
+            if (layerRoundAll.length > 0) {
+              layersInfo.roundCorners = layerRoundAll.map(toBoolLoose);
+            }
+            if (layerRoundRadiusAll.length > 0) {
+              layersInfo.roundRadiusIn = layerRoundRadiusAll.map((s) => {
+                const n = Number(s.trim());
+                return Number.isFinite(n) && n > 0 ? n : 0;
+              });
+            }
+          }
 
           // 2) Build per-layer cavity strings
           if (layersInfo && layersInfo.thicknesses.length > 0) {

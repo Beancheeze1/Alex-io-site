@@ -13,14 +13,25 @@
 // to show (full quote vs. friendly empty state).
 
 import QuotePrintClient from "./QuotePrintClient";
+import { getCurrentUserFromCookies, isRoleAllowed } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const dynamicParams = true;
 export const revalidate = 0;
 export const runtime = "nodejs";
 
-export default function Page() {
+export default async function Page() {
   // Simple shell so Next can render /quote safely at build time.
   // The client component reads quote_no from the URL as before.
-  return <QuotePrintClient />;
+  //
+  // isStaffView: this page is shared by two audiences — customers opening
+  // their emailed quote link, and reps/CS/admins previewing it from the
+  // admin quote page. Same URL, same component; only a logged-in staff
+  // session distinguishes them. Used to swap the "Forward to sales" button
+  // (customer-facing wording — a customer looping in a rep) for "Email
+  // quote" (staff wording — they're already sales, not forwarding to it).
+  const user = await getCurrentUserFromCookies();
+  const isStaffView = isRoleAllowed(user, ["sales", "cs", "admin"]);
+
+  return <QuotePrintClient isStaffView={isStaffView} />;
 }

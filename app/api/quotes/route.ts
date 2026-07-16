@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { q, one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
-import { loadFacts, saveFacts } from "@/app/lib/memory";
+import { loadFacts } from "@/app/lib/memory";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 // GET /api/quotes?limit=25
@@ -334,21 +334,6 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
     }
-
-    // --- REVISION INIT (Path A) ---
-    try {
-      const quoteNo = String((row as any)?.quote_no ?? "");
-      if (quoteNo) {
-        const facts: any = await loadFacts(quoteNo);
-        // Do not overwrite existing revisions.
-        if (!facts?.stage_rev) facts.stage_rev = "AS";
-        if (!facts?.revision) facts.revision = String(facts.stage_rev || "AS");
-        await saveFacts(quoteNo, facts);
-      }
-    } catch {
-      // Non-fatal: quote creation must succeed even if facts store is unavailable.
-    }
-    // --- END REVISION INIT ---
 
     return NextResponse.json({ ok: true, quote: row }, { status: 201 });
   } catch (err: any) {

@@ -28,13 +28,14 @@ import ProgressRail, {
   ProgressState,
 } from "@/components/start-quote/ProgressRail";
 import StepCard from "@/components/start-quote/StepCard";
+import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 
 type QuoteType = "foam_insert" | "complete_pack";
 type BoxStyle = "mailer" | "rsc";
 type FoamConfig = "bottom_top" | "bottom_only" | "custom";
 
-const FIT_ALLOW_IN = 0.125;
 const DEFAULT_TOP_PAD_IN = 1.0;
+const DEFAULT_ROUND_RADIUS_IN = 0.25;
 
 type MaterialRow = {
   id: number;
@@ -297,6 +298,9 @@ export default function RepStartQuoteModal({
   const [foamConfig, setFoamConfig] = React.useState<FoamConfig>("bottom_top");
   const [bottomThk, setBottomThk] = React.useState("");
   const [topThk, setTopThk] = React.useState(String(DEFAULT_TOP_PAD_IN));
+  const [topPadCropCorners, setTopPadCropCorners] = React.useState(false);
+  const [roundCorners, setRoundCorners] = React.useState(false);
+  const [roundRadiusIn, setRoundRadiusIn] = React.useState(String(DEFAULT_ROUND_RADIUS_IN));
 
   // ----- Step 5: Cavities -----
   const [cavityRows, setCavityRows] = React.useState<CavityRow[]>([newCavityRow()]);
@@ -444,6 +448,9 @@ export default function RepStartQuoteModal({
     setFoamConfig("bottom_top");
     setBottomThk("");
     setTopThk(String(DEFAULT_TOP_PAD_IN));
+    setTopPadCropCorners(false);
+    setRoundCorners(false);
+    setRoundRadiusIn(String(DEFAULT_ROUND_RADIUS_IN));
     setCavityRows([newCavityRow()]);
     setMaterialText("");
     setMaterialId("");
@@ -519,6 +526,8 @@ export default function RepStartQuoteModal({
       }
       if (materialText.trim()) p.set("material_text", materialText.trim());
 
+      const roundRadiusNum = toNumOrNull(roundRadiusIn) ?? DEFAULT_ROUND_RADIUS_IN;
+
       if (quoteType === "foam_insert") {
         const L = toNumOrNull(insertL);
         const W = toNumOrNull(insertW);
@@ -529,11 +538,18 @@ export default function RepStartQuoteModal({
         p.set("layer_count", "1");
         p.append("layer_thicknesses", String(D || 1));
         p.append("layer_label", "Layer 1");
+        p.append("layer_crop", "0");
+        p.append("layer_round", roundCorners ? "1" : "0");
+        p.append("layer_round_radius", String(roundRadiusNum));
         p.set("activeLayer", "1");
         p.set("active_layer", "1");
       } else {
-        const L = toNumOrNull(boxL);
-        const W = toNumOrNull(boxW);
+        // Foam block is cut FIT_ALLOW_IN smaller than the box in both L/W so
+        // it actually fits inside the box, matching StartQuoteModal.
+        const boxLNum = toNumOrNull(boxL);
+        const boxWNum = toNumOrNull(boxW);
+        const L = boxLNum != null ? Math.max(0, boxLNum - FIT_ALLOW_IN) : null;
+        const W = boxWNum != null ? Math.max(0, boxWNum - FIT_ALLOW_IN) : null;
         const bottomD = toNumOrNull(bottomThk);
         const dims = normalizeDims3(L, W, bottomD);
         if (dims) p.set("dims", dims);
@@ -543,8 +559,14 @@ export default function RepStartQuoteModal({
           p.set("layer_count", "2");
           p.append("layer_thicknesses", String(bottomD || 1));
           p.append("layer_label", "Bottom Insert");
+          p.append("layer_crop", "0");
+          p.append("layer_round", roundCorners ? "1" : "0");
+          p.append("layer_round_radius", String(roundRadiusNum));
           p.append("layer_thicknesses", String(t || DEFAULT_TOP_PAD_IN));
           p.append("layer_label", "Top Pad");
+          p.append("layer_crop", topPadCropCorners ? "1" : "0");
+          p.append("layer_round", roundCorners ? "1" : "0");
+          p.append("layer_round_radius", String(roundRadiusNum));
           p.set("activeLayer", "1");
           p.set("active_layer", "1");
           if (t) p.set("top_pad_in", String(t));
@@ -552,6 +574,9 @@ export default function RepStartQuoteModal({
           p.set("layer_count", "1");
           p.append("layer_thicknesses", String(bottomD || 1));
           p.append("layer_label", "Layer 1");
+          p.append("layer_crop", "0");
+          p.append("layer_round", roundCorners ? "1" : "0");
+          p.append("layer_round_radius", String(roundRadiusNum));
           p.set("activeLayer", "1");
           p.set("active_layer", "1");
         }
@@ -846,8 +871,41 @@ export default function RepStartQuoteModal({
                             />
                             Printed box
                           </label>
+
+                          {foamConfig === "bottom_top" ? (
+                            <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                              <input
+                                type="checkbox"
+                                checked={topPadCropCorners}
+                                onChange={(e) => setTopPadCropCorners(e.target.checked)}
+                                className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)]"
+                              />
+                              Top pad cropped corners?
+                            </label>
+                          ) : null}
                         </>
                       )}
+
+                      <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                        <input
+                          type="checkbox"
+                          checked={roundCorners}
+                          onChange={(e) => setRoundCorners(e.target.checked)}
+                          className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)]"
+                        />
+                        Rounded corners?
+                      </label>
+                      {roundCorners ? (
+                        <div className="mt-3 w-32">
+                          <Field label="Radius (in)">
+                            <Input
+                              value={roundRadiusIn}
+                              onChange={setRoundRadiusIn}
+                              placeholder={String(DEFAULT_ROUND_RADIUS_IN)}
+                            />
+                          </Field>
+                        </div>
+                      ) : null}
                     </StepCard>
                   ) : null}
 

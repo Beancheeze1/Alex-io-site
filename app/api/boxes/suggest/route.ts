@@ -223,7 +223,34 @@ function pickBestFromDbRows(
   return best ?? null;
 }
 
+/* =======================================================================
+   Shared suggestion logic (used by both POST and GET)
+   ======================================================================= */
 
+// Canonical clearance: 0.5" all around the foam block, applied before any
+// candidate box is queried or scored. This used to only be applied by GET
+// (the quote-print-page suggester) — POST (the layout editor's auto-pick)
+// queried/scored against the bare foam footprint with no clearance at all,
+// so it could auto-pick a box the foam wouldn't actually fit into with any
+// margin. Both callers now go through this one function so they can't drift
+// apart again.
+const CLEARANCE_IN = 0.5;
+
+async function suggestBoxes(rawFootprintL: number, rawFootprintW: number, rawStackDepth: number) {
+  const requiredL = rawFootprintL + CLEARANCE_IN * 2;
+  const requiredW = rawFootprintW + CLEARANCE_IN * 2;
+  const requiredH = rawStackDepth + CLEARANCE_IN * 2;
+
+  const [rscRows, mailerRows] = await Promise.all([
+    fetchBoxesForStyle(requiredL, requiredW, requiredH, "rsc"),
+    fetchBoxesForStyle(requiredL, requiredW, requiredH, "mailer"),
+  ]);
+
+  const bestRsc = pickBestFromDbRows(rscRows, "RSC", requiredL, requiredW, requiredH);
+  const bestMailer = pickBestFromDbRows(mailerRows, "MAILER", requiredL, requiredW, requiredH);
+
+  return { requiredL, requiredW, requiredH, rscRows, mailerRows, bestRsc, bestMailer };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -241,31 +268,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(resp);
     }
 
-        // Use the live Box Partners catalog stored in public.boxes.
-    const requiredL = L;
-    const requiredW = W;
-    const requiredH = H;
-
-    // Pull candidates for each style from the DB.
-    const [rscRows, mailerRows] = await Promise.all([
-      fetchBoxesForStyle(requiredL, requiredW, requiredH, "rsc"),
-      fetchBoxesForStyle(requiredL, requiredW, requiredH, "mailer"),
-    ]);
-
-    const bestRsc = pickBestFromDbRows(
-      rscRows,
-      "RSC",
-      requiredL,
-      requiredW,
-      requiredH,
-    );
-    const bestMailer = pickBestFromDbRows(
-      mailerRows,
-      "MAILER",
-      requiredL,
-      requiredW,
-      requiredH,
-    );
+    // Use the live Box Partners catalog stored in public.boxes.
+    const { bestRsc, bestMailer } = await suggestBoxes(L, W, H);
 
     if (!bestRsc && !bestMailer) {
       const resp: BoxSuggestOut = {
@@ -275,16 +279,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(resp);
     }
 
-const resp: BoxSuggestOut = {
-  ok: true,
-  bestRsc: bestRsc ?? null,
-  bestMailer: bestMailer ?? null,
-};
+    const resp: BoxSuggestOut = {
+      ok: true,
+      bestRsc: bestRsc ?? null,
+      bestMailer: bestMailer ?? null,
+    };
 
-return NextResponse.json(resp);
-
-
-
+    return NextResponse.json(resp);
   } catch (err: any) {
     console.error("Box suggester POST error", err);
     const resp: BoxSuggestOut = {
@@ -558,43 +559,22 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(body, { status: 400 });
     }
 
-    const clearance = 0.5; // 0.5" all around for now
-    const requiredInsideL = L + clearance * 2;
-    const requiredInsideW = W + clearance * 2;
-    const requiredInsideH = H + clearance * 2;
+    const { requiredL, requiredW, requiredH, rscRows, mailerRows } = await suggestBoxes(L, W, H);
 
     const block: BoxesBlock = {
       length_in: L,
       width_in: W,
       height_in: H,
-      clearance_in: clearance,
+      clearance_in: CLEARANCE_IN,
       required_inside: {
-        length_in: requiredInsideL,
-        width_in: requiredInsideW,
-        height_in: requiredInsideH,
+        length_in: requiredL,
+        width_in: requiredW,
+        height_in: requiredH,
       },
     };
 
-    let rsc: BoxSuggestion[] = [];
-    let mailer: BoxSuggestion[] = [];
-
-    if (styleMode === "rsc" || styleMode === "both") {
-      rsc = await fetchBoxesForStyle(
-        requiredInsideL,
-        requiredInsideW,
-        requiredInsideH,
-        "rsc",
-      );
-    }
-
-    if (styleMode === "mailer" || styleMode === "both") {
-      mailer = await fetchBoxesForStyle(
-        requiredInsideL,
-        requiredInsideW,
-        requiredInsideH,
-        "mailer",
-      );
-    }
+    const rsc: BoxSuggestion[] = styleMode === "rsc" || styleMode === "both" ? rscRows : [];
+    const mailer: BoxSuggestion[] = styleMode === "mailer" || styleMode === "both" ? mailerRows : [];
 
     const body: BoxesOk = {
       ok: true,
