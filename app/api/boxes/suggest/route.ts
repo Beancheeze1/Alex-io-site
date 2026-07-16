@@ -16,8 +16,10 @@
 //   Response (stub):
 //     {
 //       ok: boolean;
-//       bestRsc?: { ... };
-//       bestMailer?: { ... };
+//       bestRsc?: { ... };            // unchanged shape (layout editor auto-pick)
+//       bestMailer?: { ... };         // unchanged shape (layout editor auto-pick)
+//       candidatesRsc?: [ ... ];      // top 3 ranked matches, priced when qty given
+//       candidatesMailer?: [ ... ];   // top 3 ranked matches, priced when qty given
 //       error?: string;
 //     }
 //
@@ -41,6 +43,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
+import { resolveBoxUnitPrice, type BoxTierInputs } from "@/app/lib/box-tier-pricing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +60,7 @@ type BoxSuggestIn = {
 };
 
 type StubBoxRow = {
+  id: number;
   sku: string;
   description: string;
   style: "RSC" | "MAILER";
@@ -68,59 +72,19 @@ type StubBoxRow = {
 type SuggestedBox = StubBoxRow & {
   fit_score: number; // 0–100 (higher = tighter but still valid)
   notes?: string;
+  unit_price_usd?: number | null;
+  extended_price_usd?: number | null;
 };
 
 type BoxSuggestOut = {
   ok: boolean;
   bestRsc?: SuggestedBox | null;
   bestMailer?: SuggestedBox | null;
+  candidatesRsc?: SuggestedBox[];
+  candidatesMailer?: SuggestedBox[];
   error?: string;
   message?: string;
 };
-
-// Tiny stub catalog (replace with real Box Partners data later).
-const CATALOG: StubBoxRow[] = [
-  {
-    sku: "BP-RSC-12x12x4",
-    description: "RSC 12 x 12 x 4",
-    style: "RSC",
-    inside_length_in: 12,
-    inside_width_in: 12,
-    inside_height_in: 4,
-  },
-  {
-    sku: "BP-RSC-16x12x6",
-    description: "RSC 16 x 12 x 6",
-    style: "RSC",
-    inside_length_in: 16,
-    inside_width_in: 12,
-    inside_height_in: 6,
-  },
-  {
-    sku: "BP-RSC-20x16x6",
-    description: "RSC 20 x 16 x 6",
-    style: "RSC",
-    inside_length_in: 20,
-    inside_width_in: 16,
-    inside_height_in: 6,
-  },
-  {
-    sku: "BP-MLR-13x10x3",
-    description: "Tab-lock mailer 13 x 10 x 3",
-    style: "MAILER",
-    inside_length_in: 13,
-    inside_width_in: 10,
-    inside_height_in: 3,
-  },
-  {
-    sku: "BP-MLR-15x11x4",
-    description: "Tab-lock mailer 15 x 11 x 4",
-    style: "MAILER",
-    inside_length_in: 15,
-    inside_width_in: 11,
-    inside_height_in: 4,
-  },
-];
 
 // Compute a simple fit score based on volume utilization.
 // Tries both orientations (L/W swapped). Returns null if it doesn’t fit.
@@ -193,6 +157,18 @@ function pickBestStub(
   return best;
 }
 
+function toStubRows(dbRows: BoxSuggestion[], style: "RSC" | "MAILER"): StubBoxRow[] {
+  return dbRows.map((b) => ({
+    id: b.id,
+    sku: b.sku,
+    description: b.description,
+    style,
+    inside_length_in: b.inside_length_in,
+    inside_width_in: b.inside_width_in,
+    inside_height_in: b.inside_height_in,
+  }));
+}
+
 function pickBestFromDbRows(
   dbRows: BoxSuggestion[],
   style: "RSC" | "MAILER",
@@ -202,17 +178,8 @@ function pickBestFromDbRows(
 ): SuggestedBox | null {
   if (!Array.isArray(dbRows) || dbRows.length === 0) return null;
 
-  const stubRows: StubBoxRow[] = dbRows.map((b) => ({
-    sku: b.sku,
-    description: b.description,
-    style,
-    inside_length_in: b.inside_length_in,
-    inside_width_in: b.inside_width_in,
-    inside_height_in: b.inside_height_in,
-  }));
-
   const best = pickBestStub(
-    stubRows,
+    toStubRows(dbRows, style),
     style,
     footprintL,
     footprintW,
@@ -221,6 +188,42 @@ function pickBestFromDbRows(
 
   // Normalize undefined → null so the signature stays SuggestedBox | null
   return best ?? null;
+}
+
+// Same scoring as pickBestStub (computeFitScore + describeFit), but keeps
+// every fitting candidate instead of just the single best, sorted best-first
+// and capped at 3 — the "closest matches" list shown alongside bestRsc/
+// bestMailer rather than replacing them.
+function rankStub(
+  rows: StubBoxRow[],
+  style: "RSC" | "MAILER",
+  footprintL: number,
+  footprintW: number,
+  stackDepth: number,
+): SuggestedBox[] {
+  const scored: SuggestedBox[] = [];
+
+  for (const row of rows) {
+    if (row.style !== style) continue;
+    const score = computeFitScore(row, footprintL, footprintW, stackDepth);
+    if (score === null) continue;
+
+    scored.push({ ...row, fit_score: score, notes: describeFit(score) });
+  }
+
+  scored.sort((a, b) => b.fit_score - a.fit_score);
+  return scored.slice(0, 3);
+}
+
+function rankFromDbRows(
+  dbRows: BoxSuggestion[],
+  style: "RSC" | "MAILER",
+  footprintL: number,
+  footprintW: number,
+  stackDepth: number,
+): SuggestedBox[] {
+  if (!Array.isArray(dbRows) || dbRows.length === 0) return [];
+  return rankStub(toStubRows(dbRows, style), style, footprintL, footprintW, stackDepth);
 }
 
 /* =======================================================================
@@ -252,6 +255,40 @@ async function suggestBoxes(rawFootprintL: number, rawFootprintW: number, rawSta
   return { requiredL, requiredW, requiredH, rscRows, mailerRows, bestRsc, bestMailer };
 }
 
+function roundToCents(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  return Math.round(value * 100) / 100;
+}
+
+async function fetchTierForBox(boxId: number): Promise<BoxTierInputs | null> {
+  return one<BoxTierInputs>(
+    `
+    select base_unit_price,
+           tier1_min_qty, tier1_unit_price,
+           tier2_min_qty, tier2_unit_price,
+           tier3_min_qty, tier3_unit_price,
+           tier4_min_qty, tier4_unit_price
+    from public.box_price_tiers
+    where box_id = $1
+    `,
+    [boxId],
+  );
+}
+
+// Prices each candidate via the same resolveBoxUnitPrice tier logic used
+// everywhere else pricing is resolved from box_price_tiers.
+async function priceCandidates(candidates: SuggestedBox[], qty: number): Promise<SuggestedBox[]> {
+  const qtyForPrice = Math.max(1, qty);
+  return Promise.all(
+    candidates.map(async (candidate) => {
+      const tier = await fetchTierForBox(candidate.id);
+      const unitPrice = resolveBoxUnitPrice(tier, qtyForPrice);
+      const extendedPrice = unitPrice != null ? roundToCents(unitPrice * qtyForPrice) : null;
+      return { ...candidate, unit_price_usd: unitPrice, extended_price_usd: extendedPrice };
+    }),
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as Partial<BoxSuggestIn>;
@@ -259,6 +296,8 @@ export async function POST(req: NextRequest) {
     const L = Number(body.footprint_length_in) || 0;
     const W = Number(body.footprint_width_in) || 0;
     const H = Number(body.stack_depth_in) || 0;
+    const qty = Number(body.qty);
+    const hasQty = Number.isFinite(qty) && qty > 0;
 
     if (L <= 0 || W <= 0 || H <= 0) {
       const resp: BoxSuggestOut = {
@@ -269,7 +308,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Use the live Box Partners catalog stored in public.boxes.
-    const { bestRsc, bestMailer } = await suggestBoxes(L, W, H);
+    const { requiredL, requiredW, requiredH, rscRows, mailerRows, bestRsc, bestMailer } =
+      await suggestBoxes(L, W, H);
 
     if (!bestRsc && !bestMailer) {
       const resp: BoxSuggestOut = {
@@ -279,10 +319,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(resp);
     }
 
+    let candidatesRsc = rankFromDbRows(rscRows, "RSC", requiredL, requiredW, requiredH);
+    let candidatesMailer = rankFromDbRows(mailerRows, "MAILER", requiredL, requiredW, requiredH);
+
+    if (hasQty) {
+      [candidatesRsc, candidatesMailer] = await Promise.all([
+        priceCandidates(candidatesRsc, qty),
+        priceCandidates(candidatesMailer, qty),
+      ]);
+    }
+
     const resp: BoxSuggestOut = {
       ok: true,
       bestRsc: bestRsc ?? null,
       bestMailer: bestMailer ?? null,
+      candidatesRsc,
+      candidatesMailer,
     };
 
     return NextResponse.json(resp);
