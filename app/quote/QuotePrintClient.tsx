@@ -131,16 +131,6 @@ type ApiOk = {
   grandTotal: number;
   isPrinted?: boolean;
   customerBoxDims?: { L: number; W: number; H: number; style?: "mailer" | "rsc" } | null;
-  customerBoxMatch?: {
-    sku: string;
-    description: string | null;
-    style: string | null;
-    inside_length_in: number;
-    inside_width_in: number;
-    inside_height_in: number;
-    unit_price_usd: number | null;
-    extended_price_usd: number | null;
-  } | null;
   packagingLines?: RequestedBox[];
   salesRepEmail?: string | null;
 };
@@ -158,8 +148,9 @@ type ApiResponse = ApiOk | ApiErr;
 type RequestedBox = {
   id: number; // quote_box_selections.id
   quote_id: number;
-  box_id: number;
-  sku: string;
+  kind: "stock" | "custom";
+  box_id: number | null;
+  sku: string | null;
   vendor: string | null;
   style: string | null;
   description: string | null;
@@ -803,9 +794,6 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   // Printed flag and customer box dims from API
   const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
   const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number; style?: "mailer" | "rsc" } | null>(null);
-  const [customerBoxMatch, setCustomerBoxMatch] = React.useState<ApiOk["customerBoxMatch"]>(null);
-  // packagingLines from the print API — used when requestedBoxes (for-quote) is empty
-  const [apiPackagingLines, setApiPackagingLines] = React.useState<RequestedBox[]>([]);
 
   // Subtotals from server: foam, packaging, grand (foam + packaging)
   const [foamSubtotal, setFoamSubtotal] = React.useState<number>(0);
@@ -963,8 +951,6 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
         setIsPrinted(!!(asOk.isPrinted));
         setCustomerBoxDims(asOk.customerBoxDims ?? null);
-        setCustomerBoxMatch(asOk.customerBoxMatch ?? null);
-        setApiPackagingLines(Array.isArray(asOk.packagingLines) ? asOk.packagingLines : []);
         setSalesRepEmail(typeof asOk.salesRepEmail === "string" ? asOk.salesRepEmail : null);
       } else {
         setError("Unexpected response from quote API.");
@@ -1270,19 +1256,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
     );
   };
 
+  // requestedBoxes now reliably includes every selection (stock and custom
+  // alike), so it alone is the source of truth here.
   for (const rb of requestedBoxes) {
     if (footprintMatches(Number(rb.inside_length_in), Number(rb.inside_width_in))) return true;
   }
 
-  // requestedBoxes stays empty for custom (non-catalog-matched) boxes — the
-  // packaging line for those comes from apiPackagingLines instead, so check
-  // there too, or the phantom helper row never gets filtered.
-  for (const rb of apiPackagingLines) {
-    if (footprintMatches(Number(rb.inside_length_in), Number(rb.inside_width_in))) return true;
-  }
-
-  // Final fallback: the raw customer-entered box dims (always populated for
-  // custom boxes, regardless of whether either API list above has resolved).
+  // Final fallback: the raw customer-entered box dims, in case the selection
+  // hasn't been persisted yet.
   if (customerBoxDims && footprintMatches(Number(customerBoxDims.L), Number(customerBoxDims.W))) {
     return true;
   }
@@ -2824,8 +2805,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </tr>
                       ))}
 
-                      {/* Requested cartons appended as additional lines */}
-                      {(requestedBoxes.length > 0 || apiPackagingLines.length > 0 || isPrinted || !!customerBoxDims) && (
+                      {/* Requested cartons appended as additional lines. requestedBoxes now
+                          reliably includes every selection (stock and custom alike), so it's
+                          the only thing that determines whether "Packaging" applies — except
+                          the print-upcharge row below, which can apply on its own even with
+                          no carton selected at all. */}
+                      {(requestedBoxes.length > 0 || isPrinted || effectivePrintingUpcharge > 0) && (
                         <tr>
                           <td
                             colSpan={5}
@@ -2846,81 +2831,16 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </tr>
                       )}
 
-                      {/* Customer box with matched pricing — shown when customer entered dims but no carton was explicitly picked */}
-                      {customerBoxDims && requestedBoxes.length === 0 && apiPackagingLines.length === 0 && (
-                        <tr>
-                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
-                            <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-secondary)", marginBottom: 2 }}>
-                              Packaging – Customer box (inside)
-                            </div>
-                            <div style={{ fontWeight: 500 }}>
-                              {customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in
-                            </div>
-                            <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>
-                              No matching stock box found. Pricing TBD.
-                            </div>
-                          </td>
-                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{customerBoxDims.L} × {customerBoxDims.W} × {customerBoxDims.H} in</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
-                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>TBD</td>
-                        </tr>
-                      )}
-
-                      {/* Render API packaging lines (includes matched customer box) when no DB-selected carton exists */}
-                      {requestedBoxes.length === 0 && apiPackagingLines.map((rb, idx) => {
-                        const isCustomerBoxLine = !!(customerBoxDims && customerBoxMatch && rb.sku === customerBoxMatch.sku);
-
-                        // For customer box lines, show clean customer-facing label only
-                        const customerBoxStyleLabel =
-                          customerBoxDims?.style === "mailer"
-                            ? "Mailer"
-                            : customerBoxDims?.style === "rsc"
-                              ? "RSC"
-                              : null;
-                        const mainLabel = isCustomerBoxLine
-                          ? customerBoxStyleLabel
-                            ? `Custom box (${customerBoxStyleLabel})`
-                            : "Custom box"
-                          : ((rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) || "Carton");
-
-                        // Display dims are always the customer's requested dims for customer box lines
-                        const L = Number(rb.inside_length_in);
-                        const W = Number(rb.inside_width_in);
-                        const H = Number(rb.inside_height_in);
-                        const dimsOk = Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H);
-                        const dimsText = dimsOk ? `${formatDims(L, W, H)} in` : null;
-
-                        const qty = rb.qty || primaryItem?.qty || 1;
-                        const unitPrice = parsePriceField((rb as any).unit_price_usd ?? null);
-                        const lineTotal = parsePriceField((rb as any).extended_price_usd ?? null);
-                        return (
-                          <tr key={`api-pkg-${idx}`}>
-                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
-                              <div style={{ fontWeight: 500 }}>{mainLabel}</div>
-                            </td>
-                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{dimsText ?? "—"}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{qty}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                              {unitPrice != null ? formatUsd(unitPrice) : "—"}
-                            </td>
-                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                              {lineTotal != null ? formatUsd(lineTotal) : unitPrice != null ? formatUsd(unitPrice * qty) : "—"}
-                            </td>
-                          </tr>
-                        );
-                      })}
-
                       {requestedBoxes.map((rb) => {
                         const mainLabel =
                           (rb.description && rb.description.trim().length > 0 ? rb.description.trim() : `${rb.style || "Carton"}`) ||
                           "Carton";
 
-                        // Every row here is a real, catalog-matched box (requestedBoxes rows
-                        // always join to boxes.id) — always show its own real inside dims.
-                        // customerBoxDims is the rep/customer-typed request and only applies to
-                        // the separate "no stock match" path below (requestedBoxes.length === 0);
-                        // it must never override a genuinely matched stock box's own dims.
+                        // Every row here is a real selection — stock (joined to a real boxes
+                        // row) or custom (its own frozen custom_* dims/description/price) —
+                        // resolved and frozen at write time by add-to-quote /
+                        // add-custom-to-quote. Always show its own real dims; no override
+                        // logic needed for either kind.
                         const displayL = Number(rb.inside_length_in);
                         const displayW = Number(rb.inside_width_in);
                         const displayH = Number(rb.inside_height_in);
