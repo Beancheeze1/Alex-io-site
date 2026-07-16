@@ -30,7 +30,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
-import { resolveBoxUnitPrice } from "@/app/lib/box-tier-pricing";
+import { resolveStockSelection } from "@/app/lib/packaging-selection";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -52,6 +52,7 @@ type BoxRow = {
   vendor: string | null;
   style: string | null;
   sku: string;
+  description: string | null;
   inside_length_in: number;
   inside_width_in: number;
   inside_height_in: number;
@@ -66,25 +67,14 @@ type SelectionRow = {
   id: number;
   quote_id: number;
   quote_no: string;
+  kind?: string;
   box_id: number;
   sku: string;
+  description?: string | null;
   qty: number;
   created_at: string;
   unit_price_usd?: number | null;
   extended_price_usd?: number | null;
-};
-
-// NOTE: matches the schema used by /api/admin/boxes
-type TierRow = {
-  base_unit_price: string | number | null;
-  tier1_min_qty: number | null;
-  tier1_unit_price: string | number | null;
-  tier2_min_qty: number | null;
-  tier2_unit_price: string | number | null;
-  tier3_min_qty: number | null;
-  tier3_unit_price: string | number | null;
-  tier4_min_qty: number | null;
-  tier4_unit_price: string | number | null;
 };
 
 // ---------- helpers ----------
@@ -107,12 +97,6 @@ function toNumberOrNull(raw: any): number | null {
   if (raw === null || raw === undefined) return null;
   const n = typeof raw === "number" ? raw : Number(raw);
   return Number.isFinite(n) ? n : null;
-}
-
-function roundToCents(value: number | null): number | null {
-  if (value === null) return null;
-  if (!Number.isFinite(value)) return null;
-  return Math.round(value * 100) / 100;
 }
 
 // POST /api/boxes/add-to-quote
@@ -167,7 +151,7 @@ export async function POST(req: NextRequest) {
 
       box = (await one<BoxRow>(
         `
-        SELECT id, vendor, style, sku, inside_length_in, inside_width_in, inside_height_in
+        SELECT id, vendor, style, sku, description, inside_length_in, inside_width_in, inside_height_in
         FROM public.boxes
         WHERE id = $1
         `,
@@ -177,7 +161,7 @@ export async function POST(req: NextRequest) {
       const sku = (body.sku || "").trim();
       box = (await one<BoxRow>(
         `
-        SELECT id, vendor, style, sku, inside_length_in, inside_width_in, inside_height_in
+        SELECT id, vendor, style, sku, description, inside_length_in, inside_width_in, inside_height_in
         FROM public.boxes
         WHERE sku = $1
         `,
@@ -313,46 +297,35 @@ export async function POST(req: NextRequest) {
       console.warn("[boxes/add-to-quote] qty sync skipped", err);
     }
 
-    // 3b) Price the carton selection using box_price_tiers (by box_id)
-    const tier = (await one<TierRow>(
-      `
-      SELECT
-        base_unit_price,
-        tier1_min_qty, tier1_unit_price,
-        tier2_min_qty, tier2_unit_price,
-        tier3_min_qty, tier3_unit_price,
-        tier4_min_qty, tier4_unit_price
-      FROM public.box_price_tiers
-      WHERE box_id = $1
-      `,
-      [box.id],
-    )) as TierRow | null;
-
+    // 3b) Resolve description + price exactly once, via the shared
+    // packaging-selection resolver (the only place this should be computed
+    // from here forward — kind='stock' since box came from the catalog).
     const qtyForPrice = Math.max(1, selection.qty ?? 1);
-
-    const unitPrice = resolveBoxUnitPrice(tier, qtyForPrice);
-
-    const extendedPrice =
-      unitPrice != null ? roundToCents(unitPrice * qtyForPrice) : null;
+    const { description, unit_price_usd: unitPrice, extended_price_usd: extendedPrice } =
+      await resolveStockSelection(box, qtyForPrice);
 
     const priced = await q(
       `
       UPDATE public.quote_box_selections
-      SET unit_price_usd = $1,
-          extended_price_usd = $2
-      WHERE id = $3
+      SET kind = 'stock',
+          description = $1,
+          unit_price_usd = $2,
+          extended_price_usd = $3
+      WHERE id = $4
       RETURNING
         id,
         quote_id,
         quote_no,
+        kind,
         box_id,
         sku,
+        description,
         qty,
         created_at,
         unit_price_usd,
         extended_price_usd
       `,
-      [unitPrice, extendedPrice, selection.id],
+      [description, unitPrice, extendedPrice, selection.id],
     );
 
     const pricedSelection = (priced?.[0] ?? selection) as SelectionRow;
