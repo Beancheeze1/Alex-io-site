@@ -3888,12 +3888,7 @@ const handleGoToFoamAdvisor = () => {
         return;
       }
 
-      if (boxSuggest.loading) return; // wait for results
-
       const kind: "RSC" | "MAILER" = boxStyle === "mailer" ? "MAILER" : "RSC";
-      const candidate = kind === "RSC" ? boxSuggest.bestRsc : boxSuggest.bestMailer;
-
-      if (!candidate) return; // suggest hasn't returned a result yet — wait
 
       // Only resize the foam block to match stock inside dims when the customer
       // explicitly chose a stock SKU from the chat widget (box_sku param present).
@@ -3901,6 +3896,20 @@ const handleGoToFoamAdvisor = () => {
       // footprint — don't let the stock suggestion stomp it.
       const urlSku = url.searchParams.get("box_sku") || undefined;
       const hasStockSku = !!urlSku;
+
+      // An explicit box_sku is committed by SKU directly via handlePickCarton's
+      // overrideSku, regardless of what this session's own live suggester
+      // thinks is best — so it doesn't need to wait on boxSuggest at all.
+      // That matters in practice: boxSuggest only runs once customer name +
+      // email are filled in, and email is optional on the rep intake form —
+      // without this, an explicit pick could wait forever for a suggestion
+      // that never runs. Only the legacy "no explicit sku, guess from
+      // box_style alone" path still needs a live candidate to commit.
+      if (!hasStockSku) {
+        if (boxSuggest.loading) return; // wait for results
+        const candidate = kind === "RSC" ? boxSuggest.bestRsc : boxSuggest.bestMailer;
+        if (!candidate) return; // suggest hasn't returned a result yet — wait
+      }
 
       autoPickedCartonRef.current = true; // mark before async call to prevent double-fire
       setSelectedCartonKind(kind);
