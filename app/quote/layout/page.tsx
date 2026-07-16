@@ -2579,15 +2579,26 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
     React.useState<"RSC" | "MAILER" | null>(null);
 
   const handlePickCarton = React.useCallback(
-    async (kind: "RSC" | "MAILER", opts?: { skipDimResize?: boolean }) => {
+    async (kind: "RSC" | "MAILER", opts?: { skipDimResize?: boolean; overrideSku?: string }) => {
       // Update the visual selection immediately
       setSelectedCartonKind(kind);
 
       const chosen = kind === "RSC" ? boxSuggest.bestRsc : boxSuggest.bestMailer;
-      const sku = chosen?.sku;
+      // An explicit override (e.g. a specific candidate the rep picked in the
+      // intake form's pick-list, which may not be this session's live "best"
+      // suggestion) always wins — /api/boxes/add-to-quote resolves its own
+      // real dims/price server-side by SKU, so committing the right box only
+      // depends on passing the right sku here.
+      const sku = opts?.overrideSku || chosen?.sku;
 
-      const insideL = Number(chosen?.inside_length_in);
-      const insideW = Number(chosen?.inside_width_in);
+      // Only trust `chosen`'s dims for the resize step below when it's
+      // actually the box being committed — an override sku that doesn't
+      // match this session's live "best" pick has no reliable dims here to
+      // resize against, so skip resizing rather than resize toward the
+      // wrong box.
+      const dimsSource = !opts?.overrideSku || chosen?.sku === opts.overrideSku ? chosen : null;
+      const insideL = Number(dimsSource?.inside_length_in);
+      const insideW = Number(dimsSource?.inside_width_in);
       if (!opts?.skipDimResize && Number.isFinite(insideL) && Number.isFinite(insideW) && insideL > 0 && insideW > 0) {
         const clearance = 0.125;
         const cand1 = { L: insideL - clearance, W: insideW - clearance };
@@ -3858,15 +3869,26 @@ const handleGoToFoamAdvisor = () => {
   // We use a ref so this only fires once per page load even if boxSuggest re-runs.
   React.useEffect(() => {
     if (autoPickedCartonRef.current) return; // already fired
-    if (boxSuggest.loading) return;          // wait for results
 
     try {
       const url = new URL(window.location.href);
       const packType = url.searchParams.get("pack_type");
       const boxStyle = (url.searchParams.get("box_style") || "").toLowerCase();
+      const boxChoice = (url.searchParams.get("box_choice") || "").toLowerCase();
 
       if (packType !== "complete_pack") return;
       if (!boxStyle) return;
+
+      // Rep explicitly chose "use custom instead" in the intake form's box
+      // picker — respect that decision rather than overriding it with an
+      // auto-suggested stock box. The autoCommittedCustomRef effect below
+      // commits the real custom selection for this case instead.
+      if (boxChoice === "custom") {
+        autoPickedCartonRef.current = true;
+        return;
+      }
+
+      if (boxSuggest.loading) return; // wait for results
 
       const kind: "RSC" | "MAILER" = boxStyle === "mailer" ? "MAILER" : "RSC";
       const candidate = kind === "RSC" ? boxSuggest.bestRsc : boxSuggest.bestMailer;
@@ -3877,17 +3899,80 @@ const handleGoToFoamAdvisor = () => {
       // explicitly chose a stock SKU from the chat widget (box_sku param present).
       // For custom-sized boxes the dims= param already carries the correct foam
       // footprint — don't let the stock suggestion stomp it.
-      const hasStockSku = !!url.searchParams.get("box_sku");
+      const urlSku = url.searchParams.get("box_sku") || undefined;
+      const hasStockSku = !!urlSku;
 
       autoPickedCartonRef.current = true; // mark before async call to prevent double-fire
       setSelectedCartonKind(kind);
       // Store the promise so Apply can await it — prevents the race where
       // Apply fires before /api/boxes/add-to-quote has committed the row.
-      cartonPickPromiseRef.current = handlePickCarton(kind, { skipDimResize: !hasStockSku });
+      // overrideSku: the rep may have picked a specific candidate (not
+      // necessarily this session's live "best" pick) in the intake form's
+      // pick-list — pass it through so the exact chosen box gets committed.
+      cartonPickPromiseRef.current = handlePickCarton(kind, {
+        skipDimResize: !hasStockSku,
+        overrideSku: urlSku,
+      });
     } catch {
       // ignore URL parse errors
     }
   }, [boxSuggest.loading, boxSuggest.bestRsc, boxSuggest.bestMailer, handlePickCarton]);
+
+  // Commits an explicit "use custom instead" choice from the rep intake
+  // form's box picker as a real kind='custom' quote_box_selections row via
+  // /api/boxes/add-custom-to-quote. Without this, a box_choice=custom
+  // decision would just mean nothing gets auto-suggested (per the effect
+  // above) AND nothing gets committed either, leaving the quote with no
+  // packaging selection at all until someone manually added one later.
+  const autoCommittedCustomRef = React.useRef(false);
+  React.useEffect(() => {
+    if (autoCommittedCustomRef.current) return; // already fired
+    if (!quoteNo) return;
+
+    try {
+      const url = new URL(window.location.href);
+      const packType = url.searchParams.get("pack_type");
+      const boxChoice = (url.searchParams.get("box_choice") || "").toLowerCase();
+
+      if (packType !== "complete_pack") return;
+      if (boxChoice !== "custom") return;
+
+      const boxL = parseFloat(url.searchParams.get("box_l") || "");
+      const boxW = parseFloat(url.searchParams.get("box_w") || "");
+      const boxD = parseFloat(url.searchParams.get("box_d") || "");
+      const boxStyle =
+        (url.searchParams.get("box_style") || "mailer").toLowerCase() === "rsc" ? "rsc" : "mailer";
+
+      if (
+        !Number.isFinite(boxL) || boxL <= 0 ||
+        !Number.isFinite(boxW) || boxW <= 0 ||
+        !Number.isFinite(boxD) || boxD <= 0
+      ) {
+        return; // no usable box dims to commit — nothing to do
+      }
+
+      autoCommittedCustomRef.current = true; // mark before async call to prevent double-fire
+
+      const numericQty = typeof qty === "number" && Number.isFinite(qty) && qty > 0 ? qty : 1;
+
+      fetch("/api/boxes/add-custom-to-quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quote_no: quoteNo,
+          length_in: boxL,
+          width_in: boxW,
+          height_in: boxD,
+          style: boxStyle,
+          qty: numericQty,
+        }),
+      }).catch((err) => {
+        console.error("[layout] Error committing custom box choice", err);
+      });
+    } catch {
+      // ignore URL parse errors
+    }
+  }, [quoteNo, qty]);
 
   // Derived labels used in multiple spots
   const footprintLabel =

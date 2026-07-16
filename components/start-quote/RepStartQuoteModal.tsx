@@ -74,6 +74,20 @@ type CustomerOption = {
   phone: string | null;
 };
 
+type StockCandidate = {
+  id: number;
+  sku: string;
+  description: string;
+  style: string;
+  inside_length_in: number;
+  inside_width_in: number;
+  inside_height_in: number;
+  fit_score: number;
+  notes?: string;
+  unit_price_usd?: number | null;
+  extended_price_usd?: number | null;
+};
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -302,6 +316,90 @@ export default function RepStartQuoteModal({
   const [roundCorners, setRoundCorners] = React.useState(false);
   const [roundRadiusIn, setRoundRadiusIn] = React.useState(String(DEFAULT_ROUND_RADIUS_IN));
 
+  // Real stock box candidates for the box being specced (Complete Pack only).
+  // Nothing is pre-selected — the rep must explicitly pick a candidate or
+  // "use custom instead" before moving on; see the Next-button guard below.
+  const [stockCandidates, setStockCandidates] = React.useState<StockCandidate[]>([]);
+  const [stockCandidatesLoading, setStockCandidatesLoading] = React.useState(false);
+  const [boxChoice, setBoxChoice] = React.useState<"" | "stock" | "custom">("");
+  const [selectedStockSku, setSelectedStockSku] = React.useState("");
+
+  // Debounced (500ms) lookup of real stock candidates once box L/W/D and qty
+  // are all filled in. Reuses the same 0.5" clearance-aware /api/boxes/suggest
+  // endpoint the layout editor's own auto-pick uses, fed the same foam
+  // footprint (box L/W minus FIT_ALLOW_IN) this form already computes for
+  // `dims` on submit, so the candidates shown here match what the editor
+  // would independently suggest for the same inputs.
+  React.useEffect(() => {
+    if (quoteType !== "complete_pack") {
+      setStockCandidates([]);
+      setStockCandidatesLoading(false);
+      return;
+    }
+
+    const boxLNum = toNumOrNull(boxL);
+    const boxWNum = toNumOrNull(boxW);
+    const boxDNum = toNumOrNull(boxD);
+    const qtyNum = toNumOrNull(qty);
+
+    if (!boxLNum || !boxWNum || !boxDNum || !qtyNum) {
+      setStockCandidates([]);
+      setStockCandidatesLoading(false);
+      return;
+    }
+
+    // A pick only applies to the exact dims/qty/style it was made for — reset
+    // it whenever any of those change so a stale choice can't silently carry
+    // over onto a different box. A real choice is always required again.
+    setBoxChoice("");
+    setSelectedStockSku("");
+    setStockCandidatesLoading(true);
+
+    const bottomThkNum = toNumOrNull(bottomThk) ?? 0;
+    const topThkNum = foamConfig === "bottom_top" ? (toNumOrNull(topThk) ?? 0) : 0;
+    const stackDepth = bottomThkNum + topThkNum;
+
+    const footprintL = Math.max(0, boxLNum - FIT_ALLOW_IN);
+    const footprintW = Math.max(0, boxWNum - FIT_ALLOW_IN);
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/boxes/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            footprint_length_in: footprintL,
+            footprint_width_in: footprintW,
+            // Fall back to the rep's box depth guess if foam thickness fields
+            // aren't filled in yet, so the lookup still runs instead of
+            // failing on a zero/blank stack depth.
+            stack_depth_in: stackDepth > 0 ? stackDepth : boxDNum,
+            qty: qtyNum,
+          }),
+        });
+        const json = await res.json().catch(() => null);
+        if (cancelled) return;
+
+        if (json?.ok) {
+          const list = boxStyle === "rsc" ? json.candidatesRsc : json.candidatesMailer;
+          setStockCandidates(Array.isArray(list) ? list : []);
+        } else {
+          setStockCandidates([]);
+        }
+      } catch {
+        if (!cancelled) setStockCandidates([]);
+      } finally {
+        if (!cancelled) setStockCandidatesLoading(false);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [quoteType, boxL, boxW, boxD, qty, boxStyle, foamConfig, bottomThk, topThk]);
+
   // ----- Step 5: Cavities -----
   const [cavityRows, setCavityRows] = React.useState<CavityRow[]>([newCavityRow()]);
 
@@ -451,6 +549,10 @@ export default function RepStartQuoteModal({
     setTopPadCropCorners(false);
     setRoundCorners(false);
     setRoundRadiusIn(String(DEFAULT_ROUND_RADIUS_IN));
+    setStockCandidates([]);
+    setStockCandidatesLoading(false);
+    setBoxChoice("");
+    setSelectedStockSku("");
     setCavityRows([newCavityRow()]);
     setMaterialText("");
     setMaterialId("");
@@ -470,6 +572,12 @@ export default function RepStartQuoteModal({
     if (!customerName.trim()) {
       setSubmitError("Customer name is required.");
       setActiveStep("customer");
+      return;
+    }
+
+    if (quoteType === "complete_pack" && !boxChoice) {
+      setSubmitError('Choose a stock box or "Use custom instead" before creating the quote.');
+      setActiveStep("specs");
       return;
     }
 
@@ -589,6 +697,17 @@ export default function RepStartQuoteModal({
         p.set("pack_type", "complete_pack");
         p.set("foam_config", foamConfig);
         p.set("fit_allow_in", String(FIT_ALLOW_IN));
+
+        // Carry the rep's explicit box choice through so the editor commits
+        // exactly what was picked here instead of re-suggesting or silently
+        // defaulting: a stock pick names its real SKU; a custom choice tells
+        // the editor to skip stock auto-pick and commit the typed dims as a
+        // real kind='custom' selection instead.
+        if (boxChoice === "stock" && selectedStockSku) {
+          p.set("box_sku", selectedStockSku);
+        } else if (boxChoice === "custom") {
+          p.set("box_choice", "custom");
+        }
       }
 
       // Per-layer cavity params (cavities_l1, cavities_l2, ...) — matches the
@@ -849,6 +968,100 @@ export default function RepStartQuoteModal({
                                 <option value="custom" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Custom</option>
                               </select>
                             </Field>
+                          </div>
+
+                          <div className="mt-4">
+                            <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                              BOX SELECTION
+                            </div>
+
+                            {!toNumOrNull(boxL) || !toNumOrNull(boxW) || !toNumOrNull(boxD) || !toNumOrNull(qty) ? (
+                              <div className="mt-2 text-xs text-[var(--text-muted)]">
+                                Enter box L/W/D and quantity above to see matching stock cartons.
+                              </div>
+                            ) : stockCandidatesLoading ? (
+                              <div className="mt-2 text-sm text-[var(--text-muted)]">
+                                Looking up matching cartons…
+                              </div>
+                            ) : (
+                              <div className="mt-2 space-y-2">
+                                {stockCandidates.length === 0 ? (
+                                  <div className="text-xs text-[var(--text-muted)]">
+                                    No close stock matches found for these dimensions.
+                                  </div>
+                                ) : (
+                                  stockCandidates.map((c) => {
+                                    const selected = boxChoice === "stock" && selectedStockSku === c.sku;
+                                    return (
+                                      <button
+                                        key={c.sku}
+                                        type="button"
+                                        onClick={() => {
+                                          setBoxChoice("stock");
+                                          setSelectedStockSku(c.sku);
+                                        }}
+                                        className={[
+                                          "w-full rounded-md border px-3 py-2 text-left text-sm",
+                                          selected
+                                            ? "border-[var(--action-primary)] bg-[var(--surface-subtle)]"
+                                            : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
+                                        ].join(" ")}
+                                      >
+                                        <div className="flex items-center justify-between gap-3">
+                                          <div>
+                                            <div className="font-medium text-[var(--text-primary)]">
+                                              {c.description || c.sku}
+                                            </div>
+                                            <div className="mt-0.5 text-xs text-[var(--text-muted)]">
+                                              Inside {c.inside_length_in} x {c.inside_width_in} x {c.inside_height_in} in · {c.sku}
+                                            </div>
+                                          </div>
+                                          <div className="shrink-0 text-right text-xs text-[var(--text-secondary)]">
+                                            {c.unit_price_usd != null ? (
+                                              <>
+                                                <div>${Number(c.unit_price_usd).toFixed(2)}/ea</div>
+                                                {c.extended_price_usd != null ? (
+                                                  <div className="font-medium text-[var(--text-primary)]">
+                                                    ${Number(c.extended_price_usd).toFixed(2)}
+                                                  </div>
+                                                ) : null}
+                                              </>
+                                            ) : (
+                                              <div className="text-[var(--text-faint)]">—</div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </button>
+                                    );
+                                  })
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setBoxChoice("custom");
+                                    setSelectedStockSku("");
+                                  }}
+                                  className={[
+                                    "w-full rounded-md border px-3 py-2 text-left text-sm",
+                                    boxChoice === "custom"
+                                      ? "border-[var(--action-primary)] bg-[var(--surface-subtle)]"
+                                      : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
+                                  ].join(" ")}
+                                >
+                                  <div className="font-medium text-[var(--text-primary)]">Use custom instead</div>
+                                  <div className="mt-0.5 text-xs text-[var(--text-muted)]">
+                                    Skip stock matching — use the box dimensions entered above as-is.
+                                  </div>
+                                </button>
+
+                                {!boxChoice ? (
+                                  <div className="text-xs text-[var(--attention)]">
+                                    Choose a stock box or "Use custom instead" before continuing.
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
                           </div>
 
                           <div className="mt-4 grid grid-cols-2 gap-3">
@@ -1275,7 +1488,8 @@ export default function RepStartQuoteModal({
                 <button
                   type="button"
                   onClick={goNext}
-                  className="rounded-md bg-[var(--action-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)]"
+                  disabled={activeStep === "specs" && quoteType === "complete_pack" && !boxChoice}
+                  className="rounded-md bg-[var(--action-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)] disabled:opacity-40"
                 >
                   Next
                 </button>
