@@ -29,7 +29,6 @@ import { buildLayoutExports, computeGeometryHash } from "@/app/lib/layout/export
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
-import { resolveBoxUnitPrice } from "@/app/lib/box-tier-pricing";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -85,8 +84,9 @@ type LayoutPkgRow = {
 export type PackagingLine = {
   id: number;
   quote_id: number;
-  box_id: number;
-  sku: string;
+  kind: "stock" | "custom";
+  box_id: number | null;
+  sku: string | null;
   qty: number;
   unit_price_usd: number | null;
   extended_price_usd: number | null;
@@ -190,80 +190,6 @@ function sortItemsForQuoteDisplay(items: ItemRow[]): ItemRow[] {
   });
 }
 
-type BoxMatchRow = {
-  id: number;
-  sku: string;
-  vendor: string | null;
-  style: string | null;
-  description: string | null;
-  inside_length_in: number;
-  inside_width_in: number;
-  inside_height_in: number;
-};
-
-type BoxPriceTierRow = {
-  base_unit_price: string | number | null;
-  tier1_min_qty: number | null; tier1_unit_price: string | number | null;
-  tier2_min_qty: number | null; tier2_unit_price: string | number | null;
-  tier3_min_qty: number | null; tier3_unit_price: string | number | null;
-  tier4_min_qty: number | null; tier4_unit_price: string | number | null;
-};
-
-/**
- * Find the closest matching stock box for given inside dims + qty, and price it.
- * Tries both orientations (L/W swapped). Returns null if no match found.
- */
-async function findAndPriceClosestBox(
-  insideL: number,
-  insideW: number,
-  insideH: number,
-  qty: number,
-): Promise<{
-  box: BoxMatchRow;
-  unit_price_usd: number | null;
-  extended_price_usd: number | null;
-} | null> {
-  // Fetch boxes that fit in either orientation, ordered by smallest volume first (tightest fit)
-  const candidates = await q<BoxMatchRow>(
-    `
-    select id, sku, vendor, style, description,
-           inside_length_in, inside_width_in, inside_height_in
-    from public.boxes
-    where (
-      (inside_length_in >= $1 and inside_width_in >= $2 and inside_height_in >= $3)
-      or
-      (inside_length_in >= $2 and inside_width_in >= $1 and inside_height_in >= $3)
-    )
-    order by inside_length_in * inside_width_in * inside_height_in asc
-    limit 5
-    `,
-    [insideL, insideW, insideH],
-  );
-
-  if (!candidates || candidates.length === 0) return null;
-
-  const best = candidates[0];
-
-  // Look up tier pricing for this box
-  const tier = await one<BoxPriceTierRow>(
-    `
-    select base_unit_price,
-           tier1_min_qty, tier1_unit_price,
-           tier2_min_qty, tier2_unit_price,
-           tier3_min_qty, tier3_unit_price,
-           tier4_min_qty, tier4_unit_price
-    from public.box_price_tiers
-    where box_id = $1
-    `,
-    [best.id],
-  );
-
-  const unitPrice = resolveBoxUnitPrice(tier, qty);
-
-  const extendedPrice = unitPrice != null ? Math.round(unitPrice * qty * 100) / 100 : null;
-
-  return { box: best, unit_price_usd: unitPrice, extended_price_usd: extendedPrice };
-}
 
 /**
  * Authoritative pricing call: POST /api/quotes/calc
@@ -648,108 +574,42 @@ export async function GET(req: NextRequest) {
 
     /* ---------------- Packaging lines ---------------- */
 
+    // Single LEFT JOIN read: quote_box_selections is the one source of truth
+    // for both stock (box_id set, joins to a real boxes row) and custom
+    // (box_id null, own custom_* dims + frozen description/price) selections.
+    // No live matching, no live pricing, no synthetic lines — everything here
+    // was already resolved and frozen at write time by
+    // app/lib/packaging-selection.ts (see /api/boxes/add-to-quote and
+    // /api/boxes/add-custom-to-quote).
     const packagingLines: PackagingLine[] = await q(
       `
       select
         qbs.id,
         qbs.quote_id,
+        qbs.kind,
         qbs.box_id,
         qbs.sku,
         qbs.qty,
         qbs.unit_price_usd,
         qbs.extended_price_usd,
         b.vendor,
-        b.style,
-        b.description,
-        b.inside_length_in,
-        b.inside_width_in,
-        b.inside_height_in
+        coalesce(b.style, qbs.custom_style) as style,
+        coalesce(qbs.description, b.description) as description,
+        coalesce(b.inside_length_in, qbs.custom_length_in) as inside_length_in,
+        coalesce(b.inside_width_in, qbs.custom_width_in) as inside_width_in,
+        coalesce(b.inside_height_in, qbs.custom_height_in) as inside_height_in
       from quote_box_selections qbs
-      join boxes b on b.id = qbs.box_id
+      left join boxes b on b.id = qbs.box_id
       where qbs.quote_id = $1
       `,
       [quote.id],
     );
 
+    // customer_box_in facts value: kept only for display code that still
+    // references what the customer originally typed (e.g. the Mailer/RSC
+    // style label). No longer drives packaging-line matching or pricing.
     const customerBox = parseDimsString((facts as any)?.customer_box_in);
-    let packagingLinesForDisplay = packagingLines;
-
-    // Track the matched stock box so the client can display it
-    let customerBoxMatch: {
-      sku: string;
-      description: string | null;
-      style: string | null;
-      inside_length_in: number;
-      inside_width_in: number;
-      inside_height_in: number;
-      unit_price_usd: number | null;
-      extended_price_usd: number | null;
-    } | null = null;
-
-    if (customerBox) {
-      // Derive qty from primary foam item for tier pricing
-      const primaryQty = items.length > 0 ? (Number(items[0].qty) || 1) : 1;
-
-      if (packagingLines.length === 1) {
-        // Exactly one carton was explicitly picked — override display dims only,
-        // keep that carton's own pricing intact. With multiple cartons on the
-        // quote, customerBox can't apply to all of them, so each line keeps its
-        // own actual dims/description instead.
-        packagingLinesForDisplay = packagingLines.map((l) => {
-          const baseDesc = typeof l.description === "string" ? l.description : "";
-          const note = `Customer box (inside): ${customerBox.L} × ${customerBox.W} × ${customerBox.H} in`;
-          const nextDesc = baseDesc ? `${baseDesc} · ${note}` : note;
-          return {
-            ...l,
-            inside_length_in: customerBox.L,
-            inside_width_in: customerBox.W,
-            inside_height_in: customerBox.H,
-            description: nextDesc,
-          };
-        });
-      } else if (packagingLines.length === 0) {
-        // No carton picked yet — find + price the closest matching stock box
-        // and inject it as a synthetic packaging line.
-        const matched = await findAndPriceClosestBox(
-          customerBox.L,
-          customerBox.W,
-          customerBox.H,
-          primaryQty,
-        );
-
-        if (matched) {
-          customerBoxMatch = {
-            sku: matched.box.sku,
-            description: matched.box.description,
-            style: matched.box.style,
-            inside_length_in: matched.box.inside_length_in,
-            inside_width_in: matched.box.inside_width_in,
-            inside_height_in: matched.box.inside_height_in,
-            unit_price_usd: matched.unit_price_usd,
-            extended_price_usd: matched.extended_price_usd,
-          };
-
-          // Synthetic line — id -1 flags it as not yet committed to DB
-          packagingLinesForDisplay = [
-            {
-              id: -1,
-              quote_id: quote.id,
-              box_id: matched.box.id ?? -1,
-              sku: matched.box.sku,
-              qty: primaryQty,
-              unit_price_usd: matched.unit_price_usd,
-              extended_price_usd: matched.extended_price_usd,
-              vendor: matched.box.vendor ?? null,
-              style: matched.box.style ?? null,
-              description: `Custom box`,
-              inside_length_in: customerBox.L,
-              inside_width_in: customerBox.W,
-              inside_height_in: customerBox.H,
-            } as PackagingLine,
-          ];
-        }
-      }
-    }
+    const packagingLinesForDisplay = packagingLines;
 
     // Only count billable priced items toward foam subtotal.
     const foamSubtotal = items.reduce((s, i) => s + (Number(i.price_total_usd) || 0), 0);
@@ -789,7 +649,6 @@ export async function GET(req: NextRequest) {
       grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge,
       isPrinted,
       customerBoxDims: customerBox ?? null,
-      customerBoxMatch,
       facts,
       salesRepEmail,
     });
