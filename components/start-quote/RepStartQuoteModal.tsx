@@ -621,10 +621,14 @@ export default function RepStartQuoteModal({
       p.set("quote_no", quote_no);
       if (salesRepSlug.trim()) p.set("sales_rep_slug", salesRepSlug.trim());
       if (toNumOrNull(qty)) p.set("qty", String(toNumOrNull(qty)));
-      // Unlike StartQuoteModal (customer-facing), this is a rep typing notes
-      // meant to carry straight through to the editor, not left for the
-      // customer to fill in themselves.
-      if (internalNotes.trim()) p.set("notes", internalNotes.trim());
+      // internalNotes is staff-only (persisted separately via internal_notes
+      // above) and must NEVER be threaded into the editor's "notes" param —
+      // that field seeds quote_layout_packages.notes, which is customer-facing
+      // (returned by /api/quote/print and rendered on the print page). A rep
+      // who wants to leave a genuine customer-visible production/layout note
+      // can type it directly into the editor's own "Notes / special
+      // instructions" field once the editor opens, same as customers already
+      // do via StartQuoteModal.
 
       const matIdNum = Number(materialId);
       const hasMaterialId = Number.isFinite(matIdNum) && matIdNum > 0;
