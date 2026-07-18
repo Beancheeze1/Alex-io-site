@@ -1076,6 +1076,13 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
   const [loadingPreviousLayout, setLoadingPreviousLayout] = React.useState(false);
 
+  // Internal notes (staff-only; migration 012). Loaded from a dedicated
+  // admin-gated endpoint, NOT /api/quote/print — that response is shared
+  // with the customer-facing print page and must never carry this field.
+  const [internalNotes, setInternalNotes] = React.useState<string | null>(null);
+  const [internalNotesLoading, setInternalNotesLoading] = React.useState<boolean>(false);
+  const [internalNotesError, setInternalNotesError] = React.useState<string | null>(null);
+
   const [refreshTick, setRefreshTick] = React.useState<number>(0);
 
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -1260,6 +1267,57 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     }
 
     loadRequestedBoxes();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteNoValue, refreshTick]);
+
+  React.useEffect(() => {
+    if (!quoteNoValue) return;
+
+    let cancelled = false;
+
+    async function loadInternalNotes() {
+      setInternalNotesLoading(true);
+      setInternalNotesError(null);
+
+      try {
+        const res = await fetch(
+          "/api/admin/quotes/internal-notes?quote_no=" + encodeURIComponent(quoteNoValue),
+          { cache: "no-store" },
+        );
+
+        const json = await res.json().catch(() => null);
+
+        if (!res.ok || !json?.ok) {
+          if (!cancelled) {
+            // Staff without access (or public/demo views) simply see nothing here —
+            // not worth surfacing as a page-level error.
+            setInternalNotes(null);
+            if (json?.error && json.error !== "FORBIDDEN" && json.error !== "UNAUTHENTICATED") {
+              setInternalNotesError("Unable to load internal notes.");
+            }
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setInternalNotes(json.internal_notes ?? null);
+        }
+      } catch (err) {
+        console.error("Error fetching /api/admin/quotes/internal-notes:", err);
+        if (!cancelled) {
+          setInternalNotes(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setInternalNotesLoading(false);
+        }
+      }
+    }
+
+    loadInternalNotes();
 
     return () => {
       cancelled = true;
@@ -2158,6 +2216,21 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       {quoteState.phone ? <> • {quoteState.phone}</> : null}
                     </div>
                   </div>
+                  {(internalNotes || internalNotesLoading || internalNotesError) && (
+                    <div>
+                      <div style={labelStyle}>Internal notes</div>
+                      <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 2 }}>
+                        Not visible to customer
+                      </div>
+                      {internalNotesLoading ? (
+                        <div style={{ color: "var(--text-muted)" }}>Loading…</div>
+                      ) : internalNotesError ? (
+                        <div style={{ color: "var(--text-muted)" }}>{internalNotesError}</div>
+                      ) : (
+                        <div style={{ whiteSpace: "pre-wrap" }}>{internalNotes}</div>
+                      )}
+                    </div>
+                  )}
                   {primaryItem && (
                     <>
                       <div>
