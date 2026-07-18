@@ -37,6 +37,12 @@ type QuoteRow = {
   company: string | null;
   status: string;
   created_at: string;
+
+  // Rep-intake fields (migration 012) — saved on creation, previously never
+  // surfaced on this page.
+  po_number?: string | null;
+  is_rush?: boolean | null;
+  qty_breaks?: Array<{ qty: number; price: number | null }> | null;
 };
 
 type ItemRow = {
@@ -2063,6 +2069,28 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         {facts.revision}
                       </span>
                     ) : null}
+                    {quote.is_rush ? (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          padding: "2px 8px",
+                          borderRadius: 999,
+                          background: "var(--attention-bg)",
+                          border: "1px solid var(--attention-border)",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          letterSpacing: "0.06em",
+                          color: "var(--attention)",
+                        }}
+                      >
+                        RUSH
+                      </span>
+                    ) : null}
+                    {quote.po_number ? (
+                      <span style={{ marginLeft: 8, color: "var(--text-muted)" }}>
+                        · PO {quote.po_number}
+                      </span>
+                    ) : null}
                   </div>
                   <p style={{ margin: "2px 0 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
                     {quote.customer_name}
@@ -2949,6 +2977,32 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       )}
                     </tbody>
                   </table>
+
+                  {Array.isArray(quote.qty_breaks) && quote.qty_breaks.length > 0 && (
+                    <div style={{ marginTop: 16 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
+                        Quantity price breaks
+                      </div>
+                      <table style={{ width: "auto", borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ textAlign: "left", padding: "4px 16px 4px 0", color: "var(--text-muted)", fontWeight: 500 }}>Qty</th>
+                            <th style={{ textAlign: "left", padding: "4px 0", color: "var(--text-muted)", fontWeight: 500 }}>Price / unit</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {quote.qty_breaks.map((b, i) => (
+                            <tr key={i}>
+                              <td style={{ padding: "2px 16px 2px 0", color: "var(--text-primary)" }}>{b.qty.toLocaleString()}</td>
+                              <td style={{ padding: "2px 0", color: "var(--text-primary)" }}>
+                                {b.price != null ? formatUsd(b.price) : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
                   <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
                     <div style={{ textAlign: "right" }}>

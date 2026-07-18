@@ -52,6 +52,12 @@ type QuoteRow = {
   // NEW: revision label (customer workflow language)
   // Source (Path A): facts.revision (default RevAS) until DB is wired.
   revision?: string | null;
+
+  // Rep-intake fields (migration 012) — saved on creation, previously never
+  // read back out here or displayed on the print page.
+  po_number?: string | null;
+  is_rush?: boolean | null;
+  qty_breaks?: Array<{ qty: number; price: number | null }> | null;
 };
 
 type ItemRow = {
@@ -322,7 +328,10 @@ export async function GET(req: NextRequest) {
         created_at,
         locked,
         geometry_hash,
-        sales_rep_id
+        sales_rep_id,
+        po_number,
+        is_rush,
+        qty_breaks
       from quotes
       where quote_no = $1
         and tenant_id = $2
