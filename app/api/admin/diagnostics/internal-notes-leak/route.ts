@@ -71,10 +71,16 @@ export async function GET(req: NextRequest) {
   if (role !== "admin")
     return json({ ok: false, error: "FORBIDDEN", message: "Admin access required." }, 403);
 
-  // Latest quote_layout_packages row per quote, joined back to quotes.
+  // Broad mode: dataset is small enough to return EVERY layout package row
+  // with non-null notes (not just the latest per quote, not just keyword
+  // matches) so a human can eyeball all of it directly, not just what a
+  // keyword heuristic happens to catch. `is_latest_package` and
+  // `keyword_match` are both included as flags to help triage, not as filters.
   const keywordWhere = SUSPECT_PATTERNS.map((_, i) => `lp.notes ilike $${i + 2}`).join(" or ");
 
-  const rows = await q<Row>(
+  const rows = await q<
+    Row & { is_latest_package: boolean; keyword_match: boolean }
+  >(
     `
     select
       q.quote_no,
@@ -84,23 +90,23 @@ export async function GET(req: NextRequest) {
       q.created_at,
       q.internal_notes,
       lp.notes as layout_notes,
-      lp.created_at as layout_notes_created_at
+      lp.created_at as layout_notes_created_at,
+      lp.id = latest.id as is_latest_package,
+      (${keywordWhere}) as keyword_match
     from public.quotes q
+    join public.quote_layout_packages lp on lp.quote_id = q.id
     join lateral (
-      select notes, created_at
+      select id
       from public.quote_layout_packages
       where quote_id = q.id
       order by created_at desc
       limit 1
-    ) lp on true
+    ) latest on true
     where q.tenant_id = $1
       and lp.notes is not null
-      and (
-        ${keywordWhere}
-        or (q.internal_notes is not null and lp.notes ilike '%' || replace(replace(q.internal_notes, '%', ''), '_', '') || '%')
-      )
-    order by q.created_at desc
-    limit 200
+      and trim(lp.notes) <> ''
+    order by q.created_at desc, lp.created_at asc
+    limit 500
     `,
     [user.tenant_id, ...SUSPECT_PATTERNS.map((p) => `%${p}%`)],
   );
