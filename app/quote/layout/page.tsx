@@ -4137,7 +4137,13 @@ const tenantCssVars = React.useMemo(() => {
         onChange={handleFileSelected}
       />
       <div className="w-full max-w-none mx-auto">
-        <div className="relative rounded-xl border border-[var(--border)] bg-[var(--surface-card)] overflow-hidden">
+        {/* STOPGAP (not the real fix): overflow-x-auto so the fixed-width
+            left/right sidebars + flex-1 canvas below become reachable by
+            horizontal scroll on narrow viewports instead of being silently
+            clipped to zero pixels by overflow-hidden. Column structure is
+            untouched. A real responsive redesign (stacking columns or a
+            collapsible drawer below a breakpoint) is separate follow-up work. */}
+        <div className="relative rounded-xl border border-[var(--border)] bg-[var(--surface-card)] overflow-x-auto overflow-y-hidden">
           <div className="relative">
             {/* Header */}
             <div

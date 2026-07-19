@@ -258,6 +258,13 @@ export default function StartQuoteModal() {
     searchParams.get("cavity") || "",
   );
 
+  // Customer notes — feeds the "notes" URL param, which seeds the editor's
+  // "Notes / special instructions" field and renders on the finished print
+  // page. Deliberately starts blank (no URL seed) so the customer fills it
+  // in themselves here, same intent as the removed comment below explained
+  // before this field existed.
+  const [customerNotes, setCustomerNotes] = React.useState<string>("");
+
   // Foam Insert specs
   const [insertL, setInsertL] = React.useState<string>("");
   const [insertW, setInsertW] = React.useState<string>("");
@@ -1035,9 +1042,8 @@ export default function StartQuoteModal() {
       }
     }
 
-    // Notes are intentionally not passed to the editor URL —
-    // the customer-facing notes field should start blank for the client to fill in.
     // Internal hints (fit tips, box suggestions) are stored in internalHints, not notes.
+    if (customerNotes.trim()) p.set("notes", customerNotes.trim());
 
     router.push(`/quote/layout?${p.toString()}`);
   };
@@ -1760,6 +1766,25 @@ export default function StartQuoteModal() {
                               v={normalizedSeed || "-"}
                             />
                           </div>
+                        </div>
+
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            NOTES
+                          </div>
+                          <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                            Anything we should know about this order?
+                          </div>
+                          <div className="mt-1 text-[11px] text-[var(--text-muted)]">
+                            This will appear on the final quote you see — packing needs, timing, anything else worth flagging.
+                          </div>
+                          <textarea
+                            value={customerNotes}
+                            onChange={(e) => setCustomerNotes(e.target.value)}
+                            rows={3}
+                            className="mt-2 w-full rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)] focus:outline-none"
+                            placeholder="e.g. fragile, needs to ship by a certain date, special packaging request..."
+                          />
                         </div>
 
                         <div className="flex flex-wrap items-center justify-end gap-3">

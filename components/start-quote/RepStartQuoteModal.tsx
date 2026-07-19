@@ -295,6 +295,12 @@ export default function RepStartQuoteModal({
   const [qty, setQty] = React.useState("");
   const [qtyBreaks, setQtyBreaks] = React.useState<QtyBreak[]>([newQtyBreakRow()]);
   const [internalNotes, setInternalNotes] = React.useState("");
+  // Customer-visible notes — separate from internalNotes above. This is the
+  // ONLY field on this form that feeds the "notes" URL param (the pipe that
+  // flows into quote_layout_packages.notes and renders on the customer print
+  // page). internalNotes must never touch that param — see the comment at
+  // its usage site in onLaunchEditor below.
+  const [customerNotes, setCustomerNotes] = React.useState("");
 
   // ----- Step 3: Quote type -----
   const [quoteType, setQuoteType] = React.useState<QuoteType>("foam_insert");
@@ -534,6 +540,7 @@ export default function RepStartQuoteModal({
     setQty("");
     setQtyBreaks([newQtyBreakRow()]);
     setInternalNotes("");
+    setCustomerNotes("");
     setQuoteType("foam_insert");
     setInsertL("");
     setInsertW("");
@@ -624,11 +631,10 @@ export default function RepStartQuoteModal({
       // internalNotes is staff-only (persisted separately via internal_notes
       // above) and must NEVER be threaded into the editor's "notes" param —
       // that field seeds quote_layout_packages.notes, which is customer-facing
-      // (returned by /api/quote/print and rendered on the print page). A rep
-      // who wants to leave a genuine customer-visible production/layout note
-      // can type it directly into the editor's own "Notes / special
-      // instructions" field once the editor opens, same as customers already
-      // do via StartQuoteModal.
+      // (returned by /api/quote/print and rendered on the print page).
+      // customerNotes is the deliberate, clearly-labeled customer-visible
+      // field for this — it's the only thing allowed to set "notes" here.
+      if (customerNotes.trim()) p.set("notes", customerNotes.trim());
 
       const matIdNum = Number(materialId);
       const hasMaterialId = Number.isFinite(matIdNum) && matIdNum > 0;
@@ -884,12 +890,30 @@ export default function RepStartQuoteModal({
 
                       <div className="mt-5">
                         <Field label="Internal notes">
+                          <div className="mb-1 text-[11px] text-[var(--text-faint)]">
+                            Staff only — never shown to the customer.
+                          </div>
                           <textarea
                             value={internalNotes}
                             onChange={(e) => setInternalNotes(e.target.value)}
                             rows={4}
                             className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)] focus:outline-none"
                             placeholder="Anything the layout editor / next rep should know"
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="mt-5">
+                        <Field label="Notes for the customer's quote">
+                          <div className="mb-1 text-[11px] text-[var(--attention)]">
+                            This will appear on the final quote the customer sees.
+                          </div>
+                          <textarea
+                            value={customerNotes}
+                            onChange={(e) => setCustomerNotes(e.target.value)}
+                            rows={4}
+                            className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)] focus:outline-none"
+                            placeholder="Anything we should tell the customer about this order (packing notes, lead time, etc.)"
                           />
                         </Field>
                       </div>
@@ -1449,10 +1473,21 @@ export default function RepStartQuoteModal({
                       {internalNotes.trim() ? (
                         <div className="mt-4">
                           <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
-                            INTERNAL NOTES
+                            INTERNAL NOTES <span className="text-[var(--text-faint)]">(staff only)</span>
                           </div>
                           <div className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">
                             {internalNotes}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {customerNotes.trim() ? (
+                        <div className="mt-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            CUSTOMER-VISIBLE NOTES <span className="text-[var(--attention)]">(on the quote)</span>
+                          </div>
+                          <div className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">
+                            {customerNotes}
                           </div>
                         </div>
                       ) : null}
