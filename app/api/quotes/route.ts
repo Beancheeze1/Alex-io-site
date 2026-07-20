@@ -8,6 +8,7 @@ import { q, one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { loadFacts } from "@/app/lib/memory";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
+import { findOrCreateCustomer } from "@/app/lib/customers";
 
 // GET /api/quotes?limit=25
 export async function GET(req: NextRequest) {
@@ -252,6 +253,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Link this quote to a real customer record — find-or-create by
+    // normalized email (see app/lib/customers.ts for why this is
+    // deliberately email-only, not fuzzy name-matching). Returns null when
+    // no email was provided at all; the quote is simply left unlinked in
+    // that case rather than guessing at an identity.
+    const customer = await findOrCreateCustomer(user.tenant_id, {
+      name: customer_name,
+      email,
+      phone,
+    });
+
     // Tenant-scoped upsert: quote_no unique is global today, so we must prevent cross-tenant overwrite.
     // We enforce tenant_id in insert and also in ON CONFLICT by keeping tenant_id unchanged.
     const row = await one(
@@ -268,9 +280,10 @@ export async function POST(req: NextRequest) {
         is_rush,
         qty,
         qty_breaks,
-        internal_notes
+        internal_notes,
+        customer_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT (quote_no) DO UPDATE
         SET customer_name = EXCLUDED.customer_name,
             email         = EXCLUDED.email,
@@ -286,6 +299,7 @@ export async function POST(req: NextRequest) {
             qty           = COALESCE(EXCLUDED.qty, public."quotes".qty),
             qty_breaks    = COALESCE(EXCLUDED.qty_breaks, public."quotes".qty_breaks),
             internal_notes = COALESCE(EXCLUDED.internal_notes, public."quotes".internal_notes),
+            customer_id   = COALESCE(public."quotes".customer_id, EXCLUDED.customer_id),
             updated_at    = now()
       WHERE public."quotes".tenant_id = $1
       RETURNING id,
@@ -301,6 +315,7 @@ export async function POST(req: NextRequest) {
                 qty,
                 qty_breaks,
                 internal_notes,
+                customer_id,
                 locked,
                 geometry_hash,
                 locked_at,
@@ -320,6 +335,7 @@ export async function POST(req: NextRequest) {
         qty,
         qtyBreaksJson,
         internal_notes,
+        customer?.id ?? null,
       ],
     );
 
