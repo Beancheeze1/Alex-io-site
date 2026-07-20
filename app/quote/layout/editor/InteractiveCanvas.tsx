@@ -55,8 +55,10 @@ type DragState =
   | null;
 
 // Back to original internal canvas size so side panels still fit on screen
-const CANVAS_WIDTH = 1200;
-const CANVAS_HEIGHT = 620;
+// Exported so callers can measure their real container against this reference
+// size when computing an auto-fit zoom (see app/quote/layout/page.tsx).
+export const CANVAS_WIDTH = 1200;
+export const CANVAS_HEIGHT = 620;
 
 // Reserved band at the top of the SVG for auto notes (QUOTE / NOT TO SCALE / BLOCK / MATERIAL)
 // The foam block + cavities are always drawn below this Y, so notes never overlap the block.

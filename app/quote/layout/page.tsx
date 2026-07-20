@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
 import { useLayoutModel } from "./editor/useLayoutModel";
-import InteractiveCanvas from "./editor/InteractiveCanvas";
+import InteractiveCanvas, { CANVAS_WIDTH, CANVAS_HEIGHT } from "./editor/InteractiveCanvas";
 import { usePageTracker } from "@/hooks/usePageTracker";
 
 type SearchParams = {
@@ -2408,6 +2408,47 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
 
   const [zoom, setZoom] = React.useState(1);
 
+  // --- Auto-fit-to-view for the canvas zoom ---
+  // Measures the real pixel space available for the canvas (independent of
+  // InteractiveCanvas's fixed CANVAS_WIDTH/CANVAS_HEIGHT reference size) and
+  // picks a zoom so the foam block fits cleanly within it. Manual use of the
+  // zoom slider below stops auto-adjusting until the container resizes again
+  // or the user clicks "Fit to view".
+  const canvasContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const [hasManualZoom, setHasManualZoom] = React.useState(false);
+
+  const computeFitZoom = React.useCallback((width: number, height: number) => {
+    if (!width || !height) return 1;
+    const raw = Math.min(width / CANVAS_WIDTH, height / CANVAS_HEIGHT);
+    if (!Number.isFinite(raw) || raw <= 0) return 1;
+    // Keep within the same range the manual zoom slider allows.
+    return Math.min(1.4, Math.max(0.7, raw));
+  }, []);
+
+  React.useEffect(() => {
+    const el = canvasContainerRef.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      setZoom(computeFitZoom(width, height));
+      setHasManualZoom(false);
+    });
+
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [computeFitZoom]);
+
+  const fitCanvasToView = React.useCallback(() => {
+    const el = canvasContainerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setZoom(computeFitZoom(rect.width, rect.height));
+    setHasManualZoom(false);
+  }, [computeFitZoom]);
+
     // --- Block dimension inputs (type freely, commit on Enter/Blur; snap to 0.125) ---
   const [blockInputs, setBlockInputs] = React.useState<{ length: string; width: string }>(() => ({
     length: block.lengthIn != null ? String(block.lengthIn) : "",
@@ -4412,10 +4453,21 @@ const tenantCssVars = React.useMemo(() => {
                         max={1.4}
                         step={0.05}
                         value={zoom}
-                        onChange={(e) => setZoom(Number(e.target.value))}
+                        onChange={(e) => {
+                          setZoom(Number(e.target.value));
+                          setHasManualZoom(true);
+                        }}
                       className="w-32 accent-[var(--tenant-secondary)]"
                       />
                       <span className="ml-1 text-[var(--text-primary)] font-mono">{Math.round(zoom * 100)}%</span>
+                      <span className="text-[var(--text-muted)]">{hasManualZoom ? "(manual)" : "(auto-fit)"}</span>
+                      <button
+                        type="button"
+                        onClick={fitCanvasToView}
+                        className="inline-flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--tenant-secondary)] hover:text-[var(--text-primary)] transition"
+                      >
+                        Fit to view
+                      </button>
                     </div>
                     <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
                       <span>Qty</span>
@@ -5173,7 +5225,7 @@ const tenantCssVars = React.useMemo(() => {
               {/* CENTER: Big visualizer */}
               <section
                 data-guided="canvas"
-                className={`flex-1 flex flex-col gap-3 ${guidedClass("canvas")}`}
+                className={`flex-1 min-w-0 flex flex-col gap-3 ${guidedClass("canvas")}`}
               >
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
                   <div>
@@ -5208,7 +5260,10 @@ const tenantCssVars = React.useMemo(() => {
                 </p>
 
                 {/* canvas wrapper */}
-                <div className="relative flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface-page)] overflow-hidden">
+                <div
+                  ref={canvasContainerRef}
+                  className="relative flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface-page)] overflow-hidden"
+                >
                   <div className="relative p-4 overflow-auto">
                   <InteractiveCanvas
   layout={layout}
