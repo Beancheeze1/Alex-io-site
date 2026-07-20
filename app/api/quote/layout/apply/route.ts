@@ -51,6 +51,7 @@ import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { resolveTenantFromHost } from "@/lib/tenant";
 import { buildStepFromLayout } from "@/lib/cad/step";
+import { findOrCreateCustomer } from "@/app/lib/customers";
 import {
   buildLayoutExports,
   computeGeometryHash,
@@ -330,6 +331,27 @@ async function ensureQuoteHeader(args: {
   );
   if (existing) return existing;
 
+  const customer = await findOrCreateCustomer(args.tenantId, {
+    name: args.customerName,
+    email: args.customerEmail,
+    phone: args.customerPhone,
+    company: args.customerCompany,
+  });
+
+  async function linkCustomerAndReturn(row: QuoteRow): Promise<QuoteRow> {
+    if (customer?.id) {
+      try {
+        await q(`update quotes set customer_id = $1 where id = $2`, [customer.id, row.id]);
+      } catch (e) {
+        console.warn("[layout/apply] Failed to link customer_id on newly created quote", {
+          quoteNo: args.quoteNo,
+          err: String(e),
+        });
+      }
+    }
+    return row;
+  }
+
   // IMPORTANT:
   // - quotes.customer_name is NOT NULL in your DB → ALWAYS provide a value
   // - quotes.created_by_user_id does NOT exist in your DB → NEVER reference it
@@ -378,7 +400,7 @@ async function ensureQuoteHeader(args: {
 
     if (created) {
       console.warn("[layout/apply] Auto-created missing quote header (draft)", { quoteNo: args.quoteNo });
-      return created;
+      return await linkCustomerAndReturn(created);
     }
   } catch (e) {
     console.warn("[layout/apply] Quote header insert (full) failed; will try without updated_by_user_id", {
@@ -421,7 +443,7 @@ async function ensureQuoteHeader(args: {
 
     if (created2) {
       console.warn("[layout/apply] Auto-created missing quote header (no updated_by_user_id)", { quoteNo: args.quoteNo });
-      return created2;
+      return await linkCustomerAndReturn(created2);
     }
   } catch (e) {
     console.warn("[layout/apply] Quote header insert (no updated_by_user_id) failed; will try minimal", {
@@ -443,7 +465,7 @@ async function ensureQuoteHeader(args: {
 
     if (created3) {
       console.warn("[layout/apply] Auto-created missing quote header (minimal)", { quoteNo: args.quoteNo });
-      return created3;
+      return await linkCustomerAndReturn(created3);
     }
   } catch (e) {
     console.error("[layout/apply] Failed to auto-create quote header", {
