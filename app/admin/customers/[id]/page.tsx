@@ -41,11 +41,16 @@ function fmtDate(raw: string): string {
   }
 }
 
-export default async function CustomerDetailPage({ params }: { params: { id: string } }) {
+export default async function CustomerDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const user = await getCurrentUserFromCookies();
   if (!user || user.role !== "admin") redirect("/login");
 
-  const customerId = Number(params.id);
+  const { id } = await params;
+  const customerId = Number(id);
   if (!Number.isFinite(customerId) || customerId <= 0) {
     redirect("/admin/quotes");
   }
