@@ -105,7 +105,8 @@ export async function GET(req: NextRequest) {
              q.geometry_hash,
              q.locked_at,
              q.created_at,
-             q.updated_at
+             q.updated_at,
+             q.customer_id
       FROM public."quotes" q
       LEFT JOIN public."users" u
         ON u.id = q.sales_rep_id

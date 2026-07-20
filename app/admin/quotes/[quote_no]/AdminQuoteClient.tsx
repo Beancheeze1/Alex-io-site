@@ -31,6 +31,7 @@ type QuoteRow = {
   phone: string | null;
   status: string;
   created_at: string;
+  customer_id?: number | null;
 };
 
 type ItemRow = {
@@ -2215,6 +2216,16 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       {quoteState.email ? <> • {quoteState.email}</> : null}
                       {quoteState.phone ? <> • {quoteState.phone}</> : null}
                     </div>
+                    {quoteState.customer_id ? (
+                      <div style={{ marginTop: 4 }}>
+                        <a
+                          href={`/admin/customers/${quoteState.customer_id}`}
+                          style={{ fontSize: 12, color: "var(--text-muted)", textDecoration: "underline" }}
+                        >
+                          View all quotes from this customer
+                        </a>
+                      </div>
+                    ) : null}
                   </div>
                   {(internalNotes || internalNotesLoading || internalNotesError) && (
                     <div>

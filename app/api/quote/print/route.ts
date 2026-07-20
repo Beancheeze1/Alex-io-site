@@ -58,6 +58,7 @@ type QuoteRow = {
   po_number?: string | null;
   is_rush?: boolean | null;
   qty_breaks?: Array<{ qty: number; price: number | null }> | null;
+  customer_id?: number | null;
 };
 
 type ItemRow = {
@@ -331,7 +332,8 @@ export async function GET(req: NextRequest) {
         sales_rep_id,
         po_number,
         is_rush,
-        qty_breaks
+        qty_breaks,
+        customer_id
       from quotes
       where quote_no = $1
         and tenant_id = $2

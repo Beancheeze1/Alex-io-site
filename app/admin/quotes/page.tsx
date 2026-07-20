@@ -24,6 +24,7 @@ type QuoteRow = {
   id: number;
   quote_no: string;
   customer_name: string | null;
+  customer_id?: number | null;
   email: string | null;
   phone: string | null;
   status: string | null;
@@ -687,8 +688,18 @@ export default function AdminQuotesPage() {
                           </Link>
                         </td>
                         <td className="px-3 py-2 text-xs text-[var(--text-primary)]">
-                          {q.customer_name || (
-                            <span className="text-[var(--text-faint)]">Unknown</span>
+                          {q.customer_id ? (
+                            <Link
+                              href={`/admin/customers/${q.customer_id}`}
+                              className="hover:underline"
+                              title="View all quotes from this customer"
+                            >
+                              {q.customer_name || "Unnamed customer"}
+                            </Link>
+                          ) : (
+                            q.customer_name || (
+                              <span className="text-[var(--text-faint)]">Unknown</span>
+                            )
                           )}
                         </td>
                         <td className="px-3 py-2 text-[11px] text-[var(--text-secondary)]">
