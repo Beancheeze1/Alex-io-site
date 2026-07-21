@@ -363,6 +363,11 @@ export async function GET(req: NextRequest) {
     const locked = !!(quote as any)?.locked;
     const revision = pickDisplayRevision(facts as any, locked);
 
+    // Staff (sales/cs/admin) can access CAD for an unlocked quote too — see
+    // staffUnlockedRegen below. Computed once here and reused for the final
+    // CAD RBAC redaction further down, rather than checking the role twice.
+    const isStaffCaller = isRoleAllowed(user, ["admin", "sales", "cs"]);
+
     // Attach revision to the quote header we return.
     // This does NOT require DB schema changes and is safe for current consumers.
     (quote as any).revision = revision;
@@ -544,7 +549,18 @@ export async function GET(req: NextRequest) {
       const layoutHash = computeGeometryHash(layoutPkg.layout_json);
       const lockOk = !!quote.locked && storedHash && layoutHash === storedHash;
 
-      if (!lockOk) {
+      // Staff need CAD for manufacturing review before a quote is
+      // locked/RFM'd too. Locked quotes are unchanged for everyone: still
+      // must match the frozen geometry hash (lockOk above). Unlocked +
+      // staff regenerates fresh from the current (staging) layout_json
+      // instead — there's no frozen hash to compare against pre-lock, so
+      // this is a plain regenerate, not a hash check. Unlocked + non-staff
+      // stays null, unchanged — the final CAD RBAC redaction below also
+      // still applies regardless of any of this.
+      const staffUnlockedRegen = !quote.locked && isStaffCaller;
+      const shouldRegenerate = lockOk || staffUnlockedRegen;
+
+      if (!shouldRegenerate) {
         layoutPkg = {
           ...layoutPkg,
           svg_text: null,
@@ -571,7 +587,7 @@ export async function GET(req: NextRequest) {
     // --- CAD RBAC: redact CAD exports for demo quotes and non-staff users ---
     // Demo quotes never have real CAD exports anyway, but we always redact
     // to be safe and consistent with the non-demo staff-only rule.
-    const cadAllowed = !isDemoQuote && isRoleAllowed(user, ["admin", "sales", "cs"]);
+    const cadAllowed = !isDemoQuote && isStaffCaller;
 
     if (layoutPkg && !cadAllowed) {
       layoutPkg = {
