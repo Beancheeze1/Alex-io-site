@@ -668,6 +668,12 @@ function UsersAndRolesCard() {
   );
   const [password, setPassword] = React.useState("");
   const [salesSlug, setSalesSlug] = React.useState("");
+  // Owner-only: view/manage a different tenant's users. Blank = your own
+  // tenant, same as before. Deliberately a plain ID input rather than a
+  // fetched dropdown of every tenant — the actual need here is narrow
+  // (recover access to one specific tenant), not general-purpose
+  // multi-tenant browsing.
+  const [viewTenantId, setViewTenantId] = React.useState("");
 
   async function loadUsers() {
     setLoading(true);
@@ -675,7 +681,8 @@ function UsersAndRolesCard() {
     setOkMsg(null);
 
     try {
-      const res = await fetch("/api/admin/users", { cache: "no-store" });
+      const tenantParam = viewTenantId.trim() ? `?tenant_id=${encodeURIComponent(viewTenantId.trim())}` : "";
+      const res = await fetch(`/api/admin/users${tenantParam}`, { cache: "no-store" });
       const json = (await res
         .json()
         .catch(() => null)) as AdminUsersListResponse | null;
@@ -808,6 +815,7 @@ function UsersAndRolesCard() {
           role,
           password,
           sales_slug: salesSlug.trim() || null,
+          tenant_id: viewTenantId.trim() || undefined,
         }),
       });
 
@@ -938,6 +946,25 @@ function UsersAndRolesCard() {
           >
             {loading ? "Refreshing…" : "Refresh list"}
           </button>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-[var(--text-faint)]">Tenant ID (owner only):</span>
+            <input
+              type="text"
+              value={viewTenantId}
+              onChange={(e) => setViewTenantId(e.target.value)}
+              placeholder="your own"
+              title="Blank = your own tenant. Only has an effect for the platform owner account — everyone else always sees their own tenant regardless."
+              className="w-20 rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-2.5 py-1 text-[11px] text-[var(--text-primary)]"
+            />
+            <button
+              type="button"
+              onClick={loadUsers}
+              className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-page)]"
+            >
+              View
+            </button>
+          </div>
 
           {okMsg && <span className="text-[11px] text-[var(--status-success-text)]">{okMsg}</span>}
           {tempPassword && resetForEmail && (

@@ -17,7 +17,7 @@ import { one } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { checkSeatLimit, PLAN_LIMITS } from "@/lib/plan";
-import { adminOnly } from "@/lib/admin-auth";
+import { adminOnly, isPlatformOwner } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -72,7 +72,16 @@ export const GET = adminOnly(async (req: NextRequest) => {
       );
     }
 
-    const tenantId = user.tenant_id;
+    // Platform owner can explicitly target any tenant via ?tenant_id=.
+    // Every other admin is always restricted to their own tenant,
+    // regardless of what (if anything) is passed here — this is the same
+    // pattern already used for /admin/tenants and /admin/traffic.
+    const url = new URL(req.url);
+    const requestedTenantId = Number(url.searchParams.get("tenant_id"));
+    const tenantId =
+      isPlatformOwner(user) && Number.isFinite(requestedTenantId) && requestedTenantId > 0
+        ? requestedTenantId
+        : user.tenant_id;
 
     // Use `one()` only (no assumptions about multi-row helper):
     // Return a JSON array aggregated by Postgres.
@@ -146,7 +155,15 @@ export const POST = adminOnly(async (req: NextRequest) => {
       );
     }
 
-    const tenantId = current.tenant_id;
+    // Platform owner can explicitly target any tenant via body.tenant_id.
+    // Every other admin always creates into their own tenant, regardless
+    // of what (if anything) is sent here.
+    const preBody = (await req.json().catch(() => null)) as any;
+    const requestedTenantId = Number(preBody?.tenant_id);
+    const tenantId =
+      isPlatformOwner(current) && Number.isFinite(requestedTenantId) && requestedTenantId > 0
+        ? requestedTenantId
+        : current.tenant_id;
 
     // ── Seat limit gate ────────────────────────────────────────────────────
     const seatCheck = await checkSeatLimit(tenantId);
@@ -169,7 +186,7 @@ export const POST = adminOnly(async (req: NextRequest) => {
     }
     // ── End seat limit gate ────────────────────────────────────────────────
 
-    const body = (await req.json().catch(() => null)) as any;
+    const body = preBody;
 
     const emailRaw = body?.email;
     const nameRaw = body?.name;
@@ -314,6 +331,7 @@ export const DELETE = adminOnly(async (req: NextRequest) => {
     }
 
     const tenantId = current.tenant_id;
+    const ownerBypass = isPlatformOwner(current);
 
     // Accept id from query string first: /api/admin/users?id=123
     // Fallback: JSON body { id: 123 } (in case the UI sends it that way).
@@ -349,11 +367,18 @@ export const DELETE = adminOnly(async (req: NextRequest) => {
       );
     }
 
-    // Confirm user exists (so we can return 404 cleanly).
-    const exists = await one<{ id: number; email: string }>(
-      `select id, email from public.users where id = $1 and tenant_id = $2`,
-      [id, tenantId],
-    ).catch(() => null);
+    // Confirm user exists (so we can return 404 cleanly). Platform owner
+    // can target any tenant's user; everyone else stays restricted to
+    // their own tenant.
+    const exists = ownerBypass
+      ? await one<{ id: number; email: string }>(
+          `select id, email from public.users where id = $1`,
+          [id],
+        ).catch(() => null)
+      : await one<{ id: number; email: string }>(
+          `select id, email from public.users where id = $1 and tenant_id = $2`,
+          [id, tenantId],
+        ).catch(() => null);
 
     if (!exists?.id) {
       return bad(
@@ -363,10 +388,17 @@ export const DELETE = adminOnly(async (req: NextRequest) => {
     }
 
     // Delete
-    await one<{ ok: boolean }>(
-      `with d as (delete from public.users where id = $1 and tenant_id = $2 returning 1) select true as ok`,
-      [id, tenantId],
-    );
+    if (ownerBypass) {
+      await one<{ ok: boolean }>(
+        `with d as (delete from public.users where id = $1 returning 1) select true as ok`,
+        [id],
+      );
+    } else {
+      await one<{ ok: boolean }>(
+        `with d as (delete from public.users where id = $1 and tenant_id = $2 returning 1) select true as ok`,
+        [id, tenantId],
+      );
+    }
 
     return ok({ ok: true }, 200);
   } catch (err: any) {
@@ -378,7 +410,7 @@ export const DELETE = adminOnly(async (req: NextRequest) => {
   }
 });
 
-// ---------- PATCH: update commission_pct for a user ----------
+// ---------- PATCH: reset password (query ?id=) OR update commission_pct (JSON body) ----------
 export const PATCH = adminOnly(async (req: NextRequest) => {
   try {
     const current = await getCurrentUserFromRequest(req);
@@ -393,6 +425,57 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       return bad({ ok: false, error: "tenant_required", message: "Missing tenant." }, 403);
     }
 
+    const tenantId = current.tenant_id;
+    const ownerBypass = isPlatformOwner(current);
+
+    const url = new URL(req.url);
+    const queryId = Number(url.searchParams.get("id"));
+
+    // ---- Branch 1: password reset — the admin UI's "Reset password"
+    // button calls PATCH /api/admin/users?id=<id> with no body. This was
+    // previously unimplemented entirely: makeTempPassword() existed but
+    // was never called, and the only PATCH logic that existed read id
+    // from a JSON body (which this call never sends), so every reset
+    // attempt failed with "invalid_payload" regardless of tenant. Fixed
+    // here — and given the platform owner is the one most likely to need
+    // this specifically to recover a locked-out tenant, this branch skips
+    // the tenant filter entirely for the owner, matching DELETE above.
+    if (Number.isFinite(queryId) && queryId > 0) {
+      const target = ownerBypass
+        ? await one<{ id: number; email: string }>(
+            `select id, email from public.users where id = $1`,
+            [queryId],
+          ).catch(() => null)
+        : await one<{ id: number; email: string }>(
+            `select id, email from public.users where id = $1 and tenant_id = $2`,
+            [queryId, tenantId],
+          ).catch(() => null);
+
+      if (!target?.id) {
+        return bad({ ok: false, error: "not_found", message: "User not found." }, 404);
+      }
+
+      const temp_password = makeTempPassword();
+      const password_hash = await bcrypt.hash(temp_password, 10);
+
+      const updated = ownerBypass
+        ? await one<{ id: number }>(
+            `update public.users set password_hash = $1, updated_at = now() where id = $2 returning id`,
+            [password_hash, queryId],
+          ).catch(() => null)
+        : await one<{ id: number }>(
+            `update public.users set password_hash = $1, updated_at = now() where id = $2 and tenant_id = $3 returning id`,
+            [password_hash, queryId, tenantId],
+          ).catch(() => null);
+
+      if (!updated?.id) {
+        return bad({ ok: false, error: "reset_failed", message: "Failed to reset password." }, 500);
+      }
+
+      return ok({ ok: true, id: updated.id, email: target.email, temp_password });
+    }
+
+    // ---- Branch 2: commission_pct update — JSON body, no query string id.
     const body = (await req.json().catch(() => null)) as any;
     const id = Number(body?.id);
     const pct = body?.commission_pct === null ? null : Number(body?.commission_pct);
@@ -410,13 +493,21 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       [],
     ).catch(() => null);
 
-    const updated = await one<{ id: number; commission_pct: number | null }>(
-      `UPDATE public.users
-       SET commission_pct = $1, updated_at = NOW()
-       WHERE id = $2 AND tenant_id = $3
-       RETURNING id, commission_pct`,
-      [pct ?? null, id, current.tenant_id],
-    );
+    const updated = ownerBypass
+      ? await one<{ id: number; commission_pct: number | null }>(
+          `UPDATE public.users
+           SET commission_pct = $1, updated_at = NOW()
+           WHERE id = $2
+           RETURNING id, commission_pct`,
+          [pct ?? null, id],
+        )
+      : await one<{ id: number; commission_pct: number | null }>(
+          `UPDATE public.users
+           SET commission_pct = $1, updated_at = NOW()
+           WHERE id = $2 AND tenant_id = $3
+           RETURNING id, commission_pct`,
+          [pct ?? null, id, tenantId],
+        );
 
     if (!updated?.id) {
       return bad({ ok: false, error: "not_found", message: "User not found." }, 404);
