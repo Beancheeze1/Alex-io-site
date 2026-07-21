@@ -31,6 +31,39 @@ export function buildFullPackageFilename(opts: {
   return `${q}__Full-Package${revPart}.${opts.ext}`;
 }
 
+function formatThicknessForName(thicknessIn: number | null | undefined): string | null {
+  if (thicknessIn == null) return null;
+  const n = Number(thicknessIn);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const fixed = n.toFixed(3);
+  const trimmed = fixed.replace(/\.?0+$/g, "");
+  return `${trimmed}in`;
+}
+
+export function buildLayerFilename(opts: {
+  quoteNo: string;
+  layerIndex: number; // 0-based
+  layerLabel: string | null;
+  thicknessIn: number | null;
+  ext: "dxf" | "step";
+  revision?: string | null;
+}): string {
+  const q = sanitizeFilenamePart(opts.quoteNo || "quote");
+  const layerNum = opts.layerIndex + 1;
+  const label = sanitizeFilenamePart(opts.layerLabel || "");
+  const thick = formatThicknessForName(opts.thicknessIn);
+
+  const parts: string[] = [q];
+  const rev = sanitizeFilenamePart(opts.revision || "");
+  if (rev) parts.push(rev);
+
+  parts.push(`Layer-${layerNum}`);
+  if (label) parts.push(label);
+  if (thick) parts.push(thick);
+
+  return `${parts.join("__")}.${opts.ext}`;
+}
+
 export function triggerBlobDownload(blob: Blob, filename: string) {
   if (typeof window === "undefined") return;
   const url = URL.createObjectURL(blob);

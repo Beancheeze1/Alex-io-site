@@ -27,7 +27,7 @@
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
 import { usePageTracker } from "@/hooks/usePageTracker";
-import { buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
+import { buildFullPackageFilename, buildLayerFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 
 type QuoteRow = {
   id: number;
@@ -955,6 +955,91 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
       console.error("CAD STEP download failed:", err);
     }
   }, [layoutPkg, quote, quoteNo, facts]);
+
+  // Per-layer CAD downloads — staff-only (gated by isStaffView at the call
+  // site below), one DXF + one STEP per layer, matching the admin page's
+  // per-layer buttons. Unlike the merged downloads above, both fetch a
+  // server route on click rather than reading a pre-fetched string:
+  //   - /api/quote/layout/step-layer already re-checks auth/lock server-side
+  //     (this is the same endpoint the admin page uses).
+  //   - /api/quote/layout/dxf-layer is new: admin's own per-layer DXF button
+  //     builds the file client-side with no server check at all, which is
+  //     fine for a staff-only route but not safe to reuse verbatim here,
+  //     since this page's JS bundle also ships to logged-out customers.
+  // On failure we surface the real error (open the JSON error response)
+  // rather than swallowing it — same pattern the admin page already uses
+  // for handleDownloadLayerStep.
+  const handleDownloadLayerDxf = React.useCallback(
+    async (layerIndex: number, layerLabel: string | null, thicknessIn: number | null) => {
+      if (typeof window === "undefined") return;
+      const quoteNoValue = quote?.quote_no || quoteNo;
+      if (!quoteNoValue) return;
+
+      const url = `/api/quote/layout/dxf-layer?quote_no=${encodeURIComponent(quoteNoValue)}&layer_index=${encodeURIComponent(String(layerIndex))}`;
+
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) {
+          console.error("Layer DXF fetch failed:", res.status, res.statusText);
+          window.open(url, "_blank", "noopener,noreferrer");
+          return;
+        }
+
+        const text = await res.text();
+        const blob = new Blob([text], { type: "application/dxf" });
+        const filename = buildLayerFilename({
+          quoteNo: quoteNoValue,
+          revision: facts?.revision ?? null,
+          layerIndex,
+          layerLabel,
+          thicknessIn,
+          ext: "dxf",
+        });
+
+        triggerBlobDownload(blob, filename);
+      } catch (err) {
+        console.error("Layer DXF download failed:", err);
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    },
+    [quote, quoteNo, facts],
+  );
+
+  const handleDownloadLayerStep = React.useCallback(
+    async (layerIndex: number, layerLabel: string | null, thicknessIn: number | null) => {
+      if (typeof window === "undefined") return;
+      const quoteNoValue = quote?.quote_no || quoteNo;
+      if (!quoteNoValue) return;
+
+      const url = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(quoteNoValue)}&layer_index=${encodeURIComponent(String(layerIndex))}`;
+
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) {
+          console.error("Layer STEP fetch failed:", res.status, res.statusText);
+          window.open(url, "_blank", "noopener,noreferrer");
+          return;
+        }
+
+        const buf = await res.arrayBuffer();
+        const blob = new Blob([buf], { type: "application/octet-stream" });
+        const filename = buildLayerFilename({
+          quoteNo: quoteNoValue,
+          revision: facts?.revision ?? null,
+          layerIndex,
+          layerLabel,
+          thicknessIn,
+          ext: "step",
+        });
+
+        triggerBlobDownload(blob, filename);
+      } catch (err) {
+        console.error("Layer STEP download failed:", err);
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    },
+    [quote, quoteNo, facts],
+  );
 
   // Helper to reload quote data from /api/quote/print (used on initial load and after removals)
   const reloadQuoteData = React.useCallback(async (qNo: string) => {
@@ -3293,6 +3378,55 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       </div>
                                     )}
                                   </div>
+
+                                  {isStaffView && (layoutPkg?.dxf_text || layoutPkg?.step_text) ? (
+                                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                      {layoutPkg?.dxf_text ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDownloadLayerDxf(idx, label, t);
+                                          }}
+                                          title="Staff only — not shown on the customer-facing quote page"
+                                          style={{
+                                            padding: "4px 10px",
+                                            borderRadius: 999,
+                                            border: "1px dashed var(--border)",
+                                            background: "var(--surface-page)",
+                                            color: "var(--text-primary)",
+                                            fontSize: 11,
+                                            cursor: "pointer",
+                                          }}
+                                        >
+                                          Download DXF (layer)
+                                        </button>
+                                      ) : null}
+
+                                      {layoutPkg?.step_text ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDownloadLayerStep(idx, label, t);
+                                          }}
+                                          title="Staff only — generates a STEP for this single layer via /api/quote/layout/step-layer"
+                                          style={{
+                                            padding: "4px 10px",
+                                            borderRadius: 999,
+                                            border: "1px solid var(--border)",
+                                            background: "var(--surface-card)",
+                                            color: "var(--text-primary)",
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            cursor: "pointer",
+                                          }}
+                                        >
+                                          Download STEP (layer)
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
 
                                   <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)" }}>
                                     Preview shows foam outline + cavity geometry for this layer.
