@@ -25,7 +25,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
-import { buildLayoutExports, computeGeometryHash } from "@/app/lib/layout/exports";
+import { buildLayoutExports, computeGeometryHash, embedGeometryHashInStep } from "@/app/lib/layout/exports";
+import { buildStepFromLayout } from "@/lib/cad/step";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
@@ -572,11 +573,34 @@ export async function GET(req: NextRequest) {
         try {
           const bundle = buildLayoutExports(layoutPkg.layout_json);
 
+          // STEP is handled separately from svg/dxf: buildLayoutExports()'s
+          // step field is a hardcoded stub ("") — it is never a real export,
+          // so it must never be written into step_text (bundle.step ?? x
+          // does NOT skip "", since "" isn't null/undefined, which is what
+          // silently wiped every quote's real, microservice-generated
+          // step_text on every single page load). Locked quotes already have
+          // a real step_text frozen at lock time (lock fails if STEP
+          // generation fails there) — leave it untouched. Only the new
+          // staff+unlocked case needs a genuinely fresh STEP, so call the
+          // real microservice-backed generator; if that fails, keep the
+          // last known-good stored value rather than blanking it.
+          let stepText = layoutPkg.step_text;
+          if (staffUnlockedRegen) {
+            try {
+              const fresh = await buildStepFromLayout(layoutPkg.layout_json, quote.quote_no, null);
+              if (fresh) {
+                stepText = embedGeometryHashInStep(fresh, layoutHash);
+              }
+            } catch (e) {
+              console.error("[quote/print] fresh STEP regeneration failed", e);
+            }
+          }
+
           layoutPkg = {
             ...layoutPkg,
             svg_text: bundle.svg ?? layoutPkg.svg_text,
             dxf_text: bundle.dxf ?? layoutPkg.dxf_text,
-            step_text: bundle.step ?? layoutPkg.step_text,
+            step_text: stepText,
           };
         } catch (e) {
           console.error("[quote/print] export regeneration failed", e);
