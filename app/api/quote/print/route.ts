@@ -26,7 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
 import { buildLayoutExports, computeGeometryHash } from "@/app/lib/layout/exports";
-import { getCurrentUserFromRequest } from "@/lib/auth";
+import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
 
@@ -571,8 +571,7 @@ export async function GET(req: NextRequest) {
     // --- CAD RBAC: redact CAD exports for demo quotes and non-staff users ---
     // Demo quotes never have real CAD exports anyway, but we always redact
     // to be safe and consistent with the non-demo staff-only rule.
-    const role = (user?.role || "").toLowerCase();
-    const cadAllowed = !isDemoQuote && (role === "admin" || role === "sales" || role === "cs");
+    const cadAllowed = !isDemoQuote && isRoleAllowed(user, ["admin", "sales", "cs"]);
 
     if (layoutPkg && !cadAllowed) {
       layoutPkg = {

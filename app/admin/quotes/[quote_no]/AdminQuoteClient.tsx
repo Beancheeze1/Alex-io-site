@@ -12,7 +12,8 @@
 //
 // IMPORTANT:
 //  - This is an INTERNAL view (engineering / estimating).
-//  - Client-facing /quote page remains CAD-download-free.
+//  - /quote (QuotePrintClient.tsx) also has CAD downloads now, gated to
+//    isStaffView — never shown on the actual customer-facing view.
 //  - We DO NOT touch cavity parsing, dims, qty logic, or existing /quote UI.
 
 "use client";
@@ -21,6 +22,7 @@ import * as React from "react";
 import { buildOuterOutlinePolyline } from "@/app/lib/layout/outline";
 import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
 import QuoteAttachmentsPanel from "@/components/admin/QuoteAttachmentsPanel";
+import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 
 
 type QuoteRow = {
@@ -184,19 +186,6 @@ function svgRoundedRectPath(x: number, y: number, w: number, h: number, r: numbe
 
 /* ---------------- Filename helpers (manufacturer-friendly) ---------------- */
 
-function sanitizeFilenamePart(input: string): string {
-  const s = (input || "").trim();
-  if (!s) return "";
-  // Replace illegal-ish characters with dashes and collapse repeats
-  const cleaned = s
-    .replace(/[\s]+/g, "-")
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[-_.]+|[-_.]+$/g, "");
-  // Keep it readable, not monstrous
-  return cleaned.length > 48 ? cleaned.slice(0, 48) : cleaned;
-}
-
 function formatThicknessForName(thicknessIn: number | null | undefined): string | null {
   if (thicknessIn == null) return null;
   const n = Number(thicknessIn);
@@ -233,18 +222,6 @@ function buildLayerFilename(opts: {
 
   return `${parts.join("__")}.${opts.ext}`;
 }
-
-function buildFullPackageFilename(opts: {
-  quoteNo: string;
-  ext: "dxf" | "step" | "zip" | "svg";
-  revision?: string | null;
-}): string {
-  const q = sanitizeFilenamePart(opts.quoteNo || "quote");
-  const rev = sanitizeFilenamePart(opts.revision || "");
-  const revPart = rev ? `__${rev}` : "";
-  return `${q}__Full-Package${revPart}.${opts.ext}`;
-}
-
 
 /* ---------------- DXF helpers (per-layer) ---------------- */
 
@@ -1458,17 +1435,6 @@ const overallQty =
     const targetDims =
       Number.isFinite(targetL) && targetL > 0 && Number.isFinite(targetW) && targetW > 0 ? ({ L: targetL, W: targetW } as TargetDimsIn) : undefined;
     return targetDims;
-  }
-
-  function triggerBlobDownload(blob: Blob, filename: string) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
   }
 
   const handleDownloadSvg = React.useCallback(() => {

@@ -27,6 +27,7 @@
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
 import { usePageTracker } from "@/hooks/usePageTracker";
+import { buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 
 type QuoteRow = {
   id: number;
@@ -915,6 +916,45 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
     window.open(url, "_blank", "noopener,noreferrer");
   }, []);
+
+  // CAD downloads — staff-only (gated by isStaffView at the call site below).
+  // Uses the same server-regenerated export strings already returned by
+  // /api/quote/print (layoutPkg.dxf_text / .step_text) that the admin quote
+  // detail page's downloads use, via the now-shared helpers in
+  // app/lib/cad-download.ts — not a second, separate implementation.
+  const handleDownloadDxf = React.useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (!layoutPkg?.dxf_text) return;
+
+    try {
+      const blob = new Blob([layoutPkg.dxf_text], { type: "application/dxf" });
+      const filename = buildFullPackageFilename({
+        quoteNo: quote?.quote_no || quoteNo || "quote",
+        ext: "dxf",
+        revision: facts?.revision ?? null,
+      });
+      triggerBlobDownload(blob, filename);
+    } catch (err) {
+      console.error("CAD DXF download failed:", err);
+    }
+  }, [layoutPkg, quote, quoteNo, facts]);
+
+  const handleDownloadStep = React.useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (!layoutPkg?.step_text) return;
+
+    try {
+      const blob = new Blob([layoutPkg.step_text], { type: "application/octet-stream" });
+      const filename = buildFullPackageFilename({
+        quoteNo: quote?.quote_no || quoteNo || "quote",
+        ext: "step",
+        revision: facts?.revision ?? null,
+      });
+      triggerBlobDownload(blob, filename);
+    } catch (err) {
+      console.error("CAD STEP download failed:", err);
+    }
+  }, [layoutPkg, quote, quoteNo, facts]);
 
   // Helper to reload quote data from /api/quote/print (used on initial load and after removals)
   const reloadQuoteData = React.useCallback(async (qNo: string) => {
@@ -2130,6 +2170,26 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     >
                       Schedule a call
                     </button>
+                    {isStaffView && layoutPkg?.dxf_text ? (
+                      <button
+                        type="button"
+                        onClick={handleDownloadDxf}
+                        title="Staff only — not shown on the customer-facing quote page"
+                        style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border-strong)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}
+                      >
+                        Download DXF
+                      </button>
+                    ) : null}
+                    {isStaffView && layoutPkg?.step_text ? (
+                      <button
+                        type="button"
+                        onClick={handleDownloadStep}
+                        title="Staff only — not shown on the customer-facing quote page"
+                        style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border-strong)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}
+                      >
+                        Download STEP
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
