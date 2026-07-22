@@ -128,13 +128,14 @@ export async function GET(req: Request) {
     // ── End demo bypass ─────────────────────────────────────────────────────
 
     const pkg = await one<{
+      quote_id: number;
       quote_no: string;
       layout_json: any;
       locked: boolean | null;
       geometry_hash: string | null;
     }>(
       `
-      SELECT q.quote_no, q.locked, q.geometry_hash, lp.layout_json
+      SELECT lp.quote_id, q.quote_no, q.locked, q.geometry_hash, lp.layout_json
       FROM public.quote_layout_packages lp
       JOIN public.quotes q ON q.id = lp.quote_id
       WHERE q.quote_no = $1
@@ -173,6 +174,55 @@ export async function GET(req: Request) {
     if (!sliced) return jsonErr(404, "NOT_FOUND", "Layer not found for this quote layout.");
 
     coerceLayerCropToBlockCorners(sliced);
+
+    // Scale to the primary (first) foam item's L/W, same correction
+    // dxf-layer/route.ts's buildDxfForLayer already applies — the saved
+    // layout_json block dims can drift slightly from the item's recorded
+    // length_in/width_in, and STEP was the only per-layer export not
+    // correcting for it. Root cause of that drift is out of scope here.
+    const primaryItem = await one<{ length_in: string; width_in: string }>(
+      `
+      SELECT length_in, width_in
+      FROM public.quote_items
+      WHERE quote_id = $1
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [pkg.quote_id],
+    );
+
+    const targetL = primaryItem ? Number(primaryItem.length_in) : NaN;
+    const targetW = primaryItem ? Number(primaryItem.width_in) : NaN;
+    const targetDims =
+      Number.isFinite(targetL) && targetL > 0 && Number.isFinite(targetW) && targetW > 0
+        ? { L: targetL, W: targetW }
+        : undefined;
+
+    if (targetDims && sliced.block) {
+      const rawL = Number(sliced.block.lengthIn ?? sliced.block.length_in);
+      const rawW = Number(sliced.block.widthIn ?? sliced.block.width_in);
+
+      if (Number.isFinite(rawL) && rawL > 0) {
+        const scale = targetDims.L / rawL;
+        const fallbackW = Number.isFinite(rawW) && rawW > 0 ? rawW : rawL;
+        const scaledL = rawL * scale;
+        const scaledW = fallbackW * scale;
+
+        const scaledBlock = { ...sliced.block, lengthIn: scaledL, widthIn: scaledW };
+
+        const chamferInRaw = Number(scaledBlock.chamferIn);
+        if (Number.isFinite(chamferInRaw) && chamferInRaw > 0) {
+          scaledBlock.chamferIn = Math.max(0, Math.min(chamferInRaw * scale, scaledL / 2 - 1e-6, scaledW / 2 - 1e-6));
+        }
+
+        const roundRadiusRaw = Number(scaledBlock.roundRadiusIn);
+        if (Number.isFinite(roundRadiusRaw) && roundRadiusRaw > 0) {
+          scaledBlock.roundRadiusIn = Math.max(0, Math.min(roundRadiusRaw * scale, scaledL / 2 - 1e-6, scaledW / 2 - 1e-6));
+        }
+
+        sliced.block = scaledBlock;
+      }
+    }
 
     const stepBase = await buildStepFromLayout(sliced, quote_no, null);
     if (!stepBase || stepBase.trim().length === 0) {
