@@ -270,6 +270,27 @@ export default function StartQuoteModal() {
   const [insertW, setInsertW] = React.useState<string>("");
   const [insertD, setInsertD] = React.useState<string>("");
 
+  // Foam Insert: additional bonded layers on top of the Layer 1 block above.
+  // Empty by default so a plain single-block quote is unaffected.
+  const [extraInsertLayers, setExtraInsertLayers] = React.useState<
+    { id: string; thicknessIn: string }[]
+  >([]);
+
+  const addExtraInsertLayer = () => {
+    setExtraInsertLayers((prev) => [
+      ...prev,
+      { id: `extra-${Date.now()}-${prev.length}`, thicknessIn: "1" },
+    ]);
+  };
+  const removeExtraInsertLayer = (id: string) => {
+    setExtraInsertLayers((prev) => prev.filter((l) => l.id !== id));
+  };
+  const updateExtraInsertLayerThickness = (id: string, value: string) => {
+    setExtraInsertLayers((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, thicknessIn: value } : l)),
+    );
+  };
+
   // Complete Pack: Box setup
   const [boxL, setBoxL] = React.useState<string>(
     (searchParams.get("box_l") || "").trim(),
@@ -669,7 +690,8 @@ export default function StartQuoteModal() {
 
   const insertDimsOk =
     quoteType === "foam_insert"
-      ? !!(toNumOrNull(insertL) && toNumOrNull(insertW) && toNumOrNull(insertD))
+      ? !!(toNumOrNull(insertL) && toNumOrNull(insertW) && toNumOrNull(insertD)) &&
+        extraInsertLayers.every((l) => !!toNumOrNull(l.thicknessIn))
       : true;
 
   const boxOk =
@@ -967,9 +989,13 @@ export default function StartQuoteModal() {
       const dims = normalizeDims3(L, W, D);
       if (dims) p.set("dims", dims);
 
-      p.set("layer_count", "1");
+      p.set("layer_count", String(1 + extraInsertLayers.length));
       p.append("layer_thicknesses", String(D || 1));
       p.append("layer_label", "Layer 1");
+      extraInsertLayers.forEach((layer, i) => {
+        p.append("layer_thicknesses", String(toNumOrNull(layer.thicknessIn) || 1));
+        p.append("layer_label", `Layer ${i + 2}`);
+      });
       p.set("layer_cavity_layer_index", "1");
       p.set("activeLayer", "1");
       p.set("active_layer", "1");
@@ -1519,13 +1545,56 @@ export default function StartQuoteModal() {
                         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                           <DimInput label="Length (in)" value={insertL} onChange={setInsertL} />
                           <DimInput label="Width (in)" value={insertW} onChange={setInsertW} />
-                          <DimInput label="Depth (in)" value={insertD} onChange={setInsertD} />
+                          <DimInput
+                            label={extraInsertLayers.length > 0 ? "Layer 1 thickness (in)" : "Depth (in)"}
+                            value={insertD}
+                            onChange={setInsertD}
+                          />
                         </div>
                         {!insertDimsOk ? (
                           <div className="mt-3 text-sm text-[var(--attention)]">
                             Length/Width/Depth are required for Foam Insert.
                           </div>
                         ) : null}
+
+                        {extraInsertLayers.length > 0 ? (
+                          <div className="mt-4 space-y-3">
+                            <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                              ADDITIONAL LAYERS (bonded on top of Layer 1)
+                            </div>
+                            {extraInsertLayers.map((layer, i) => (
+                              <div key={layer.id} className="flex items-end gap-3">
+                                <div className="flex-1">
+                                  <DimInput
+                                    label={`Layer ${i + 2} thickness (in)`}
+                                    value={layer.thicknessIn}
+                                    onChange={(v) => updateExtraInsertLayerThickness(layer.id, v)}
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => removeExtraInsertLayer(layer.id)}
+                                  className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <div className="mt-4">
+                          <button
+                            type="button"
+                            onClick={addExtraInsertLayer}
+                            className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+                          >
+                            + Add layer
+                          </button>
+                          <div className="mt-2 text-xs text-[var(--text-muted)]">
+                            Add a bonded foam layer (e.g. a top pad) on top of the block above. Layers share the same length/width and can be fine-tuned further in the layout editor.
+                          </div>
+                        </div>
                       </div>
                     </StepCard>
                   ) : null}

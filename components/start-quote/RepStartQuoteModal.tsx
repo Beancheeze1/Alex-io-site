@@ -310,6 +310,27 @@ export default function RepStartQuoteModal({
   const [insertW, setInsertW] = React.useState("");
   const [insertD, setInsertD] = React.useState("");
 
+  // Foam Insert: additional bonded layers on top of the Layer 1 block above.
+  // Empty by default so a plain single-block quote is unaffected.
+  const [extraInsertLayers, setExtraInsertLayers] = React.useState<
+    { id: string; thicknessIn: string }[]
+  >([]);
+
+  const addExtraInsertLayer = () => {
+    setExtraInsertLayers((prev) => [
+      ...prev,
+      { id: `extra-${Date.now()}-${prev.length}`, thicknessIn: "1" },
+    ]);
+  };
+  const removeExtraInsertLayer = (id: string) => {
+    setExtraInsertLayers((prev) => prev.filter((l) => l.id !== id));
+  };
+  const updateExtraInsertLayerThickness = (id: string, value: string) => {
+    setExtraInsertLayers((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, thicknessIn: value } : l)),
+    );
+  };
+
   const [boxL, setBoxL] = React.useState("");
   const [boxW, setBoxW] = React.useState("");
   const [boxD, setBoxD] = React.useState("");
@@ -653,12 +674,19 @@ export default function RepStartQuoteModal({
         const dims = normalizeDims3(L, W, D);
         if (dims) p.set("dims", dims);
 
-        p.set("layer_count", "1");
+        p.set("layer_count", String(1 + extraInsertLayers.length));
         p.append("layer_thicknesses", String(D || 1));
         p.append("layer_label", "Layer 1");
         p.append("layer_crop", "0");
         p.append("layer_round", roundCorners ? "1" : "0");
         p.append("layer_round_radius", String(roundRadiusNum));
+        extraInsertLayers.forEach((layer, i) => {
+          p.append("layer_thicknesses", String(toNumOrNull(layer.thicknessIn) || 1));
+          p.append("layer_label", `Layer ${i + 2}`);
+          p.append("layer_crop", "0");
+          p.append("layer_round", roundCorners ? "1" : "0");
+          p.append("layer_round_radius", String(roundRadiusNum));
+        });
         p.set("activeLayer", "1");
         p.set("active_layer", "1");
       } else {
@@ -949,17 +977,60 @@ export default function RepStartQuoteModal({
                       }
                     >
                       {quoteType === "foam_insert" ? (
-                        <div className="grid grid-cols-3 gap-3">
-                          <Field label="Length (in)">
-                            <Input value={insertL} onChange={setInsertL} placeholder="12" />
-                          </Field>
-                          <Field label="Width (in)">
-                            <Input value={insertW} onChange={setInsertW} placeholder="10" />
-                          </Field>
-                          <Field label="Depth (in)">
-                            <Input value={insertD} onChange={setInsertD} placeholder="2" />
-                          </Field>
-                        </div>
+                        <>
+                          <div className="grid grid-cols-3 gap-3">
+                            <Field label="Length (in)">
+                              <Input value={insertL} onChange={setInsertL} placeholder="12" />
+                            </Field>
+                            <Field label="Width (in)">
+                              <Input value={insertW} onChange={setInsertW} placeholder="10" />
+                            </Field>
+                            <Field label={extraInsertLayers.length > 0 ? "Layer 1 thickness (in)" : "Depth (in)"}>
+                              <Input value={insertD} onChange={setInsertD} placeholder="2" />
+                            </Field>
+                          </div>
+
+                          {extraInsertLayers.length > 0 ? (
+                            <div className="mt-4 space-y-3">
+                              <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                                ADDITIONAL LAYERS (bonded on top of Layer 1)
+                              </div>
+                              {extraInsertLayers.map((layer, i) => (
+                                <div key={layer.id} className="flex items-end gap-3">
+                                  <div className="flex-1">
+                                    <Field label={`Layer ${i + 2} thickness (in)`}>
+                                      <Input
+                                        value={layer.thicknessIn}
+                                        onChange={(v) => updateExtraInsertLayerThickness(layer.id, v)}
+                                        placeholder="1"
+                                      />
+                                    </Field>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeExtraInsertLayer(layer.id)}
+                                    className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+
+                          <div className="mt-4">
+                            <button
+                              type="button"
+                              onClick={addExtraInsertLayer}
+                              className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+                            >
+                              + Add layer
+                            </button>
+                            <div className="mt-2 text-xs text-[var(--text-muted)]">
+                              Add a bonded foam layer (e.g. a top pad) on top of the block above. Layers share the same length/width and can be fine-tuned further in the layout editor.
+                            </div>
+                          </div>
+                        </>
                       ) : (
                         <>
                           <div className="grid grid-cols-3 gap-3">
