@@ -82,6 +82,7 @@ export type TemplateInput = {
   printingUpchargePct?: number | null;
   printingUpchargeAmt?: number | null;
   printingUpcharge?: number | null;       // combined total (artSetupFee + printingUpchargeAmt)
+  dieCuttingCharge?: number | null;
   grandTotal?: number | null;
   layers?: TemplateLayoutLayer[] | null;
   layoutNotes?: string | null;
@@ -589,6 +590,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const printingUpchargePctVal = input.printingUpchargePct ?? null;
   const printingUpchargeAmtVal = input.printingUpchargeAmt ?? null;
   const printingUpchargeAmt = input.printingUpcharge ?? null;   // combined
+  const dieCuttingChargeAmt = input.dieCuttingCharge ?? null;
   const grandTotalAmt = input.grandTotal ?? null;
   const layers = Array.isArray(input.layers) ? input.layers : [];
   const hasLayers = layers.length > 0;
@@ -671,6 +673,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const displayTotal = grandTotalAmt ?? (pricingPending ? null : pricing.total ?? null);
   const hasPackaging = packagingSubtotalAmt != null && packagingSubtotalAmt > 0;
   const hasPrinting  = printingUpchargeAmt != null && printingUpchargeAmt > 0;
+  const hasDieCutting = dieCuttingChargeAmt != null && dieCuttingChargeAmt > 0;
   void showHowBuilt; // retained for potential future use
 
   return `<!doctype html>
@@ -738,7 +741,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           <td style="width:23%;vertical-align:top;text-align:right;">
                             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Est. total</div>
                             <div style="font-size:16px;font-weight:800;color:#f97316;">${displayTotal != null ? fmtMoney(displayTotal) : "Pending"}</div>
-                            ${hasPackaging || hasPrinting ? `<div style="font-size:10px;color:#6b7280;margin-top:2px;">foam${hasPackaging ? " + pkg" : ""}${hasPrinting ? " + print" : ""}</div>` : ""}
+                            ${hasPackaging || hasPrinting || hasDieCutting ? `<div style="font-size:10px;color:#6b7280;margin-top:2px;">foam${hasPackaging ? " + pkg" : ""}${hasPrinting ? " + print" : ""}${hasDieCutting ? " + die-cut" : ""}</div>` : ""}
                           </td>
                         </tr>
                       </table>

@@ -244,9 +244,23 @@ export async function POST(req: NextRequest) {
     const printingUpchargePct = isPrinted ? Number(settings.printing_upcharge_pct || 0) : 0;
     const printingUpchargeAmt = Math.round((foamSubtotal + packagingSubtotal) * (printingUpchargePct / 100) * 100) / 100;
     const printingUpcharge = artSetupFee + printingUpchargeAmt;
-    const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge;
 
-    console.log(`[send-quote] foam=${foamSubtotal} pkg=${packagingSubtotal} artSetup=${artSetupFee} upchargeAmt=${printingUpchargeAmt} grand=${grandTotal}`);
+    // Die-cutting charge: same rule as /api/quote/print — flat fee once the
+    // order's real qty (the primary, non-layout-layer, non-packaging row)
+    // reaches the configured trigger. Computed independently here (like the
+    // rest of this route's pricing) since send-quote avoids calling other
+    // internal routes over HTTP.
+    const orderQtyForDieCut = Number(
+      items.find((it) => !isLayoutLayerRow(it.notes) && !isPackagingRow(it.notes))?.qty,
+    ) || 0;
+    const dieCutTriggerQty = Number(settings.die_cut_trigger_qty) || 0;
+    const dieCutUpchargeUsd = Number(settings.die_cut_upcharge_usd) || 0;
+    const dieCuttingTriggered = dieCutTriggerQty > 0 && orderQtyForDieCut >= dieCutTriggerQty;
+    const dieCuttingCharge = dieCuttingTriggered ? dieCutUpchargeUsd : 0;
+
+    const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
+
+    console.log(`[send-quote] foam=${foamSubtotal} pkg=${packagingSubtotal} artSetup=${artSetupFee} upchargeAmt=${printingUpchargeAmt} dieCut=${dieCuttingCharge} grand=${grandTotal}`);
 
     // 7) Load layout package
     const layoutPkg = await one<LayoutRow>(
@@ -385,6 +399,7 @@ export async function POST(req: NextRequest) {
       printingUpchargePct: printingUpchargePct > 0 ? printingUpchargePct : null,
       printingUpchargeAmt: printingUpchargeAmt > 0 ? printingUpchargeAmt : null,
       printingUpcharge: printingUpcharge > 0 ? printingUpcharge : null,
+      dieCuttingCharge: dieCuttingCharge > 0 ? dieCuttingCharge : null,
       grandTotal,
       layers: emailLayers.length > 0 ? emailLayers : null,
       layoutNotes: layoutPkg?.notes || null,

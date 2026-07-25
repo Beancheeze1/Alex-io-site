@@ -83,6 +83,8 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       "machining_in3_per_min",
       "machine_cost_per_min",
       "markup_factor_default",
+      "die_cut_trigger_qty",
+      "die_cut_upcharge_usd",
       "cushion_family_order",
     ];
 

@@ -20,6 +20,12 @@ export type PricingSettings = {
   machine_cost_per_min: number;
   markup_factor_default: number;
 
+  // Die-cutting upcharge: flat fee applied once order qty reaches the trigger.
+  // Off by default (upcharge 0) so this never silently starts charging
+  // existing quotes until an admin explicitly sets both values.
+  die_cut_trigger_qty: number;
+  die_cut_upcharge_usd: number;
+
   cushion_family_order: string[];
 };
 
@@ -35,6 +41,9 @@ const DEFAULTS: PricingSettings = {
   machining_in3_per_min: 3000,
   machine_cost_per_min: 0.65,
   markup_factor_default: 1.45,
+
+  die_cut_trigger_qty: 500,
+  die_cut_upcharge_usd: 0,
 
   cushion_family_order: ["EPE", "PU", "PE", "EVA"],
 };

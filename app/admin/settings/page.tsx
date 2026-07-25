@@ -34,6 +34,9 @@ type PricingSettings = {
   machine_cost_per_min: number;
   markup_factor_default: number;
 
+  die_cut_trigger_qty: number;
+  die_cut_upcharge_usd: number;
+
   cushion_family_order: string[];
 };
 
@@ -62,6 +65,9 @@ export default function AdminSettingsPage() {
     machining_in3_per_min: 3000,
     machine_cost_per_min: 0.65,
     markup_factor_default: 1.45,
+
+    die_cut_trigger_qty: 500,
+    die_cut_upcharge_usd: 0,
 
     cushion_family_order: ["EPE", "PU", "PE", "EVA"],
   });
@@ -125,6 +131,15 @@ export default function AdminSettingsPage() {
           markup_factor_default: numberOr(
             (s as any).markup_factor_default,
             prev.markup_factor_default,
+          ),
+
+          die_cut_trigger_qty: numberOr(
+            (s as any).die_cut_trigger_qty,
+            prev.die_cut_trigger_qty,
+          ),
+          die_cut_upcharge_usd: numberOr(
+            (s as any).die_cut_upcharge_usd,
+            prev.die_cut_upcharge_usd,
           ),
 
           cushion_family_order: Array.isArray(
@@ -463,6 +478,51 @@ export default function AdminSettingsPage() {
                 <p className="mt-3 text-[11px] text-[var(--text-faint)]">
                   These values will eventually align with the pricing breakdown
                   you see in the quote viewer: material vs. machine vs. markup.
+                </p>
+              </div>
+
+              {/* Die-cutting charge */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
+                <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">
+                  Die-cutting charge
+                </h2>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-xs">
+                    <span className="text-[var(--text-secondary)]">
+                      Trigger quantity (order qty &ge; this)
+                    </span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                      value={settings.die_cut_trigger_qty}
+                      onChange={(e) =>
+                        setNum("die_cut_trigger_qty")(e.target.value)
+                      }
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1 text-xs">
+                    <span className="text-[var(--text-secondary)]">
+                      Die-cutting upcharge ($)
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                      value={settings.die_cut_upcharge_usd}
+                      onChange={(e) =>
+                        setNum("die_cut_upcharge_usd")(e.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
+                  Flat charge applied once when an order's quantity reaches the
+                  trigger. Set the upcharge to 0 to keep this off — it never
+                  applies unless both values are set above 0.
                 </p>
               </div>
 

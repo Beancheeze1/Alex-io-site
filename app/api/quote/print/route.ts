@@ -683,6 +683,17 @@ export async function GET(req: NextRequest) {
     // Combined printing total (backward-compat field clients already read)
     const printingUpcharge = artSetupFee + printingUpchargeAmt;
 
+    // Die-cutting charge: flat fee triggered once order qty reaches the
+    // configured threshold. items[] is already sorted primary-first
+    // (sortItemsForQuoteDisplay), and every row on a quote shares the same
+    // order qty, so items[0] reliably carries the real order quantity for
+    // both pre-Apply (facts-only) and post-Apply (DB-backed) paths.
+    const orderQty = Number(items[0]?.qty) || 0;
+    const dieCutTriggerQty = Number(settings.die_cut_trigger_qty) || 0;
+    const dieCutUpchargeUsd = Number(settings.die_cut_upcharge_usd) || 0;
+    const dieCuttingTriggered = dieCutTriggerQty > 0 && orderQty >= dieCutTriggerQty;
+    const dieCuttingCharge = dieCuttingTriggered ? dieCutUpchargeUsd : 0;
+
     return ok({
       ok: true,
       quote,
@@ -696,7 +707,10 @@ export async function GET(req: NextRequest) {
       printingUpchargePct,
       printingUpchargeAmt,
       printingUpcharge,
-      grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge,
+      dieCutTriggerQty,
+      dieCuttingTriggered,
+      dieCuttingCharge,
+      grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge,
       isPrinted,
       customerBoxDims: customerBox ?? null,
       facts,

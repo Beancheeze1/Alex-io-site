@@ -86,6 +86,9 @@ type ApiOk = {
   packagingSubtotal?: number;
   grandSubtotal?: number;
   printingUpcharge?: number;
+  dieCuttingCharge?: number;
+  dieCuttingTriggered?: boolean;
+  dieCutTriggerQty?: number;
   grandTotal?: number;
   customerBoxDims?: { L: number; W: number; H: number } | null;
   customerBoxMatch?: {
@@ -1049,6 +1052,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
   const [printingUpcharge, setPrintingUpcharge] = React.useState<number>(0);
+  const [dieCuttingCharge, setDieCuttingCharge] = React.useState<number>(0);
+  const [dieCuttingTriggered, setDieCuttingTriggered] = React.useState<boolean>(false);
+  const [dieCutTriggerQty, setDieCutTriggerQty] = React.useState<number>(0);
   const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number } | null>(null);
   const [customerBoxMatch, setCustomerBoxMatch] = React.useState<ApiOk["customerBoxMatch"]>(null);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
@@ -1167,6 +1173,17 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             setPrintingUpcharge(
               Number.isFinite((json as ApiOk)?.printingUpcharge as any)
                 ? Number((json as ApiOk).printingUpcharge)
+                : 0,
+            );
+            setDieCuttingCharge(
+              Number.isFinite((json as ApiOk)?.dieCuttingCharge as any)
+                ? Number((json as ApiOk).dieCuttingCharge)
+                : 0,
+            );
+            setDieCuttingTriggered(!!(json as ApiOk)?.dieCuttingTriggered);
+            setDieCutTriggerQty(
+              Number.isFinite((json as ApiOk)?.dieCutTriggerQty as any)
+                ? Number((json as ApiOk).dieCutTriggerQty)
                 : 0,
             );
             setGrandTotal(
@@ -1322,11 +1339,14 @@ const overallQty =
   }, 0);
 
   const effectivePrintingUpcharge = printingUpcharge > 0 ? printingUpcharge : 0;
+  const effectiveDieCuttingCharge = dieCuttingCharge > 0 ? dieCuttingCharge : 0;
   const effectiveGrandTotal =
-    grandTotal > 0 ? grandTotal : subtotal + effectivePrintingUpcharge;
+    grandTotal > 0
+      ? grandTotal
+      : subtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge;
 
   const anyPricing =
-    subtotal > 0 || effectivePrintingUpcharge > 0 || effectiveGrandTotal > 0;
+    subtotal > 0 || effectivePrintingUpcharge > 0 || effectiveDieCuttingCharge > 0 || effectiveGrandTotal > 0;
 
     // Strip [REV:X] tags from notes for admin display
     const notesPreview = React.useMemo(() => {
@@ -2265,9 +2285,17 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             <div>{formatUsd(effectivePrintingUpcharge)}</div>
                           </div>
                         )}
+                        {(dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
+                          <div>
+                            <div style={labelStyle}>Die-cutting charge</div>
+                            <div>{effectiveDieCuttingCharge > 0 ? formatUsd(effectiveDieCuttingCharge) : "TBD"}</div>
+                          </div>
+                        )}
                         {effectiveGrandTotal > 0 && (
                           <div>
-                            <div style={labelStyle}>Total (incl. printing)</div>
+                            <div style={labelStyle}>
+                              Total (incl. printing{effectiveDieCuttingCharge > 0 ? " + die-cutting" : ""})
+                            </div>
                             <div style={{ fontSize: 16, fontWeight: 600 }}>
                               {formatUsd(effectiveGrandTotal)}
                             </div>

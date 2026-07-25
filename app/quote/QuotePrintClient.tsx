@@ -135,6 +135,9 @@ type ApiOk = {
   packagingSubtotal: number;
   grandSubtotal: number;
   printingUpcharge: number;
+  dieCuttingCharge?: number;
+  dieCuttingTriggered?: boolean;
+  dieCutTriggerQty?: number;
   grandTotal: number;
   isPrinted?: boolean;
   customerBoxDims?: { L: number; W: number; H: number; style?: "mailer" | "rsc" } | null;
@@ -807,6 +810,9 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
   const [packagingSubtotal, setPackagingSubtotal] = React.useState<number>(0);
   const [grandSubtotal, setGrandSubtotal] = React.useState<number>(0);
   const [printingUpcharge, setPrintingUpcharge] = React.useState<number>(0);
+  const [dieCuttingCharge, setDieCuttingCharge] = React.useState<number>(0);
+  const [dieCuttingTriggered, setDieCuttingTriggered] = React.useState<boolean>(false);
+  const [dieCutTriggerQty, setDieCutTriggerQty] = React.useState<number>(0);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
   const [salesRepEmail, setSalesRepEmail] = React.useState<string | null>(null);
 
@@ -1039,6 +1045,13 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         setGrandSubtotal(typeof asOk.grandSubtotal === "number" ? asOk.grandSubtotal : 0);
         setPrintingUpcharge(
           typeof asOk.printingUpcharge === "number" ? asOk.printingUpcharge : 0,
+        );
+        setDieCuttingCharge(
+          typeof asOk.dieCuttingCharge === "number" ? asOk.dieCuttingCharge : 0,
+        );
+        setDieCuttingTriggered(!!asOk.dieCuttingTriggered);
+        setDieCutTriggerQty(
+          typeof asOk.dieCutTriggerQty === "number" ? asOk.dieCutTriggerQty : 0,
         );
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
         setIsPrinted(!!(asOk.isPrinted));
@@ -1367,8 +1380,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
   const effectiveGrandSubtotal = grandSubtotal > 0 ? grandSubtotal : foamSubtotal + effectivePackagingSubtotal;
   const effectivePrintingUpcharge = printingUpcharge > 0 ? printingUpcharge : 0;
+  const effectiveDieCuttingCharge = dieCuttingCharge > 0 ? dieCuttingCharge : 0;
   const effectiveGrandTotal =
-    grandTotal > 0 ? grandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge;
+    grandTotal > 0
+      ? grandTotal
+      : effectiveGrandSubtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge;
 
   // anyPricing: use effective grandSubtotal (foam + packaging) if available,
   // but still works if only foam is priced.
@@ -2454,9 +2470,18 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </div>
                       )}
 
+                      {(dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
+                        <div>
+                          <div style={labelStyle}>Die-cutting charge</div>
+                          <div style={{ fontSize: 13 }}>{effectiveDieCuttingCharge > 0 ? formatUsd(effectiveDieCuttingCharge) : "TBD"}</div>
+                        </div>
+                      )}
+
                       {effectiveGrandTotal > 0 && (
                         <div>
-                          <div style={labelStyle}>Total estimate (foam + packaging + printing)</div>
+                          <div style={labelStyle}>
+                            Total estimate (foam + packaging + printing{effectiveDieCuttingCharge > 0 ? " + die-cutting" : ""})
+                          </div>
                           <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal)}</div>
                         </div>
                       )}
@@ -3116,13 +3141,21 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             </>
                           )}
 
-                          {/* Grand subtotal — show when packaging or printing is present */}
-                          {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0) && (
+                          {/* Die-cutting charge line in summary */}
+                          {effectiveDieCuttingCharge > 0 && (
+                            <>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Die-cutting charge</div>
+                              <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectiveDieCuttingCharge)}</div>
+                            </>
+                          )}
+
+                          {/* Grand subtotal — show when packaging, printing, or die-cutting is present */}
+                          {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0 || effectiveDieCuttingCharge > 0) && (
                             <>
                               <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                                Estimated subtotal (foam + packaging{effectivePrintingUpcharge > 0 ? " + printing" : ""})
+                                Estimated subtotal (foam + packaging{effectivePrintingUpcharge > 0 ? " + printing" : ""}{effectiveDieCuttingCharge > 0 ? " + die-cutting" : ""})
                               </div>
-                              <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge)}</div>
+                              <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge)}</div>
                             </>
                           )}
                         </>
