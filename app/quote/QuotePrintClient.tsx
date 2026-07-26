@@ -3086,6 +3086,35 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           </td>
                         </tr>
                       )}
+
+                      {/* Die-cutting charge — its own line item, not folded into packaging or printing */}
+                      {(dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
+                        <tr>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                textTransform: "uppercase",
+                                letterSpacing: "0.08em",
+                                color: "var(--text-secondary)",
+                                marginBottom: 2,
+                              }}
+                            >
+                              Machining – Die-cutting charge
+                            </div>
+                            <div style={{ fontWeight: 500 }}>
+                              Applied at qty {dieCutTriggerQty > 0 ? `≥ ${dieCutTriggerQty}` : "threshold"}
+                            </div>
+                          </td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                            {effectiveDieCuttingCharge > 0 ? formatUsd(effectiveDieCuttingCharge) : "TBD"}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
 

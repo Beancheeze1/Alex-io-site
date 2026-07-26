@@ -83,6 +83,7 @@ export type TemplateInput = {
   printingUpchargeAmt?: number | null;
   printingUpcharge?: number | null;       // combined total (artSetupFee + printingUpchargeAmt)
   dieCuttingCharge?: number | null;
+  dieCutTriggerQty?: number | null;
   grandTotal?: number | null;
   layers?: TemplateLayoutLayer[] | null;
   layoutNotes?: string | null;
@@ -591,6 +592,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const printingUpchargeAmtVal = input.printingUpchargeAmt ?? null;
   const printingUpchargeAmt = input.printingUpcharge ?? null;   // combined
   const dieCuttingChargeAmt = input.dieCuttingCharge ?? null;
+  const dieCutTriggerQtyVal = input.dieCutTriggerQty ?? null;
   const grandTotalAmt = input.grandTotal ?? null;
   const layers = Array.isArray(input.layers) ? input.layers : [];
   const hasLayers = layers.length > 0;
@@ -750,6 +752,53 @@ export function renderQuoteEmail(input: TemplateInput): string {
                 </table>
               </td>
             </tr>
+
+            <!-- Itemized breakdown -->
+            ${hasLineItems || hasPrinting || hasDieCutting ? `<tr>
+              <td style="padding:20px 28px 0 28px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:12px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
+                  <tr>
+                    <td style="padding:10px 16px;border-bottom:1px solid #1f2937;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;background:rgba(56,189,248,0.06);">
+                      Itemized breakdown
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 16px 8px 16px;">
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                        ${lineItems.map((li) => `<tr>
+                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;vertical-align:top;">
+                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${li.label}</div>
+                            ${li.sublabel ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">${li.sublabel}</div>` : ""}
+                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">${li.dims} &middot; Qty ${li.qty}</div>
+                          </td>
+                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;text-align:right;vertical-align:top;white-space:nowrap;">
+                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${li.lineTotal != null ? fmtMoney(li.lineTotal) : li.isIncluded ? "Included" : "&mdash;"}</div>
+                          </td>
+                        </tr>`).join("")}
+                        ${hasPrinting ? `<tr>
+                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;vertical-align:top;">
+                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">Packaging &ndash; Print upcharge</div>
+                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">Custom printed mailer / box</div>
+                          </td>
+                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;text-align:right;vertical-align:top;white-space:nowrap;">
+                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(printingUpchargeAmt as number)}</div>
+                          </td>
+                        </tr>` : ""}
+                        ${hasDieCutting ? `<tr>
+                          <td style="padding:8px 0;vertical-align:top;">
+                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">Machining &ndash; Die-cutting charge</div>
+                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">Applied at qty ${dieCutTriggerQtyVal && dieCutTriggerQtyVal > 0 ? `&ge; ${dieCutTriggerQtyVal}` : "threshold"}</div>
+                          </td>
+                          <td style="padding:8px 0;text-align:right;vertical-align:top;white-space:nowrap;">
+                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(dieCuttingChargeAmt as number)}</div>
+                          </td>
+                        </tr>` : ""}
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>` : ""}
 
             <!-- Primary CTA -->
             <tr>

@@ -205,15 +205,26 @@ export async function POST(req: NextRequest) {
     }
 
     // 5) Load packaging lines directly from DB
+    // LEFT JOIN (not INNER): quote_box_selections is the source of truth for
+    // both stock (box_id set, joins to a real boxes row) and custom (box_id
+    // null, own custom_* columns) selections — an INNER JOIN here silently
+    // dropped every custom-box row, zeroing packaging subtotal (and understating
+    // the printing-upcharge %, since that's computed off foam+packaging).
+    // Mirrors the same LEFT JOIN + coalesce pattern already correct in
+    // /api/quote/print/route.ts.
     let packagingLines: PkgRow[] = [];
     try {
       packagingLines = await q<PkgRow>(
         `SELECT qbs.id, qbs.sku, qbs.qty,
                 qbs.unit_price_usd, qbs.extended_price_usd,
-                b.vendor, b.style, b.description,
-                b.inside_length_in, b.inside_width_in, b.inside_height_in
+                b.vendor,
+                coalesce(b.style, qbs.custom_style) as style,
+                coalesce(qbs.description, b.description) as description,
+                coalesce(b.inside_length_in, qbs.custom_length_in) as inside_length_in,
+                coalesce(b.inside_width_in, qbs.custom_width_in) as inside_width_in,
+                coalesce(b.inside_height_in, qbs.custom_height_in) as inside_height_in
          FROM quote_box_selections qbs
-         JOIN boxes b ON b.id = qbs.box_id
+         LEFT JOIN boxes b ON b.id = qbs.box_id
          WHERE qbs.quote_id = $1`,
         [quote.id],
       );
@@ -400,6 +411,7 @@ export async function POST(req: NextRequest) {
       printingUpchargeAmt: printingUpchargeAmt > 0 ? printingUpchargeAmt : null,
       printingUpcharge: printingUpcharge > 0 ? printingUpcharge : null,
       dieCuttingCharge: dieCuttingCharge > 0 ? dieCuttingCharge : null,
+      dieCutTriggerQty: dieCutTriggerQty > 0 ? dieCutTriggerQty : null,
       grandTotal,
       layers: emailLayers.length > 0 ? emailLayers : null,
       layoutNotes: layoutPkg?.notes || null,
