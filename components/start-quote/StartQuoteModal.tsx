@@ -270,6 +270,12 @@ export default function StartQuoteModal() {
   const [insertW, setInsertW] = React.useState<string>("");
   const [insertD, setInsertD] = React.useState<string>("");
 
+  // Foam Insert: cropped corners (chamfer), applied uniformly to every layer
+  // in the block above. Same geometry the layout editor / CAD export already
+  // support per-layer (cropCorners) — this just exposes it here too. No
+  // pricing impact (matches the existing Complete Pack top-pad option).
+  const [insertCropCorners, setInsertCropCorners] = React.useState<boolean>(false);
+
   // Foam Insert: additional bonded layers on top of the Layer 1 block above.
   // Empty by default so a plain single-block quote is unaffected.
   const [extraInsertLayers, setExtraInsertLayers] = React.useState<
@@ -992,9 +998,11 @@ export default function StartQuoteModal() {
       p.set("layer_count", String(1 + extraInsertLayers.length));
       p.append("layer_thicknesses", String(D || 1));
       p.append("layer_label", "Layer 1");
+      p.append("layer_crop", insertCropCorners ? "1" : "0");
       extraInsertLayers.forEach((layer, i) => {
         p.append("layer_thicknesses", String(toNumOrNull(layer.thicknessIn) || 1));
         p.append("layer_label", `Layer ${i + 2}`);
+        p.append("layer_crop", insertCropCorners ? "1" : "0");
       });
       p.set("layer_cavity_layer_index", "1");
       p.set("activeLayer", "1");
@@ -1593,6 +1601,31 @@ export default function StartQuoteModal() {
                           </button>
                           <div className="mt-2 text-xs text-[var(--text-muted)]">
                             Add a bonded foam layer (e.g. a top pad) on top of the block above. Layers share the same length/width and can be fine-tuned further in the layout editor.
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                                CROPPED CORNERS
+                              </div>
+                              <div className="mt-1 text-sm text-[var(--text-secondary)]">
+                                Chamfer-cut corners on every layer above. No price change.
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setInsertCropCorners((c) => !c)}
+                              className={[
+                                "rounded-md border px-4 py-2 text-sm font-medium",
+                                insertCropCorners
+                                  ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] text-[var(--text-primary)]"
+                                  : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
+                              ].join(" ")}
+                            >
+                              {insertCropCorners ? "Cropped" : "Square"}
+                            </button>
                           </div>
                         </div>
                       </div>

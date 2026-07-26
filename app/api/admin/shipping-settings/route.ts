@@ -20,17 +20,20 @@ export const runtime = "nodejs";
 type SettingsRow = {
   id: number;
   rough_ship_pct: number | string;
+  shipping_cap_usd: number | string | null;
 };
 
 type OkGet = {
   ok: true;
   rough_ship_pct: number;
+  shipping_cap_usd: number;
   source: "db" | "default";
 };
 
 type OkPost = {
   ok: true;
   rough_ship_pct: number;
+  shipping_cap_usd: number;
 };
 
 type Err = {
@@ -56,13 +59,20 @@ function normalizePct(raw: any): number | null {
   return clipped;
 }
 
+function normalizeCap(raw: any): number | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
 // ---------- GET: read current rough_ship_pct ----------
 export const GET = adminOnly(async (req: NextRequest) => {
   try {
     try {
       const row = (await one<SettingsRow>(
         `
-        select id, rough_ship_pct
+        select id, rough_ship_pct, shipping_cap_usd
         from public.shipping_settings
         order by id asc
         limit 1
@@ -75,14 +85,17 @@ export const GET = adminOnly(async (req: NextRequest) => {
         return ok({
           ok: true,
           rough_ship_pct: 2.0,
+          shipping_cap_usd: 200.0,
           source: "default",
         } satisfies OkGet);
       }
 
       const pct = normalizePct(row.rough_ship_pct);
+      const cap = normalizeCap(row.shipping_cap_usd);
       return ok({
         ok: true,
         rough_ship_pct: pct ?? 2.0,
+        shipping_cap_usd: cap ?? 200.0,
         source: "db",
       } satisfies OkGet);
     } catch (innerErr: any) {
@@ -107,6 +120,7 @@ export const GET = adminOnly(async (req: NextRequest) => {
       return ok({
         ok: true,
         rough_ship_pct: 2.0,
+        shipping_cap_usd: 200.0,
         source: "default",
       } satisfies OkGet);
     }
@@ -131,14 +145,14 @@ export const POST = adminOnly(async (req: NextRequest) => {
 
   try {
     const body = (await req.json().catch(() => null)) as
-      | { rough_ship_pct?: any }
+      | { rough_ship_pct?: any; shipping_cap_usd?: any }
       | null;
 
     if (!body || body.rough_ship_pct === undefined) {
       return bad({
         ok: false,
         error: "INVALID_PAYLOAD",
-        message: "Expected { rough_ship_pct: number }.",
+        message: "Expected { rough_ship_pct: number, shipping_cap_usd?: number }.",
       } satisfies Err);
     }
 
@@ -154,7 +168,7 @@ export const POST = adminOnly(async (req: NextRequest) => {
     // Try to update an existing row; if none, insert one.
     const existing = (await one<SettingsRow>(
       `
-      select id, rough_ship_pct
+      select id, rough_ship_pct, shipping_cap_usd
       from public.shipping_settings
       order by id asc
       limit 1
@@ -162,28 +176,46 @@ export const POST = adminOnly(async (req: NextRequest) => {
       [],
     ).catch(() => null)) as SettingsRow | null;
 
+    // shipping_cap_usd is optional in the payload; fall back to the existing
+    // (or default) value so a caller that only sends rough_ship_pct doesn't
+    // clobber the cap.
+    let cap: number | null;
+    if (body.shipping_cap_usd === undefined) {
+      cap = normalizeCap(existing?.shipping_cap_usd) ?? 200.0;
+    } else {
+      cap = normalizeCap(body.shipping_cap_usd);
+      if (cap === null) {
+        return bad({
+          ok: false,
+          error: "INVALID_CAP",
+          message: "shipping_cap_usd must be a non-negative number.",
+        } satisfies Err);
+      }
+    }
+
     if (existing && typeof existing.id === "number") {
       await q(
         `
         update public.shipping_settings
-        set rough_ship_pct = $1
-        where id = $2
+        set rough_ship_pct = $1, shipping_cap_usd = $2
+        where id = $3
         `,
-        [pct, existing.id],
+        [pct, cap, existing.id],
       );
     } else {
       await q(
         `
-        insert into public.shipping_settings (rough_ship_pct)
-        values ($1)
+        insert into public.shipping_settings (rough_ship_pct, shipping_cap_usd)
+        values ($1, $2)
         `,
-        [pct],
+        [pct, cap],
       );
     }
 
     return ok({
       ok: true,
       rough_ship_pct: pct,
+      shipping_cap_usd: cap,
     } satisfies OkPost);
   } catch (err: any) {
     console.error("Error in POST /api/admin/shipping-settings:", err);

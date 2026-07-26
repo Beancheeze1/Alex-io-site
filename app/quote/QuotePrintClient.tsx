@@ -190,6 +190,7 @@ type RequestedBoxesResponse = RequestedBoxesOk | RequestedBoxesErr;
 type ShippingSettingsResponse = {
   ok: boolean;
   rough_ship_pct: number;
+  shipping_cap_usd?: number;
   source?: "db" | "default";
   error?: string;
   message?: string;
@@ -819,6 +820,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
   // Rough shipping % knob from admin (percent of foam + packaging)
   const [roughShipPct, setRoughShipPct] = React.useState<number | null>(null);
+  const [shippingCapUsd, setShippingCapUsd] = React.useState<number | null>(null);
 
   // Which carton selection is currently being removed (for button disable/spinner)
   const [removingBoxId, setRemovingBoxId] = React.useState<number | null>(null);
@@ -1202,16 +1204,20 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         if (!res.ok || !json || !json.ok) {
           // Fall back to default 2% if the API isn't ready
           setRoughShipPct(2.0);
+          setShippingCapUsd(200.0);
           return;
         }
 
         const pct = json.rough_ship_pct ?? 2.0;
+        const cap = json.shipping_cap_usd ?? 200.0;
         setRoughShipPct(pct);
+        setShippingCapUsd(cap);
       } catch (err) {
         console.error("Failed to load shipping settings (quote view):", err);
         // Safe fallback
         if (active) {
           setRoughShipPct(2.0);
+          setShippingCapUsd(200.0);
         }
       }
     }
@@ -1393,10 +1399,17 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
   // Rough shipping estimate from admin knob:
   //   shippingEstimate = (foam+packaging+printing subtotal) * roughShipPct / 100
-  const shippingEstimate =
-    roughShipPct != null && (effectiveGrandTotal ?? 0) > 0
-      ? Math.round(effectiveGrandTotal * (roughShipPct / 100) * 100) / 100
-      : 0;
+  //   capped at shippingCapUsd, if set
+  const { shippingEstimate, shippingIsCapped } = React.useMemo(() => {
+    if (roughShipPct == null || (effectiveGrandTotal ?? 0) <= 0) {
+      return { shippingEstimate: 0, shippingIsCapped: false };
+    }
+    const raw = Math.round(effectiveGrandTotal * (roughShipPct / 100) * 100) / 100;
+    if (shippingCapUsd != null && raw > shippingCapUsd) {
+      return { shippingEstimate: shippingCapUsd, shippingIsCapped: true };
+    }
+    return { shippingEstimate: raw, shippingIsCapped: false };
+  }, [roughShipPct, shippingCapUsd, effectiveGrandTotal]);
 
   // Planning total adds rough shipping to the effective grand total
   const planningTotal = (effectiveGrandTotal ?? 0) + (shippingEstimate || 0);
@@ -2493,7 +2506,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <div style={{ fontSize: 13 }}>
                               {formatUsd(shippingEstimate)}{" "}
                               <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
-                                ({roughShipPct?.toFixed(1).replace(/\.0$/, "")}% of foam + packaging; for planning only)
+                                {shippingIsCapped
+                                  ? `(capped at ${formatUsd(shippingCapUsd || 0)}; for planning only)`
+                                  : `(${roughShipPct?.toFixed(1).replace(/\.0$/, "")}% of foam + packaging; for planning only)`}
                               </span>
                             </div>
                           </div>

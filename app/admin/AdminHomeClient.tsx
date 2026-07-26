@@ -31,6 +31,7 @@ type HealthResponse = {
 type ShippingSettingsResponse = {
   ok: boolean;
   rough_ship_pct: number;
+  shipping_cap_usd?: number;
   source?: "db" | "default";
   error?: string;
   message?: string;
@@ -450,6 +451,7 @@ function NavCard({ href, title, description }: NavCardProps) {
 
 function ShippingSettingsCard() {
   const [value, setValue] = React.useState<string>("");
+  const [capValue, setCapValue] = React.useState<string>("");
   const [initialLoaded, setInitialLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -480,7 +482,9 @@ function ShippingSettingsCard() {
         }
 
         const pct = json.rough_ship_pct ?? 2.0;
+        const cap = json.shipping_cap_usd ?? 200.0;
         setValue(String(pct));
+        setCapValue(String(cap));
         setError(null);
         setInitialLoaded(true);
       } catch (err) {
@@ -512,12 +516,18 @@ function ShippingSettingsCard() {
       return;
     }
 
+    const capN = Number(capValue);
+    if (!Number.isFinite(capN) || capN < 0) {
+      setError("Please enter a valid shipping cap ($, 0 or more).");
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await fetch("/api/admin/shipping-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rough_ship_pct: n }),
+        body: JSON.stringify({ rough_ship_pct: n, shipping_cap_usd: capN }),
       });
 
       const json = (await res
@@ -531,10 +541,12 @@ function ShippingSettingsCard() {
         setError(msg);
         setSavedMessage(null);
       } else {
-        setSavedMessage("Saved – new rough shipping % is live.");
+        setSavedMessage("Saved – new rough shipping % and cap are live.");
         setError(null);
         const pct = json.rough_ship_pct ?? n;
+        const cap = json.shipping_cap_usd ?? capN;
         setValue(String(pct));
+        setCapValue(String(cap));
       }
     } catch (err) {
       console.error("Failed to save shipping settings:", err);
@@ -592,12 +604,33 @@ function ShippingSettingsCard() {
           </div>
 
           <div className="flex items-center gap-3">
+            <label className="text-xs text-[var(--text-secondary)]">
+              Shipping cap ($ max)
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-[var(--text-muted)]">$</span>
+            <input
+              type="number"
+              step="1"
+              min={0}
+              value={capValue}
+              onChange={(e) => setCapValue(e.target.value)}
+              disabled={disabled}
+              className="w-28 rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none ring-[var(--action-primary)]/30 focus:border-[var(--action-primary)] focus:ring-1 disabled:opacity-60"
+            />
+          </div>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            If the computed rough shipping estimate exceeds this amount, the cap is shown instead.
+          </p>
+
+          <div className="flex items-center gap-3">
             <button
               type="submit"
               disabled={disabled}
               className="inline-flex items-center rounded-full bg-[var(--action-primary)] px-3 py-1 text-[11px] font-medium text-white transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {saving ? "Saving…" : "Save rough shipping %"}
+              {saving ? "Saving…" : "Save shipping settings"}
             </button>
             {savedMessage && (
               <span className="text-[11px] text-[var(--status-success-text)]">

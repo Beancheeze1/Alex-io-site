@@ -62,6 +62,42 @@ export default function AdminQuotesPage() {
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
   const [showStartModal, setShowStartModal] = React.useState(false);
 
+  // Internal notes — expandable per row, lazy-loaded from the existing
+  // staff-only /api/admin/quotes/internal-notes route (same one the detail
+  // page already uses) so this list never has to carry internal_notes text
+  // for all 200 rows up front.
+  const [expandedNotes, setExpandedNotes] = React.useState<Record<string, boolean>>({});
+  const [notesByQuote, setNotesByQuote] = React.useState<Record<string, string | null>>({});
+  const [notesLoading, setNotesLoading] = React.useState<Record<string, boolean>>({});
+  const [notesError, setNotesError] = React.useState<Record<string, string | null>>({});
+
+  const toggleNotes = React.useCallback(async (quoteNo: string) => {
+    setExpandedNotes((prev) => ({ ...prev, [quoteNo]: !prev[quoteNo] }));
+
+    // Already loaded (or in flight) — nothing more to do.
+    if (quoteNo in notesByQuote || notesLoading[quoteNo]) return;
+
+    setNotesLoading((prev) => ({ ...prev, [quoteNo]: true }));
+    setNotesError((prev) => ({ ...prev, [quoteNo]: null }));
+
+    try {
+      const res = await fetch(
+        `/api/admin/quotes/internal-notes?quote_no=${encodeURIComponent(quoteNo)}`,
+        { cache: "no-store" },
+      );
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        setNotesError((prev) => ({ ...prev, [quoteNo]: "Unable to load internal notes." }));
+        return;
+      }
+      setNotesByQuote((prev) => ({ ...prev, [quoteNo]: json.internal_notes ?? null }));
+    } catch {
+      setNotesError((prev) => ({ ...prev, [quoteNo]: "Unable to load internal notes." }));
+    } finally {
+      setNotesLoading((prev) => ({ ...prev, [quoteNo]: false }));
+    }
+  }, [notesByQuote, notesLoading]);
+
 
   // Client-side filters
   const [filterKey, setFilterKey] = React.useState<FilterKey>("all");
@@ -673,8 +709,8 @@ export default function AdminQuotesPage() {
                     );
 
                     return (
+                      <React.Fragment key={q.id}>
                       <tr
-                        key={q.id}
                         className="border-t border-[var(--border)] hover:bg-[var(--surface-subtle)]"
                       >
                         <td className="px-3 py-2 font-mono text-[11px]">
@@ -779,10 +815,44 @@ export default function AdminQuotesPage() {
                             >
                               Review
                             </Link>
+
+                            <button
+                              type="button"
+                              onClick={() => toggleNotes(q.quote_no)}
+                              className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+                              aria-expanded={!!expandedNotes[q.quote_no]}
+                              title="View internal notes without opening the full quote"
+                            >
+                              {expandedNotes[q.quote_no] ? "Hide notes ▲" : "Notes ▼"}
+                            </button>
                           </div>
                         </td>
 
                       </tr>
+                      {expandedNotes[q.quote_no] && (
+                        <tr className="border-t border-[var(--border)] bg-[var(--surface-subtle)]">
+                          <td colSpan={5} className="px-3 py-3">
+                            <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                              Internal notes
+                            </div>
+                            <div className="mb-1 text-[11px] text-[var(--text-faint)]">
+                              Not visible to customer
+                            </div>
+                            {notesLoading[q.quote_no] ? (
+                              <div className="text-xs text-[var(--text-muted)]">Loading…</div>
+                            ) : notesError[q.quote_no] ? (
+                              <div className="text-xs text-[var(--attention)]">{notesError[q.quote_no]}</div>
+                            ) : notesByQuote[q.quote_no] ? (
+                              <div className="whitespace-pre-wrap text-xs text-[var(--text-primary)]">
+                                {notesByQuote[q.quote_no]}
+                              </div>
+                            ) : (
+                              <div className="text-xs text-[var(--text-faint)]">No internal notes for this quote.</div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     );
                   })}
               </tbody>

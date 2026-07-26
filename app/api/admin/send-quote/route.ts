@@ -271,7 +271,24 @@ export async function POST(req: NextRequest) {
 
     const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
 
-    console.log(`[send-quote] foam=${foamSubtotal} pkg=${packagingSubtotal} artSetup=${artSetupFee} upchargeAmt=${printingUpchargeAmt} dieCut=${dieCuttingCharge} grand=${grandTotal}`);
+    // Rough shipping estimate: same global knob + cap the live quote page
+    // reads from public.shipping_settings. Computed independently here
+    // (like the rest of this route's pricing) since send-quote avoids
+    // internal HTTP calls.
+    const shippingSettingsRow = await one<{ rough_ship_pct: number | string; shipping_cap_usd: number | string | null }>(
+      `select rough_ship_pct, shipping_cap_usd from public.shipping_settings order by id asc limit 1`,
+      [],
+    ).catch(() => null);
+    const roughShipPct = shippingSettingsRow ? Number(shippingSettingsRow.rough_ship_pct) : 2.0;
+    const shippingCapUsd = shippingSettingsRow?.shipping_cap_usd != null ? Number(shippingSettingsRow.shipping_cap_usd) : 200.0;
+    const rawShippingEstimate =
+      Number.isFinite(roughShipPct) && grandTotal > 0
+        ? Math.round(grandTotal * (roughShipPct / 100) * 100) / 100
+        : 0;
+    const shippingIsCapped = Number.isFinite(shippingCapUsd) && rawShippingEstimate > shippingCapUsd;
+    const shippingEstimate = shippingIsCapped ? shippingCapUsd : rawShippingEstimate;
+
+    console.log(`[send-quote] foam=${foamSubtotal} pkg=${packagingSubtotal} artSetup=${artSetupFee} upchargeAmt=${printingUpchargeAmt} dieCut=${dieCuttingCharge} ship=${shippingEstimate} grand=${grandTotal}`);
 
     // 7) Load layout package
     const layoutPkg = await one<LayoutRow>(
@@ -413,6 +430,10 @@ export async function POST(req: NextRequest) {
       dieCuttingCharge: dieCuttingCharge > 0 ? dieCuttingCharge : null,
       dieCutTriggerQty: dieCutTriggerQty > 0 ? dieCutTriggerQty : null,
       grandTotal,
+      shippingEstimate: shippingEstimate > 0 ? shippingEstimate : null,
+      shippingIsCapped,
+      roughShipPct: Number.isFinite(roughShipPct) ? roughShipPct : null,
+      shippingCapUsd: Number.isFinite(shippingCapUsd) ? shippingCapUsd : null,
       layers: emailLayers.length > 0 ? emailLayers : null,
       layoutNotes: layoutPkg?.notes || null,
       quotePageUrl,

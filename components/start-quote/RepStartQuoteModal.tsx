@@ -331,6 +331,12 @@ export default function RepStartQuoteModal({
     );
   };
 
+  // Foam Insert: cropped corners (chamfer), applied uniformly to every layer
+  // in the block above — same uniform-per-layer pattern this form's existing
+  // roundCorners toggle already uses. No pricing impact (matches the
+  // existing Complete Pack top-pad crop option).
+  const [insertCropCorners, setInsertCropCorners] = React.useState(false);
+
   const [boxL, setBoxL] = React.useState("");
   const [boxW, setBoxW] = React.useState("");
   const [boxD, setBoxD] = React.useState("");
@@ -350,6 +356,20 @@ export default function RepStartQuoteModal({
   const [stockCandidatesLoading, setStockCandidatesLoading] = React.useState(false);
   const [boxChoice, setBoxChoice] = React.useState<"" | "stock" | "custom">("");
   const [selectedStockSku, setSelectedStockSku] = React.useState("");
+
+  // A pick only applies to the exact box L/W/D/qty/style it was made for —
+  // reset it whenever any of those change so a stale choice can't silently
+  // carry over onto a different box. Deliberately does NOT depend on
+  // bottomThk/topThk/foamConfig: editing foam thickness doesn't change the
+  // box itself, so it must not force the rep to re-pick a choice they
+  // already made. This used to live inside the candidates effect below
+  // (which does depend on thickness, since stack depth affects which boxes
+  // get suggested), so every thickness keystroke was also wiping the box
+  // choice — this is that bug's fix.
+  React.useEffect(() => {
+    setBoxChoice("");
+    setSelectedStockSku("");
+  }, [quoteType, boxL, boxW, boxD, qty, boxStyle]);
 
   // Debounced (500ms) lookup of real stock candidates once box L/W/D and qty
   // are all filled in. Reuses the same 0.5" clearance-aware /api/boxes/suggest
@@ -375,11 +395,6 @@ export default function RepStartQuoteModal({
       return;
     }
 
-    // A pick only applies to the exact dims/qty/style it was made for — reset
-    // it whenever any of those change so a stale choice can't silently carry
-    // over onto a different box. A real choice is always required again.
-    setBoxChoice("");
-    setSelectedStockSku("");
     setStockCandidatesLoading(true);
 
     const bottomThkNum = toNumOrNull(bottomThk) ?? 0;
@@ -566,6 +581,7 @@ export default function RepStartQuoteModal({
     setInsertL("");
     setInsertW("");
     setInsertD("");
+    setInsertCropCorners(false);
     setBoxL("");
     setBoxW("");
     setBoxD("");
@@ -677,13 +693,13 @@ export default function RepStartQuoteModal({
         p.set("layer_count", String(1 + extraInsertLayers.length));
         p.append("layer_thicknesses", String(D || 1));
         p.append("layer_label", "Layer 1");
-        p.append("layer_crop", "0");
+        p.append("layer_crop", insertCropCorners ? "1" : "0");
         p.append("layer_round", roundCorners ? "1" : "0");
         p.append("layer_round_radius", String(roundRadiusNum));
         extraInsertLayers.forEach((layer, i) => {
           p.append("layer_thicknesses", String(toNumOrNull(layer.thicknessIn) || 1));
           p.append("layer_label", `Layer ${i + 2}`);
-          p.append("layer_crop", "0");
+          p.append("layer_crop", insertCropCorners ? "1" : "0");
           p.append("layer_round", roundCorners ? "1" : "0");
           p.append("layer_round_radius", String(roundRadiusNum));
         });
@@ -1030,6 +1046,16 @@ export default function RepStartQuoteModal({
                               Add a bonded foam layer (e.g. a top pad) on top of the block above. Layers share the same length/width and can be fine-tuned further in the layout editor.
                             </div>
                           </div>
+
+                          <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                            <input
+                              type="checkbox"
+                              checked={insertCropCorners}
+                              onChange={(e) => setInsertCropCorners(e.target.checked)}
+                              className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)]"
+                            />
+                            Cropped corners? (applies to every layer above, no price change)
+                          </label>
                         </>
                       ) : (
                         <>

@@ -85,6 +85,10 @@ export type TemplateInput = {
   dieCuttingCharge?: number | null;
   dieCutTriggerQty?: number | null;
   grandTotal?: number | null;
+  shippingEstimate?: number | null;   // rough shipping estimate, already capped
+  shippingIsCapped?: boolean;
+  roughShipPct?: number | null;
+  shippingCapUsd?: number | null;
   layers?: TemplateLayoutLayer[] | null;
   layoutNotes?: string | null;
   quotePageUrl?: string | null;
@@ -594,6 +598,10 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const dieCuttingChargeAmt = input.dieCuttingCharge ?? null;
   const dieCutTriggerQtyVal = input.dieCutTriggerQty ?? null;
   const grandTotalAmt = input.grandTotal ?? null;
+  const shippingEstimateAmt = input.shippingEstimate ?? null;
+  const shippingIsCappedVal = !!input.shippingIsCapped;
+  const roughShipPctVal = input.roughShipPct ?? null;
+  const shippingCapUsdVal = input.shippingCapUsd ?? null;
   const layers = Array.isArray(input.layers) ? input.layers : [];
   const hasLayers = layers.length > 0;
   const layoutNotes = input.layoutNotes || null;
@@ -672,10 +680,12 @@ export function renderQuoteEmail(input: TemplateInput): string {
 
 
   // ── Key facts for the summary card ──────────────────────────────────
-  const displayTotal = grandTotalAmt ?? (pricingPending ? null : pricing.total ?? null);
+  const baseTotal = grandTotalAmt ?? (pricingPending ? null : pricing.total ?? null);
   const hasPackaging = packagingSubtotalAmt != null && packagingSubtotalAmt > 0;
   const hasPrinting  = printingUpchargeAmt != null && printingUpchargeAmt > 0;
   const hasDieCutting = dieCuttingChargeAmt != null && dieCuttingChargeAmt > 0;
+  const hasShipping = shippingEstimateAmt != null && shippingEstimateAmt > 0;
+  const displayTotal = hasShipping && baseTotal != null ? baseTotal + shippingEstimateAmt : baseTotal;
   void showHowBuilt; // retained for potential future use
 
   return `<!doctype html>
@@ -743,7 +753,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           <td style="width:23%;vertical-align:top;text-align:right;">
                             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Est. total</div>
                             <div style="font-size:16px;font-weight:800;color:#f97316;">${displayTotal != null ? fmtMoney(displayTotal) : "Pending"}</div>
-                            ${hasPackaging || hasPrinting || hasDieCutting ? `<div style="font-size:10px;color:#6b7280;margin-top:2px;">foam${hasPackaging ? " + pkg" : ""}${hasPrinting ? " + print" : ""}${hasDieCutting ? " + die-cut" : ""}</div>` : ""}
+                            ${hasPackaging || hasPrinting || hasDieCutting || hasShipping ? `<div style="font-size:10px;color:#6b7280;margin-top:2px;">foam${hasPackaging ? " + pkg" : ""}${hasPrinting ? " + print" : ""}${hasDieCutting ? " + die-cut" : ""}${hasShipping ? " + ship" : ""}</div>` : ""}
                           </td>
                         </tr>
                       </table>
@@ -754,7 +764,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
             </tr>
 
             <!-- Itemized breakdown -->
-            ${hasLineItems || hasPrinting || hasDieCutting ? `<tr>
+            ${hasLineItems || hasPrinting || hasDieCutting || hasShipping ? `<tr>
               <td style="padding:20px 28px 0 28px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:12px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
                   <tr>
@@ -785,12 +795,25 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           </td>
                         </tr>` : ""}
                         ${hasDieCutting ? `<tr>
-                          <td style="padding:8px 0;vertical-align:top;">
+                          <td style="padding:8px 0;${hasShipping ? "border-bottom:1px solid #1f2937;" : ""}vertical-align:top;">
                             <div style="font-size:13px;font-weight:600;color:#f9fafb;">Machining &ndash; Die-cutting charge</div>
                             <div style="font-size:11px;color:#6b7280;margin-top:1px;">Applied at qty ${dieCutTriggerQtyVal && dieCutTriggerQtyVal > 0 ? `&ge; ${dieCutTriggerQtyVal}` : "threshold"}</div>
                           </td>
-                          <td style="padding:8px 0;text-align:right;vertical-align:top;white-space:nowrap;">
+                          <td style="padding:8px 0;${hasShipping ? "border-bottom:1px solid #1f2937;" : ""}text-align:right;vertical-align:top;white-space:nowrap;">
                             <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(dieCuttingChargeAmt as number)}</div>
+                          </td>
+                        </tr>` : ""}
+                        ${hasShipping ? `<tr>
+                          <td style="padding:8px 0;vertical-align:top;">
+                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">Shipping &ndash; rough estimate</div>
+                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">
+                              ${shippingIsCappedVal
+                                ? `Capped at ${fmtMoney(shippingCapUsdVal)}`
+                                : `${roughShipPctVal != null ? fmtPercent(roughShipPctVal) : ""} of foam + packaging`} &middot; for planning only
+                            </div>
+                          </td>
+                          <td style="padding:8px 0;text-align:right;vertical-align:top;white-space:nowrap;">
+                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(shippingEstimateAmt as number)}</div>
                           </td>
                         </tr>` : ""}
                       </table>
