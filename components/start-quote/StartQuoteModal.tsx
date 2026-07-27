@@ -186,24 +186,36 @@ function parseSeedCavity(raw: string): { normalized: string; kind: "rect" | "cir
   return null;
 }
 
-export default function StartQuoteModal() {
+export default function StartQuoteModal({
+  embedded = false,
+  initialPrefillData = null,
+}: {
+  embedded?: boolean;
+  /**
+   * Bypasses the URL ?prefill= mechanism — used when the embedded chat
+   * widget hands off gathered facts to an in-place "expand" within the
+   * same iframe (no page navigation, so there's no URL to carry the data).
+   * Same shape as the JSON object normally JSON-encoded into ?prefill=.
+   */
+  initialPrefillData?: Record<string, any> | null;
+} = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   // ---------- Parse prefill data from chatbot ----------
   const prefillData = React.useMemo(() => {
     const prefillRaw = searchParams.get("prefill");
-    if (!prefillRaw) return null;
-    
+    if (!prefillRaw) return initialPrefillData ?? null;
+
     try {
       const decoded = decodeURIComponent(prefillRaw);
       const parsed = JSON.parse(decoded);
       return parsed;
     } catch (err) {
       console.warn("Failed to parse prefill data:", err);
-      return null;
+      return initialPrefillData ?? null;
     }
-  }, [searchParams]);
+  }, [searchParams, initialPrefillData]);
 
   // ---------- Close behavior ----------
   const close = React.useCallback(() => {
@@ -1106,7 +1118,7 @@ export default function StartQuoteModal() {
   const selectedMaterialIdNum = Number(materialId);
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className={embedded ? "relative" : "fixed inset-0 z-50"}>
       <style jsx global>{`
         /* Start Quote modal: bind tenant-brand accents onto the graphite action tokens (local override) */
         .border-\[var\(--action-primary\)\],
@@ -1133,14 +1145,22 @@ export default function StartQuoteModal() {
         }
       `}</style>
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={close}
-        aria-hidden="true"
-      />
+      {!embedded && (
+        <div
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          onClick={close}
+          aria-hidden="true"
+        />
+      )}
 
       {/* Modal wrapper */}
-      <div className="relative mx-auto flex min-h-screen max-w-5xl items-center justify-center px-4 py-10">
+      <div
+        className={
+          embedded
+            ? "relative mx-auto w-full max-w-5xl"
+            : "relative mx-auto flex min-h-screen max-w-5xl items-center justify-center px-4 py-10"
+        }
+      >
         <div className="relative w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-page)] shadow-[0_20px_80px_-20px_rgba(0,0,0,0.25)]">
           {/* Header */}
           <div className="relative flex items-start justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
@@ -1158,19 +1178,21 @@ export default function StartQuoteModal() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={close}
-              className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
-              aria-label="Close"
-            >
-              Close
-            </button>
+            {!embedded && (
+              <button
+                type="button"
+                onClick={close}
+                className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
+                aria-label="Close"
+              >
+                Close
+              </button>
+            )}
           </div>
 
-          {/* Body: make scrollable area */}
-          <div className="relative flex max-h-[calc(100vh-180px)] flex-col">
-            <div className="flex-1 overflow-y-auto px-6 py-6">
+          {/* Body: scrollable area in modal mode; natural flow (for iframe resize) when embedded */}
+          <div className={embedded ? "relative flex flex-col" : "relative flex max-h-[calc(100vh-180px)] flex-col"}>
+            <div className={embedded ? "flex-1 px-6 py-6" : "flex-1 overflow-y-auto px-6 py-6"}>
               <div className="grid grid-cols-1 gap-6 md:grid-cols-[240px_1fr]">
                 {/* Left rail */}
                 <div className="md:pr-2">

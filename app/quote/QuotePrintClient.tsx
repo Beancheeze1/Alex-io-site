@@ -664,8 +664,10 @@ if ((c as any).shape === "poly" && Array.isArray((c as any).points) && (c as any
 
 export default function QuotePrintClient({
   isStaffView = false,
+  embedded = false,
 }: {
   isStaffView?: boolean;
+  embedded?: boolean;
 }) {
   const searchParams = useSearchParams();
   const { trackEvent } = usePageTracker("/quote");
@@ -1590,8 +1592,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
       style={{
         fontFamily: "Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
         background: "var(--surface-page)",
-        minHeight: "100vh",
-        padding: "24px",
+        minHeight: embedded ? undefined : "100vh",
+        padding: embedded ? "12px" : "24px",
       }}
     >
       <div
@@ -1654,8 +1656,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
         {/* Happy path */}
         {!loading && quote && (
           <>
-            {/* Gradient header — demo and real quote variants */}
-            {isDemo ? (
+            {/* Gradient header — demo and real quote variants (hidden in embed mode: no
+                site branding / print-forward-schedule chrome inside a third-party iframe) */}
+            {!embedded && (isDemo ? (
               /* ── Demo header: sells Alex-IO the software ── */
               <div
                 style={{
@@ -2248,7 +2251,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   </div>
                 </div>
               </div>
-            )}
+            ))}
 
             {/* Quote total summary — now placed under the gradient header */}
             {primaryItem && (

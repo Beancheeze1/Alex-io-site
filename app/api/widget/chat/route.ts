@@ -1,6 +1,7 @@
 // app/api/widget/chat/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -812,6 +813,16 @@ function nextQuestionFromFacts(f: WidgetFacts): {
 }
 
 export async function POST(req: NextRequest) {
+  // Anonymous, unauthenticated by design (public widget) — same per-IP
+  // sliding-window limiter /api/ai/orchestrate already uses, since this
+  // route also pays for an OpenAI call per request and is now reachable
+  // from arbitrary third-party sites via the embeddable chat widget, not
+  // just Alex-IO's own marketing pages.
+  const rate = await rateLimit(req, 15, "widget-chat");
+  if (!rate.success) {
+    return rateLimitResponse(rate.reset);
+  }
+
   // Stash parsed facts outside the try so the catch block can return them
   // without calling req.clone().json() on an already-consumed body stream.
   let _parsedFacts: WidgetFacts = {};

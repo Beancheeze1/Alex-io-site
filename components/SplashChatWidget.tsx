@@ -189,10 +189,37 @@ type ChatResponse = {
   quickReplies?: string[];
 };
 
-export default function SplashChatWidget({ startQuotePath }: { startQuotePath: string }) {
+export default function SplashChatWidget({
+  startQuotePath,
+  embedded = false,
+  onOpenChange,
+  onQuoteReady,
+}: {
+  startQuotePath: string;
+  /** Strips the fixed bottom-5 right-5 self-positioning — used inside the
+   * /embed/chat iframe, where the OUTER iframe (placed by embed.js on the
+   * host page) is what's actually fixed-positioned; this component then
+   * just fills that iframe naturally. */
+  embedded?: boolean;
+  /** Mirrors the internal open/closed bubble state out, so an embed wrapper
+   * can report it to the host page for iframe resizing. */
+  onOpenChange?: (open: boolean) => void;
+  /** When supplied, called with the same payload object that would
+   * otherwise be JSON-encoded into ?prefill= — used by /embed/chat to hand
+   * facts to an in-place "expand" instead of navigating the iframe to a
+   * new page (which would drop the embedded/chrome-free treatment). */
+  onQuoteReady?: (payload: ReturnType<typeof buildPrefillPayload>) => void;
+}) {
   const router = useRouter();
 
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpenState] = React.useState(false);
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      setOpenState(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
   const [minimizedHint, setMinimizedHint] = React.useState(false);
 
   const [facts, setFacts] = React.useState<WidgetFacts>(() => {
@@ -339,6 +366,13 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
       }),
     });
 
+    if (res.status === 429) {
+      throw new Error("RATE_LIMITED");
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP_${res.status}`);
+    }
+
     return res.json();
   }
 
@@ -376,13 +410,16 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
       setQuickReplies(
         Array.isArray(data.quickReplies) ? data.quickReplies.slice(0, 6) : []
       );
-    } catch {
+    } catch (err) {
+      const rateLimited = err instanceof Error && err.message === "RATE_LIMITED";
       setMsgs((prev) => [
         ...prev,
         {
           id: uid("m"),
           role: "bot",
-          text: "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (LxWxH) and qty.",
+          text: rateLimited
+            ? "You're sending messages faster than I can keep up — give it about a minute and try again."
+            : "I’m with you — quick hiccup on my side. Try that again, or just give me outside size (LxWxH) and qty.",
         },
       ]);
     } finally {
@@ -421,6 +458,16 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
     }
 
     const payload = buildPrefillPayload(payloadFacts);
+
+    if (onQuoteReady) {
+      // Embedded/expand-in-place path: hand the facts object directly to
+      // the parent instead of navigating — a page navigation would land on
+      // /start-quote's full modal chrome inside what's meant to stay a
+      // chrome-free iframe.
+      onQuoteReady(payload);
+      return;
+    }
+
     const prefill = encodeURIComponent(JSON.stringify(payload));
     const separator = startQuotePath.includes("?") ? "&" : "?";
     router.push(`${startQuotePath}${separator}prefill=${prefill}`);
@@ -431,7 +478,7 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
   return (
     <>
       {/* Bubble */}
-      <div className="fixed bottom-5 right-5 z-[80]">
+      <div className={embedded ? "relative" : "fixed bottom-5 right-5 z-[80]"}>
         {!open && (
           <button
             type="button"
@@ -558,10 +605,12 @@ export default function SplashChatWidget({ startQuotePath }: { startQuotePath: s
                     summary. Open the layout when you’re ready.
                   </div>
 
-                  <div className="mt-2 text-[11px] text-[var(--text-muted)]">
-                    Opens the seeded editor via{" "}
-                    <code className="text-[var(--text-secondary)]">{startQuotePath}</code>.
-                  </div>
+                  {!onQuoteReady && (
+                    <div className="mt-2 text-[11px] text-[var(--text-muted)]">
+                      Opens the seeded editor via{" "}
+                      <code className="text-[var(--text-secondary)]">{startQuotePath}</code>.
+                    </div>
+                  )}
                 </div>
               ) : null}
             </div>

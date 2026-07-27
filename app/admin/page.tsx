@@ -8,6 +8,8 @@ import AdminHomeClient from "./AdminHomeClient";
 
 export default async function AdminHomePage() {
   let dashboardTitle = "Alex-IO Admin";
+  let tenantSlug: string | null = null;
+  let landingChatEnabled = false;
 
   try {
     const h = await headers();
@@ -22,10 +24,18 @@ export default async function AdminHomePage() {
 
       const name = (brandName || tenant.name || tenant.slug || "Tenant").trim();
       dashboardTitle = `${name} Admin`;
+      tenantSlug = tenant.slug;
+      landingChatEnabled = tenant.theme_json?.landingChatEnabled === true;
     }
   } catch {
     dashboardTitle = "Alex-IO Admin";
   }
 
-  return <AdminHomeClient dashboardTitle={dashboardTitle} />;
+  return (
+    <AdminHomeClient
+      dashboardTitle={dashboardTitle}
+      tenantSlug={tenantSlug}
+      landingChatEnabled={landingChatEnabled}
+    />
+  );
 }
