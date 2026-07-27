@@ -111,18 +111,27 @@
 
   // ---------- Chat (corner-pinned, no placeholder div) ----------
 
+  var EXPANDED_MARGIN = "24px";
+
   function applyChatLayout(iframe, key) {
     if (key === "expanded") {
-      // Full-viewport takeover: same behavior as navigating to a real page,
-      // not a bigger corner widget. Native iframe scrolling handles a
-      // wizard taller than the viewport.
-      iframe.style.top = "0";
-      iframe.style.left = "0";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "100%";
-      iframe.style.height = "100%";
-      iframe.style.borderRadius = "0";
+      // Big, near-viewport-filling modal — "the same widget, just bigger",
+      // not a flush full-bleed page takeover. The quote form itself renders
+      // its own backdrop + centered card (StartQuoteModal without the
+      // `embedded` prop, same as /start-quote), so this only needs to give
+      // it a generous, comfortable box to sit inside; the form's own
+      // internal scroll region handles a wizard taller than that box.
+      // All four insets alone fully determine both position and size for a
+      // fixed element — explicit width/height too would over-constrain the
+      // box (CSS resolves that by ignoring one of the insets) and could
+      // silently cancel one side's margin.
+      iframe.style.top = EXPANDED_MARGIN;
+      iframe.style.left = EXPANDED_MARGIN;
+      iframe.style.right = EXPANDED_MARGIN;
+      iframe.style.bottom = EXPANDED_MARGIN;
+      iframe.style.width = "";
+      iframe.style.height = "";
+      iframe.style.borderRadius = "16px";
       iframe.setAttribute("data-alexio-chat-expanded", "1");
       iframe.setAttribute("scrolling", "auto");
       return;

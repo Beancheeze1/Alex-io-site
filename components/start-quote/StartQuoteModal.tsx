@@ -189,6 +189,7 @@ function parseSeedCavity(raw: string): { normalized: string; kind: "rect" | "cir
 export default function StartQuoteModal({
   embedded = false,
   initialPrefillData = null,
+  onClose,
 }: {
   embedded?: boolean;
   /**
@@ -198,6 +199,14 @@ export default function StartQuoteModal({
    * Same shape as the JSON object normally JSON-encoded into ?prefill=.
    */
   initialPrefillData?: Record<string, any> | null;
+  /**
+   * Overrides the default Close-button behavior (router.back()/push
+   * ("/admin")), which doesn't make sense inside the chat-expand embed —
+   * there's no app history to go back to and /admin is a staff route, not
+   * a customer one. Used by EmbedChatClient to "minimize" back to the
+   * chat bubble instead of navigating.
+   */
+  onClose?: () => void;
 } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -219,12 +228,16 @@ export default function StartQuoteModal({
 
   // ---------- Close behavior ----------
   const close = React.useCallback(() => {
+    if (onClose) {
+      onClose();
+      return;
+    }
     if (typeof window !== "undefined" && window.history.length > 1) {
       router.back();
       return;
     }
     router.push("/admin");
-  }, [router]);
+  }, [router, onClose]);
 
 // ---------- Seeded entry (minimal, safe) ----------
   // Check both direct URL params AND prefill data from chatbot

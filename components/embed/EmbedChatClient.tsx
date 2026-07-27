@@ -4,13 +4,15 @@
 // expanded quote form, all within the SAME iframe (no page navigation).
 //
 // closed/open are small, fixed, corner-anchored sizes owned by embed.js on
-// the host page. "expanded" is a full-viewport takeover, NOT a bigger
-// corner box — a multi-step quote wizard can be taller than the viewport,
-// and a corner-anchored box that grows upward from bottom:20px eventually
-// puts its own top edge above y=0, permanently unreachable (confirmed
-// live). Full-viewport takeover scrolls natively like a real page instead,
-// so there's no dynamic height tracking for this phase — EmbedResizeReporter
-// is only used by the form/viewer embeds' grow-to-content model, not here.
+// the host page. "expanded" is a big, near-viewport-filling modal (embed.js
+// sizes the outer iframe to viewport minus a comfortable margin) — same
+// widget the standalone /start-quote page already shows (backdrop + centered
+// card + its own Close button, i.e. StartQuoteModal WITHOUT the `embedded`
+// prop), just presented inside the chat iframe instead of a page navigation.
+// Not the placeholder-div form/viewer embeds' "grow to fit total content"
+// model either: a multi-step wizard can be taller than the modal's own
+// capped height, so it scrolls internally (same as the real /start-quote
+// page always has) — no EmbedResizeReporter/dynamic height tracking here.
 //
 // Message contract with embed.js:
 //   { type: "alex-io-chat-state", state: "closed" | "open" | "expanded" | "disabled" }
@@ -57,35 +59,13 @@ export default function EmbedChatClient() {
   }, [state]);
 
   if (state === "expanded") {
+    // Deliberately NOT `embedded` — this is the same backdrop + centered
+    // card + Close button treatment /start-quote always uses. onClose
+    // overrides the default router-based close (which would try to
+    // navigate to /admin, a staff route, or app history that doesn't
+    // exist inside this iframe) to just minimize back to the chat bubble.
     return (
-      <>
-        {/* Full-viewport takeover has no other way back short of reloading
-            the host page — without this, a visitor who opens the form by
-            mistake (or wants to keep browsing the host site first) is stuck. */}
-        <button
-          type="button"
-          onClick={() => setState("closed")}
-          aria-label="Minimize back to chat"
-          style={{
-            position: "fixed",
-            top: 12,
-            right: 12,
-            zIndex: 1000,
-            width: 36,
-            height: 36,
-            borderRadius: 999,
-            border: "1px solid var(--border)",
-            background: "var(--surface-card)",
-            color: "var(--text-primary)",
-            fontSize: 16,
-            cursor: "pointer",
-            boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-          }}
-        >
-          &#x2715;
-        </button>
-        <StartQuoteModal embedded initialPrefillData={prefillPayload} />
-      </>
+      <StartQuoteModal onClose={() => setState("closed")} initialPrefillData={prefillPayload} />
     );
   }
 
