@@ -36,13 +36,20 @@
 
   // Chat's closed/open sizes are fixed, known constants (not content-driven
   // like form/viewer) — the bubble and panel don't grow with conversation
-  // length, since the message list scrolls internally. "expanded" is the
-  // one state that behaves like form/viewer: real content height, reported
-  // via the same alex-io-resize message once the quote form mounts inside.
+  // length, since the message list scrolls internally.
+  //
+  // "expanded" is NOT a bigger version of the same corner-anchored box: a
+  // full multi-step quote wizard can be far taller than the viewport, and
+  // a corner anchor (bottom:20px) grows UPWARD as height increases — past
+  // a certain height its top edge ends up above y=0, permanently
+  // unreachable (confirmed live: an 1385px-tall corner box in an 863px
+  // viewport put ~542px of content off-screen with no way to scroll to
+  // it). So "expanded" instead takes over the full viewport like a real
+  // page, with its own native scrolling — no dynamic height tracking
+  // needed at all once it's full-viewport.
   var CHAT_SIZES = {
     closed: { width: "260px", height: "64px" },
     open: { width: "380px", height: "620px" },
-    expanded: { width: "min(860px, calc(100vw - 40px))", height: DEFAULT_HEIGHT_PX + "px" },
   };
 
   function buildIframeSrc(tenant, mode, quoteNo) {
@@ -104,11 +111,34 @@
 
   // ---------- Chat (corner-pinned, no placeholder div) ----------
 
-  function applyChatSize(iframe, sizeKey) {
-    var size = CHAT_SIZES[sizeKey];
+  function applyChatLayout(iframe, key) {
+    if (key === "expanded") {
+      // Full-viewport takeover: same behavior as navigating to a real page,
+      // not a bigger corner widget. Native iframe scrolling handles a
+      // wizard taller than the viewport.
+      iframe.style.top = "0";
+      iframe.style.left = "0";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "100%";
+      iframe.style.height = "100%";
+      iframe.style.borderRadius = "0";
+      iframe.setAttribute("data-alexio-chat-expanded", "1");
+      iframe.setAttribute("scrolling", "auto");
+      return;
+    }
+
+    var size = CHAT_SIZES[key];
     if (!size) return;
+    iframe.style.top = "";
+    iframe.style.left = "";
+    iframe.style.bottom = "20px";
+    iframe.style.right = "20px";
     iframe.style.width = size.width;
     iframe.style.height = size.height;
+    iframe.style.borderRadius = "16px";
+    iframe.removeAttribute("data-alexio-chat-expanded");
+    iframe.setAttribute("scrolling", "no");
   }
 
   function mountChat() {
@@ -126,18 +156,14 @@
     iframe.src = buildIframeSrc(tenant, "chat", null);
     iframe.setAttribute("data-alexio-iframe-id", makeIframeId());
     iframe.setAttribute("data-alexio-chat-iframe", "1");
-    iframe.setAttribute("scrolling", "no");
     iframe.setAttribute("title", "Alex-IO chat");
     iframe.style.position = "fixed";
-    iframe.style.bottom = "20px";
-    iframe.style.right = "20px";
     iframe.style.border = "none";
     iframe.style.background = "transparent";
     iframe.style.colorScheme = "normal";
     iframe.style.zIndex = "2147483000";
-    iframe.style.borderRadius = "16px";
-    iframe.style.transition = "width 0.15s ease, height 0.15s ease";
-    applyChatSize(iframe, "closed");
+    iframe.style.transition = "top 0.15s ease, left 0.15s ease, right 0.15s ease, bottom 0.15s ease, width 0.15s ease, height 0.15s ease";
+    applyChatLayout(iframe, "closed");
     iframe.setAttribute("allowtransparency", "true");
 
     thisScript.setAttribute("data-alexio-mounted", "1");
@@ -160,7 +186,10 @@
 
     if (data.type === RESIZE_MESSAGE_TYPE && typeof data.height === "number") {
       var iframe = findIframeBySource(evt.source);
-      if (iframe) {
+      // A full-viewport expanded chat iframe scrolls its own content
+      // natively and ignores content-height resize messages — applying one
+      // would fight the 100%-height layout applyChatLayout("expanded") set.
+      if (iframe && !iframe.hasAttribute("data-alexio-chat-expanded")) {
         iframe.style.height = Math.max(1, Math.round(data.height)) + "px";
       }
       return;
@@ -177,7 +206,7 @@
         return;
       }
       if (data.state === "closed" || data.state === "open" || data.state === "expanded") {
-        applyChatSize(chatIframe, data.state);
+        applyChatLayout(chatIframe, data.state);
       }
       return;
     }
