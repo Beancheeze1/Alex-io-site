@@ -54,8 +54,17 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
+            // NOTE: a bare "*" host-source does NOT match the https: scheme
+            // for frame-ancestors in current browsers (confirmed via a real
+            // console error: "Framing '...' violates CSP directive:
+            // 'frame-ancestors *'. The scheme 'https:' must be added
+            // explicitly."). Per the CSP spec, https:/http: are
+            // <scheme-source> tokens (bare scheme + required colon, no
+            // "//" or host) — listing them explicitly is the correct,
+            // unambiguous way to allow framing from any origin over either
+            // scheme, instead of relying on the wildcard host-source.
             key: "Content-Security-Policy",
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self'; frame-ancestors *;",
+            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self'; frame-ancestors https: http:;",
           },
         ],
       },
