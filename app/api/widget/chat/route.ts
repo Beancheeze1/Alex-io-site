@@ -50,6 +50,16 @@ type WidgetFacts = {
 
   notes?: string;
   createdAtIso?: string;
+
+  /**
+   * Internal only — never part of the OpenAI response schema, so the model
+   * can't see or set it directly. Set when the BLOCK SIZE PROTECTION guard
+   * flags a possible outside-dim shrink and asks the customer to confirm;
+   * cleared once the next turn resolves it (applied or clarified as a
+   * cavity). Lets us tell "first time we've seen this shrink" apart from
+   * "customer just answered the clarifying question" without a second AI call.
+   */
+  pendingDimShrink?: { l: string; w: string; h: string } | null;
 };
 
 type Incoming = {
@@ -864,12 +874,41 @@ export async function POST(req: NextRequest) {
     // Run box suggester BEFORE AI call so we can inject the stock suggestion as context.
     const pack = await maybeSeedPackagingFromBoxesSuggest({ mergedFacts: seededFacts });
 
+    // Guide (don't force) which field the model should ask about next, using the
+    // same required-field order nextQuestionFromFacts() already defines. Keeps
+    // required fields (e.g. shipMode) from getting skipped for many turns while
+    // still letting the model write its own reply and react to whatever the
+    // customer actually said this turn.
+    const questionGuidance = nextQuestionFromFacts(seededFacts);
+    const questionOrderContext = questionGuidance.done
+      ? undefined
+      : `SYSTEM NOTE: If the customer's latest message doesn't already cover it, and nothing more ` +
+        `pressing needs a reply first, the next required field to prioritize asking about is: ` +
+        `"${questionGuidance.assistantMessage}" Don't skip ahead to later fields until this one is ` +
+        `addressed. Put this in your own words as part of a natural reply — don't just repeat it verbatim.`;
+
+    // If we're still waiting on the customer to confirm a possible outside-dim
+    // shrink from last turn (see BLOCK SIZE PROTECTION below), tell the model so
+    // it can resolve the ambiguity from their new message instead of guessing.
+    const dimShrinkContext = facts.pendingDimShrink
+      ? `SYSTEM NOTE: Last turn the customer proposed shrinking the outside block from ` +
+        `${facts.outsideL}x${facts.outsideW}x${facts.outsideH} to ` +
+        `${facts.pendingDimShrink.l}x${facts.pendingDimShrink.w}x${facts.pendingDimShrink.h}, and you asked ` +
+        `them to confirm whether that's the new outer block size or a cavity/pocket size. Read their new ` +
+        `message: if they confirm the resize, set outsideL/outsideW/outsideH to the smaller size. If they ` +
+        `clarify it's a cavity/pocket instead, set cavities and leave outsideL/outsideW/outsideH unchanged.`
+      : undefined;
+
+    const combinedContext =
+      [pack.suggestionContext, dimShrinkContext, questionOrderContext].filter(Boolean).join("\n\n") ||
+      undefined;
+
     const rawObj = await callOpenAI({
       messages,
       userText,
       facts: seededFacts,
       materialOptions,
-      suggestionContext: pack.suggestionContext,
+      suggestionContext: combinedContext,
     });
     const parsed = normalizeBrainObj(rawObj);
 
@@ -933,9 +972,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // BLOCK SIZE PROTECTION: If the AI tries to overwrite already-confirmed outside
-    // dims with smaller values (i.e. cavity-sized numbers), reject the overwrite.
-    // This catches the case where the AI confuses a cavity dimension for the block size.
+    // Set below when BLOCK SIZE PROTECTION intercepts a shrink that needs customer
+    // confirmation — overrides the assistant's reply/quickReplies/done so they never
+    // contradict what was actually applied to the facts.
+    let dimShrinkClarification: { assistantMessage: string; quickReplies: string[] } | null = null;
+
+    // BLOCK SIZE PROTECTION: If the AI proposes overwriting already-confirmed outside
+    // dims with smaller values (i.e. cavity-sized numbers), we can't tell from the
+    // numbers alone whether the AI confused a cavity for the block size, or the
+    // customer is genuinely shrinking their block — so we don't silently guess either
+    // way. First time we see it, hold the old dims and ask the customer to confirm
+    // (dimShrinkClarification below overrides the assistant's reply so it never claims
+    // a change that didn't happen). If we already asked last turn (pendingDimShrink
+    // was set), this turn's answer resolves it either way — see dimShrinkContext above,
+    // which tells the model how to interpret the customer's response.
     const prevL = Number(facts.outsideL);
     const prevW = Number(facts.outsideW);
     const prevH = Number(facts.outsideH);
@@ -951,16 +1001,35 @@ export async function POST(req: NextRequest) {
         Number.isFinite(newL) && Number.isFinite(newW) && Number.isFinite(newH) &&
         (newL < prevL || newW < prevW); // strictly smaller in L or W = suspicious
 
-      if (newDimsLookLikeCavity) {
-        // Reject the AI's outside dim update — keep the previously confirmed values.
-        // The new dims are likely a cavity — let the AI assign them to cavities instead.
+      const alreadyAskedAboutThis = Boolean(facts.pendingDimShrink);
+
+      if (newDimsLookLikeCavity && !alreadyAskedAboutThis) {
+        // Don't apply the shrink and don't let the assistant claim it happened —
+        // hold the previous values and ask the customer to confirm instead.
         nextFacts.outsideL = facts.outsideL;
         nextFacts.outsideW = facts.outsideW;
         nextFacts.outsideH = facts.outsideH;
-        console.warn("[widget/chat] Rejected suspicious outside dim overwrite — looks like cavity dims", {
+        nextFacts.pendingDimShrink = { l: String(newL), w: String(newW), h: String(newH) };
+
+        dimShrinkClarification = {
+          assistantMessage:
+            `Just to double check — do you want the outer block size changed to ${newL}x${newW}x${newH}, ` +
+            `or is that the cavity/pocket size cut into the ${facts.outsideL}x${facts.outsideW}x${facts.outsideH} block?`,
+          quickReplies: [
+            `Yes, resize block to ${newL}x${newW}x${newH}`,
+            `No, that's the cavity size`,
+          ],
+        };
+
+        console.warn("[widget/chat] Outside dim shrink needs customer confirmation before applying", {
           prev: `${prevL}x${prevW}x${prevH}`,
-          rejected: `${newL}x${newW}x${newH}`,
+          proposed: `${newL}x${newW}x${newH}`,
         });
+      } else if (alreadyAskedAboutThis) {
+        // Already asked last turn — this turn's answer resolves it one way or the
+        // other (the model was told how to interpret it via dimShrinkContext).
+        // Stop asking either way so this can't loop forever.
+        nextFacts.pendingDimShrink = null;
       }
     }
 
@@ -1005,16 +1074,26 @@ export async function POST(req: NextRequest) {
       mergedFacts.packagingSku = pack.packagingSku;
     }
 
-    const assistantMessage = parsed.assistantMessage;
+    // dimShrinkClarification takes over the reply entirely when set — the customer
+    // must see a question that matches what actually happened to the facts, not
+    // whatever the model originally said before we intercepted the dim update.
+    const assistantMessage = dimShrinkClarification
+      ? dimShrinkClarification.assistantMessage
+      : parsed.assistantMessage;
 
     // AI quick replies take priority; pad with suggestion choices if fewer than 2.
-    const aiReplies = (parsed.quickReplies ?? []).slice(0, 6);
-    const finalReplies =
-      aiReplies.length >= 2
+    const aiReplies = dimShrinkClarification
+      ? dimShrinkClarification.quickReplies
+      : (parsed.quickReplies ?? []).slice(0, 6);
+    const finalReplies = dimShrinkClarification
+      ? aiReplies
+      : aiReplies.length >= 2
         ? aiReplies
         : [...aiReplies, ...(pack.suggestionQuickReplies ?? [])].slice(0, 6);
 
-    const done = parsed.done && isReady(mergedFacts);
+    // Never finish on the same turn we're still waiting on the customer to confirm
+    // an outside-dim shrink — the facts aren't settled yet.
+    const done = dimShrinkClarification ? false : parsed.done && isReady(mergedFacts);
 
 // If AI responded normally, NEVER treat "not ready" as an error
 
@@ -1028,18 +1107,22 @@ export async function POST(req: NextRequest) {
       { status: 200 },
     );
   } catch (e: any) {
+    // Full error stays server-side only — the client must never render raw error
+    // text as if it were an assistant reply. Status must be non-200 so the widget's
+    // existing !res.ok fallback path (SplashChatWidget.tsx callBrain) fires instead
+    // of treating this JSON body's assistantMessage as a normal bot response.
     console.error("widget_chat_route_error", e);
     // NOTE: do NOT call req.clone().json() here — req.json() already consumed the body
     // stream earlier in this handler. Cloning after consumption throws in Node.js runtime.
     // Instead we use _parsedFacts which was stashed from the parsed payload above.
     return NextResponse.json(
       {
-        assistantMessage: "DEBUG ERROR: " + (e?.message || "unknown"),
+        assistantMessage: "Sorry — I hit a snag processing that. Please try again in a moment.",
         facts: _parsedFacts,
         done: false,
         quickReplies: [],
       },
-      { status: 200 },
+      { status: 500 },
     );
   }
 }
