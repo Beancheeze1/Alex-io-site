@@ -678,8 +678,8 @@ function buildEmbedSnippet(slug: string, mode: EmbedMode): string {
 
   const dataAttrs =
     mode === "quote-viewer"
-      ? `data-tenant="${slug}" data-mode="quote-viewer" data-quote-no="PASTE-QUOTE-NUMBER-HERE"`
-      : `data-tenant="${slug}" data-mode="quote-form"`;
+      ? `data-alexio-embed data-tenant="${slug}" data-mode="quote-viewer" data-quote-no="PASTE-QUOTE-NUMBER-HERE"`
+      : `data-alexio-embed data-tenant="${slug}" data-mode="quote-form"`;
 
   return [
     `<div ${dataAttrs}></div>`,
