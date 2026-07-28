@@ -318,6 +318,7 @@ async function ensureQuoteHeader(args: {
   customerEmail: string | null;
   customerPhone: string | null;
   customerCompany: string | null;
+  quoteSource: string;
 }): Promise<QuoteRow | null> {
   // 1) Try load
   const existing = await one<QuoteRow>(
@@ -378,9 +379,10 @@ async function ensureQuoteHeader(args: {
         geometry_hash,
         locked_at,
         updated_by_user_id,
-        is_demo
+        is_demo,
+        quote_source
       )
-      values ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      values ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       returning id, quote_no, status
       `,
       [
@@ -395,6 +397,7 @@ async function ensureQuoteHeader(args: {
         null,
         args.currentUserId,
         args.quoteNo.startsWith("Q-DEMO-"),
+        args.quoteSource,
       ],
     );
 
@@ -1203,6 +1206,15 @@ export async function POST(req: NextRequest) {
   const salesRepSlug =
     typeof body?.sales_rep_slug === "string" ? body.sales_rep_slug.trim() : "";
 
+  // Reporting-only channel tag, distinct from sales_rep_slug/sales_rep_id
+  // above (who gets commission credit). Only set once, at creation, in
+  // ensureQuoteHeader below -- never touched again on later apply calls for
+  // an already-existing quote.
+  const QUOTE_SOURCES = new Set(["direct", "embed_website"]);
+  const quoteSourceRaw =
+    typeof body?.quote_source === "string" ? body.quote_source.trim() : "";
+  const quoteSource = QUOTE_SOURCES.has(quoteSourceRaw) ? quoteSourceRaw : "direct";
+
   const quoteNo = String(body.quoteNo).trim();
   const layout = body.layout;
   const action = typeof body.action === "string" ? body.action.trim().toLowerCase() : "";
@@ -1372,6 +1384,7 @@ export async function POST(req: NextRequest) {
       customerEmail,
       customerPhone,
       customerCompany,
+      quoteSource,
     });
 
     if (!quote) {

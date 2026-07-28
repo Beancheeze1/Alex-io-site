@@ -42,7 +42,7 @@ export default function EmbedQuoteFormPage() {
     <EmbedResizeReporter>
       <div className="bg-[var(--surface-page)]">
         <Suspense fallback={null}>
-          <StartQuoteModal embedded />
+          <StartQuoteModal embedded quoteSource="embed_website" />
         </Suspense>
       </div>
     </EmbedResizeReporter>

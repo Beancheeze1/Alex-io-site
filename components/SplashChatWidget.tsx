@@ -48,6 +48,11 @@ type WidgetFacts = {
 
   // meta
   createdAtIso?: string;
+
+  /** Sales rep attribution slug, e.g. from /q/{slug} -> ?sales_rep_slug=. Carried
+   * through the same structured payload as every other fact instead of relying
+   * on a bare URL param surviving the whole chat-to-editor navigation. */
+  salesRepSlug?: string;
 };
 
 type Msg = {
@@ -108,6 +113,10 @@ function buildPrefillPayload(facts: WidgetFacts) {
     customerEmail: facts.customerEmail ?? "",
 
     notes: facts.notes ?? "",
+
+    // sales attribution -- reaches StartQuoteModal's onLaunchEditor via
+    // prefillData.salesRepSlug, same fallback the raw URL param already gets.
+    salesRepSlug: facts.salesRepSlug ?? "",
   };
 }
 
@@ -194,6 +203,7 @@ export default function SplashChatWidget({
   embedded = false,
   onOpenChange,
   onQuoteReady,
+  salesRepSlug,
 }: {
   startQuotePath: string;
   /** Strips the fixed bottom-5 right-5 self-positioning — used inside the
@@ -209,6 +219,11 @@ export default function SplashChatWidget({
    * facts to an in-place "expand" instead of navigating the iframe to a
    * new page (which would drop the embedded/chrome-free treatment). */
   onQuoteReady?: (payload: ReturnType<typeof buildPrefillPayload>) => void;
+  /** Sales rep attribution slug read from the host page's own URL (e.g. by
+   * /t/[tenant]/page.tsx from ?sales_rep_slug=). Seeded into facts once so it
+   * survives into buildPrefillPayload regardless of what happens to the URL
+   * during the rest of the chat-to-editor flow. */
+  salesRepSlug?: string;
 }) {
   const router = useRouter();
 
@@ -226,8 +241,12 @@ export default function SplashChatWidget({
     const saved = safeJsonParse<{ facts: WidgetFacts }>(
       typeof window !== "undefined" ? localStorage.getItem(LS_KEY) : null,
     );
-    if (saved?.facts) return saved.facts;
-    return { createdAtIso: new Date().toISOString() };
+    if (saved?.facts) {
+      // Don't clobber a rep already captured earlier in this session (first
+      // touch) -- only backfill if this resumed session never had one.
+      return saved.facts.salesRepSlug ? saved.facts : { ...saved.facts, salesRepSlug };
+    }
+    return { createdAtIso: new Date().toISOString(), salesRepSlug };
   });
 
   const [msgs, setMsgs] = React.useState<Msg[]>(() => {

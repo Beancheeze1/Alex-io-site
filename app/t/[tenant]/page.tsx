@@ -103,7 +103,7 @@ export default function TenantLanding() {
         {/* Optional: if logo was enabled but failed, we silently fall back to text */}
       </div>
       {theme?.landingChatEnabled ? (
-        <SplashChatWidget startQuotePath={startQuotePath} />
+        <SplashChatWidget startQuotePath={startQuotePath} salesRepSlug={salesRepSlug} />
       ) : null}
     </main>
   );

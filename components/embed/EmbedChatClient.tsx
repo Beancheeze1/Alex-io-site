@@ -65,7 +65,11 @@ export default function EmbedChatClient() {
     // navigate to /admin, a staff route, or app history that doesn't
     // exist inside this iframe) to just minimize back to the chat bubble.
     return (
-      <StartQuoteModal onClose={() => setState("closed")} initialPrefillData={prefillPayload} />
+      <StartQuoteModal
+        onClose={() => setState("closed")}
+        initialPrefillData={prefillPayload}
+        quoteSource="embed_website"
+      />
     );
   }
 

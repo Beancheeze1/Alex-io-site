@@ -190,6 +190,7 @@ export default function StartQuoteModal({
   embedded = false,
   initialPrefillData = null,
   onClose,
+  quoteSource,
 }: {
   embedded?: boolean;
   /**
@@ -207,6 +208,14 @@ export default function StartQuoteModal({
    * chat bubble instead of navigating.
    */
   onClose?: () => void;
+  /**
+   * Reporting-only channel tag ("direct" | "embed_website") for where this
+   * quote was created from -- distinct from sales_rep_slug (who gets
+   * commission credit). Set once per entry point (this page/component
+   * already knows unambiguously which channel it is) and threaded into the
+   * editor URL so /api/quote/layout/apply can stamp it on quote creation.
+   */
+  quoteSource?: string;
 } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -987,8 +996,18 @@ export default function StartQuoteModal({
 
     const p = new URLSearchParams();
 
-    const salesSlugFromUrl = (searchParams.get("sales_rep_slug") || searchParams.get("sales") || searchParams.get("rep") || "").trim();
+    const salesSlugFromPrefill =
+      typeof prefillData?.salesRepSlug === "string" ? prefillData.salesRepSlug : "";
+    const salesSlugFromUrl = (
+      searchParams.get("sales_rep_slug") ||
+      searchParams.get("sales") ||
+      searchParams.get("rep") ||
+      salesSlugFromPrefill ||
+      ""
+    ).trim();
     if (salesSlugFromUrl) p.set("sales_rep_slug", salesSlugFromUrl);
+
+    if (quoteSource) p.set("quote_source", quoteSource);
 
     const tenantFromUrl = (searchParams.get("tenant") || searchParams.get("t") || "").trim();
     if (tenantFromUrl) p.set("tenant", tenantFromUrl);

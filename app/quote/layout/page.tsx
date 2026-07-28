@@ -3505,6 +3505,19 @@ const handleGoToFoamAdvisor = () => {
     }
   })();
 
+  // Quote source (reporting only, distinct from sales credit above): each
+  // entry point into StartQuoteModal already sets this unambiguously
+  // ("direct" or "embed_website"), threaded here the same way as sales credit.
+  const quoteSourceForApply = (() => {
+    try {
+      if (typeof window === "undefined") return "";
+      const url = new URL(window.location.href);
+      return (url.searchParams.get("quote_source") || "").trim();
+    } catch {
+      return "";
+    }
+  })();
+
   const handleApplyToQuote = async () => {
     if (!hasRealQuoteNo) {
       alert("This layout isn’t linked to a quote.\nOpen from a real quote email.");
@@ -3635,6 +3648,11 @@ const handleGoToFoamAdvisor = () => {
       // Sales credit: pass through to backend; backend will only set if quote.sales_rep_id is NULL.
       if (salesRepSlugForApply && salesRepSlugForApply.length > 0) {
         payload.sales_rep_slug = salesRepSlugForApply;
+      }
+
+      // Quote source: reporting only, does not affect sales credit above.
+      if (quoteSourceForApply && quoteSourceForApply.length > 0) {
+        payload.quote_source = quoteSourceForApply;
       }
 
       // Attach chosen carton so the backend can upsert the box line item.

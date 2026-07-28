@@ -55,7 +55,7 @@ export default function StartQuotePage() {
 
       {/* Modal mounts immediately (Option B) */}
       <Suspense fallback={null}>
-        <StartQuoteModal />
+        <StartQuoteModal quoteSource="direct" />
       </Suspense>
     </div>
   );
