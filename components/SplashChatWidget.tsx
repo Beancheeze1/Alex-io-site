@@ -341,7 +341,9 @@ export default function SplashChatWidget({
   }
 
   function reset() {
-    const freshFacts: WidgetFacts = { createdAtIso: new Date().toISOString() };
+    // salesRepSlug is tied to how the customer arrived (the URL), not to
+    // conversation content -- a fresh start shouldn't drop attribution.
+    const freshFacts: WidgetFacts = { createdAtIso: new Date().toISOString(), salesRepSlug };
     setFacts(freshFacts);
     setMsgs([
       {
