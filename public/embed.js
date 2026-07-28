@@ -112,6 +112,7 @@
   // ---------- Chat (corner-pinned, no placeholder div) ----------
 
   var EXPANDED_MARGIN = "24px";
+  var EXPANDED_MARGIN_PX = 24;
 
   function applyChatLayout(iframe, key) {
     if (key === "expanded") {
@@ -121,16 +122,22 @@
       // `embedded` prop, same as /start-quote), so this only needs to give
       // it a generous, comfortable box to sit inside; the form's own
       // internal scroll region handles a wizard taller than that box.
-      // All four insets alone fully determine both position and size for a
-      // fixed element — explicit width/height too would over-constrain the
-      // box (CSS resolves that by ignoring one of the insets) and could
-      // silently cancel one side's margin.
+      //
+      // <iframe> is a CSS replaced element, so unlike normal block boxes it
+      // does NOT stretch to fill the gap between opposing inset offsets
+      // when width/height are left 'auto' — it falls back to the browser's
+      // default replaced-element size (300x150), rendering as a tiny
+      // clipped box instead of a modal (confirmed live). Explicit
+      // width/height via calc() against the viewport is required; the four
+      // insets are kept for positioning and are consistent with — not
+      // overridden by — the explicit size, so nothing here fights or
+      // cancels out.
       iframe.style.top = EXPANDED_MARGIN;
       iframe.style.left = EXPANDED_MARGIN;
       iframe.style.right = EXPANDED_MARGIN;
       iframe.style.bottom = EXPANDED_MARGIN;
-      iframe.style.width = "";
-      iframe.style.height = "";
+      iframe.style.width = "calc(100vw - " + EXPANDED_MARGIN_PX * 2 + "px)";
+      iframe.style.height = "calc(100vh - " + EXPANDED_MARGIN_PX * 2 + "px)";
       iframe.style.borderRadius = "16px";
       iframe.setAttribute("data-alexio-chat-expanded", "1");
       iframe.setAttribute("scrolling", "auto");

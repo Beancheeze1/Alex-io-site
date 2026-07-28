@@ -662,6 +662,28 @@ function normalizeLooseName(raw: string): string | null {
   return parts.join(" ");
 }
 
+/**
+ * True once every field that comes before the name question (in the same
+ * required-field order nextQuestionFromFacts() uses) is already settled and
+ * customerName isn't yet set — i.e. the conversation has actually reached the
+ * point of asking for a name, not just "some short alphabetic reply showed up
+ * somewhere." Gates the loose-name fallback below so an answer to an earlier
+ * question (e.g. "not printed") can't get misread as a name guess.
+ */
+function isAtNameQuestion(f: WidgetFacts): boolean {
+  const qtyOk = Boolean(f.qty && String(f.qty).trim().length > 0);
+  const printedOk = f.printed != null || !(f.shipMode === "box" || f.shipMode === "mailer");
+  return (
+    hasCoreDims(f) &&
+    qtyOk &&
+    Boolean(f.shipMode) &&
+    printedOk &&
+    Boolean(f.insertType) &&
+    Boolean(f.holding) &&
+    !(f.customerName && String(f.customerName).trim())
+  );
+}
+
 function extractSimpleFacts(userText: string, facts: WidgetFacts): Partial<WidgetFacts> {
   const text = String(userText || "").trim();
   const next: Partial<WidgetFacts> = {};
@@ -723,7 +745,13 @@ function extractSimpleFacts(userText: string, facts: WidgetFacts): Partial<Widge
     const explicitName = normalizeLooseName(nameMatch?.[1] ?? "");
     if (explicitName) {
       next.customerName = explicitName;
-    } else {
+    } else if (isAtNameQuestion(facts)) {
+      // Loose fallback (no explicit "my name is..." phrasing) is only safe to
+      // guess from once the conversation has actually reached the point of
+      // asking for a name — otherwise a short alphabetic reply to an unrelated
+      // question (e.g. "not printed" answering the printing question) gets
+      // misread as a name and sticks, since a non-blank customerName stops the
+      // AI from ever asking again.
       const looseName = normalizeLooseName(text);
       if (
         looseName &&
