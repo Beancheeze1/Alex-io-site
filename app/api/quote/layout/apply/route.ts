@@ -2157,7 +2157,9 @@ export async function POST(req: NextRequest) {
         const qtyForCarton =
           qtyMaybe != null && qtyMaybe > 0 ? qtyMaybe : 1;
 
-        // Look up box by SKU in the boxes catalogue
+        // Look up box by SKU in the boxes catalogue. Scoped to the shared
+        // catalog plus this quote's own tenant, so a tenant-specific custom
+        // size never gets attached to another tenant's quote.
         const boxRow = (await one<{
           id: number;
           inside_length_in: number;
@@ -2168,8 +2170,9 @@ export async function POST(req: NextRequest) {
           `SELECT id, inside_length_in, inside_width_in, inside_height_in, style
            FROM public.boxes
            WHERE sku = $1
+             AND (tenant_id IS NULL OR tenant_id = $2)
            LIMIT 1`,
-          [sku],
+          [sku, tenantId],
         )) as any;
 
         if (boxRow) {
@@ -2304,7 +2307,7 @@ export async function POST(req: NextRequest) {
               const customStyle =
                 styleStr.toLowerCase() === "rsc" ? "rsc" : "mailer";
               const { description, unit_price_usd, extended_price_usd } =
-                await resolveCustomSelection(L, W, H, customStyle, qtyForCarton);
+                await resolveCustomSelection(L, W, H, customStyle, qtyForCarton, tenantId);
 
               await q(
                 `DELETE FROM public.quote_box_selections WHERE quote_id = $1 AND kind = 'custom'`,

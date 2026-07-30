@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
         }
 
         const quoteTotals = await Promise.all(
-          quotes.map((qt) => getCommissionableTotal(qt.id, qt.quote_no, base)),
+          quotes.map((qt) => getCommissionableTotal(qt.id, qt.quote_no, base, tenantId)),
         );
 
         const quotesTotal = Math.round(quoteTotals.reduce((s, t) => s + t, 0) * 100) / 100;

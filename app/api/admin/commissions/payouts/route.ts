@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
       );
 
       const totals = await Promise.all(
-        quotes.map((qt) => getCommissionableTotal(qt.id, qt.quote_no, base)),
+        quotes.map((qt) => getCommissionableTotal(qt.id, qt.quote_no, base, tenantId)),
       );
       const quotesTotal = Math.round(totals.reduce((s, t) => s + t, 0) * 100) / 100;
       const pct = safeNum(rep.commission_pct);

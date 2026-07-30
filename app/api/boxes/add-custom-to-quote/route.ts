@@ -45,6 +45,7 @@ type BodyIn = {
 type QuoteRow = {
   id: number;
   quote_no: string;
+  tenant_id: number | null;
 };
 
 type SelectionRow = {
@@ -124,7 +125,7 @@ export async function POST(req: NextRequest) {
 
     const quote = (await one<QuoteRow>(
       `
-      SELECT id, quote_no
+      SELECT id, quote_no, tenant_id
       FROM public.quotes
       WHERE quote_no = $1
       `,
@@ -141,6 +142,7 @@ export async function POST(req: NextRequest) {
       H,
       style,
       qty,
+      quote.tenant_id,
     );
 
     const selection = await withTxn(async (tx) => {

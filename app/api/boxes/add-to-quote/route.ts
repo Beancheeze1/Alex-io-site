@@ -45,6 +45,7 @@ type BodyIn = {
 type QuoteRow = {
   id: number;
   quote_no: string;
+  tenant_id: number | null;
 };
 
 type BoxRow = {
@@ -56,6 +57,7 @@ type BoxRow = {
   inside_length_in: number;
   inside_width_in: number;
   inside_height_in: number;
+  tenant_id: number | null;
 };
 
 type PrimaryItemRow = {
@@ -129,7 +131,7 @@ export async function POST(req: NextRequest) {
     // 1) Quote
     const quote = (await one<QuoteRow>(
       `
-      SELECT id, quote_no
+      SELECT id, quote_no, tenant_id
       FROM public.quotes
       WHERE quote_no = $1
       `,
@@ -151,7 +153,7 @@ export async function POST(req: NextRequest) {
 
       box = (await one<BoxRow>(
         `
-        SELECT id, vendor, style, sku, description, inside_length_in, inside_width_in, inside_height_in
+        SELECT id, vendor, style, sku, description, inside_length_in, inside_width_in, inside_height_in, tenant_id
         FROM public.boxes
         WHERE id = $1
         `,
@@ -161,7 +163,7 @@ export async function POST(req: NextRequest) {
       const sku = (body.sku || "").trim();
       box = (await one<BoxRow>(
         `
-        SELECT id, vendor, style, sku, description, inside_length_in, inside_width_in, inside_height_in
+        SELECT id, vendor, style, sku, description, inside_length_in, inside_width_in, inside_height_in, tenant_id
         FROM public.boxes
         WHERE sku = $1
         `,
@@ -171,6 +173,20 @@ export async function POST(req: NextRequest) {
 
     if (!box) {
       return bad({ ok: false, error: "BOX_NOT_FOUND" }, 404);
+    }
+
+    // A tenant-specific box (tenant_id set) may only be added to that same
+    // tenant's own quotes -- otherwise a stale cached candidate list (or a
+    // direct API call) could attach another tenant's private catalog entry.
+    if (box.tenant_id != null && box.tenant_id !== quote.tenant_id) {
+      return bad(
+        {
+          ok: false,
+          error: "BOX_NOT_FOUND",
+          message: "This box is not available for this quote's tenant.",
+        },
+        404,
+      );
     }
 
     // 3) Upsert selection row

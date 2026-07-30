@@ -44,6 +44,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { resolveBoxUnitPrice, type BoxTierInputs } from "@/app/lib/box-tier-pricing";
+import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -239,14 +240,19 @@ function rankFromDbRows(
 // apart again.
 const CLEARANCE_IN = 0.5;
 
-async function suggestBoxes(rawFootprintL: number, rawFootprintW: number, rawStackDepth: number) {
+async function suggestBoxes(
+  rawFootprintL: number,
+  rawFootprintW: number,
+  rawStackDepth: number,
+  tenantId: number | null,
+) {
   const requiredL = rawFootprintL + CLEARANCE_IN * 2;
   const requiredW = rawFootprintW + CLEARANCE_IN * 2;
   const requiredH = rawStackDepth + CLEARANCE_IN * 2;
 
   const [rscRows, mailerRows] = await Promise.all([
-    fetchBoxesForStyle(requiredL, requiredW, requiredH, "rsc"),
-    fetchBoxesForStyle(requiredL, requiredW, requiredH, "mailer"),
+    fetchBoxesForStyle(requiredL, requiredW, requiredH, "rsc", tenantId),
+    fetchBoxesForStyle(requiredL, requiredW, requiredH, "mailer", tenantId),
   ]);
 
   const bestRsc = pickBestFromDbRows(rscRows, "RSC", requiredL, requiredW, requiredH);
@@ -307,9 +313,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(resp);
     }
 
+    // Resolve the caller's tenant from the request host so suggestions only
+    // ever include the shared catalog plus that tenant's own custom sizes.
+    // A resolution failure (e.g. unrecognized host) falls back to global-only
+    // rather than failing the whole suggestion -- narrows visibility, never
+    // widens it.
+    const tenantResult = await enforceTenantMatch(req, null, { allowPublic: true });
+    if (!tenantResult.ok) {
+      console.warn("[boxes/suggest] Could not resolve tenant from host; falling back to global-only catalog", {
+        status: tenantResult.status,
+      });
+    }
+    const tenantId = tenantResult.ok && tenantResult.tenant_id ? tenantResult.tenant_id : null;
+
     // Use the live Box Partners catalog stored in public.boxes.
     const { requiredL, requiredW, requiredH, rscRows, mailerRows, bestRsc, bestMailer } =
-      await suggestBoxes(L, W, H);
+      await suggestBoxes(L, W, H, tenantId);
 
     if (!bestRsc && !bestMailer) {
       const resp: BoxSuggestOut = {
@@ -464,9 +483,13 @@ async function fetchBoxesForStyle(
   requiredW: number,
   requiredH: number,
   styleFilter: "rsc" | "mailer",
+  tenantId: number | null,
 ): Promise<BoxSuggestion[]> {
   const styleValue = styleFilter === "rsc" ? "rsc" : "mailer";
 
+  // tenant_id IS NULL = shared/global catalog (visible to everyone); a non-null
+  // tenant_id row only surfaces for that same tenant, so tenant-specific sizes
+  // never leak into another tenant's quote suggestions.
   const rows = (await q<BoxDbRow>(
     `
       select
@@ -487,10 +510,11 @@ async function fetchBoxesForStyle(
         and inside_width_in >= $2
         and inside_height_in >= $3
         and lower(coalesce(style, '')) = $4
+        and (tenant_id is null or tenant_id = $5)
       order by inside_length_in * inside_width_in * inside_height_in asc
       limit 10
     `,
-    [requiredL, requiredW, requiredH, styleValue],
+    [requiredL, requiredW, requiredH, styleValue, tenantId],
   )) as BoxDbRow[];
 
   const out: BoxSuggestion[] = [];
@@ -566,6 +590,16 @@ export async function GET(req: NextRequest) {
         ? styleParam
         : "both";
 
+    // Resolve the quote's own tenant_id -- more reliable than the request
+    // host here, since this route is keyed by quote_no rather than being
+    // called mid-quoting. Used to scope box suggestions so a tenant-specific
+    // custom size never surfaces for another tenant's quote.
+    const quoteTenantRow = await one<{ tenant_id: number | null }>(
+      `select tenant_id from public."quotes" where quote_no = $1 limit 1`,
+      [quoteNo],
+    );
+    const tenantId = quoteTenantRow?.tenant_id ?? null;
+
     // First try: primary line item dims for this quote
     let dims = await one<QuoteDimsRow>(
       `
@@ -611,7 +645,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(body, { status: 400 });
     }
 
-    const { requiredL, requiredW, requiredH, rscRows, mailerRows } = await suggestBoxes(L, W, H);
+    const { requiredL, requiredW, requiredH, rscRows, mailerRows } = await suggestBoxes(
+      L,
+      W,
+      H,
+      tenantId,
+    );
 
     const block: BoxesBlock = {
       length_in: L,

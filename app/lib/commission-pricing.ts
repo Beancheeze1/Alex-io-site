@@ -69,6 +69,7 @@ async function syntheticBoxTotal(
   insideW: number,
   insideH: number,
   qty: number,
+  tenantId: number | null,
 ): Promise<number> {
   try {
     type BoxRow = { id: number; sku: string };
@@ -79,9 +80,10 @@ async function syntheticBoxTotal(
          OR
          (inside_length_in >= $2 AND inside_width_in >= $1 AND inside_height_in >= $3)
        )
+       AND (tenant_id IS NULL OR tenant_id = $4)
        ORDER BY inside_length_in * inside_width_in * inside_height_in ASC
        LIMIT 1`,
-      [insideL, insideW, insideH],
+      [insideL, insideW, insideH, tenantId],
     );
 
     if (!candidates || candidates.length === 0) return 0;
@@ -118,6 +120,7 @@ export async function getCommissionableTotal(
   quoteId: number,
   quoteNo: string,
   base: string,
+  tenantId: number | null = null,
 ): Promise<number> {
   // ── Foam items ──
   const items = await q<{
@@ -153,7 +156,7 @@ export async function getCommissionableTotal(
       const customerBox = parseDims((facts as any).customer_box_in);
       if (customerBox) {
         const synQty = qty > 0 ? qty : 1;
-        boxTotal = await syntheticBoxTotal(customerBox.L, customerBox.W, customerBox.H, synQty);
+        boxTotal = await syntheticBoxTotal(customerBox.L, customerBox.W, customerBox.H, synQty, tenantId);
       }
     }
   } else {
@@ -182,7 +185,7 @@ export async function getCommissionableTotal(
       const customerBox = parseDims((facts as any).customer_box_in);
       if (customerBox) {
         const primaryQty = items.length > 0 ? (Number(items[0].qty) || 1) : 1;
-        boxTotal = await syntheticBoxTotal(customerBox.L, customerBox.W, customerBox.H, primaryQty);
+        boxTotal = await syntheticBoxTotal(customerBox.L, customerBox.W, customerBox.H, primaryQty, tenantId);
       }
     }
   }

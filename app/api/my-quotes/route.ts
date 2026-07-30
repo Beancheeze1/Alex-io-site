@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
     if (myQuotes.length > 0) {
       const { getCommissionableTotal } = await import("@/app/lib/commission-pricing");
       const quoteTotals = await Promise.all(
-        myQuotes.map(({ id, quote_no }) => getCommissionableTotal(id, quote_no, base)),
+        myQuotes.map(({ id, quote_no }) => getCommissionableTotal(id, quote_no, base, user.tenant_id ?? null)),
       );
       quotesTotalUsd = Math.round(quoteTotals.reduce((s, t) => s + t, 0) * 100) / 100;
     }

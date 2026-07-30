@@ -89,9 +89,13 @@ export async function resolveCustomSelection(
   customHeightIn: number,
   customStyle: string,
   qty: number,
+  tenantId: number | null = null,
 ): Promise<ResolvedSelection> {
   const description = `Custom box ${customLengthIn} x ${customWidthIn} x ${customHeightIn} in (${customStyle})`;
 
+  // Scoped to the shared catalog plus this tenant's own custom sizes, so the
+  // "closest matching standard carton" reference price can't be silently
+  // borrowed from another tenant's private catalog entry.
   const candidates = await q<StockBoxRow>(
     `
     SELECT id, sku, vendor, style, description, inside_length_in, inside_width_in, inside_height_in
@@ -101,10 +105,11 @@ export async function resolveCustomSelection(
       OR
       (inside_length_in >= $2 AND inside_width_in >= $1 AND inside_height_in >= $3)
     )
+    AND (tenant_id IS NULL OR tenant_id = $4)
     ORDER BY inside_length_in * inside_width_in * inside_height_in ASC
     LIMIT 1
     `,
-    [customLengthIn, customWidthIn, customHeightIn],
+    [customLengthIn, customWidthIn, customHeightIn, tenantId],
   );
 
   const best = candidates?.[0] ?? null;
